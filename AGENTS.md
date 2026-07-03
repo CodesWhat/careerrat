@@ -163,6 +163,10 @@ renders from these files.
 
 ### Tracker Write Contract (hard — binds every writing skill)
 
+DB workspaces (`rolester data status` exits 0) use the **Data Write Contract**
+below instead — this section governs legacy JSON-only workspaces (no
+`.rolester/db/rolester.db` yet).
+
 `workspace/tracker.json` is the **single source of truth** for the dashboard.
 Every skill that mutates it — `apply-job`, `evaluate-job`, `tailor-application`,
 `schedule-meeting`, `interview-prep`, `track-outcomes`, `email-comms`,
@@ -253,6 +257,56 @@ contract — there is no code interceptor for them, by design.
   panel and a stale CTA that never resolves. Done means the field is gone, not
   that a later event fires.
 - **Completed-action clears its CTA (hard).** Completing any tracked action — sending a reply, submitting a recruiter-requested portal/data-completion form (e.g. an Avature additional-info form), finishing a call, providing a requested document, or the user reporting they already did it out-of-band — requires the SAME `tracker.json` write to: (1) transition the source record's `status` to its resulting state (`waiting` when the ball is now with the other party, or the next pipeline stage); (2) `null` the satisfied `nextActionDue`; (3) rewrite or clear `nextAction` to reflect what's expected next (or clear it if nothing is); (4) append the completed action to `messages[]` or `conversations[]` as history; and (5) set `comm.draft = null` (and `app.followUp.draft = null`) if a draft backed the action. Writing only `statusNote`, `note`, or an activity event does NOT clear a CTA that lives on a different record — e.g., a `communications[]` thread requesting an additional-info form is a distinct record from the `applications[]` row; updating the app row's `statusNote` leaves the comm CTA up. When the user says they already completed an action the agent did not perform, record the completion and clear state immediately — never leave a CTA standing because the agent wasn't the one who did it.
+
+### Data Write Contract (DB workspaces)
+
+Mode detection: run `rolester data status`. **Exit 0 (a database exists at
+`.rolester/db/rolester.db`)** — every tracker-visible mutation goes through
+`rolester data <verb>`; never hand-edit `tracker.json`/`activity.jsonl` with the
+Edit tool, they are generated files in this mode. **Nonzero exit (no database
+yet)** — the Tracker Write Contract above applies unchanged. A workspace only
+enters DB mode via an explicit `rolester data import` (legacy migrate) or
+`rolester data init` (fresh) — never trigger that migration yourself as a side
+effect of another skill.
+
+Each `rolester data <verb>` call is one atomic transaction that already performs
+steps 1 and 5 of the Tracker Write Contract (plus step 3 for outcome-changing
+verbs), then exports — do not repeat these by hand in DB mode:
+
+- **Stamp + version bump** (`meta.lastUpdatedAt` / `meta.version`) — every verb
+  except `activity append` and `analytics-refresh` (derived-data-only, same
+  no-op-poll carve-out as the legacy contract).
+- **One Activity Pulse event**, logged in the same transaction — every verb
+  except `analytics-refresh`.
+- **Analytics refresh** (`tracker.json#analytics`), same transaction, stamp
+  **not** bumped a second time — only the outcome-changing verbs: `app upsert`,
+  `app set-status`, `sourced upsert-batch`, `sourced promote`. Comms/scheduling/
+  artifact verbs (`app set-fields`, `app schedule-interview`,
+  `app register-artifact`, `comm upsert`, `comm append-message`,
+  `comm mark-sent`) skip it — same carve-out as pure comms/scheduling writes.
+- **Export to legacy files**, immediately after commit: `workspace/tracker.json`
+  + `workspace/activity.jsonl` are regenerated so the existing render/dashboard
+  keeps working untouched. If `rolester tracker-dev` is running, its `fs.watch`
+  on `tracker.json` picks this up and live-reloads — no separate re-render
+  step needed. For a static snapshot, or when the dev server isn't running,
+  still run `rolester tracker`.
+- **`app set-status`** applies the interview round-completion clearing
+  automatically (nulls `nextInterviewAt`/`interviewNote`, and `interviewAt` too
+  when no next round is booked) — do not hand-write those nulls in DB mode.
+- **`comm mark-sent`** applies the Sent-Clears-Draft invariant automatically
+  (`comm.draft = null`, and `app.followUp.draft = null` when that application
+  exists) in the same write — do not hand-write that clear in DB mode.
+- **Verify:** `rolester data verify` re-exports then runs the same
+  domain-integrity check as `npm run verify:tracker` (status/score/modes/
+  channels/dupes). It does not run the ajv schema check (`rolester tracker
+  --verify`); run that too after export if schema-level parity is needed.
+
+Verbs available today (`node src/cli/data.mjs --help` for exact syntax):
+`app upsert|set-status|set-fields|schedule-interview|register-artifact`,
+`sourced upsert-batch|promote`, `comm upsert|append-message|mark-sent`,
+`activity append`, `analytics-refresh`, plus top-level `status|init|import|
+export|verify`. Every verb accepts `--json` (machine-readable) and `--root
+<dir>`.
 
 ### Tracker Content Register (hard)
 
