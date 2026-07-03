@@ -19,6 +19,7 @@ import {
   createChatRuntime,
   resolveAllowedChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
+import { RUNTIME_TOOLS } from "../src/core/ai/skill-runtime.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 // ---------------------------------------------------------------------------
@@ -190,10 +191,13 @@ function parseSseFrame(chunk) {
 // resolveAllowedChatSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedChatSkills: defaults to ingest-profile when ROLESTER_CHAT_SKILLS is unset", () => {
-  const repoRoot = tempRepoWithSkill("ingest-profile");
+test("resolveAllowedChatSkills: defaults to ingest-profile + discover-companies when ROLESTER_CHAT_SKILLS is unset", () => {
+  const repoRoot = tempRepoWithSkill(["ingest-profile", "discover-companies"]);
   try {
-    assert.deepEqual(resolveAllowedChatSkills({ repoRoot, env: {} }), ["ingest-profile"]);
+    assert.deepEqual(resolveAllowedChatSkills({ repoRoot, env: {} }), [
+      "ingest-profile",
+      "discover-companies",
+    ]);
   } finally {
     cleanup(repoRoot);
   }
@@ -410,6 +414,35 @@ test("createChatRuntime.startSession: the session past maxSessions is rejected M
         chatRuntime.startSession({ skill: "c" }),
         (err) => err.code === "MAX_SESSIONS"
       );
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.startSession: query() gets CHAT_TOOLS (RUNTIME_TOOLS + WebSearch), not the bare one-shot RUNTIME_TOOLS — discover-companies needs WebSearch", async () => {
+  const repoRoot = tempRepoWithSkill(["ingest-profile", "discover-companies"]);
+  try {
+    let seenTools = null;
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env: {
+        ANTHROPIC_API_KEY: "sk-ant-test",
+        ROLESTER_CHAT_SKILLS: "ingest-profile,discover-companies",
+      },
+      loadSdk: async () => ({
+        query: (args) => {
+          seenTools = args.options.tools;
+          return fakeStreamingSdk([[]]).query(args);
+        },
+      }),
+    });
+    try {
+      await chatRuntime.startSession({ skill: "discover-companies" });
+      assert.deepEqual(seenTools, [...RUNTIME_TOOLS, "WebSearch"]);
+      assert.ok(seenTools.includes("WebSearch"));
     } finally {
       chatRuntime.shutdown();
     }

@@ -90,6 +90,36 @@ export function readJsonBodyCapped(req, maxBytes) {
   });
 }
 
+// Read a raw binary request body up to `maxBytes` — same overflow/no-destroy
+// semantics as readJsonBodyCapped above, but resolves the raw Buffer instead
+// of parsing JSON. Used by onboard-route.mjs's POST /api/onboard/resume-ai
+// (a PDF/image upload is the request body itself, not a JSON envelope).
+export function readRawBodyCapped(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    let size = 0;
+    let overflowed = false;
+    const chunks = [];
+    req.on("data", (chunk) => {
+      size += chunk.length;
+      if (size > maxBytes) {
+        overflowed = true;
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      if (overflowed) {
+        const err = new Error(`request body exceeds ${maxBytes} byte limit`);
+        err.status = 413;
+        reject(err);
+        return;
+      }
+      resolve(Buffer.concat(chunks));
+    });
+    req.on("error", (err) => reject(err));
+  });
+}
+
 // Map a runSkillStream() rejection code to the HTTP status to use *when it
 // failed before any streaming began*. Anything unrecognized is a 500 — an
 // unexpected internal failure, not a client mistake.

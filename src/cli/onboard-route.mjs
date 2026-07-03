@@ -4,19 +4,25 @@
 // exactly the mount point for this, and `readJsonBodyCapped`/`sendJson` are
 // imported from skill-run-route.mjs rather than duplicated.
 //
-// Everything here is deliberately AI-free: it seeds candidate/ files from
-// templates, parses a plain-text/markdown resume with the zero-dep
-// resume-parser.mjs (never calls a model), validates + writes candidate YAML
-// through the existing schema-validator.mjs/yaml.mjs primitives, and stores a
-// BYOK Anthropic key locally (ai-env.mjs). The companion byte-static page is
-// src/core/onboarding/onboard-page.mjs, mounted at GET /onboard by
-// tracker-dev.mjs.
+// Everything here was originally deliberately AI-free (M1): it seeds
+// candidate/ files from templates, parses a plain-text/markdown resume with
+// the zero-dep resume-parser.mjs (never calls a model), validates + writes
+// candidate YAML through the existing schema-validator.mjs/yaml.mjs
+// primitives, and stores a BYOK Anthropic key locally (ai-env.mjs). The
+// companion byte-static page is src/core/onboarding/onboard-page.mjs,
+// mounted at GET /onboard by tracker-dev.mjs. M8 adds exactly one AI-touching
+// route here (POST /api/onboard/resume-ai, for the PDF/image case
+// resume-parser.mjs can't handle) rather than a separate file, since it's the
+// same résumé-intake concern as the existing POST /api/onboard/resume and
+// mirrors that route's response shape byte-for-byte.
 //
 // mountOnboardRoutes({ addRoute, repoRoot, env }) registers:
 //
 //   GET  /api/onboard/state              candidate-file + key + config status
 //   POST /api/onboard/init               ensureCandidateFiles() (never overwrites)
 //   POST /api/onboard/resume             parse a pasted/loaded resume (2MB cap)
+//   POST /api/onboard/resume-ai          M8 — AI-extract a PDF/image resume (5MB
+//                                        cap, raw body bytes, ?name=<filename>)
 //   POST /api/onboard/candidate/:name    merge+validate+write one candidate file
 //                                        (one concrete route per known name —
 //                                        see CANDIDATE_ROUTE_ENTRIES below)
@@ -37,10 +43,12 @@
 // interview) owns it exclusively. The non-AI wizard seeds/validates candidate
 // files but never claims to have run the interview.
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
+import { runStructuredOneshot } from "../core/ai/structured-oneshot.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import {
   CANDIDATE_FILES,
@@ -59,10 +67,17 @@ import {
 } from "../core/profile/resume-parser.mjs";
 import { validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../core/profile/yaml.mjs";
-import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
+import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap skill-run-route.mjs uses.
 const RESUME_MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — resume text can be long.
+
+// POST /api/onboard/resume-ai's binary-upload cap (frozen M8 contract: 5MB)
+// and the extensions it accepts — PDF/image only; .txt/.md keep using the
+// existing zero-AI POST /api/onboard/resume above.
+const RESUME_AI_MAX_BYTES = 5 * 1024 * 1024;
+const RESUME_AI_ALLOWED_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp"]);
+const RESUME_EXTRACT_SCHEMA_PATH = "config/resume-extract.schema.json";
 
 // Concrete candidate-file routes: CANDIDATE_FILES (profile, targeting,
 // evidence, honesty, form-defaults) plus the one OPTIONAL_CANDIDATE_FILES
@@ -92,6 +107,23 @@ const SETTINGS_DATA_FILES = ["profile", "targeting", "form-defaults", "modes"];
 // characters (what a lossy UTF-8 decode of binary data produces). 1% is a
 // deliberately low bar — real resumes have essentially zero replacement
 // characters; binary garbage has them throughout.
+// Traversal-safe filename sanitizer for POST /api/onboard/resume-ai's saved
+// upload path. Strips any directory component first (handles both "/" and
+// "\" separators, defeating a `../../etc/passwd`-shaped `name` before the
+// character filter even runs), then replaces every character outside
+// [A-Za-z0-9._-], then strips leading dots (so a bare ".." or ".hidden"
+// can't survive as a hidden/parent-referencing segment). Never returns an
+// empty string — falls back to "upload" so a pathologically-named upload
+// still lands somewhere sane.
+export function sanitizeUploadFilename(name) {
+  const base =
+    String(name || "")
+      .split(/[/\\]/)
+      .pop() || "";
+  const cleaned = base.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "");
+  return cleaned || "upload";
+}
+
 export function looksBinary(text) {
   if (text.indexOf("\0") !== -1) return true;
   if (!text.length) return false;
@@ -169,7 +201,16 @@ function writeYamlDoc(candidatePath, doc) {
 // mountOnboardRoutes
 // ---------------------------------------------------------------------------
 
-export function mountOnboardRoutes({ addRoute, repoRoot, env = process.env }) {
+export function mountOnboardRoutes({
+  addRoute,
+  repoRoot,
+  env = process.env,
+  // Dependency-injected the same way tracker-dev.mjs's mountSkillRunRoute
+  // wires runSkillStream — so POST /api/onboard/resume-ai's tests can drive
+  // a hand-rolled MOCKED runtime (happy/retry-then-ok/422/413/501) without
+  // touching the real @anthropic-ai/claude-agent-sdk devDependency.
+  runSkillStream = defaultRunSkillStream,
+}) {
   const pathCtx = { repoRoot };
 
   // -------------------------------------------------------------------------
@@ -268,6 +309,137 @@ export function mountOnboardRoutes({ addRoute, repoRoot, env = process.env }) {
     }
 
     sendJson(res, 200, { profileSeed, evidenceSeed, sections });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/resume-ai?name=<filename> — raw PDF/image bytes.
+  //
+  // Frozen M8 contract: the request body IS the file (no JSON envelope,
+  // unlike every other route in this file) — `name` travels as a query
+  // param purely so the server knows the original filename/extension.
+  // Saves under workspace/intake/resume-uploads/, then runs the new
+  // resume-extract skill one-shot (tools: ["Read"] only) over the embedded
+  // runtime, buffers its reply, and parses/validates/retries via the shared
+  // structured-oneshot helper (src/core/ai/structured-oneshot.mjs — also
+  // used by POST /api/assist/suggest). The success response is shaped
+  // identically to POST /api/onboard/resume's above (profileSeed/
+  // evidenceSeed/sections) plus `source: "ai"`, so the wizard's review/edit
+  // UI is 100% parser-agnostic about which path produced the seed.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/resume-ai", async (req, res) => {
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+    const name = (requestUrl.searchParams.get("name") || "").trim();
+    if (!name) {
+      sendJson(res, 400, { error: "?name=<filename> is required" });
+      return;
+    }
+
+    const ext = extname(name).toLowerCase();
+    if (!RESUME_AI_ALLOWED_EXTENSIONS.has(ext)) {
+      sendJson(res, 400, {
+        error:
+          `unsupported file type "${ext || name}" — resume-ai accepts PDF/image uploads only ` +
+          "(.pdf .png .jpg .jpeg .webp); .txt/.md resumes go through POST /api/onboard/resume",
+      });
+      return;
+    }
+
+    let bytes;
+    try {
+      bytes = await readRawBodyCapped(req, RESUME_AI_MAX_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+    if (!bytes.length) {
+      sendJson(res, 400, { error: "request body is empty" });
+      return;
+    }
+
+    const savedRelPath = `workspace/intake/resume-uploads/${Date.now()}-${sanitizeUploadFilename(name)}`;
+    const savedPath = userPath(pathCtx, savedRelPath);
+    mkdirSync(dirname(savedPath), { recursive: true });
+    // Raw bytes (a PDF/image) — never atomicWriteFile, which hardcodes utf8
+    // and would corrupt binary data.
+    writeFileSync(savedPath, bytes);
+
+    const schema = JSON.parse(readFileSync(join(repoRoot, RESUME_EXTRACT_SCHEMA_PATH), "utf8"));
+
+    // One attempt of the one-shot skill run: Read-only tool surface, the
+    // saved file's path as input (a corrective addendum on a retry — see
+    // structured-oneshot.mjs's own header comment for why `invoke` throwing
+    // here is deliberately NOT caught inside runStructuredOneshot). Buffers
+    // every `assistant` event's text blocks in order, exactly like
+    // skill-runtime.mjs's own header comment describes for a driven
+    // (non-SSE-passthrough) run.
+    async function invokeResumeExtract({ correction }) {
+      let rawText = "";
+      await runSkillStream({
+        skill: "resume-extract",
+        input: correction
+          ? `Read the file at this exact path: ${savedPath}\n\n${correction}`
+          : { path: savedPath },
+        repoRoot,
+        env,
+        tools: ["Read"],
+        onEvent: (evt) => {
+          if (evt.type !== "assistant") return;
+          for (const block of evt.data?.message?.content ?? []) {
+            if (block?.type === "text" && typeof block.text === "string") {
+              rawText += block.text;
+            }
+          }
+        },
+      });
+      return rawText;
+    }
+
+    let outcome;
+    try {
+      outcome = await runStructuredOneshot({ schema, maxRetries: 1, invoke: invokeResumeExtract });
+    } catch (err) {
+      // runSkillStream rejects (before ever calling onEvent) for a config
+      // problem — no AI route, the skill not allowlisted, or the SDK
+      // devDependency missing. Every one of those is "the AI assist isn't
+      // available," which is a 501 by the standing convention ("No API key
+      // → assists return 501") — never the generic 400 skill-run-route.mjs
+      // uses for its own SKILL_NOT_ALLOWED/NO_AI_ROUTE mapping, since this
+      // route has no not-a-skill-name/bad-request case to distinguish it
+      // from.
+      const status =
+        err.code === "SDK_NOT_INSTALLED" ||
+        err.code === "NO_AI_ROUTE" ||
+        err.code === "SKILL_NOT_ALLOWED"
+          ? 501
+          : 500;
+      sendJson(res, status, { error: err.message });
+      return;
+    }
+
+    if (!outcome.ok) {
+      // Expected failure mode (the model never produced valid structured
+      // output after one retry) — the wizard's fallback is the existing
+      // paste-text textarea, keyed off this exact status per the frozen
+      // contract.
+      sendJson(res, 422, {
+        error: "could not extract a usable profile from this file after a retry",
+        raw: outcome.raw,
+      });
+      return;
+    }
+
+    const claims = (outcome.data.claims || []).map((c, i) => ({
+      id: `resume-${String(i + 1).padStart(3, "0")}`,
+      claim: String(c?.claim ?? ""),
+      evidence: String(c?.evidence ?? ""),
+    }));
+
+    sendJson(res, 200, {
+      profileSeed: { candidate: outcome.data.candidate || {} },
+      evidenceSeed: { claims },
+      sections: outcome.data.sections || {},
+      source: "ai",
+    });
   });
 
   // -------------------------------------------------------------------------

@@ -12,6 +12,7 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -51,6 +52,13 @@ function buildTempRoot() {
     copyFileSync(join(REAL_ROOT, entry.templatePath), join(tempRoot, entry.templatePath));
   }
   copyFileSync(join(REAL_ROOT, "templates/AGENTS.md"), join(tempRoot, "templates/AGENTS.md"));
+  // M8: POST /api/onboard/resume-ai reads this schema straight off the repo
+  // root (not through userPath — it's a checked-in config schema, never a
+  // per-candidate file), so the temp fixture needs its own copy too.
+  copyFileSync(
+    join(REAL_ROOT, "config/resume-extract.schema.json"),
+    join(tempRoot, "config/resume-extract.schema.json")
+  );
 
   return tempRoot;
 }
@@ -61,12 +69,15 @@ function candidatePath(root, relPath) {
 
 // Mirrors skill-run-route.test.mjs's bootRouteServer(): a minimal
 // addRoute-based harness, no full tracker-dev.mjs dev server needed.
-function bootServer(repoRoot, env = {}) {
+// `extra` optionally carries a stubbed `runSkillStream` (M8's
+// POST /api/onboard/resume-ai tests) — every pre-existing caller omits it and
+// gets the real default, untouched.
+function bootServer(repoRoot, env = {}, extra = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-  mountOnboardRoutes({ addRoute, repoRoot, env });
+  mountOnboardRoutes({ addRoute, repoRoot, env, ...extra });
 
   const server = createServer((req, res) => {
     const url = (req.url || "/").split("?")[0];
@@ -80,6 +91,24 @@ function bootServer(repoRoot, env = {}) {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve({ server, env }));
   });
+}
+
+// A fake runSkillStream() for POST /api/onboard/resume-ai: takes a list of
+// canned assistant replies (one per attempt) and asserts the shape
+// onboard-route.mjs's invokeResumeExtract() actually calls it with, mirroring
+// tests/skill-runtime.test.mjs's fakeSdk/SAMPLE_RUN convention but at the
+// runSkillStream layer (this route's own DI seam) rather than the SDK's.
+function fakeRunSkillStream(replies, { onCall } = {}) {
+  let callCount = 0;
+  return async ({ skill, input, repoRoot, tools, onEvent }) => {
+    onCall?.({ skill, input, repoRoot, tools });
+    const reply = replies[Math.min(callCount, replies.length - 1)];
+    callCount++;
+    onEvent({
+      type: "assistant",
+      data: { message: { content: [{ type: "text", text: reply }] } },
+    });
+  };
 }
 
 function baseUrl(server) {
@@ -295,6 +324,193 @@ describe("POST /api/onboard/resume", () => {
       const { status, body } = await postJson(server, "/api/onboard/resume", { save: true });
       assert.equal(status, 400);
       assert.match(body.error, /text is required/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/onboard/resume-ai — M8, MOCKED runtime only (no network, no
+// ANTHROPIC_API_KEY needed): fakeRunSkillStream() above stands in for the
+// real embedded SDK runtime end to end.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboard/resume-ai", () => {
+  const FAKE_PDF_BYTES = Buffer.from("%PDF-1.4 fake pdf bytes for a route test\n");
+  const VALID_REPLY = JSON.stringify({
+    candidate: { full_name: "Jane Doe", email: "jane.doe@example.com" },
+    claims: [{ claim: "Led a team of 5 engineers.", evidence: "Resume, Experience section." }],
+    sections: { experience: 1, education: 0, skills: 2, projects: 0, other: 0 },
+  });
+  const VALID_FENCED_REPLY = `Here you go:\n\`\`\`json\n${VALID_REPLY}\n\`\`\`\n`;
+
+  async function postResumeAi(server, name, bytes) {
+    const res = await fetch(
+      `${baseUrl(server)}/api/onboard/resume-ai?name=${encodeURIComponent(name)}`,
+      { method: "POST", body: bytes }
+    );
+    const body = await res.json().catch(() => ({}));
+    return { status: res.status, body };
+  }
+
+  it("happy path: saves the upload, extracts on the first attempt, mirrors POST /api/onboard/resume's shape + source:'ai'", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 200);
+      assert.equal(body.source, "ai");
+      assert.equal(body.profileSeed.candidate.full_name, "Jane Doe");
+      assert.equal(body.profileSeed.candidate.email, "jane.doe@example.com");
+      assert.equal(body.evidenceSeed.claims.length, 1);
+      assert.equal(body.evidenceSeed.claims[0].id, "resume-001");
+      assert.equal(body.sections.experience, 1);
+      assert.equal(body.sections.skills, 2);
+
+      const uploadDir = candidatePath(repoRoot, "workspace/intake/resume-uploads");
+      const saved = readdirSync(uploadDir);
+      assert.equal(saved.length, 1);
+      assert.match(saved[0], /^\d+-resume\.pdf$/);
+      assert.ok(readFileSync(join(uploadDir, saved[0])).equals(FAKE_PDF_BYTES));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("retry-then-ok: first attempt malformed, second (correction) attempt valid — 200, retried once", async () => {
+    const repoRoot = buildTempRoot();
+    const calls = [];
+    const runSkillStream = fakeRunSkillStream(["not json at all", VALID_FENCED_REPLY], {
+      onCall: (info) => calls.push(info),
+    });
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 200);
+      assert.equal(body.source, "ai");
+      assert.equal(calls.length, 2, "invoke must be called exactly twice — one retry");
+      assert.equal(calls[0].tools.length, 1);
+      assert.equal(calls[0].tools[0], "Read");
+      assert.match(calls[1].input, /Read the file at this exact path/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("422s when the model never produces valid structured output, even after the retry", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = fakeRunSkillStream(["still not json", "still not json on retry either"]);
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 422);
+      assert.match(body.error, /could not extract/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("413s over the 5MB cap and never invokes the runtime", async () => {
+    const repoRoot = buildTempRoot();
+    let called = false;
+    const runSkillStream = async () => {
+      called = true;
+    };
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const oversized = Buffer.alloc(5 * 1024 * 1024 + 1, 1);
+      const { status } = await postResumeAi(server, "resume.pdf", oversized);
+      assert.equal(status, 413);
+      assert.equal(called, false);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("501s when runSkillStream rejects with NO_AI_ROUTE (no key configured)", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = async () => {
+      const err = new Error("no AI route configured");
+      err.code = "NO_AI_ROUTE";
+      throw err;
+    };
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 501);
+      assert.match(body.error, /no AI route configured/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("501s when runSkillStream rejects with SDK_NOT_INSTALLED", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = async () => {
+      const err = new Error("the claude-agent-sdk devDependency is not installed");
+      err.code = "SDK_NOT_INSTALLED";
+      throw err;
+    };
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 501);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("501s when runSkillStream rejects with SKILL_NOT_ALLOWED", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = async () => {
+      const err = new Error("resume-extract is not in the runtime allowlist");
+      err.code = "SKILL_NOT_ALLOWED";
+      throw err;
+    };
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 501);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("400s when ?name= is missing", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      const res = await fetch(`${baseUrl(server)}/api/onboard/resume-ai`, {
+        method: "POST",
+        body: FAKE_PDF_BYTES,
+      });
+      assert.equal(res.status, 400);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("400s on an unsupported extension (e.g. .docx / .txt)", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      const { status, body } = await postResumeAi(server, "resume.docx", FAKE_PDF_BYTES);
+      assert.equal(status, 400);
+      assert.match(body.error, /resume-ai accepts PDF\/image uploads only/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("400s on an empty request body", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", Buffer.alloc(0));
+      assert.equal(status, 400);
+      assert.match(body.error, /body is empty/);
     } finally {
       await closeServer(server);
     }

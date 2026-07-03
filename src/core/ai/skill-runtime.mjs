@@ -58,12 +58,18 @@ export function discoverSkillDirs(repoRoot) {
 }
 
 // Default-restricted to evaluate-job (P0-5's target), answer-question (the
-// Interactive Q&A slice's target — see .agents/skills/answer-question), and
+// Interactive Q&A slice's target — see .agents/skills/answer-question),
 // tailor-application (M4's target — the /packet view's "Generate packet"
-// button, see src/cli/packet-route.mjs). Empty string explicitly set in env
-// means "nothing is allowed" — only an *unset* env var falls back to the
-// default, so an operator can deliberately lock the runtime down.
-const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question,tailor-application";
+// button, see src/cli/packet-route.mjs), and resume-extract (M8's target —
+// the onboarding wizard's PDF/image résumé-drop step, see
+// src/cli/onboard-route.mjs's POST /api/onboard/resume-ai). Widened
+// deliberately, not silently: resume-extract is a first-party wizard
+// feature (every install needs it the moment a candidate drops a PDF), not
+// an operator opt-in like a hypothetical third-party skill would be. Empty
+// string explicitly set in env means "nothing is allowed" — only an
+// *unset* env var falls back to the default, so an operator can
+// deliberately lock the runtime down.
+const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question,tailor-application,resume-extract";
 
 // Shared allowlist-resolution shape both the one-shot embedded runtime
 // (ROLESTER_RUNTIME_SKILLS, below) and the conversational chat runtime
@@ -346,8 +352,17 @@ export async function loadClaudeAgentSdk() {
 //     `rolester questions`, and `rolester tracker --verify` (the
 //     placeholder-lint + build + tracker-stamp CLIs); WebFetch only for a JD
 //     refetch if the saved posting needs re-reading; and Skill.
-// The list itself is already the union of all three, so no entries change
-// here. If ROLESTER_RUNTIME_SKILLS grows again, redo this audit per-skill.
+//   - resume-extract (see .agents/skills/resume-extract) is in
+//     DEFAULT_RUNTIME_SKILLS above but is NEVER run with this shared
+//     RUNTIME_TOOLS default — its one caller, POST /api/onboard/resume-ai
+//     (onboard-route.mjs), always passes an explicit `tools: ["Read"]`
+//     override to runSkillStream (see the `tools` param below), since a
+//     headless PDF/image-reading call has no business touching Bash/Write/
+//     Edit/WebFetch. It doesn't enter the union this constant represents.
+// The list itself is already the union of the three skills that actually
+// run with it (evaluate-job, answer-question, tailor-application). If
+// ROLESTER_RUNTIME_SKILLS grows with a skill that also needs this shared
+// default (rather than its own explicit override), redo this audit per-skill.
 export const RUNTIME_TOOLS = ["Read", "Glob", "Grep", "WebFetch", "Write", "Edit", "Bash", "Skill"];
 
 // Posture text injected into the run's opening instruction — the one place
@@ -400,6 +415,12 @@ export async function runSkillStream({
   // hermetic, deterministic stand-in for a live CLI subprocess — without
   // touching the actual @anthropic-ai/claude-agent-sdk devDependency.
   loadSdk = loadClaudeAgentSdk,
+  // Optional per-call tool-surface override — defaults to RUNTIME_TOOLS so
+  // every existing caller (POST /api/skill/run) is byte-identical to before
+  // this param existed. M8's resume-extract is the first caller to narrow
+  // it (`tools: ["Read"]`) — see RUNTIME_TOOLS's own comment above for why
+  // that skill never uses this shared default.
+  tools = RUNTIME_TOOLS,
 } = {}) {
   if (typeof onEvent !== "function") {
     throw new TypeError("runSkillStream: onEvent callback is required");
@@ -458,7 +479,7 @@ export async function runSkillStream({
       abortController: controller,
       settingSources: ["project"],
       skills: [skill],
-      tools: RUNTIME_TOOLS,
+      tools,
       // Headless posture: nobody is watching a permission prompt in a
       // server process, so a prompt would just hang the loop forever. The
       // real safety boundary is `tools` above (what CAN be invoked at all);

@@ -54,8 +54,10 @@ import {
   resolvePort,
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
+import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
+import { mountLogoRoutes } from "./logo-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
@@ -282,6 +284,14 @@ export function createDevServer({
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     res.end(ONBOARD_PAGE_HTML);
   });
+
+  // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
+  // prompt templates for the Targeting step's "Roland-suggest" chips
+  // (src/cli/assist-route.mjs) and the Companies step's logo.dev proxy +
+  // cache (src/cli/logo-route.mjs). No page mounted here — apps/web's SPA
+  // (out of this backend build's scope) is the only client.
+  mountAssistRoutes({ addRoute, repoRoot, env });
+  mountLogoRoutes({ addRoute, repoRoot, env });
 
   // M2 of the paid-POC journey — the conversational (multi-turn) skill
   // runtime's HTTP surface (src/cli/chat-route.mjs) and its byte-static page

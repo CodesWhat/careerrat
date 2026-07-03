@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rolester.local/schemas/resume-extract.schema.json",
+  "title": "Rolester resume-extract skill output",
+  "type": "object",
+  "required": ["candidate", "claims", "sections"],
+  "additionalProperties": false,
+  "properties": {
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "full_name": { "type": ["string", "null"] },
+        "email": { "type": ["string", "null"] },
+        "phone": { "type": ["string", "null"] },
+        "location": { "type": ["string", "null"] },
+        "linkedin": { "type": ["string", "null"] },
+        "github": { "type": ["string", "null"] },
+        "portfolio": { "type": ["string", "null"] }
+      }
+    },
+    "claims": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["claim", "evidence"],
+        "additionalProperties": false,
+        "properties": {
+          "claim": { "type": "string" },
+          "evidence": { "type": "string" }
+        }
+      }
+    },
+    "sections": {
+      "type": "object",
+      "required": ["experience", "education", "skills", "projects", "other"],
+      "additionalProperties": false,
+      "properties": {
+        "experience": { "type": "integer" },
+        "education": { "type": "integer" },
+        "skills": { "type": "integer" },
+        "projects": { "type": "integer" },
+        "other": { "type": "integer" }
+      }
+    }
+  }
+}

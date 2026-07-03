@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rolester.local/schemas/assist-suggest.schema.json",
+  "title": "Rolester POST /api/assist/suggest model output",
+  "type": "object",
+  "required": ["suggestions"],
+  "additionalProperties": false,
+  "properties": {
+    "suggestions": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "rationale": { "type": "string" }
+  }
+}

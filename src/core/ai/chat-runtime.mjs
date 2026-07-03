@@ -57,12 +57,29 @@ import {
   writeByokUsage,
 } from "./skill-runtime.mjs";
 
-// Default-restricted to ingest-profile — the only skill M2 ships a
-// conversational front end for. Same "empty string explicitly locks it down,
-// unset falls back to the default" semantics as ROLESTER_RUNTIME_SKILLS (see
-// skill-runtime.mjs's resolveSkillAllowlist header comment) — deliberately
-// shared logic, not a re-derived copy.
-const DEFAULT_CHAT_SKILLS = "ingest-profile";
+// Default-restricted to ingest-profile (M2's original conversational target)
+// plus discover-companies (M8's addition — the onboarding wizard's "Roland,
+// find companies" button, see .agents/skills/discover-companies). Widened
+// deliberately, not silently: discover-companies is confirm-first by its own
+// contract ("auto-add is active only when the user has explicitly opted
+// in" — its SKILL.md STEP 4) — the opposite of the one-shot embedded
+// runtime's posture ("nobody available to answer questions... rather than
+// asking", ONESHOT_POSTURE in skill-runtime.mjs), so it must run
+// conversationally here, never via runSkillStream. Same "empty string
+// explicitly locks it down, unset falls back to the default" semantics as
+// ROLESTER_RUNTIME_SKILLS (see skill-runtime.mjs's resolveSkillAllowlist
+// header comment) — deliberately shared logic, not a re-derived copy.
+const DEFAULT_CHAT_SKILLS = "ingest-profile,discover-companies";
+
+// discover-companies does real WebSearch fan-out (its own STEP 1: "run at
+// least 4 distinct queries") — a capability RUNTIME_TOOLS deliberately
+// doesn't include, since none of the one-shot runtime's three skills
+// (evaluate-job/answer-question/tailor-application — see that constant's own
+// per-skill audit comment in skill-runtime.mjs) ever call it. Scoped to this
+// runtime only, not added to the shared RUNTIME_TOOLS constant itself, so
+// the one-shot skills' audited tool surface doesn't silently grow along with
+// it.
+const CHAT_TOOLS = [...RUNTIME_TOOLS, "WebSearch"];
 
 export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
@@ -436,7 +453,7 @@ export function createChatRuntime({
         abortController,
         settingSources: ["project"],
         skills: [trimmedSkill],
-        tools: RUNTIME_TOOLS,
+        tools: CHAT_TOOLS,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         maxTurns,

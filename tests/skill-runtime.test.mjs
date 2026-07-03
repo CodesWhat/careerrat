@@ -17,17 +17,18 @@ import {
   discoverSkillDirs,
   loadClaudeAgentSdk,
   mapSdkMessage,
+  RUNTIME_TOOLS,
   resolveAllowedSkills,
   runSkillStream,
 } from "../src/core/ai/skill-runtime.mjs";
 import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 // `skillNames` accepts a single name (most tests only need one) or an array
-// — the default-allowlist tests need "evaluate-job", "answer-question", and
-// "tailor-application" fixtures present since DEFAULT_RUNTIME_SKILLS now
-// names all three (resolveAllowedSkills filters the default against
-// discovered dirs, so a fixture missing one of them would silently
-// under-assert the real default).
+// — the default-allowlist tests need "evaluate-job", "answer-question",
+// "tailor-application", and "resume-extract" fixtures present since
+// DEFAULT_RUNTIME_SKILLS now names all four (resolveAllowedSkills filters the
+// default against discovered dirs, so a fixture missing one of them would
+// silently under-assert the real default).
 function tempRepoWithSkill(skillNames = "test-skill") {
   const names = Array.isArray(skillNames) ? skillNames : [skillNames];
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-"));
@@ -71,13 +72,19 @@ test("discoverSkillDirs: returns [] when .agents/skills doesn't exist", () => {
 // resolveAllowedSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedSkills: defaults to evaluate-job + answer-question + tailor-application when ROLESTER_RUNTIME_SKILLS is unset", () => {
-  const repoRoot = tempRepoWithSkill(["evaluate-job", "answer-question", "tailor-application"]);
+test("resolveAllowedSkills: defaults to evaluate-job + answer-question + tailor-application + resume-extract when ROLESTER_RUNTIME_SKILLS is unset", () => {
+  const repoRoot = tempRepoWithSkill([
+    "evaluate-job",
+    "answer-question",
+    "tailor-application",
+    "resume-extract",
+  ]);
   try {
     assert.deepEqual(resolveAllowedSkills({ repoRoot, env: {} }), [
       "evaluate-job",
       "answer-question",
       "tailor-application",
+      "resume-extract",
     ]);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
@@ -495,6 +502,53 @@ const SAMPLE_RUN = [
     },
   },
 ];
+
+test("runSkillStream: tools param — an unset caller gets RUNTIME_TOOLS passed to query()", async () => {
+  const repoRoot = tempRepoWithSkill("evaluate-job");
+  try {
+    let seenTools = null;
+    await runSkillStream({
+      skill: "evaluate-job",
+      input: "hi",
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      onEvent: () => {},
+      loadSdk: async () => ({
+        query: ({ options }) => {
+          seenTools = options.tools;
+          return fakeSdk(SAMPLE_RUN).query({ options });
+        },
+      }),
+    });
+    assert.deepEqual(seenTools, RUNTIME_TOOLS);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream: an explicit tools override (M8's resume-extract: ['Read']) reaches query() verbatim, not RUNTIME_TOOLS", async () => {
+  const repoRoot = tempRepoWithSkill(["evaluate-job", "resume-extract"]);
+  try {
+    let seenTools = null;
+    await runSkillStream({
+      skill: "resume-extract",
+      input: "hi",
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      tools: ["Read"],
+      onEvent: () => {},
+      loadSdk: async () => ({
+        query: ({ options }) => {
+          seenTools = options.tools;
+          return fakeSdk(SAMPLE_RUN).query({ options });
+        },
+      }),
+    });
+    assert.deepEqual(seenTools, ["Read"]);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
 
 test("runSkillStream: drives the stubbed query to completion, in order, and returns the result data", async () => {
   const repoRoot = tempRepoWithSkill("evaluate-job");

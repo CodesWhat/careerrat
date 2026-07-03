@@ -52,6 +52,7 @@
     ".agents/skills/research-boards/SKILL.md",
     ".agents/skills/research-comp/SKILL.md",
     ".agents/skills/research-company/SKILL.md",
+    ".agents/skills/resume-extract/SKILL.md",
     ".agents/skills/schedule-meeting/SKILL.md",
     ".agents/skills/search-jobs/SKILL.md",
     ".agents/skills/setup-searches/SKILL.md",
