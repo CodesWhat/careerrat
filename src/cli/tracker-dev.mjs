@@ -144,7 +144,18 @@ export function createDevServer({
 
   function renderOnce() {
     return new Promise((resolve) => {
-      const child = spawn(process.execPath, [TRACKER_CLI], { cwd: repoRoot });
+      const child = spawn(process.execPath, [TRACKER_CLI], {
+        cwd: repoRoot,
+        // No-op under plain node (there's no such env var to worry about).
+        // Under an Electron host (see apps/desktop/main.mjs), process.execPath
+        // IS the Electron binary — this makes THIS ONE child run as headless
+        // node instead of booting a second GUI instance. Scoped to this one
+        // spawn's env, not the host process's own env: Chromium's own helper
+        // processes (GPU/network/renderer) inherit the host's env too, and
+        // booting THEM as node instead of Chromium helpers breaks rendering
+        // (see the trap-1 comment in apps/desktop/main.mjs for the incident).
+        env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      });
       let stderr = "";
       child.stderr.on("data", (d) => (stderr += d));
       child.on("error", (err) => resolve({ ok: false, error: err.message }));

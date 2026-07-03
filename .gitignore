@@ -7,6 +7,12 @@ node_modules/
 website/.next/
 website/out/
 
+# apps/desktop build artifacts. staging/ (scripts/stage.mjs's extraResources
+# tree) needs an explicit ignore; apps/desktop/dist/ and apps/desktop/
+# node_modules/ are already covered by the bare `dist/` and `node_modules/`
+# patterns above (no path prefix = match at any depth).
+apps/desktop/staging/
+
 # build:demo static bundle (rebuilt per deploy so dates stay evergreen)
 dist/
 website/next-env.d.ts

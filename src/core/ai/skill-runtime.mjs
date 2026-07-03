@@ -137,6 +137,24 @@ export function buildChildEnv({ route, skill, baseEnv = process.env, repoRoot } 
   if (model) shared.ANTHROPIC_MODEL = model;
   if (smallFastModel) shared.ANTHROPIC_SMALL_FAST_MODEL = smallFastModel;
 
+  // ELECTRON_RUN_AS_NODE: no-op under plain node. Under an Electron host (see
+  // apps/desktop/main.mjs) this SDK query() spawns its own CLI child (and
+  // that child can spawn further descendants) — same "process.execPath is
+  // the Electron binary" hazard tracker-dev.mjs's renderOnce() has, so it
+  // needs the same fix. Checked the installed
+  // @anthropic-ai/claude-agent-sdk@0.3.199's sdk.d.ts/sdk.mjs rather than
+  // assuming: `Options.executable` ("JavaScript runtime to use … Auto-detected
+  // if not specified") defaults to the literal string `"node"` and is
+  // resolved via the SDK's own bundled execa-style PATH lookup — NOT via
+  // `process.execPath` — UNLESS a prebuilt native CLI binary exists for the
+  // current platform/arch (this install ships one for darwin-arm64, in which
+  // case neither "node" nor process.execPath is used at all; it execs that
+  // native binary directly). So on most real installs this env var is
+  // belt-and-braces, not a live fix — but it's free, and it's the one thing
+  // standing between "correct" and "silently spawns a second GUI" on
+  // whichever platform/path combination DOES fall back to spawning "node".
+  const electronGuard = { ELECTRON_RUN_AS_NODE: "1" };
+
   if (route.type === "byok") {
     // Direct to Anthropic (or a ROLESTER_ANTHROPIC_BASE_URL override) with the
     // user's own key. No x-rolester-* labels here — call-ai.mjs's own BYOK
@@ -144,6 +162,7 @@ export function buildChildEnv({ route, skill, baseEnv = process.env, repoRoot } 
     // proxy-metering label, not something Anthropic's API consumes.
     return {
       ...shared,
+      ...electronGuard,
       ANTHROPIC_API_KEY: route.apiKey,
       ANTHROPIC_BASE_URL: route.baseUrl,
     };
@@ -161,6 +180,7 @@ export function buildChildEnv({ route, skill, baseEnv = process.env, repoRoot } 
   // proxy's meter rows can carry which skill produced them.
   return {
     ...shared,
+    ...electronGuard,
     ANTHROPIC_API_KEY: route.token,
     ANTHROPIC_BASE_URL: route.baseUrl,
     ANTHROPIC_CUSTOM_HEADERS: `x-rolester-skill: ${skill}`,

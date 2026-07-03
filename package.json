@@ -20,7 +20,8 @@
     "rolester": "bin/rolester.mjs"
   },
   "workspaces": [
-    "website"
+    "website",
+    "apps/desktop"
   ],
   "engines": {
     "node": ">=18"
@@ -88,6 +89,8 @@
     "build": "turbo build",
     "web:dev": "npm --workspace website run dev",
     "web:build": "npm --workspace website run build",
+    "desktop": "npm --workspace apps/desktop run dev",
+    "desktop:dist": "npm --workspace apps/desktop run dist",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
