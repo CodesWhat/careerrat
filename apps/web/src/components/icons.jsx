@@ -82,6 +82,16 @@ export function CalendarIcon(props) {
   );
 }
 
+// M9 — the docked capture bar + /inbox nav entry.
+export function InboxIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3.5 12.5h5l1.8 3h3.4l1.8-3h5" />
+      <path d="M5.5 6.5h13l2 6v6.5a1.5 1.5 0 0 1-1.5 1.5h-14A1.5 1.5 0 0 1 3.5 19V12.5z" />
+    </Svg>
+  );
+}
+
 export function SunIcon(props) {
   return (
     <Svg {...props}>

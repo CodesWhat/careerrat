@@ -119,6 +119,20 @@ test("GET /app/onboarding (M8 wizard route) falls back to the same index.html", 
   }
 });
 
+test("GET /app/inbox (M9 Inbox route) falls back to the same index.html", async () => {
+  const repoRoot = tempRepo();
+  writeFakeDist(repoRoot);
+  const dev = await bootServer(repoRoot);
+  try {
+    const res = await fetch(`${baseUrl(dev)}/app/inbox`);
+    assert.equal(res.status, 200);
+    const body = await res.text();
+    assert.match(body, /id="root"/);
+  } finally {
+    teardown(dev, repoRoot);
+  }
+});
+
 test("GET /app/assets/main-abc123.js serves the real hashed asset with a JS content-type and a long-lived cache", async () => {
   const repoRoot = tempRepo();
   writeFakeDist(repoRoot);

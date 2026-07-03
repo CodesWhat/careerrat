@@ -67,6 +67,14 @@ button {
   padding: 0 10px;
 }
 
+.app-shell__main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  min-height: 100%;
+}
+
 .app-shell__content {
   flex: 1;
   min-width: 0;
@@ -409,6 +417,16 @@ button {
   color: var(--ink-soft);
 }
 
+.badge--warn {
+  background: var(--mustard-light);
+  color: var(--mustard);
+}
+
+.badge--error {
+  background: var(--m-error-container);
+  color: var(--m-error);
+}
+
 /* ── Onboarding wizard (M8, /app/onboarding) ───────────────────────────── */
 
 .wizard-rail {
@@ -657,4 +675,206 @@ button {
 .chat-input-row .text-area {
   flex: 1;
   min-height: 2.4rem;
+}
+
+/* ── M9 — docked capture bar (AppShell) ─────────────────────────────────── */
+/* No left-edge accent strip (repo standing rule) — the drag-active state is
+ * conveyed by the whole bar's border/background, never a colored edge. */
+
+.capture-bar {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 clamp(20px, 4vw, 48px) 20px;
+  padding: 12px 14px;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--card-radius);
+  background: var(--paper-surface);
+  box-shadow: var(--card-shadow);
+}
+
+.capture-bar--drag-active {
+  border-color: var(--m-secondary);
+  background: var(--paper-band);
+}
+
+.capture-bar__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 10px;
+}
+
+.capture-bar__icon {
+  flex-shrink: 0;
+  display: flex;
+  color: var(--ink-soft);
+  padding-bottom: 8px;
+  font-size: 18px;
+}
+
+.capture-bar__input {
+  flex: 1;
+  resize: none;
+  min-height: 2.4rem;
+  max-height: 8rem;
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--paper-edge-strong);
+  background: var(--paper-bg);
+  color: var(--ink);
+}
+
+.capture-bar__input:focus {
+  outline: 2px solid var(--m-secondary);
+  outline-offset: 1px;
+}
+
+.capture-bar__note {
+  font-size: 12px;
+  padding: 6px 10px;
+  border-radius: 6px;
+}
+
+.capture-bar__note--error {
+  background: var(--m-error-container);
+  color: var(--m-error);
+}
+
+.capture-bar__note--warn {
+  background: var(--mustard-light);
+  color: var(--mustard);
+}
+
+.capture-bar__dismiss {
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1;
+  padding: 2px;
+}
+
+/* Inline "immediate feedback" panel — replaces the input row after a
+ * successful capture, until dismissed. */
+
+.capture-result {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.capture-result__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.capture-result__spacer {
+  flex: 1;
+}
+
+.capture-result__link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sky);
+  text-decoration: none;
+}
+
+.capture-result__link:hover {
+  text-decoration: underline;
+}
+
+.capture-result__action {
+  margin: 0;
+  font-size: 13px;
+}
+
+.capture-result__match,
+.capture-result__dispatch {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.capture-result__needs-you {
+  margin: 0;
+  font-size: 12px;
+  color: var(--mustard);
+}
+
+/* ── M9 — /inbox ─────────────────────────────────────────────────────────── */
+
+.inbox-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.inbox-filter {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--paper-edge);
+  background: var(--paper-surface);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.inbox-filter:hover {
+  border-color: var(--paper-edge-strong);
+  color: var(--ink);
+}
+
+.inbox-filter--active {
+  background: var(--m-secondary-container);
+  border-color: transparent;
+  color: var(--m-on-secondary-container);
+}
+
+.inbox-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.intake-card__raw {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.intake-card__match {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--paper-band);
+}
+
+.intake-card__match p {
+  margin: 0;
+  font-size: 12px;
+}
+
+.intake-card__dispatch {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.intake-card__chat {
+  margin-top: 4px;
+}
+
+.intake-card__actions {
+  display: flex;
+  gap: 8px;
 }

@@ -1,9 +1,11 @@
 import { IconButton } from "../components/Button.jsx";
 import { MoonIcon, SunIcon } from "../components/icons.jsx";
 import { useTheme } from "../lib/theme.js";
+import { CaptureBar } from "./CaptureBar.jsx";
 import { NavList } from "./NavList.jsx";
 
-// AppShell — fixed left nav + content region. Mirrors the visual language of
+// AppShell — fixed left nav + content region, plus (M9) a docked capture bar
+// pinned under the content on every route. Mirrors the visual language of
 // src/core/tracker/dashboard-shell.html's header chrome (translucent
 // surface, Geist type), not its markup — the SPA hand-writes its own CSS
 // against the copied token set (see ../styles/tokens.css).
@@ -24,7 +26,10 @@ export function AppShell({ children }) {
           </IconButton>
         </div>
       </nav>
-      <main className="app-shell__content">{children}</main>
+      <div className="app-shell__main">
+        <main className="app-shell__content">{children}</main>
+        <CaptureBar />
+      </div>
     </div>
   );
 }

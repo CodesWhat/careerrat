@@ -24,9 +24,18 @@ import { useEventSource } from "../lib/sse.js";
 // than dropping the panel entirely for a bare "continue in /chat" link.
 // Functionally equivalent (the skill's own STEP 4 confirm-first gate still
 // runs, unchanged), just not chip-shaped.
-export function ChatPanel({ skill, kickoffLabel }) {
-  const [chatId, setChatId] = useState(null);
-  const [chatState, setChatState] = useState(null);
+//
+// `initialChatId` (M9 addition) — when the caller already knows a live
+// session exists (the Inbox's Lane-C confirm: src/cli/intake-route.mjs's
+// executeLaneC already called chatRuntime.startSession/postMessage
+// server-side and handed the resulting chatId back on the confirmed intake
+// item), the panel skips its own "Start"-button/startChat() call entirely
+// and subscribes straight to that session's SSE stream. Every existing
+// caller (CompaniesStep's "Ask Roland to find companies") omits this prop
+// and keeps its original start-from-scratch behavior unchanged.
+export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
+  const [chatId, setChatId] = useState(initialChatId);
+  const [chatState, setChatState] = useState(initialChatId ? "running" : null);
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [starting, setStarting] = useState(false);

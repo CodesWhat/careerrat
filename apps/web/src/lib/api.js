@@ -201,3 +201,64 @@ export function closeChat(chatId) {
 export function findChatBySkill(skill) {
   return apiFetch(`/api/chat/by-skill?skill=${encodeURIComponent(skill)}`);
 }
+
+// ---------------------------------------------------------------------------
+// M9 — Universal Intake (src/cli/intake-route.mjs). Capture + classify never
+// touch domain data (see that route file's own header comment) — only
+// POST /api/intake/confirm may dispatch a verb call / skill run / chat
+// handoff, and every intake verb's own state machine is fail-closed 409 on a
+// legacy (no-DB) workspace, same NO_DATABASE contract as every /api/data/*
+// route. `createIntake`'s response already carries the FULL classify result
+// (kind, entities, trackerMatch, dispatch) — the create call is awaited
+// server-side end to end, not a "submitted, poll for it" shape.
+// ---------------------------------------------------------------------------
+
+// `inputKind` is optional — server-side detectInputKind() infers "url" vs
+// "text" from the raw string when omitted; the docked capture bar never
+// needs to guess this itself.
+export function createIntake({ text, inputKind } = {}) {
+  return apiFetch("/api/intake", {
+    method: "POST",
+    body: JSON.stringify({ text, ...(inputKind ? { inputKind } : {}) }),
+  });
+}
+
+export function listIntake({ status, limit } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (limit) params.set("limit", String(limit));
+  const qs = params.toString();
+  return apiFetch(`/api/intake/list${qs ? `?${qs}` : ""}`);
+}
+
+export function getIntakeOne(id) {
+  return apiFetch(`/api/intake/one?id=${encodeURIComponent(id)}`);
+}
+
+// Re-runs classification from scratch on the item's original raw_input —
+// allowed by the server from "captured"/"classifying"/"proposed"/"needs_you"/
+// "error" (see intake-route.mjs's RECLASSIFIABLE_STATUSES); a 409 means the
+// item has already moved past that (confirmed/running/done/dismissed).
+export function reclassifyIntake(id) {
+  return apiFetch("/api/intake/classify", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+// The ONLY call in this file that can result in a domain write / skill run /
+// chat session starting — see intake-route.mjs's own confirm handler. Only
+// legal from status "proposed"; a 409 means someone already decided this item.
+export function confirmIntake(id) {
+  return apiFetch("/api/intake/confirm", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
+export function dismissIntake(id) {
+  return apiFetch("/api/intake/dismiss", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
