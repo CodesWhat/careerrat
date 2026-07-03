@@ -7,6 +7,11 @@ node_modules/
 website/.next/
 website/out/
 
+# apps/web build artifacts (M7 SPA shell) — built fresh, shipped via
+# package.json#files["apps/web/dist"], same "gitignored generated release
+# artifact" pattern as website's Next output above.
+apps/web/dist/
+
 # apps/desktop build artifacts. staging/ (scripts/stage.mjs's extraResources
 # tree) needs an explicit ignore; apps/desktop/dist/ and apps/desktop/
 # node_modules/ are already covered by the bare `dist/` and `node_modules/`

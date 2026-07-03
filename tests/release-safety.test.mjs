@@ -60,30 +60,34 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(!files.some((entry) => entry.includes("search-sources.yml")));
 });
 
+// Shared with the built-dist scan below (apps/web/dist) — one banned list,
+// two surfaces: `git grep` over tracked source, and a plain filesystem walk
+// over generated build output that `git grep` (tracked-files-only) can't see.
+const PERSONAL_SENTINELS = [
+  ["Scott", "Benson"].join(" "),
+  "Bloomfield",
+  "$" + "145K",
+  "145" + "000",
+  "sctt" + "bnsn",
+  ["Work", "OS"].join(""),
+  ["work", "os"].join(""),
+  "Pw" + "C",
+  "pwc",
+  "workos" + ".com",
+  "pwc" + ".com",
+  "shopify" + ".com",
+  ["Anna", "Meyer"].join(" "),
+  ["Robert", "Choe"].join(" "),
+  ["Alex", "Aberg"].join(" "),
+  ["Juniper", "Square"].join(" "),
+  "Sabri" + "na",
+  "225" + "000",
+  "220" + "000",
+  "225" + "K",
+];
+
 test("tracked app files do not contain known production personal sentinels", () => {
-  const banned = [
-    ["Scott", "Benson"].join(" "),
-    "Bloomfield",
-    "$" + "145K",
-    "145" + "000",
-    "sctt" + "bnsn",
-    ["Work", "OS"].join(""),
-    ["work", "os"].join(""),
-    "Pw" + "C",
-    "pwc",
-    "workos" + ".com",
-    "pwc" + ".com",
-    "shopify" + ".com",
-    ["Anna", "Meyer"].join(" "),
-    ["Robert", "Choe"].join(" "),
-    ["Alex", "Aberg"].join(" "),
-    ["Juniper", "Square"].join(" "),
-    "Sabri" + "na",
-    "225" + "000",
-    "220" + "000",
-    "225" + "K",
-  ];
-  const pattern = banned.map(escapeEgrep).join("|");
+  const pattern = PERSONAL_SENTINELS.map(escapeEgrep).join("|");
 
   try {
     const output = execFileSync(
@@ -107,6 +111,52 @@ test("tracked app files do not contain known production personal sentinels", () 
     if (err.status === 1) return;
     throw err;
   }
+});
+
+// M7 — apps/web/dist is gitignored (built fresh, shipped via package.json
+// #files), so the `git grep` check above (tracked files only) can never see
+// it. Vite bundles anything imported at build time into plain static text;
+// this is the guard that no candidate/workspace value ever gets inlined into
+// the shipped SPA bundle. Skips cleanly when dist hasn't been built in this
+// run (root `npm test` stays build-free — see package.json's own `test`
+// script scoping) rather than failing on a missing optional artifact.
+test("built apps/web/dist (when present) contains no known production personal sentinels", async () => {
+  const {
+    existsSync,
+    readdirSync,
+    readFileSync: readFileSyncFs,
+    statSync,
+  } = await import("node:fs");
+  const distDir = join(root, "apps/web/dist");
+  if (!existsSync(distDir)) return;
+
+  const TEXT_EXTENSIONS = new Set([".html", ".js", ".css", ".map", ".json", ".svg", ".txt"]);
+  const pattern = new RegExp(PERSONAL_SENTINELS.map(escapeRegExp).join("|"));
+
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else files.push(full);
+    }
+  };
+  walk(distDir);
+
+  const offenders = [];
+  for (const file of files) {
+    const ext = file.slice(file.lastIndexOf("."));
+    if (!TEXT_EXTENSIONS.has(ext)) continue;
+    const text = readFileSyncFs(file, "utf8");
+    if (pattern.test(text)) offenders.push(file.slice(root.length));
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `Personal sentinel(s) found in built apps/web/dist — a candidate/workspace value leaked ` +
+      `into the SPA bundle:\n${offenders.join("\n")}`
+  );
 });
 
 test("shipped docs/SOURCES.md carries no candidate-discovered (vetted) boards", async () => {

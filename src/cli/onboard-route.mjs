@@ -75,6 +75,13 @@ const CANDIDATE_ROUTE_ENTRIES = [
   ...OPTIONAL_CANDIDATE_FILES.filter((entry) => entry.name === "modes"),
 ];
 
+// The curated subset of candidate files the M7 Settings page (apps/web/src/
+// settings/SettingsPage.jsx) reads and writes. GET /api/onboard/state below
+// includes parsed data for exactly these files — see that route's own
+// comment for why this extends the existing state read instead of adding a
+// new route.
+const SETTINGS_DATA_FILES = ["profile", "targeting", "form-defaults", "modes"];
+
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
@@ -177,8 +184,33 @@ export function mountOnboardRoutes({ addRoute, repoRoot, env = process.env }) {
       errors,
     }));
     const sourceResumeEntry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+
+    // Settings-page prefill data — parsed current (or template-default, via
+    // readBaseDoc()'s existing fallback) YAML for the curated subset of
+    // candidate files the M7 Settings surface reads (see
+    // SETTINGS_DATA_FILES above). This extends the existing state read
+    // rather than adding a parallel GET /api/onboard/candidate/:name route:
+    // the M7 design explicitly prefers extending state when it's missing a
+    // needed read, over growing the route surface.
+    const data = {};
+    for (const name of SETTINGS_DATA_FILES) {
+      const entry = CANDIDATE_ROUTE_ENTRIES.find((f) => f.name === name);
+      if (!entry) continue;
+      const candidatePath = userPath(pathCtx, entry.candidatePath);
+      try {
+        data[name] = readBaseDoc(repoRoot, entry, candidatePath);
+      } catch {
+        // Neither the candidate file nor its template exists in this
+        // repoRoot (e.g. a minimal test fixture, or a workspace mid-setup
+        // before ensureCandidateFiles() has run) — degrade to an empty
+        // prefill rather than 500ing the whole state read.
+        data[name] = {};
+      }
+    }
+
     sendJson(res, 200, {
       files,
+      data,
       sourceResumePresent: existsSync(userPath(pathCtx, sourceResumeEntry.candidatePath)),
       keyConfigured: resolveAIRoute(env).type !== "none",
       searchSourcesPresent: existsSync(userPath(pathCtx, "config/search-sources.yml")),

@@ -11,7 +11,7 @@ pre-commit:
   parallel: true
   jobs:
     - name: biome
-      glob: "*.{js,mjs,cjs,ts,json}"
+      glob: "*.{js,mjs,cjs,jsx,ts,tsx,json}"
       run: npx biome check --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     - name: structure-guards

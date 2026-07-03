@@ -1,0 +1,410 @@
+/* apps/web/src/styles/app.css — plain CSS against the tokens in tokens.css.
+ * No Tailwind, no CSS-in-JS: hand-written component classes, the same
+ * (non-Tailwind) styling discipline src/core/tracker/styles.mjs's
+ * DASHBOARD_CSS already uses elsewhere in this repo. */
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--paper-bg);
+  color: var(--ink);
+  font-family: "Geist Sans", system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+code,
+.mono {
+  font-family: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+}
+
+a {
+  color: inherit;
+}
+
+button {
+  font: inherit;
+}
+
+/* ── App shell ──────────────────────────────────────────────────────────── */
+
+.app-shell {
+  display: flex;
+  min-height: 100%;
+}
+
+.app-shell__nav {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 220px;
+  flex-shrink: 0;
+  padding: 20px 14px;
+  background: var(--paper-surface);
+  border-right: 1px solid var(--paper-edge);
+}
+
+.app-shell__brand {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: 0.01em;
+  padding: 0 10px;
+}
+
+.app-shell__nav-footer {
+  margin-top: auto;
+  display: flex;
+  padding: 0 10px;
+}
+
+.app-shell__content {
+  flex: 1;
+  min-width: 0;
+  padding: 32px clamp(20px, 4vw, 48px);
+}
+
+/* ── Nav list ───────────────────────────────────────────────────────────── */
+
+.nav-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 10px;
+  border-radius: 6px;
+  color: var(--ink-soft);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.nav-item:hover {
+  background: var(--paper-band);
+  color: var(--ink);
+}
+
+.nav-item--active {
+  background: var(--m-secondary-container);
+  color: var(--m-on-secondary-container);
+}
+
+.nav-item__icon {
+  flex-shrink: 0;
+  font-size: 18px;
+}
+
+.nav-item__label {
+  flex: 1;
+}
+
+.nav-item__badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: var(--paper-band);
+  color: var(--ink-soft);
+}
+
+/* ── Page scaffold ──────────────────────────────────────────────────────── */
+
+.page-scaffold {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  max-width: 760px;
+}
+
+.page-scaffold__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.page-scaffold__title {
+  margin: 0 0 4px;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.page-scaffold__subtitle {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+.page-scaffold__content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+/* ── Card — no left-edge accent strip; state via badge/icon/text only ─── */
+
+.card {
+  background: var(--paper-surface);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  padding: 18px 20px;
+}
+
+.card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.card__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.card__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+/* ── Form primitives ────────────────────────────────────────────────────── */
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.field__label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-soft);
+}
+
+.field__hint {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.field__error {
+  font-size: 11px;
+  color: var(--danger);
+}
+
+.text-input,
+.text-area,
+.select-input {
+  font: inherit;
+  padding: 8px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--paper-edge-strong);
+  background: var(--paper-bg);
+  color: var(--ink);
+}
+
+.text-input:focus,
+.text-area:focus,
+.select-input:focus {
+  outline: 2px solid var(--m-secondary);
+  outline-offset: 1px;
+}
+
+.text-area {
+  resize: vertical;
+  font-family: inherit;
+}
+
+.field-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 14px;
+}
+
+.toggle {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  width: fit-content;
+}
+
+.toggle input {
+  position: absolute;
+  opacity: 0;
+  width: 1px;
+  height: 1px;
+}
+
+.toggle__track {
+  width: 36px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--paper-edge-strong);
+  position: relative;
+  transition: background 0.15s ease;
+  flex-shrink: 0;
+}
+
+.toggle__thumb {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--paper-surface);
+  transition: transform 0.15s ease;
+}
+
+.toggle input:checked + .toggle__track {
+  background: var(--m-secondary);
+}
+
+.toggle input:checked + .toggle__track .toggle__thumb {
+  transform: translateX(16px);
+}
+
+.toggle__label {
+  font-size: 13px;
+}
+
+/* ── Buttons ─────────────────────────────────────────────────────────────── */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 8px 14px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--m-secondary);
+  color: var(--m-on-secondary);
+}
+
+.btn--secondary {
+  background: transparent;
+  border-color: var(--paper-edge-strong);
+  color: var(--ink);
+}
+
+.btn--danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 16px;
+}
+
+.icon-btn:hover {
+  background: var(--paper-band);
+  color: var(--ink);
+}
+
+/* ── Toast / inline alert ───────────────────────────────────────────────── */
+
+.toast {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 13px;
+  width: fit-content;
+}
+
+.toast--success {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.toast--error {
+  background: var(--m-error-container);
+  color: var(--m-error);
+}
+
+.toast__dismiss {
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  color: inherit;
+  line-height: 1;
+}
+
+.inline-alert {
+  padding: 10px 14px;
+  border-radius: 6px;
+  font-size: 12px;
+}
+
+.inline-alert--error {
+  background: var(--m-error-container);
+  color: var(--m-error);
+}
+
+/* ── Status badges (AI connection, etc.) ───────────────────────────────── */
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.badge--ok {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.badge--muted {
+  background: var(--paper-band);
+  color: var(--ink-soft);
+}

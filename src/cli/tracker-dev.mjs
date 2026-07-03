@@ -130,6 +130,11 @@ export function createDevServer({
   const TRACKER_SRC_DIR = join(repoRoot, "src/core/tracker");
   const ASSETS_DIR = join(repoRoot, "assets");
   const FONTS_DIR = join(repoRoot, "fonts");
+  // M7 — the Vite + React app shell's built output (see apps/web/). Gitignored,
+  // built via `npm run app:build` (or the root `prepack` script before
+  // npm pack/publish), shipped via package.json#files["apps/web/dist"].
+  const APP_DIST_DIR = join(repoRoot, "apps/web/dist");
+  const APP_INDEX_HTML = join(APP_DIST_DIR, "index.html");
   const adapter = defaultAdapter(repoRoot);
 
   // SSE clients subscribed to reload/tracker-update/activity-update events.
@@ -446,9 +451,23 @@ export function createDevServer({
       return;
     }
 
+    // M7 — the Vite + React app shell. Additive only: inserted after every
+    // legacy exact-path route above and before the final 404, so none of the
+    // existing routes (/, /tracker, /onboard, /chat, /search, /evaluate,
+    // /answer, /packet) are affected. SPA-fallback contract: a request under
+    // /app/* that names a real built file (has an extension — hashed assets
+    // like /app/assets/index-abc123.js) is served from apps/web/dist as a
+    // static file; anything else (client-side routes like /app/settings) falls
+    // back to the built index.html, same pattern as any SPA host.
+    if (url === "/app" || url.startsWith("/app/")) {
+      serveApp(url, res);
+      return;
+    }
+
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(
       "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /chat, /search, /packet, " +
+        "/app/* (the Vite/React app shell), " +
         "/dashboard-data.js, " +
         "/workspace/dashboard-data.js, " +
         "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
@@ -517,6 +536,70 @@ export function createDevServer({
       return;
     }
     res.writeHead(200, { "Content-Type": mimeFor(resolved.full), "Cache-Control": "no-cache" });
+    res.end(body);
+  }
+
+  // M7 — serve apps/web/dist at /app/*, reusing the exact safeAssetPath()
+  // traversal guard serveAsset()/serveFont() already use above, parameterized
+  // with the "/app/" prefix. A URL segment with a file extension (hashed
+  // assets: /app/assets/index-abc123.js) is resolved as a real static file;
+  // anything else (client-side routes: /app/settings) falls back to the
+  // built index.html — the standard SPA-fallback contract.
+  function serveApp(url, res) {
+    if (!existsSync(APP_INDEX_HTML)) {
+      res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(
+        placeholderPage(
+          "App not built",
+          "apps/web hasn't been built yet. Run <code>npm run app:build</code> " +
+            "(or <code>npm run build --workspace apps/web</code>), then reload."
+        )
+      );
+      return;
+    }
+
+    const lastSegment = url.split("/").pop() || "";
+    const hasExtension = lastSegment.includes(".");
+
+    if (hasExtension) {
+      const resolved = safeAssetPath(APP_DIST_DIR, url, "/app/");
+      if (!resolved.ok) {
+        res.writeHead(resolved.status, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(resolved.status === 400 ? "Bad request" : "Forbidden");
+        return;
+      }
+      let body;
+      try {
+        if (!statSync(resolved.full).isFile()) throw new Error("not a file");
+        body = readFileSync(resolved.full);
+      } catch {
+        res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end("Not found");
+        return;
+      }
+      // Hashed asset filenames (Vite content-hashes everything under
+      // assets/) are safe to cache forever; index.html itself is not (it
+      // changes across builds/versions without a new URL).
+      const isIndexHtml = resolved.full === APP_INDEX_HTML;
+      res.writeHead(200, {
+        "Content-Type": mimeFor(resolved.full),
+        "Cache-Control": isIndexHtml ? "no-store" : "public, max-age=31536000, immutable",
+      });
+      res.end(body);
+      return;
+    }
+
+    // Extension-less path under /app — a client-side route. Fall back to the
+    // built index.html (react-router then resolves the route in the browser).
+    let body;
+    try {
+      body = readFileSync(APP_INDEX_HTML);
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(`Could not read apps/web/dist/index.html: ${err.message}`);
+      return;
+    }
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
     res.end(body);
   }
 
@@ -711,6 +794,7 @@ Routes:
   GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
   GET  /search                          Deterministic ATS-board sweep results + "Run sweep" (M3)
   GET  /packet                          Review a gated app's tailored resume/cover letter/answers, or generate live (M4)
+  GET  /app, /app/*                     The Vite + React app shell (M7) — build via \`npm run app:build\`
   GET  /dashboard-data.js               Dashboard data module
   GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
   GET  /workspace/tracker.json          Raw tracker.json (static file)

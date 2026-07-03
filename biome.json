@@ -12,6 +12,7 @@
       "tests/**",
       "scripts/**",
       "bin/**",
+      "apps/web/src/**",
       "*.json",
       "!**/package-lock.json",
       "!node_modules"

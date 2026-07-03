@@ -21,7 +21,8 @@
   },
   "workspaces": [
     "website",
-    "apps/desktop"
+    "apps/desktop",
+    "apps/web"
   ],
   "engines": {
     "node": ">=24"
@@ -68,6 +69,7 @@
     "examples",
     "assets",
     "fonts",
+    "apps/web/dist",
     "scripts/analyze-outcomes.mjs",
     "scripts/calibrate-writing-style.mjs",
     "scripts/capture-board-snapshot.mjs",
@@ -85,10 +87,13 @@
   "scripts": {
     "postinstall": "node scripts/install-skills.mjs --soft || true",
     "prepare": "lefthook install || true",
+    "prepack": "npm run build --workspace apps/web",
     "dev": "turbo dev",
     "build": "turbo build",
     "web:dev": "npm --workspace website run dev",
     "web:build": "npm --workspace website run build",
+    "app:dev": "npm run dev --workspace apps/web",
+    "app:build": "npm run build --workspace apps/web",
     "desktop": "npm --workspace apps/desktop run dev",
     "desktop:fresh": "ROLESTER_HOME=.rolester-fresh npm run desktop",
     "desktop:dist": "npm --workspace apps/desktop run dist",
@@ -123,7 +128,7 @@
     "status:map": "node src/cli/status-map.mjs",
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
-    "test": "node --test",
+    "test": "node --test 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
     "capture:board": "node scripts/capture-board-snapshot.mjs",
