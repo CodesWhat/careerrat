@@ -13,5 +13,13 @@ export {
   appUpsert,
 } from "./app.mjs";
 export { commAppendMessage, commMarkSent, commUpsert } from "./comm.mjs";
+export {
+  InvalidTransitionError,
+  intakeCapture,
+  intakeDecide,
+  intakeList,
+  intakeOne,
+  intakeUpdate,
+} from "./intake.mjs";
 export { NotFoundError } from "./shared.mjs";
 export { sourcedPromote, sourcedUpsertBatch } from "./sourced.mjs";

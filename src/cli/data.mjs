@@ -31,6 +31,11 @@
 //   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
 //   node src/cli/data.mjs activity append --data <json> | --data-file <path>
+//   node src/cli/data.mjs intake capture --text <string> [--input-kind text|url]
+//   node src/cli/data.mjs intake update <id> --data <json> | --data-file <path>
+//   node src/cli/data.mjs intake decide <id> confirm|dismiss [--note <t>]
+//   node src/cli/data.mjs intake list [--status <s>] [--limit <n>]
+//   node src/cli/data.mjs intake one <id>
 //   node src/cli/data.mjs analytics-refresh [--at <iso>]
 //
 // Every verb accepts --json (machine-readable) and --root <dir> (repo root,
@@ -53,6 +58,11 @@ import {
   commAppendMessage,
   commMarkSent,
   commUpsert,
+  intakeCapture,
+  intakeDecide,
+  intakeList,
+  intakeOne,
+  intakeUpdate,
   sourcedPromote,
   sourcedUpsertBatch,
 } from "../core/db/verbs.mjs";
@@ -81,6 +91,11 @@ function parseArgs(argv) {
     else if (a === "--kind") opts.kind = argv[++i];
     else if (a === "--path") opts.path = argv[++i];
     else if (a === "--summary") opts.summary = argv[++i];
+    else if (a === "--status") opts.status = argv[++i];
+    else if (a === "--limit") opts.limit = Number.parseInt(argv[++i], 10);
+    else if (a === "--text") opts.text = argv[++i];
+    else if (a === "--input-kind") opts.inputKind = argv[++i];
+    else if (a === "--source-file-path") opts.sourceFilePath = argv[++i];
     else opts.positional.push(a);
   }
   return opts;
@@ -146,6 +161,9 @@ try {
       break;
     case "activity":
       cmdActivity(sub, rest);
+      break;
+    case "intake":
+      cmdIntake(sub, rest);
       break;
     case "analytics-refresh":
       cmdAnalyticsRefresh();
@@ -347,6 +365,58 @@ function cmdComm(sub, rest) {
 }
 
 // ---------------------------------------------------------------------------
+// intake <sub> — M9 Universal Intake's queue-state verbs. Mirrors the exact
+// same lib functions src/cli/intake-route.mjs calls (one-write-path); unlike
+// every verb above, these do NOT bump meta.version/last_updated_at and do NOT
+// re-export tracker.json/activity.jsonl afterward — see
+// src/core/db/verbs/intake.mjs's own header comment for why intake_items
+// sits outside the Tracker Write Contract. `decide confirm` does NOT execute
+// the item's dispatch lane (that's intake-route.mjs's confirm-time job) — the
+// CLI surface here is the same queue-state primitive the route builds on,
+// not a shortcut around it.
+// ---------------------------------------------------------------------------
+
+function cmdIntake(sub, rest) {
+  switch (sub) {
+    case "capture": {
+      if (!opts.text) fail("intake capture requires --text <string>");
+      return printResult(
+        intakeCapture({
+          ...pathCtx,
+          rawInput: opts.text,
+          inputKind: opts.inputKind || "text",
+          sourceFilePath: opts.sourceFilePath,
+        })
+      );
+    }
+    case "update": {
+      const [id] = rest;
+      if (!id) fail("intake update requires <id>");
+      return printResult(intakeUpdate({ ...pathCtx, id, patch: readPayload("intake update") }));
+    }
+    case "decide": {
+      const [id, decision] = rest;
+      if (!id || !decision) fail("intake decide requires <id> <confirm|dismiss>");
+      return printResult(intakeDecide({ ...pathCtx, id, decision, dispatchSummary: opts.note }));
+    }
+    case "list":
+      return printResult({
+        ok: true,
+        items: intakeList({ ...pathCtx, status: opts.status, limit: opts.limit }),
+      });
+    case "one": {
+      const [id] = rest;
+      if (!id) fail("intake one requires <id>");
+      const item = intakeOne({ ...pathCtx, id });
+      if (!item) fail(`no intake item with id "${id}"`);
+      return printResult({ ok: true, item });
+    }
+    default:
+      return fail(`unknown "intake" command "${sub}". See --help.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // activity <sub> / analytics-refresh
 // ---------------------------------------------------------------------------
 
@@ -405,6 +475,13 @@ Usage:
   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
 
   node src/cli/data.mjs activity append --data <json> | --data-file <path>
+
+  node src/cli/data.mjs intake capture --text <string> [--input-kind text|url]
+  node src/cli/data.mjs intake update <id> --data <json> | --data-file <path>
+  node src/cli/data.mjs intake decide <id> confirm|dismiss [--note <t>]
+  node src/cli/data.mjs intake list [--status <s>] [--limit <n>]
+  node src/cli/data.mjs intake one <id>
+
   node src/cli/data.mjs analytics-refresh [--at <iso>]
 
 Every command accepts --json (machine-readable) and --root <dir>.

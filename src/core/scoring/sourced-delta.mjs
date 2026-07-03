@@ -146,7 +146,10 @@ export function renderDeltaMarkdown({ currentPath, previousPath, delta, summary 
   return `${lines.join("\n")}\n`;
 }
 
-function normalizeUrl(raw) {
+// Exported for reuse by src/core/intake/match.mjs (M9's tracker-match dedup
+// logic reuses the exact same tracking-param-stripping/hash-trim rule this
+// module already applies, rather than a second copy).
+export function normalizeUrl(raw) {
   if (!raw) return "";
   try {
     const url = new URL(raw);

@@ -58,6 +58,7 @@ import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountBoardsRoutes } from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
+import { mountIntakeRoutes } from "./intake-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
@@ -346,6 +347,15 @@ export function createDevServer({
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
   mountDataRoutes({ addRoute, repoRoot, env });
 
+  // M9 — Universal Intake's HTTP surface (src/cli/intake-route.mjs): the
+  // paste/URL drop zone (POST /api/intake), its confirm-first gate
+  // (POST /api/intake/confirm), and the read/dismiss/re-classify routes
+  // alongside it. Shares this SAME chatRuntime instance with mountChatRoute
+  // above (not a second registry) so Lane C's findBySkill/postMessage reuse
+  // an already-live ingest-profile/discover-companies-style session exactly
+  // as /api/chat/* would see it.
+  mountIntakeRoutes({ addRoute, repoRoot, env, chatRuntime });
+
   // Idle/closed-session eviction — see chatRuntime.sweepOnce()'s own doc
   // comment. Started here (not gated behind main()'s CLI boot) so every
   // createDevServer() instance, including ones tests construct directly,
@@ -498,6 +508,8 @@ export function createDevServer({
         "/api/data/sourced, /api/data/communications, /api/data/activity, " +
         "/api/data/app/status, /api/data/app/fields, /api/data/app/interview, /api/data/app/artifact, " +
         "/api/data/sourced/promote, /api/data/comm/message, /api/data/comm/send, " +
+        "/api/intake, /api/intake/list, /api/intake/one, /api/intake/classify, " +
+        "/api/intake/confirm, /api/intake/dismiss, " +
         "/assets/*, /fonts/*, and /__livereload."
     );
   });
@@ -856,6 +868,12 @@ Routes:
   POST /api/data/sourced/promote        sourcedPromote verb
   POST /api/data/comm/message           commAppendMessage verb
   POST /api/data/comm/send              commMarkSent verb (sent-clears-draft)
+  POST /api/intake                      Capture a paste/URL into the intake queue + auto-classify (M9)
+  GET  /api/intake/list                 Intake queue rows, newest-first (?status=, ?limit=)
+  GET  /api/intake/one                  One intake item (?id=)
+  POST /api/intake/classify             Re-run classification on an intake item
+  POST /api/intake/confirm              Confirm-first gate: executes the item's resolved dispatch lane
+  POST /api/intake/dismiss              Dismiss an intake item (never deletes the row)
   GET  /assets/*, /fonts/*              Static assets
   GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
 

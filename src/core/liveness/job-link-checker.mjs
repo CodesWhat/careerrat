@@ -78,7 +78,10 @@ function spaEscalation(parsedUrl) {
   return { escalationHint: "browser-evaluate" };
 }
 
-function isSpaJobHost(hostname) {
+// Exported for reuse by src/core/intake/resolve.mjs (M9's deterministic
+// intake URL resolver checks the same known-SPA host set before deciding
+// whether a plain server-side fetch can possibly work).
+export function isSpaJobHost(hostname) {
   return (
     LEVER_HOSTS.has(hostname) ||
     [

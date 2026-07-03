@@ -1,0 +1,118 @@
+{
+  "$comment": "SSOT for AGENTS.md's Paste Intake table (AGENTS.md#Paste Intake, ~line 447). Every `routes[]` entry's whatTheyPasted/routeTo/capturesInto fields must be the VERBATIM text of that table's corresponding row (same order) — tests/paste-intake-parity.test.mjs parses AGENTS.md's actual markdown table and fails if this file drifts from it. Do not hand-edit these three fields without updating AGENTS.md's table (or vice versa) in the same change. `m9` fields are this file's own addition (not present in AGENTS.md) — the parity test never checks them; they drive config/intake-classify.schema.json's kind enum and src/core/intake/dispatch.mjs's lane table for the M9 milestone. `m9.status: \"deferred\"` means the row's owning skill has no dispatch lane wired up yet (WebSearch/session-browser tooling mismatch in the headless intake pipeline — tracked in the private roadmap, not a silent gap).",
+  "version": 1,
+  "routes": [
+    {
+      "id": "job-posting",
+      "whatTheyPasted": "A job description / posting URL",
+      "routeTo": "`evaluate-job` → (if KEEP) `apply-job`",
+      "capturesInto": "full JD body saved to `workspace/jobs/<…>.md` + mirrored to `artifacts.jd`, the application row",
+      "m9": { "status": "active", "kinds": ["jd-text", "job-url"], "lane": "B", "skill": "evaluate-job" }
+    },
+    {
+      "id": "posting-list",
+      "whatTheyPasted": "A list/board of postings",
+      "routeTo": "`search-jobs`",
+      "capturesInto": "sourced (with triage fit)",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "search-jobs" }
+    },
+    {
+      "id": "recruiter-email",
+      "whatTheyPasted": "A recruiter / hiring email",
+      "routeTo": "`email-comms`",
+      "capturesInto": "`communications[].messages[]`",
+      "m9": { "status": "active", "kinds": ["recruiter-email"], "lane": "C", "skill": "email-comms" }
+    },
+    {
+      "id": "interview-invite",
+      "whatTheyPasted": "An interview invite",
+      "routeTo": "`interview-prep`",
+      "capturesInto": "application status + `conversations[]`",
+      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "track-outcomes" }
+    },
+    {
+      "id": "interview-notes",
+      "whatTheyPasted": "Interview notes / a transcript",
+      "routeTo": "`interview-prep`",
+      "capturesInto": "`conversations[]`",
+      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "track-outcomes" }
+    },
+    {
+      "id": "status-change",
+      "whatTheyPasted": "A rejection / offer / status change",
+      "routeTo": "`track-outcomes`",
+      "capturesInto": "application status + outcome",
+      "m9": { "status": "active", "kinds": ["status-update"], "lane": "A", "skill": null }
+    },
+    {
+      "id": "withdrawal",
+      "whatTheyPasted": "\"I withdrew from X\" / \"I pulled out\" / \"withdraw my application\" / candidate-initiated exit",
+      "routeTo": "`track-outcomes`",
+      "capturesInto": "sets `status: withdrawn`, logs withdrawal activity event, records exit reason in learnings",
+      "m9": { "status": "active", "kinds": ["status-update"], "lane": "A", "skill": null }
+    },
+    {
+      "id": "profile-facts",
+      "whatTheyPasted": "Résumé / profile facts / LinkedIn",
+      "routeTo": "`ingest-profile`",
+      "capturesInto": "`candidate/` profile + evidence",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "ingest-profile" }
+    },
+    {
+      "id": "projects-scan",
+      "whatTheyPasted": "A code/projects folder path or repo URL (\"scan my projects\", \"see what I've built\")",
+      "routeTo": "`ingest-profile` (projects-scan, STEP 2b)",
+      "capturesInto": "`candidate/evidence.yml` claims",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "ingest-profile" }
+    },
+    {
+      "id": "mail-sync",
+      "whatTheyPasted": "A mailbox sync request (Apple Mail / Gmail / Outlook)",
+      "routeTo": "`ingest-mail`",
+      "capturesInto": "`communications[]`",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "ingest-mail" }
+    },
+    {
+      "id": "message-sync",
+      "whatTheyPasted": "An in-platform message sync request (LinkedIn / Wellfound DMs)",
+      "routeTo": "`ingest-messages`",
+      "capturesInto": "`communications[]`",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "ingest-messages" }
+    },
+    {
+      "id": "company-research",
+      "whatTheyPasted": "A company name / \"tell me about X\" / a company homepage URL",
+      "routeTo": "`research-company`",
+      "capturesInto": "`workspace/research/<slug>.md`",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "research-company" }
+    },
+    {
+      "id": "employer-wishlist",
+      "whatTheyPasted": "A wishlist of employers to target / \"find companies like X to add\"",
+      "routeTo": "`discover-companies`",
+      "capturesInto": "`config/sourced-scan.json` `tracked_companies[]` (confirm-first)",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "discover-companies" }
+    },
+    {
+      "id": "company-risk",
+      "whatTheyPasted": "\"is X a safe bet\" / company risk, layoffs, financial health, morale — scoped to the role",
+      "routeTo": "`company-health`",
+      "capturesInto": "`companyHealth` (role-scoped rating) on the tracker row",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "company-health" }
+    },
+    {
+      "id": "standalone-fact",
+      "whatTheyPasted": "A standalone fact / preference / constraint (comp, location, an exclusion)",
+      "routeTo": "`configure` / `ingest-profile`",
+      "capturesInto": "`candidate/` config, confirm-first",
+      "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": null }
+    },
+    {
+      "id": "catch-all-note",
+      "whatTheyPasted": "Anything else with no obvious owner (a note, a stray link, a screenshot)",
+      "routeTo": "capture as a dated note",
+      "capturesInto": "`workspace/intake/<slug>-<date>.md`, linked to the nearest application or company",
+      "m9": { "status": "needs_you", "kinds": ["other"], "lane": null, "skill": null }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rolester.local/schemas/intake-classify.schema.json",
+  "title": "Rolester POST /api/intake classify model output",
+  "type": "object",
+  "required": ["kind", "proposedAction", "confidence", "needsUser"],
+  "additionalProperties": false,
+  "properties": {
+    "kind": {
+      "description": "M9's dispatchable intake kinds — see config/paste-intake-routes.json's m9.kinds. Every other AGENTS.md Paste Intake row is deferred for this milestone and must classify as \"other\" (needsUser: true) instead.",
+      "enum": ["jd-text", "job-url", "recruiter-email", "interview-transcript", "status-update", "other"]
+    },
+    "entities": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "company": { "type": ["string", "null"] },
+        "role": { "type": ["string", "null"] },
+        "url": { "type": ["string", "null"] },
+        "statusTo": {
+          "type": ["string", "null"],
+          "description": "For kind:\"status-update\" only — the target status, in track-outcomes' canonical vocabulary (e.g. rejected, offer, withdrawn, interview)."
+        },
+        "statusNote": { "type": ["string", "null"] },
+        "contactName": { "type": ["string", "null"] },
+        "contactEmail": { "type": ["string", "null"] },
+        "interviewDate": { "type": ["string", "null"] }
+      }
+    },
+    "proposedAction": {
+      "type": "string",
+      "description": "Short human sentence for the confirm card, e.g. \"Evaluate this posting against your gate.\" May reference the deterministically-computed trackerMatch summary given as prompt context, but must never invent a match itself."
+    },
+    "confidence": { "type": "number" },
+    "needsUser": {
+      "type": "boolean",
+      "description": "true when the paste is ambiguous, unreadable, or matches a kind this milestone hasn't wired a dispatch lane for yet (see config/paste-intake-routes.json's m9.status:\"deferred\" rows)."
+    },
+    "needsUserReason": { "type": ["string", "null"] }
+  }
+}
