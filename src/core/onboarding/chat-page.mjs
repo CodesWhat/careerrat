@@ -222,6 +222,7 @@ export const CHAT_PAGE_HTML = `<!doctype html>
       <a id="link-onboard" data-hook="link-onboard" href="/onboard">Onboarding wizard</a>
       <a id="link-search" data-hook="link-search" href="/search">Search</a>
       <a id="link-evaluate" data-hook="link-evaluate" href="/evaluate">Evaluate a job</a>
+      <a id="link-packet" data-hook="link-packet" href="/packet">Packet</a>
       <a id="link-tracker" data-hook="link-tracker" href="/tracker">Tracker</a>
     </div>
   </section>

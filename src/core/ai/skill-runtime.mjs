@@ -57,12 +57,13 @@ export function discoverSkillDirs(repoRoot) {
     .sort();
 }
 
-// Default-restricted to evaluate-job (P0-5's target) and answer-question
-// (the Interactive Q&A slice's target — see .agents/skills/answer-question).
-// Empty string explicitly set in env means "nothing is allowed" — only an
-// *unset* env var falls back to the default, so an operator can deliberately
-// lock the runtime down.
-const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question";
+// Default-restricted to evaluate-job (P0-5's target), answer-question (the
+// Interactive Q&A slice's target — see .agents/skills/answer-question), and
+// tailor-application (M4's target — the /packet view's "Generate packet"
+// button, see src/cli/packet-route.mjs). Empty string explicitly set in env
+// means "nothing is allowed" — only an *unset* env var falls back to the
+// default, so an operator can deliberately lock the runtime down.
+const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question,tailor-application";
 
 // Shared allowlist-resolution shape both the one-shot embedded runtime
 // (ROLESTER_RUNTIME_SKILLS, below) and the conversational chat runtime
@@ -317,8 +318,16 @@ export async function loadClaudeAgentSdk() {
 //     screening_answers, append to an answers artifact, and stamp the
 //     tracker row; Bash for the activity/tracker CLIs; and Skill. It never
 //     calls WebFetch — that's evaluate-job's alone.
-// The list itself is already the union of both, so no entries change here.
-// If ROLESTER_RUNTIME_SKILLS grows again, redo this audit per-skill.
+//   - tailor-application (see .agents/skills/tailor-application) needs
+//     Read/Glob/Grep to read the gate files, evidence, writing style, and
+//     prior tailored artifacts (STEP 1-4); Write/Edit to draft the resume/
+//     cover letter/answers artifacts and stamp the tracker row (STEP 5-7);
+//     Bash because its own STEPs shell out to `rolester export`,
+//     `rolester questions`, and `rolester tracker --verify` (the
+//     placeholder-lint + build + tracker-stamp CLIs); WebFetch only for a JD
+//     refetch if the saved posting needs re-reading; and Skill.
+// The list itself is already the union of all three, so no entries change
+// here. If ROLESTER_RUNTIME_SKILLS grows again, redo this audit per-skill.
 export const RUNTIME_TOOLS = ["Read", "Glob", "Grep", "WebFetch", "Write", "Edit", "Bash", "Skill"];
 
 // Posture text injected into the run's opening instruction — the one place

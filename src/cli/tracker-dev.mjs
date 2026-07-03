@@ -43,6 +43,7 @@ import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
 import { ONBOARD_PAGE_HTML } from "../core/onboarding/onboard-page.mjs";
+import { PACKET_PAGE_HTML } from "../core/onboarding/packet-page.mjs";
 import { SEARCH_PAGE_HTML } from "../core/onboarding/search-page.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
 import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
@@ -55,6 +56,7 @@ import {
 } from "../core/tracker/dev-server.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
+import { mountPacketRoutes } from "./packet-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 
@@ -291,6 +293,20 @@ export function createDevServer({
     res.end(SEARCH_PAGE_HTML);
   });
 
+  // M4 of the paid-POC journey — the /packet view: review a gated
+  // application's tailored resume/cover letter/answers, or generate them live
+  // via tailor-application. Its HTTP surface (list + single-packet resolution,
+  // path-safety-checked artifact reads) is src/cli/packet-route.mjs; its
+  // byte-static page is src/core/onboarding/packet-page.mjs. The "Generate
+  // packet" button POSTs the same /api/skill/run mountSkillRunRoute already
+  // registered above, so no new skill-run mechanics are needed here.
+  mountPacketRoutes({ addRoute, repoRoot, env });
+
+  addRoute("GET", "/packet", (_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(PACKET_PAGE_HTML);
+  });
+
   // Idle/closed-session eviction — see chatRuntime.sweepOnce()'s own doc
   // comment. Started here (not gated behind main()'s CLI boot) so every
   // createDevServer() instance, including ones tests construct directly,
@@ -414,7 +430,8 @@ export function createDevServer({
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(
-      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /chat, /search, /dashboard-data.js, " +
+      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /chat, /search, /packet, " +
+        "/dashboard-data.js, " +
         "/workspace/dashboard-data.js, " +
         "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
         "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
@@ -423,6 +440,7 @@ export function createDevServer({
         "/api/settings/ai-key, /api/settings/ai, /api/chat/start, /api/chat/events, /api/chat/message, " +
         "/api/chat/interrupt, /api/chat/close, /api/chat/by-skill, /api/chat/list, " +
         "/api/search/scan, /api/search/results, /api/search/sources, " +
+        "/api/packet/list, /api/packet, " +
         "/assets/*, /fonts/*, and /__livereload."
     );
   });
@@ -670,6 +688,7 @@ Routes:
   GET  /onboard                         Non-AI onboarding wizard (M1) — seed candidate files, BYOK key
   GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
   GET  /search                          Deterministic ATS-board sweep results + "Run sweep" (M3)
+  GET  /packet                          Review a gated app's tailored resume/cover letter/answers, or generate live (M4)
   GET  /dashboard-data.js               Dashboard data module
   GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
   GET  /workspace/tracker.json          Raw tracker.json (static file)
@@ -700,6 +719,8 @@ Routes:
   POST /api/search/scan                 Run the deterministic ATS-board sweep, persist + return the summary (M3)
   GET  /api/search/results              Newest (or ?date=YYYY-MM-DD) persisted sweep summary
   GET  /api/search/sources              Search-source/tracked-company presence counts
+  GET  /api/packet/list                 Gated applications + artifact presence + NEEDS YOU counts (M4)
+  GET  /api/packet?id=<appId>           One application's resolved resume/coverLetter/answers (M4)
   GET  /assets/*, /fonts/*              Static assets
   GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
 

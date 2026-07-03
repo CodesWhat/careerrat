@@ -23,10 +23,11 @@ import {
 import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 // `skillNames` accepts a single name (most tests only need one) or an array
-// — the default-allowlist tests need both "evaluate-job" and
-// "answer-question" fixtures present since DEFAULT_RUNTIME_SKILLS now names
-// both (resolveAllowedSkills filters the default against discovered dirs, so
-// a fixture missing one of them would silently under-assert the real default).
+// — the default-allowlist tests need "evaluate-job", "answer-question", and
+// "tailor-application" fixtures present since DEFAULT_RUNTIME_SKILLS now
+// names all three (resolveAllowedSkills filters the default against
+// discovered dirs, so a fixture missing one of them would silently
+// under-assert the real default).
 function tempRepoWithSkill(skillNames = "test-skill") {
   const names = Array.isArray(skillNames) ? skillNames : [skillNames];
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-"));
@@ -70,12 +71,13 @@ test("discoverSkillDirs: returns [] when .agents/skills doesn't exist", () => {
 // resolveAllowedSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedSkills: defaults to evaluate-job + answer-question when ROLESTER_RUNTIME_SKILLS is unset", () => {
-  const repoRoot = tempRepoWithSkill(["evaluate-job", "answer-question"]);
+test("resolveAllowedSkills: defaults to evaluate-job + answer-question + tailor-application when ROLESTER_RUNTIME_SKILLS is unset", () => {
+  const repoRoot = tempRepoWithSkill(["evaluate-job", "answer-question", "tailor-application"]);
   try {
     assert.deepEqual(resolveAllowedSkills({ repoRoot, env: {} }), [
       "evaluate-job",
       "answer-question",
+      "tailor-application",
     ]);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
