@@ -17,12 +17,14 @@
 //
 // Each subcommand delegates to the matching src/cli script, forwarding args.
 
-// Node version guard — must run before any ESM import that requires >=18 features.
+// Node version guard — must run before any ESM import that requires >=24
+// features (M6: node:sqlite is a builtin from Node 22.5, but only stable
+// without a flag from 24 — see package.json#engines).
 {
   const major = parseInt(process.versions.node.split(".")[0], 10);
-  if (major < 18) {
+  if (major < 24) {
     process.stderr.write(
-      `rolester requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
+      `rolester requires Node.js >= 24 (you have ${process.versions.node}) — please upgrade.\n`
     );
     process.exit(1);
   }
@@ -67,6 +69,7 @@ const CLIS = {
   questions: "src/cli/questions.mjs",
   tracker: "src/cli/tracker.mjs",
   "tracker-dev": "src/cli/tracker-dev.mjs",
+  data: "src/cli/data.mjs",
   modes: "src/cli/modes.mjs",
   automation: "src/cli/automation.mjs",
   activity: "src/cli/activity.mjs",
@@ -527,6 +530,7 @@ Commands:
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'rolester start')
   tracker-dev  Serve the live hot-reloading dashboard without launching an agent
+  data        sqlite-backed data layer: status/init/import/export/verify + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
   automation  Show/toggle opt-in browser-automation config (defaults OFF)

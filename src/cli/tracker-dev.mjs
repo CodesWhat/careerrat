@@ -55,6 +55,7 @@ import {
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
+import { mountDataRoutes } from "./data-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
@@ -318,6 +319,12 @@ export function createDevServer({
     res.end(PACKET_PAGE_HTML);
   });
 
+  // M6 — the sqlite-backed data layer's JSON API (src/cli/data-route.mjs).
+  // Fail-closed per decision 7: every route 409s with a clear "no database
+  // yet" error until `rolester data init`/`import` creates one; there is no
+  // page mounted here (no /data view), just the API surface CLI verbs mirror.
+  mountDataRoutes({ addRoute, repoRoot, env });
+
   // Idle/closed-session eviction — see chatRuntime.sweepOnce()'s own doc
   // comment. Started here (not gated behind main()'s CLI boot) so every
   // createDevServer() instance, including ones tests construct directly,
@@ -452,6 +459,10 @@ export function createDevServer({
         "/api/chat/interrupt, /api/chat/close, /api/chat/by-skill, /api/chat/list, " +
         "/api/search/scan, /api/search/results, /api/search/sources, " +
         "/api/packet/list, /api/packet, " +
+        "/api/data/snapshot, /api/data/applications, /api/data/applications/one, " +
+        "/api/data/sourced, /api/data/communications, /api/data/activity, " +
+        "/api/data/app/status, /api/data/app/fields, /api/data/app/interview, /api/data/app/artifact, " +
+        "/api/data/sourced/promote, /api/data/comm/message, /api/data/comm/send, " +
         "/assets/*, /fonts/*, and /__livereload."
     );
   });
@@ -732,6 +743,19 @@ Routes:
   GET  /api/search/sources              Search-source/tracked-company presence counts
   GET  /api/packet/list                 Gated applications + artifact presence + NEEDS YOU counts (M4)
   GET  /api/packet?id=<appId>           One application's resolved resume/coverLetter/answers (M4)
+  GET  /api/data/snapshot               sqlite data layer: meta + table counts (M6, 409 if no db yet)
+  GET  /api/data/applications           Application rows (?status=, ?company= filters)
+  GET  /api/data/applications/one       One application row (?id=)
+  GET  /api/data/sourced                Sourced rows
+  GET  /api/data/communications         Communication thread rows
+  GET  /api/data/activity               Activity events, newest-first (?limit=)
+  POST /api/data/app/status             appSetStatus verb
+  POST /api/data/app/fields             appSetFields verb
+  POST /api/data/app/interview          appScheduleInterview verb
+  POST /api/data/app/artifact           appRegisterArtifact verb
+  POST /api/data/sourced/promote        sourcedPromote verb
+  POST /api/data/comm/message           commAppendMessage verb
+  POST /api/data/comm/send              commMarkSent verb (sent-clears-draft)
   GET  /assets/*, /fonts/*              Static assets
   GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
 

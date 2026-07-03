@@ -64,6 +64,11 @@ docs/COMPARISON.md
 # Consolidated local user data root (candidate/workspace/generated config/internal).
 .rolester/
 
+# Alternate ROLESTER_HOME used by `npm run desktop:fresh` to boot the desktop
+# app against a clean data root (fresh onboarding / fresh-db smoke tests)
+# without touching the real .rolester/ data root.
+.rolester-fresh/
+
 # Local candidate data
 /candidate/
 

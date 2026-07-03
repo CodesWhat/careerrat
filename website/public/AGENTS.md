@@ -16,7 +16,7 @@ cloud, no account, no telemetry. Free to self-host, MIT licensed, zero runtime d
 
 ## Requirements
 
-- Node.js >= 18
+- Node.js >= 24
 - A coding-agent CLI on PATH — Claude Code or Codex (Rolester runs *through* you):
   - Claude Code: `npm install -g @anthropic-ai/claude-code` (https://claude.com/claude-code)
   - Codex: `npm install -g @openai/codex` (https://github.com/openai/codex)

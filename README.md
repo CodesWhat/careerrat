@@ -20,7 +20,7 @@ Tagline:
 
 **Prerequisites:**
 
-- Node.js ≥ 18 — check with `node -v`
+- Node.js ≥ 24 — check with `node -v`
 - A coding-agent CLI on your PATH — Claude Code or Codex:
   - Claude Code: `npm install -g @anthropic-ai/claude-code` ([claude.com/claude-code](https://claude.com/claude-code))
   - Codex: `npm install -g @openai/codex` ([github.com/openai/codex](https://github.com/openai/codex))

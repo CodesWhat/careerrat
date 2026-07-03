@@ -6,7 +6,7 @@ renders, and serves the dashboard.
 
 ## Prerequisites
 
-- Node.js >= 18
+- Node.js >= 24
 - A coding-agent CLI on your PATH — Claude Code or Codex:
   - Claude Code:  `npm install -g @anthropic-ai/claude-code`  (<https://claude.com/claude-code>)
   - Codex:        `npm install -g @openai/codex`               (<https://github.com/openai/codex>)
