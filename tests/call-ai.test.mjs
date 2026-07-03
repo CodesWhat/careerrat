@@ -8,7 +8,7 @@
 // dirs for the usage log, no network.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -215,6 +215,56 @@ test("callAI (BYOK, non-stream): appends a usage_event when root is given", asyn
     assert.equal(events[0].tokens_out, 12);
     assert.equal(events[0].cache_read_tokens, 10);
     assert.equal(events[0].cache_creation_tokens, 5);
+    assert.equal(events[0].upstream, new URL(upstream.url).host); // cost-drift visibility
+  } finally {
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI: falls back to config/ai.json#model when the caller passes no model", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  mkdirSync(join(root, "config"), { recursive: true });
+  writeFileSync(
+    join(root, "config", "ai.json"),
+    JSON.stringify({ model: "claude-sonnet-5" }),
+    "utf8"
+  );
+  try {
+    await callAI({
+      messages: [{ role: "user", content: "hi" }],
+      maxTokens: 16,
+      root,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+    });
+    assert.equal(upstream.requests.length, 1);
+    assert.equal(upstream.requests[0].body.model, "claude-sonnet-5");
+  } finally {
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI: an explicit model always wins over config/ai.json", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  mkdirSync(join(root, "config"), { recursive: true });
+  writeFileSync(
+    join(root, "config", "ai.json"),
+    JSON.stringify({ model: "claude-sonnet-5" }),
+    "utf8"
+  );
+  try {
+    await callAI({
+      model: "claude-opus-4-8",
+      messages: [{ role: "user", content: "hi" }],
+      maxTokens: 16,
+      root,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+    });
+    assert.equal(upstream.requests.length, 1);
+    assert.equal(upstream.requests[0].body.model, "claude-opus-4-8");
   } finally {
     upstream.close();
     rmSync(root, { recursive: true, force: true });
@@ -244,6 +294,7 @@ test("callAI (BYOK, stream): yields raw SSE events and appends a usage_event on 
     assert.equal(usageEvents[0].tokens_out, 12);
     assert.equal(usageEvents[0].cache_read_tokens, 10);
     assert.equal(usageEvents[0].cache_creation_tokens, 5);
+    assert.equal(usageEvents[0].upstream, new URL(upstream.url).host);
   } finally {
     upstream.close();
     rmSync(root, { recursive: true, force: true });

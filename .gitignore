@@ -76,6 +76,11 @@ config/search-sources.yml
 config/search-sources.json
 config/sourced-scan.json
 
+# User-local model-swap config (schema + example stay committed, see
+# config/ai.schema.json / config/ai.example.json). Holds an operator's chosen
+# model id(s) — no-code-change model swap must never ship a default choice.
+config/ai.json
+
 # Generated/private workspace data
 workspace/jobs/*
 workspace/tailored/*

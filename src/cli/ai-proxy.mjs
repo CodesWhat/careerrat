@@ -29,6 +29,12 @@
 //   ROLESTER_UPSTREAM_URL    default https://api.anthropic.com — the gateway slot.
 //   ROLESTER_UPSTREAM_HEADERS  optional JSON object of extra headers to inject upstream
 //                              (e.g. {"x-portkey-config":"..."} when fronting Portkey).
+//   ROLESTER_UPSTREAM_REPORTING  optional "1" to inject Vercel AI Gateway attribution
+//                                headers on every outbound request: ai-reporting-user
+//                                (a stable pseudonymous id, sha256 of the caller's own
+//                                proxy token — never the raw token) and ai-reporting-tags
+//                                (skill:.../action:... from x-rolester-skill/-action when
+//                                present). Off by default; harmless to other upstreams.
 //   ROLESTER_PROXY_PORT      default 7788.
 //   ROLESTER_PROXY_METER_ROOT  default process.cwd() — root the usage log is written under.
 //
@@ -100,13 +106,18 @@ function tokensMatch(provided, expected) {
 // set (verified against the installed @anthropic-ai/claude-agent-sdk bundle,
 // not assumed), which is how the embedded skill runtime (P0-4) routes the
 // Agent SDK's own traffic through this proxy without an Authorization header
-// at all. Same timingSafeEqual posture either way.
-function requireAuth(req, res, proxyToken) {
-  const header = String(req.headers.authorization || "");
+// at all. Shared with buildUpstreamHeaders() below, which hashes whichever
+// token was actually presented into the (opt-in) ai-reporting-user header.
+function extractProvidedToken(headers) {
+  const header = String(headers.authorization || "");
   const match = /^Bearer\s+(.+)$/i.exec(header.trim());
   const bearer = match ? match[1] : "";
-  const apiKey = String(req.headers["x-api-key"] || "").trim();
-  const provided = bearer || apiKey;
+  const apiKey = String(headers["x-api-key"] || "").trim();
+  return bearer || apiKey;
+}
+
+function requireAuth(req, res, proxyToken) {
+  const provided = extractProvidedToken(req.headers);
   if (!provided || !tokensMatch(provided, proxyToken)) {
     sendJson(res, 401, { error: "unauthorized" });
     return false;
@@ -123,7 +134,30 @@ function readRequestBody(req) {
   });
 }
 
-function buildUpstreamHeaders(inboundHeaders, upstreamKey, extraHeaders) {
+// First 12 hex chars of sha256(token) — stable per token, never the token
+// itself. Long enough to attribute usage per-caller at the gateway without
+// being reversible or colliding across a realistic number of proxy tokens.
+function reportingUserId(token) {
+  return createHash("sha256").update(String(token), "utf8").digest("hex").slice(0, 12);
+}
+
+// "skill:x,action:y" from the x-rolester-* labels, or null when neither is
+// present — never emit an empty ai-reporting-tags header.
+function buildReportingTags(inboundHeaders) {
+  const tags = [];
+  const skill = inboundHeaders["x-rolester-skill"];
+  const action = inboundHeaders["x-rolester-action"];
+  if (skill) tags.push(`skill:${Array.isArray(skill) ? skill.join(",") : skill}`);
+  if (action) tags.push(`action:${Array.isArray(action) ? action.join(",") : action}`);
+  return tags.length ? tags.join(",") : null;
+}
+
+function buildUpstreamHeaders(
+  inboundHeaders,
+  upstreamKey,
+  extraHeaders,
+  { env = process.env } = {}
+) {
   const out = {};
   for (const [key, value] of Object.entries(inboundHeaders)) {
     if (value === undefined) continue;
@@ -135,6 +169,16 @@ function buildUpstreamHeaders(inboundHeaders, upstreamKey, extraHeaders) {
   out["x-api-key"] = upstreamKey;
   out["anthropic-version"] = inboundHeaders["anthropic-version"] || ANTHROPIC_VERSION;
   Object.assign(out, extraHeaders || {});
+
+  // Opt-in Vercel AI Gateway attribution headers — see the ROLESTER_UPSTREAM_REPORTING
+  // doc at the top of this file. Off by default; harmless to other upstreams.
+  if (String(env.ROLESTER_UPSTREAM_REPORTING || "").trim() === "1") {
+    const providedToken = extractProvidedToken(inboundHeaders);
+    if (providedToken) out["ai-reporting-user"] = reportingUserId(providedToken);
+    const tags = buildReportingTags(inboundHeaders);
+    if (tags) out["ai-reporting-tags"] = tags;
+  }
+
   return out;
 }
 
@@ -148,6 +192,7 @@ export function createProxyServer({
   upstreamUrl = "https://api.anthropic.com",
   upstreamHeaders = {},
   meterRoot = process.cwd(),
+  env = process.env,
 } = {}) {
   if (!String(proxyToken || "").trim())
     throw new Error("ai-proxy: ROLESTER_PROXY_TOKEN is required");
@@ -155,6 +200,15 @@ export function createProxyServer({
     throw new Error("ai-proxy: ROLESTER_UPSTREAM_KEY is required");
 
   const base = upstreamUrl.replace(/\/+$/, "");
+  // Host of the upstream base URL, for the usage log's `upstream` field (cost-
+  // drift visibility across providers) — never throws on a malformed URL.
+  const upstreamHost = (() => {
+    try {
+      return new URL(base).host || null;
+    } catch {
+      return null;
+    }
+  })();
 
   // Since-boot totals, seeded from any prior proxy-sourced rows in the usage
   // log so a restart doesn't reset /meter to zero (see usage-log.mjs's own
@@ -175,6 +229,7 @@ export function createProxyServer({
       skill: skill || null,
       action: action || null,
       model,
+      upstream: upstreamHost,
       tokens_in: usage.input_tokens,
       tokens_out: usage.output_tokens,
       cache_read_tokens: usage.cache_read_input_tokens,
@@ -199,7 +254,9 @@ export function createProxyServer({
       bodyBuffer = await readRequestBody(req);
     }
 
-    const outboundHeaders = buildUpstreamHeaders(req.headers, upstreamKey, upstreamHeaders);
+    const outboundHeaders = buildUpstreamHeaders(req.headers, upstreamKey, upstreamHeaders, {
+      env,
+    });
     const upstreamUrlFull = `${base}${path}${url.search}`;
 
     let upstreamRes;

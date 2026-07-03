@@ -7,9 +7,9 @@
 // model, and the ROLESTER_PRICING_JSON override.
 
 import assert from "node:assert/strict";
-import { appendFileSync, mkdtempSync, rmSync } from "node:fs";
+import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import {
   appendUsageEvent,
@@ -153,6 +153,20 @@ test("canonicalizeUsageEvent: unknown model is unpriced, cost_usd null", () => {
   assert.equal(event.cost_usd, null);
 });
 
+test("canonicalizeUsageEvent: carries the upstream host, defaults to null when absent", () => {
+  const withUpstream = canonicalizeUsageEvent(
+    { model: "claude-sonnet-5", tokens_in: 1, tokens_out: 1, upstream: "ai-gateway.vercel.sh" },
+    { now: NOW }
+  );
+  assert.equal(withUpstream.upstream, "ai-gateway.vercel.sh");
+
+  const withoutUpstream = canonicalizeUsageEvent(
+    { model: "claude-sonnet-5", tokens_in: 1, tokens_out: 1 },
+    { now: NOW }
+  );
+  assert.equal(withoutUpstream.upstream, null);
+});
+
 // ---------------------------------------------------------------------------
 // append/read round-trip
 // ---------------------------------------------------------------------------
@@ -181,6 +195,55 @@ test("appendUsageEvent + readUsageEvents: round-trips exact fields", () => {
     assert.equal(row.tokens_in, 200);
     assert.equal(row.tokens_out, 100);
     assert.equal(row.priced, true);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("appendUsageEvent + readUsageEvents: upstream field round-trips", () => {
+  const root = tempRoot();
+  try {
+    appendUsageEvent(
+      {
+        source: "proxy",
+        model: "claude-sonnet-5",
+        tokens_in: 1,
+        tokens_out: 1,
+        upstream: "api.anthropic.com",
+      },
+      { root, now: NOW }
+    );
+    const [row] = readUsageEvents({ root });
+    assert.equal(row.upstream, "api.anthropic.com");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("readUsageEvents: an old row written without an `upstream` key reads back fine", () => {
+  const root = tempRoot();
+  try {
+    const path = usageLogAbsPath(root);
+    mkdirSync(dirname(path), { recursive: true });
+    // Hand-written line shaped like a pre-upstream-field row — no `upstream` key at all.
+    appendFileSync(
+      path,
+      `${JSON.stringify({
+        id: "use_legacy",
+        at: NOW.toISOString(),
+        source: "byok",
+        model: "claude-sonnet-5",
+        tokens_in: 5,
+        tokens_out: 5,
+        priced: true,
+        cost_usd: 0.000075,
+      })}\n`,
+      "utf8"
+    );
+    const events = readUsageEvents({ root });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].id, "use_legacy");
+    assert.equal(events[0].upstream, undefined); // absent, not backfilled — never throws
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

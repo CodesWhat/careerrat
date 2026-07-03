@@ -34,6 +34,7 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { appendUsageEvent, computeCost } from "./usage-log.mjs";
 
@@ -78,14 +79,42 @@ export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
 // has to land as env vars for that child, not request headers.
 // ---------------------------------------------------------------------------
 
+// The model-selection knobs the Agent SDK's own CLI reads directly (verified
+// against the installed @anthropic-ai/claude-agent-sdk, not assumed) — the
+// no-code model-swap seam (see ai-config.mjs). `shared = { ...baseEnv }` below
+// already carries every one of these when the server operator set them
+// directly; this list is kept explicit/self-documenting rather than relying
+// on that incidental blanket copy, and is what actually applies the
+// config/ai.json fallback for the two model-id vars when neither is set.
+const MODEL_SELECTION_ENV_VARS = [
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL",
+  "ANTHROPIC_DEFAULT_OPUS_MODEL",
+  "ANTHROPIC_DEFAULT_SONNET_MODEL",
+  "ANTHROPIC_DEFAULT_HAIKU_MODEL",
+  "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
+];
+
 // Pure + exported so the routing decision is unit-testable without spawning
 // the SDK: given a resolved route, what env does the child process get?
 // route.type === "none" returns null — callers must have already rejected
-// that case (see runSkillStream).
-export function buildChildEnv({ route, skill, baseEnv = process.env } = {}) {
+// that case (see runSkillStream). `repoRoot` locates config/ai.json (the
+// no-code model-swap file) — optional; ai-config.mjs falls back to its own
+// repo-root default when omitted (unit tests exercise it that way).
+export function buildChildEnv({ route, skill, baseEnv = process.env, repoRoot } = {}) {
   if (!route || route.type === "none") return null;
 
   const shared = { ...baseEnv };
+  for (const key of MODEL_SELECTION_ENV_VARS) {
+    if (baseEnv[key] !== undefined) shared[key] = baseEnv[key];
+  }
+
+  // config/ai.json fallback: only fills ANTHROPIC_MODEL/ANTHROPIC_SMALL_FAST_MODEL
+  // when the server env didn't already set them — resolveModelConfig() applies
+  // that precedence (env > config file > unset) itself.
+  const { model, smallFastModel } = resolveModelConfig({ root: repoRoot, env: baseEnv });
+  if (model) shared.ANTHROPIC_MODEL = model;
+  if (smallFastModel) shared.ANTHROPIC_SMALL_FAST_MODEL = smallFastModel;
 
   if (route.type === "byok") {
     // Direct to Anthropic (or a ROLESTER_ANTHROPIC_BASE_URL override) with the
@@ -325,7 +354,7 @@ export async function runSkillStream({
   // 501, not a crash mid-stream.
   const { query } = await loadSdk();
 
-  const childEnv = buildChildEnv({ route, skill, baseEnv: env });
+  const childEnv = buildChildEnv({ route, skill, baseEnv: env, repoRoot });
 
   const controller = new AbortController();
   let externallyAborted = false;

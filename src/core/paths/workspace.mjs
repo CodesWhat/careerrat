@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 export const DEFAULT_PRIVATE_DIR = ".rolester";
 
 const DEFAULT_REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const GENERATED_CONFIG_FILES = ["search-sources.yml", "search-sources.json", "sourced-scan.json"];
+const GENERATED_CONFIG_FILES = [
+  "search-sources.yml",
+  "search-sources.json",
+  "sourced-scan.json",
+  "ai.json",
+];
 const WORKSPACE_RUNTIME_FILES = [
   "tracker.json",
   "tracker.html",

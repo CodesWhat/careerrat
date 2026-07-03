@@ -14,6 +14,7 @@
 // good client hygiene and what makes "did /meter update yet" deterministic.
 
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -325,6 +326,147 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
     assert.equal(events[0].cache_creation_tokens, 200);
     assert.equal(events[0].priced, true);
     assert.equal(events[0].cost_usd, expected.cost_usd);
+    assert.equal(events[0].upstream, new URL(upstream.url).host); // cost-drift visibility
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Opt-in Vercel AI Gateway attribution headers (ROLESTER_UPSTREAM_REPORTING)
+// ---------------------------------------------------------------------------
+
+test("proxy: ROLESTER_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, never the raw token", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "devtok",
+    upstreamKey: "sk-real-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    env: { ROLESTER_UPSTREAM_REPORTING: "1" },
+  });
+  try {
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer devtok",
+        "content-type": "application/json",
+        "x-rolester-skill": "evaluate-job",
+        "x-rolester-action": "gate",
+      },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+
+    assert.equal(upstream.requests.length, 1);
+    const [upReq] = upstream.requests;
+    const expectedUserId = createHash("sha256").update("devtok", "utf8").digest("hex").slice(0, 12);
+    assert.equal(upReq.headers["ai-reporting-user"], expectedUserId);
+    assert.equal(upReq.headers["ai-reporting-tags"], "skill:evaluate-job,action:gate");
+
+    // The raw proxy token must never appear as any outbound header value.
+    for (const value of Object.values(upReq.headers)) {
+      assert.notEqual(String(value), "devtok");
+    }
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: reporting headers are absent when ROLESTER_UPSTREAM_REPORTING is unset (default off)", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "devtok",
+    upstreamKey: "sk-real-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+  });
+  try {
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer devtok",
+        "content-type": "application/json",
+        "x-rolester-skill": "evaluate-job",
+      },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+
+    const [upReq] = upstream.requests;
+    assert.equal(upReq.headers["ai-reporting-user"], undefined);
+    assert.equal(upReq.headers["ai-reporting-tags"], undefined);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: ai-reporting-tags omitted when no x-rolester-skill/-action headers are sent", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "devtok",
+    upstreamKey: "sk-real-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    env: { ROLESTER_UPSTREAM_REPORTING: "1" },
+  });
+  try {
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: "Bearer devtok", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+
+    const [upReq] = upstream.requests;
+    assert.notEqual(upReq.headers["ai-reporting-user"], undefined); // still attributed
+    assert.equal(upReq.headers["ai-reporting-tags"], undefined); // nothing to tag
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Documents CURRENT precedence, not new behavior: a bearer-auth-style upstream
+// (ROLESTER_UPSTREAM_HEADERS carrying its own "authorization") rides through
+// the trailing Object.assign in buildUpstreamHeaders(), and x-api-key still
+// carries the upstream key set earlier in the same function — the two can
+// coexist for a gateway that wants both.
+test("proxy: ROLESTER_UPSTREAM_HEADERS carrying authorization rides through Object.assign; x-api-key still the upstream key", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "devtok",
+    upstreamKey: "sk-real-upstream",
+    upstreamUrl: upstream.url,
+    upstreamHeaders: { authorization: "Bearer gateway-side-token" },
+    meterRoot: root,
+  });
+  try {
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: "Bearer devtok", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+
+    const [upReq] = upstream.requests;
+    assert.equal(upReq.headers.authorization, "Bearer gateway-side-token");
+    assert.equal(upReq.headers["x-api-key"], "sk-real-upstream");
   } finally {
     proxy.close();
     upstream.close();

@@ -145,6 +145,11 @@ export function canonicalizeUsageEvent(input = {}, { now = new Date(), env = pro
     skill: trimOrNull(input.skill),
     action: trimOrNull(input.action),
     model,
+    // Upstream provider host (e.g. "ai-gateway.vercel.sh" / "api.anthropic.com")
+    // — cost-drift visibility across providers. Optional; older rows written
+    // before this field existed simply lack the key on read (readUsageEvents
+    // parses each line as-is, no backfill).
+    upstream: trimOrNull(input.upstream),
     tokens_in,
     tokens_out,
     cache_read_tokens,

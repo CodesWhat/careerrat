@@ -131,6 +131,105 @@ test("buildChildEnv: route.type 'none' returns null", () => {
   assert.equal(buildChildEnv({ route: null, skill: "evaluate-job", baseEnv: {} }), null);
 });
 
+test("buildChildEnv: forwards the explicit model-selection env vars when the server set them", () => {
+  const childEnv = buildChildEnv({
+    route: { type: "byok", apiKey: "sk-ant-real", baseUrl: "https://api.anthropic.com" },
+    skill: "evaluate-job",
+    baseEnv: {
+      ANTHROPIC_MODEL: "claude-sonnet-5",
+      ANTHROPIC_SMALL_FAST_MODEL: "claude-haiku-4-5",
+      ANTHROPIC_DEFAULT_OPUS_MODEL: "claude-opus-4-8",
+      ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-sonnet-5",
+      ANTHROPIC_DEFAULT_HAIKU_MODEL: "claude-haiku-4-5",
+      CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: "1",
+    },
+  });
+  assert.equal(childEnv.ANTHROPIC_MODEL, "claude-sonnet-5");
+  assert.equal(childEnv.ANTHROPIC_SMALL_FAST_MODEL, "claude-haiku-4-5");
+  assert.equal(childEnv.ANTHROPIC_DEFAULT_OPUS_MODEL, "claude-opus-4-8");
+  assert.equal(childEnv.ANTHROPIC_DEFAULT_SONNET_MODEL, "claude-sonnet-5");
+  assert.equal(childEnv.ANTHROPIC_DEFAULT_HAIKU_MODEL, "claude-haiku-4-5");
+  assert.equal(childEnv.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS, "1");
+});
+
+// ---------------------------------------------------------------------------
+// buildChildEnv — no-code model-swap seam (config/ai.json via ai-config.mjs)
+// ---------------------------------------------------------------------------
+
+function tempRepoWithAiConfig(contents) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-aiconfig-"));
+  mkdirSync(join(repoRoot, "config"), { recursive: true });
+  writeFileSync(join(repoRoot, "config", "ai.json"), JSON.stringify(contents), "utf8");
+  return repoRoot;
+}
+
+test("buildChildEnv: config/ai.json fills ANTHROPIC_MODEL/SMALL_FAST_MODEL when unset in baseEnv", () => {
+  const repoRoot = tempRepoWithAiConfig({
+    model: "anthropic/claude-sonnet-4.6",
+    smallFastModel: "claude-haiku-4-5",
+  });
+  try {
+    const childEnv = buildChildEnv({
+      route: { type: "byok", apiKey: "sk-ant-real", baseUrl: "https://api.anthropic.com" },
+      skill: "evaluate-job",
+      baseEnv: {},
+      repoRoot,
+    });
+    assert.equal(childEnv.ANTHROPIC_MODEL, "anthropic/claude-sonnet-4.6");
+    assert.equal(childEnv.ANTHROPIC_SMALL_FAST_MODEL, "claude-haiku-4-5");
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildChildEnv: an explicit ANTHROPIC_MODEL in baseEnv wins over config/ai.json", () => {
+  const repoRoot = tempRepoWithAiConfig({ model: "claude-sonnet-5" });
+  try {
+    const childEnv = buildChildEnv({
+      route: { type: "byok", apiKey: "sk-ant-real", baseUrl: "https://api.anthropic.com" },
+      skill: "evaluate-job",
+      baseEnv: { ANTHROPIC_MODEL: "claude-opus-4-8" },
+      repoRoot,
+    });
+    assert.equal(childEnv.ANTHROPIC_MODEL, "claude-opus-4-8"); // env wins, not the file's claude-sonnet-5
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildChildEnv: a missing config/ai.json applies no override — no ANTHROPIC_MODEL key added", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-noaiconfig-"));
+  try {
+    const childEnv = buildChildEnv({
+      route: { type: "byok", apiKey: "sk-ant-real", baseUrl: "https://api.anthropic.com" },
+      skill: "evaluate-job",
+      baseEnv: {},
+      repoRoot,
+    });
+    assert.equal(childEnv.ANTHROPIC_MODEL, undefined);
+    assert.equal(childEnv.ANTHROPIC_SMALL_FAST_MODEL, undefined);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("buildChildEnv: a malformed config/ai.json applies no override, never throws", () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-badaiconfig-"));
+  mkdirSync(join(repoRoot, "config"), { recursive: true });
+  writeFileSync(join(repoRoot, "config", "ai.json"), "{not valid json", "utf8");
+  try {
+    const childEnv = buildChildEnv({
+      route: { type: "byok", apiKey: "sk-ant-real", baseUrl: "https://api.anthropic.com" },
+      skill: "evaluate-job",
+      baseEnv: {},
+      repoRoot,
+    });
+    assert.equal(childEnv.ANTHROPIC_MODEL, undefined);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 // ---------------------------------------------------------------------------
 // mapSdkMessage — pure event mapping from a stubbed message iterator
 // ---------------------------------------------------------------------------

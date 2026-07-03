@@ -21,9 +21,21 @@
 // shared with ai-proxy.mjs's byte-faithful tee, so the two places that ever
 // read raw Anthropic SSE agree on framing.
 
+import { resolveModelConfig } from "./ai-config.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
 
 const ANTHROPIC_VERSION = "2023-06-01";
+
+// Host of a base URL, for the usage log's `upstream` field (cost-drift
+// visibility across providers) — never throws on a malformed URL, since a
+// metering label must never be the reason a real request fails.
+function hostOf(url) {
+  try {
+    return new URL(url).host || null;
+  } catch {
+    return null;
+  }
+}
 
 export function resolveAIRoute(env = process.env) {
   const apiKey = String(env.ANTHROPIC_API_KEY || "").trim();
@@ -133,12 +145,13 @@ function buildRequest(route, { model, system, messages, maxTokens, stream, skill
   return { url, headers, body };
 }
 
-function usageRow({ source, skill, action, model, usage }) {
+function usageRow({ source, skill, action, model, usage, upstream }) {
   return {
     source,
     skill,
     action,
     model,
+    upstream,
     tokens_in: usage?.input_tokens,
     tokens_out: usage?.output_tokens,
     cache_read_tokens: usage?.cache_read_input_tokens,
@@ -179,6 +192,7 @@ async function* streamAI({ res, route, model, skill, action, root }) {
           skill,
           action,
           model: finalModel,
+          upstream: hostOf(route.baseUrl),
           usage: {
             input_tokens: inputTokens,
             output_tokens: outputTokens,
@@ -207,8 +221,13 @@ export async function callAI({
   const route = resolveAIRoute(env);
   if (route.type === "none") throw new Error(route.error);
 
+  // No-code model-swap seam (ai-config.mjs): a caller that doesn't pass a
+  // model falls back to config/ai.json#model (itself already env-overridable
+  // via ANTHROPIC_MODEL there) rather than sending `model: undefined`.
+  const resolvedModel = model || resolveModelConfig({ root, env }).model;
+
   const { url, headers, body } = buildRequest(route, {
-    model,
+    model: resolvedModel,
     system,
     messages,
     maxTokens,
@@ -226,14 +245,21 @@ export async function callAI({
   }
 
   if (stream) {
-    return streamAI({ res, route, model, skill, action, root });
+    return streamAI({ res, route, model: resolvedModel, skill, action, root });
   }
 
   const data = await res.json();
 
   if (route.type === "byok" && root) {
     appendUsageEvent(
-      usageRow({ source: "byok", skill, action, model: data.model || model, usage: data.usage }),
+      usageRow({
+        source: "byok",
+        skill,
+        action,
+        model: data.model || resolvedModel,
+        upstream: hostOf(route.baseUrl),
+        usage: data.usage,
+      }),
       { root }
     );
   }
