@@ -55,6 +55,7 @@ import {
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
+import { mountBoardsRoutes } from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
@@ -292,6 +293,11 @@ export function createDevServer({
   // (out of this backend build's scope) is the only client.
   mountAssistRoutes({ addRoute, repoRoot, env });
   mountLogoRoutes({ addRoute, repoRoot, env });
+  // M8 additive (Builder B, wizard UI) — src/cli/boards-route.mjs's own
+  // header comment explains why this route didn't already exist: the
+  // Targeting step's board-URL preview and the Finish step's "add LinkedIn
+  // saved search" affordance have no server surface without it.
+  mountBoardsRoutes({ addRoute, repoRoot, env });
 
   // M2 of the paid-POC journey — the conversational (multi-turn) skill
   // runtime's HTTP surface (src/cli/chat-route.mjs) and its byte-static page

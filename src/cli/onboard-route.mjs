@@ -67,6 +67,12 @@ import {
 } from "../core/profile/resume-parser.mjs";
 import { validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../core/profile/yaml.mjs";
+// M8 additive (Builder B, wizard UI): resolveLogoTokens is already exported
+// by logo-route.mjs for exactly this reuse — see its own header comment.
+// Reused here (not re-derived) so GET /api/onboard/state can report whether
+// logo.dev credentials are configured WITHOUT ever echoing their values back
+// (same "never echoed" convention as keyConfigured/the AI key below).
+import { resolveLogoTokens } from "./logo-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap skill-run-route.mjs uses.
@@ -85,9 +91,31 @@ const RESUME_EXTRACT_SCHEMA_PATH = "config/resume-extract.schema.json";
 // method+path Map (see tracker-dev.mjs), not a param router, so ":name" is
 // realized as one concrete route per known name rather than a wildcard — any
 // other name simply 404s via the server's existing fallback.
+// M8 additive (Builder B, wizard UI): a write route for
+// candidate/automation.yml#integrations.{logo_dev_token,logo_dev_secret_key}
+// — the Companies step's ONLY way to configure logo.dev credentials. No write
+// path for this existed anywhere: `rolester automation` (src/cli/automation.mjs)
+// only edits consent/capabilities, never token fields. Deliberately NOT added
+// to candidate-setup.mjs's OPTIONAL_CANDIDATE_FILES/ensureCandidateFiles():
+// automation.yml's absence is load-bearing ("nothing automated" — see the
+// template's own header), and POST /api/onboard/init must keep not
+// scaffolding it. This entry exists ONLY so the one extra
+// POST /api/onboard/candidate/automation route below can validate+merge+write
+// it on demand, reusing readBaseDoc/deepMerge/writeYamlDoc exactly like every
+// other candidate file — automation.yml's own schema is additionalProperties
+// permissive enough (see config/automation.schema.json) that merging in a new
+// top-level `integrations` key never trips validation.
+const AUTOMATION_ROUTE_ENTRY = {
+  name: "automation",
+  candidatePath: "candidate/automation.yml",
+  templatePath: "templates/automation.example.yml",
+  schemaPath: "config/automation.schema.json",
+};
+
 const CANDIDATE_ROUTE_ENTRIES = [
   ...CANDIDATE_FILES,
   ...OPTIONAL_CANDIDATE_FILES.filter((entry) => entry.name === "modes"),
+  AUTOMATION_ROUTE_ENTRY,
 ];
 
 // The curated subset of candidate files the M7 Settings page (apps/web/src/
@@ -249,12 +277,22 @@ export function mountOnboardRoutes({
       }
     }
 
+    // M8 additive (Builder B): logo.dev credential presence, never the values
+    // themselves — reuses logo-route.mjs's own resolveLogoTokens() so this
+    // route doesn't re-derive candidate/automation.yml's read/fallback shape.
+    // The Companies step uses these to decide whether to show the
+    // autocomplete/logo affordances or degrade straight to manual entry +
+    // initials, without ever seeing the secret/token values.
+    const { publishableToken, secretKey } = resolveLogoTokens(pathCtx, env);
+
     sendJson(res, 200, {
       files,
       data,
       sourceResumePresent: existsSync(userPath(pathCtx, sourceResumeEntry.candidatePath)),
       keyConfigured: resolveAIRoute(env).type !== "none",
       searchSourcesPresent: existsSync(userPath(pathCtx, "config/search-sources.yml")),
+      logoImageTokenConfigured: !!publishableToken,
+      logoSearchTokenConfigured: !!secretKey,
     });
   });
 

@@ -98,3 +98,23 @@ export function MoonIcon(props) {
     </Svg>
   );
 }
+
+// M8 onboarding wizard additions — same inline-stroke-SVG convention as
+// every icon above (never a ligature-font glyph).
+
+export function CheckIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4.5 12.5 9.5 17.5 19.5 6.5" />
+    </Svg>
+  );
+}
+
+export function UploadIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9" />
+      <path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" />
+    </Svg>
+  );
+}

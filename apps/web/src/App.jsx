@@ -1,28 +1,21 @@
 import { Route, Routes } from "react-router-dom";
 import { AppShell } from "./app-shell/AppShell.jsx";
+import { OnboardingPage } from "./onboarding/OnboardingPage.jsx";
 import { ComingSoonPage } from "./pages/ComingSoonPage.jsx";
 import { HomePage } from "./pages/HomePage.jsx";
 import { SettingsPage } from "./settings/SettingsPage.jsx";
 
-// M7 route map. Only "/" and "/settings" are real M7 deliverables — the rest
-// are working stub pages for the M8-M10 route map (see the M7 design memo's
-// route migration table), landed now so the left nav never links to a 404.
+// M7/M8 route map. "/", "/settings", and "/onboarding" are real deliverables
+// now — /jobs, /library, /calendar remain working stub pages for the M9-M10
+// route map (see the M7 design memo's route migration table), landed now so
+// the left nav never links to a 404.
 export function App() {
   return (
     <AppShell>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route
-          path="/onboarding"
-          element={
-            <ComingSoonPage
-              title="Onboarding"
-              milestone="M8"
-              description="A guided key → resume drop → suggestion wizard replaces the legacy /onboard + /chat pages here."
-            />
-          }
-        />
+        <Route path="/onboarding" element={<OnboardingPage />} />
         <Route
           path="/jobs"
           element={

@@ -59,6 +59,18 @@ function buildTempRoot() {
     join(REAL_ROOT, "config/resume-extract.schema.json"),
     join(tempRoot, "config/resume-extract.schema.json")
   );
+  // M8 additive (Builder B): AUTOMATION_ROUTE_ENTRY's template+schema aren't
+  // part of CANDIDATE_FILES/OPTIONAL_CANDIDATE_FILES (see onboard-route.mjs's
+  // own comment on that entry — deliberately NOT auto-scaffolded by
+  // ensureCandidateFiles), so this fixture copies them by hand too.
+  copyFileSync(
+    join(REAL_ROOT, "templates/automation.example.yml"),
+    join(tempRoot, "templates/automation.example.yml")
+  );
+  copyFileSync(
+    join(REAL_ROOT, "config/automation.schema.json"),
+    join(tempRoot, "config/automation.schema.json")
+  );
 
   return tempRoot;
 }
@@ -190,6 +202,33 @@ describe("GET /api/onboard/state", () => {
       const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
       const body = await res.json();
       assert.equal(body.keyConfigured, true);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  // M8 additive (Builder B): logo.dev credential PRESENCE, never echoed —
+  // reused from logo-route.mjs's resolveLogoTokens() (see that route's own
+  // two-credential header comment: publishable image token vs. secret
+  // Brand Search key).
+  it("logoImageTokenConfigured / logoSearchTokenConfigured reflect candidate/automation.yml#integrations", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      const before = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(before.logoImageTokenConfigured, false);
+      assert.equal(before.logoSearchTokenConfigured, false);
+
+      await postJson(server, "/api/onboard/candidate/automation", {
+        data: { integrations: { logo_dev_token: "pk_test" } },
+      });
+
+      const after = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(after.logoImageTokenConfigured, true);
+      assert.equal(after.logoSearchTokenConfigured, false);
+      // Never echoed — the raw token value must not appear anywhere in the
+      // state response.
+      assert.equal(JSON.stringify(after).includes("pk_test"), false);
     } finally {
       await closeServer(server);
     }
@@ -607,7 +646,7 @@ describe("POST /api/onboard/candidate/:name", () => {
     }
   });
 
-  it("404s for a name outside CANDIDATE_FILES + modes", async () => {
+  it("404s for a name outside CANDIDATE_FILES + modes + automation", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
@@ -617,6 +656,45 @@ describe("POST /api/onboard/candidate/:name", () => {
         body: JSON.stringify({ data: {} }),
       });
       assert.equal(res.status, 404);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  // M8 additive (Builder B): the Companies step's ONLY way to configure
+  // logo.dev credentials — see onboard-route.mjs's AUTOMATION_ROUTE_ENTRY
+  // comment for why this route exists despite "automation" not being an
+  // OPTIONAL_CANDIDATE_FILES entry.
+  it("mounts a route for 'automation' that merges integrations.* onto the template default", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      const { status, body } = await postJson(server, "/api/onboard/candidate/automation", {
+        data: { integrations: { logo_dev_token: "pk_test", logo_dev_secret_key: "sk_test" } },
+      });
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+
+      const written = parseYaml(
+        readFileSync(candidatePath(repoRoot, "candidate/automation.yml"), "utf8")
+      );
+      assert.equal(written.integrations.logo_dev_token, "pk_test");
+      assert.equal(written.integrations.logo_dev_secret_key, "sk_test");
+      // The rest of the template's opt-in-off matrix survives untouched —
+      // writing logo.dev credentials never flips any automation switch on.
+      assert.equal(written.consent.linkedin, false);
+      assert.equal(written.capabilities.authenticated_search.enabled, false);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("does NOT scaffold candidate/automation.yml on POST /api/onboard/init — its absence stays load-bearing", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/automation.yml")), false);
     } finally {
       await closeServer(server);
     }
