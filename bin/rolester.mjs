@@ -9,6 +9,7 @@
 //   rolester searches    Build/curate the search-source config
 //   rolester companies   Manage tracked employer ATS boards
 //   rolester evaluate    Run the body-read gate on a saved job
+//   rolester questions   Fetch a job's real application-form questions (no browser)
 //   rolester tracker     One-shot tracker snapshot (use `start` for the live dev server)
 //   rolester restore     Recover workspace/tracker.json from a rolling snapshot
 //   rolester export      Render a tailored artifact / packet to PDF or DOCX
@@ -63,6 +64,7 @@ const CLIS = {
   searches: "src/cli/searches.mjs",
   companies: "src/cli/companies.mjs",
   evaluate: "src/cli/evaluate.mjs",
+  questions: "src/cli/questions.mjs",
   tracker: "src/cli/tracker.mjs",
   "tracker-dev": "src/cli/tracker-dev.mjs",
   modes: "src/cli/modes.mjs",
@@ -522,6 +524,7 @@ Commands:
   searches    Build and curate the search-source config
   companies   Manage tracked employer ATS boards
   evaluate    Run the body-read gate on a saved job (GATE/FIT/COMP/ACTION)
+  questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'rolester start')
   tracker-dev  Serve the live hot-reloading dashboard without launching an agent
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)

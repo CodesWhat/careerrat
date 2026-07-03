@@ -99,6 +99,7 @@
     "searches": "node src/cli/searches.mjs",
     "companies": "node src/cli/companies.mjs",
     "evaluate": "node src/cli/evaluate.mjs",
+    "questions": "node src/cli/questions.mjs",
     "tracker": "node src/cli/tracker.mjs",
     "tracker:dev": "node src/cli/tracker-dev.mjs",
     "serve": "node src/cli/tracker-dev.mjs",
