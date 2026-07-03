@@ -239,6 +239,37 @@ export function createChatRuntime({
   const sessions = new Map();
   let sweepTimer = null;
 
+  // M10 — chatId -> Set<callback> for onClose() below. A side registry, not a
+  // field on the session record itself, so a caller can register interest in a
+  // session's terminal transition (e.g. intake-route.mjs's Lane C completion
+  // loop) without the runtime's own session bookkeeping knowing anything about
+  // who's listening or why. Cleared per-chatId once closeSessionInternal fires
+  // (a session closes exactly once — see that function's own idempotency
+  // guard — so listeners fire exactly once too, then this entry is dropped).
+  const closeListeners = new Map();
+
+  // Registers `callback({chatId, reason, lastError})` to run the moment
+  // `chatId` transitions to "closed" (see closeSessionInternal below for the
+  // six possible `reason` values). Safe to call for a session that hasn't
+  // closed yet — the only supported use — there's no dispatch for a chatId
+  // that's already closed (its listener set was already dropped, and a stale
+  // callback would never fire, silently). Multiple callbacks may register for
+  // the same chatId; each fires once.
+  function onClose(chatId, callback) {
+    if (!closeListeners.has(chatId)) closeListeners.set(chatId, new Set());
+    closeListeners.get(chatId).add(callback);
+  }
+
+  // The message of the most recent `type:"error"` event this session ever
+  // broadcast, or null. Only meaningful when closing for reason "error" (see
+  // pump()'s catch block, the only place that ever records one).
+  function lastErrorMessage(session) {
+    for (let i = session.events.length - 1; i >= 0; i--) {
+      if (session.events[i].type === "error") return session.events[i].data?.message ?? null;
+    }
+    return null;
+  }
+
   function summarize(session) {
     return {
       chatId: session.id,
@@ -301,6 +332,26 @@ export function createChatRuntime({
     session.state = "closed";
     session.closeReason = reason;
     session.lastActivityAt = now();
+
+    // Fire onClose() listeners right alongside the SSE broadcast below — before
+    // it, so a listener that itself triggers a synchronous intakeUpdate (see
+    // intake-route.mjs's executeLaneC) always observes this session as fully
+    // closed. A throwing listener must never break session teardown for
+    // everyone else (pushQueue close, SSE end, other listeners) — caught and
+    // dropped, not rethrown.
+    const listeners = closeListeners.get(session.id);
+    if (listeners) {
+      closeListeners.delete(session.id);
+      const lastError = reason === "error" ? lastErrorMessage(session) : null;
+      for (const callback of listeners) {
+        try {
+          callback({ chatId: session.id, reason, lastError });
+        } catch {
+          // a listener's own error must never crash the pump/close path
+        }
+      }
+    }
+
     try {
       session.pushQueue.close();
     } catch {
@@ -693,6 +744,7 @@ export function createChatRuntime({
     interrupt,
     closeSession,
     subscribe,
+    onClose,
     sweepOnce,
     startSweep,
     stopSweep,

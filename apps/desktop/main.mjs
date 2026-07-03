@@ -141,9 +141,13 @@ async function boot() {
   // own path resolver — the same one createDevServer() itself used above —
   // rather than hand-rolling a join, so this always agrees with where the
   // server actually looked for candidate/workspace files.
+  // First-run goes to the M8 SPA wizard (/app/onboarding — PDF/image resume
+  // drop, AI extraction), NOT the legacy /onboard page (txt/md only). The
+  // Electron window has no address bar, so landing on the wrong wizard
+  // strands the user there.
   const pathCtx = { repoRoot };
   resolveUserPaths(pathCtx);
-  const route = existsSync(userPath(pathCtx, "candidate/profile.yml")) ? "/tracker" : "/onboard";
+  const route = existsSync(userPath(pathCtx, "candidate/profile.yml")) ? "/tracker" : "/app/onboarding";
 
   return { url, route };
 }

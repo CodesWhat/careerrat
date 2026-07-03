@@ -54,10 +54,15 @@ function buildActivityLines(db) {
     .map((row) => row.data);
 }
 
-export function exportToTracker({ repoRoot, env } = {}) {
-  const pathCtx = { repoRoot, env };
-  const db = requireDb({ repoRoot, env });
-
+// assembleTrackerObject — the pure, in-memory half of the export: reads
+// applications/sources/communications/sourced/meta/analytics/kv straight off
+// the db and reassembles the exact legacy tracker.json shape, WITHOUT writing
+// anything to disk. Extracted (M10) so a request-time consumer — the new
+// GET /api/data/dashboard route (src/cli/dashboard-route.mjs) — can build the
+// same trackerData object exportToTracker() writes to disk, in-process, with
+// no round-trip through the filesystem. exportToTracker() below is now just
+// this function + the atomic file write; no behavior change.
+export function assembleTrackerObject(db) {
   const applications = rowsAsObjects(db, "applications");
   const sources = rowsAsObjects(db, "sources");
   const communications = rowsAsObjects(db, "communications");
@@ -76,6 +81,26 @@ export function exportToTracker({ repoRoot, env } = {}) {
   const kvRows = db.prepare("SELECT key, data FROM kv ORDER BY key ASC").all();
   for (const row of kvRows) output[row.key] = JSON.parse(row.data);
 
+  return output;
+}
+
+// assembleActivityEvents — the activity.jsonl feed as parsed objects (not raw
+// JSONL lines) for an in-process consumer. Reuses the same table read
+// exportToTracker's own buildActivityLines() draws from; order doesn't matter
+// to callers (dashboard-data.js's buildActivityPulse/buildJobActivityTimeline
+// both sort internally), so this is just the plain rowid-ordered read
+// rowsAsObjects() already gives every other table.
+export function assembleActivityEvents(db) {
+  return rowsAsObjects(db, "activity_events");
+}
+
+export function exportToTracker({ repoRoot, env } = {}) {
+  const pathCtx = { repoRoot, env };
+  const db = requireDb({ repoRoot, env });
+
+  const output = assembleTrackerObject(db);
+  const kvCount = db.prepare("SELECT COUNT(*) AS n FROM kv").get().n;
+
   const trackerPath = userPath(pathCtx, "workspace/tracker.json");
   mkdirSync(dirname(trackerPath), { recursive: true });
   atomicWriteFile(trackerPath, `${JSON.stringify(output, null, 2)}\n`);
@@ -89,12 +114,12 @@ export function exportToTracker({ repoRoot, env } = {}) {
     trackerPath,
     activityPath,
     counts: {
-      applications: applications.length,
-      sourced: sourced.length,
-      sources: sources.length,
-      communications: communications.length,
+      applications: output.applications.length,
+      sourced: output.sourced.length,
+      sources: output.sources.length,
+      communications: output.communications.length,
       activity: activityLines.length,
-      kv: kvRows.length,
+      kv: kvCount,
     },
   };
 }

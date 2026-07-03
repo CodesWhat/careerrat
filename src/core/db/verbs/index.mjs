@@ -20,6 +20,7 @@ export {
   intakeList,
   intakeOne,
   intakeUpdate,
+  reconcileOrphanedLaneCIntakeItems,
 } from "./intake.mjs";
 export { NotFoundError } from "./shared.mjs";
 export { sourcedPromote, sourcedUpsertBatch } from "./sourced.mjs";

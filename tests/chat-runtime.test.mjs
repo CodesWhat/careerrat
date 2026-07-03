@@ -568,6 +568,137 @@ test("createChatRuntime: a mid-turn throw (not our own abort) closes the session
 });
 
 // ---------------------------------------------------------------------------
+// onClose — the M10 Lane-C completion-loop hook (intake-route.mjs's
+// executeLaneC registers one of these per confirmed intake item so a chat
+// session's terminal transition can map to an intake done/error outcome).
+// ---------------------------------------------------------------------------
+
+test("createChatRuntime.onClose: fires with {chatId, reason, lastError:null} on a user-initiated close", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+
+      let payload = null;
+      chatRuntime.onClose(chatId, (p) => {
+        payload = p;
+      });
+      chatRuntime.closeSession(chatId, "closed");
+
+      assert.deepEqual(payload, { chatId, reason: "closed", lastError: null });
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.onClose: an 'error' close carries the session's last error-event message as lastError", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      loadSdk: async () => ({
+        query: () => {
+          async function* gen() {
+            yield { type: "system", subtype: "init", session_id: "s1" };
+            throw new Error("boom mid-turn");
+          }
+          const it = gen();
+          it.interrupt = async () => {};
+          it.close = () => {};
+          it.return = async () => ({ value: undefined, done: true });
+          return it;
+        },
+      }),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      let payload = null;
+      chatRuntime.onClose(chatId, (p) => {
+        payload = p;
+      });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "closed");
+
+      assert.equal(payload.chatId, chatId);
+      assert.equal(payload.reason, "error");
+      assert.match(payload.lastError, /boom mid-turn/);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.onClose: a throwing callback never breaks the close path, and a second registered callback still fires", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+
+      let secondFired = false;
+      chatRuntime.onClose(chatId, () => {
+        throw new Error("listener blew up");
+      });
+      chatRuntime.onClose(chatId, () => {
+        secondFired = true;
+      });
+
+      assert.doesNotThrow(() => chatRuntime.closeSession(chatId, "closed"));
+      assert.equal(secondFired, true);
+      assert.equal(chatRuntime.getSession(chatId).state, "closed");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.onClose: never double-fires — a repeated close() call is a no-op per closeSessionInternal's idempotency guard", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+
+      let fireCount = 0;
+      chatRuntime.onClose(chatId, () => {
+        fireCount++;
+      });
+      chatRuntime.closeSession(chatId, "closed");
+      chatRuntime.closeSession(chatId, "closed"); // already closed — no-op
+
+      assert.equal(fireCount, 1);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // postMessage / interrupt / closeSession error codes
 // ---------------------------------------------------------------------------
 

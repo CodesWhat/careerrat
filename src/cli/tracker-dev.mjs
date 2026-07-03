@@ -41,6 +41,7 @@ import { ANSWER_PAGE_HTML } from "../core/ai/answer-page.mjs";
 import { createChatRuntime } from "../core/ai/chat-runtime.mjs";
 import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
+import { reconcileOrphanedLaneCIntakeItems } from "../core/db/verbs.mjs";
 import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
 import { ONBOARD_PAGE_HTML } from "../core/onboarding/onboard-page.mjs";
 import { PACKET_PAGE_HTML } from "../core/onboarding/packet-page.mjs";
@@ -57,6 +58,7 @@ import {
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountBoardsRoutes } from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
+import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
 import { mountIntakeRoutes } from "./intake-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
@@ -347,6 +349,13 @@ export function createDevServer({
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
   mountDataRoutes({ addRoute, repoRoot, env });
 
+  // M10 — the server-derived dashboard view model (src/cli/dashboard-route.mjs):
+  // one GET that reuses dashboard-data.js's buildDashboardViewModel UNMODIFIED
+  // against DB-native inputs, so the /app SPA's Home/Jobs/Calendar surfaces
+  // (and the legacy dashboard) never disagree on CTA/focus/calendar derivation.
+  // Same fail-closed-409-no-db posture as mountDataRoutes above.
+  mountDashboardRoutes({ addRoute, repoRoot, env });
+
   // M9 — Universal Intake's HTTP surface (src/cli/intake-route.mjs): the
   // paste/URL drop zone (POST /api/intake), its confirm-first gate
   // (POST /api/intake/confirm), and the read/dismiss/re-classify routes
@@ -355,6 +364,21 @@ export function createDevServer({
   // an already-live ingest-profile/discover-companies-style session exactly
   // as /api/chat/* would see it.
   mountIntakeRoutes({ addRoute, repoRoot, env, chatRuntime });
+
+  // M10 — boot-time Lane-C orphan reconciliation (see
+  // src/core/db/verbs/intake.mjs's reconcileOrphanedLaneCIntakeItems doc
+  // comment): chat-runtime sessions are in-memory only, so any intake item
+  // left "running" with a Lane C dispatch from a PREVIOUS process lifetime can
+  // never resolve on its own — its onClose() callback would need a session
+  // that no longer exists. Runs once, here, before the server starts
+  // accepting traffic. Best-effort: a workspace with no db yet (NO_DATABASE)
+  // or any other read/write hiccup here must never block server boot — the
+  // very next confirm/reconcile pass still has the same recovery available.
+  try {
+    reconcileOrphanedLaneCIntakeItems({ repoRoot, env });
+  } catch {
+    // best-effort only — see comment above
+  }
 
   // Idle/closed-session eviction — see chatRuntime.sweepOnce()'s own doc
   // comment. Started here (not gated behind main()'s CLI boot) so every
@@ -506,6 +530,7 @@ export function createDevServer({
         "/api/packet/list, /api/packet, " +
         "/api/data/snapshot, /api/data/applications, /api/data/applications/one, " +
         "/api/data/sourced, /api/data/communications, /api/data/activity, " +
+        "/api/data/dashboard, " +
         "/api/data/app/status, /api/data/app/fields, /api/data/app/interview, /api/data/app/artifact, " +
         "/api/data/sourced/promote, /api/data/comm/message, /api/data/comm/send, " +
         "/api/intake, /api/intake/list, /api/intake/one, /api/intake/classify, " +
@@ -861,6 +886,7 @@ Routes:
   GET  /api/data/sourced                Sourced rows
   GET  /api/data/communications         Communication thread rows
   GET  /api/data/activity               Activity events, newest-first (?limit=)
+  GET  /api/data/dashboard              Server-derived dashboard view model (M10, 409 if no db yet)
   POST /api/data/app/status             appSetStatus verb
   POST /api/data/app/fields             appSetFields verb
   POST /api/data/app/interview          appScheduleInterview verb

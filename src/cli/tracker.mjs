@@ -8,7 +8,6 @@
 //   rolester tracker --verify     Validate tracker.json against config/tracker.schema.json
 //   rolester tracker --json       Machine-readable output for the current mode
 //   rolester tracker --help
-import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +15,7 @@ import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 import { formatErrors, validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml } from "../core/profile/yaml.mjs";
+import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { computeFollowUps, rulesFromConfig } from "../core/tracker/cadence.mjs";
 import {
   renderTrackerSummaryText,
@@ -86,7 +86,7 @@ function runDashboard(data) {
   };
   const settingsSnapshot = loadSettingsSnapshot({ root });
   const librarySnapshot = loadLibrarySnapshot({ root });
-  const agentGuidance = loadAgentGuidanceSnapshot();
+  const agentGuidance = loadAgentGuidanceSnapshot({ root });
   modeSnapshot.settings = settingsSnapshot;
   modeSnapshot.agentGuidance = agentGuidance;
   mkdirSync(dirname(OUT_PATH), { recursive: true });
@@ -134,21 +134,6 @@ function runDashboard(data) {
   console.log(`Wrote ${displayPath(pathCtx, "workspace/settings.json")}`);
   console.log(`Wrote ${displayPath(pathCtx, "workspace/library.json")}`);
   console.log(renderTrackerSummaryText(data));
-}
-
-function loadAgentGuidanceSnapshot() {
-  const result = spawnSync(process.execPath, [join(root, "src/cli/doctor.mjs"), "--json"], {
-    cwd: root,
-    env: process.env,
-    encoding: "utf8",
-  });
-  if (result.error || !result.stdout) return null;
-  try {
-    const data = JSON.parse(result.stdout);
-    return data?.agentGuidance ?? null;
-  } catch {
-    return null;
-  }
 }
 
 function runSummary(data) {

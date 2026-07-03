@@ -53,6 +53,7 @@ import {
 } from "../core/db/verbs.mjs";
 import { classifyIntakeItem } from "../core/intake/classify.mjs";
 import { resolveIntakeDispatch } from "../core/intake/dispatch.mjs";
+import { summarizeDispatch } from "../core/intake/dispatch-summary.mjs";
 import { matchTrackerRecord } from "../core/intake/match.mjs";
 import { resolveJobUrl } from "../core/intake/resolve.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
@@ -201,24 +202,15 @@ async function classifyAndPropose({ repoRoot, env, id, inputKind, rawInput, fetc
 // header comment for the lane definitions.
 // ---------------------------------------------------------------------------
 
-function summarizeDispatch(dispatch) {
-  if (!dispatch) return null;
-  if (dispatch.action === "app_set_status") {
-    // matchedCompany/matchedRole are present whenever dispatch.mjs resolved
-    // this off a real trackerMatch (always, for app_set_status) — named
-    // explicitly here so a company_unique match (no role in the original
-    // paste) still shows the human exactly which tracked application is
-    // about to change, e.g. "E Corp — Staff Software Engineer", the
-    // sanity-check confirm-first exists for.
-    const target =
-      dispatch.params.matchedCompany && dispatch.params.matchedRole
-        ? `${dispatch.params.matchedCompany} — ${dispatch.params.matchedRole}`
-        : dispatch.params.applicationId;
-    return `update ${target} status to "${dispatch.params.to}"`;
-  }
-  if (dispatch.action === "run_skill") return `run ${dispatch.params.skill}`;
-  if (dispatch.action === "chat_skill") return `hand off to ${dispatch.params.skill}`;
-  return dispatch.action;
+// withDispatchSummary — every response that carries an item with a `dispatch`
+// field also carries a `dispatchSummary` string alongside it (M10: killing
+// apps/web/src/inbox/dispatch-summary.js's hand-maintained client mirror —
+// see dispatch-summary.mjs's own header comment). A cheap pure-function call
+// right before sendJson, computed off the SAME dispatch object the item
+// already has — never a second derivation.
+function withDispatchSummary(item) {
+  if (!item) return item;
+  return { ...item, dispatchSummary: summarizeDispatch(item.dispatch) };
 }
 
 function executeLaneA({ repoRoot, env, id, dispatch }) {
@@ -296,9 +288,44 @@ function buildChatHandoffText(item) {
   ].join("\n");
 }
 
+// mapCloseReasonToIntakePatch — chat-runtime.mjs's onClose() fires with one of
+// six close reasons (see that file's closeSessionInternal); this is the
+// intake-specific outcome each one maps to (M10 decisions memo §5's table).
+// "done" reasons are normal/user-intentional endings; "error" reasons are
+// genuine failures OR (shutdown) a restart this milestone deliberately does
+// NOT try to auto-resume across — an honest "this got interrupted" beats
+// silently mis-marking it done or leaving the item stuck "running" forever.
+function mapCloseReasonToIntakePatch(reason, lastError) {
+  switch (reason) {
+    case "process_exited":
+    case "closed":
+      return { status: "done" };
+    case "idle_timeout":
+      // classifyChatEvent already maps a `result` event to state "idle" before
+      // any idle-sweep eviction can fire, so an idle-timeout almost always
+      // means the last turn already completed — best-effort "done", not error.
+      return { status: "done" };
+    case "error":
+      return { status: "error", error: lastError || "chat session ended in error" };
+    case "aborted":
+      return { status: "error", error: "session aborted" };
+    case "shutdown":
+      return {
+        status: "error",
+        error: "server restarted mid-session; re-open to retry",
+      };
+    default:
+      return { status: "error", error: `chat session closed for unknown reason "${reason}"` };
+  }
+}
+
 // Chat session collision per the decisions memo: reuse an existing live
 // session for the skill via findBySkill and post the intake as a message;
-// only start a new session when none exists.
+// only start a new session when none exists. Either way, register an
+// onClose() listener for THIS intake item — even a reused session's eventual
+// close must resolve this item, not just whichever item happened to start it
+// (a live session can carry multiple confirmed intake items across its
+// lifetime, each needing its own done/error outcome when the chat ends).
 async function executeLaneC({ repoRoot, env, id, item, dispatch, chatRuntime }) {
   const skill = dispatch.params.skill;
   const handoffText = buildChatHandoffText(item);
@@ -318,6 +345,9 @@ async function executeLaneC({ repoRoot, env, id, item, dispatch, chatRuntime }) 
     });
     chatId = started.chatId;
   }
+  chatRuntime.onClose(chatId, ({ reason, lastError }) => {
+    intakeUpdate({ repoRoot, env, id, patch: mapCloseReasonToIntakePatch(reason, lastError) });
+  });
   return intakeUpdate({ repoRoot, env, id, patch: { status: "running", result: { chatId } } }).item;
 }
 
@@ -372,7 +402,7 @@ export function mountIntakeRoutes({
       fetchImpl,
       loadSdk,
     });
-    sendJson(res, 200, { ok: true, item: finalItem });
+    sendJson(res, 200, { ok: true, item: withDispatchSummary(finalItem) });
   });
 
   addRoute("GET", "/api/intake/list", (req, res) => {
@@ -381,7 +411,7 @@ export function mountIntakeRoutes({
       const limitParam = queryParam(req, "limit");
       const limit = limitParam ? Number.parseInt(limitParam, 10) : undefined;
       const items = intakeList({ repoRoot, env, status, limit });
-      sendJson(res, 200, { ok: true, items });
+      sendJson(res, 200, { ok: true, items: items.map(withDispatchSummary) });
     } catch (err) {
       respondError(res, err);
     }
@@ -399,7 +429,7 @@ export function mountIntakeRoutes({
         sendJson(res, 404, { ok: false, error: `no intake item with id "${id}"` });
         return;
       }
-      sendJson(res, 200, { ok: true, item });
+      sendJson(res, 200, { ok: true, item: withDispatchSummary(item) });
     } catch (err) {
       respondError(res, err);
     }
@@ -449,7 +479,7 @@ export function mountIntakeRoutes({
       fetchImpl,
       loadSdk,
     });
-    sendJson(res, 200, { ok: true, item: finalItem });
+    sendJson(res, 200, { ok: true, item: withDispatchSummary(finalItem) });
   });
 
   addRoute("POST", "/api/intake/confirm", async (req, res) => {
