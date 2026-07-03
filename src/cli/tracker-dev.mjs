@@ -38,8 +38,10 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadLocalAiEnv } from "../core/ai/ai-env.mjs";
 import { ANSWER_PAGE_HTML } from "../core/ai/answer-page.mjs";
+import { createChatRuntime } from "../core/ai/chat-runtime.mjs";
 import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
+import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
 import { ONBOARD_PAGE_HTML } from "../core/onboarding/onboard-page.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
 import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
@@ -50,6 +52,7 @@ import {
   resolvePort,
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
+import { mountChatRoute } from "./chat-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 
@@ -89,8 +92,16 @@ function log(msg) {
 
 export function createDevServer({
   repoRoot = DEFAULT_ROOT,
-  runSkillStream = defaultRunSkillStream,
   env = process.env,
+  runSkillStream = defaultRunSkillStream,
+  // M2 — the conversational chat runtime (see src/core/ai/chat-runtime.mjs).
+  // Dependency-injected the same way `runSkillStream` is above, so tests can
+  // hand in a runtime built against a fake `loadSdk` without touching the
+  // real @anthropic-ai/claude-agent-sdk devDependency. Defaulting its
+  // construction here (rather than requiring every caller to build one)
+  // keeps `createDevServer({ repoRoot })` alone still fully functional, same
+  // as before M2.
+  chatRuntime = createChatRuntime({ repoRoot, env }),
 } = {}) {
   // Boot-load any stored BYOK key from .internal/ai.env (see ai-env.mjs)
   // before any route captures `env` — a key saved by the onboarding wizard's
@@ -251,6 +262,26 @@ export function createDevServer({
     res.end(ONBOARD_PAGE_HTML);
   });
 
+  // M2 of the paid-POC journey — the conversational (multi-turn) skill
+  // runtime's HTTP surface (src/cli/chat-route.mjs) and its byte-static page
+  // (src/core/onboarding/chat-page.mjs), mounted at GET /chat. This is what
+  // runs ingest-profile's interview from the browser instead of a terminal
+  // session — see chat-runtime.mjs's header comment for the long-lived
+  // query()-with-streaming-input design decision.
+  mountChatRoute({ addRoute, repoRoot, chatRuntime, env });
+
+  addRoute("GET", "/chat", (_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(CHAT_PAGE_HTML);
+  });
+
+  // Idle/closed-session eviction — see chatRuntime.sweepOnce()'s own doc
+  // comment. Started here (not gated behind main()'s CLI boot) so every
+  // createDevServer() instance, including ones tests construct directly,
+  // reaps orphaned sessions; stopped in main()'s shutdown() below, and by
+  // whichever teardown path a test uses on its own chatRuntime.
+  chatRuntime.startSweep();
+
   // -------------------------------------------------------------------------
   // HTTP server
 
@@ -367,13 +398,15 @@ export function createDevServer({
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(
-      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /dashboard-data.js, " +
+      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /chat, /dashboard-data.js, " +
         "/workspace/dashboard-data.js, " +
         "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
         "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
         "/api/skill/run, /api/onboard/state, /api/onboard/init, /api/onboard/resume, " +
         "/api/onboard/candidate/:name, /api/onboard/evidence-seed, /api/onboard/write-config, " +
-        "/api/settings/ai-key, /api/settings/ai, /assets/*, /fonts/*, and /__livereload."
+        "/api/settings/ai-key, /api/settings/ai, /api/chat/start, /api/chat/events, /api/chat/message, " +
+        "/api/chat/interrupt, /api/chat/close, /api/chat/by-skill, /api/chat/list, " +
+        "/assets/*, /fonts/*, and /__livereload."
     );
   });
 
@@ -515,6 +548,7 @@ export function createDevServer({
     stopWatching,
     closeClients,
     clients,
+    chatRuntime,
   };
 }
 
@@ -575,6 +609,10 @@ async function main() {
   function shutdown() {
     dev.closeClients();
     dev.stopWatching();
+    // M2 — closes every live chat session (query.close() + abort) and stops
+    // the idle-sweep timer so a Ctrl-C never leaves an orphaned Agent SDK
+    // child process running.
+    dev.chatRuntime.shutdown();
     dev.server.close(() => process.exit(0));
     // Don't hang on a lingering socket.
     setTimeout(() => process.exit(0), 200).unref();
@@ -613,6 +651,7 @@ Routes:
   GET  /evaluate                        Paste a JD → live evaluate-job verdict (P0-5)
   GET  /answer                          Paste a screening question → live answer-question draft
   GET  /onboard                         Non-AI onboarding wizard (M1) — seed candidate files, BYOK key
+  GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
   GET  /dashboard-data.js               Dashboard data module
   GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
   GET  /workspace/tracker.json          Raw tracker.json (static file)
@@ -633,6 +672,13 @@ Routes:
   POST /api/onboard/write-config        Generate config/search-sources.yml + candidate/AGENTS.md
   POST /api/settings/ai-key             Store a BYOK Anthropic key in .internal/ai.env
   GET  /api/settings/ai                 { route, keyPresent } — never the key value
+  POST /api/chat/start                  Start (or find the live) ingest-profile chat session (M2)
+  GET  /api/chat/events                 SSE transcript stream for a chat session (?id=<chatId>)
+  POST /api/chat/message                Send the human's next turn to a chat session
+  POST /api/chat/interrupt              Interrupt a running chat session's current turn
+  POST /api/chat/close                  End a chat session
+  GET  /api/chat/by-skill               Find the live chat session for a skill (?skill=<name>)
+  GET  /api/chat/list                   List every tracked chat session
   GET  /assets/*, /fonts/*              Static assets
   GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
 

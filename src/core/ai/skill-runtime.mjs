@@ -64,14 +64,32 @@ export function discoverSkillDirs(repoRoot) {
 // lock the runtime down.
 const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question";
 
-export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
+// Shared allowlist-resolution shape both the one-shot embedded runtime
+// (ROLESTER_RUNTIME_SKILLS, below) and the conversational chat runtime
+// (ROLESTER_CHAT_SKILLS — see chat-runtime.mjs's resolveAllowedChatSkills)
+// narrow from: a comma-separated env var, filtered down to whatever's
+// actually discoverable under .agents/skills/. Pulled out to M2 so the two
+// runtimes can't drift on the "empty string explicitly locks it down, unset
+// falls back to the default" semantics documented above.
+export function resolveSkillAllowlist({ repoRoot, env = process.env, envVar, defaultValue } = {}) {
   const discovered = new Set(discoverSkillDirs(repoRoot));
-  const raw = String(env.ROLESTER_RUNTIME_SKILLS ?? DEFAULT_RUNTIME_SKILLS);
+  const raw = String(env[envVar] ?? defaultValue);
   const requested = raw
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean);
   return requested.filter((name) => discovered.has(name));
+}
+
+// Thin, behavior-identical wrapper over resolveSkillAllowlist() for the
+// one-shot embedded runtime's own env var + default.
+export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
+  return resolveSkillAllowlist({
+    repoRoot,
+    env,
+    envVar: "ROLESTER_RUNTIME_SKILLS",
+    defaultValue: DEFAULT_RUNTIME_SKILLS,
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -301,14 +319,31 @@ export async function loadClaudeAgentSdk() {
 //     calls WebFetch — that's evaluate-job's alone.
 // The list itself is already the union of both, so no entries change here.
 // If ROLESTER_RUNTIME_SKILLS grows again, redo this audit per-skill.
-const RUNTIME_TOOLS = ["Read", "Glob", "Grep", "WebFetch", "Write", "Edit", "Bash", "Skill"];
+export const RUNTIME_TOOLS = ["Read", "Glob", "Grep", "WebFetch", "Write", "Edit", "Bash", "Skill"];
 
-function buildPrompt({ skill, input }) {
+// Posture text injected into the run's opening instruction — the one place
+// the one-shot embedded runtime and the M2 conversational chat runtime
+// (src/core/ai/chat-runtime.mjs) differ. Exported as part of buildPrompt so
+// buildChatKickoffPrompt() there reuses this exact wording for its kickoff
+// message instead of hand-duplicating a second copy that could drift.
+const ONESHOT_POSTURE =
+  "This is a non-interactive, headless run with nobody available to answer questions — make the " +
+  "best defensible call yourself and state what you assumed rather than asking.";
+const CONVERSATIONAL_POSTURE =
+  "This is a conversational, multi-turn session — a real user will answer turn by turn. Ask ONE " +
+  "question at a time exactly as the skill's steps specify, wait for the reply, never invent an " +
+  "answer on the user's behalf. Confirm what you already know before asking again (skill's own " +
+  "STEP 0 guidance).";
+
+// `mode` defaults to "oneshot" so every existing call site (runSkillStream,
+// below) is byte-identical to the pre-M2 text; "conversational" is the only
+// other value and swaps in CONVERSATIONAL_POSTURE above.
+export function buildPrompt({ skill, input, mode = "oneshot" }) {
   const body = typeof input === "string" ? input : JSON.stringify(input ?? {});
+  const posture = mode === "conversational" ? CONVERSATIONAL_POSTURE : ONESHOT_POSTURE;
   return (
     `Run the \`${skill}\` skill against the following input, following its SKILL.md exactly. ` +
-    "This is a non-interactive, headless run with nobody available to answer questions — make the " +
-    "best defensible call yourself and state what you assumed rather than asking.\n\n" +
+    `${posture}\n\n` +
     body
   );
 }
@@ -440,7 +475,7 @@ export async function runSkillStream({
 // appendUsageEvent call on every /v1/messages it forwards) — so only the BYOK
 // path needs a write here, exactly mirroring call-ai.mjs's own "nothing else
 // is watching on BYOK" comment. One row per model actually used.
-function writeByokUsage({ msg, skill, repoRoot, env }) {
+export function writeByokUsage({ msg, skill, repoRoot, env }) {
   for (const [model, mu] of Object.entries(msg.modelUsage || {})) {
     appendUsageEvent(
       {
