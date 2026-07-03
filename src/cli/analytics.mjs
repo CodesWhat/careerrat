@@ -6,7 +6,9 @@
 // rejection/advancement counts, and a reevaluation-due signal. It is written here and
 // read by the dashboard; no other code recomputes it. Because it is derived data (not a
 // user data change), it NEVER bumps the freshness stamp — the "last updated" pill must
-// only move on real data writes. writeTrackerJson is called with { stamp: false }.
+// only move on real data writes. The write goes through the storage adapter
+// (defaultAdapter().writeTracker) with { stamp: false }, same underlying
+// writeTrackerJson stamping semantics.
 //
 // Usage:
 //   node src/cli/analytics.mjs refresh [--at ISO] [--write] [--json] [--root DIR]
@@ -21,8 +23,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { parseYaml } from "../core/profile/yaml.mjs";
+import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import { buildReevaluationAnalytics } from "../core/tracker/outcome-analysis.mjs";
-import { writeTrackerJson } from "../core/tracker/tracker-writer.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -131,7 +133,7 @@ function cmdRefresh() {
   }
 
   data.analytics = analytics;
-  writeTrackerJson(trackerPath, data, { stamp: false });
+  defaultAdapter(opts.root).writeTracker(data, { stamp: false });
 
   if (opts.json) {
     console.log(JSON.stringify({ ok: true, written: true, analytics }, null, 2));
