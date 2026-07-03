@@ -61,6 +61,13 @@ export const PLACEHOLDER_PATTERNS = [
     name: "XXX",
     re: /\bXXX\b/,
   },
+  // Unanswerable form-question marker written by tailor-application STEP 6 — the
+  // packet must not be upload-ready until the user resolves it. Case-sensitive on
+  // purpose: ALL-CAPS is the marker form; lowercase "needs you" is legitimate prose.
+  {
+    name: "needs-you-marker",
+    re: /\bNEEDS YOU\b/,
+  },
   // Lorem ipsum
   {
     name: "lorem-ipsum",

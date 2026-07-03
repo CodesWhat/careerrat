@@ -30,6 +30,9 @@ const patterns = [
   /<candidate>/i,
   /\bJane Candidate\b/,
   /\bjane@example\.com\b/i,
+  // Unanswerable form-question marker (tailor-application STEP 6). Case-sensitive:
+  // ALL-CAPS is the marker form; lowercase "needs you" is legitimate prose.
+  /\bNEEDS YOU\b/,
 ];
 
 const files = targets.flatMap((target) => collect(resolveTarget(target)));

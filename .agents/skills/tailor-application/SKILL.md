@@ -154,7 +154,34 @@ wait for permission to draft. A stronger user-supplied angle always wins over th
 inferred one; an angle with no backing evidence is an Evidence Gap to surface, not
 a narrative to fabricate.
 
-Produce short-answer responses when the form or JD requires them.
+### Form questions — fetch the real list, answer every one
+
+Short answers start from the **actual application-form questions**, not guesses inferred
+from the JD:
+
+1. **Fetch the form.** Run `rolester questions workspace/jobs/<saved-job>.md` —
+   deterministic, zero AI cost; supports Greenhouse and Ashby postings and writes the
+   normalized list to `workspace/jobs/<saved-job>.md.questions.json`. For any other ATS,
+   ask the user to paste the form's questions and capture them in the same shape with
+   `rolester questions workspace/jobs/<saved-job>.md --paste`. If neither is possible,
+   fall back to questions stated in the JD and say so in the packet summary.
+2. **Answer every fetched question** in one answers artifact,
+   `workspace/tailored/<Company> — <Role> — answers.md`: one section per question
+   (verbatim label, required ones marked), the drafted first-person answer beneath.
+   Use apply-job's screening-answer posture: `form-defaults.yml#screening_answers`
+   first, then profile / honesty / evidence and the tailored artifacts. Entries with
+   `type: "file"` are attachment slots (resume, cover letter) — list them at the top
+   as attachments; never write prose for them.
+3. **Never fabricate.** A question whose truthful answer would require guessing a
+   number/date/clearance/tool depth, revealing current compensation, or contradicting
+   `honesty.yml` gets the literal marker `NEEDS YOU: <one-line reason>` as its body.
+   The placeholder lint (STEP 7) blocks on `NEEDS YOU`, so the packet cannot be
+   upload-ready until the user supplies the answer.
+4. **Persist durable answers.** When the user resolves a `NEEDS YOU` or confirms an
+   answer to a recurring disclosure-style question, write it to
+   `candidate/form-defaults.yml#screening_answers` (normalized question fragment →
+   exact answer) so it is never asked again — and note it in
+   `candidate/interview-notes.md` when it is a legal/disclosure answer.
 
 All cover-letter and short-answer text follows the same constraints as the resume:
 no unresolved placeholders, no forbidden wording, no unevidenced claims, no
@@ -185,7 +212,9 @@ rolester activity append --type tailored --actor agent \
 ```
 
 Treat these as invalid placeholders: `[Company]`, `[Role]`, `{candidate}`,
-`<insert metric>`, `TODO`, `TBD`, `lorem ipsum`, and any similar template residue.
+`<insert metric>`, `TODO`, `TBD`, `lorem ipsum`, `NEEDS YOU`, and any similar
+template residue. (`NEEDS YOU` is the STEP 6 unanswered-question marker — resolving
+it with the user, not deleting it, is the fix.)
 
 **Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0,
 write the produced artifact paths back to the application row in a single
@@ -194,6 +223,7 @@ write the produced artifact paths back to the application row in a single
 ```
 applications[<id>].artifacts.resume      = "workspace/tailored/<Company> — <Role>.md"
 applications[<id>].artifacts.coverLetter = "<cover letter path or inline text, if produced>"
+applications[<id>].artifacts.answers     = "workspace/tailored/<Company> — <Role> — answers.md" (when form answers were produced)
 applications[<id>].artifacts.resumeNote  = "<one-line tailoring approach>"
 ```
 
