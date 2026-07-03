@@ -101,6 +101,7 @@
     "evaluate": "node src/cli/evaluate.mjs",
     "tracker": "node src/cli/tracker.mjs",
     "tracker:dev": "node src/cli/tracker-dev.mjs",
+    "serve": "node src/cli/tracker-dev.mjs",
     "build:demo": "node scripts/build-demo.mjs",
     "deploy:demo": "node scripts/deploy-demo.mjs",
     "gate": "node src/cli/gate.mjs",
@@ -124,7 +125,8 @@
     "check:jobs": "node scripts/check-job-links.mjs",
     "verify:tracker": "node scripts/verify-tracker.mjs",
     "analyze:outcomes": "node scripts/analyze-outcomes.mjs",
-    "calibrate:style": "node scripts/calibrate-writing-style.mjs"
+    "calibrate:style": "node scripts/calibrate-writing-style.mjs",
+    "ai-proxy": "node src/cli/ai-proxy.mjs"
   },
   "keywords": [
     "job-search",
@@ -136,6 +138,7 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.199",
     "@biomejs/biome": "^2.5.0",
     "lefthook": "^2.1.9",
     "playwright": "^1.60.0",
