@@ -22,15 +22,23 @@ import {
 } from "../src/core/ai/skill-runtime.mjs";
 import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
-function tempRepoWithSkill(skillName = "test-skill") {
+// `skillNames` accepts a single name (most tests only need one) or an array
+// — the default-allowlist tests need both "evaluate-job" and
+// "answer-question" fixtures present since DEFAULT_RUNTIME_SKILLS now names
+// both (resolveAllowedSkills filters the default against discovered dirs, so
+// a fixture missing one of them would silently under-assert the real default).
+function tempRepoWithSkill(skillNames = "test-skill") {
+  const names = Array.isArray(skillNames) ? skillNames : [skillNames];
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-"));
-  const skillDir = join(repoRoot, ".agents/skills", skillName);
-  mkdirSync(skillDir, { recursive: true });
-  writeFileSync(
-    join(skillDir, "SKILL.md"),
-    `---\nname: ${skillName}\n---\n# ${skillName}\n`,
-    "utf8"
-  );
+  for (const skillName of names) {
+    const skillDir = join(repoRoot, ".agents/skills", skillName);
+    mkdirSync(skillDir, { recursive: true });
+    writeFileSync(
+      join(skillDir, "SKILL.md"),
+      `---\nname: ${skillName}\n---\n# ${skillName}\n`,
+      "utf8"
+    );
+  }
   // A second skill dir with no SKILL.md — must never be discovered.
   mkdirSync(join(repoRoot, ".agents/skills/not-a-skill"), { recursive: true });
   return repoRoot;
@@ -62,10 +70,13 @@ test("discoverSkillDirs: returns [] when .agents/skills doesn't exist", () => {
 // resolveAllowedSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedSkills: defaults to evaluate-job when ROLESTER_RUNTIME_SKILLS is unset", () => {
-  const repoRoot = tempRepoWithSkill("evaluate-job");
+test("resolveAllowedSkills: defaults to evaluate-job + answer-question when ROLESTER_RUNTIME_SKILLS is unset", () => {
+  const repoRoot = tempRepoWithSkill(["evaluate-job", "answer-question"]);
   try {
-    assert.deepEqual(resolveAllowedSkills({ repoRoot, env: {} }), ["evaluate-job"]);
+    assert.deepEqual(resolveAllowedSkills({ repoRoot, env: {} }), [
+      "evaluate-job",
+      "answer-question",
+    ]);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

@@ -57,10 +57,12 @@ export function discoverSkillDirs(repoRoot) {
     .sort();
 }
 
-// Default-restricted to evaluate-job (P0-5's target). Empty string explicitly
-// set in env means "nothing is allowed" — only an *unset* env var falls back
-// to the default, so an operator can deliberately lock the runtime down.
-const DEFAULT_RUNTIME_SKILLS = "evaluate-job";
+// Default-restricted to evaluate-job (P0-5's target) and answer-question
+// (the Interactive Q&A slice's target — see .agents/skills/answer-question).
+// Empty string explicitly set in env means "nothing is allowed" — only an
+// *unset* env var falls back to the default, so an operator can deliberately
+// lock the runtime down.
+const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question";
 
 export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
   const discovered = new Set(discoverSkillDirs(repoRoot));
@@ -282,13 +284,23 @@ export async function loadClaudeAgentSdk() {
   }
 }
 
-// The tool surface this P0-4 spike restricts every run to, scoped to what
-// evaluate-job's SKILL.md actually calls: Read/Glob/Grep/WebFetch to fetch and
-// read a JD + candidate config, Write/Edit to save the JD body and patch
-// tracker.json/frontmatter, Bash because the skill's STEP 9/10 shell out to
-// `rolester evaluate|tracker|activity|learnings|research` CLIs, and Skill so
-// the model can invoke evaluate-job itself. If ROLESTER_RUNTIME_SKILLS ever
-// grows beyond evaluate-job, this list needs revisiting per-skill.
+// The tool surface this P0-4 spike restricts every run to — a union across
+// every skill currently in DEFAULT_RUNTIME_SKILLS. Per its own instruction
+// above ("needs revisiting per-skill"), here is that audit, redone each time
+// the allowlist grows, rather than re-derived from scratch:
+//   - evaluate-job needs Read/Glob/Grep/WebFetch to fetch and read a JD +
+//     candidate config, Write/Edit to save the JD body and patch
+//     tracker.json/frontmatter, Bash because its STEP 9/10 shell out to
+//     `rolester evaluate|tracker|activity|learnings|research` CLIs, and Skill
+//     so the model can invoke evaluate-job itself.
+//   - answer-question (see .agents/skills/answer-question) needs
+//     Read/Glob/Grep to read candidate config, evidence, and tailored
+//     artifacts as grounding context; Write/Edit to persist
+//     screening_answers, append to an answers artifact, and stamp the
+//     tracker row; Bash for the activity/tracker CLIs; and Skill. It never
+//     calls WebFetch — that's evaluate-job's alone.
+// The list itself is already the union of both, so no entries change here.
+// If ROLESTER_RUNTIME_SKILLS grows again, redo this audit per-skill.
 const RUNTIME_TOOLS = ["Read", "Glob", "Grep", "WebFetch", "Write", "Edit", "Bash", "Skill"];
 
 function buildPrompt({ skill, input }) {

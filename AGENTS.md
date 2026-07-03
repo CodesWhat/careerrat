@@ -465,6 +465,15 @@ Rules for intake:
 - If the user asks to tailor a resume, cover letter, short answer, or
   non-message outreach artifact: use `tailor-application`, but only after the
   job has passed `evaluate-job`.
+- If the user pastes an application-form or screening question and wants a
+  drafted answer outside a full tailor/apply run ("how should I answer this",
+  "the form is asking X"): use `answer-question`. It reuses
+  `screening_answers` first, grounds new answers in profile/honesty/evidence,
+  never fabricates (the unanswerable case is the literal `NEEDS YOU` marker),
+  and persists durable disclosure-style answers back to
+  `form-defaults.yml#screening_answers` so they're never re-asked. During a
+  full tailor/apply run, `tailor-application` STEP 6 owns the answers
+  artifact instead.
 - If the user asks to write, reply to, follow up on, summarize, thank,
   negotiate, or respond to a recruiter/hiring email or message: use
   `email-comms`.

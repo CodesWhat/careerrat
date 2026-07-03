@@ -98,6 +98,8 @@ workspace/tracker.*
 workspace/.snapshots/
 workspace/activity.jsonl
 workspace/activity.jsonl.bak
+workspace/usage-events.jsonl
+workspace/usage-events.jsonl.bak
 workspace/dashboard-data.js
 workspace/modes.json
 workspace/settings.json

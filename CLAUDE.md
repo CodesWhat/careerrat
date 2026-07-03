@@ -38,3 +38,11 @@ report a bug or file an issue, run `report-issue`. It separates a real defect fr
 config problem, assembles redacted diagnostics (never candidate PII, comp, or
 workspace contents), and only with an explicit yes opens a GitHub issue on the
 upstream `CodesWhat/rolester` repo. It never auto-files.
+
+When the user pastes an application-form or screening question and wants a drafted
+answer outside a full tailor/apply run ("how should I answer this", "the form is
+asking X"), run `answer-question`. It reuses `screening_answers` first, grounds new
+answers in profile/honesty/evidence, never fabricates (the unanswerable case is the
+literal `NEEDS YOU` marker), and persists durable disclosure-style answers back to
+`form-defaults.yml#screening_answers` so they're never re-asked. During a full
+tailor/apply run, `tailor-application` STEP 6 owns the answers artifact instead.

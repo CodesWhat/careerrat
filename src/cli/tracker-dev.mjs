@@ -37,6 +37,7 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { ANSWER_PAGE_HTML } from "../core/ai/answer-page.mjs";
 import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
@@ -219,6 +220,14 @@ export function createDevServer({
     res.end(EVALUATE_PAGE_HTML);
   });
 
+  // Interactive Q&A slice (POC apply-packet item 3) — a byte-static page (see
+  // src/core/ai/answer-page.mjs); it calls the two routes above from
+  // client-side JS, same as /evaluate.
+  addRoute("GET", "/answer", (_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(ANSWER_PAGE_HTML);
+  });
+
   // -------------------------------------------------------------------------
   // HTTP server
 
@@ -335,7 +344,7 @@ export function createDevServer({
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(
-      "Not found. The dev server serves /, /tracker, /evaluate, /dashboard-data.js, /workspace/dashboard-data.js, " +
+      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /dashboard-data.js, /workspace/dashboard-data.js, " +
         "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
         "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
         "/api/skill/run, /assets/*, /fonts/*, and /__livereload."
@@ -571,6 +580,7 @@ Usage:
 Routes:
   GET  /, /tracker                     Rendered dashboard HTML (live-reloading)
   GET  /evaluate                        Paste a JD → live evaluate-job verdict (P0-5)
+  GET  /answer                          Paste a screening question → live answer-question draft
   GET  /dashboard-data.js               Dashboard data module
   GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
   GET  /workspace/tracker.json          Raw tracker.json (static file)
