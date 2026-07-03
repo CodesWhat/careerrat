@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/Button.jsx";
 import { UploadIcon } from "../components/icons.jsx";
-import { formatDispatchSummary, kindLabel } from "../inbox/dispatch-summary.js";
+import { kindLabel } from "../inbox/intake-labels.js";
 import { ApiError, createIntake } from "../lib/api.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 
@@ -131,8 +131,6 @@ export function CaptureBar() {
     if (dropped) setText((prev) => (prev ? `${prev}\n${dropped}` : dropped));
   }
 
-  const dispatchSummary = result?.dispatch ? formatDispatchSummary(result.dispatch) : null;
-
   // Drag/drop has no interactive-role equivalent; the bar's real controls
   // (textarea, Button) underneath are each independently keyboard/screen-
   // reader operable — drop is a mouse-only convenience layered on top, same
@@ -149,11 +147,7 @@ export function CaptureBar() {
       onDrop={handleDrop}
     >
       {result ? (
-        <CaptureResult
-          item={result}
-          dispatchSummary={dispatchSummary}
-          onDismiss={() => setResult(null)}
-        />
+        <CaptureResult item={result} onDismiss={() => setResult(null)} />
       ) : (
         <div className="capture-bar__row">
           <span className="capture-bar__icon" aria-hidden="true">
@@ -188,8 +182,11 @@ export function CaptureBar() {
 // before the response goes out), so `item` here already carries the full
 // classification, the deterministic trackerMatch, and the resolved dispatch
 // — nothing further to poll for before showing this.
-function CaptureResult({ item, dispatchSummary, onDismiss }) {
+function CaptureResult({ item, onDismiss }) {
   const needsUser = item.status === "needs_you";
+  // M10: read straight off the API response (src/core/intake/dispatch-summary.mjs,
+  // computed server-side once) — no more client-side formatDispatchSummary mirror.
+  const dispatchSummary = item.dispatchSummary;
   return (
     <div className="capture-result">
       <div className="capture-result__row">

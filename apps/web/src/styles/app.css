@@ -878,3 +878,606 @@ button {
   display: flex;
   gap: 8px;
 }
+
+/* ── M10 — nav footer (theme toggle + activity bell side by side) ──────── */
+
+.app-shell__nav-footer {
+  gap: 4px;
+}
+
+/* ── M10 — /jobs + /calendar wide page scaffold ─────────────────────────── */
+
+.page-scaffold--wide {
+  max-width: 1080px;
+}
+
+/* ── M10 — Jobs funnel bar chart ─────────────────────────────────────────── */
+
+.job-funnel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-funnel__row {
+  display: grid;
+  grid-template-columns: 120px 1fr 32px;
+  align-items: center;
+  gap: 10px;
+}
+
+.job-funnel__label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--ink-soft);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.job-funnel__bar-track {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--paper-band);
+  overflow: hidden;
+}
+
+.job-funnel__bar {
+  display: block;
+  height: 100%;
+  border-radius: 999px;
+}
+
+.job-funnel__count {
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+}
+
+/* ── M10 — Jobs row list (glanceable rows, never a dense table) ─────────── */
+
+.job-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--row-radius);
+  background: var(--paper-surface);
+  cursor: pointer;
+  text-align: left;
+  font: inherit;
+  color: inherit;
+}
+
+.job-row:hover {
+  border-color: var(--paper-edge-strong);
+}
+
+.job-row__main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.job-row__title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+
+.job-row__company {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.job-row__role {
+  font-size: 12px;
+  color: var(--ink-soft);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.job-row__meta {
+  display: flex;
+  gap: 10px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.job-row__stage {
+  flex-shrink: 0;
+}
+
+.job-row__fit,
+.job-row__date {
+  flex-shrink: 0;
+  width: 72px;
+  font-size: 11px;
+  color: var(--ink-soft);
+  text-align: right;
+}
+
+.job-row__action {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--sky);
+}
+
+/* ── M10 — Jobs / Calendar shared drawer ────────────────────────────────── */
+
+.job-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(var(--rgb-line), 0.35);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 40;
+}
+
+.job-drawer {
+  position: relative;
+  width: min(480px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: var(--paper-bg);
+  border-left: 1px solid var(--paper-edge);
+  padding: 24px 22px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.job-drawer__close {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  border: none;
+  background: none;
+  font-size: 20px;
+  line-height: 1;
+  color: var(--ink-soft);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.job-drawer__header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding-right: 28px;
+}
+
+.job-drawer__header-text {
+  flex: 1;
+  min-width: 0;
+}
+
+.job-drawer__company {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 700;
+}
+
+.job-drawer__role {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--ink-soft);
+}
+
+.job-drawer__link {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sky);
+  text-decoration: none;
+  width: fit-content;
+}
+
+.job-drawer__link:hover {
+  text-decoration: underline;
+}
+
+.job-drawer__list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.job-drawer__timeline {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.job-drawer__timeline-item {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.job-drawer__timeline-icon {
+  flex-shrink: 0;
+  color: var(--ink-soft);
+  margin-top: 1px;
+}
+
+.job-drawer__timeline-item > span:last-child {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  font-size: 12px;
+}
+
+.job-drawer__timeline-title {
+  font-weight: 700;
+}
+
+.job-drawer__timeline-at {
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
+.job-drawer__timeline-desc {
+  color: var(--ink-soft);
+}
+
+.job-drawer__draft {
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--paper-band);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.job-drawer__draft-subject {
+  margin: 0;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.job-drawer__draft-body {
+  margin: 0;
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.job-drawer__thread {
+  padding: 10px 0;
+  border-bottom: 1px solid var(--paper-edge);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.job-drawer__thread:last-child {
+  border-bottom: none;
+}
+
+.job-drawer__thread-subject {
+  margin: 0;
+  font-weight: 700;
+  font-size: 12px;
+}
+
+.job-drawer__inline-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.job-drawer__inline-actions .text-input {
+  flex: 1;
+}
+
+/* ── M10 — Home pipeline snapshot ────────────────────────────────────────── */
+
+.pipeline-snapshot {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+  gap: 10px;
+}
+
+.pipeline-snapshot__tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--paper-band);
+}
+
+.pipeline-snapshot__value {
+  font-size: 20px;
+  font-weight: 700;
+}
+
+.pipeline-snapshot__label {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+/* ── M10 — Calendar ──────────────────────────────────────────────────────── */
+
+.calendar-metrics {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.calendar-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.calendar-toolbar__nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.calendar-week {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 10px;
+}
+
+.calendar-day {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--row-radius);
+  background: var(--paper-surface);
+  min-height: 120px;
+}
+
+.calendar-day--today {
+  border-color: var(--m-secondary);
+}
+
+.calendar-day__header {
+  display: flex;
+  justify-content: space-between;
+  font-size: 11px;
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.calendar-day__events {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calendar-day__empty {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.calendar-event {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 5px 7px;
+  border-radius: 6px;
+  background: var(--paper-band);
+  border: none;
+  font: inherit;
+  text-align: left;
+  color: inherit;
+  cursor: default;
+  width: 100%;
+}
+
+button.calendar-event {
+  cursor: pointer;
+}
+
+button.calendar-event:hover {
+  background: var(--m-secondary-container);
+  color: var(--m-on-secondary-container);
+}
+
+.calendar-event--done {
+  opacity: 0.55;
+}
+
+.calendar-event__icon {
+  flex-shrink: 0;
+  margin-top: 1px;
+  color: var(--ink-soft);
+}
+
+.calendar-event__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.calendar-event__time {
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.calendar-event__title {
+  font-size: 11px;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.calendar-month {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.calendar-month__weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-align: center;
+}
+
+.calendar-month__grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.calendar-month__cell {
+  min-height: 82px;
+  padding: 6px;
+  border: 1px solid var(--paper-edge);
+  border-radius: 6px;
+  background: var(--paper-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.calendar-month__cell--muted {
+  opacity: 0.45;
+}
+
+.calendar-month__cell--today {
+  border-color: var(--m-secondary);
+}
+
+.calendar-month__date {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.calendar-month__events {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.calendar-month__more {
+  font-size: 10px;
+  color: var(--ink-soft);
+}
+
+.calendar-sync summary {
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.calendar-sync {
+  padding: 12px 14px;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--card-radius);
+  background: var(--paper-surface);
+}
+
+.calendar-sync[open] summary {
+  margin-bottom: 8px;
+}
+
+/* ── M10 — Activity Pulse header bell ───────────────────────────────────── */
+
+.activity-bell {
+  position: relative;
+}
+
+.activity-bell__popover {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 0;
+  width: 320px;
+  max-height: 360px;
+  overflow-y: auto;
+  background: var(--paper-surface);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  z-index: 50;
+}
+
+.activity-bell__header {
+  padding: 10px 12px 6px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ink-soft);
+}
+
+.activity-bell__list {
+  list-style: none;
+  margin: 0;
+  padding: 0 0 8px;
+}
+
+.activity-bell__item {
+  display: flex;
+  gap: 8px;
+  padding: 6px 12px;
+}
+
+.activity-bell__dot {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.activity-bell__body {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.activity-bell__title {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.activity-bell__summary {
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.activity-bell__meta {
+  font-size: 10px;
+  color: var(--ink-soft);
+}

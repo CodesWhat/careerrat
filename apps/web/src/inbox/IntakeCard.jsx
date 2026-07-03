@@ -4,7 +4,7 @@ import { Card } from "../components/Card.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { confirmIntake, dismissIntake, reclassifyIntake } from "../lib/api.js";
 import { ChatPanel } from "../onboarding/ChatPanel.jsx";
-import { formatDispatchSummary, kindLabel, statusLabel } from "./dispatch-summary.js";
+import { kindLabel, statusLabel } from "./intake-labels.js";
 
 const RAW_PREVIEW_MAX = 320;
 
@@ -61,7 +61,10 @@ export function IntakeCard({ item, onChanged }) {
   const [actionError, setActionError] = useState(null);
 
   const entities = entityEntries(item.classification?.entities);
-  const dispatchSummary = formatDispatchSummary(item.dispatch);
+  // M10: the server computes this once (src/core/intake/dispatch-summary.mjs)
+  // and includes it on every intake response that carries a dispatch — no
+  // more client-side re-derivation of the confirm-preview sentence.
+  const dispatchSummary = item.dispatchSummary;
   const match = item.trackerMatch;
   const otherHistory = match?.companyHistory || [];
 

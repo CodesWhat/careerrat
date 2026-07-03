@@ -1,33 +1,13 @@
 import { useEffect, useState } from "react";
 import { Button } from "../../components/Button.jsx";
 import { Card } from "../../components/Card.jsx";
+import { CompanyAvatar } from "../../components/CompanyAvatar.jsx";
 import { Field, TextField } from "../../components/form.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
-import { logoImageUrl, saveCandidateFile, searchLogos } from "../../lib/api.js";
+import { saveCandidateFile, searchLogos } from "../../lib/api.js";
 import { ChatPanel } from "../ChatPanel.jsx";
 
 const SEARCH_DEBOUNCE_MS = 350;
-
-function initials(name) {
-  return String(name || "")
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((w) => w[0]?.toUpperCase() ?? "")
-    .join("");
-}
-
-function CompanyAvatar({ name, domain }) {
-  const [failed, setFailed] = useState(false);
-  if (domain && !failed) {
-    return (
-      <span className="avatar">
-        <img src={logoImageUrl(domain)} alt="" onError={() => setFailed(true)} />
-      </span>
-    );
-  }
-  return <span className="avatar">{initials(name)}</span>;
-}
 
 // Step 5 — Companies. Type-ahead (logo.dev Brand Search proxy, GET
 // /api/logos/search) + initials fallback, a collapsed logo.dev-credentials

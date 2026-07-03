@@ -1,17 +1,21 @@
 import { Route, Routes } from "react-router-dom";
 import { AppShell } from "./app-shell/AppShell.jsx";
+import { CalendarPage } from "./calendar/CalendarPage.jsx";
 import { InboxPage } from "./inbox/InboxPage.jsx";
+import { JobsPage } from "./jobs/JobsPage.jsx";
 import { OnboardingPage } from "./onboarding/OnboardingPage.jsx";
 import { ComingSoonPage } from "./pages/ComingSoonPage.jsx";
 import { HomePage } from "./pages/HomePage.jsx";
 import { SettingsPage } from "./settings/SettingsPage.jsx";
 
-// M7/M8/M9 route map. "/", "/settings", "/onboarding", and (M9) "/inbox" are
-// real deliverables now — /jobs, /library, /calendar remain working stub
-// pages for the M10 route map (see the M7 design memo's route migration
-// table), landed now so the left nav never links to a 404. /inbox ships now
-// rather than waiting on M10 because the docked capture bar (AppShell.jsx)
-// needs somewhere real to hand its queue off to.
+// M7-M10 route map. "/", "/settings", "/onboarding", (M9) "/inbox", and (M10)
+// "/jobs"/"/calendar" are all real pages now, every one served off the shared
+// GET /api/data/dashboard snapshot (see app-shell/DashboardContext.jsx).
+// "/library" stays a route here only as a safety net for a stale bookmark —
+// NavList.jsx's own Library nav item is now a genuine external link to the
+// legacy dashboard (`/tracker`), not this stub (M10 design doc §1: Network
+// and Library are legacy-only, occasional-use reference tools, not part of
+// the weekly loop this milestone ships).
 export function App() {
   return (
     <AppShell>
@@ -20,33 +24,14 @@ export function App() {
         <Route path="/settings" element={<SettingsPage />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/inbox" element={<InboxPage />} />
-        <Route
-          path="/jobs"
-          element={
-            <ComingSoonPage
-              title="Jobs"
-              milestone="M10"
-              description="Tracker views on the SQLite data layer (src/cli/data-route.mjs) land here."
-            />
-          }
-        />
+        <Route path="/jobs" element={<JobsPage />} />
+        <Route path="/calendar" element={<CalendarPage />} />
         <Route
           path="/library"
           element={
             <ComingSoonPage
               title="Library"
-              milestone="M10"
-              description="The full evidence + story bank browser lands here."
-            />
-          }
-        />
-        <Route
-          path="/calendar"
-          element={
-            <ComingSoonPage
-              title="Calendar"
-              milestone="M10"
-              description="Interview, assessment, and follow-up scheduling views land here."
+              description="The full evidence + story bank browser lives in the legacy dashboard for now — open it at /tracker."
             />
           }
         />

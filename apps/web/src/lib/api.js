@@ -262,3 +262,106 @@ export function dismissIntake(id) {
     body: JSON.stringify({ id }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// M10 — the DB-served dashboard view model (src/cli/dashboard-route.mjs) and
+// the six drawer writes the Jobs/Calendar/Home surfaces ship (existing
+// src/cli/data-route.mjs verb routes — no new server surface). 409 NO_DATABASE
+// is the same fail-closed contract every /api/data/* route already uses; every
+// caller here is expected to catch ApiError and show the server's own hint
+// (see CaptureBar.jsx's describeCaptureError for the house pattern) rather
+// than inventing a second "no database" message.
+// ---------------------------------------------------------------------------
+
+// GET /api/data/dashboard — one call, the whole server-derived view model
+// (focus, nextSteps, jobs incl. rows/funnel/rail, calendar, activity, …).
+// NEVER re-derive CTA/focus/calendar/job-action rules client-side — every
+// M10 view renders this payload's fields directly (M10 design doc §2).
+export function getDashboard() {
+  return apiFetch("/api/data/dashboard");
+}
+
+// GET /api/data/applications/one?id= — the RAW application row (not the
+// derived jobs.rows[] shape). The drawer's read-modify-write writes
+// (follow-up complete, note edit) need this: appSetFields is a shallow
+// one-level merge (verbs/app.mjs), so patching a nested sub-object
+// (followUp, roleFit) from anything less than the FULL current sub-object
+// silently drops sibling keys not named in the patch.
+export function getApplication(id) {
+  return apiFetch(`/api/data/applications/one?id=${encodeURIComponent(id)}`);
+}
+
+// GET /api/data/communications — the raw list, no server-side
+// ?applicationId= filter exists (data-route.mjs only filters applications by
+// status/company). Callers filter client-side by applicationId — fine at
+// this repo's single-user, hundreds-of-rows scale (M10 design doc §2).
+export function getCommunications() {
+  return apiFetch("/api/data/communications");
+}
+
+// Merge helper for the appSetFields shallow-merge trap above: read the
+// app's CURRENT sub-object (or {} if absent), overlay `updates`, and hand the
+// FULL merged object back to the caller to send as the patch value — never
+// send a bare partial for an object-typed field.
+export function mergeNestedField(app, field, updates) {
+  const current = app?.[field];
+  const base = current && typeof current === "object" && !Array.isArray(current) ? current : {};
+  return { ...base, ...updates };
+}
+
+// POST /api/data/app/status — appSetStatus verb.
+export function setAppStatus({ id, to, note, followUpDueAt, clearInterview } = {}) {
+  return apiFetch("/api/data/app/status", {
+    method: "POST",
+    body: JSON.stringify({ id, to, note, followUpDueAt, clearInterview }),
+  });
+}
+
+// POST /api/data/app/fields — appSetFields verb (shallow one-level merge
+// server-side; see mergeNestedField above for the object-field trap).
+export function setAppFields({ id, patch } = {}) {
+  return apiFetch("/api/data/app/fields", {
+    method: "POST",
+    body: JSON.stringify({ id, patch }),
+  });
+}
+
+// POST /api/data/app/interview — appScheduleInterview verb. A second call
+// while an interview is already future-set books the NEXT round into
+// nextInterviewAt instead of interviewAt (see verbs/app.mjs's own comment) —
+// the caller never has to decide which field to write.
+export function scheduleInterview({ id, at, round, note } = {}) {
+  return apiFetch("/api/data/app/interview", {
+    method: "POST",
+    body: JSON.stringify({ id, at, round, note }),
+  });
+}
+
+// POST /api/data/comm/message — commAppendMessage verb ("add a note to the
+// thread" affordance; `message.direction` is "note" for a plain drawer note).
+export function appendCommMessage({ id, message } = {}) {
+  return apiFetch("/api/data/comm/message", {
+    method: "POST",
+    body: JSON.stringify({ id, message }),
+  });
+}
+
+// POST /api/data/comm/send — commMarkSent verb. The literal mechanism behind
+// the self-clearing "Ready to send" CTA: nulls comm.draft (and, if linked,
+// app.followUp.draft) server-side in one write.
+export function markCommSent({ id, at, summary } = {}) {
+  return apiFetch("/api/data/comm/send", {
+    method: "POST",
+    body: JSON.stringify({ id, at, summary }),
+  });
+}
+
+// POST /api/data/sourced/promote — sourcedPromote verb (the folded-in
+// sourced-triage tab's "Gate this role" action: moves a sourced[] row into
+// applications[] as status "reviewed-hold").
+export function promoteSourced({ id, appRow } = {}) {
+  return apiFetch("/api/data/sourced/promote", {
+    method: "POST",
+    body: JSON.stringify({ id, appRow }),
+  });
+}
