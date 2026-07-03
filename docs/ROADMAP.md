@@ -203,26 +203,75 @@ nurse, a driver, and an engineer each bring their own config.
   Network page. Approved leads become Network contacts; rejected or unreviewed leads are not warm
   paths. It never sends outreach and never turns a no-contact application into a "prioritize"
   action by itself.
+- **Company-health signal** (`company-health`) — an opt-in, role-scoped stability rating
+  (`healthy | watch | risky` across layoff risk, hiring momentum, financials, sentiment, and
+  leadership) with provenance and an as-of date. It only adjusts fit where a weak dimension
+  intersects a need you actually stated, it is cost-gated (auto-fires at the interview stage by
+  default), and it stays an internal signal — it never appears in an outbound artifact.
+- **Interactive live demo on the site** — the dashboard rendered against the bundled sample
+  workspace as a static, client-side-only build, served from the project site. Anyone can click
+  through a realistic, fully populated job search (a live pipeline, booked interviews, an offer
+  being weighed) without installing anything; demo dates auto-rebase so it stays evergreen.
+- **Answer any application question** (`answer-question`) — paste a screening or form question
+  outside a full apply run and get a drafted answer grounded in your profile, honesty
+  boundaries, and evidence. Known answers are reused, durable disclosure-style answers persist
+  so they are never re-asked, and anything unanswerable is marked for you instead of invented.
+- **Apply packet without a browser** — for a gated job, one artifact set: tailored resume,
+  cover letter, and drafted answers to the posting's *actual* application-form questions,
+  fetched browser-free from supported ATS form endpoints (with a paste fallback for the rest).
+  Unresolved answers structurally block "ready to upload."
+- **Local database with one shared write path** — application data now lives in a local SQLite
+  database (via Node's builtin driver — still zero runtime dependencies). Every change goes
+  through the same atomic domain verbs whether a human clicks a button, the agent runs a skill,
+  or you use the `rolester data` CLI: one write path, with the activity event, freshness stamp,
+  and analytics refresh applied in a single transaction. Existing workspaces migrate only via an
+  explicit `rolester data import`; the classic `tracker.json` keeps working as a generated
+  export during the transition.
+- **App UI** — a bundled single-page app (`/app`) over the local server, built for clicking
+  rather than prompting: a guided onboarding wizard (drop a PDF/image resume and AI extracts
+  your profile — with a manual path whenever no AI key is configured), editable settings forms,
+  and AI-assist buttons that propose values you can edit before saving. AI suggests terms;
+  deterministic code builds search URLs.
+- **Universal capture** — a docked capture bar plus an Inbox: paste or drop anything (a job
+  description, a posting URL, a recruiter email, an interview transcript) and the intake
+  pipeline classifies it, matches it against what you're already tracking, and proposes exactly
+  what it will write or run — you confirm before anything happens. Recognized ATS links are
+  handled deterministically with no AI call at all, and ambiguity is surfaced, never guessed.
+- **App dashboard views** — home (focus card, pipeline snapshot, next steps), a Jobs view with
+  glanceable rows and a detail drawer whose actions write through the real domain verbs (status
+  changes, interview scheduling, follow-up completion, notes, communications), a week/month
+  calendar, and an activity feed — all rendered from the same server-derived view model as the
+  classic dashboard, so the two never disagree.
+- **Company logos everywhere** — a server-side logo proxy with a local cache (and optional
+  brand-search autocomplete when a key is configured), with an initials fallback so nothing
+  breaks offline or keyless.
+- **Desktop app shell** — an Electron wrapper around the same local server, so the whole thing
+  runs as a native window: first run lands in the onboarding wizard, external links open in
+  your OS browser, and quitting cleanly shuts down every agent session.
+- **Embedded AI runtime (bring your own key)** — the local server can drive agent skills
+  in-process over live event streams: a chat page for conversational runs, an evaluate page
+  that turns a pasted posting into a gate verdict, and packet generation. Your API key is
+  stored locally in a permission-restricted, gitignored file, is never echoed back by any
+  endpoint, and every AI feature degrades to a manual path without it.
 
-## Dogfood Pass
+## In progress / up next
 
-Rolester is now in a use-it-and-tighten-it pass. There is no active v1 feature
-queue; the next work should come from real usage, tracker data problems, or UI
-friction that blocks the job-search loop.
+The app-first surface is now the daily driver; current work is the follow-through:
 
-### Watch list
-
-- **Tracker data quality** — keep `npm run verify:tracker` clean enough to trust
-  the dashboard. Current warnings are data hygiene, not feature blockers.
-- **Dashboard clarity** — keep trimming clutter as real usage shows what should be
-  glanceable, drill-in, or hidden behind the drawer.
-- **Real-data dashboard surfaces** — every dashboard panel now renders from your
-  tracker (the Network map and the last static one, the Sourced page, are wired);
-  keep new panels real-data-only so nothing ever shows placeholder companies.
-- **Consent-gated automation** — calendar sync, mail, messaging, status polling,
-  relationship sourcing, and profile writes stay opt-in and confirm-first.
-- **Skill flow polish** — when a real run feels awkward, fix the owning skill or
-  tracker write-back path instead of adding a parallel workflow.
+- **Finish migrating the writing skills to the data API** — a batch at a time, so every skill
+  write goes through the same verbs the UI buttons use (legacy workspaces keep working
+  unchanged).
+- **File drops in capture** — accept binary files (a resume PDF, a JD attachment) in the
+  capture bar, not just text and links.
+- **Calendar busy-block write path** — give externally-sourced busy windows a proper owning
+  verb so scheduling can avoid double-booking in database-backed workspaces.
+- **Classic dashboard parity, then retirement** — the Network and Library views (and the
+  funnel diagram) still render on the classic tracker page; the app links out to them. The
+  classic render path retires only once the app covers them.
+- **Coaching loop** — turn a below-floor fit score from a verdict into a plan: name the gaps,
+  suggest how to close them, re-ingest the new evidence, re-score.
+- **Desktop packaging polish** — signing/notarization and first-run experience for the
+  desktop shell.
 
 ## V2 Parking Lot
 
@@ -253,11 +302,10 @@ extra surface area.
   and human while staying restrained, favicon-legible, and theme-agnostic.
 - **More sources** — additional job-board and ATS adapters behind provider modules,
   beyond the current Wellfound + Lever coverage.
-- **Interactive live demo on the site** — render the dashboard against the bundled
-  sample workspace as a static, client-side-only build and serve it from the project
-  site so anyone can click through a realistic, fully populated job search (emails,
-  interview notes, an offer-to-accept arc) without installing anything. No backend; the
-  demo data ships with the build.
+- **Browser automation inside the app** — the consent-gated session-browser capabilities
+  (authenticated search, message ingest, status sync, assisted apply) exist today for
+  agent-driven runs; surfacing them as first-class buttons inside the app UI waits until
+  the browser-free core has been proven with real users.
 
 ## Principles
 
