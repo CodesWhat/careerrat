@@ -33,7 +33,10 @@ import { resolveAllowedSkills } from "../core/ai/skill-runtime.mjs";
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB cap per the P0-4 spec.
 const HEARTBEAT_MS = 15000;
 
-function sendJson(res, status, body) {
+// Exported so other route mounters (src/cli/onboard-route.mjs) reuse the
+// exact same JSON-response and capped-body-read primitives instead of
+// duplicating them — see that file's header comment.
+export function sendJson(res, status, body) {
   res.writeHead(status, {
     "Content-Type": "application/json; charset=utf-8",
     "Cache-Control": "no-store",
@@ -50,7 +53,7 @@ function sendJson(res, status, body) {
 // of a clean error body. Instead, stop accumulating bytes once over the cap
 // (so memory stays bounded) but let the stream keep draining to 'end', then
 // reject there — the socket stays intact for the response.
-function readJsonBodyCapped(req, maxBytes) {
+export function readJsonBodyCapped(req, maxBytes) {
   return new Promise((resolve, reject) => {
     let size = 0;
     let overflowed = false;

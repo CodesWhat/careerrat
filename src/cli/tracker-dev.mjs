@@ -36,10 +36,11 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-
+import { loadLocalAiEnv } from "../core/ai/ai-env.mjs";
 import { ANSWER_PAGE_HTML } from "../core/ai/answer-page.mjs";
 import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
+import { ONBOARD_PAGE_HTML } from "../core/onboarding/onboard-page.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
 import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import {
@@ -49,6 +50,7 @@ import {
   resolvePort,
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
+import { mountOnboardRoutes } from "./onboard-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -90,6 +92,13 @@ export function createDevServer({
   runSkillStream = defaultRunSkillStream,
   env = process.env,
 } = {}) {
+  // Boot-load any stored BYOK key from .internal/ai.env (see ai-env.mjs)
+  // before any route captures `env` — a key saved by the onboarding wizard's
+  // AI-key step (POST /api/settings/ai-key) then survives a server restart
+  // without the user re-sourcing it into their shell. env always wins over
+  // the stored file (see loadLocalAiEnv's own doc comment).
+  loadLocalAiEnv({ repoRoot, env });
+
   const pathCtx = { repoRoot };
   const userPaths = resolveUserPaths(pathCtx);
   const TRACKER_CLI = join(repoRoot, "src/cli/tracker.mjs");
@@ -228,6 +237,20 @@ export function createDevServer({
     res.end(ANSWER_PAGE_HTML);
   });
 
+  // M1 of the paid-POC journey — the non-AI onboarding wizard. Its HTTP
+  // surface (candidate file seeding, resume parsing, BYOK key storage) is
+  // src/cli/onboard-route.mjs; its byte-static page is
+  // src/core/onboarding/onboard-page.mjs. Deliberately mounted after
+  // mountSkillRunRoute rather than before: unlike /evaluate and /answer, this
+  // page never calls POST /api/skill/run — it exists precisely so a
+  // candidate's workspace is legible before any paid AI usage starts.
+  mountOnboardRoutes({ addRoute, repoRoot, env });
+
+  addRoute("GET", "/onboard", (_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(ONBOARD_PAGE_HTML);
+  });
+
   // -------------------------------------------------------------------------
   // HTTP server
 
@@ -344,10 +367,13 @@ export function createDevServer({
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(
-      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /dashboard-data.js, /workspace/dashboard-data.js, " +
+      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /dashboard-data.js, " +
+        "/workspace/dashboard-data.js, " +
         "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
         "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
-        "/api/skill/run, /assets/*, /fonts/*, and /__livereload."
+        "/api/skill/run, /api/onboard/state, /api/onboard/init, /api/onboard/resume, " +
+        "/api/onboard/candidate/:name, /api/onboard/evidence-seed, /api/onboard/write-config, " +
+        "/api/settings/ai-key, /api/settings/ai, /assets/*, /fonts/*, and /__livereload."
     );
   });
 
@@ -523,7 +549,12 @@ async function main() {
 
   dev.startWatching();
 
-  dev.server.listen(port, () => {
+  // Loopback-only by default: this server executes skills (Bash and all, via
+  // /api/skill/run) and accepts local credential writes (/api/settings/ai-key)
+  // — it must never be reachable from the LAN unless the operator explicitly
+  // opts in with ROLESTER_TRACKER_HOST (e.g. for a trusted-network preview).
+  const host = process.env.ROLESTER_TRACKER_HOST || "127.0.0.1";
+  dev.server.listen(port, host, () => {
     const url = `http://localhost:${port}`;
     log(`serving ${url}`);
     log(
@@ -581,6 +612,7 @@ Routes:
   GET  /, /tracker                     Rendered dashboard HTML (live-reloading)
   GET  /evaluate                        Paste a JD → live evaluate-job verdict (P0-5)
   GET  /answer                          Paste a screening question → live answer-question draft
+  GET  /onboard                         Non-AI onboarding wizard (M1) — seed candidate files, BYOK key
   GET  /dashboard-data.js               Dashboard data module
   GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
   GET  /workspace/tracker.json          Raw tracker.json (static file)
@@ -593,6 +625,14 @@ Routes:
   GET  /api/health                      { ok, version }
   GET  /api/runtime/config              { skills: [...] } — the embedded runtime's allowlist
   POST /api/skill/run                   Run a SKILL.md via the embedded Agent SDK runtime (SSE)
+  GET  /api/onboard/state               Candidate-file + key + search-config status
+  POST /api/onboard/init                Seed candidate/ from templates (never overwrites)
+  POST /api/onboard/resume              Parse a pasted/loaded resume (no AI)
+  POST /api/onboard/candidate/:name     Merge + validate + write one candidate file
+  POST /api/onboard/evidence-seed       Dedupe-merge claims into candidate/evidence.yml
+  POST /api/onboard/write-config        Generate config/search-sources.yml + candidate/AGENTS.md
+  POST /api/settings/ai-key             Store a BYOK Anthropic key in .internal/ai.env
+  GET  /api/settings/ai                 { route, keyPresent } — never the key value
   GET  /assets/*, /fonts/*              Static assets
   GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
 
