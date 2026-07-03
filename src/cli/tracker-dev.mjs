@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync, watch } from "node:fs";
-// Rolester tracker dev server — a live-reloading dashboard for iterating on the
-// tracker data or the dashboard UI itself.
+// Rolester tracker dev server — promoted (Productization Phase 0, P0-2) from a
+// live-reloading dashboard preview into the embedded app server: it still serves
+// the hot-reloading dashboard, and now also serves the JSON API surface (tracker/
+// activity/health) the embedded runtime and future clients read from directly.
 //
 // Usage:
 //   rolester tracker-dev                 Serve http://localhost:7777 with live reload
@@ -10,21 +12,35 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 //   rolester tracker-dev --open       Best-effort open the page in your browser
 //   rolester tracker-dev --help
 //
+// (`npm run serve` is an alias for the same entry point — the process is being
+// promoted to the app server; `tracker:dev` stays for the dashboard-preview name.)
+//
 // Zero runtime deps: node:http + node:fs.watch + Server-Sent Events. Watches
-//   - workspace/tracker.json        (edit the data → page refreshes)
+//   - workspace/tracker.json        (edit the data → page refreshes + tracker-update SSE)
+//   - workspace/activity.jsonl      (edit the feed → activity-update SSE)
 //   - src/core/tracker/*            (edit the dashboard code → page refreshes)
-// and on any change re-renders via the canonical `tracker.mjs` CLI in a child
-// process (so the preview can never drift from `rolester tracker`, and every
-// render picks up fresh modules), then pushes a reload to the open page.
+// and on a tracker.json/activity.jsonl change re-renders via the canonical
+// `tracker.mjs` CLI in a child process (so the preview can never drift from
+// `rolester tracker`, and every render picks up fresh modules), then pushes a
+// reload to the open page.
 //
 // The pure, risk-bearing helpers (asset traversal guard, MIME, snippet
 // injection, port parsing) live in src/core/tracker/dev-server.mjs and are
 // unit-tested there. This file is the I/O glue (http, watch, child render).
+//
+// createDevServer() below is a pure factory — no listen, no initial render, no
+// fs.watch — so tests (and the embedded-runtime work in P0-4, which mounts new
+// routes via the returned `addRoute`) can construct one against an isolated
+// repoRoot and drive it directly. main() is the only caller that also renders,
+// watches, and listens, and only runs when this file is the entry script.
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
+import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
+import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import {
   injectLiveReload,
   LIVERELOAD_SNIPPET,
@@ -32,285 +48,443 @@ import {
   resolvePort,
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
+import { mountSkillRunRoute } from "./skill-run-route.mjs";
 
-const root = join(fileURLToPath(new URL("../..", import.meta.url)));
-const pathCtx = { repoRoot: root };
-const userPaths = resolveUserPaths(pathCtx);
-const TRACKER_CLI = join(root, "src/cli/tracker.mjs");
-const TRACKER_JSON = userPath(pathCtx, "workspace/tracker.json");
-const OUT_HTML = userPath(pathCtx, "workspace/tracker.html");
-const OUT_DATA = userPath(pathCtx, "workspace/dashboard-data.js");
-const OUT_MODES = userPath(pathCtx, "workspace/modes.json");
-const OUT_SETTINGS = userPath(pathCtx, "workspace/settings.json");
-const OUT_LIBRARY = userPath(pathCtx, "workspace/library.json");
-const ACTIVITY_JSONL = userPath(pathCtx, "workspace/activity.jsonl");
-const WORKSPACE_DIR = userPaths.workspaceDir;
-const CANDIDATE_DIR = userPaths.candidateDir;
-const TRACKER_SRC_DIR = join(root, "src/core/tracker");
-const ASSETS_DIR = join(root, "assets");
-const FONTS_DIR = join(root, "fonts");
+const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
 
-// SSE clients subscribed to reload events.
-const clients = new Set();
+// The running package's own version is a property of the CODE, not of whichever
+// workspace/data root a given createDevServer() instance points at — read it
+// once from the install location, not per-instance.
+const PACKAGE_VERSION = (() => {
+  try {
+    return JSON.parse(readFileSync(join(DEFAULT_ROOT, "package.json"), "utf8")).version || null;
+  } catch {
+    return null;
+  }
+})();
 
-// ---------------------------------------------------------------------------
-// Render: shell out to the canonical CLI so the dev preview is byte-identical
-// to `rolester tracker` and always loads fresh modules.
+// A monotonic-ish stamp for SSE payloads without Date.now() determinism worries.
+let tick = 0;
+function stamp() {
+  return `${++tick}`;
+}
 
-let rendering = false;
-let renderQueued = false;
-
-function renderOnce() {
-  return new Promise((resolve) => {
-    const child = spawn(process.execPath, [TRACKER_CLI], { cwd: root });
-    let stderr = "";
-    child.stderr.on("data", (d) => (stderr += d));
-    child.on("error", (err) => resolve({ ok: false, error: err.message }));
-    child.on("close", (code) =>
-      resolve(code === 0 ? { ok: true } : { ok: false, error: stderr.trim() || `exit ${code}` })
-    );
+function sendJson(res, status, body) {
+  res.writeHead(status, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": "no-store",
   });
+  res.end(JSON.stringify(body));
 }
 
-// Re-render, coalescing overlapping requests: if a change lands mid-render we
-// run exactly one more pass afterward rather than piling up child processes.
-async function rerenderAndReload(reason) {
-  if (rendering) {
-    renderQueued = true;
-    return;
-  }
-  rendering = true;
-  const result = await renderOnce();
-  rendering = false;
-  if (result.ok) {
-    log(`rendered (${reason}) → reloading ${clients.size} client${clients.size === 1 ? "" : "s"}`);
-    broadcastReload();
-  } else {
-    log(`render failed (${reason}): ${result.error}`);
-  }
-  if (renderQueued) {
-    renderQueued = false;
-    rerenderAndReload("coalesced");
-  }
-}
-
-function broadcastReload() {
-  for (const res of clients) {
-    try {
-      res.write(`event: reload\ndata: ${stamp()}\n\n`);
-    } catch {
-      clients.delete(res);
-    }
-  }
+function log(msg) {
+  process.stdout.write(`[tracker:dev] ${msg}\n`);
 }
 
 // ---------------------------------------------------------------------------
-// HTTP server
+// Server creation
 
-const server = createServer((req, res) => {
-  const url = (req.url || "/").split("?")[0];
+export function createDevServer({
+  repoRoot = DEFAULT_ROOT,
+  runSkillStream = defaultRunSkillStream,
+  env = process.env,
+} = {}) {
+  const pathCtx = { repoRoot };
+  const userPaths = resolveUserPaths(pathCtx);
+  const TRACKER_CLI = join(repoRoot, "src/cli/tracker.mjs");
+  const TRACKER_JSON = userPath(pathCtx, "workspace/tracker.json");
+  const OUT_HTML = userPath(pathCtx, "workspace/tracker.html");
+  const OUT_DATA = userPath(pathCtx, "workspace/dashboard-data.js");
+  const OUT_MODES = userPath(pathCtx, "workspace/modes.json");
+  const OUT_SETTINGS = userPath(pathCtx, "workspace/settings.json");
+  const OUT_LIBRARY = userPath(pathCtx, "workspace/library.json");
+  const ACTIVITY_JSONL = userPath(pathCtx, "workspace/activity.jsonl");
+  const WORKSPACE_DIR = userPaths.workspaceDir;
+  const CANDIDATE_DIR = userPaths.candidateDir;
+  const TRACKER_SRC_DIR = join(repoRoot, "src/core/tracker");
+  const ASSETS_DIR = join(repoRoot, "assets");
+  const FONTS_DIR = join(repoRoot, "fonts");
+  const adapter = defaultAdapter(repoRoot);
 
-  if (url === "/__livereload") {
-    res.writeHead(200, {
-      "Content-Type": "text/event-stream",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    });
-    res.write(`event: hello\ndata: connected\n\n`);
-    clients.add(res);
-    const ping = setInterval(() => {
-      try {
-        res.write(`: ping\n\n`);
-      } catch {
-        clearInterval(ping);
-      }
-    }, 25000);
-    req.on("close", () => {
-      clearInterval(ping);
-      clients.delete(res);
-    });
-    return;
-  }
+  // SSE clients subscribed to reload/tracker-update/activity-update events.
+  const clients = new Set();
+  const watchers = [];
 
-  if (url === "/" || url === "/index.html" || url === "/tracker.html") {
-    if (!existsSync(OUT_HTML)) {
-      res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(
-        placeholderPage(
-          "Rendering…",
-          "The dashboard is still rendering. This page will refresh automatically."
-        )
+  // -------------------------------------------------------------------------
+  // Render: shell out to the canonical CLI so the dev preview is byte-identical
+  // to `rolester tracker` and always loads fresh modules.
+
+  let rendering = false;
+  let renderQueued = false;
+
+  function renderOnce() {
+    return new Promise((resolve) => {
+      const child = spawn(process.execPath, [TRACKER_CLI], { cwd: repoRoot });
+      let stderr = "";
+      child.stderr.on("data", (d) => (stderr += d));
+      child.on("error", (err) => resolve({ ok: false, error: err.message }));
+      child.on("close", (code) =>
+        resolve(code === 0 ? { ok: true } : { ok: false, error: stderr.trim() || `exit ${code}` })
       );
+    });
+  }
+
+  // Re-render, coalescing overlapping requests: if a change lands mid-render we
+  // run exactly one more pass afterward rather than piling up child processes.
+  async function rerenderAndReload(reason) {
+    if (rendering) {
+      renderQueued = true;
       return;
     }
-    let html;
+    rendering = true;
+    const result = await renderOnce();
+    rendering = false;
+    if (result.ok) {
+      log(
+        `rendered (${reason}) → reloading ${clients.size} client${clients.size === 1 ? "" : "s"}`
+      );
+      broadcastEvent("reload");
+    } else {
+      log(`render failed (${reason}): ${result.error}`);
+    }
+    if (renderQueued) {
+      renderQueued = false;
+      rerenderAndReload("coalesced");
+    }
+  }
+
+  // Named SSE event broadcast. "reload" (post re-render) is what the injected
+  // livereload snippet listens for; "tracker-update"/"activity-update" fire
+  // immediately on the raw watch trigger, independent of render, for API
+  // consumers (e.g. the embedded runtime) that care about data changes rather
+  // than the HTML preview.
+  function broadcastEvent(name) {
+    const payload = stamp();
+    for (const res of clients) {
+      try {
+        res.write(`event: ${name}\ndata: ${payload}\n\n`);
+      } catch {
+        clients.delete(res);
+      }
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // JSON API — exact method+path routes, checked before the static/HTML url
+  // branching below. `addRoute` is returned on the server object so a later
+  // phase can register new routes (e.g. POST /api/skill/run) without reaching
+  // back into this module.
+  const routes = new Map();
+  function addRoute(method, path, handler) {
+    routes.set(`${method} ${path}`, handler);
+  }
+
+  addRoute("GET", "/api/tracker", (_req, res) => {
+    let data;
     try {
-      html = readFileSync(OUT_HTML, "utf8");
+      data = adapter.readTracker();
     } catch (err) {
-      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end(`Could not read workspace/tracker.html: ${err.message}`);
+      const status = /no tracker\.json/.test(err.message) ? 404 : 500;
+      sendJson(res, status, { error: err.message });
       return;
     }
+    sendJson(res, 200, data);
+  });
+
+  addRoute("GET", "/api/activity", (_req, res) => {
+    try {
+      sendJson(res, 200, adapter.readActivity());
+    } catch (err) {
+      sendJson(res, 500, { error: err.message });
+    }
+  });
+
+  addRoute("GET", "/api/health", (_req, res) => {
+    sendJson(res, 200, { ok: true, version: PACKAGE_VERSION });
+  });
+
+  // P0-4 — the embedded AI skill runtime. See src/cli/skill-run-route.mjs for
+  // the SSE/abort/status-code mechanics and src/core/ai/skill-runtime.mjs for
+  // the Agent SDK driver itself. `runSkillStream` is dependency-injected above
+  // so tests can stub it without needing the real SDK devDependency installed.
+  // Also registers GET /api/runtime/config (the allowlist evaluate-page.mjs
+  // polls to decide whether its decision buttons can run).
+  mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env });
+
+  // P0-5 — the headline paste → evaluate-job → live verdict slice's UI. A
+  // byte-static page (see src/core/ai/evaluate-page.mjs); it calls the two
+  // routes above from client-side JS.
+  addRoute("GET", "/evaluate", (_req, res) => {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(injectLiveReload(html));
-    return;
-  }
+    res.end(EVALUATE_PAGE_HTML);
+  });
 
-  if (url === "/dashboard-data.js") {
-    serveFile(OUT_DATA, res, "text/javascript; charset=utf-8");
-    return;
-  }
+  // -------------------------------------------------------------------------
+  // HTTP server
 
-  if (url === "/workspace/tracker.json") {
-    serveFile(TRACKER_JSON, res, "application/json; charset=utf-8");
-    return;
-  }
+  const server = createServer((req, res) => {
+    const url = (req.url || "/").split("?")[0];
 
-  if (url === "/workspace/modes.json") {
-    serveFile(OUT_MODES, res, "application/json; charset=utf-8");
-    return;
-  }
+    const route = routes.get(`${req.method} ${url}`);
+    if (route) {
+      route(req, res);
+      return;
+    }
 
-  if (url === "/workspace/settings.json") {
-    serveFile(OUT_SETTINGS, res, "application/json; charset=utf-8");
-    return;
-  }
-
-  if (url === "/workspace/library.json") {
-    serveFile(OUT_LIBRARY, res, "application/json; charset=utf-8");
-    return;
-  }
-
-  // The Activity Pulse feed. Optional — serve an empty body (not 404) before any
-  // skill has written an event, so the client degrades to the empty-state cleanly.
-  if (url === "/workspace/activity.jsonl") {
-    if (!existsSync(ACTIVITY_JSONL)) {
+    if (url === "/__livereload") {
       res.writeHead(200, {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Content-Type": "text/event-stream",
+        "Cache-Control": "no-cache, no-transform",
+        Connection: "keep-alive",
+        "X-Accel-Buffering": "no",
+      });
+      res.write(`event: hello\ndata: connected\n\n`);
+      clients.add(res);
+      const ping = setInterval(() => {
+        try {
+          res.write(`: ping\n\n`);
+        } catch {
+          clearInterval(ping);
+        }
+      }, 25000);
+      req.on("close", () => {
+        clearInterval(ping);
+        clients.delete(res);
+      });
+      return;
+    }
+
+    if (url === "/" || url === "/index.html" || url === "/tracker" || url === "/tracker.html") {
+      if (!existsSync(OUT_HTML)) {
+        res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
+        res.end(
+          placeholderPage(
+            "Rendering…",
+            "The dashboard is still rendering. This page will refresh automatically."
+          )
+        );
+        return;
+      }
+      let html;
+      try {
+        html = readFileSync(OUT_HTML, "utf8");
+      } catch (err) {
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(`Could not read workspace/tracker.html: ${err.message}`);
+        return;
+      }
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
         "Cache-Control": "no-store",
       });
-      res.end("");
+      res.end(injectLiveReload(html));
       return;
     }
-    serveFile(ACTIVITY_JSONL, res, "application/x-ndjson; charset=utf-8");
-    return;
-  }
 
-  // Static assets the dashboard references relatively (../assets/logo.png,
-  // ../assets/logos/*). The page lives at /, so those resolve to /assets/*.
-  if (url.startsWith("/assets/")) {
-    serveAsset(url, res);
-    return;
-  }
+    if (url === "/dashboard-data.js" || url === "/workspace/dashboard-data.js") {
+      serveFile(OUT_DATA, res, "text/javascript; charset=utf-8");
+      return;
+    }
 
-  if (url.startsWith("/fonts/")) {
-    serveFont(url, res);
-    return;
-  }
+    if (url === "/workspace/tracker.json") {
+      serveFile(TRACKER_JSON, res, "application/json; charset=utf-8");
+      return;
+    }
 
-  res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-  res.end(
-    "Not found. The dev server serves /, /dashboard-data.js, /workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, /workspace/activity.jsonl, /assets/*, /fonts/*, and /__livereload."
-  );
-});
+    if (url === "/workspace/modes.json") {
+      serveFile(OUT_MODES, res, "application/json; charset=utf-8");
+      return;
+    }
 
-function serveFile(path, res, contentType) {
-  let body;
-  try {
-    body = readFileSync(path);
-  } catch {
+    if (url === "/workspace/settings.json") {
+      serveFile(OUT_SETTINGS, res, "application/json; charset=utf-8");
+      return;
+    }
+
+    if (url === "/workspace/library.json") {
+      serveFile(OUT_LIBRARY, res, "application/json; charset=utf-8");
+      return;
+    }
+
+    // The Activity Pulse feed. Optional — serve an empty body (not 404) before any
+    // skill has written an event, so the client degrades to the empty-state cleanly.
+    if (url === "/workspace/activity.jsonl") {
+      if (!existsSync(ACTIVITY_JSONL)) {
+        res.writeHead(200, {
+          "Content-Type": "application/x-ndjson; charset=utf-8",
+          "Cache-Control": "no-store",
+        });
+        res.end("");
+        return;
+      }
+      serveFile(ACTIVITY_JSONL, res, "application/x-ndjson; charset=utf-8");
+      return;
+    }
+
+    // Static assets the dashboard references relatively (../assets/logo.png,
+    // ../assets/logos/*). The page lives at /, so those resolve to /assets/*.
+    if (url.startsWith("/assets/")) {
+      serveAsset(url, res);
+      return;
+    }
+
+    if (url.startsWith("/fonts/")) {
+      serveFont(url, res);
+      return;
+    }
+
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("File not found");
-    return;
-  }
-  res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
-  res.end(body);
-}
+    res.end(
+      "Not found. The dev server serves /, /tracker, /evaluate, /dashboard-data.js, /workspace/dashboard-data.js, " +
+        "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
+        "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
+        "/api/skill/run, /assets/*, /fonts/*, and /__livereload."
+    );
+  });
 
-function serveAsset(url, res) {
-  const resolved = safeAssetPath(ASSETS_DIR, url);
-  if (!resolved.ok) {
-    res.writeHead(resolved.status, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end(resolved.status === 400 ? "Bad request" : "Forbidden");
-    return;
+  function serveFile(path, res, contentType) {
+    let body;
+    try {
+      body = readFileSync(path);
+    } catch {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("File not found");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
+    res.end(body);
   }
-  let body;
-  try {
-    if (!statSync(resolved.full).isFile()) throw new Error("not a file");
-    body = readFileSync(resolved.full);
-  } catch {
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Asset not found");
-    return;
-  }
-  res.writeHead(200, { "Content-Type": mimeFor(resolved.full), "Cache-Control": "no-cache" });
-  res.end(body);
-}
 
-function serveFont(url, res) {
-  const resolved = safeAssetPath(FONTS_DIR, url, "/fonts/");
-  if (!resolved.ok) {
-    res.writeHead(resolved.status, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end(resolved.status === 400 ? "Bad request" : "Forbidden");
-    return;
+  function serveAsset(url, res) {
+    const resolved = safeAssetPath(ASSETS_DIR, url);
+    if (!resolved.ok) {
+      res.writeHead(resolved.status, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(resolved.status === 400 ? "Bad request" : "Forbidden");
+      return;
+    }
+    let body;
+    try {
+      if (!statSync(resolved.full).isFile()) throw new Error("not a file");
+      body = readFileSync(resolved.full);
+    } catch {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Asset not found");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": mimeFor(resolved.full), "Cache-Control": "no-cache" });
+    res.end(body);
   }
-  let body;
-  try {
-    if (!statSync(resolved.full).isFile()) throw new Error("not a file");
-    body = readFileSync(resolved.full);
-  } catch {
-    res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end("Font not found");
-    return;
-  }
-  res.writeHead(200, { "Content-Type": mimeFor(resolved.full), "Cache-Control": "no-cache" });
-  res.end(body);
-}
 
-function placeholderPage(title, body) {
-  return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head>
+  function serveFont(url, res) {
+    const resolved = safeAssetPath(FONTS_DIR, url, "/fonts/");
+    if (!resolved.ok) {
+      res.writeHead(resolved.status, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(resolved.status === 400 ? "Bad request" : "Forbidden");
+      return;
+    }
+    let body;
+    try {
+      if (!statSync(resolved.full).isFile()) throw new Error("not a file");
+      body = readFileSync(resolved.full);
+    } catch {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Font not found");
+      return;
+    }
+    res.writeHead(200, { "Content-Type": mimeFor(resolved.full), "Cache-Control": "no-cache" });
+    res.end(body);
+  }
+
+  function placeholderPage(title, body) {
+    return `<!doctype html><html><head><meta charset="utf-8"><title>${title}</title></head>
 <body style="font:15px system-ui;padding:3rem;color:#333">
 <h1>${title}</h1><p>${body}</p>${LIVERELOAD_SNIPPET}</body></html>`;
+  }
+
+  // -------------------------------------------------------------------------
+  // File watching → debounced re-render, plus immediate named SSE events
+
+  let debounce = null;
+  function scheduleRerender(reason) {
+    clearTimeout(debounce);
+    debounce = setTimeout(() => rerenderAndReload(reason), 120);
+  }
+
+  function startWatching() {
+    // Watch the data file by watching its directory and filtering the filename —
+    // editors rename-on-save, which a direct file watch can miss. Ignore our own
+    // tracker.html writes so re-rendering never triggers another re-render.
+    if (existsSync(WORKSPACE_DIR)) {
+      watchers.push(
+        watch(WORKSPACE_DIR, (_event, filename) => {
+          if (filename === "tracker.json") {
+            broadcastEvent("tracker-update");
+            scheduleRerender(filename);
+          } else if (filename === "activity.jsonl") {
+            broadcastEvent("activity-update");
+            scheduleRerender(filename);
+          }
+        })
+      );
+    }
+    // Watch the dashboard source so editing the UI hot-reloads too.
+    if (existsSync(TRACKER_SRC_DIR)) {
+      watchers.push(
+        watch(TRACKER_SRC_DIR, { recursive: true }, (_event, filename) => {
+          if (/\.(mjs|js|html|css)$/.test(filename || "")) {
+            scheduleRerender(`src/core/tracker/${filename}`);
+          }
+        })
+      );
+    }
+    if (existsSync(CANDIDATE_DIR)) {
+      watchers.push(
+        watch(CANDIDATE_DIR, (_event, filename) => {
+          if (filename === "modes.yml") scheduleRerender("candidate/modes.yml");
+        })
+      );
+    }
+  }
+
+  // Close every fs.watch handle — test/embedded-runtime teardown, so a repeated
+  // createDevServer() in the same process doesn't leak watchers.
+  function stopWatching() {
+    for (const w of watchers.splice(0)) {
+      try {
+        w.close();
+      } catch {
+        /* ignore */
+      }
+    }
+    clearTimeout(debounce);
+  }
+
+  // End every open SSE connection — used on shutdown and in test teardown.
+  function closeClients() {
+    for (const res of clients) {
+      try {
+        res.end();
+      } catch {
+        /* ignore */
+      }
+    }
+    clients.clear();
+  }
+
+  return {
+    server,
+    pathCtx,
+    addRoute,
+    renderOnce,
+    startWatching,
+    stopWatching,
+    closeClients,
+    clients,
+  };
 }
 
 // ---------------------------------------------------------------------------
-// File watching → debounced re-render
-
-let debounce = null;
-function scheduleRerender(reason) {
-  clearTimeout(debounce);
-  debounce = setTimeout(() => rerenderAndReload(reason), 120);
-}
-
-function startWatching() {
-  // Watch the data file by watching its directory and filtering the filename —
-  // editors rename-on-save, which a direct file watch can miss. Ignore our own
-  // tracker.html writes so re-rendering never triggers another re-render.
-  if (existsSync(WORKSPACE_DIR)) {
-    watch(WORKSPACE_DIR, (_event, filename) => {
-      if (filename === "tracker.json" || filename === "activity.jsonl") {
-        scheduleRerender(filename);
-      }
-    });
-  }
-  // Watch the dashboard source so editing the UI hot-reloads too.
-  if (existsSync(TRACKER_SRC_DIR)) {
-    watch(TRACKER_SRC_DIR, { recursive: true }, (_event, filename) => {
-      if (/\.(mjs|js|html|css)$/.test(filename || "")) {
-        scheduleRerender(`src/core/tracker/${filename}`);
-      }
-    });
-  }
-  if (existsSync(CANDIDATE_DIR)) {
-    watch(CANDIDATE_DIR, (_event, filename) => {
-      if (filename === "modes.yml") scheduleRerender("candidate/modes.yml");
-    });
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Boot
+// Boot (CLI entry point only — see the import.meta.url guard at the bottom)
 
 async function main() {
   const args = process.argv.slice(2);
@@ -321,7 +495,10 @@ async function main() {
   const wantOpen = args.includes("--open");
   const port = resolvePort(args, process.env);
 
-  if (!existsSync(TRACKER_JSON)) {
+  const dev = createDevServer({ repoRoot: DEFAULT_ROOT });
+  const pathCtx = dev.pathCtx;
+
+  if (!existsSync(userPath(pathCtx, "workspace/tracker.json"))) {
     log(
       `No ${displayPath(pathCtx, "workspace/tracker.json")} yet. Seed one from templates/tracker.json.`
     );
@@ -329,15 +506,15 @@ async function main() {
   }
 
   log("initial render…");
-  const first = await renderOnce();
+  const first = await dev.renderOnce();
   if (!first.ok) {
     log(`initial render failed: ${first.error}`);
     process.exit(1);
   }
 
-  startWatching();
+  dev.startWatching();
 
-  server.listen(port, () => {
+  dev.server.listen(port, () => {
     const url = `http://localhost:${port}`;
     log(`serving ${url}`);
     log(
@@ -346,7 +523,7 @@ async function main() {
     log("Ctrl-C to stop.");
     if (wantOpen) openBrowser(url);
   });
-  server.on("error", (err) => {
+  dev.server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
       log(`port ${port} is in use. Pick another: rolester tracker-dev --port ${port + 1}`);
     } else {
@@ -354,22 +531,17 @@ async function main() {
     }
     process.exit(1);
   });
-}
 
-function shutdown() {
-  for (const res of clients) {
-    try {
-      res.end();
-    } catch {
-      /* ignore */
-    }
+  function shutdown() {
+    dev.closeClients();
+    dev.stopWatching();
+    dev.server.close(() => process.exit(0));
+    // Don't hang on a lingering socket.
+    setTimeout(() => process.exit(0), 200).unref();
   }
-  server.close(() => process.exit(0));
-  // Don't hang on a lingering socket.
-  setTimeout(() => process.exit(0), 200).unref();
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 }
-process.on("SIGINT", shutdown);
-process.on("SIGTERM", shutdown);
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -388,28 +560,38 @@ function openBrowser(url) {
   }
 }
 
-// A monotonic-ish stamp for SSE payloads without Date.now() determinism worries.
-let tick = 0;
-function stamp() {
-  return `${++tick}`;
-}
-
-function log(msg) {
-  process.stdout.write(`[tracker:dev] ${msg}\n`);
-}
-
 function printHelp() {
-  process.stdout.write(`rolester tracker-dev — live-reloading dashboard
+  process.stdout.write(`rolester tracker-dev — the embedded app server (live-reloading dashboard + JSON API)
 
 Usage:
   rolester tracker-dev                 Serve http://localhost:7777 with live reload
   rolester tracker-dev --port 8080  Pick a port (or set ROLESTER_DEV_PORT)
   rolester tracker-dev --open       Open the page in your browser on start
 
-Watches workspace/tracker.json, candidate/modes.yml, and src/core/tracker/*.mjs;
-re-renders via the canonical tracker CLI and pushes a reload over Server-Sent Events.
-Zero deps.
+Routes:
+  GET  /, /tracker                     Rendered dashboard HTML (live-reloading)
+  GET  /evaluate                        Paste a JD → live evaluate-job verdict (P0-5)
+  GET  /dashboard-data.js               Dashboard data module
+  GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
+  GET  /workspace/tracker.json          Raw tracker.json (static file)
+  GET  /workspace/modes.json            Modes config
+  GET  /workspace/settings.json         Settings config
+  GET  /workspace/library.json          Evidence library
+  GET  /workspace/activity.jsonl        Activity Pulse feed (NDJSON)
+  GET  /api/tracker                     Raw tracker.json via the StorageAdapter (JSON)
+  GET  /api/activity                    Activity feed via the StorageAdapter (JSON array)
+  GET  /api/health                      { ok, version }
+  GET  /api/runtime/config              { skills: [...] } — the embedded runtime's allowlist
+  POST /api/skill/run                   Run a SKILL.md via the embedded Agent SDK runtime (SSE)
+  GET  /assets/*, /fonts/*              Static assets
+  GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
+
+Watches workspace/tracker.json, workspace/activity.jsonl, candidate/modes.yml, and
+src/core/tracker/*.mjs; re-renders via the canonical tracker CLI and pushes a reload
+over Server-Sent Events. Zero deps.
 `);
 }
 
-main();
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main();
+}
