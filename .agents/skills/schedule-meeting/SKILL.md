@@ -59,11 +59,19 @@ external calendar without explicit confirmation (see RULES).
 
 ## STEP 1 — Match to tracker thread
 
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — every
+write step below gives the `rolester data <verb>` command (Data Write Contract,
+AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
+gives the existing direct JSON-edit instructions, unchanged.
+
 Read `workspace/tracker.json`. Find the `communications[]` record whose `applicationId`,
 `company` + `role`, or `threadId` / `subject` matches the message. If none exists and this is
 a real thread, create one (same shape as `email-comms` STEP 1: `id`, `applicationId`,
 `company`, `role`, `channel`, `status: "needs-reply"`, `summary`) and write it before
 drafting. Don't draft against a thread that isn't recorded.
+
+- **DB workspace:** `rolester data comm upsert --data '<the new record JSON>'` (full-row insert).
+- **Legacy workspace (no DB):** write the updated `workspace/tracker.json` directly.
 
 ---
 
@@ -149,9 +157,19 @@ Contract applies: halt on login wall / 2FA / captcha / account-picker confusion)
 (schema: `id`, `provider`, `startIso`, `endIso`, `allDay`, `label` — default `"Busy"`,
 `source`, `ingestedAt`). Dedupe on normalized `provider + startIso + endIso`. The `label` stays
 `"Busy"`; never substitute the real meeting subject. These are a **snapshot, not a live feed** —
-note when it was taken, and re-ingest before relying on it for a fresh decision. After writing,
-validate + re-render (`rolester tracker --verify` then `rolester tracker`); the
-Calendar then shows the windows as muted "Busy" blocks alongside actionable events.
+note when it was taken, and re-ingest before relying on it for a fresh decision.
+
+- **DB workspace:** `calendarBusy[]` is a top-level `tracker.json` key, not part of any
+  `applications[]`/`sourced[]`/`communications[]` row — today's verb surface (`app`, `sourced`,
+  `comm`, `activity`, `analytics-refresh`; see `src/cli/data.mjs --help`) has **no verb that
+  writes it**. This is a genuine gap in the current Data Write Contract, not something to paper
+  over: never hand-edit `tracker.json` in a DB workspace (it's a generated file), and never
+  fabricate a `kv`/`calendarBusy` verb that doesn't exist. Until one ships, treat free/busy
+  ingestion as unavailable in DB workspaces — fall back to the draft-only path in STEP 4 and
+  tell the user real-calendar double-booking checks aren't available yet on this workspace.
+- **Legacy workspace (no DB):** after writing, validate + re-render (`rolester tracker --verify`
+  then `rolester tracker`); the Calendar then shows the windows as muted "Busy" blocks alongside
+  actionable events.
 
 ---
 
@@ -239,6 +257,15 @@ set `comm.draft = null` (and `app.followUp.draft = null` if the reply was backed
 A partial write — messages[] updated but draft still set — leaves the "Ready to send" CTA
 live after the reply has gone out.
 
+- **DB workspace:** `rolester data comm append-message <comm-id> --data '<message JSON above>'`
+  appends the message and auto-rolls `lastInboundAt`/`lastOutboundAt` from `direction`. If this
+  call flips `direction` to `outbound-sent` and the status is advancing to `waiting`, follow with
+  `rolester data comm mark-sent <comm-id> [--at <iso>]` — it clears `comm.draft` (and
+  `app.followUp.draft` when linked) automatically in the same transaction; do not hand-write that
+  clear. For any other status target, use the read-patch-persist pattern in (b) below instead.
+- **Legacy workspace (no DB):** append to `communications[].messages[]` directly in
+  `workspace/tracker.json`.
+
 **(b) Update the parent `communications[]` record** in that same write:
 - `status`: `scheduled` once a slot is agreed; `waiting` while awaiting their pick/confirm;
   `needs-reply` if the ball is back with the candidate.
@@ -248,6 +275,15 @@ live after the reply has gone out.
   in one write. Never overwrite a live `nextActionDue` without nulling it first.
 - `nextAction`: rewrite to reflect the new pending item, or clear it if none.
 - `lastOutboundAt` / `lastInboundAt`.
+
+- **DB workspace:** there is no single-field patch verb for `communications[]` beyond
+  `mark-sent`'s narrow send case (used in (a) above). For `status: scheduled`/`needs-reply`, or
+  to set `nextActionDue`/`nextAction` explicitly, read the current row from
+  `workspace/tracker.json#communications[]`, apply the fields above (carrying every other field
+  over unchanged), and persist the whole row: `rolester data comm upsert --data '<patched full
+  comm row JSON>'`.
+- **Legacy workspace (no DB):** edit the fields above directly on the communications record, in
+  the same write as (a).
 
 **(c) When a meeting is BOOKED** — do ALL of the following in the SAME write as (a) and (b):
 
@@ -285,8 +321,40 @@ If you don't know whether this is the first or a follow-on round, check `convers
 if a prior entry exists with a `kind` matching an interview stage, use `nextInterviewAt`; if
 none, use `interviewAt`.
 
-**(d) Validate + re-render:** `rolester tracker --verify` (must exit clean), then
-`rolester tracker`.
+**DB workspace — (c-i)/(c-ii)/(c-iii) composition.** No single verb covers all three, so
+compose, back-to-back in the same turn as (a)/(b):
+1. ```
+   rolester data app schedule-interview <id> --at <iso> --round "<kind>" --note "<interviewNote text>"
+   ```
+   In one transaction this sets `interviewAt` (or `nextInterviewAt`, auto-detected from whether
+   a future `interviewAt` already exists — same "first round vs. follow-on" rule above), sets
+   `interviewNote`, and appends a `conversations[]` entry `{date: at, kind: round, notes: note}` —
+   covering the bulk of (c-i) and all of (c-iii). It does not set `who` and reuses the same
+   `--note` text for both `interviewNote` (the ≤60-char logistics string) and the conversations
+   entry's `notes` (which wants the richer "length, channel, timezone-confirmed slot, prep
+   notes" text) — those two fields want different content, so this verb doesn't map 1:1.
+2. Patch the `who` field (and, if needed, a fuller `notes` string) onto the conversations entry
+   `schedule-interview` just appended: read the current row's `conversations[]`, update that one
+   entry, then persist the whole array (wholesale array replace, same pattern as
+   `track-outcomes`' STEP 2 routing table): `rolester data app set-fields <id> --data
+   '{"conversations":[...]}'`.
+3. ```
+   rolester data app set-status <id> "<stage>"
+   ```
+   Advances `applications[].status` to the matching stage (`recruiter screen`, `technical`,
+   `onsite`, etc.) — outcome-changing, refreshes analytics, and (since entering, not leaving, the
+   interview band) never triggers the round-completion clearing.
+
+**Legacy workspace (no DB) — (c-i)/(c-ii)/(c-iii):** add the `conversations[]` entry, advance
+`applications[].status`, and write the interview datetime fields exactly as described above, all
+in the SAME `tracker.json` write as (a) and (b).
+
+**(d) Validate + re-render:**
+- **DB workspace:** the calls in (a)–(c) already persisted and auto-exported. Run
+  `rolester data verify` (re-exports + domain integrity) and `rolester tracker --verify`
+  (schema-level parity).
+- **Legacy workspace (no DB):** `rolester tracker --verify` (must exit clean), then
+  `rolester tracker`.
 
 **(e) Out-of-band completion.** If the user reports "I already confirmed / scheduled /
 rescheduled this" without the agent having sent the reply: record it immediately in the same
@@ -298,27 +366,35 @@ single write — do not leave the CTA live because the agent did not perform the
   - Set `comm.draft = null`; null `nextActionDue`, then set a fresh value if the next event
     is known; advance `comm.status` to `scheduled` / `waiting` as appropriate.
   - Run verify + re-render (STEP 7d).
+  - **DB workspace:** `rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"<user-reported completion>"}'`, then the same (c) composition above if a meeting was booked, then read-patch-persist `rolester data comm upsert --data '<patched full comm row JSON>'` for `draft`/`nextActionDue`/`status`, then STEP 7(d)'s DB verify.
+  - **Legacy workspace (no DB):** apply the bullets above directly in `workspace/tracker.json`, then run STEP 7(d)'s legacy verify.
 
 **(f) Log to the Activity Pulse feed** (see **Activity Pulse** in AGENTS.md). The reply is a
 draft awaiting send → log it as needing the user:
-```
-rolester activity append --type drafted --actor agent --needs-user \
-  --title "Scheduling reply — <Company>" \
-  --summary "<one line: proposed/confirmed slot>" \
-  --company "<Company>" --app-id <application id> --cta-label "Review & send" --write
-```
+- **DB workspace:** the (a)/(c) calls above already auto-logged their own generic events. For
+  the richer, scheduling-specific type, log an additional event:
+  ```
+  rolester data activity append --data '{"type":"drafted","actor":"agent","needsUser":true,"title":"Scheduling reply — <Company>","summary":"<one line: proposed/confirmed slot>","refs":{"applicationId":"<application id>","company":"<Company>"},"cta":{"label":"Review & send"}}'
+  ```
+- **Legacy workspace (no DB):**
+  ```
+  rolester activity append --type drafted --actor agent --needs-user \
+    --title "Scheduling reply — <Company>" \
+    --summary "<one line: proposed/confirmed slot>" \
+    --company "<Company>" --app-id <application id> --cta-label "Review & send" --write
+  ```
 
 ---
 
 ## STEP 8 — Outcome routing
 
-| Condition | Action |
-|---|---|
-| Meeting booked / confirmed | `applications[].status` + `conversations[]` entry are already written in STEP 7(c). Hand off to `interview-prep` for prep materials using that conversations[] entry as the anchor. No additional write needed here. |
-| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + re-render. Without updating the datetime fields the dashboard Focus card still shows the old time. |
-| They go quiet after your proposal | Leave `status: waiting`; STEP 7b's `nextActionDue` surfaces it as a follow-up (handled by `email-comms` / the follow-up timer). |
-| Thread turns to comp / general reply | Hand off to `email-comms` (general comms / negotiation surface). |
-| User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to `candidate/profile.yml#availability` (STEP 3 write-back). |
+| Condition | Action | DB-mode command |
+|---|---|---|
+| Meeting booked / confirmed | `applications[].status` + `conversations[]` entry are already written in STEP 7(c). Hand off to `interview-prep` for prep materials using that conversations[] entry as the anchor. No additional write needed here. | Already covered by STEP 7(c)'s DB composition — no additional call. |
+| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + re-render. Without updating the datetime fields the dashboard Focus card still shows the old time. | `rolester data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `rolester data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `rolester data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
+| They go quiet after your proposal | Leave `status: waiting`; STEP 7b's `nextActionDue` surfaces it as a follow-up (handled by `email-comms` / the follow-up timer). | No write here — this is a read/no-op branch. |
+| Thread turns to comp / general reply | Hand off to `email-comms` (general comms / negotiation surface). | No write here — hand-off only. |
+| User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to `candidate/profile.yml#availability` (STEP 3 write-back). | Unchanged in both modes — a `candidate/profile.yml` write, not a `tracker.json` write; outside the Data Write Contract. |
 
 ---
 

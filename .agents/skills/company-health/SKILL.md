@@ -36,6 +36,11 @@ doubling down on it may still be worth a shot.
 
 ## STEP 0 — Load config
 
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — every
+write step below gives the `rolester data <verb>` command (Data Write Contract,
+AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
+gives the existing direct JSON-edit instructions, unchanged.
+
 Read before doing anything else. The skill must work with all of these absent (neutral
 defaults shown).
 
@@ -156,8 +161,7 @@ dashboard data-pipeline constraint in AGENTS.md). So the rating must be DERIVED 
 PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
 `compEstimate` provenance pattern.
 
-1. Open `workspace/tracker.json`. On the company's `applications[]` row (or `sourced[]` row),
-   set:
+1. On the company's `applications[]` row (or `sourced[]` row), set:
 
    ```jsonc
    "companyHealth": {
@@ -179,23 +183,42 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
    }
    ```
 
+   - **DB workspace:**
+     - **`applications[]` row:** `rolester data app set-fields <id> --data-file <patch.json>` with `{"companyHealth": {...the object above...}}` (shallow merge one level — replaces the whole `companyHealth` object, which is what's wanted since it's always written in full). Use `--data-file` given the object's size (dimensions + signals).
+     - **`sourced[]` row:** there is no single-field patch verb for `sourced[]` — read the current row from `workspace/tracker.json#sourced[]`, set `companyHealth` on it (carrying every other field over unchanged), and persist the whole row: `rolester data sourced upsert-batch --data '[<patched full sourced row JSON>]'` (a one-element batch; this is outcome-changing per the Data Write Contract, so it also bumps the stamp and refreshes analytics in the same transaction).
+   - **Legacy workspace (no DB):** open `workspace/tracker.json` and set the object above directly on the matching row.
 2. Bump `meta.lastUpdatedAt` (the freshness stamp every writing skill bumps).
+   - **DB workspace:** the `set-fields` / `upsert-batch` call in step 1 already bumped `meta.lastUpdatedAt` (and `meta.version`) in the same transaction — no separate action needed.
+   - **Legacy workspace (no DB):** stamp it by hand in the same write as step 1.
 3. Verify + re-render (the dashboard handoff):
-   ```
-   rolester tracker --verify
-   ```
+   - **DB workspace:** step 1's call already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl`. Run:
+     ```
+     rolester data verify
+     rolester tracker --verify
+     ```
+   - **Legacy workspace (no DB):**
+     ```
+     rolester tracker --verify
+     ```
    Fix and re-run until it passes clean. Render must never write `tracker.json`.
 
 ---
 
 ## STEP 6 — Log to Activity Pulse
 
-```
-rolester activity append --type research --actor agent \
-  --title "Company health: <Company> — <rating>" \
-  --summary "<function>-scoped: <the one driving signal>" \
-  --company "<Company>" --write
-```
+- **DB workspace:** step 5's `app set-fields` / `sourced upsert-batch` call already auto-logged
+  a generic event in the same transaction. For the richer, rating-specific type, log an
+  additional event (this verb only logs, it never bumps the stamp):
+  ```
+  rolester data activity append --data '{"type":"research","actor":"agent","title":"Company health: <Company> — <rating>","summary":"<function>-scoped: <the one driving signal>","refs":{"company":"<Company>"}}'
+  ```
+- **Legacy workspace (no DB):**
+  ```
+  rolester activity append --type research --actor agent \
+    --title "Company health: <Company> — <rating>" \
+    --summary "<function>-scoped: <the one driving signal>" \
+    --company "<Company>" --write
+  ```
 
 ---
 

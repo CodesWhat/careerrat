@@ -58,9 +58,17 @@ Append the **full JD body** below the frontmatter — the complete role text, no
 
 Mirror the same body onto the tracker row so it travels with the application: when this posting has (or gets) an `applications[]` row, set `artifacts.jd` to the full body text (the saved `workspace/jobs/` file stays the source of truth; `artifacts.jd` is the embedded durable copy the dashboard can render without the live page).
 
+- **DB workspace:** `rolester data app set-fields <id> --data-file <patch.json>` with `{"artifacts": {"jd": "<full body text>"}}` (shallow merge one level — merges into the existing `artifacts` object without disturbing `artifacts.resume`/`artifacts.coverLetter`). Use `--data-file` given the body length. Not outcome-changing.
+- **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set `artifacts.jd` on the matching `applications[]` row.
+
 ---
 
 ## STEP 2 — LOAD CANDIDATE CONFIG
+
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — every
+write step below gives the `rolester data <verb>` command (Data Write Contract,
+AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
+gives the existing direct JSON-edit instructions, unchanged.
 
 Read the following files (all under `candidate/`):
 
@@ -202,6 +210,8 @@ Extract the comp band from the JD (may be missing; note "unlisted" if so).
      - **`estimated`** (estimate midpoint clears the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) from <N> comparables; confirm live before anchoring`. This is ADVISORY; action stays `manual`, never a hard cut.
      - **`estimated-below-floor`** (estimate midpoint falls under the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) likely below floor; hold unless strong non-cash benefits`. ADVISORY; action is `hold`, never a hard cut. An estimate is a guess, not a posted band — never trigger `cut` on an estimate.
      - **Persist the estimate** onto the tracker `sourced[]` row as `compEstimate` so the dashboard renders it with provenance ("Built from data"). Shape: `{source:"comparables", lowK, midpointK, highK, floorK, askK, sampleSize, tier, confidence, basis, asOf}`. Stamp `asOf` with today's date (`YYYY-MM-DD`) so staleness is detectable — the dashboard surfaces it as "as of <date>".
+       - **DB workspace:** there is no single-field patch verb for `sourced[]` — read the current row from `workspace/tracker.json#sourced[]`, set `compEstimate` on it (carrying every other field over unchanged), then persist the whole row: `rolester data sourced upsert-batch --data '[<patched full sourced row JSON>]'` (a one-element batch).
+       - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set `compEstimate` on the matching `sourced[]` row.
      - **Freshness / decay (mirror `company_health`).** A comp estimate drifts as the tracker accumulates comparables. If the row already carries a `compEstimate` whose `asOf` is newer than `modes.comp_estimate.recheck_days` ago (default 30), reuse it as-is — don't recompute. Older than that, or the row just crossed into a deeper stage (screen/interview/offer), re-run the estimate and bump `asOf`. Never leave an estimate un-dated.
      - The `renderGateBlock` output includes a `COMP ESTIMATE: $<low>K–$<high>K (mid $<mid>K) - <N> <tier> comparables...; confidence <X> (confirm live before anchoring)` line when an estimate exists. Emit it in the Required Output block.
      - The estimate strengthens as more tracker rows accumulate (tighter tier match: `family` → `arrangement` → `metro`; higher confidence: `low` → `medium` → `high`). Encourage the user to confirm the real band in the first screen call to ground the anchor.
@@ -306,25 +316,48 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - **GATE: KEEP or REVIEW** → set `status: "reviewed-hold"`. The role has passed the gate and sits on the active board as ready-to-apply.
    - Also set `fitScore`, `fitBucket`, and `fitBasis: "evaluated"` on the sourced row.
    - Also write company-history cautions from STEP 3.25 into `warn`/`note`, and set `action: "manual"` when same-company active/recent history forced manual review.
+   - **DB workspace:** the role stays in `sourced[]` here — this is a field patch, not a promotion (`sourced promote` is for the later apply-time move into `applications[]`). There is no single-field patch verb for `sourced[]`, so read the current row from `workspace/tracker.json#sourced[]`, apply every field above (carrying the rest of the row over unchanged), and persist the whole row in one call:
+     ```
+     rolester data sourced upsert-batch --data '[<patched full sourced row JSON>]'
+     ```
+     This is outcome-changing per the Data Write Contract — it bumps the stamp, logs its own activity event, and refreshes analytics in the same transaction.
+   - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `sourced[]` row.
 3. **For roles evaluated directly (not from a sourced[] row):** scan `applications[]` for an entry where `id` matches the reqId (if known), else where `company` and `role` match. If no matching row exists, do **not** create one here — `applications[]` rows are created at submission; skip to STEP 10.
    - In that object set `fitScore: <N>`, `fitBucket: "<high|med|stretch>"`, `fitBasis: "evaluated"`.
-4. Validate and re-render (run in sequence):
-   ```
-   rolester tracker --verify
-   rolester tracker
-   ```
-   These are two complementary checks and both should be run: `rolester tracker --verify` validates JSON shape/structure against config/tracker.schema.json (required keys, field presence), while `npm run verify:tracker` validates domain integrity (status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Neither replaces the other.
+   - **DB workspace:** `rolester data app set-fields <id> --data '{"fitScore":<N>,"fitBucket":"<high|med|stretch>","fitBasis":"evaluated"}'`. Not outcome-changing (no analytics refresh) — this is a fit-score annotation on an existing row, not a status transition.
+   - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `applications[]` row.
+4. Validate and re-render:
+   - **DB workspace:** sub-step 2's `sourced upsert-batch` call (or sub-step 3's `app set-fields` call) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run:
+     ```
+     rolester data verify
+     rolester tracker --verify
+     ```
+     `rolester data verify` re-exports then runs the same domain-integrity check as `npm run verify:tracker`; `rolester tracker --verify` covers the ajv schema-level check `data verify` doesn't run. Both should pass clean.
+   - **Legacy workspace (no DB):** run in sequence:
+     ```
+     rolester tracker --verify
+     rolester tracker
+     ```
+     These are two complementary checks and both should be run: `rolester tracker --verify` validates JSON shape/structure against config/tracker.schema.json (required keys, field presence), while `npm run verify:tracker` validates domain integrity (status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Neither replaces the other.
 
 This promotes the row from a coarse scanner estimate to an authoritative body-read fit.
 
 Then log the verdict to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md). One event per evaluation:
 
-```
-rolester activity append --type evaluated --actor agent \
-  --title "Evaluated — <Company>" --summary "<GATE verdict>: <short reason>" \
-  --company "<Company>" --role "<Role>" --app-id <application id> --url "<posting URL>" --write
-```
+- **DB workspace:** sub-step 2/3's call already auto-logged its own generic event
+  (`sourced` sweep-style or `status_change`-style) in the same transaction. For
+  the richer, evaluation-specific type, log an additional event (this verb only
+  logs, it never bumps the stamp):
+  ```
+  rolester data activity append --data '{"type":"evaluated","actor":"agent","title":"Evaluated — <Company>","summary":"<GATE verdict>: <short reason>","refs":{"applicationId":"<application id>","company":"<Company>","role":"<Role>","url":"<posting URL>"}}'
+  ```
+- **Legacy workspace (no DB):**
+  ```
+  rolester activity append --type evaluated --actor agent \
+    --title "Evaluated — <Company>" --summary "<GATE verdict>: <short reason>" \
+    --company "<Company>" --role "<Role>" --app-id <application id> --url "<posting URL>" --write
+  ```
 
 ---
 

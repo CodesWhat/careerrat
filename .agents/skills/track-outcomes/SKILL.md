@@ -145,7 +145,7 @@ draft that backed it is gone — then append a note recording what happened.
      ```
   2. Append the outcome note:
      ```
-     rolester data comm append-message <comm-id> --data '{"direction":"note","sentAt":"<ISO timestamp>","body":"<one-liner, e.g. Rejection received — recorded by track-outcomes>"}'
+     rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO timestamp>","summary":"<one-liner, e.g. Rejection received — recorded by track-outcomes>"}'
      ```
   If `app.followUp.draft` is set and step 1 wasn't itself a `comm mark-sent`
   call, clear it too: `rolester data app set-fields <app-id> --data
@@ -157,7 +157,7 @@ draft that backed it is gone — then append a note recording what happened.
      `app.followUp.draft = null` if present).
   2. Append a note to `comm.messages[]`:
      ```json
-     { "direction": "note", "sentAt": "<ISO timestamp>", "body": "<one-liner: what was recorded, e.g. 'Rejection received — recorded by track-outcomes'>" }
+     { "direction": "note", "at": "<ISO timestamp>", "summary": "<one-liner: what was recorded, e.g. 'Rejection received — recorded by track-outcomes'>" }
      ```
 
 **D.E.Shaw / Avature / data-completion case:** if the completion event is a submitted additional-info or data-completion form that was tracked in a `communications[]` thread (identified by subject line or recruiter name), treat that thread as the comm record above — flip it to `waiting`, null its `nextActionDue`, clear its `draft`, and append the outbound-completion note (DB mode: the same `comm upsert` + `comm append-message` pair).

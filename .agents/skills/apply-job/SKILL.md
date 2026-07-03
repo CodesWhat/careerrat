@@ -26,6 +26,11 @@ a JD URL with clear application intent.
 
 ## STEP 0 — Application-limits gate
 
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — every
+write step below gives the `rolester data <verb>` command (Data Write Contract,
+AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
+gives the existing direct JSON-edit instructions, unchanged.
+
 Read `candidate/application-limits.yml` (if absent, skip silently and proceed).
 
 - Look up the target company by name.
@@ -56,7 +61,28 @@ ACTION: apply-now|hold|manual|cut
 
 - **GATE: KEEP** → proceed.
 - **GATE: REVIEW** → confirm with user before proceeding.
-- **GATE: CUT** → write `status: cut` to the tracker row. In the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is not already `closed`). If one exists, set `comm.status = "closed"`, `comm.nextActionDue = null`, `comm.nextAction = null`, `comm.draft = null`, and append to `comm.messages[]`: `{ direction: "note", at: "<ISO>", body: "Role cut — <reason from GATE line>. No further action." }`. Run `npm run verify:tracker && rolester tracker --verify && rolester tracker` after the write. Halt, stop.
+- **GATE: CUT** →
+  - **DB workspace:** run
+    ```
+    rolester data app set-status <id> cut
+    ```
+    Then check for a backing comm thread (`jobs[id].comm` where `comm.status` is
+    not already `closed`). If one exists, compose two calls back-to-back (there
+    is no combined app+comm transaction, so "same write" becomes "same turn"):
+    1. Patch the comm row locally (read the current shape from
+       `workspace/tracker.json#communications[]`, set `status: "closed"`,
+       `nextActionDue: null`, `nextAction: null`, `draft: null`, carrying every
+       other field over unchanged), then persist the whole row:
+       ```
+       rolester data comm upsert --data '<patched full comm row JSON>'
+       ```
+    2. Append the note:
+       ```
+       rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"Role cut — <reason from GATE line>. No further action."}'
+       ```
+    Then verify: `rolester data verify` (re-exports + domain integrity) and
+    `rolester tracker --verify` (schema-level parity). Halt, stop.
+  - **Legacy workspace (no DB):** write `status: cut` to the tracker row. In the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is not already `closed`). If one exists, set `comm.status = "closed"`, `comm.nextActionDue = null`, `comm.nextAction = null`, `comm.draft = null`, and append to `comm.messages[]`: `{ direction: "note", at: "<ISO>", body: "Role cut — <reason from GATE line>. No further action." }`. Run `npm run verify:tracker && rolester tracker --verify && rolester tracker` after the write. Halt, stop.
 
 ---
 
@@ -121,10 +147,29 @@ Read `candidate/form-defaults.yml#auto_submit` (default: `false`).
 
 Regardless of `auto_submit`: **immediately halt** (do not submit) if the page shows a captcha or Cloudflare human-check, an application-limit blocker, a required manual exercise (assessment, coding exercise, Ashby/Workday exercise, etc.), a required account creation or password reset, an ATS spam-rejection, or any auth prompt that is not a supported emailed verification-code flow. When halting on one of these blockers:
 
-1. Write the blocked state to the application's tracker row immediately — set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type, any visible context text, and the apply URL so the human can finish (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the dashboard, never archived.
-2. **Comm-thread write-back (blocker case):** in the same `tracker.json` write as step 1, check whether a backing comm thread exists — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting. If one exists: do NOT flip `comm.status` to `waiting` (the human still needs to act), but append a `note`-direction entry to `comm.messages[]` recording the block reason and the manual-apply URL (e.g. `{ direction: "note", at: "<ISO>", body: "Auto-submit blocked: Cloudflare — manual apply required at <url>" }`), rewrite `comm.nextAction` to describe the manual step (e.g. `"Complete application manually — Cloudflare block at <url>"`), and update `comm.nextActionDue` forward by one day so the due date does not show as overdue while the human clears the blocker. Write app row + comm update atomically — no partial writes.
-3. Report what was found and ask the user how to proceed.
-4. **Re-entry point:** when the user clears the blocker and returns, resume at STEP 7 (Fill) — the tail of the form is the re-entry point, not the beginning of the workflow. Re-read the current page state via the session browser before continuing.
+- **DB workspace:**
+  1. Write the blocked state immediately:
+     ```
+     rolester data app set-status <id> manual-apply
+     rolester data app set-fields <id> --data '{"note":"manual-apply: <blocker type> — <url>"}'
+     ```
+     (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the dashboard, never archived. Run both calls back-to-back, never deferring the second.
+  2. **Comm-thread write-back (blocker case):** check whether a backing comm thread exists — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting. If one exists, compose two calls (there is no single partial-patch verb, so this is "same turn," never deferred):
+     1. Patch the comm row locally (read the current shape, do NOT change `status` — the human still needs to act — rewrite `nextAction` to describe the manual step and advance `nextActionDue` forward by one day so it doesn't show overdue while the human clears the blocker), then persist:
+        ```
+        rolester data comm upsert --data '<patched full comm row JSON>'
+        ```
+     2. Append the block-reason note:
+        ```
+        rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"Auto-submit blocked: <blocker type> — manual apply required at <url>"}'
+        ```
+  3. Report what was found and ask the user how to proceed.
+  4. **Re-entry point:** when the user clears the blocker and returns, resume at STEP 7 (Fill) — the tail of the form is the re-entry point, not the beginning of the workflow. Re-read the current page state via the session browser before continuing.
+- **Legacy workspace (no DB):**
+  1. Write the blocked state to the application's tracker row immediately — set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type, any visible context text, and the apply URL so the human can finish (e.g. `"manual-apply: Cloudflare human-check — <url>"`, `"manual-apply: Ashby take-home exercise required — <url>"`, `"manual-apply: Workday account creation required — <url>"`, `"manual-apply: ATS spam-flag — contact recruiter directly — <url>"`). `manual-apply` means the human must finish applying; it is ACTIVE and stays visible on the dashboard, never archived.
+  2. **Comm-thread write-back (blocker case):** in the same `tracker.json` write as step 1, check whether a backing comm thread exists — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting. If one exists: do NOT flip `comm.status` to `waiting` (the human still needs to act), but append a `note`-direction entry to `comm.messages[]` recording the block reason and the manual-apply URL (e.g. `{ direction: "note", at: "<ISO>", body: "Auto-submit blocked: Cloudflare — manual apply required at <url>" }`), rewrite `comm.nextAction` to describe the manual step (e.g. `"Complete application manually — Cloudflare block at <url>"`), and update `comm.nextActionDue` forward by one day so the due date does not show as overdue while the human clears the blocker. Write app row + comm update atomically — no partial writes.
+  3. Report what was found and ask the user how to proceed.
+  4. **Re-entry point:** when the user clears the blocker and returns, resume at STEP 7 (Fill) — the tail of the form is the re-entry point, not the beginning of the workflow. Re-read the current page state via the session browser before continuing.
 
 ---
 
@@ -217,8 +262,14 @@ If you encounter a login wall, captcha, platform 2FA / two-step-verification pro
    - `auto_submit: true`: click the final submit button without an extra pause.
 
    Regardless of `auto_submit`: **immediately halt** (do not click Submit) on captcha, platform 2FA / two-step-verification prompt, an application-limit blocker, or a required exercise that cannot be completed in the modal. On halt:
-   - Set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type and the apply URL (e.g. `"manual-apply: captcha — <url>"`, `"manual-apply: LinkedIn application limit reached — <url>"`) to the tracker row immediately. `manual-apply` is ACTIVE and stays visible on the dashboard.
-   - **Comm-thread write-back (blocker case — same rule as STEP 6):** in the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due`). If one exists: append a `note`-direction entry to `comm.messages[]` with the block reason and URL, rewrite `comm.nextAction` to describe the manual step, and advance `comm.nextActionDue` by one day. Do NOT flip `comm.status` to `waiting`. Write atomically.
+   - **DB workspace (same composition as STEP 6's DB branch):**
+     ```
+     rolester data app set-status <id> manual-apply
+     rolester data app set-fields <id> --data '{"note":"manual-apply: <blocker type> — <url>"}'
+     ```
+     (e.g. `"manual-apply: captcha — <url>"`, `"manual-apply: LinkedIn application limit reached — <url>"`). `manual-apply` is ACTIVE and stays visible on the dashboard. Then apply the same comm-thread write-back as STEP 6 (patch locally + `comm upsert`, then `comm append-message` with the block reason and URL; do NOT flip `comm.status` to `waiting`; rewrite `comm.nextAction`, advance `comm.nextActionDue` by one day).
+   - **Legacy workspace (no DB):** Set `status: "manual-apply"` (NOT "blocked") and add a `note` with the specific blocker type and the apply URL (e.g. `"manual-apply: captcha — <url>"`, `"manual-apply: LinkedIn application limit reached — <url>"`) to the tracker row immediately. `manual-apply` is ACTIVE and stays visible on the dashboard.
+     - **Comm-thread write-back (blocker case — same rule as STEP 6):** in the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due`). If one exists: append a `note`-direction entry to `comm.messages[]` with the block reason and URL, rewrite `comm.nextAction` to describe the manual step, and advance `comm.nextActionDue` by one day. Do NOT flip `comm.status` to `waiting`. Write atomically.
    - Report what was found and ask the user how to proceed.
    - **Re-entry point:** when the user clears the blocker, resume at STEP 7b Fill — re-read the current page state via the session browser before continuing.
 
@@ -275,10 +326,12 @@ depend on 9b passing.
 Locate the application row in `workspace/tracker.json`:
 - Match `applications[]` entry by `id` field first; if no `id`, match by `company` + `role` (case-insensitive).
 - If no matching row exists: create a new entry in `applications[]` with at minimum `company`, `role`, and `id` (generate a short slug, e.g. `<company-slug>-<role-slug>`). Do not halt — the row must exist before writing status.
+  - **DB workspace:** create it with `rolester data app upsert --data '{"id":"<slug>","company":"<Company>","role":"<Role>"}'` (full-row insert/replace), then continue with the field writes below against that same `<id>`.
+  - **Legacy workspace (no DB):** create the entry directly in the `tracker.json` edit below.
 
 **`app.note` validation (run before writing the row):** `note` is the INTERNAL submission one-liner — ≤60 chars, one topic, ATS/system + "submitted" only (e.g. `"Greenhouse — submitted, confirmation received."`). It must NOT contain application-form answer text, work-arrangement Q&A (onsite/hybrid/remote phrases), interview-loop descriptions, or language copied from the JD or form fields. Anything that fails this check routes to `statusNote` (live state text), `compNote` (comp intel), or is dropped entirely. A polluted `note` produces phantom interview Focus cards on the dashboard — prevent it here.
 
-Edit the matched (or newly created) row and set:
+The matched (or newly created) row must end up with:
 
 - `status: "awaiting"`
 - `submittedDate: <today ISO date>`
@@ -292,7 +345,22 @@ Edit the matched (or newly created) row and set:
 - `artifacts.resumeNote`: one line on tailoring approach (e.g. "led with operations leadership + cost-reduction wins")
 - `link`: the canonical posting URL
 
-**Comm-thread write-back (submission case):** after setting the fields above, before closing the write, check whether this submission fulfills an open comm thread — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting (the D.E. Shaw / Avature supplemental-form case: a recruiter-requested data-completion tracked in comm must flip to waiting in the same write that records the submission). If such a thread exists, set in the same atomic `tracker.json` write:
+Apply the write per mode:
+
+- **DB workspace:** compose two calls, back-to-back (there is no single verb covering every field above, so "one write" becomes "same turn — never leave the second call for later"):
+  1. ```
+     rolester data app set-status <id> awaiting --note "<statusNote text>"
+     ```
+     Sets `status` and `statusNote` (via `--note`) in one atomic transaction, bumps the stamp, refreshes analytics (a new submission is outcome-changing per the Data Write Contract), and logs the activity event.
+  2. ```
+     rolester data app set-fields <id> --data-file <patch.json>
+     ```
+     A shallow-merge patch (one level) carrying every field `set-status` doesn't cover: `submittedDate`, `channel`, `note` (the internal one-liner — **not** the same as `set-status`'s `--note`, which writes `statusNote`), `link`, `compNote` / `roleFit.why[]` / `roleFit.risks[]` (Content Register routing), and `artifacts: {jd, coverLetter, resume, resumeNote}` (merges one level into the existing `artifacts` object). Use `--data-file` rather than an inline `--data` string given the JD-body and cover-letter text length. Not outcome-changing — the preceding `set-status` call already refreshed analytics.
+
+     `app register-artifact <id> --kind resume --path "<resume filename>" --note "<tailoring approach>"` is the more purpose-built verb for a single artifact (it stamps `artifacts.resume` + `artifacts.resumeGeneratedAt` + `artifacts.resumeNote` in one call) and is a reasonable substitute for the `resume`/`resumeNote` piece of the patch above — it fits well because a résumé filename is a short, path-like value. It's a poorer fit for `artifacts.jd` / `artifacts.coverLetter`, which hold full body **text** (not a path) that's awkward to pass through a single `--path` argv token, so those two stay in the `set-fields` patch. Don't run both against the same `artifacts` key in the same turn — pick one path per field.
+- **Legacy workspace (no DB):** edit the matched (or newly created) row directly with the fields above, in one `tracker.json` write.
+
+**Comm-thread write-back (submission case):** after setting the fields above, before closing the write, check whether this submission fulfills an open comm thread — `jobs[id].comm` where `comm.status` is `needs-reply`, `drafted`, or `comm-due` and `comm.nextAction` or `comm.messages[]` references this application or posting (the D.E. Shaw / Avature supplemental-form case: a recruiter-requested data-completion tracked in comm must flip to waiting in the same write that records the submission). If such a thread exists:
 
 - `comm.status = "waiting"`
 - `comm.nextActionDue = null`
@@ -300,20 +368,45 @@ Edit the matched (or newly created) row and set:
 - `comm.nextAction = "Awaiting review after submission"` (or similar present-tense state)
 - append to `comm.messages[]`: `{ direction: "note", at: "<ISO>", body: "Submitted application via <ATS/channel>. Confirmation received." }`
 
-**One-write invariant:** the app row update and any comm-thread write-back above must land in a single `tracker.json` write. Do not write the app row, run verify, then write the comm record — that leaves ghost CTAs visible between writes. Write both, then run 9b once.
+- **DB workspace:** compose two calls, back-to-back in the same turn as the app calls above:
+  1. Patch the comm row locally (read the current shape from `workspace/tracker.json#communications[]`, apply the `status`/`nextActionDue`/`draft`/`nextAction` rules above, carrying every other field over unchanged), then persist the whole row:
+     ```
+     rolester data comm upsert --data '<patched full comm row JSON>'
+     ```
+  2. Append the note:
+     ```
+     rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"Submitted application via <ATS/channel>. Confirmation received."}'
+     ```
+- **Legacy workspace (no DB):** set the fields above in the SAME `tracker.json` write as the app-row change, and append the `comm.messages[]` note in that write too.
+
+**One-write invariant:**
+- **DB workspace:** the two app calls and the two comm calls each atomically persist and auto-export on their own — there is no single combined transaction, so the completeness guarantee is on running all four calls back-to-back in the same turn, never deferring any of them. Then run 9b once.
+- **Legacy workspace (no DB):** the app row update and any comm-thread write-back above must land in a single `tracker.json` write. Do not write the app row, run verify, then write the comm record — that leaves ghost CTAs visible between writes. Write both, then run 9b once.
 
 ### 9b — Verify the row landed (gate)
 
-Run validation and re-render in sequence:
-
-```
-npm run verify:tracker
-rolester tracker --verify && rolester tracker
-```
-
-Both must exit 0 **and** the row must now be present (confirm by `id`). If the row
-is missing or validation fails, **stop** — the application is not recorded. Fix the
-row write and re-run 9b before doing anything else. Do not proceed to 9c.
+- **DB workspace:** each `rolester data <verb>` call in 9a already persisted and
+  auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data
+  Write Contract, AGENTS.md). Run:
+  ```
+  rolester data verify
+  rolester tracker --verify
+  ```
+  `rolester data verify` re-exports then runs the same domain-integrity check as
+  `npm run verify:tracker`; `rolester tracker --verify` covers the ajv
+  schema-level check `data verify` doesn't run. Both must exit 0 **and** the row
+  must now be present (confirm by `id`). If either fails or the row is missing,
+  **stop** — fix it with another `app set-fields` / `comm upsert` call (never
+  hand-edit `tracker.json`, it is a regenerated file) and re-run 9b. Do not
+  proceed to 9c.
+- **Legacy workspace (no DB):** run validation and re-render in sequence:
+  ```
+  npm run verify:tracker
+  rolester tracker --verify && rolester tracker
+  ```
+  Both must exit 0 **and** the row must now be present (confirm by `id`). If the row
+  is missing or validation fails, **stop** — the application is not recorded. Fix the
+  row write and re-run 9b before doing anything else. Do not proceed to 9c.
 
 ### 9c — Downloads copy (only after 9b passes)
 
@@ -331,11 +424,18 @@ Then log the submission to the Activity Pulse feed (the dashboard's live timelin
 **Activity Pulse** in AGENTS.md). One event per submission; the id is content-derived, so
 a re-run never double-logs:
 
-```
-rolester activity append --type applied --actor agent \
-  --title "Applied — <Company>" --summary "<Role> · via <channel>" \
-  --company "<Company>" --role "<Role>" --app-id <application id> --url "<posting URL>" --write
-```
+- **DB workspace:** the 9a `app set-status` call already auto-logged one generic
+  `status_change` event in the same transaction. For the richer, submission-specific
+  type, log an additional event (this verb only logs, it never bumps the stamp):
+  ```
+  rolester data activity append --data '{"type":"applied","actor":"agent","title":"Applied — <Company>","summary":"<Role> · via <channel>","refs":{"applicationId":"<application id>","company":"<Company>","role":"<Role>","url":"<posting URL>"}}'
+  ```
+- **Legacy workspace (no DB):**
+  ```
+  rolester activity append --type applied --actor agent \
+    --title "Applied — <Company>" --summary "<Role> · via <channel>" \
+    --company "<Company>" --role "<Role>" --app-id <application id> --url "<posting URL>" --write
+  ```
 
 If any new application limit was learned during the apply flow (e.g. a blocker message or FAQ stating a reapply window): write it back to `candidate/application-limits.yml` using *confirm-first* friction, then echo what was written.
 
