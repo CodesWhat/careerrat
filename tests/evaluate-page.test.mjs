@@ -149,6 +149,16 @@ test("GET /api/runtime/config never lists a skill directory without a SKILL.md",
 });
 
 // ---------------------------------------------------------------------------
+// M3 — ?url= prefill from /search's "Evaluate" links
+// ---------------------------------------------------------------------------
+
+test("the inline script reads location.search's url param and prefills without auto-running", () => {
+  assert.match(EVALUATE_PAGE_HTML, /prefillFromQuery/);
+  assert.match(EVALUATE_PAGE_HTML, /URLSearchParams\(window\.location\.search\)/);
+  assert.match(EVALUATE_PAGE_HTML, /params\.get\("url"\)/);
+});
+
+// ---------------------------------------------------------------------------
 // Inline <script> — syntax-only guard, never executed (see client-script.test.mjs)
 // ---------------------------------------------------------------------------
 

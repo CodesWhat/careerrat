@@ -273,7 +273,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
     </div>
     <div id="finish-result" data-hook="finish-result" class="result"></div>
     <div id="finish-links" data-hook="finish-links" class="links" hidden>
-      <a id="link-search" data-hook="link-search" href="/search">Search (coming online)</a>
+      <a id="link-search" data-hook="link-search" href="/search">Search</a>
       <a id="link-evaluate" data-hook="link-evaluate" href="/evaluate">Evaluate a job</a>
       <a id="link-answer" data-hook="link-answer" href="/answer">Answer a question</a>
       <a id="link-tracker" data-hook="link-tracker" href="/tracker">Tracker</a>

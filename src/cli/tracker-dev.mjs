@@ -43,6 +43,7 @@ import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
 import { ONBOARD_PAGE_HTML } from "../core/onboarding/onboard-page.mjs";
+import { SEARCH_PAGE_HTML } from "../core/onboarding/search-page.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
 import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import {
@@ -54,6 +55,7 @@ import {
 } from "../core/tracker/dev-server.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
+import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -275,6 +277,20 @@ export function createDevServer({
     res.end(CHAT_PAGE_HTML);
   });
 
+  // M3 of the paid-POC journey — the /search surface over the existing
+  // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the
+  // sweep) is src/cli/search-route.mjs; its byte-static page is
+  // src/core/onboarding/search-page.mjs. Each result row's "Evaluate" link
+  // hands the posting URL to /evaluate?url=… (see evaluate-page.mjs's
+  // prefillFromQuery()) — the two pages are deliberately linked, not merged,
+  // so a scan can be re-run/browsed without re-running evaluate-job.
+  mountSearchRoutes({ addRoute, repoRoot, env });
+
+  addRoute("GET", "/search", (_req, res) => {
+    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
+    res.end(SEARCH_PAGE_HTML);
+  });
+
   // Idle/closed-session eviction — see chatRuntime.sweepOnce()'s own doc
   // comment. Started here (not gated behind main()'s CLI boot) so every
   // createDevServer() instance, including ones tests construct directly,
@@ -398,7 +414,7 @@ export function createDevServer({
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(
-      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /chat, /dashboard-data.js, " +
+      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /chat, /search, /dashboard-data.js, " +
         "/workspace/dashboard-data.js, " +
         "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
         "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
@@ -406,6 +422,7 @@ export function createDevServer({
         "/api/onboard/candidate/:name, /api/onboard/evidence-seed, /api/onboard/write-config, " +
         "/api/settings/ai-key, /api/settings/ai, /api/chat/start, /api/chat/events, /api/chat/message, " +
         "/api/chat/interrupt, /api/chat/close, /api/chat/by-skill, /api/chat/list, " +
+        "/api/search/scan, /api/search/results, /api/search/sources, " +
         "/assets/*, /fonts/*, and /__livereload."
     );
   });
@@ -652,6 +669,7 @@ Routes:
   GET  /answer                          Paste a screening question → live answer-question draft
   GET  /onboard                         Non-AI onboarding wizard (M1) — seed candidate files, BYOK key
   GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
+  GET  /search                          Deterministic ATS-board sweep results + "Run sweep" (M3)
   GET  /dashboard-data.js               Dashboard data module
   GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
   GET  /workspace/tracker.json          Raw tracker.json (static file)
@@ -679,6 +697,9 @@ Routes:
   POST /api/chat/close                  End a chat session
   GET  /api/chat/by-skill               Find the live chat session for a skill (?skill=<name>)
   GET  /api/chat/list                   List every tracked chat session
+  POST /api/search/scan                 Run the deterministic ATS-board sweep, persist + return the summary (M3)
+  GET  /api/search/results              Newest (or ?date=YYYY-MM-DD) persisted sweep summary
+  GET  /api/search/sources              Search-source/tracked-company presence counts
   GET  /assets/*, /fonts/*              Static assets
   GET  /__livereload                    Server-Sent Events: reload, tracker-update, activity-update
 

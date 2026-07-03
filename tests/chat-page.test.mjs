@@ -97,10 +97,7 @@ test("GET /chat's completion panel links to /onboard, /search, /evaluate, /track
       html,
       /<a id="link-onboard" data-hook="link-onboard" href="\/onboard">Onboarding wizard<\/a>/
     );
-    assert.match(
-      html,
-      /<a id="link-search" data-hook="link-search" href="\/search">Search \(coming soon\)<\/a>/
-    );
+    assert.match(html, /<a id="link-search" data-hook="link-search" href="\/search">Search<\/a>/);
     assert.match(
       html,
       /<a id="link-evaluate" data-hook="link-evaluate" href="\/evaluate">Evaluate a job<\/a>/

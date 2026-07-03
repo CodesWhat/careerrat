@@ -246,6 +246,23 @@ export const EVALUATE_PAGE_HTML = `<!doctype html>
   var lastGateSummary = "";
   var accumulatedText = "";
 
+  // M3 — /search rows link here as /evaluate?url=<encoded offer url> so a
+  // scanner hit can go straight to the body-read gate. Prefill only: never
+  // auto-run, since evaluate-job is a paid AI call the human should trigger
+  // deliberately.
+  function prefillFromQuery() {
+    try {
+      var params = new URLSearchParams(window.location.search);
+      var url = params.get("url");
+      if (url) {
+        input.value = url;
+        runBtn.focus();
+      }
+    } catch (err) {
+      // best effort — no url param, or URLSearchParams unsupported
+    }
+  }
+
   function truncate(text, max) {
     var t = String(text || "").replace(/\\s+/g, " ").trim();
     return t.length > max ? t.slice(0, max - 1) + "…" : t;
@@ -531,6 +548,8 @@ export const EVALUATE_PAGE_HTML = `<!doctype html>
     .catch(function () {
       applyAllowlist([]);
     });
+
+  prefillFromQuery();
 })();
 </script>
 </body>
