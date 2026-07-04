@@ -1,4 +1,9 @@
-import { runStructuredOneshot } from "./structured-oneshot.mjs";
+import { callAI } from "./call-ai.mjs";
+import {
+  buildCorrectiveAddendum,
+  parseStructuredJson,
+  runStructuredOneshot,
+} from "./structured-oneshot.mjs";
 
 export const BOUNDED_AI_CODES = Object.freeze({
   AI_SCHEMA_INVALID: "AI_SCHEMA_INVALID",
@@ -9,6 +14,12 @@ export const BOUNDED_AI_CODES = Object.freeze({
 
 export const BOUNDED_AI_MODES = Object.freeze({
   fallback: "fallback",
+  native: "native",
+});
+
+const STRUCTURED_MODES = Object.freeze({
+  fallback: "fallback",
+  nativePreferred: "native-preferred",
 });
 
 const LABEL_FIELDS = ["skill", "action", "operation"];
@@ -94,11 +105,32 @@ export function makeBoundedAIEnvelope({ ok, status, code, data, error, ai, manua
   return { status: Number(status) || (ok ? 200 : 500), body };
 }
 
+export function extractAIText(content) {
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((block) => {
+        if (typeof block === "string") return block;
+        if (!block || typeof block !== "object") return "";
+        if (block.type === "text" || Object.hasOwn(block, "text")) {
+          return String(block.text ?? "");
+        }
+        return "";
+      })
+      .join("");
+  }
+  if (content && typeof content === "object") {
+    if (Object.hasOwn(content, "text")) return String(content.text ?? "");
+    if (Object.hasOwn(content, "content")) return extractAIText(content.content);
+  }
+  return String(content ?? "");
+}
+
 function unwrapInvocationResult(result) {
   if (typeof result === "string") return { text: result, model: null };
   if (!result || typeof result !== "object") return { text: String(result ?? ""), model: null };
   return {
-    text: String(result.text ?? result.rawText ?? result.raw ?? result.content ?? ""),
+    text: extractAIText(result.text ?? result.rawText ?? result.raw ?? result.content ?? ""),
     model: trimString(result.model) || null,
   };
 }
@@ -151,6 +183,94 @@ function labelFailureEnvelope(err, manual) {
   });
 }
 
+function withDefined(base, fields) {
+  const output = { ...base };
+  for (const [key, value] of Object.entries(fields)) {
+    if (value !== undefined) output[key] = value;
+  }
+  return output;
+}
+
+function messagesForAttempt(messages, errors) {
+  const base = Array.isArray(messages) ? messages : [];
+  if (!errors) return base;
+  return [...base, { role: "user", content: buildCorrectiveAddendum(errors) }];
+}
+
+async function runNativePreferred({
+  labels,
+  schema,
+  manual,
+  maxRetries,
+  call,
+  messages,
+  system,
+  model: requestedModel,
+  maxTokens,
+  outputName,
+  root,
+  env,
+  signal,
+}) {
+  const nativeCall = call || callAI;
+  let attempt = 0;
+  let lastErrors = null;
+  let responseModel = null;
+
+  while (attempt <= maxRetries) {
+    const response = await nativeCall(
+      withDefined(
+        {
+          messages: messagesForAttempt(messages, lastErrors),
+          skill: labels.skill,
+          action: labels.action,
+          outputMode: "native",
+          outputSchema: schema,
+        },
+        { system, model: requestedModel, maxTokens, outputName, root, env, signal }
+      )
+    );
+    const unwrapped = unwrapInvocationResult(response);
+    if (unwrapped.model) responseModel = unwrapped.model;
+    const parsed = parseStructuredJson(unwrapped.text, schema);
+    if (parsed.ok) {
+      return makeBoundedAIEnvelope({
+        ok: true,
+        status: 200,
+        data: parsed.data,
+        ai: aiMetadata({
+          labels,
+          used: true,
+          mode: BOUNDED_AI_MODES.native,
+          retried: attempt > 0,
+          model: responseModel,
+        }),
+        manual,
+      });
+    }
+    lastErrors = parsed.errors;
+    attempt++;
+  }
+
+  return makeBoundedAIEnvelope({
+    ok: false,
+    status: 422,
+    code: BOUNDED_AI_CODES.AI_SCHEMA_INVALID,
+    error: {
+      message: "Model output did not match the route schema.",
+      details: lastErrors,
+    },
+    ai: aiMetadata({
+      labels,
+      used: true,
+      mode: BOUNDED_AI_MODES.native,
+      retried: maxRetries > 0,
+      model: responseModel,
+    }),
+    manual,
+  });
+}
+
 export async function runBoundedAI({
   labels,
   schema,
@@ -158,6 +278,16 @@ export async function runBoundedAI({
   maxRetries = 1,
   invoke,
   mode = BOUNDED_AI_MODES.fallback,
+  structuredMode = STRUCTURED_MODES.fallback,
+  call,
+  messages,
+  system,
+  model,
+  maxTokens,
+  outputName,
+  root,
+  env,
+  signal,
   structuredRunner = runStructuredOneshot,
 } = {}) {
   let normalizedLabels;
@@ -170,15 +300,33 @@ export async function runBoundedAI({
     throw err;
   }
 
-  let model = null;
+  let fallbackModel = null;
   try {
+    if (structuredMode === STRUCTURED_MODES.nativePreferred) {
+      return await runNativePreferred({
+        labels: normalizedLabels,
+        schema,
+        manual,
+        maxRetries,
+        call,
+        messages,
+        system,
+        model,
+        maxTokens,
+        outputName,
+        root,
+        env,
+        signal,
+      });
+    }
+
     const outcome = await structuredRunner({
       schema,
       maxRetries,
       invoke: async ({ attempt, correction }) => {
         const invocation = await invoke({ attempt, correction, labels: normalizedLabels });
         const unwrapped = unwrapInvocationResult(invocation);
-        if (unwrapped.model) model = unwrapped.model;
+        if (unwrapped.model) fallbackModel = unwrapped.model;
         return unwrapped.text;
       },
     });
@@ -193,7 +341,7 @@ export async function runBoundedAI({
           used: true,
           mode,
           retried: outcome.retried,
-          model,
+          model: fallbackModel,
         }),
         manual,
       });
@@ -212,18 +360,26 @@ export async function runBoundedAI({
         used: true,
         mode,
         retried: maxRetries > 0,
-        model,
+        model: fallbackModel,
       }),
       manual,
     });
   } catch (err) {
+    const failureMode =
+      structuredMode === STRUCTURED_MODES.nativePreferred ? BOUNDED_AI_MODES.native : mode;
     if (isNoAIError(err)) {
       return makeBoundedAIEnvelope({
         ok: false,
         status: 501,
         code: BOUNDED_AI_CODES.NO_AI_ROUTE,
         error: { message: "No AI route is configured for this bounded assist." },
-        ai: aiMetadata({ labels: normalizedLabels, used: false, mode, retried: false, model }),
+        ai: aiMetadata({
+          labels: normalizedLabels,
+          used: false,
+          mode: failureMode,
+          retried: false,
+          model: fallbackModel,
+        }),
         manual,
       });
     }
@@ -233,7 +389,13 @@ export async function runBoundedAI({
       status: 502,
       code: BOUNDED_AI_CODES.AI_PROVIDER_FAILED,
       error: { message: "AI provider request failed." },
-      ai: aiMetadata({ labels: normalizedLabels, used: true, mode, retried: false, model }),
+      ai: aiMetadata({
+        labels: normalizedLabels,
+        used: true,
+        mode: failureMode,
+        retried: false,
+        model: fallbackModel,
+      }),
       manual,
     });
   }
