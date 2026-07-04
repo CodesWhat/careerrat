@@ -107,8 +107,13 @@ asked for that specific mutation.
 
 ## STEP 4 — Write back and render
 
-After a successful confirmed write, append one compact record to
-`workspace/tracker.json#calendarWrites[]`:
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — use the
+`rolester data <verb>` command below (Data Write Contract, AGENTS.md). Nonzero
+exit → legacy workspace (no DB yet) — use the direct `tracker.json` write path
+below.
+
+After a successful confirmed provider write, persist one compact
+`calendarWrites[]` record:
 
 - `id`
 - `eventId`
@@ -122,7 +127,22 @@ After a successful confirmed write, append one compact record to
 
 Avoid duplicates by normalized `provider + eventId + eventIso + title`.
 
-Then run:
+**DB workspace:**
+
+```bash
+rolester data calendar write --data '<calendar write JSON>'
+rolester data verify
+rolester tracker --verify
+```
+
+`rolester data calendar write` bumps `meta.lastUpdatedAt`/`meta.version`, writes
+the Activity Pulse event, exports `workspace/tracker.json` +
+`workspace/activity.jsonl`, and dedupes by normalized
+`provider + eventId + eventIso + title`. Run `rolester tracker` afterward only
+when a static snapshot is needed or the dev server is not running.
+
+**Legacy workspace (no DB):** append the record directly to
+`workspace/tracker.json#calendarWrites[]`, then run:
 
 ```bash
 rolester tracker --verify

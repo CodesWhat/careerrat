@@ -713,6 +713,66 @@ from all parties before recording starts. If no recording, leave `recording: ""`
 
 ## STEP 6 — Append to tracker conversations[]
 
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — use the
+`rolester data <verb>` commands below (Data Write Contract, AGENTS.md). Nonzero
+exit → legacy workspace (no DB yet) — follow the direct `workspace/tracker.json`
+instructions in this step unchanged.
+
+**DB workspace:** never hand-edit `workspace/tracker.json` or
+`workspace/activity.jsonl`; they are generated exports. All content rules in
+this step (conversation shape, Content Register routing, dossier gating, the
+no-overwrite guard, atomic stage write-back) apply identically — only the write
+mechanism changes:
+
+- Append or replace `conversations[]`, row-level typed fields, and
+  `artifacts.interviewDossier` by reading the current exported application row,
+  building the full patched field set, and writing it with:
+
+  ```bash
+  rolester data app set-fields <application-id> --data '<patch JSON>'
+  ```
+
+- When setting a confirmed future interview datetime and the existing value is
+  absent or in the past, use the booking-aware verb first:
+
+  ```bash
+  rolester data app schedule-interview <application-id> --at <ISO datetime> --round "<canonical round kind>" --note "<interviewNote>"
+  ```
+
+  Then use `app set-fields` for the conversation entry, dossier artifact,
+  `stage`, `nextAction`, `nextActionDue`, `compNote`, `roleFit`, or other typed
+  fields. If a future `interviewAt` / `nextInterviewAt` already exists and the
+  invite context shows a different time, do not overwrite it here; flag the
+  discrepancy and hand the reschedule to `schedule-meeting`.
+
+- When the prep or debrief changes pipeline status, use:
+
+  ```bash
+  rolester data app set-status <application-id> <status> --note "<statusNote>"
+  ```
+
+  Then use `app set-fields` for non-status typed fields that are not part of
+  the status verb.
+
+- When STEP 3b offer-call handling also resolves a communication thread, patch
+  the full communication row and persist it with:
+
+  ```bash
+  rolester data comm upsert --data '<patched full communication row JSON>'
+  ```
+
+- After DB writes, run:
+
+  ```bash
+  rolester data verify
+  rolester tracker --verify
+  ```
+
+  Run `rolester tracker` afterward only when a static snapshot is needed or the
+  dev server is not running. Add a richer packet/debrief Activity Pulse event
+  only if needed with `rolester data activity append --data '<activity JSON>'`;
+  the domain verbs already export and log their own audit events.
+
 Locate the application row in `workspace/tracker.json`: match
 `applications[].id` first; if no `id`, match by `applications[].company` +
 `applications[].role`. If no row exists, halt and report — do not create a
@@ -783,7 +843,7 @@ interview" prompt rather than a broken preview.
 
 This makes the Focus card and Next Steps CTA reflect the actual next event. A partial write (dossier set, stage fields not updated) leaves a ghost CTA — write everything atomically.
 
-After editing `tracker.json`, run in sequence:
+**Legacy workspace (no DB):** after editing `tracker.json`, run in sequence:
 
 ```
 rolester tracker --verify

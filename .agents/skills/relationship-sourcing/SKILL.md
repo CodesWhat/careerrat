@@ -98,8 +98,31 @@ a person as an approved warm path until the candidate approves the lead.
 
 ## STEP 4 — Write back and render
 
-Append review leads to `workspace/tracker.json#relationshipLeads[]`. Avoid duplicate
-lead records by normalized `company + name + platform`.
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — use the
+`rolester data <verb>` command below (Data Write Contract, AGENTS.md). Nonzero
+exit → legacy workspace (no DB yet) — use the direct `tracker.json` write path
+below.
+
+Append review leads to `relationshipLeads[]`. Avoid duplicate lead records by
+normalized `company + name + platform`.
+
+**DB workspace:**
+
+```bash
+rolester data relationship leads upsert --data '<relationship lead JSON array>'
+rolester data verify
+rolester tracker --verify
+```
+
+`relationship leads upsert` persists `relationshipLeads[]`, dedupes by
+normalized `company + name + platform`, clears sourcing-related CTAs on linked
+jobs in the same transaction, writes Activity Pulse, and exports
+`workspace/tracker.json` + `workspace/activity.jsonl`. Run `rolester tracker`
+afterward only when a static snapshot is needed or the dev server is not
+running.
+
+**Legacy workspace (no DB):** append review leads to
+`workspace/tracker.json#relationshipLeads[]` directly.
 
 **CTA clear-down (same write):** For each target job row, inspect `jobs[id].nextAction`
 and `jobs[id].followUp` for any sourcing-related pending CTA (e.g. "find recruiter
@@ -128,6 +151,38 @@ The Network dashboard will show pending leads in **Lead review**. Approved leads
 become Network contacts; rejected leads stay out of the warm-path map.
 
 ## STEP 5 — Approval and outreach
+
+**DB workspace:**
+
+When the candidate approves a lead:
+
+```bash
+rolester data relationship lead set-status <lead-id> approved --at <ISO timestamp> --follow-up-due <ISO date>
+rolester data verify
+rolester tracker --verify
+```
+
+`relationship lead set-status` sets `relationshipLeads[n].status = "approved"`,
+records `approvedAt`, updates the linked job row to
+`nextAction: "Send outreach to <Name> via email-comms"`, sets `nextActionDue`,
+appends the internal conversation note, logs Activity Pulse, and exports
+tracker files in one transaction.
+
+When the candidate rejects a lead:
+
+```bash
+rolester data relationship lead set-status <lead-id> rejected --at <ISO timestamp> --note "<brief reason>"
+rolester data verify
+rolester tracker --verify
+```
+
+The same verb records `rejectedAt`, appends the internal note, and if no other
+`review` or `approved` leads remain for that target job, restates
+`nextAction: "Re-run relationship-sourcing for <Company>"` with
+`nextActionDue: null` in the same transaction. Run `rolester tracker` afterward
+only when a static snapshot is needed or the dev server is not running.
+
+**Legacy workspace (no DB):**
 
 **When the candidate approves a lead**, perform a single `workspace/tracker.json`
 write that covers all three mutations together:

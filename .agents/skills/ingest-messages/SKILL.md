@@ -178,7 +178,49 @@ the platform.
 
 ## STEP 6 — CAPTURE TO TRACKER
 
-For each confirmed-matched thread, update `workspace/tracker.json` directly.
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — use the
+`rolester data <verb>` commands below (Data Write Contract, AGENTS.md). Nonzero
+exit → legacy workspace (no DB yet) — use the direct `workspace/tracker.json`
+instructions further down in this step.
+
+**DB workspace:** for each confirmed-matched thread:
+
+1. Save any long raw body to `workspace/comms/<thread-id>.md` as before. This
+   artifact file write is local-only and is unaffected by DB vs legacy mode.
+2. Find or create the parent communication row by patching the full
+   communication object and persisting it:
+
+   ```bash
+   rolester data comm upsert --data '<full communication row JSON>'
+   ```
+
+3. Append each newly captured message in chronological order:
+
+   ```bash
+   rolester data comm append-message <comm-id> --data '<message JSON>'
+   ```
+
+4. If the thread changes parent communication state (`status`, `lastInboundAt`,
+   `nextAction`, `nextActionDue`, `draft`), patch the full communication row
+   from the current exported tracker state and persist it again:
+
+   ```bash
+   rolester data comm upsert --data '<patched full communication row JSON>'
+   ```
+
+5. For outcome-signal threads, follow STEP 7: defer intermediate `needs-reply`
+   writes, hand the outcome to `track-outcomes`, then persist only the resolved
+   communication state after `track-outcomes` returns. Do not hand-edit
+   `tracker.json` or `activity.jsonl` in DB mode.
+
+The communication verbs bump/export/log Activity Pulse events automatically.
+Add a richer inbound-thread event only if needed with
+`rolester data activity append --data '<activity JSON>'`. The message shape,
+status-transition rules, privacy invariant, and gate write-back rules below
+apply in both modes.
+
+**Legacy workspace (no DB):** for each confirmed-matched thread, update
+`workspace/tracker.json` directly.
 
 Find or create the `communications[]` record with fields:
 `id`, `applicationId`, `company`, `role`, `status`, `summary`.
@@ -283,62 +325,66 @@ draft the response.
 
 ## STEP 8 — WRITE WATERMARK
 
-For each platform successfully polled, upsert the following object into
-`tracker.json`'s `sources[]` array:
+For each platform successfully polled, write the source watermark.
+
+**DB workspace:**
+
+```bash
+rolester data source watermark --at <ISO-8601 timestamp of now> --data '<source JSON or JSON array>'
+```
 
 LinkedIn:
+
 ```json
-{
-  "id": "linkedin-messages",
-  "kind": "linkedin-messages",
-  "name": "LinkedIn Messages",
-  "lastRunAt": "<ISO-8601 timestamp of now>"
-}
+{ "id": "linkedin-messages", "kind": "linkedin-messages", "name": "LinkedIn Messages", "lastRunAt": "<ISO-8601 timestamp of now>" }
 ```
 
 Wellfound:
+
 ```json
-{
-  "id": "wellfound-messages",
-  "kind": "wellfound-messages",
-  "name": "Wellfound Messages",
-  "lastRunAt": "<ISO-8601 timestamp of now>"
-}
+{ "id": "wellfound-messages", "kind": "wellfound-messages", "name": "Wellfound Messages", "lastRunAt": "<ISO-8601 timestamp of now>" }
 ```
 
-If an entry with the matching `id` already exists, update only `lastRunAt`.
-If no such entry exists, insert the full object.
+When both platforms were polled, pass a JSON array containing both objects.
+`source watermark` updates `sources[]` and `meta.lastSweepAt`, exports tracker
+files, and intentionally does not bump `meta.version`, `meta.lastUpdatedAt`, or
+Activity Pulse.
 
+**Legacy workspace (no DB):** upsert the same object(s) into
+`tracker.json#sources[]`. If an entry with the matching `id` already exists,
+update only `lastRunAt`. If no such entry exists, insert the full object.
 Write the changes directly to `workspace/tracker.json`.
 
 ## STEP 9 — VERIFY + RE-RENDER
 
-Run in sequence:
+**DB workspace:**
 
 ```bash
+rolester data verify
 rolester tracker --verify
-```
-
-Must exit 0. If it fails, do not proceed — show the validation errors and ask the
-user how to resolve them.
-
-```bash
 rolester tracker --followups
-```
-
-Confirm new threads appear in the follow-ups surface.
-
-```bash
 rolester tracker --summary
 ```
 
-Confirm message counts incremented for the matched applications.
+Both verify commands must exit 0. If either fails, do not proceed — show the
+validation errors and ask the user how to resolve them. Confirm new threads
+appear in the follow-ups surface and message counts incremented for the
+matched applications. Run `rolester tracker` afterward only when a static
+snapshot is needed or the dev server is not running.
+
+**Legacy workspace (no DB):**
 
 ```bash
+rolester tracker --verify
+rolester tracker --followups
+rolester tracker --summary
 rolester tracker
 ```
 
-Re-renders `workspace/tracker.html`.
+`rolester tracker --verify` must exit 0. If it fails, do not proceed — show the
+validation errors and ask the user how to resolve them. Confirm new threads
+appear in the follow-ups surface and message counts incremented. The final
+command re-renders `workspace/tracker.html`.
 
 Print a final ingest summary. The counts in this summary are agent-composed from
 the running tallies kept during STEPS 4–7 — they are NOT parsed from CLI output

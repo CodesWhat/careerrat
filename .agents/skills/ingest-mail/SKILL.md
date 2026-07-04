@@ -213,7 +213,53 @@ it outbound.
 
 ## STEP 7 — CAPTURE TO TRACKER
 
-For each confirmed-matched message, update `workspace/tracker.json` directly:
+**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — use the
+`rolester data <verb>` commands below (Data Write Contract, AGENTS.md). Nonzero
+exit → legacy workspace (no DB yet) — use the direct `workspace/tracker.json`
+instructions further down in this step.
+
+**DB workspace:** for each confirmed-matched message:
+
+1. Save any long raw body to `workspace/comms/<thread-id>.md` as before. This
+   artifact file write is local-only and is unaffected by DB vs legacy mode.
+2. Find or create the parent communication row by patching the full
+   communication object and persisting it:
+
+   ```bash
+   rolester data comm upsert --data '<full communication row JSON>'
+   ```
+
+3. Append the inbound message:
+
+   ```bash
+   rolester data comm append-message <comm-id> --data '<message JSON>'
+   ```
+
+4. If the message changes parent communication state (`status`,
+   `lastInboundAt`, `nextAction`, `nextActionDue`, `draft`,
+   `outcomeSignalUnresolved`), patch the full communication row from the
+   current exported tracker state and persist it again:
+
+   ```bash
+   rolester data comm upsert --data '<patched full communication row JSON>'
+   ```
+
+5. For outcome-signal records, follow STEP 8: write only the message append and
+   `lastInboundAt` first, hand the outcome to `track-outcomes`, and let
+   `track-outcomes` settle application state. If `track-outcomes` fails to
+   settle the communication state, persist the fallback communication row with
+   `status: "waiting"`, `nextAction: null`, `nextActionDue: null`,
+   `draft: null`, and `outcomeSignalUnresolved: true` through
+   `rolester data comm upsert`.
+
+The communication verbs bump/export/log Activity Pulse events automatically.
+Add a richer inbound-thread event only if needed with
+`rolester data activity append --data '<activity JSON>'`; do not hand-edit
+`activity.jsonl` in DB mode. The message shape, CTA-clearance rules, privacy
+invariant, and gate write-back rules below apply in both modes.
+
+**Legacy workspace (no DB):** for each confirmed-matched message, update
+`workspace/tracker.json` directly:
 
 Find or create the `communications[]` record with fields:
 `id`, `applicationId`, `company`, `role`, `channel: "email"`, `status`,
@@ -290,74 +336,71 @@ If `track-outcomes` fails or returns without writing `status`, `nextAction`, and
 
 Run this step unconditionally — even if STEP 8 (the track-outcomes hand-off) returned early or failed, the sweep happened, so the watermark must still be written. Write `lastRunAt` to the matching `sources[]` entry and also set `meta.lastSweepAt` to the same timestamp. Do **not** set `meta.lastUpdatedAt` here — that field drives the dashboard's "last updated" pill and must only be touched when this sweep actually mutated tracker data (a status, nextAction, or nextActionDue change). A sweep that found nothing or had no outcome-signal hand-offs must not reset that pill.
 
-Upsert the source object into `tracker.json`'s `sources[]` array.
+**DB workspace:**
+
+```bash
+rolester data source watermark --at <ISO-8601 timestamp of now> --data '<source JSON>'
+```
+
+Use one of these source objects:
 
 Apple Mail:
 
 ```json
-{
-  "id": "apple-mail",
-  "kind": "apple-mail",
-  "name": "Apple Mail",
-  "lastRunAt": "<ISO-8601 timestamp of now>"
-}
+{ "id": "apple-mail", "kind": "apple-mail", "name": "Apple Mail", "lastRunAt": "<ISO-8601 timestamp of now>" }
 ```
 
 Gmail webmail:
 
 ```json
-{
-  "id": "gmail-webmail",
-  "kind": "webmail",
-  "name": "Gmail webmail",
-  "lastRunAt": "<ISO-8601 timestamp of now>"
-}
+{ "id": "gmail-webmail", "kind": "webmail", "name": "Gmail webmail", "lastRunAt": "<ISO-8601 timestamp of now>" }
 ```
 
 Outlook webmail:
 
 ```json
-{
-  "id": "outlook-webmail",
-  "kind": "webmail",
-  "name": "Outlook webmail",
-  "lastRunAt": "<ISO-8601 timestamp of now>"
-}
+{ "id": "outlook-webmail", "kind": "webmail", "name": "Outlook webmail", "lastRunAt": "<ISO-8601 timestamp of now>" }
 ```
 
-If an entry with the selected source id already exists, update only `lastRunAt`.
-If no such entry exists, insert the full object.
+`source watermark` updates `sources[]` and `meta.lastSweepAt`, exports tracker
+files, and intentionally does not bump `meta.version`, `meta.lastUpdatedAt`, or
+Activity Pulse.
 
-Write the change directly to `workspace/tracker.json`.
+**Legacy workspace (no DB):** upsert the selected source object into
+`tracker.json#sources[]`. If an entry with the selected source id already
+exists, update only `lastRunAt`. If no such entry exists, insert the full
+object. Write the change directly to `workspace/tracker.json`.
 
 ## STEP 10 — VERIFY + RE-RENDER
 
-Run in sequence:
+**DB workspace:**
 
 ```bash
+rolester data verify
 rolester tracker --verify
-```
-
-Must exit 0. If it fails, do not proceed — show the validation errors and ask
-the user how to resolve them.
-
-```bash
 rolester tracker --followups
-```
-
-Confirm new threads appear in the follow-ups surface.
-
-```bash
 rolester tracker --summary
 ```
 
-Confirm message counts incremented for the matched applications.
+Both verify commands must exit 0. If either fails, do not proceed — show the
+validation errors and ask the user how to resolve them. Confirm new threads
+appear in the follow-ups surface and message counts incremented for the
+matched applications. Run `rolester tracker` afterward only when a static
+snapshot is needed or the dev server is not running.
+
+**Legacy workspace (no DB):**
 
 ```bash
+rolester tracker --verify
+rolester tracker --followups
+rolester tracker --summary
 rolester tracker
 ```
 
-Re-renders `workspace/tracker.html`.
+`rolester tracker --verify` must exit 0. If it fails, do not proceed — show the
+validation errors and ask the user how to resolve them. Confirm new threads
+appear in the follow-ups surface and message counts incremented. The final
+command re-renders `workspace/tracker.html`.
 
 Print a final ingest summary. The counts in this summary are agent-composed
 from the running tallies kept during Steps 5–8 — they are NOT parsed from
