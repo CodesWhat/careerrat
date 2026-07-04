@@ -38,11 +38,23 @@ const SEED_SCHEMA = {
 };
 
 const ROOT = "/tmp/rolester-test-root";
+const FORBIDDEN_CONTENT = [
+  "PROMPT_SECRET_02_07",
+  "RAW_MODEL_REPLY_02_07",
+  "RESUME_SECRET_02_07",
+  "JD_SECRET_02_07",
+  "CANDIDATE_FACT_SECRET_02_07",
+  "PAGE_BODY_SECRET_02_07",
+];
+const FORBIDDEN_TEXT = FORBIDDEN_CONTENT.join(" ");
 
 function assertNoSensitiveFields(value) {
   const serialized = JSON.stringify(value);
-  for (const field of ["raw", "prompt", "resume", "jd", "candidate", "bodyText"]) {
+  for (const field of ["raw", "prompt", "resume", "jd", "candidate", "bodyText", "body"]) {
     assert.doesNotMatch(serialized, new RegExp(`"${field}"\\s*:`));
+  }
+  for (const secret of FORBIDDEN_CONTENT) {
+    assert.equal(serialized.includes(secret), false, `envelope leaked ${secret}`);
   }
 }
 
@@ -96,6 +108,28 @@ test("requireBoundedAILabels rejects missing or blank labels before invocation",
     assert.equal(result.body.code, BOUNDED_AI_CODES.AI_LABELS_INVALID);
     assert.equal(result.body.ai.used, false);
     assertNoSensitiveFields(result.body);
+
+    let callInvoked = false;
+    const nativeResult = await runBoundedAI({
+      labels,
+      schema: SEED_SCHEMA,
+      manual: MANUAL,
+      structuredMode: "native-preferred",
+      call: async () => {
+        callInvoked = true;
+        return {
+          content: [{ type: "text", text: '{"seeds":[]}' }],
+          model: "claude-native-test",
+        };
+      },
+      messages: [{ role: "user", content: "Suggest company seeds." }],
+      root: ROOT,
+    });
+    assert.equal(callInvoked, false, `${name}: native call should not be called`);
+    assert.equal(nativeResult.status, 400);
+    assert.equal(nativeResult.body.code, BOUNDED_AI_CODES.AI_LABELS_INVALID);
+    assert.equal(nativeResult.body.ai.used, false);
+    assertNoSensitiveFields(nativeResult.body);
   }
 });
 
@@ -322,6 +356,45 @@ test("runBoundedAI maps generic provider errors to a safe 502 manual envelope", 
   assert.equal(result.body.ai.used, true);
   assert.equal(result.body.manual.available, true);
   assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI failure envelopes omit raw prompts, model text, and sensitive source content", async () => {
+  const schemaResult = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    maxRetries: 1,
+    invoke: async () => `not json ${FORBIDDEN_TEXT}`,
+  });
+  assert.equal(schemaResult.status, 422);
+  assert.equal(schemaResult.body.code, BOUNDED_AI_CODES.AI_SCHEMA_INVALID);
+  assertNoSensitiveFields(schemaResult.body);
+
+  const noAiError = new Error(`no AI route configured ${FORBIDDEN_TEXT}`);
+  noAiError.code = BOUNDED_AI_CODES.NO_AI_ROUTE;
+  const noAiResult = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    invoke: async () => {
+      throw noAiError;
+    },
+  });
+  assert.equal(noAiResult.status, 501);
+  assert.equal(noAiResult.body.code, BOUNDED_AI_CODES.NO_AI_ROUTE);
+  assertNoSensitiveFields(noAiResult.body);
+
+  const providerResult = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    invoke: async () => {
+      throw new Error(`provider echoed ${FORBIDDEN_TEXT}`);
+    },
+  });
+  assert.equal(providerResult.status, 502);
+  assert.equal(providerResult.body.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
+  assertNoSensitiveFields(providerResult.body);
 });
 
 test("runBoundedAI native-preferred mode maps provider failures to a safe 502 manual envelope", async () => {

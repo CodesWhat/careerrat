@@ -40,6 +40,15 @@ const PROXY_ENV = {
   ROLESTER_AI_PROXY_URL: "http://127.0.0.1:7788",
   ROLESTER_AI_PROXY_TOKEN: "devtoken",
 };
+const FORBIDDEN_CONTENT = [
+  "PROMPT_SECRET_02_07",
+  "RAW_MODEL_REPLY_02_07",
+  "RESUME_SECRET_02_07",
+  "JD_SECRET_02_07",
+  "CANDIDATE_FACT_SECRET_02_07",
+  "PAGE_BODY_SECRET_02_07",
+];
+const FORBIDDEN_TEXT = FORBIDDEN_CONTENT.join(" ");
 
 // Same fakeSdk() shape as tests/skill-runtime.test.mjs: an AsyncGenerator
 // that checks the abortController's signal every step. `onQuery` lets a test
@@ -145,6 +154,16 @@ function assertAssistLabels(body, kind, { used = true, retried = false } = {}) {
   assert.equal(body.ai.label, `assist:suggest-${kind}:assist.suggest.${kind}`);
   assert.equal(body.ai.mode, "fallback");
   assert.equal(body.ai.retried, retried);
+}
+
+function assertNoSensitiveRouteEnvelope(body) {
+  const serialized = JSON.stringify(body);
+  for (const key of ["prompt", "body", "raw", "rawText", "resume", "jd", "candidate", "bodyText"]) {
+    assert.doesNotMatch(serialized, new RegExp(`"${key}"\\s*:`));
+  }
+  for (const secret of FORBIDDEN_CONTENT) {
+    assert.equal(serialized.includes(secret), false, `route envelope leaked ${secret}`);
+  }
 }
 
 after(() => {
@@ -276,7 +295,7 @@ test("POST /api/assist/suggest: retry-then-ok — first reply malformed, second 
 test("POST /api/assist/suggest: 422s when the model never produces valid output, even after the retry", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot, {
-    loadSdk: async () => fakeSdk(assistantTextRun("still not json")),
+    loadSdk: async () => fakeSdk(assistantTextRun(`still not json ${FORBIDDEN_TEXT}`)),
   });
   try {
     const { status, body } = await postJson(server, "/api/assist/suggest", {
@@ -291,6 +310,32 @@ test("POST /api/assist/suggest: 422s when the model never produces valid output,
     assert.equal(body.ai.retried, true);
     assertNoLegacySuggestionFields(body);
     assert.match(body.error.message, /route schema/);
+    assertNoSensitiveRouteEnvelope(body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/assist/suggest: provider failures return safe envelopes without raw content", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot, {
+    loadSdk: async () => {
+      throw new Error(`provider echoed ${FORBIDDEN_TEXT}`);
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/assist/suggest", {
+      kind: "titles",
+      input: { profileSummary: `profile ${FORBIDDEN_TEXT}` },
+    });
+    assert.equal(status, 502);
+    assert.equal(body.ok, false);
+    assert.equal(body.code, "AI_PROVIDER_FAILED");
+    assert.equal(body.ai.used, true);
+    assertAssistLabels(body, "titles");
+    assert.equal(body.manual.available, true);
+    assertNoLegacySuggestionFields(body);
+    assertNoSensitiveRouteEnvelope(body);
   } finally {
     await closeServer(server);
   }

@@ -31,7 +31,7 @@ const NON_STREAM_BODY = {
   id: "msg_1",
   type: "message",
   role: "assistant",
-  content: [{ type: "text", text: "hello" }],
+  content: [{ type: "text", text: "hello RAW_MODEL_REPLY_02_07" }],
   model: "claude-sonnet-5",
   stop_reason: "end_turn",
   stop_sequence: null,
@@ -42,6 +42,55 @@ const NON_STREAM_BODY = {
     cache_read_input_tokens: 100,
   },
 };
+
+const ALLOWED_USAGE_KEYS = [
+  "id",
+  "at",
+  "source",
+  "skill",
+  "action",
+  "model",
+  "upstream",
+  "tokens_in",
+  "tokens_out",
+  "cache_read_tokens",
+  "cache_creation_tokens",
+  "web_searches",
+  "shared_cache_hit",
+  "cost_usd",
+  "priced",
+];
+const FORBIDDEN_USAGE_KEYS = [
+  "prompt",
+  "body",
+  "requestBody",
+  "responseBody",
+  "raw",
+  "rawText",
+  "content",
+  "messages",
+  "outputSchema",
+  "schema",
+];
+const FORBIDDEN_CONTENT = [
+  "PROMPT_SECRET_02_07",
+  "RAW_MODEL_REPLY_02_07",
+  "RESUME_SECRET_02_07",
+  "JD_SECRET_02_07",
+  "CANDIDATE_FACT_SECRET_02_07",
+  "PAGE_BODY_SECRET_02_07",
+];
+
+function assertUsageEventIsMetadataOnly(event) {
+  assert.deepEqual(Object.keys(event).sort(), [...ALLOWED_USAGE_KEYS].sort());
+  for (const key of FORBIDDEN_USAGE_KEYS) {
+    assert.equal(Object.hasOwn(event, key), false, `usage row leaked key ${key}`);
+  }
+  const serialized = JSON.stringify(event);
+  for (const secret of FORBIDDEN_CONTENT) {
+    assert.equal(serialized.includes(secret), false, `usage row leaked ${secret}`);
+  }
+}
 
 function sseFixture(model) {
   const events = [
@@ -327,6 +376,67 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
     assert.equal(events[0].priced, true);
     assert.equal(events[0].cost_usd, expected.cost_usd);
     assert.equal(events[0].upstream, new URL(upstream.url).host); // cost-drift visibility
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy (non-stream): metered bounded calls write labels and allowed usage keys only", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "devtok",
+    upstreamKey: "sk-real-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+  });
+  try {
+    const reqBody = JSON.stringify({
+      model: "claude-sonnet-5",
+      max_tokens: 32,
+      messages: [
+        {
+          role: "user",
+          content:
+            "PROMPT_SECRET_02_07 RESUME_SECRET_02_07 JD_SECRET_02_07 " +
+            "CANDIDATE_FACT_SECRET_02_07 PAGE_BODY_SECRET_02_07",
+        },
+      ],
+      output_config: {
+        format: {
+          type: "json_schema",
+          name: "company_seed_response",
+          schema: {
+            type: "object",
+            additionalProperties: false,
+            properties: { seeds: { type: "array" } },
+            required: ["seeds"],
+          },
+        },
+      },
+    });
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer devtok",
+        "content-type": "application/json",
+        "x-rolester-skill": "discover-companies",
+        "x-rolester-action": "seed-generate",
+      },
+      body: reqBody,
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+
+    const events = readUsageEvents({ root });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].source, "proxy");
+    assert.equal(events[0].skill, "discover-companies");
+    assert.equal(events[0].action, "seed-generate");
+    assert.equal(events[0].model, "claude-sonnet-5");
+    assertUsageEventIsMetadataOnly(events[0]);
   } finally {
     proxy.close();
     upstream.close();

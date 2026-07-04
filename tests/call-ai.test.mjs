@@ -24,7 +24,7 @@ const NON_STREAM_BODY = {
   id: "msg_1",
   type: "message",
   role: "assistant",
-  content: [{ type: "text", text: "hello" }],
+  content: [{ type: "text", text: "hello RAW_MODEL_REPLY_02_07" }],
   model: "claude-haiku-4-5",
   stop_reason: "end_turn",
   stop_sequence: null,
@@ -45,6 +45,55 @@ const OUTPUT_SCHEMA = {
   },
   required: ["verdict", "confidence"],
 };
+
+const ALLOWED_USAGE_KEYS = [
+  "id",
+  "at",
+  "source",
+  "skill",
+  "action",
+  "model",
+  "upstream",
+  "tokens_in",
+  "tokens_out",
+  "cache_read_tokens",
+  "cache_creation_tokens",
+  "web_searches",
+  "shared_cache_hit",
+  "cost_usd",
+  "priced",
+];
+const FORBIDDEN_USAGE_KEYS = [
+  "prompt",
+  "body",
+  "requestBody",
+  "responseBody",
+  "raw",
+  "rawText",
+  "content",
+  "messages",
+  "outputSchema",
+  "schema",
+];
+const FORBIDDEN_CONTENT = [
+  "PROMPT_SECRET_02_07",
+  "RAW_MODEL_REPLY_02_07",
+  "RESUME_SECRET_02_07",
+  "JD_SECRET_02_07",
+  "CANDIDATE_FACT_SECRET_02_07",
+  "PAGE_BODY_SECRET_02_07",
+];
+
+function assertUsageEventIsMetadataOnly(event) {
+  assert.deepEqual(Object.keys(event).sort(), [...ALLOWED_USAGE_KEYS].sort());
+  for (const key of FORBIDDEN_USAGE_KEYS) {
+    assert.equal(Object.hasOwn(event, key), false, `usage row leaked key ${key}`);
+  }
+  const serialized = JSON.stringify(event);
+  for (const secret of FORBIDDEN_CONTENT) {
+    assert.equal(serialized.includes(secret), false, `usage row leaked ${secret}`);
+  }
+}
 
 function sseFixture(model) {
   const events = [
@@ -226,6 +275,43 @@ test("callAI (BYOK, native output): sends Anthropic json_schema output_config", 
     assert.deepEqual(req.body.output_config.format.schema, OUTPUT_SCHEMA);
   } finally {
     upstream.close();
+  }
+});
+
+test("callAI (BYOK, native output): usage rows preserve labels and metadata-only keys", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  try {
+    await callAI({
+      model: "claude-haiku-4-5",
+      messages: [
+        {
+          role: "user",
+          content:
+            "classify PROMPT_SECRET_02_07 RESUME_SECRET_02_07 JD_SECRET_02_07 " +
+            "CANDIDATE_FACT_SECRET_02_07 PAGE_BODY_SECRET_02_07",
+        },
+      ],
+      maxTokens: 16,
+      outputMode: "native",
+      outputName: "classification",
+      outputSchema: OUTPUT_SCHEMA,
+      skill: "discover-companies",
+      action: "seed-generate",
+      root,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+    });
+
+    const events = readUsageEvents({ root });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].source, "byok");
+    assert.equal(events[0].skill, "discover-companies");
+    assert.equal(events[0].action, "seed-generate");
+    assert.equal(events[0].model, "claude-haiku-4-5");
+    assertUsageEventIsMetadataOnly(events[0]);
+  } finally {
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
   }
 });
 

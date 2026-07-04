@@ -35,6 +35,15 @@ import { parseYaml } from "../src/core/profile/yaml.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
+const FORBIDDEN_CONTENT = [
+  "PROMPT_SECRET_02_07",
+  "RAW_MODEL_REPLY_02_07",
+  "RESUME_SECRET_02_07",
+  "JD_SECRET_02_07",
+  "CANDIDATE_FACT_SECRET_02_07",
+  "PAGE_BODY_SECRET_02_07",
+];
+const FORBIDDEN_TEXT = FORBIDDEN_CONTENT.join(" ");
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -132,6 +141,16 @@ function baseUrl(server) {
 
 function closeServer(server) {
   return new Promise((resolve) => server.close(resolve));
+}
+
+function assertNoSensitiveRouteEnvelope(body) {
+  const serialized = JSON.stringify(body);
+  for (const key of ["prompt", "body", "raw", "rawText", "resume", "jd", "candidate", "bodyText"]) {
+    assert.doesNotMatch(serialized, new RegExp(`"${key}"\\s*:`));
+  }
+  for (const secret of FORBIDDEN_CONTENT) {
+    assert.equal(serialized.includes(secret), false, `route envelope leaked ${secret}`);
+  }
 }
 
 async function postJson(server, path, payload) {
@@ -552,8 +571,8 @@ describe("POST /api/onboard/resume-ai", () => {
 
   it("422s when the model never produces valid structured output, even after the retry", async () => {
     const repoRoot = buildTempRoot();
-    const invalidReply = "still not json on retry either";
-    const runSkillStream = fakeRunSkillStream(["still not json", invalidReply]);
+    const invalidReply = `still not json on retry either ${FORBIDDEN_TEXT}`;
+    const runSkillStream = fakeRunSkillStream([`still not json ${FORBIDDEN_TEXT}`, invalidReply]);
     const { server } = await bootServer(repoRoot, {}, { runSkillStream });
     try {
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
@@ -563,6 +582,7 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(body.manual.available, true);
       assert.equal(body.raw, undefined);
       assert.equal(JSON.stringify(body).includes(invalidReply), false);
+      assertNoSensitiveRouteEnvelope(body);
     } finally {
       await closeServer(server);
     }
@@ -588,7 +608,7 @@ describe("POST /api/onboard/resume-ai", () => {
   it("501s when runSkillStream rejects with NO_AI_ROUTE (no key configured)", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = async () => {
-      const err = new Error("no AI route configured");
+      const err = new Error(`no AI route configured ${FORBIDDEN_TEXT}`);
       err.code = "NO_AI_ROUTE";
       throw err;
     };
@@ -603,6 +623,7 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(body.ai.action, "resume-ai");
       assert.equal(body.ai.operation, "onboard.resume-ai");
       assert.equal(body.manual.available, true);
+      assertNoSensitiveRouteEnvelope(body);
     } finally {
       await closeServer(server);
     }
@@ -611,7 +632,9 @@ describe("POST /api/onboard/resume-ai", () => {
   it("502s when runSkillStream rejects with SDK_NOT_INSTALLED", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = async () => {
-      const err = new Error("the claude-agent-sdk devDependency is not installed");
+      const err = new Error(
+        `the claude-agent-sdk devDependency is not installed ${FORBIDDEN_TEXT}`
+      );
       err.code = "SDK_NOT_INSTALLED";
       throw err;
     };
@@ -623,6 +646,7 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(body.code, "AI_PROVIDER_FAILED");
       assert.equal(body.ai.used, true);
       assert.equal(body.manual.available, true);
+      assertNoSensitiveRouteEnvelope(body);
     } finally {
       await closeServer(server);
     }
@@ -646,10 +670,10 @@ describe("POST /api/onboard/resume-ai", () => {
   });
 
   for (const [code, message] of [
-    ["AI_PROVIDER_FAILED", "provider returned 500"],
-    ["AI_PROXY_FAILED", "proxy unavailable"],
-    ["AI_TIMEOUT", "provider timed out"],
-    ["AI_TRANSPORT_FAILED", "transport disconnected"],
+    ["AI_PROVIDER_FAILED", `provider returned 500 ${FORBIDDEN_TEXT}`],
+    ["AI_PROXY_FAILED", `proxy unavailable ${FORBIDDEN_TEXT}`],
+    ["AI_TIMEOUT", `provider timed out ${FORBIDDEN_TEXT}`],
+    ["AI_TRANSPORT_FAILED", `transport disconnected ${FORBIDDEN_TEXT}`],
   ]) {
     it(`502s with AI_PROVIDER_FAILED when runSkillStream rejects with ${code}`, async () => {
       const repoRoot = buildTempRoot();
@@ -667,6 +691,7 @@ describe("POST /api/onboard/resume-ai", () => {
         assert.equal(body.ai.used, true);
         assert.equal(body.manual.available, true);
         assert.equal(JSON.stringify(body).includes(message), false);
+        assertNoSensitiveRouteEnvelope(body);
       } finally {
         await closeServer(server);
       }
