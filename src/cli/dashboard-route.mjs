@@ -32,9 +32,11 @@
 //
 // Fail-closed 409 no-DB, same as every other /api/data/* route (decision 7,
 // see data-route.mjs's own header comment). Envelope shape matches that same
-// file: { ok, meta: { version, lastUpdatedAt }, data }.
+// file, with setup readiness kept outside the parity-tested view model:
+// { ok, meta: { version, lastUpdatedAt }, data, setup }.
 import { requireDb } from "../core/db/connection.mjs";
 import { assembleActivityEvents, assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
+import { candidateConfigGet } from "../core/db/verbs.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../core/tracker/dashboard-data.js";
@@ -53,7 +55,19 @@ function statusForError(err) {
 }
 
 function respondError(res, err) {
-  sendJson(res, statusForError(err), { ok: false, error: err?.message || String(err) });
+  sendJson(res, statusForError(err), {
+    ok: false,
+    setup: null,
+    error: err?.message || String(err),
+  });
+}
+
+function readSetup({ repoRoot, env, candidateConfigGetForRoute }) {
+  try {
+    return candidateConfigGetForRoute({ repoRoot, env })?.setup || null;
+  } catch {
+    return null;
+  }
 }
 
 // `now` is injectable (mirrors chat-runtime.mjs's own `now = () => Date.now()`
@@ -66,6 +80,7 @@ export function mountDashboardRoutes({
   repoRoot,
   env = process.env,
   now = () => new Date(),
+  candidateConfigGet: candidateConfigGetForRoute = candidateConfigGet,
 }) {
   addRoute("GET", "/api/data/dashboard", (_req, res) => {
     let db;
@@ -93,7 +108,9 @@ export function mountDashboardRoutes({
         agentGuidance,
       });
 
-      sendJson(res, 200, { ok: true, meta: readMeta(db), data: viewModel });
+      const setup = readSetup({ repoRoot, env, candidateConfigGetForRoute });
+
+      sendJson(res, 200, { ok: true, meta: readMeta(db), data: viewModel, setup });
     } catch (err) {
       respondError(res, err);
     }

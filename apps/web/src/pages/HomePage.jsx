@@ -1,8 +1,11 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Card } from "../components/Card.jsx";
 import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
+import { getDashboard } from "../lib/api.js";
+import { SetupReadinessCard } from "./SetupReadinessCard.jsx";
 
 // / (Home) — M10: Focus card (buildFocusCard's exact 4-branch priority:
 // interview → action → review → clear) + the pipeline snapshot stat row
@@ -18,6 +21,21 @@ const FOCUS_TONE_BADGE = {
 
 export function HomePage() {
   const { data, loading, error, noDatabase } = useDashboardSnapshot();
+  const [setup, setSetup] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getDashboard()
+      .then((snapshot) => {
+        if (!cancelled) setSetup(snapshot?.setup || null);
+      })
+      .catch(() => {
+        if (!cancelled) setSetup(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   if (noDatabase) {
     return (
@@ -37,6 +55,7 @@ export function HomePage() {
 
       {data ? (
         <>
+          <SetupReadinessCard setup={setup} />
           <FocusCard focus={data.focus} />
           <PipelineSnapshot rail={data.jobs.rail} />
           <NextStepsQueue nextSteps={data.nextSteps} />

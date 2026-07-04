@@ -19,9 +19,9 @@
 //     already covers directly)
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { mountDashboardRoutes } from "../src/cli/dashboard-route.mjs";
@@ -37,6 +37,7 @@ import { loadSettingsSnapshot } from "../src/core/tracker/settings-snapshot.mjs"
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const DEMO_DIR = join(REAL_ROOT, "examples/demo-workspace");
 const cleanupRoots = [];
+const READINESS_KEYS = ["search_ready", "gate_ready", "apply_ready", "deep_ingest_complete"];
 
 // A fresh repoRoot with just enough of the real tree for loadModes() to work
 // (it unconditionally reads config/modes.schema.json regardless of whether
@@ -68,51 +69,72 @@ after(() => {
   }
 });
 
-function bootServer(repoRoot, { now } = {}) {
+function bootServer(repoRoot, { now, candidateConfigGet } = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-  mountDashboardRoutes({ addRoute, repoRoot, env: {}, ...(now ? { now } : {}) });
+  mountDashboardRoutes({
+    addRoute,
+    repoRoot,
+    env: {},
+    ...(now ? { now } : {}),
+    ...(candidateConfigGet ? { candidateConfigGet } : {}),
+  });
   mountDataRoutes({ addRoute, repoRoot, env: {} });
-
-  const server = createServer((req, res) => {
-    const url = (req.url || "/").split("?")[0];
-    const route = routes.get(`${req.method} ${url}`);
-    if (!route) {
-      res.writeHead(404).end();
-      return;
-    }
-    route(req, res);
-  });
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => resolve(server));
-  });
+  return { routes };
 }
 
-function baseUrl(server) {
-  const { port } = server.address();
-  return `http://127.0.0.1:${port}`;
+function closeServer(_server) {
+  return Promise.resolve();
 }
 
-function closeServer(server) {
-  return new Promise((resolve) => server.close(resolve));
+async function invokeJson(server, method, path, payload) {
+  const routePath = path.split("?")[0];
+  const route = server.routes.get(`${method} ${routePath}`);
+  if (!route) return { status: 404, body: {} };
+
+  const bodyText = payload === undefined ? "" : JSON.stringify(payload ?? {});
+  const req = Readable.from(bodyText ? [Buffer.from(bodyText)] : []);
+  req.method = method;
+  req.url = path;
+
+  let status = 200;
+  let responseText = "";
+  const done = new Promise((resolve) => {
+    const res = {
+      writeHead(nextStatus) {
+        status = nextStatus;
+        return res;
+      },
+      end(chunk = "") {
+        responseText = Buffer.isBuffer(chunk) ? chunk.toString("utf8") : String(chunk);
+        resolve();
+      },
+    };
+    Promise.resolve(route(req, res)).catch((err) => {
+      status = 500;
+      responseText = JSON.stringify({ ok: false, error: err.message });
+      resolve();
+    });
+  });
+  await done;
+
+  let body = {};
+  try {
+    body = responseText ? JSON.parse(responseText) : {};
+  } catch {
+    body = { raw: responseText };
+  }
+  return { status, body };
 }
 
 async function getJson(server, path) {
-  const res = await fetch(`${baseUrl(server)}${path}`);
-  const body = await res.json().catch(() => ({}));
-  return { status: res.status, body };
+  return invokeJson(server, "GET", path);
 }
 
 async function postJson(server, path, payload) {
-  const res = await fetch(`${baseUrl(server)}${path}`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(payload ?? {}),
-  });
-  const body = await res.json().catch(() => ({}));
-  return { status: res.status, body };
+  return invokeJson(server, "POST", path, payload);
 }
 
 function seedFixture(repoRoot, tracker) {
@@ -132,6 +154,7 @@ test("GET /api/data/dashboard: 409 with the fail-closed message when no db exist
   try {
     const { status, body } = await getJson(server, "/api/data/dashboard");
     assert.equal(status, 409);
+    assert.equal(body.setup, null);
     assert.match(body.error, /no database yet/);
     assert.match(body.error, /rolester data import/);
   } finally {
@@ -180,6 +203,37 @@ test("GET /api/data/dashboard: the route's view model deep-equals a direct build
     });
 
     assert.deepEqual(body.data, direct);
+    assert.equal(body.data.setup, undefined);
+    assert.deepEqual(Object.keys(body.setup.readiness).sort(), READINESS_KEYS.slice().sort());
+    assert.deepEqual(Object.keys(body.setup.missing).sort(), READINESS_KEYS.slice().sort());
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("GET /api/data/dashboard: setup derivation errors degrade to setup null while the route still returns the dashboard", async () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot, {
+    meta: {},
+    applications: [
+      { id: "app-1", company: "Aperture Science", role: "Test Engineer", status: "applied" },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  });
+
+  const server = await bootServer(repoRoot, {
+    candidateConfigGet: () => {
+      throw new Error("setup unavailable");
+    },
+  });
+  try {
+    const { status, body } = await getJson(server, "/api/data/dashboard");
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.setup, null);
+    assert.equal(body.data.jobs.rows[0].company, "Aperture Science");
   } finally {
     await closeServer(server);
   }
