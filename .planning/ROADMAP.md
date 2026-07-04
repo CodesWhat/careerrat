@@ -26,12 +26,18 @@
 **Plans:** 4 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 01-01-PLAN.md — Create the skill decomposition inventory.
 - [ ] 01-02-PLAN.md — Create the `discover-companies` target contract.
 - [ ] 01-03-PLAN.md — Create the runtime routing policy.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 01-04-PLAN.md — Create the decomposition-map validation test.
 
 **Success Criteria**:
+
 1. A project-local decomposition artifact lists each high-priority skill and its deterministic, bounded-AI, full-skill, and deferred pieces.
 2. `discover-companies` has a detailed target contract that names its AI seed schema, deterministic resolver, scanner, confirmation, and write path.
 3. The routing policy explains when UI, CLI, and agents should call local APIs versus `POST /api/skill/run`.
@@ -45,6 +51,7 @@ Plans:
 **Requirements:** AIR-01, AIR-02, AIR-03, AIR-04
 
 **Success Criteria**:
+
 1. Bounded AI routes have a common invocation pattern using `callAI()` or `runStructuredOneshot()`.
 2. Route schemas and parse/retry behavior are tested without making real model calls.
 3. No-AI responses use a consistent response shape that app surfaces can render as manual paths.
@@ -58,6 +65,7 @@ Plans:
 **Requirements:** DISC-01, DISC-02, DISC-03, DISC-04, DISC-05
 
 **Success Criteria**:
+
 1. Company seed generation returns schema-validated JSON using candidate context and dedup inputs.
 2. Deterministic code resolves candidate companies to supported ATS URLs and rejects unsupported boards.
 3. Existing ATS provider scanners verify current relevant roles before a company is proposed.
@@ -72,6 +80,7 @@ Plans:
 **Requirements:** RUNT-01, RUNT-02, RUNT-03
 
 **Success Criteria**:
+
 1. App discovery controls call the new company discovery API instead of starting a whole skill session.
 2. `POST /api/skill/run` remains documented, allowlisted, and available for flows that still need agent tools.
 3. Discovery chat handoffs remain available for users who want an agent-led workflow.
@@ -85,6 +94,7 @@ Plans:
 **Requirements:** VER-01, VER-02, VER-03, VER-04, VER-05
 
 **Success Criteria**:
+
 1. Tests prove deterministic discovery resolver/scanner/write paths do not invoke AI.
 2. Tests cover malformed AI JSON, schema rejection, and corrective retry.
 3. Tests cover no-AI route behavior and manual fallback metadata.

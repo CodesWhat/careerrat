@@ -382,22 +382,22 @@ export function companyAtsUpsert({ repoRoot, env, entry } = {}) {
 
 All factual claims in this research were traced to repo files, phase context, commands, or targeted tests. No `[ASSUMED]` claims are used. [VERIFIED: codebase grep; environment probe; test run]
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Should `.planning/architecture/skill-decomposition.yml` become runtime-consumed later?**
    - What we know: Phase 1 only needs an implementation map before runtime changes. [VERIFIED: .planning/ROADMAP.md]
-   - What's unclear: Future phases may want route code to consume decomposition metadata. [VERIFIED: .planning/STATE.md]
-   - Recommendation: Keep Phase 1 artifacts testable but not runtime-consumed; defer runtime consumption until routing code needs it. [VERIFIED: .planning/ROADMAP.md]
+   - Deferred boundary: Future phases may want route code to consume decomposition metadata. [VERIFIED: .planning/STATE.md]
+   - Resolution: Keep Phase 1 artifacts testable but not runtime-consumed; defer runtime consumption until routing code needs it. [VERIFIED: .planning/ROADMAP.md]
 
 2. **Which UI surface should confirm company proposals?**
    - What we know: Current `/api/discovery/next` starts confirm-first chat sessions and `/search` owns scan controls. [VERIFIED: src/cli/discovery-route.mjs; src/cli/search-route.mjs]
-   - What's unclear: The final proposal confirmation surface is not locked in STATE. [VERIFIED: .planning/STATE.md]
-   - Recommendation: Phase 1 should name a "discovery proposal confirmation" contract without binding the final screen; Phase 3/4 can choose the UI. [VERIFIED: .planning/ROADMAP.md]
+   - Deferred boundary: The final proposal confirmation surface is not locked in STATE. [VERIFIED: .planning/STATE.md]
+   - Resolution: Phase 1 names a "discovery proposal confirmation" contract without binding the final screen; Phase 3/4 can choose the UI. [VERIFIED: .planning/ROADMAP.md]
 
 3. **What exact DB table should hold board-resolution cache?**
    - What we know: Existing source config table only stores `search-sources` and `sourced-scan`, and company ATS entries reject unsupported hosts. [VERIFIED: src/core/db/migrations/005-source-config.mjs; src/core/db/verbs/source-config.mjs]
-   - What's unclear: Whether to extend `candidate_source_configs` JSON or add a dedicated table is not implemented. [VERIFIED: codebase grep]
-   - Recommendation: Phase 1 target contract should specify the fields and owner boundary, while Phase 3 chooses table shape with tests. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md]
+   - Deferred boundary: Whether to extend `candidate_source_configs` JSON or add a dedicated table is not implemented. [VERIFIED: codebase grep]
+   - Resolution: Phase 1 target contract specifies the fields and owner boundary; Phase 3 chooses table shape with tests. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md]
 
 ## Environment Availability
 
