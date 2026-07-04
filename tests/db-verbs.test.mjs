@@ -5,7 +5,7 @@
 // reproduces AGENTS.md's round-completion field-clearing rule set; commMarkSent
 // reproduces the "sent clears draft" hard invariant across both tables.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -19,12 +19,20 @@ import {
   appSetFields,
   appSetStatus,
   appUpsert,
+  calendarBusyUpsert,
+  candidateApplicationLimitUpsert,
+  candidateArtifactPut,
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
   commAppendMessage,
   commMarkSent,
   commUpsert,
   sourcedPromote,
   sourcedUpsertBatch,
 } from "../src/core/db/verbs.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
 
@@ -118,6 +126,11 @@ function activityCount(db) {
 
 function activityRow(db, id) {
   return db.prepare("SELECT id, type, data FROM activity_events WHERE id = ?").get(id);
+}
+
+function readKv(db, key) {
+  const row = db.prepare("SELECT data FROM kv WHERE key = ?").get(key);
+  return row ? JSON.parse(row.data) : null;
 }
 
 // ---------------------------------------------------------------------------
@@ -271,6 +284,19 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
       path: "workspace/tailored/x.md",
     })
   );
+  expectOneBump("calendarBusyUpsert", () =>
+    calendarBusyUpsert({
+      repoRoot,
+      blocks: [
+        {
+          provider: "work_calendar",
+          startIso: "2030-01-02T14:00:00.000Z",
+          endIso: "2030-01-02T15:00:00.000Z",
+        },
+      ],
+      source: "calendar_read",
+    })
+  );
   expectOneBump("commUpsert", () =>
     commUpsert({
       repoRoot,
@@ -353,6 +379,59 @@ test("analyticsRefresh recomputes the analytics block WITHOUT bumping meta.versi
   assert.deepEqual(JSON.parse(stored.data), result.analytics);
 });
 
+test("calendarBusyUpsert appends opaque busy blocks, dedupes provider/start/end, and exports calendarBusy", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const result = calendarBusyUpsert({
+    repoRoot,
+    blocks: [
+      {
+        provider: "google_calendar",
+        startIso: "2030-01-02T14:00:00.000Z",
+        endIso: "2030-01-02T15:00:00.000Z",
+        label: "Sensitive meeting subject",
+        source: "calendar_read",
+      },
+      {
+        provider: "google_calendar",
+        startIso: "2030-01-02T14:00:00.000Z",
+        endIso: "2030-01-02T15:00:00.000Z",
+        allDay: true,
+        label: "Replacement subject",
+      },
+      {
+        provider: "work_calendar",
+        startIso: "2030-01-03T00:00:00.000Z",
+        endIso: "2030-01-04T00:00:00.000Z",
+        allDay: true,
+      },
+    ],
+    source: "calendar_read",
+  });
+
+  assert.equal(result.count, 2);
+  const stored = readKv(db, "calendarBusy");
+  assert.equal(stored.length, 2);
+  assert.deepEqual(
+    stored.map((block) => block.label),
+    ["Busy", "Busy"],
+    "stored blocks must never carry real meeting titles"
+  );
+  assert.equal(stored[0].provider, "google_calendar");
+  assert.equal(stored[0].allDay, true, "last duplicate wins while deduping");
+  assert.equal(stored[0].source, "calendar_read");
+  assert.match(stored[0].id, /^busy_[a-f0-9]{16}$/);
+  assert.ok(stored[0].ingestedAt);
+
+  const exportedTracker = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  assert.deepEqual(exportedTracker.calendarBusy, stored);
+  assert.ok(activityRow(db, result.event.id));
+});
+
 // ---------------------------------------------------------------------------
 // sourcedPromote: moves the row out of sourced[] and into applications[] in
 // one transaction — not a separate deferred cleanup.
@@ -373,4 +452,250 @@ test("sourcedPromote removes the row from sourced and creates it in applications
     .get("sourced-promote-me");
   assert.ok(promoted, "the promoted row must now exist in applications");
   assert.equal(JSON.parse(promoted.data).status, "reviewed-hold");
+});
+
+// ---------------------------------------------------------------------------
+// Candidate setup: DB-mode app onboarding source of truth.
+// ---------------------------------------------------------------------------
+
+test("candidate setup initializes neutral DB records without writing candidate YAML", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  candidateSetupInitialize({ repoRoot });
+  const config = candidateConfigGet({ repoRoot });
+
+  assert.equal(config.profile.candidate.full_name, "");
+  assert.equal(config.profile.candidate.email, "");
+  assert.deepEqual(config.targeting.role_buckets, []);
+  assert.deepEqual(config.evidence.claims, []);
+  assert.equal(config.modes.usage_mode, "standard");
+  assert.equal(config.setup.readiness.search_ready, false);
+  assert.equal(config.setup.readiness.gate_ready, false);
+  assert.equal(config.setup.readiness.apply_ready, false);
+
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/targeting.yml")), false);
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/evidence.yml")), false);
+});
+
+test("candidate setup patches profile, search tracks, companies, and evidence into normalized DB tables", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      candidate: { full_name: "Ada Lovelace", email: "ada@example.com", location: "London" },
+      location: { home: "London", remote: true, hybrid: false, onsite: false, relocation: [] },
+      compensation: { minimum_base: 181234, target_base: 223456 },
+      authorization: { work_authorized: true, requires_sponsorship: false },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Applied AI",
+          priority: "primary",
+          titles: ["Applied AI Engineer", "Forward Deployed Engineer"],
+          notes: "Best overlap.",
+        },
+        {
+          name: "Platform",
+          priority: "secondary",
+          titles: ["Platform Engineer"],
+        },
+      ],
+      keep_signals: ["agents", "prototype-to-production"],
+      cut_signals: ["pure research"],
+      tracked_companies: ["OpenAI", "Anthropic"],
+      excluded_companies: ["Evil Corp"],
+    },
+  });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      { id: "resume-001", claim: "Built agent workflow", evidence: "Resume" },
+      { claim: "Led migration", evidence: "Resume" },
+    ],
+  });
+
+  const config = candidateConfigGet({ repoRoot });
+  assert.equal(config.profile.candidate.full_name, "Ada Lovelace");
+  assert.equal(config.profile.compensation.minimum_base, 181234);
+  assert.equal(config.targeting.role_buckets.length, 2);
+  assert.equal(config.targeting.role_buckets[0].titles[1], "Forward Deployed Engineer");
+  assert.deepEqual(config.targeting.tracked_companies, ["OpenAI", "Anthropic"]);
+  assert.deepEqual(config.targeting.excluded_companies, ["Evil Corp"]);
+  assert.equal(config.evidence.claims.length, 2);
+  assert.equal(config.evidence.claims[1].id, "seed-001");
+
+  const db = openDb({ repoRoot });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_search_tracks").get().n, 2);
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM candidate_target_companies WHERE kind = 'target'").get()
+      .n,
+    2
+  );
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM candidate_target_companies WHERE kind = 'excluded'").get()
+      .n,
+    1
+  );
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_evidence_claims").get().n, 2);
+
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/targeting.yml")), false);
+});
+
+test("candidate setup recomputes quick-start readiness from SQLite setup facts", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+      location: { home: "New York, NY", remote: true },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }],
+      tracked_companies: ["Anthropic"],
+    },
+  });
+
+  let config = candidateConfigGet({ repoRoot });
+  assert.equal(config.setup.readiness.search_ready, false);
+  assert.match(config.setup.missing.search_ready.join("\n"), /source resume/i);
+
+  candidateArtifactPut({
+    repoRoot,
+    id: "source-resume",
+    kind: "source-resume",
+    data: { path: "candidate/SOURCE_RESUME.md" },
+  });
+
+  config = candidateConfigGet({ repoRoot });
+  assert.equal(config.setup.readiness.search_ready, true);
+  assert.equal(config.setup.readiness.gate_ready, false);
+  assert.match(config.setup.missing.gate_ready.join("\n"), /compensation floor/i);
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      compensation: { minimum_base: 190000 },
+      authorization: { work_authorized: true, requires_sponsorship: false },
+    },
+  });
+
+  config = candidateConfigGet({ repoRoot });
+  assert.equal(config.setup.readiness.gate_ready, true);
+  assert.equal(config.setup.readiness.apply_ready, false);
+  assert.match(config.setup.missing.apply_ready.join("\n"), /evidence claims/i);
+
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [{ claim: "Built an agentic intake workflow", evidence: "Resume" }],
+  });
+
+  config = candidateConfigGet({ repoRoot });
+  assert.equal(config.setup.readiness.search_ready, true);
+  assert.equal(config.setup.readiness.gate_ready, true);
+  assert.equal(config.setup.readiness.apply_ready, true);
+  assert.equal(config.setup.readiness.deep_ingest_complete, false);
+  assert.match(config.setup.missing.deep_ingest_complete.join("\n"), /deeper evidence/i);
+});
+
+test("candidate application limits are DB-backed and upsert by company plus scope", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  let config = candidateConfigGet({ repoRoot });
+  assert.deepEqual(config["application-limits"].companies, []);
+
+  const first = candidateApplicationLimitUpsert({
+    repoRoot,
+    row: {
+      company: "OpenAI",
+      cap: { max: 4, window_days: 180 },
+      status: "caution",
+      source: "careers FAQ",
+    },
+  });
+  assert.equal(first.ok, true);
+  assert.equal(first.data.companies.length, 1);
+  assert.equal(first.data.companies[0].scope, "all-roles");
+
+  candidateApplicationLimitUpsert({
+    repoRoot,
+    row: {
+      company: "openai",
+      scope: "all-roles",
+      status: "blocked",
+      hit_on: "2026-07-01",
+      note: "Cap hit by a recent application.",
+    },
+  });
+
+  config = candidateConfigGet({ repoRoot });
+  assert.equal(config["application-limits"].companies.length, 1);
+  assert.equal(config["application-limits"].companies[0].company, "OpenAI");
+  assert.deepEqual(config["application-limits"].companies[0].cap, {
+    max: 4,
+    window_days: 180,
+  });
+  assert.equal(config["application-limits"].companies[0].status, "blocked");
+  assert.equal(config["application-limits"].companies[0].hit_on, "2026-07-01");
+  assert.equal(config["application-limits"].companies[0].note, "Cap hit by a recent application.");
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/application-limits.yml")), false);
+});
+
+test("candidate setup initialize is idempotent and never resets saved DB config", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { candidate: { full_name: "Katherine Johnson", email: "kj@example.com" } },
+  });
+
+  candidateSetupInitialize({ repoRoot });
+  const config = candidateConfigGet({ repoRoot });
+  assert.equal(config.profile.candidate.full_name, "Katherine Johnson");
+  assert.equal(config.profile.candidate.email, "kj@example.com");
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
+});
+
+test("candidateEvidenceMerge replaces an existing explicit id even when the claim text changes", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [{ id: "resume-001", claim: "Built the first version", evidence: "Resume" }],
+  });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [{ id: "resume-001", claim: "Built the production version", evidence: "Resume v2" }],
+  });
+
+  const config = candidateConfigGet({ repoRoot });
+  assert.equal(config.evidence.claims.length, 1);
+  assert.equal(config.evidence.claims[0].id, "resume-001");
+  assert.equal(config.evidence.claims[0].claim, "Built the production version");
+  assert.equal(config.evidence.claims[0].evidence, "Resume v2");
 });

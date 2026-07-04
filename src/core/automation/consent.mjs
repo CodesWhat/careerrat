@@ -15,6 +15,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { displayPath, userPath } from "../paths/workspace.mjs";
+import { candidateConfigSource, loadCandidateDoc } from "../profile/config-store.mjs";
 import { atomicWriteFile, findKeyPath, setScalar, validateText } from "../profile/gate-writer.mjs";
 import { validate } from "../profile/schema-validator.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
@@ -139,6 +140,21 @@ export function defaultAutomation() {
 export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
   const path = userPath({ repoRoot: root }, AUTOMATION_FILE);
   const display = displayPath({ repoRoot: root }, AUTOMATION_FILE);
+  const source = candidateConfigSource({ repoRoot: root });
+  if (source === "db") {
+    const data = loadCandidateDoc("automation", { repoRoot: root }) || {};
+    const schemaPath = join(root, AUTOMATION_SCHEMA);
+    const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
+    const { valid, errors } = schema ? validate(data, schema) : { valid: true, errors: [] };
+    return {
+      exists: true,
+      valid,
+      errors,
+      data: data && typeof data === "object" ? data : {},
+      path: display,
+      source,
+    };
+  }
   if (!existsSync(path)) {
     return {
       exists: false,
@@ -146,6 +162,7 @@ export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
       errors: [],
       data: defaultAutomation(),
       path: display,
+      source,
     };
   }
   let data;
@@ -158,6 +175,7 @@ export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
       errors: [{ path: "", message: `YAML parse error: ${err.message}` }],
       data: defaultAutomation(),
       path: display,
+      source,
     };
   }
   const schemaPath = join(root, AUTOMATION_SCHEMA);
@@ -169,6 +187,7 @@ export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
     errors,
     data: data && typeof data === "object" ? data : defaultAutomation(),
     path: display,
+    source,
   };
 }
 

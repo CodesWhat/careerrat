@@ -3,12 +3,15 @@
 // activity-log.mjs's own content-hash eventId (so re-importing the same
 // activity.jsonl never double-inserts).
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { candidateConfigGet, sourceConfigGet } from "../src/core/db/verbs.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
+import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 import { canonicalizeEvent, eventId } from "../src/core/tracker/activity-log.mjs";
 
 const cleanupRoots = [];
@@ -227,4 +230,131 @@ test("examples/demo-workspace imports cleanly and twice produces an identical DB
     firstDump,
     "re-importing the demo workspace must be a no-op on the DB contents"
   );
+});
+
+test("importFromTracker migrates legacy candidate YAML into canonical SQLite setup tables", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "candidate/profile.yml"),
+    `${stringifyYaml({
+      candidate: { full_name: "Legacy Candidate", email: "legacy@example.com" },
+      compensation: { minimum_base: 181234, target_base: 223456 },
+      location: { home: "Austin, TX", remote: true, hybrid: false, onsite: false },
+      authorization: { work_authorized: true, requires_sponsorship: false },
+    })}\n`
+  );
+  writeFileSync(
+    join(repoRoot, "candidate/targeting.yml"),
+    `${stringifyYaml({
+      role_buckets: [{ name: "AI Platform", titles: ["AI Platform Engineer"] }],
+      keep_signals: ["agentic systems"],
+      cut_signals: ["onsite-only"],
+      tracked_companies: ["OpenAI", "Anthropic"],
+      excluded_companies: ["BadCo"],
+    })}\n`
+  );
+  writeFileSync(
+    join(repoRoot, "candidate/evidence.yml"),
+    `${stringifyYaml({
+      claims: [{ id: "legacy-001", claim: "Built a ranking system", evidence: "Resume" }],
+    })}\n`
+  );
+  writeFileSync(
+    join(repoRoot, "candidate/modes.yml"),
+    `${stringifyYaml({
+      usage_mode: "lean",
+      application_mode: "selective",
+      agent_voice: "exec-summary",
+    })}\n`
+  );
+  writeFileSync(
+    join(repoRoot, "candidate/application-limits.yml"),
+    `companies:
+  - company: OpenAI
+    scope: all-roles
+    cap: { max: 4, window_days: 180 }
+    status: caution
+    source: careers FAQ
+`
+  );
+
+  const result = importFromTracker({ repoRoot, sourceDir });
+
+  assert.equal(result.counts.candidate.profile, true);
+  assert.equal(result.counts.candidate.targeting, true);
+  assert.equal(result.counts.candidate.evidence, 1);
+  assert.equal(result.counts.candidate.modes, true);
+  assert.equal(result.counts.candidate["application-limits"], true);
+  const config = candidateConfigGet({ repoRoot });
+  assert.equal(config.profile.candidate.full_name, "Legacy Candidate");
+  assert.equal(config.profile.compensation.minimum_base, 181234);
+  assert.equal(config.targeting.role_buckets[0].titles[0], "AI Platform Engineer");
+  assert.deepEqual(config.targeting.tracked_companies, ["OpenAI", "Anthropic"]);
+  assert.equal(config.evidence.claims[0].id, "legacy-001");
+  assert.equal(config.modes.usage_mode, "lean");
+  assert.equal(config["application-limits"].companies[0].company, "OpenAI");
+  assert.deepEqual(config["application-limits"].companies[0].cap, {
+    max: 4,
+    window_days: 180,
+  });
+  assert.equal(
+    existsSync(userPath({ repoRoot }, "candidate/profile.yml")),
+    true,
+    "legacy YAML remains as import source, but DB is now canonical"
+  );
+});
+
+test("importFromTracker migrates legacy source config files into SQLite idempotently", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "config"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "config/search-sources.yml"),
+    `${stringifyYaml({
+      searches: [
+        {
+          provider: "HiringCafe",
+          label: "Applied AI",
+          query: "applied AI engineer",
+          enabled: true,
+          recency: { lastRunAt: "2026-07-03T12:00:00.000Z" },
+        },
+      ],
+    })}\n`
+  );
+  writeFileSync(
+    join(repoRoot, "config/sourced-scan.json"),
+    JSON.stringify(
+      {
+        title_filter: { positive: [], negative: [] },
+        location_filter: null,
+        tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+      },
+      null,
+      2
+    )
+  );
+
+  const first = importFromTracker({ repoRoot, sourceDir });
+  assert.equal(first.counts.sourceConfigs["search-sources"], true);
+  assert.equal(first.counts.sourceConfigs["sourced-scan"], true);
+
+  const searchSources = sourceConfigGet({ repoRoot, name: "search-sources" });
+  const sourcedScan = sourceConfigGet({ repoRoot, name: "sourced-scan" });
+  assert.equal(searchSources.stored, true);
+  assert.equal(searchSources.data.searches[0].query, "applied AI engineer");
+  assert.equal(sourcedScan.stored, true);
+  assert.equal(sourcedScan.data.tracked_companies[0].name, "Acme");
+
+  const second = importFromTracker({ repoRoot, sourceDir });
+  assert.equal(second.counts.sourceConfigs["search-sources"], true);
+  assert.equal(second.counts.sourceConfigs["sourced-scan"], true);
+
+  const db = openDb({ repoRoot });
+  const count = db.prepare("SELECT COUNT(*) AS n FROM candidate_source_configs").get().n;
+  assert.equal(count, 2, "re-import must upsert source configs, not duplicate them");
 });

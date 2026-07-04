@@ -4,7 +4,7 @@
 // tests/skill-run-route.test.mjs's POST-body pattern. Covers: happy-path reads
 // + writes, fail-closed 409 when no db exists yet, and 400/404 validation.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -12,6 +12,7 @@ import { after, test } from "node:test";
 import { mountDataRoutes } from "../src/cli/data-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
 
@@ -96,6 +97,11 @@ function seedDb(repoRoot) {
   importFromTracker({ repoRoot, sourceDir });
 }
 
+function readKv(db, key) {
+  const row = db.prepare("SELECT data FROM kv WHERE key = ?").get(key);
+  return row ? JSON.parse(row.data) : null;
+}
+
 // ---------------------------------------------------------------------------
 // Fail-closed: no db file yet -> 409 on every route, per decision 7.
 // ---------------------------------------------------------------------------
@@ -114,6 +120,18 @@ test("GET /api/data/snapshot: 409 with the exact fail-closed message when no db 
   }
 });
 
+test("GET /api/data/candidate/config: 409 until candidate setup is explicitly initialized", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await getJson(server, "/api/data/candidate/config");
+    assert.equal(status, 409);
+    assert.match(body.error, /no database yet/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/data/app/status: 409 when no db exists yet", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot);
@@ -121,6 +139,20 @@ test("POST /api/data/app/status: 409 when no db exists yet", async () => {
     const { status, body } = await postJson(server, "/api/data/app/status", {
       id: "app-1",
       to: "offer",
+    });
+    assert.equal(status, 409);
+    assert.match(body.error, /no database yet/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/data/sourced/upsert-batch: 409 when no db exists yet", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/data/sourced/upsert-batch", {
+      rows: [{ id: "sourced-new", company: "Initrode", role: "Platform Engineer" }],
     });
     assert.equal(status, 409);
     assert.match(body.error, /no database yet/);
@@ -211,6 +243,104 @@ test("GET /api/data/sourced and /api/data/communications: 200 with the seeded ro
   }
 });
 
+test("candidate setup routes initialize neutral DB config without writing candidate YAML", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot);
+  try {
+    const init = await postJson(server, "/api/data/candidate/init", {});
+    assert.equal(init.status, 200);
+    assert.equal(init.body.ok, true);
+
+    const read = await getJson(server, "/api/data/candidate/config");
+    assert.equal(read.status, 200);
+    assert.equal(read.body.data.profile.candidate.full_name, "");
+    assert.deepEqual(read.body.data.targeting.role_buckets, []);
+    assert.deepEqual(read.body.data.evidence.claims, []);
+    assert.equal(read.body.data.setup.readiness.search_ready, false);
+
+    assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
+    assert.equal(existsSync(userPath({ repoRoot }, "candidate/targeting.yml")), false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("candidate setup routes patch profile/targeting and merge evidence in SQLite", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot);
+  try {
+    await postJson(server, "/api/data/candidate/init", {});
+
+    const profile = await postJson(server, "/api/data/candidate/config", {
+      name: "profile",
+      patch: {
+        candidate: { full_name: "Grace Hopper", email: "grace@example.com" },
+        compensation: { minimum_base: 190000 },
+        authorization: { work_authorized: true },
+      },
+    });
+    assert.equal(profile.status, 200);
+
+    const targeting = await postJson(server, "/api/data/candidate/config", {
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "AI Platform", titles: ["AI Platform Engineer"] }],
+        tracked_companies: ["OpenAI", "Anthropic"],
+        excluded_companies: ["Nope Inc"],
+      },
+    });
+    assert.equal(targeting.status, 200);
+
+    const evidence = await postJson(server, "/api/data/candidate/evidence", {
+      claims: [{ claim: "Led a database migration", evidence: "Resume" }],
+    });
+    assert.equal(evidence.status, 200);
+
+    const read = await getJson(server, "/api/data/candidate/config");
+    assert.equal(read.body.data.profile.candidate.full_name, "Grace Hopper");
+    assert.equal(read.body.data.profile.compensation.minimum_base, 190000);
+    assert.equal(read.body.data.targeting.role_buckets[0].titles[0], "AI Platform Engineer");
+    assert.deepEqual(read.body.data.targeting.tracked_companies, ["OpenAI", "Anthropic"]);
+    assert.equal(read.body.data.evidence.claims[0].id, "seed-001");
+
+    const db = openDb({ repoRoot });
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_search_tracks").get().n, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS n FROM candidate_evidence_claims").get().n, 1);
+    assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("candidate application-limit route upserts limits and exposes them in config", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot);
+  try {
+    await postJson(server, "/api/data/candidate/init", {});
+
+    const upsert = await postJson(server, "/api/data/candidate/application-limit", {
+      row: {
+        company: "OpenAI",
+        cap: { max: 4, window_days: 180 },
+        status: "caution",
+        source: "careers FAQ",
+      },
+    });
+    assert.equal(upsert.status, 200);
+    assert.equal(upsert.body.data.data.companies[0].scope, "all-roles");
+
+    const read = await getJson(server, "/api/data/candidate/config");
+    assert.equal(read.body.data["application-limits"].companies[0].company, "OpenAI");
+    assert.deepEqual(read.body.data["application-limits"].companies[0].cap, {
+      max: 4,
+      window_days: 180,
+    });
+    assert.equal(existsSync(userPath({ repoRoot }, "candidate/application-limits.yml")), false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // Writes — happy path, thin shims over the same verbs the CLI calls
 // ---------------------------------------------------------------------------
@@ -280,6 +410,50 @@ test("POST /api/data/sourced/promote: 404 for an unknown sourced id, 200 for a k
   }
 });
 
+test("POST /api/data/sourced/upsert-batch: 400 without rows, 200 + persisted created/updated rows otherwise", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const missingRows = await postJson(server, "/api/data/sourced/upsert-batch", {});
+    assert.equal(missingRows.status, 400);
+
+    const ok = await postJson(server, "/api/data/sourced/upsert-batch", {
+      rows: [
+        {
+          id: "sourced-1",
+          company: "Initech",
+          role: "Senior Staff Engineer",
+          fitScore: 78,
+        },
+        {
+          id: "sourced-2",
+          company: "Initrode",
+          role: "Platform Engineer",
+          fitScore: 73,
+        },
+      ],
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.ok, true);
+    assert.equal(ok.body.data.created, 1);
+    assert.equal(ok.body.data.updated, 1);
+    assert.equal(typeof ok.body.meta.version, "number");
+
+    const read = await getJson(server, "/api/data/sourced");
+    assert.equal(read.status, 200);
+    assert.deepEqual(
+      read.body.data.map((row) => [row.id, row.role, row.fitScore]),
+      [
+        ["sourced-1", "Senior Staff Engineer", 78],
+        ["sourced-2", "Platform Engineer", 73],
+      ]
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/data/comm/send: sent-clears-draft, 404 for an unknown comm id", async () => {
   const repoRoot = tempRepo();
   seedDb(repoRoot);
@@ -296,6 +470,40 @@ test("POST /api/data/comm/send: sent-clears-draft, 404 for an unknown comm id", 
     const comm = JSON.parse(row.data);
     assert.equal(comm.status, "waiting");
     assert.equal(comm.draft, null);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/data/calendar/busy: 400 without blocks, 200 + persisted opaque busy blocks", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const missingBlocks = await postJson(server, "/api/data/calendar/busy", {});
+    assert.equal(missingBlocks.status, 400);
+
+    const ok = await postJson(server, "/api/data/calendar/busy", {
+      blocks: [
+        {
+          provider: "work_calendar",
+          startIso: "2030-01-02T14:00:00.000Z",
+          endIso: "2030-01-02T15:00:00.000Z",
+          label: "Private meeting",
+        },
+      ],
+      source: "calendar_read",
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.ok, true);
+    assert.equal(ok.body.data.count, 1);
+    assert.equal(typeof ok.body.meta.version, "number");
+
+    const db = openDb({ repoRoot });
+    const busy = readKv(db, "calendarBusy");
+    assert.equal(busy.length, 1);
+    assert.equal(busy[0].label, "Busy");
+    assert.equal(busy[0].source, "calendar_read");
   } finally {
     await closeServer(server);
   }

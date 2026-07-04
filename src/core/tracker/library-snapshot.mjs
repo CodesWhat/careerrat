@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { userPath } from "../paths/workspace.mjs";
+import { loadCandidateDoc } from "../profile/config-store.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
@@ -280,7 +281,7 @@ export function buildLibrarySnapshot({ evidence = {}, stories = {}, writingStyle
 
 export function loadLibrarySnapshot({ root = DEFAULT_ROOT } = {}) {
   return buildLibrarySnapshot({
-    evidence: readYamlIfExists(root, "candidate/evidence.yml") || {},
+    evidence: loadCandidateDoc("evidence", { repoRoot: root }) || {},
     stories: readYamlIfExists(root, "candidate/stories.yml") || {},
     writingStyleText: readTextIfExists(root, "candidate/writing-style.md"),
   });

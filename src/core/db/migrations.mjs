@@ -13,9 +13,18 @@
 // order is rejected exactly the same as one with a gap.
 import { migration001 } from "./migrations/001-init.mjs";
 import { migration002 } from "./migrations/002-intake.mjs";
+import { migration003 } from "./migrations/003-candidate-setup.mjs";
+import { migration004 } from "./migrations/004-application-limits.mjs";
+import { migration005 } from "./migrations/005-source-config.mjs";
 
 // Add new migrations here, in ascending id order, as the schema evolves.
-export const ALL_MIGRATIONS = [migration001, migration002];
+export const ALL_MIGRATIONS = [
+  migration001,
+  migration002,
+  migration003,
+  migration004,
+  migration005,
+];
 
 function readUserVersion(db) {
   return db.prepare("PRAGMA user_version").get().user_version;

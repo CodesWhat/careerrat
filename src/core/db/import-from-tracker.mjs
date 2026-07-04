@@ -13,9 +13,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { userPath } from "../paths/workspace.mjs";
+import { loadLegacyCandidateConfig } from "../profile/config-store.mjs";
+import { parseYaml } from "../profile/yaml.mjs";
 import { snapshotTracker } from "../tracker/tracker-snapshot.mjs";
 import { openDb } from "./connection.mjs";
 import { withTransaction } from "./transaction.mjs";
+import {
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
+} from "./verbs/candidate.mjs";
+import { sourceConfigPut } from "./verbs/source-config.mjs";
 
 // Top-level tracker.json keys that already have a dedicated table/column home.
 // Anything else goes into `kv` verbatim.
@@ -182,6 +190,71 @@ function readActivityLines(path) {
   return events;
 }
 
+function importLegacyCandidateSetup(pathCtx) {
+  const legacy = loadLegacyCandidateConfig(pathCtx);
+  const counts = {
+    profile: false,
+    targeting: false,
+    honesty: false,
+    "form-defaults": false,
+    modes: false,
+    automation: false,
+    "application-limits": false,
+    evidence: 0,
+  };
+  if (Object.keys(legacy).length === 0) return counts;
+
+  candidateSetupInitialize(pathCtx);
+  for (const name of [
+    "profile",
+    "targeting",
+    "honesty",
+    "form-defaults",
+    "modes",
+    "automation",
+    "application-limits",
+  ]) {
+    if (!legacy[name]) continue;
+    candidateConfigPatch({ ...pathCtx, name, patch: legacy[name] });
+    counts[name] = true;
+  }
+  const claims = Array.isArray(legacy.evidence?.claims) ? legacy.evidence.claims : [];
+  if (claims.length) {
+    const result = candidateEvidenceMerge({ ...pathCtx, claims });
+    counts.evidence = result.added;
+  }
+  return counts;
+}
+
+function importLegacySourceConfigs(pathCtx) {
+  const counts = {
+    "search-sources": false,
+    "sourced-scan": false,
+  };
+
+  const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
+  if (existsSync(searchSourcesPath)) {
+    sourceConfigPut({
+      ...pathCtx,
+      name: "search-sources",
+      data: parseYaml(readFileSync(searchSourcesPath, "utf8")) || {},
+    });
+    counts["search-sources"] = true;
+  }
+
+  const sourcedScanPath = userPath(pathCtx, "config/sourced-scan.json");
+  if (existsSync(sourcedScanPath)) {
+    sourceConfigPut({
+      ...pathCtx,
+      name: "sourced-scan",
+      data: JSON.parse(readFileSync(sourcedScanPath, "utf8")),
+    });
+    counts["sourced-scan"] = true;
+  }
+
+  return counts;
+}
+
 // importFromTracker({repoRoot, env, sourceDir?}) — reads
 // <sourceDir||workspace>/tracker.json (+ activity.jsonl if present) and
 // upserts every row into the db. Idempotent: running it twice against the
@@ -229,6 +302,9 @@ export function importFromTracker({ repoRoot, env, sourceDir } = {}) {
       kv: importKv(db, data),
     };
   });
+
+  counts.candidate = importLegacyCandidateSetup(pathCtx);
+  counts.sourceConfigs = importLegacySourceConfigs(pathCtx);
 
   return { ok: true, sourcePath: trackerPath, activityPath, counts };
 }

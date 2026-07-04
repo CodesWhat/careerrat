@@ -26,12 +26,13 @@
 // isolated at the bottom.
 
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import { displayPath, userPath } from "../paths/workspace.mjs";
 import { findCurrentBaseToken } from "./comp-guard.mjs";
-import { atomicWriteFile, readTextIfExists } from "./gate-writer.mjs";
+import { loadCandidateDoc } from "./config-store.mjs";
+import { atomicWriteFile } from "./gate-writer.mjs";
 import { validate } from "./schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "./yaml.mjs";
 
@@ -77,9 +78,9 @@ export function parseEvidence(text) {
 }
 
 export function loadEvidence({ root = DEFAULT_ROOT } = {}) {
-  const text = readTextIfExists(evidenceAbsPath(root));
-  if (text === null) return { exists: false, claims: [] };
-  return { exists: true, ...parseEvidence(text) };
+  const data = loadCandidateDoc("evidence", { repoRoot: root });
+  if (!data) return { exists: false, claims: [] };
+  return { exists: true, data, claims: Array.isArray(data.claims) ? data.claims : [] };
 }
 
 // ---------------------------------------------------------------------------

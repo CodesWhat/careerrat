@@ -30,6 +30,11 @@
 //   node src/cli/data.mjs comm upsert --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
+//   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+//   node src/cli/data.mjs candidate init|get
+//   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
+//   node src/cli/data.mjs candidate evidence --data <json-array> | --data-file <path>
+//   node src/cli/data.mjs candidate limits upsert --data <json> | --data-file <path>
 //   node src/cli/data.mjs activity append --data <json> | --data-file <path>
 //   node src/cli/data.mjs intake capture --text <string> [--input-kind text|url]
 //   node src/cli/data.mjs intake update <id> --data <json> | --data-file <path>
@@ -55,6 +60,12 @@ import {
   appSetFields,
   appSetStatus,
   appUpsert,
+  calendarBusyUpsert,
+  candidateApplicationLimitUpsert,
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
   commAppendMessage,
   commMarkSent,
   commUpsert,
@@ -158,6 +169,12 @@ try {
       break;
     case "comm":
       cmdComm(sub, rest);
+      break;
+    case "calendar":
+      cmdCalendar(sub, rest);
+      break;
+    case "candidate":
+      cmdCandidate(sub, rest);
       break;
     case "activity":
       cmdActivity(sub, rest);
@@ -365,6 +382,63 @@ function cmdComm(sub, rest) {
 }
 
 // ---------------------------------------------------------------------------
+// calendar <sub>
+// ---------------------------------------------------------------------------
+
+function cmdCalendar(sub, _rest) {
+  switch (sub) {
+    case "busy":
+      return printResult(
+        calendarBusyUpsert({
+          ...pathCtx,
+          blocks: readPayload("calendar busy"),
+          source: opts.source,
+        })
+      );
+    default:
+      return fail(`unknown "calendar" command "${sub}". See --help.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// candidate <sub> — SQLite-primary onboarding/profile/targeting/settings.
+// These verbs intentionally do not export YAML mirrors; write-config owns
+// compatibility output.
+// ---------------------------------------------------------------------------
+
+function cmdCandidate(sub, rest) {
+  switch (sub) {
+    case "init":
+      return printResult(candidateSetupInitialize(pathCtx));
+    case "get":
+      return printResult(candidateConfigGet(pathCtx));
+    case "patch": {
+      const [name] = rest;
+      if (!name) fail("candidate patch requires <name>");
+      return printResult(
+        candidateConfigPatch({ ...pathCtx, name, patch: readPayload("candidate patch") })
+      );
+    }
+    case "evidence":
+      return printResult(
+        candidateEvidenceMerge({ ...pathCtx, claims: readPayload("candidate evidence") })
+      );
+    case "limits": {
+      const [action] = rest;
+      if (action !== "upsert") fail('candidate limits requires "upsert"');
+      return printResult(
+        candidateApplicationLimitUpsert({
+          ...pathCtx,
+          row: readPayload("candidate limits upsert"),
+        })
+      );
+    }
+    default:
+      return fail(`unknown "candidate" command "${sub}". See --help.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // intake <sub> — M9 Universal Intake's queue-state verbs. Mirrors the exact
 // same lib functions src/cli/intake-route.mjs calls (one-write-path); unlike
 // every verb above, these do NOT bump meta.version/last_updated_at and do NOT
@@ -473,6 +547,13 @@ Usage:
   node src/cli/data.mjs comm upsert --data <json> | --data-file <path>
   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
+
+  node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+
+  node src/cli/data.mjs candidate init|get
+  node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
+  node src/cli/data.mjs candidate evidence --data <json-array> | --data-file <path>
+  node src/cli/data.mjs candidate limits upsert --data <json> | --data-file <path>
 
   node src/cli/data.mjs activity append --data <json> | --data-file <path>
 

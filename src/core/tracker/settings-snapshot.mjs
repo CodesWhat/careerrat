@@ -1,8 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { displayPath, userPath } from "../paths/workspace.mjs";
-import { parseYaml } from "../profile/yaml.mjs";
+import {
+  CANDIDATE_DOCS,
+  candidateDocNames,
+  loadCandidateConfig,
+} from "../profile/config-store.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -32,12 +36,6 @@ const PROVIDER_LABELS = {
   extension: "Browser extension",
   playwright: "Playwright profile",
 };
-
-function readYamlIfExists(root, relPath) {
-  const path = userPath({ repoRoot: root }, relPath);
-  if (!existsSync(path)) return null;
-  return parseYaml(readFileSync(path, "utf8"));
-}
 
 function formatBase(value) {
   const num = Number(value);
@@ -126,14 +124,23 @@ export function buildSettingsSnapshot({
 }
 
 export function loadSettingsSnapshot({ root = DEFAULT_ROOT } = {}) {
-  const files = CONFIG_FILES.filter((relPath) =>
-    existsSync(userPath({ repoRoot: root }, relPath))
-  ).map((relPath) => displayPath({ repoRoot: root }, relPath));
+  const config = loadCandidateConfig({ repoRoot: root });
+  const files = new Set(
+    CONFIG_FILES.filter((relPath) => existsSync(userPath({ repoRoot: root }, relPath))).map(
+      (relPath) => displayPath({ repoRoot: root }, relPath)
+    )
+  );
+  if (config.mode === "db") {
+    for (const name of candidateDocNames()) {
+      if (name === "automation" && Object.keys(config.automation || {}).length === 0) continue;
+      files.add(displayPath({ repoRoot: root }, CANDIDATE_DOCS[name].candidatePath));
+    }
+  }
   return buildSettingsSnapshot({
-    profile: readYamlIfExists(root, "candidate/profile.yml") || {},
-    targeting: readYamlIfExists(root, "candidate/targeting.yml") || {},
-    honesty: readYamlIfExists(root, "candidate/honesty.yml") || {},
-    automation: readYamlIfExists(root, "candidate/automation.yml") || {},
-    files,
+    profile: config.profile || {},
+    targeting: config.targeting || {},
+    honesty: config.honesty || {},
+    automation: config.automation || {},
+    files: [...files],
   });
 }

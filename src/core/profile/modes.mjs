@@ -7,13 +7,13 @@
 // recall-oriented; this mode affects promotion/review/apply posture, not whether
 // plausible roles are intentionally hidden.
 
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { displayPath, userPath } from "../paths/workspace.mjs";
+import { displayPath } from "../paths/workspace.mjs";
+import { candidateConfigSource, loadCandidateDoc } from "./config-store.mjs";
 import { setScalar, validateText } from "./gate-writer.mjs";
 import { formatErrors, validate } from "./schema-validator.mjs";
-import { parseYaml } from "./yaml.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -100,29 +100,30 @@ export function normalizeModes(input, { schema } = {}) {
 }
 
 export function loadModes({ root = DEFAULT_ROOT } = {}) {
-  const path = userPath({ repoRoot: root }, MODES_REL_PATH);
   const display = displayPath({ repoRoot: root }, MODES_REL_PATH);
   const schema = loadModesSchema({ root });
-  if (!existsSync(path)) {
+  const source = candidateConfigSource({ repoRoot: root });
+  let parsed;
+  try {
+    parsed = loadCandidateDoc("modes", { repoRoot: root });
+  } catch (err) {
+    return {
+      exists: true,
+      valid: false,
+      errors: [{ path: "", message: `config parse error: ${err.message}` }],
+      data: { ...DEFAULT_MODES },
+      path: display,
+      source,
+    };
+  }
+  if (parsed == null) {
     return {
       exists: false,
       valid: true,
       errors: [],
       data: { ...DEFAULT_MODES },
       path: display,
-    };
-  }
-
-  let parsed;
-  try {
-    parsed = parseYaml(readFileSync(path, "utf8"));
-  } catch (err) {
-    return {
-      exists: true,
-      valid: false,
-      errors: [{ path: "", message: `YAML parse error: ${err.message}` }],
-      data: { ...DEFAULT_MODES },
-      path: display,
+      source,
     };
   }
 
@@ -133,6 +134,7 @@ export function loadModes({ root = DEFAULT_ROOT } = {}) {
     errors: normalized.errors,
     data: normalized.data,
     path: display,
+    source,
   };
 }
 

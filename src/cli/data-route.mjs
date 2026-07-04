@@ -17,9 +17,16 @@ import {
   appScheduleInterview,
   appSetFields,
   appSetStatus,
+  calendarBusyUpsert,
+  candidateApplicationLimitUpsert,
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
   commAppendMessage,
   commMarkSent,
   sourcedPromote,
+  sourcedUpsertBatch,
 } from "../core/db/verbs.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
@@ -51,6 +58,17 @@ function readMeta(db) {
 function respondVerbResult(res, result) {
   const { meta, ...data } = result;
   sendJson(res, 200, { ok: true, meta: meta || { version: null, lastUpdatedAt: null }, data });
+}
+
+function respondCandidateResult(res, pathCtx, data) {
+  let meta = { version: null, lastUpdatedAt: null };
+  try {
+    meta = readMeta(requireDb(pathCtx));
+  } catch {
+    // candidate init creates the db; if metadata is still unavailable, the
+    // payload is still the authoritative setup response.
+  }
+  sendJson(res, 200, { ok: true, meta, data });
 }
 
 async function readBody(req) {
@@ -180,9 +198,49 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
     });
   });
 
+  addRoute("GET", "/api/data/candidate/config", (_req, res) => {
+    try {
+      const config = candidateConfigGet(pathCtx);
+      respondCandidateResult(res, pathCtx, config);
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
   // -------------------------------------------------------------------------
   // Writes — thin shims over the exact CLI lib functions.
   // -------------------------------------------------------------------------
+
+  addRoute("POST", "/api/data/candidate/init", async (req, res) => {
+    try {
+      await readBody(req);
+      const result = candidateSetupInitialize(pathCtx);
+      respondCandidateResult(res, pathCtx, result);
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/data/candidate/config", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!body?.name || !body?.patch) throw badRequest("body.name and body.patch are required");
+      return candidateConfigPatch({ ...pathCtx, name: body.name, patch: body.patch });
+    });
+  });
+
+  addRoute("POST", "/api/data/candidate/evidence", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!Array.isArray(body?.claims)) throw badRequest("body.claims must be an array");
+      return candidateEvidenceMerge({ ...pathCtx, claims: body.claims });
+    });
+  });
+
+  addRoute("POST", "/api/data/candidate/application-limit", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!body?.row) throw badRequest("body.row is required");
+      return candidateApplicationLimitUpsert({ ...pathCtx, row: body.row });
+    });
+  });
 
   addRoute("POST", "/api/data/app/status", async (req, res) => {
     await withBodyVerb(req, res, (body) => {
@@ -214,6 +272,15 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
     });
   });
 
+  addRoute("POST", "/api/data/sourced/upsert-batch", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!Array.isArray(body?.rows) || body.rows.length === 0) {
+        throw badRequest("body.rows must be a non-empty array");
+      }
+      return sourcedUpsertBatch({ ...pathCtx, rows: body.rows });
+    });
+  });
+
   addRoute("POST", "/api/data/sourced/promote", async (req, res) => {
     await withBodyVerb(req, res, (body) => {
       if (!body?.id) throw badRequest("body.id is required");
@@ -232,6 +299,15 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
     await withBodyVerb(req, res, (body) => {
       if (!body?.id) throw badRequest("body.id is required");
       return commMarkSent({ ...pathCtx, ...body });
+    });
+  });
+
+  addRoute("POST", "/api/data/calendar/busy", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!Array.isArray(body?.blocks) || body.blocks.length === 0) {
+        throw badRequest("body.blocks must be a non-empty array");
+      }
+      return calendarBusyUpsert({ ...pathCtx, blocks: body.blocks, source: body.source });
     });
   });
 }

@@ -13,7 +13,7 @@ function freshDb() {
   return new DatabaseSync(":memory:");
 }
 
-test("an existing M6 db (migration001 only, user_version 1) upgrades to 2 via runMigrations", () => {
+test("an existing M6 db (migration001 only, user_version 1) upgrades through the current migrations", () => {
   const db = freshDb();
   // Simulate "an existing M6 db" — exactly what a pre-M9 install looks like:
   // only migration001 has ever run.
@@ -29,12 +29,15 @@ test("an existing M6 db (migration001 only, user_version 1) upgrades to 2 via ru
   );
 
   // Now run the REAL, full migration list (as connection.mjs's openDb() would
-  // on next launch) — only migration 2 should apply.
+  // on next launch) — every migration after 001 should apply.
   const second = runMigrations(db, ALL_MIGRATIONS);
   assert.equal(second.from, 1);
-  assert.equal(second.to, 2);
-  assert.deepEqual(second.applied, [2]);
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 2);
+  assert.equal(second.to, ALL_MIGRATIONS.at(-1).id);
+  assert.deepEqual(
+    second.applied,
+    ALL_MIGRATIONS.filter((migration) => migration.id > 1).map((migration) => migration.id)
+  );
+  assert.equal(db.prepare("PRAGMA user_version").get().user_version, ALL_MIGRATIONS.at(-1).id);
 
   const tables = db
     .prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name")
@@ -49,7 +52,7 @@ test("an existing M6 db (migration001 only, user_version 1) upgrades to 2 via ru
   const logged = db.prepare("SELECT id, name FROM _migrations ORDER BY id ASC").all();
   assert.deepEqual(
     logged.map((r) => r.id),
-    [1, 2]
+    ALL_MIGRATIONS.map((migration) => migration.id)
   );
   assert.equal(logged[1].name, "intake");
 });
