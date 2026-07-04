@@ -3,25 +3,39 @@
 # `npm run dist` runs `stage.mjs` first (builds staging/rolester, the
 # extraResources tree below) then electron-builder itself.
 #
-# Signing: a Developer ID Application certificate (team ID 3524374A2S) is
-# already in the keychain — electron-builder auto-discovers it, so
-# `mac.identity` is deliberately left unset (setting it explicitly would
-# override auto-discovery for no benefit here).
+# Signing: leave `mac.identity` unset so electron-builder uses its standard
+# macOS certificate discovery. Local signing credentials belong in the
+# builder's keychain or CI signing environment, not in this tracked file.
 #
-# Notarization: DEFERRED. No `notarytool` keychain profile exists yet, so
-# notarization is explicitly disabled below rather than left to fail at
-# build time. See README.md for the one-time `xcrun notarytool
-# store-credentials` setup step that turns this back on.
+# Notarization: explicitly disabled for local/offline builds. When enabling
+# it, store Apple credentials in a local/CI `notarytool` keychain profile
+# such as `rolester-notary`, and keep account/team identifiers outside this
+# config file.
 appId: com.codeswhat.rolester
 productName: Rolester
 directories:
   output: dist
 files:
   - main.mjs
+  - desktop-routing.mjs
+  - desktop-smoke.mjs
   - package.json
 extraResources:
   - from: staging/rolester
     to: rolester
+    filter:
+      - "**/*"
+      - ".agents/**"
+      - ".claude/**"
+      - "apps/web/dist/**"
+      - "!**/.DS_Store"
+  # electron-builder's copy filter rejects a root-level `node_modules`
+  # directory inside a FileSet, so copy the staged SDK tree as its own source.
+  - from: staging/rolester/node_modules
+    to: rolester/node_modules
+    filter:
+      - "**/*"
+      - "!**/.DS_Store"
 mac:
   target:
     - target: dmg

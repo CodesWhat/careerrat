@@ -24,6 +24,8 @@ import { existsSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { chooseDesktopRoute } from "./desktop-routing.mjs";
+import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
 
 // --- Trap 1 -----------------------------------------------------------------
 // Inside Electron, `process.execPath` is the Electron binary, not a plain
@@ -115,6 +117,8 @@ if (isSmoke) {
 async function boot() {
   const { createDevServer } = await loadEngineModule("src/cli/tracker-dev.mjs");
   const { resolveUserPaths, userPath } = await loadEngineModule("src/core/paths/workspace.mjs");
+  const { dbExists } = await loadEngineModule("src/core/db/connection.mjs");
+  const { candidateConfigGet } = await loadEngineModule("src/core/db/verbs.mjs");
 
   dev = createDevServer({ repoRoot });
 
@@ -136,20 +140,37 @@ async function boot() {
   const url = `http://127.0.0.1:${port}`;
   log(`serving ${url}`);
 
-  // First-run routing: a candidate with no seeded candidate/profile.yml goes
-  // to the onboarding wizard instead of an empty dashboard. Use the engine's
-  // own path resolver — the same one createDevServer() itself used above —
-  // rather than hand-rolling a join, so this always agrees with where the
-  // server actually looked for candidate/workspace files.
+  // First-run routing: a candidate with neither legacy candidate/profile.yml
+  // nor a non-empty DB-backed profile goes to onboarding instead of an empty
+  // dashboard. Use the engine's own path resolver — the same one
+  // createDevServer() itself used above — rather than hand-rolling a join, so
+  // this always agrees with where the server actually looked for user data.
   // First-run goes to the M8 SPA wizard (/app/onboarding — PDF/image resume
   // drop, AI extraction), NOT the legacy /onboard page (txt/md only). The
   // Electron window has no address bar, so landing on the wrong wizard
   // strands the user there.
   const pathCtx = { repoRoot };
   resolveUserPaths(pathCtx);
-  const route = existsSync(userPath(pathCtx, "candidate/profile.yml")) ? "/tracker" : "/app/onboarding";
+  const route = chooseDesktopRoute({
+    hasCandidateSetup:
+      existsSync(userPath(pathCtx, "candidate/profile.yml")) ||
+      hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }),
+  });
 
   return { url, route };
+}
+
+function hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }) {
+  if (!dbExists(pathCtx)) return false;
+  try {
+    const config = candidateConfigGet(pathCtx);
+    const candidate = config.profile?.candidate || {};
+    return !!(
+      String(candidate.full_name || "").trim() || String(candidate.email || "").trim()
+    );
+  } catch {
+    return false;
+  }
 }
 
 async function shutdown() {
@@ -165,7 +186,7 @@ async function shutdown() {
   await new Promise((resolve) => active.server.close(() => resolve()));
 }
 
-function createWindow(url, route) {
+function createWindow(url, route, { load = true } = {}) {
   win = new BrowserWindow({
     width: 1280,
     height: 860,
@@ -189,49 +210,114 @@ function createWindow(url, route) {
     }
   });
 
-  win.loadURL(`${url}${route}`);
+  if (load) {
+    win.loadURL(`${url}${route}`);
+  }
   return win;
 }
 
-// Waits for `browserWindow` to actually finish loading — not just that the
-// server answered a health check, but that the renderer painted the real
-// page. This is the check that would have caught the ELECTRON_RUN_AS_NODE
-// incident (see the trap-1 comment above): the server was healthy the whole
-// time, only the window never rendered. Rejects on a failed/aborted main-
-// frame load, a crashed renderer process, or a timeout — any of which means
-// --smoke must fail, not just "the HTTP server is up".
-function waitForLoad(browserWindow, timeoutMs = 20000) {
+// Loads the smoke window after its failure listeners are attached, waits for
+// navigation to finish, then proves the SPA actually mounted into #root.
+// This would have caught both a dead Chromium renderer and a JS bundle that
+// loads but throws before React can mount.
+function loadAndVerifySmokeWindow(browserWindow, targetUrl, timeoutMs = 20000) {
   return new Promise((resolve, reject) => {
     const wc = browserWindow.webContents;
+    let settled = false;
     const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`renderer did not finish loading within ${timeoutMs}ms`));
+      fail(new Error(`renderer did not finish loading within ${timeoutMs}ms`));
     }, timeoutMs);
 
-    function onFinish() {
+    function finish() {
+      if (settled) return;
+      settled = true;
       cleanup();
       resolve();
     }
+    function fail(err) {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      reject(err);
+    }
+    async function onFinish() {
+      try {
+        await waitForClientMount(wc);
+        finish();
+      } catch (err) {
+        fail(err);
+      }
+    }
     function onFail(_event, errorCode, errorDescription, _validatedUrl, isMainFrame) {
       if (!isMainFrame) return; // sub-frame/subresource failures aren't fatal here
-      cleanup();
-      reject(new Error(`did-fail-load: ${errorDescription} (${errorCode})`));
+      fail(new Error(`did-fail-load: ${errorDescription} (${errorCode})`));
     }
     function onGone(_event, details) {
-      cleanup();
-      reject(new Error(`render-process-gone: ${details?.reason ?? "unknown"}`));
+      fail(new Error(`render-process-gone: ${details?.reason ?? "unknown"}`));
+    }
+    function onUnresponsive() {
+      fail(new Error("renderer became unresponsive"));
+    }
+    function onConsoleMessage(event, level, message, line, sourceId) {
+      const actualLevel = typeof level === "number" ? level : event?.level;
+      if (actualLevel !== 3 && actualLevel !== "error") return;
+
+      const actualMessage = typeof message === "string" ? message : event?.message;
+      const actualLine = typeof line === "number" ? line : event?.lineNumber;
+      const actualSource = typeof sourceId === "string" ? sourceId : event?.sourceId;
+      const firstLine = String(actualMessage || "unknown error").split("\n")[0];
+      const hasLine = Number.isFinite(actualLine);
+      const location = actualSource
+        ? ` (${actualSource}${hasLine ? `:${actualLine}` : ""})`
+        : "";
+      fail(new Error(`renderer console error: ${firstLine}${location}`));
     }
     function cleanup() {
       clearTimeout(timer);
       wc.removeListener("did-finish-load", onFinish);
       wc.removeListener("did-fail-load", onFail);
       wc.removeListener("render-process-gone", onGone);
+      wc.removeListener("console-message", onConsoleMessage);
+      wc.removeListener("unresponsive", onUnresponsive);
+      browserWindow.removeListener("unresponsive", onUnresponsive);
     }
 
     wc.once("did-finish-load", onFinish);
     wc.on("did-fail-load", onFail);
     wc.on("render-process-gone", onGone);
+    wc.on("console-message", onConsoleMessage);
+    wc.on("unresponsive", onUnresponsive);
+    browserWindow.on("unresponsive", onUnresponsive);
+
+    browserWindow.loadURL(targetUrl).catch((err) => {
+      fail(new Error(`loadURL failed: ${err.message}`));
+    });
   });
+}
+
+async function waitForClientMount(wc, timeoutMs = 5000, intervalMs = 100) {
+  const script = [
+    "(() => {",
+    "  const root = document.getElementById('root');",
+    "  return !!root && root.children.length > 0;",
+    "})()",
+  ].join("\n");
+  const deadline = Date.now() + timeoutMs;
+  let lastError = null;
+
+  while (Date.now() < deadline) {
+    try {
+      if (await wc.executeJavaScript(script, true)) return;
+    } catch (err) {
+      lastError = err;
+    }
+
+    const waitMs = Math.min(intervalMs, Math.max(0, deadline - Date.now()));
+    await new Promise((resolve) => setTimeout(resolve, waitMs));
+  }
+
+  const suffix = lastError ? ` (last check: ${lastError.message})` : "";
+  throw new Error(`client app did not mount in #root within ${timeoutMs}ms${suffix}`);
 }
 
 app.whenReady().then(async () => {
@@ -239,14 +325,13 @@ app.whenReady().then(async () => {
 
   if (isSmoke) {
     try {
-      const body = await httpGetOk(`${url}/api/health`);
-      JSON.parse(body); // shape-check only — throws if the route ever regresses
+      await verifySmokeHttpSurface({ baseUrl: url, route, getOk: httpGetOk });
 
       // Health alone already passed before the ELECTRON_RUN_AS_NODE incident
       // too — the server was fine, only the window never painted. Actually
       // create it and require the real load to succeed before declaring OK.
-      const smokeWin = createWindow(url, route);
-      await waitForLoad(smokeWin);
+      const smokeWin = createWindow(url, route, { load: false });
+      await loadAndVerifySmokeWindow(smokeWin, `${url}${route}`);
 
       log(`SMOKE OK ${url}`);
       await shutdown();

@@ -11,9 +11,10 @@
 //     examples/ (those are developer/marketing surfaces, not runtime — the
 //     packaged app never reads them) and the individual per-skill
 //     `.agents/skills/<name>/SKILL.md` paths (collapsed below into a single
-//     copy of the real `.agents/skills/` directory, not the `.claude/skills`
-//     symlink — following the symlink would double the copy and, on some
-//     filesystems, dereference oddly).
+//     copy of the real `.agents/skills/` directory). After that copy lands,
+//     staging materializes a real `.claude/skills` mirror too, so packaged
+//     runtimes that still probe Claude's historical lookup path work without
+//     depending on a symlink inside a signed app bundle.
 //   - A MINIMAL, synthesized `package.json` (not in `files[]` — npm never
 //     lists its own manifest there — but the staged copy needs one so
 //     `npm install` below has somewhere to resolve into, and so the packaged
@@ -48,6 +49,7 @@ import { fileURLToPath } from "node:url";
 const desktopDir = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const repoRoot = join(desktopDir, "../..");
 const stagingRoot = join(desktopDir, "staging", "rolester");
+const webDistIndex = join(repoRoot, "apps/web/dist/index.html");
 
 const EXCLUDE_EXACT = new Set(["examples"]);
 const EXCLUDE_PREFIXES = ["docs/"];
@@ -138,6 +140,25 @@ function stageFiles() {
   log(`staged ${entries.length} allowlist entr${entries.length === 1 ? "y" : "ies"} → ${stagingRoot}`);
 }
 
+function assertWebDistBuilt() {
+  if (existsSync(webDistIndex)) return;
+  throw new Error(
+    "apps/web/dist/index.html is missing. Run `npm run app:build` before staging the desktop runtime."
+  );
+}
+
+function mirrorClaudeSkills() {
+  const src = join(stagingRoot, ".agents/skills");
+  if (!existsSync(src)) {
+    throw new Error("staged .agents/skills is missing; cannot mirror .claude/skills");
+  }
+  const dest = join(stagingRoot, ".claude/skills");
+  mkdirSync(dirname(dest), { recursive: true });
+  rmSync(dest, { recursive: true, force: true });
+  cpSync(src, dest, { recursive: true });
+  log("mirrored .agents/skills → .claude/skills");
+}
+
 // Install ONLY the SDK's own dependency tree into staging/rolester's own
 // node_modules — the packaged runtime resolves `@anthropic-ai/claude-agent-sdk`
 // from there. The core npm package stays zero-dep; this install is scoped to
@@ -170,11 +191,14 @@ function installSdk(pkg) {
 }
 
 function main() {
+  assertWebDistBuilt();
+
   rmSync(stagingRoot, { recursive: true, force: true });
   mkdirSync(stagingRoot, { recursive: true });
 
   const pkg = readRootPackageJson();
   stageFiles();
+  mirrorClaudeSkills();
   writeStagedPackageJson(pkg);
   installSdk(pkg);
 

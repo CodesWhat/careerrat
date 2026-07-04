@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "electron .",
     "stage": "node scripts/stage.mjs",
-    "dist": "npm run stage && electron-builder --mac dmg"
+    "dist": "npm --prefix ../.. run app:build && npm run stage && electron-builder --mac dmg"
   },
   "devDependencies": {
     "electron": "43.0.0",
