@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import test from "node:test";
@@ -89,6 +90,23 @@ function normalizeOwnerTarget(ownerRef) {
   return path.posix.normalize(ownerRef.replaceAll("\\", "/")).replace(/^(\.\/)+/, "");
 }
 
+function gitCheck(args) {
+  try {
+    execFileSync("git", args, { cwd: repoRoot, stdio: "ignore" });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function isGitIgnored(relPath) {
+  return gitCheck(["check-ignore", "-q", "--no-index", "--", relPath]);
+}
+
+function isTrackedPath(relPath) {
+  return gitCheck(["ls-files", "--error-unmatch", "--", relPath]);
+}
+
 function assertSafeOwnerTarget(ownerRef, label) {
   assertNonEmptyString(ownerRef, label);
   assert.ok(!ownerRef.includes("\0"), `${label} must not contain null bytes: ${ownerRef}`);
@@ -111,6 +129,7 @@ function assertSafeOwnerTarget(ownerRef, label) {
     !privateOwnerRoots.has(normalized.split("/")[0]),
     `${label} must not point at private/generated workspace data: ${ownerRef}`
   );
+  assert.ok(!isGitIgnored(normalized), `${label} must not be gitignored/private: ${ownerRef}`);
   return normalized;
 }
 
@@ -130,9 +149,10 @@ function assertRepoOwnerPath(ownerRef, label = "owner", ownerType = undefined) {
       );
     }
     if (ownerType === "planned_policy") {
-      assert.ok(
-        !/^(src|scripts)\//.test(normalized) && !normalized.endsWith(".mjs"),
-        `${label} planned_policy must be a policy or epic label, not a module path: ${ownerRef}`
+      assert.match(
+        normalized,
+        /^[a-z0-9][a-z0-9-]*$/,
+        `${label} planned_policy must be a policy or epic label, not a file path: ${ownerRef}`
       );
     }
     return;
@@ -150,6 +170,7 @@ function assertRepoOwnerPath(ownerRef, label = "owner", ownerType = undefined) {
   );
 
   const normalized = assertSafeOwnerTarget(ownerRef, label);
+  assert.ok(isTrackedPath(normalized), `${label} must be a checked-in source path: ${ownerRef}`);
   const resolved = path.resolve(repoRoot, normalized);
   assert.ok(
     resolved.startsWith(`${repoRoot}${path.sep}`),
