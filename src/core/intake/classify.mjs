@@ -1,9 +1,8 @@
 // classify.mjs — M9 Universal Intake's classification step. A bare, tool-less
-// structured one-shot (runBareOneshot + structured-oneshot.mjs's shared
-// buffer -> extract -> validate -> one-retry loop), driven by
-// config/paste-intake-routes.json's SSOT digest, exactly the same shape
-// every other small bounded structured-output route in this repo already
-// uses (POST /api/assist/suggest, POST /api/onboard/resume-ai).
+// bounded AI call (runBareOneshot + bounded-ai.mjs's shared envelope and
+// structured fallback loop), driven by config/paste-intake-routes.json's SSOT
+// digest, exactly the same shape every other small bounded structured-output
+// route in this repo already uses.
 //
 // Entirely skipped when deterministic resolution (src/core/intake/resolve.mjs)
 // already fully determines the kind — a known-ATS job-posting URL never
@@ -17,12 +16,22 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runBareOneshot } from "../../cli/assist-route.mjs";
+import { BOUNDED_AI_CODES, runBoundedAI } from "../ai/bounded-ai.mjs";
 import { loadClaudeAgentSdk } from "../ai/skill-runtime.mjs";
-import { runStructuredOneshot } from "../ai/structured-oneshot.mjs";
 import { buildClassifyRouteDigest, loadPasteIntakeRoutes } from "./routes.mjs";
 
 const SCHEMA_RELPATH = "config/intake-classify.schema.json";
 const MAX_BODY_CHARS = 8000;
+const INTAKE_AI_LABELS = Object.freeze({
+  skill: "intake",
+  action: "classify",
+  operation: "intake.classify",
+});
+const INTAKE_AI_MANUAL = Object.freeze({
+  available: true,
+  reason: "manual-review",
+  action: "Review the captured intake item manually.",
+});
 
 const SCHEMA_HINT =
   "Reply with ONLY one fenced ```json code block matching this exact shape — no prose outside the " +
@@ -141,13 +150,12 @@ export function buildIntakeClassifyPrompt({
 // classifyIntakeItem
 // ---------------------------------------------------------------------------
 
-// Returns { ok: true, data, aiSkipped, retried, degraded? }. Never throws for
-// "the AI route isn't configured/installed" (NO_AI_ROUTE/SDK_NOT_INSTALLED) —
-// those degrade to a needs_you classification (`degraded` carries the error
-// code) rather than failing the whole capture, since the raw paste is already
-// durably captured regardless (verbs/intake.mjs's intakeCapture). Any other
-// thrown error propagates — an unexpected internal failure, not an expected
-// "AI unavailable" degrade.
+// Returns { ok: true, data, aiSkipped, retried, degraded?, ai? }. Never throws for
+// "the AI route isn't configured/installed" (NO_AI_ROUTE) — those degrade to a
+// needs_you classification (`degraded` carries the error code) rather than failing
+// the whole capture, since the raw paste is already durably captured regardless
+// (verbs/intake.mjs's intakeCapture). Any other helper/provider failure propagates
+// — an unexpected internal failure, not an expected "AI unavailable" degrade.
 export async function classifyIntakeItem({
   rawInput,
   inputKind,
@@ -173,30 +181,55 @@ export async function classifyIntakeItem({
 
   async function invoke({ correction }) {
     const prompt = correction ? `${basePrompt}\n\n${correction}` : basePrompt;
-    return runBareOneshot({ prompt, repoRoot, env, skillLabel: "intake-classify", loadSdk });
+    try {
+      return await runBareOneshot({
+        prompt,
+        repoRoot,
+        env,
+        skillLabel: "intake-classify",
+        loadSdk,
+      });
+    } catch (err) {
+      if (err?.code === "SDK_NOT_INSTALLED") {
+        err.code = BOUNDED_AI_CODES.NO_AI_ROUTE;
+      }
+      throw err;
+    }
   }
 
-  try {
-    const outcome = await runStructuredOneshot({ schema, maxRetries: 1, invoke });
-    if (!outcome.ok) {
+  const result = await runBoundedAI({
+    labels: INTAKE_AI_LABELS,
+    schema,
+    manual: INTAKE_AI_MANUAL,
+    maxRetries: 1,
+    invoke,
+  });
+
+  const { body } = result;
+  const retried = Boolean(body.ai?.retried);
+  if (!body.ok) {
+    if (body.code === BOUNDED_AI_CODES.AI_SCHEMA_INVALID) {
       return {
         ok: true,
         data: needsYouFallback("the model did not produce a valid classification after a retry"),
         aiSkipped: false,
-        retried: true,
+        retried,
+        ai: body.ai,
       };
     }
-    return { ok: true, data: outcome.data, aiSkipped: false, retried: outcome.retried };
-  } catch (err) {
-    if (err.code === "NO_AI_ROUTE" || err.code === "SDK_NOT_INSTALLED") {
+    if (body.code === BOUNDED_AI_CODES.NO_AI_ROUTE) {
       return {
         ok: true,
-        data: needsYouFallback(err.message),
+        data: needsYouFallback(body.error?.message),
         aiSkipped: false,
-        retried: false,
-        degraded: err.code,
+        retried,
+        degraded: BOUNDED_AI_CODES.NO_AI_ROUTE,
+        ai: body.ai,
       };
     }
+    const err = new Error(body.error?.message || "Bounded intake classification failed.");
+    err.code = body.code;
     throw err;
   }
+  return { ok: true, data: body.data, aiSkipped: false, retried, ai: body.ai };
 }
