@@ -6,9 +6,10 @@
 import { DISCOVERY_PIPELINE } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import { candidateConfigGet } from "../core/db/verbs.mjs";
+import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { prepareQuickStartSourcing } from "./onboard-route.mjs";
-import { sendJson } from "./skill-run-route.mjs";
+import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 export const DISCOVERY_CHAT_SKILLS = ["research-boards", "discover-companies", "search-jobs"];
 
@@ -20,6 +21,8 @@ const DISCOVERY_STEP_NOTES = {
   "search-jobs":
     "Run search-jobs for the first sweep or refresh, save sourced roles, capture reachable JD bodies, and queue sourced roles that still need setup answers.",
 };
+
+const COMPANY_PROPOSAL_BODY_MAX_BYTES = 1024 * 1024;
 
 function readReadinessLocks({ repoRoot, env }) {
   const pathCtx = { repoRoot, env };
@@ -160,7 +163,44 @@ export function mountDiscoveryRoutes({
   chatRuntime,
   prepareQuickStart = prepareQuickStartSourcing,
   loadAgentGuidance = loadAgentGuidanceSnapshot,
+  fetchImpl = fetch,
+  resolveCompanyBoard,
+  scanCompaniesImpl,
+  now,
 }) {
+  addRoute("POST", "/api/discovery/company-proposals", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, COMPANY_PROPOSAL_BODY_MAX_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, {
+        ok: false,
+        code: err.status === 413 ? "PAYLOAD_TOO_LARGE" : "BAD_REQUEST",
+        error: { message: err.message },
+      });
+      return;
+    }
+
+    try {
+      const result = await createCompanyProposalBatch({
+        repoRoot,
+        env,
+        body,
+        fetchImpl,
+        resolveCompanyBoard,
+        scanCompaniesImpl,
+        now,
+      });
+      sendJson(res, 200, { ok: true, data: result.data, meta: result.meta });
+    } catch (err) {
+      sendJson(res, err.status || 500, {
+        ok: false,
+        code: err.code || "COMPANY_PROPOSAL_FAILED",
+        error: { message: err.message },
+      });
+    }
+  });
+
   addRoute("GET", "/api/discovery/state", (_req, res) => {
     let locks = { readiness: null, missing: null, locks: { gateReady: false, applyReady: false } };
     try {

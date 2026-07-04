@@ -86,7 +86,7 @@ async function invokeJson(server, method, path, rawBody) {
   const ended = new Promise((resolve) => {
     resolveEnded = resolve;
   });
-  const req = Readable.from(rawBody === undefined ? [] : [rawBody]);
+  const req = Readable.from(rawBody === undefined ? [] : [Buffer.from(rawBody)]);
   req.method = method;
   req.url = path;
 
