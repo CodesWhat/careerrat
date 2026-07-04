@@ -103,8 +103,9 @@ they do not assert the candidate is actually free.
 
 If the `availability` block is absent or thin, **ask the user for their real availability
 once** (which days/times work, meeting length, timezone), then — confirm-first — offer to
-persist it to `candidate/profile.yml#availability` so future runs don't ask again (the
-gate write-back rule; echo `Written to candidate/profile.yml: availability.<field>: <value>`).
+persist it to candidate profile config (`availability`) so future runs don't ask again.
+In DB mode use `rolester data candidate patch profile --data ...`; in legacy mode use
+the guarded candidate-config write path. Echo the CLI confirmation.
 
 **Honesty (hard): never invent availability.** Only propose windows the candidate's
 preferences or an explicit user confirmation support. If you cannot establish real
@@ -159,14 +160,17 @@ Contract applies: halt on login wall / 2FA / captcha / account-picker confusion)
 `"Busy"`; never substitute the real meeting subject. These are a **snapshot, not a live feed** —
 note when it was taken, and re-ingest before relying on it for a fresh decision.
 
-- **DB workspace:** `calendarBusy[]` is a top-level `tracker.json` key, not part of any
-  `applications[]`/`sourced[]`/`communications[]` row — today's verb surface (`app`, `sourced`,
-  `comm`, `activity`, `analytics-refresh`; see `src/cli/data.mjs --help`) has **no verb that
-  writes it**. This is a genuine gap in the current Data Write Contract, not something to paper
-  over: never hand-edit `tracker.json` in a DB workspace (it's a generated file), and never
-  fabricate a `kv`/`calendarBusy` verb that doesn't exist. Until one ships, treat free/busy
-  ingestion as unavailable in DB workspaces — fall back to the draft-only path in STEP 4 and
-  tell the user real-calendar double-booking checks aren't available yet on this workspace.
+- **DB workspace:** write via the owning verb, never by hand-editing generated
+  `tracker.json`:
+
+  ```bash
+  rolester data calendar busy --data '<JSON array of opaque blocks>' --source calendar_read
+  ```
+
+  The verb stores `calendarBusy[]` as top-level tracker state, dedupes on
+  `provider + startIso + endIso`, forces `label: "Busy"`, stamps
+  `ingestedAt`, bumps meta, logs one activity event, and exports the generated
+  legacy files.
 - **Legacy workspace (no DB):** after writing, validate + re-render (`rolester tracker --verify`
   then `rolester tracker`); the Calendar then shows the windows as muted "Busy" blocks alongside
   actionable events.
@@ -394,7 +398,7 @@ draft awaiting send → log it as needing the user:
 | Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + re-render. Without updating the datetime fields the dashboard Focus card still shows the old time. | `rolester data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `rolester data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `rolester data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
 | They go quiet after your proposal | Leave `status: waiting`; STEP 7b's `nextActionDue` surfaces it as a follow-up (handled by `email-comms` / the follow-up timer). | No write here — this is a read/no-op branch. |
 | Thread turns to comp / general reply | Hand off to `email-comms` (general comms / negotiation surface). | No write here — hand-off only. |
-| User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to `candidate/profile.yml#availability` (STEP 3 write-back). | Unchanged in both modes — a `candidate/profile.yml` write, not a `tracker.json` write; outside the Data Write Contract. |
+| User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to candidate profile config `availability` (STEP 3 write-back). | DB mode: `rolester data candidate patch profile --data ...`; legacy mode: guarded candidate-config write path. Never hand-edit YAML in DB mode. |
 
 ---
 

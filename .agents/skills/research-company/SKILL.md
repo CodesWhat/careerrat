@@ -254,13 +254,12 @@ Tell the user:
 If the user states during the research flow that this company is a no ("I don't want
 to apply there", "add them to the exclusion list", "this is a no"):
 
-1. Confirm with the user before writing ("Add `<Company>` to `excluded_companies` in
-   `candidate/targeting.yml`?").
+1. Confirm with the user before writing ("Add `<Company>` to excluded companies?").
 2. On confirmation, run:
    ```
-   rolester gate exclude-company "<Company>"
+   rolester gate exclude-company "<Company>" --write --confirm
    ```
-3. Echo `Written to candidate/targeting.yml: excluded_companies[] += <Company>`.
+3. Echo the CLI confirmation. `rolester gate` writes SQLite in DB mode and legacy YAML only in legacy mode.
 4. The research artifact can remain — it costs nothing and may be useful for competitive
    intel — but note to the user that `evaluate-job` will CUT any posting from this company.
 

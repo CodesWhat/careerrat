@@ -7,11 +7,11 @@ description: Show current settings and route changes to the validated CLI or own
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
-> **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing settings summaries. Apply the register from AGENTS.md#mode-switches. `exec-summary` = changed setting + confirmation in one line; `standard` = current state + change + confirmation as short bullets; `verbose` = full settings matrix. To change `agent_voice` itself: `rolester modes set agent_voice <value> --write`.
+> **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing settings summaries. Apply the register from AGENTS.md#mode-switches. `exec-summary` = changed setting + confirmation in one line; `standard` = current state + change + confirmation as short bullets; `verbose` = full settings matrix. To change `agent_voice` itself: `rolester modes set agent_voice <value> --write`.
 
 ## Core Principle
 
-`configure` is a **menu and router**. It reads state directly (read-only) and shows it to you. Every **write** goes through the existing validated, comment-preserving, schema-checked, atomic CLI or the owning skill — configure never hand-edits a YAML file itself. This is the [[capture-is-skills-not-cli]] invariant: mutations go through the write-guarded, confirm-first paths that already exist, not through this skill.
+`configure` is a **menu and router**. It reads state directly (read-only) and shows it to you. Every **write** goes through the existing validated, schema-checked, atomic CLI or the owning skill — configure never hand-edits a YAML file itself. In DB workspaces those CLIs write SQLite; in legacy workspaces they may patch YAML. This is the [[capture-is-skills-not-cli]] invariant: mutations go through the write-guarded, confirm-first paths that already exist, not through this skill.
 
 Consequential writes (comp floor/target, broad company exclusions) are confirm-first. Everything stays local. Nothing is ever auto-applied or run on a schedule.
 
@@ -121,7 +121,7 @@ Switch the provider with:
 rolester automation session <extension|playwright> --write
 ```
 
-Dry-run by default; `--write` commits. The first `--write` scaffolds `candidate/automation.yml` from the template if it doesn't exist yet. The change is schema-validated and comment-preserving.
+Dry-run by default; `--write` commits. In DB mode this writes `candidate_automation`; in legacy mode the first `--write` scaffolds `candidate/automation.yml` from the template if it doesn't exist yet. The change is schema-validated in both modes.
 
 `rolester doctor` now surfaces the configured provider and a best-effort presence probe (whether the provider looks reachable). See `docs/BROWSER.md` for the full substrate map and the Browser Automation Contract in `AGENTS.md` for the permission model.
 
@@ -147,11 +147,11 @@ Report what changed. If validation fails, surface the exact error and fix it bef
 
 ## Rules
 
-- **Never a new mutation path.** configure reads state and routes. Every write goes through the CLI or the owning skill — never a direct YAML edit from this skill.
-- **`current_base` is private.** Never print it, never let it appear in any output or artifact. It is stored in `profile.yml` with `current_comp_shareable: false` and is never an outbound value.
+- **Never a new mutation path.** configure reads state and routes. Every write goes through the CLI or the owning skill — never a direct YAML or SQLite edit from this skill.
+- **`current_base` is private.** Never print it, never let it appear in any output or artifact. It is stored in candidate profile config with `current_comp_shareable: false` and is never an outbound value.
 - **Confirm-first on consequential writes.** Dry-run first, show the exact line that will change, get an explicit yes before adding `--write --confirm`. Consequential gates: comp floor/target, broad company exclusions.
 - **Write-and-report on low-blast-radius writes.** Cut/keep signals, expected comp, honesty boundaries, automation switches — dry-run first, then `--write` on confirmation.
 - **ToS is the user's call.** Warn before every `consent` command. Never record consent automatically.
 - **Everything stays local.** No data leaves the machine. No automation runs on a schedule. Every automated session is user-initiated.
 - **Never auto-run browser automation.** configure surfaces the CLI commands; the user confirms each one.
-- **Domain-neutral.** No hardcoded role titles, companies, tools, or candidate-specific values in this skill. All candidate values live in their config files.
+- **Domain-neutral.** No hardcoded role titles, companies, tools, or candidate-specific values in this skill. All candidate values live in SQLite in DB mode and compatibility config files only in legacy/export mode.

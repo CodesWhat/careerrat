@@ -1,6 +1,6 @@
 ---
 name: discover-companies
-description: Web-search companies LIKELY to be hiring the candidate's target roles → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to config/sourced-scan.json tracked_companies, confirm-first. Upstream of search-jobs; turns a closed company set into a growing one.
+description: Web-search companies LIKELY to be hiring the candidate's target roles → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to Rolester tracked-company source config, confirm-first. Upstream of search-jobs; turns a closed company set into a growing one.
 tier_1_inputs: [profile.candidate.domain, targeting role_buckets, targeting keep_signals, targeting excluded_companies, profile.compensation.minimum_base, STEP 0 dedup set, modes verdict]
 tier_2_inputs: [per-company WebSearch/WebFetch bodies, careers-page resolution]
 ---
@@ -9,17 +9,19 @@ tier_2_inputs: [per-company WebSearch/WebFetch bodies, careers-page resolution]
 
 Discovers **companies** likely to be hiring the candidate's target roles, resolves
 each to a careers board the scanner can sweep, screens them, and proposes adding them
-to `config/sourced-scan.json` `tracked_companies[]`. Never writes a company without
-explicit user confirmation. Never duplicates a company already tracked, applied to,
-sourced, or excluded.
+to the Rolester source config (`rolester companies`: SQLite in DB workspaces,
+legacy `config/sourced-scan.json` otherwise). Never writes a company without explicit
+user confirmation. Never duplicates a company already tracked, applied to, sourced,
+or excluded.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 This is the company analog of `research-boards`. `research-boards` finds **boards/aggregators**;
 `discover-companies` finds **employers** and wires their ATS board into the sweep. The sweep
-(`search-jobs` → `scan:sourced`) only ever scans the companies in `config/sourced-scan.json`
-`tracked_companies[]` — it has no discovery of its own. This skill is what grows that list, so
-future sweeps reach beyond the set the candidate has already exhausted.
+(`search-jobs` → `scan:sourced`) only ever scans configured tracked companies (`rolester
+companies`: SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) — it has no
+discovery of its own. This skill is what grows that list, so future sweeps reach beyond the set
+the candidate has already exhausted.
 
 Post-onboarding discovery order:
 
@@ -35,7 +37,7 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 |---|---|
 | `candidate/targeting.yml` | `role_buckets[].name`, `role_buckets[].titles`, `role_buckets[].priority`, `keep_signals`, `cut_signals`, `excluded_companies` |
 | `candidate/profile.yml` | `candidate.domain`, `location.remote`/`home`/`relocation`, `compensation.minimum_base` (comp-plausibility filter — never surface the figure outbound) |
-| `config/sourced-scan.json` | `tracked_companies[].name`, `tracked_companies[].careers_url` — the company dedup + write target |
+| Source config | `rolester companies` / `tracked_companies[].name`, `tracked_companies[].careers_url` — the company dedup + write target. In DB mode, `rolester companies` reads/writes SQLite; in legacy mode it reads/writes `config/sourced-scan.json`. |
 | `workspace/tracker.json` | `applications[].company`, `sourced[].company` — companies already in play; never re-propose |
 
 ---
@@ -64,7 +66,7 @@ Read the input files above. Extract:
 
 Build the **dedup set** — the union of every company name the candidate is already engaged with, so nothing is re-proposed:
 
-- every `tracked_companies[].name` in `config/sourced-scan.json` (already swept), **and**
+- every `tracked_companies[].name` from `rolester companies` (already swept), **and**
 - every `applications[].company` and `sourced[].company` in `workspace/tracker.json` (already applied/sourced), **and**
 - every `targeting.excluded_companies` entry (hard-excluded).
 
@@ -164,7 +166,7 @@ Present results before writing anything:
 | 3 | <name> | <one phrase> | <title> | — | — | — | REJECTED: <reason> / ATS unsupported |
 ```
 
-Do not add anything to `config/sourced-scan.json` yet.
+Do not add anything to source config yet.
 
 ---
 
@@ -197,7 +199,7 @@ companies to add. Write nothing before that.
 - BORDERLINE / MEDIUM companies: always confirm-first, even with auto-add on.
 
 For each company being added (auto or confirmed), use the companies helper — **never hand-edit
-`config/sourced-scan.json`**:
+SQLite source tables or `config/sourced-scan.json`**:
 
 ```
 rolester companies --add "<Company Name>" --url "<careers_url>"          # dry-run preview
@@ -205,8 +207,9 @@ rolester companies --add "<Company Name>" --url "<careers_url>" --write  # commi
 ```
 
 The helper infers the provider from the host, **rejects any URL not on a supported ATS**, dedups
-by name and URL (idempotent no-op if already tracked), and writes atomically. An `ATS: unsupported`
-company cannot be added — leave it in the table as intel only.
+by name and URL (idempotent no-op if already tracked), and writes atomically. In DB workspaces it
+writes SQLite source config; in legacy workspaces it writes `config/sourced-scan.json`. An
+`ATS: unsupported` company cannot be added — leave it in the table as intel only.
 
 After adding, confirm the result and validate:
 
@@ -215,7 +218,7 @@ rolester companies
 rolester doctor
 ```
 
-Confirm `config/sourced-scan.json` still validates before reporting done.
+Confirm source config still validates before reporting done.
 
 Then log the discovery to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md) — one
 summary event, not one per company:
@@ -252,15 +255,15 @@ growing the tracked-company list.
 ## Scope boundary
 
 `discover-companies` discovers employers, resolves their ATS board, screens, proposes, and (on
-confirmation) adds them to `config/sourced-scan.json` `tracked_companies[]`. It does not:
+confirmation) adds them to source config through `rolester companies`. It does not:
 
 - scan boards for postings (that is `search-jobs`)
 - find boards/aggregators (that is `research-boards`)
 - research a single named company in depth for fit/interview context (that is `research-company`)
 - evaluate, tailor, fill, or submit anything
 
-The artifact this skill produces is rows in `config/sourced-scan.json`. Hand off to `search-jobs`
-to scan them.
+The artifact this skill produces is tracked-company source config: SQLite rows in DB workspaces,
+legacy `config/sourced-scan.json` rows otherwise. Hand off to `search-jobs` to scan them.
 
 ## Final handoff
 
@@ -292,8 +295,8 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
   this skill's prose. Every nominee derives from web-search results for the candidate's actual
   `domain`, `role_buckets`, and `keep_signals`. The same skill must serve a nurse, a driver, and
   an engineer by swapping the gate files.
-- **Confirm-first is the default.** Never touch `config/sourced-scan.json` without explicit user
-  approval, unless the user opted into auto-add for high-confidence companies this session.
+- **Confirm-first is the default.** Never write source config without explicit user approval,
+  unless the user opted into auto-add for high-confidence companies this session.
 - **Borderline/medium always confirm-first**, even with auto-add on.
 - **Dedup hard.** Never propose a company in the STEP 0 dedup set (tracked + applied + sourced)
   or in `excluded_companies`.
@@ -304,7 +307,7 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 - **Comp screen stays internal.** Use `minimum_base` to filter implausible employers; never write
   the figure into the table, an artifact, or any outbound text (Privacy Invariant).
 - **Use the helper.** Additions go through `rolester companies --add … --write`. Do not edit
-  `config/sourced-scan.json` directly.
+  SQLite source tables or `config/sourced-scan.json` directly.
 - **Quality gate.** A company must be a real employer with at least one current, dated, relevant
   role on a resolvable board to be proposed. An inferred board with no visible roles is borderline
   at best.

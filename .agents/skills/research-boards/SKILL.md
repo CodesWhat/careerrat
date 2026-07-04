@@ -1,6 +1,6 @@
 ---
 name: research-boards
-description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families → propose adding to search-sources.yml, confirm-first.
+description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families -> propose adding through `rolester searches`, confirm-first.
 tier_1_inputs: [profile.candidate.domain, targeting role families, STEP 0 dedup set, modes verdict]
 tier_2_inputs: [per-board WebFetch bodies]
 ---
@@ -8,8 +8,11 @@ tier_2_inputs: [per-board WebFetch bodies]
 # research-boards
 
 Discovers new job boards and aggregators relevant to the candidate's domain and role
-families. Proposes additions to `config/search-sources.yml`. Never writes a source
-without explicit user confirmation. Never duplicates an already-configured board.
+families. Source config is accessed through `rolester searches` (`--json` for reads,
+`--add-url` for writes). In DB workspaces this is DB-backed source config; in legacy
+workspaces it persists to `config/search-sources.yml`. Do not edit source YAML
+directly. Never writes a source without explicit user confirmation. Never duplicates
+an already-configured board.
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
@@ -17,11 +20,11 @@ without explicit user confirmation. Never duplicates an already-configured board
 
 ## Inputs
 
-| File | Fields used |
+| Input | Fields used |
 |---|---|
-| `candidate/targeting.yml` | `role_buckets[].name`, `role_buckets[].titles`, `role_buckets[].priority` |
-| `candidate/profile.yml` | `candidate.domain`, `location.remote`, `location.home` |
-| `config/search-sources.yml` | `searches[].label`, `searches[].target`, `searches[].url`, `searches[].rssUrl` — build the already-configured URL+label set to dedupe against |
+| Candidate targeting via DB-first accessor/compat export | `role_buckets[].name`, `role_buckets[].titles`, `role_buckets[].priority` |
+| Candidate profile via DB-first accessor/compat export | `candidate.domain`, `location.remote`, `location.home` |
+| Source config via `rolester searches --json` | `searches[].label`, `searches[].target`, `searches[].url`, `searches[].rssUrl` - build the already-configured URL+label set to dedupe against |
 
 ---
 
@@ -39,12 +42,13 @@ If it returns `skip`, do not run board discovery by default; explain that lean u
 mode treats board discovery as discretionary and offer to proceed only if the user
 explicitly overrides. If it returns `run`, continue.
 
-Read the three input files above. Extract:
+Read candidate context through DB-first accessors/compat exports and read source
+config with `rolester searches --json`. Extract:
 
 - **Domain** — `profile.candidate.domain` (e.g. "software engineering", "finance", "logistics")
 - **Role families** — the `name` of every bucket in `targeting.role_buckets` (not titles; families drive query breadth)
 - **Remote posture** — `profile.location.remote` (drives relevance of remote-focused boards)
-- **Configured URLs** — collect every `url`, `rssUrl`, and `target` value already present in `config/search-sources.yml`; also collect every `label` value. This is the dedup set — no board whose root domain or label already appears here will be proposed.
+- **Configured URLs** — collect every `url`, `rssUrl`, and `target` value already present in source config; also collect every `label` value. This is the dedup set — no board whose root domain or label already appears here will be proposed.
 
 Print a one-line summary of detected inputs before proceeding:
 
@@ -140,7 +144,7 @@ For boards that are RSS or have a filterable search URL, include the specific UR
 embedded filters (domain / role family keyword pre-applied) in the "Why relevant" column
 when you can determine it from the fetch.
 
-Do not add anything to `config/search-sources.yml` yet.
+Do not add anything to source config yet.
 
 ---
 
@@ -193,13 +197,13 @@ Where `<url>` is:
 
 And `<label>` is the human-readable board name from the proposed table.
 
-**Registry write-back — to the candidate's own files ONLY, never `docs/SOURCES.md`.** A
+**Registry write-back - to the candidate's own source config ONLY, never `docs/SOURCES.md`.** A
 discovered board is candidate-specific (it matches *this* user's domain and role families), so
 it must never touch `docs/SOURCES.md` — that file is shipped and published, and writing a
 discovered board there leaks one user's targeting into the public package. The durable record
 of every added board is:
-- its entry in the gitignored `config/search-sources.yml` (added above — this is what future
-  `setup-searches` runs read back as the user's own starter set), plus
+- its entry in source config through `rolester searches` (DB-backed in DB workspaces,
+  legacy `config/search-sources.yml` otherwise), plus
 - the research log recorded in the next step (gitignored `workspace/research/`).
 
 Leave `docs/SOURCES.md` untouched. It ships only field-neutral provider infrastructure
@@ -218,7 +222,7 @@ Then run:
 rolester doctor
 ```
 
-Confirm `config/search-sources.yml` passes schema validation before reporting done.
+Confirm source config passes schema validation before reporting done.
 
 **Optional — record a board-discovery audit note:**
 
@@ -252,14 +256,14 @@ rolester activity append --type research --actor agent \
 
 ## Scope boundary
 
-`research-boards` discovers, screens, proposes, and (on confirmation) adds SOURCES to
-`config/search-sources.yml`. It does not:
+`research-boards` discovers, screens, proposes, and (on confirmation) adds SOURCES
+through `rolester searches`. It does not:
 
 - scan sources for job postings (that is `search-jobs`)
 - evaluate individual postings for fit (that is `evaluate-job`)
 - tailor, fill, or submit applications
 
-The artifact this skill produces is entries in `config/search-sources.yml`. It sits in
+The artifact this skill produces is entries in source config. It sits in
 the post-onboarding discovery order:
 
 ```
@@ -267,7 +271,7 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 ```
 
 After board discovery, hand off to `discover-companies` so employer ATS boards are
-wired into `config/sourced-scan.json` before the first `search-jobs` sweep. Only go
+wired into tracked-company source config through `rolester companies` before the first `search-jobs` sweep. Only go
 straight to `search-jobs` if the user explicitly wants to skip company discovery.
 
 ## Final handoff
@@ -299,7 +303,7 @@ REGISTRY-UPDATED: <yes | no>
 - **Domain-neutral.** No hardcoded board names, industries, or aggregator brands appear
   in this skill's prose. Every board name derives from web-search results for the
   candidate's actual domain and role families.
-- **Confirm-first is the default.** Never touch `config/search-sources.yml` without the
+- **Confirm-first is the default.** Never add a source without the
   user explicitly approving additions, unless the user has opted into auto-add for
   high-confidence boards in the current session.
 - **Auto-add is opt-in only.** Auto-add activates only when the user explicitly says
@@ -312,8 +316,8 @@ REGISTRY-UPDATED: <yes | no>
 - **Quality gate.** A board must show at least one real, dated, domain-relevant listing
   to be proposed. An evergreen landing page or talent-pool gate is a rejection.
 - **Use the existing CLI.** Additions go through `rolester searches --add-url "<url>" --label "<label>"`. Do not edit `config/search-sources.yml` directly.
-- **Registry write-back.** Record every added board in the candidate's gitignored files only —
-  `config/search-sources.yml` (via the CLI above) plus the `workspace/research/` log. NEVER write
+- **Registry write-back.** Record every added board in candidate-owned source config only -
+  through `rolester searches` plus the `workspace/research/` log. NEVER write
   discovered boards to `docs/SOURCES.md`; it ships and is published, so it stays field-neutral.
 
 ---

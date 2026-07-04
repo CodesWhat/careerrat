@@ -1,6 +1,6 @@
 ---
 name: answer-question
-description: Evidence-grounded drafted answers to one-off application-form or screening questions — reuses persisted `screening_answers` first, grounds new answers in profile/honesty/evidence, and never fabricates (the unanswerable case is the literal `NEEDS YOU` marker, never a guess). Durable disclosure-style answers (work authorization, sponsorship, relocation, notice period, clearance status, start date) persist back to `candidate/form-defaults.yml#screening_answers` so they're never re-asked; job-specific answers are never persisted. Capability = local files only — no browser, no submission.
+description: Evidence-grounded drafted answers to one-off application-form or screening questions — reuses persisted `screening_answers` first, grounds new answers in profile/honesty/evidence, and never fabricates (the unanswerable case is the literal `NEEDS YOU` marker, never a guess). Durable disclosure-style answers (work authorization, sponsorship, relocation, notice period, clearance status, start date) persist back to candidate form defaults `screening_answers` so they're never re-asked; job-specific answers are never persisted. Capability = local files only — no browser, no submission.
 ---
 
 # answer-question
@@ -39,8 +39,8 @@ fragment.
 
 ## STEP 2 — screening_answers first
 
-Read `candidate/form-defaults.yml#screening_answers` — plus the legacy read
-aliases `screeningAnswers` and `screening` in that same precedence order,
+Read candidate form defaults `screening_answers` through the shared DB-first
+config accessor — plus the legacy read aliases `screeningAnswers` and `screening` in that same precedence order,
 mirroring `configuredScreeningEntries()` in `src/core/apply/form-fill.mjs`
 (~lines 498–505). Match each normalized question against the configured keys
 by substring, the same rule `findConfiguredScreeningAnswer()` there applies.
@@ -54,9 +54,9 @@ says. Mark the answer `SOURCE: screening_answers`.
 No configured hit → draft fresh. Apply **`apply-job`'s screening-answer
 posture** by pointer — see "Screening answer posture" in
 `.agents/skills/apply-job/SKILL.md` STEP 7 — rather than restating its logic
-here. Ground the answer in, in order of precedence: `candidate/form-defaults.yml`,
-`candidate/profile.yml`, `candidate/honesty.yml`, `candidate/evidence.yml`, any
-tailored artifacts loaded in the Boundary step, and the JD when available.
+here. Ground the answer in, in order of precedence: candidate form defaults,
+profile, honesty, evidence, any tailored artifacts loaded in the Boundary step,
+and the JD when available.
 Write first person, in the candidate's writing style
 (`candidate/writing-style.md`). Every claim must trace to a real
 `evidence.yml` claim — never invent an angle to fit the question.
@@ -78,11 +78,12 @@ which input carried the substance, or `SOURCE: mixed` when both did.
 **Durable** = a recurring disclosure/logistics-style answer that will come up
 again verbatim on other applications: work authorization, sponsorship,
 relocation, notice period, security clearance status, start date, and
-similar. Write the normalized question fragment → exact answer into
-`candidate/form-defaults.yml#screening_answers`. When it is a legal/disclosure
-answer, also note it in `candidate/interview-notes.md` — the same
-screening-disclosure persist pattern `tailor-application` STEP 6 item 4
-already uses; point at it rather than re-describing it.
+similar. Write the normalized question fragment → exact answer into candidate
+form defaults `screening_answers`: in DB mode use
+`rolester data candidate patch form-defaults --data ...`; in legacy mode use the
+guarded compatibility config path. When it is a legal/disclosure answer, also
+capture a local note/artifact through the owning skill; do not hand-edit
+candidate YAML in DB mode.
 
 **Never persist:** job-specific answers (why-this-company, role-fit essays,
 anything referencing a particular employer or posting), and any `NEEDS YOU`

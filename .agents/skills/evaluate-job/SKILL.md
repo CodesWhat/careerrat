@@ -78,7 +78,7 @@ Read the following files (all under `candidate/`):
 | `profile.yml` | `compensation.comp_floors` (arrangement floors: `remote`/`hybrid`/`onsite`/`relocation` + `home_metro` + `relocation_by_metro[]` — the HARD comp gate; relocation miss = cut), `compensation.minimum_base` (fallback floor), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
 | `honesty.yml` | honesty boundaries (education policy, do_not_claim, do_not_fabricate) |
 | `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `rolester modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. |
-| `application-limits.yml` | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
+| `application-limits` config | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
 | `learnings/<role-family>.md` | if present — prior outcomes for this track. Read via `rolester learnings read "<JD title>"` — the helper classifies the family from `targeting.yml` (role_families → role_buckets → neutral-slug ladder), prints the file, or skips silently when absent. |
 
 Also read any **company research** artifact for FIT context (it lives under
@@ -97,7 +97,9 @@ but does not relax this skill's honesty, comp, legitimacy, or consent gates.
 
 ## STEP 3 — APPLICATION-LIMITS PRE-CHECK
 
-Look up the posting company in `candidate/application-limits.yml`.
+Look up the posting company in application limits. In DB mode, read
+`rolester data candidate get --json` and use `application-limits.companies[]`.
+In legacy mode, read `candidate/application-limits.yml` if present.
 
 - **`status: blocked` and today < `reapply_after`** → emit `ACTION: hold - <bypass note from config>` and stop. Do not proceed to gate.
 - **`status: caution` and within `cooldown_days` window** → note in output, continue evaluation, and set `ACTION: manual` unless overridden by a later step.
@@ -108,7 +110,7 @@ Look up the posting company in `candidate/application-limits.yml`.
 ## STEP 3.25 — TRACKER COMPANY-HISTORY PRE-CHECK
 
 Open `workspace/tracker.json` and review same-company history before assigning priority.
-This is mandatory even when `application-limits.yml` has no formal cap.
+This is mandatory even when application limits have no formal cap.
 
 Check:
 
@@ -121,7 +123,7 @@ Rules:
 - **Exact req/URL/company+role already exists as an application** → do not create or promote another row. Emit `ACTION: hold` or `manual` with the duplicate reason.
 - **Exact req/URL/company+role already exists in `sourced[]`** → update that row instead of adding another one.
 - **Same company has an active application** (`awaiting`, `screen`, `interview`, `blocked`, or any non-terminal status) → carry `COMPANY HISTORY:` into the verdict and force `ACTION: manual`, unless the user explicitly says parallel applications are allowed or a recruiter bypass exists.
-- **Same company has a recent rejection/pass** (within the last 90 days, unless `application-limits.yml` defines a different cooldown) → carry `COMPANY HISTORY:` and force `ACTION: manual`; body-read fit can still be high, but the assistant must review positioning before applying again.
+- **Same company has a recent rejection/pass** (within the last 90 days, unless application limits define a different cooldown) → carry `COMPANY HISTORY:` and force `ACTION: manual`; body-read fit can still be high, but the assistant must review positioning before applying again.
 - **Same company has only prior cut/closed sourced rows** → carry a concise caution. This does not automatically block `apply-now` when the current req is distinct and live, but the prior row must be visible in the tracker note.
 - **Formal app-limit block/caution from STEP 3 wins** over softer company history.
 
@@ -363,19 +365,9 @@ Then log the verdict to the Activity Pulse feed (the dashboard's live timeline �
 
 ## STEP 10 — GATE WRITE-BACK (new limits discovered)
 
-If a new application blocker was encountered during this evaluation (e.g., the portal is hCaptcha-only, a spam blocker is confirmed, a required exercise link is found):
+If a new application blocker was encountered during this evaluation (e.g., a posted cap, cooldown, or portal blocker that should affect future roles), capture it on the tracker row and persist it after confirmation. DB mode writes use `rolester data candidate limits upsert --data '<json row>'`; legacy mode writes `candidate/application-limits.yml`.
 
-1. Write the limit to `candidate/application-limits.yml`:
-   ```yaml
-   - company: "<Company>"
-     status: blocked
-     hit_on: "<today's date>"
-     hit_via: "<how discovered>"
-     reapply_rule: "<manual review required | date>"
-   ```
-2. Confirm write: echo `Written to candidate/application-limits.yml: <company> status:blocked`.
-
-**Write-back friction rule**: application-limits are unambiguous, low-blast-radius — use write-and-report (write first, then echo the change). Do not ask for confirmation.
+**Write-back friction rule**: blocker facts are low-blast-radius to record on the row, but durable application-limit config is confirm-first.
 
 ---
 

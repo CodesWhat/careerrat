@@ -4,10 +4,12 @@ This is the agent operating contract. Humans setting up: see README.md first.
 
 Read this before doing job-search work in this repo.
 
-If `candidate/AGENTS.md` exists, read it too — `ingest-profile` generates it to
-personalize this router with the candidate's target roles, comp floor, location
-posture, and keep/cut signals. If the workspace has no `candidate/` setup yet,
-run `ingest-profile` (or `rolester ingest`) first.
+If `candidate/AGENTS.md` exists, read it too — `ingest-profile` / `write-config`
+generates it to personalize this router with the candidate's target roles, comp
+floor, location posture, and keep/cut signals. In DB workspaces, SQLite candidate
+setup is canonical and `candidate/` files are compatibility exports. If the
+workspace has no candidate setup yet, run `ingest-profile` (or `rolester ingest`)
+first.
 
 The agent is the runtime; the skills are the how-to. When in doubt about *how* to
 do something, open the owning skill and follow it — don't improvise the procedure.
@@ -29,8 +31,10 @@ let's get started" (or anything that isn't a specific task):
    aren't available) so `/apply-job`, `/search-jobs`, etc. become invokable.
    `rolester doctor` also flags this. Codex and other agents that read this AGENTS.md
    natively need no install — they route through the index below directly.
-2. Read this router and the skill index. Detect setup state: is there a
-   `candidate/` profile? Is `workspace/tracker.json` real or still the demo seed?
+2. Read this router and the skill index. Detect setup state with `rolester data
+   status` / `rolester ingest --check`: is there DB-backed candidate setup (or,
+   in legacy mode, a `candidate/` profile)? Is `workspace/tracker.json` real or
+   still the demo seed?
 3. If not set up, run `ingest-profile` — but make onboarding feel like a
    conversation, not a form:
    - **Use what you already know.** Pull from this session's context, the user's
@@ -113,6 +117,14 @@ Run `rolester update` to pull the latest code from npm. Source checkouts should
 run `npm link` once so the local `rolester` binary is on PATH. Rolester is
 published at `rolester@latest`; the update command does a privacy-guarded
 tarball extract so your `candidate/` and `workspace/` data are never touched.
+
+## Local AI Key Storage
+
+The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`.
+Path resolution follows the active Rolester home: with `ROLESTER_HOME` set, the
+file is `<ROLESTER_HOME>/internal/ai.env` (no dot); in legacy repo-root mode it
+is `.internal/ai.env`. The value is chmod `0600`, loaded at server boot, and
+never echoed back by the API.
 
 ## Dashboard Dev Server Contract
 
@@ -233,7 +245,8 @@ contract — there is no code interceptor for them, by design.
   `conversations[]` for calls/interviews/debriefs.
 - Sourced roles stay in `sourced[]` until the gate and application flow promote
   them. Saved JD bodies belong in `workspace/jobs/`; source run watermarks belong
-  in `config/search-sources.yml` and/or `tracker.sources[]`.
+  in DB source config in DB workspaces, and in `config/search-sources.yml` and/or
+  `tracker.sources[]` in legacy workspaces.
 - **JD-body capture invariant (hard).** Any time a posting is grabbed — sourced,
   evaluated, or applied to — its **full job-description text is captured locally at
   grab time**, into `workspace/jobs/<…>.md` and mirrored onto the row's
@@ -304,15 +317,18 @@ verbs), then exports — do not repeat these by hand in DB mode:
 Verbs available today (`node src/cli/data.mjs --help` for exact syntax):
 `app upsert|set-status|set-fields|schedule-interview|register-artifact`,
 `sourced upsert-batch|promote`, `comm upsert|append-message|mark-sent`,
-`activity append`, `analytics-refresh`, plus top-level `status|init|import|
-export|verify`. Every verb accepts `--json` (machine-readable) and `--root
-<dir>`.
+`calendar busy`, `candidate init|get`, `candidate patch`, `candidate evidence`,
+`candidate limits upsert`, `activity append`,
+`intake capture|update|decide|list|one`, `analytics-refresh`, plus top-level
+`status|init|import|export|verify`. Every verb accepts `--json`
+(machine-readable) and `--root <dir>`.
 
 ### Tracker Content Register (hard)
 
 The dashboard renders typed fields, not one free-text blob. Every field holds
-**exactly one topic** within a **hard character budget**. This governs what you
-*write into `tracker.json`*; it is separate from `agent_voice` (which governs chat
+**exactly one topic** within a **hard character budget**. This governs fields written
+to canonical tracker state (`rolester data ...` in DB workspaces, `workspace/tracker.json`
+in legacy workspaces); it is separate from `agent_voice` (which governs chat
 output). The canonical anti-pattern — never acceptable in any field — is one
 paragraph that mixes scheduling + comp/band + recruiter signals + next rounds +
 role fit. Each of those is a different field below.
@@ -458,7 +474,7 @@ chat.
 | A mailbox sync request (Apple Mail / Gmail / Outlook) | `ingest-mail` | `communications[]` |
 | An in-platform message sync request (LinkedIn / Wellfound DMs) | `ingest-messages` | `communications[]` |
 | A company name / "tell me about X" / a company homepage URL | `research-company` | `workspace/research/<slug>.md` |
-| A wishlist of employers to target / "find companies like X to add" | `discover-companies` | `config/sourced-scan.json` `tracked_companies[]` (confirm-first) |
+| A wishlist of employers to target / "find companies like X to add" | `discover-companies` | tracked-company source config through `rolester companies` (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) (confirm-first) |
 | "is X a safe bet" / company risk, layoffs, financial health, morale — scoped to the role | `company-health` | `companyHealth` (role-scoped rating) on the tracker row |
 | A standalone fact / preference / constraint (comp, location, an exclusion) | `configure` / `ingest-profile` | `candidate/` config, confirm-first |
 | Anything else with no obvious owner (a note, a stray link, a screenshot) | capture as a dated note | `workspace/intake/<slug>-<date>.md`, linked to the nearest application or company |
@@ -510,7 +526,8 @@ Rules for intake:
   keeps returning only roles at companies already in play (the tracked-company set
   is exhausted): use `discover-companies`. It web-searches employers likely hiring
   the candidate's target roles, resolves each to a scannable ATS board, and
-  proposes adding them to `config/sourced-scan.json` `tracked_companies[]`
+  proposes adding them to tracked-company source config through `rolester companies`
+  (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise)
   (confirm-first). It is the company analog of `research-boards` and upstream of
   `search-jobs` — `research-boards` finds boards/aggregators, `discover-companies`
   finds employers and wires their board into the sweep.
@@ -664,19 +681,21 @@ ACTION: apply-now|hold|manual|cut
 A "gate" is any constraint that decides what the user will or won't pursue: a
 cut/keep signal, an excluded company, a comp floor, a per-company application cap,
 an honesty boundary, a degree policy. **Gates live in canonical candidate config
-files that the skills read — never hardcoded into a skill's prose.** The skills are
-field-agnostic procedures; the gate files are what make them conform to *this* user.
+that the skills read — SQLite in DB workspaces, YAML only in legacy/export mode —
+never hardcoded into a skill's prose.** The skills are field-agnostic procedures;
+the candidate config is what makes them conform to *this* user.
 This is the core productization move over a single-user setup: a trucking candidate
 and an AI engineer run the *same* skills against *different* gate files.
 
-Canonical gate files (all under `candidate/`, gitignored/private):
+Canonical candidate config (DB tables in DB mode; compatibility YAML under
+`candidate/`, gitignored/private, in legacy/export mode):
 
 | File | Governs | Read by |
 | --- | --- | --- |
 | `targeting.yml` | `role_buckets`, `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands`, `priorities`/`must_haves` (candidate needs — drive the company-health cross-cut), OE bucket | evaluate-job, search-jobs, setup-searches, discover-companies, tailor-application, track-outcomes, reevaluate-strategy, interview-prep, optimize-linkedin, company-health |
 | `profile.yml` | `domain`, `toolchain`, `location.*`, `compensation.*` (minimum/target/expected base, OE range, relo; **`current_base` is private**) | nearly all skills |
 | `honesty.yml` | `education` policy, `tools.confirmed` / `tools.do_not_claim`, `claims.do_not_fabricate` | tailor-application, apply-job, email-comms, interview-prep, evaluate-job, optimize-linkedin |
-| `application-limits.yml` | per-company caps/cooldowns, reevaluation thresholds | apply-job (step-zero), evaluate-job (ACTION), search-jobs (deprioritize), track-outcomes (thresholds) |
+| `application-limits` / `application-limits.yml` | per-company caps/cooldowns, reevaluation thresholds | apply-job (step-zero), evaluate-job (ACTION), search-jobs (deprioritize), track-outcomes (thresholds) |
 | `form-defaults.yml` | `auto_submit`, applicant facts, `expected_base` | apply-job |
 | `modes.yml` | optional `usage_mode`, `application_mode`, `agent_voice`, and `company_health` (firing policy); absent means `standard` / `balanced` / `standard` / defaults | search-jobs, evaluate-job, research-company, research-comp, research-boards, interview-prep, configure, doctor, email-comms, reevaluate-strategy, company-health |
 | `writing-style.md` (+ `workspace/writing-samples/`) | voice/calibration | tailor-application, email-comms, interview-prep |
@@ -696,11 +715,13 @@ than restating it.
 
 ### Mode switches
 
-`candidate/modes.yml` is optional, private user posture. If it is absent, Rolester
-uses `usage_mode: standard`, `application_mode: balanced`, and `agent_voice: standard`.
+Candidate modes config is optional, private user posture. In DB workspaces it lives
+in SQLite; in legacy/export mode it may appear as `candidate/modes.yml`. If it is
+absent, Rolester uses `usage_mode: standard`, `application_mode: balanced`, and
+`agent_voice: standard`.
 Use `rolester modes status`, `rolester modes allows <operation>`, and `rolester modes
--- set <usage|application|agent_voice> <value> --write`; do not hand-edit the file
-unless the helper is unavailable.
+-- set <usage|application|agent_voice> <value> --write`; do not hand-edit the DB or
+compatibility file unless the helper is unavailable.
 
 - `usage_mode` (`lean | standard | full`) controls compute/scope for discretionary
   work. Core work — evaluation, tailoring, outcome tracking, and recruiter comms —
@@ -734,24 +755,27 @@ Memory**.
 
 When the user states a **new gate mid-flow** ("never Palantir", "below $190K is a
 no", "add ML-research as a cut", "OpenAI capped me at 5/180d"), the skill that hears
-it **writes it to the canonical file** so every other skill inherits it — then
+it **writes it to canonical candidate config** so every other skill inherits it — then
 re-renders / confirms. A stated gate must never live only in chat, and must never be
 hardcoded into a skill.
 
 - **Mechanism — use the `gate` helper, don't hand-edit YAML.** `rolester gate --
-  <type> <value>` routes to the right file, patches the text (comments preserved),
-  schema-validates the result, and prints the diff + friction — as a **dry run**.
+  <type> <value>` routes to the right DB-backed config in DB mode (or the legacy
+  compatibility file in legacy mode), schema-validates the result, and prints the
+  diff + friction — as a **dry run**.
   Add `--write` to commit a write-and-report gate; `--write --confirm` to commit a
   confirm-first one. It refuses any change that would invalidate the file and is
   idempotent (re-adding an existing value is a no-op). `rolester gate --list`
   shows the types: `exclude-company`, `cut-signal`, `keep-signal`, `comp-floor`,
-  `comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`. For a gate
-  with no `gate` type yet (e.g. an `application-limits.yml` cap block), edit the
-  file directly, then `rolester doctor`.
+  `comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`.
+  Per-company application caps/cooldowns use the DB-aware data helper:
+  `rolester data candidate limits upsert --data '<json row>'` in DB mode, or the
+  legacy compatibility file in legacy mode.
 - **Routing** (the helper encodes this; here for reference): exclusion →
   `targeting.yml#excluded_companies`; cut/keep signal →
   `targeting.yml#cut_signals`/`keep_signals`; comp floor/anchor →
-  `profile.yml#compensation`; per-company cap/cooldown → `application-limits.yml`;
+  `profile.yml#compensation`; per-company cap/cooldown →
+  `application-limits` (`candidate/application-limits.yml` only in legacy/export mode);
   honesty boundary → `honesty.yml`.
 - **Friction:** *write-and-report* for unambiguous, low-blast-radius gates (one clear
   cut signal; a cap the user just hit) — `--write`, then echo `Written to <file>:
@@ -954,7 +978,7 @@ event at the end of that action** — the same "the writer records it" disciplin
   | `track-outcomes` | `status_change` / `interview` / `offer` / `failure` | world | after the outcome is recorded (it is the only writer of status transitions, including those handed up by `sync-status`) |
   | `ingest-mail` / `ingest-messages` | `message` | world | one event per inbound thread captured into `communications[]` |
   | `research-company` / `research-comp` / `research-boards` | `research` | agent | after `rolester research record --write` |
-  | `discover-companies` | `research` | agent | after companies are added to `config/sourced-scan.json` — one summary event ("N companies added to track") |
+  | `discover-companies` | `research` | agent | after companies are added to tracked-company source config through `rolester companies` — one summary event ("N companies added to track") |
   | `company-health` | `research` | agent | after a role-scoped rating is persisted to `companyHealth` — title "Company health: &lt;Company&gt; — &lt;rating&gt;" |
   | `interview-prep` | `interview` | agent | after a packet / debrief is captured to `conversations[]` |
   | `reevaluate-strategy` | `system` | agent | after a strategy retune is recorded |
@@ -1201,8 +1225,10 @@ write it under `workspace/captures/` — which is gitignored — and **never** t
 repo root or `workspace/` root (stray PNGs there are also backstop-ignored). Don't
 commit captures. Only when a screenshot is meant to be shown in the app do you write
 it to a deliberately tracked path and reference it from the tracker/dashboard.
-`track-outcomes` remains the **only** writer of `tracker.json` — status-polling and
-messaging hand it transitions, they don't write the tracker themselves.
+`track-outcomes` remains the owner of canonical tracker status transitions; in DB
+workspaces it writes via `rolester data`, and in legacy workspaces it writes the
+tracker JSON. Status-polling and messaging hand it transitions, they don't write
+status themselves.
 
 **Application form-fill autonomy.** Custom screening questions are not blockers by
 default. During `apply-job`, answer as the candidate from local context first:
@@ -1217,7 +1243,8 @@ or a materially new disclosure not captured during onboarding.
 
 **Phased rollout.** Each capability becomes usable when its skill ships (M12 Phase 1–4):
 `status_polling` (read-only status) — **shipped as the `sync-status` skill**, which polls
-ATS dashboards and hands transitions to `track-outcomes` (the only writer of `tracker.json`);
+ATS dashboards and hands transitions to `track-outcomes` (the owner of canonical
+tracker status transitions; DB mode writes via `rolester data`, legacy mode writes tracker JSON);
 `authenticated_search` — **wired into `search-jobs` / `setup-searches`**: a pasted
 LinkedIn/Indeed/Glassdoor search URL becomes a `source_type:"browser"`, `auth:true`,
 `enabled:false` source bound to its `platform`, and `search-jobs` runs it only when both the
@@ -1302,8 +1329,8 @@ runtime *this phase parallelizes cleanly*.
   any spawn. A subagent never re-derives or bypasses a gate.
 - **A subagent gets a self-contained prompt and returns one structured block.** It does
   not read AGENTS.md, does not load the candidate config it wasn't handed, and does not
-  write `tracker.json` or any canonical file. The orchestrator merges results and does
-  the single authoritative write (e.g. `track-outcomes` stays the sole tracker writer).
+  write tracker JSON or any canonical file. The orchestrator merges results and does
+  the single authoritative write (e.g. `track-outcomes` stays the sole status-transition writer).
 - **One session browser at a time.** Browser-driving fan-out (status polling, messaging,
   relationship sourcing) runs **sequentially** per the Browser Automation Contract.
   `WebSearch` / `WebFetch` fan-out parallelizes freely.

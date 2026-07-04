@@ -11,7 +11,7 @@ Use this skill when the user asks why they're getting filtered, to review their 
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
-> **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing strategy recommendations. Apply the register from AGENTS.md#mode-switches. `exec-summary` = top 2–3 recommended changes as bullets + threshold that tripped; `standard` = findings summary + recommendations as scannable bullets; `technical` = funnel analysis + per-signal breakdown + recommended changes; `verbose` = full analysis including win/rejection patterns, confidence levels, and proposed gate write-backs.
+> **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing strategy recommendations. Apply the register from AGENTS.md#mode-switches. `exec-summary` = top 2–3 recommended changes as bullets + threshold that tripped; `standard` = findings summary + recommendations as scannable bullets; `technical` = funnel analysis + per-signal breakdown + recommended changes; `verbose` = full analysis including win/rejection patterns, confidence levels, and proposed gate write-backs.
 
 ---
 
@@ -21,7 +21,7 @@ Use this skill when the user asks why they're getting filtered, to review their 
 - Explicitly by the user ("why am I getting filtered", "review my strategy", "re-rank prospects", "what should I change").
 - Via handoff from `track-outcomes` STEP 6, which reads the persisted reevaluation gate at `tracker.json#analytics.reevaluation` (refreshed by `rolester analytics --write` as part of the Tracker Write Contract) and hands off here when `reevaluation.due` is true — passing `reevaluation.dueReasons` (the tripped threshold names and counts).
 
-**Read the persisted gate; do not recompute the trip.** The threshold comparison is already applied by `buildReevaluationAnalytics()` and stored in `tracker.json#analytics.reevaluation` — thresholds resolved from `candidate/targeting.yml#reevaluation.rejection_total` / `reevaluation.rejection_per_family` (defaults: 7 total, 3 per family if absent). This mirrors `track-outcomes` STEP 6 and the AGENTS.md Tracker Write Contract — read the block, trust `reevaluation.due`.
+**Read the persisted gate; do not recompute the trip.** The threshold comparison is already applied by `buildReevaluationAnalytics()` and stored in `tracker.json#analytics.reevaluation` — thresholds resolved from candidate targeting config `reevaluation.rejection_total` / `reevaluation.rejection_per_family` (defaults: 7 total, 3 per family if absent). This mirrors `track-outcomes` STEP 6 and the AGENTS.md Tracker Write Contract — read the block, trust `reevaluation.due`.
 
 Pre-flight: `analytics.mjs` reads `workspace/tracker.json` (the source of truth) and resolves it relative to the repo root, so it runs from any cwd — no dashboard render is required first. If the file is missing, seed it: `cp templates/tracker.json workspace/tracker.json`.
 
@@ -41,7 +41,7 @@ The output (from `buildReevaluationAnalytics` in `src/core/tracker/outcome-analy
 - If `reevaluation.due` is false AND the user did NOT explicitly request a review: report current counts, state "below threshold — no action needed," and exit.
 - If `reevaluation.due` is true OR user explicitly requested: continue to STEP 1.
 
-Also read `candidate/application-limits.yml` now. Identify any per-company caps or cooldowns that could be inflating rejection counts — exclude cap-blocked entries from reject-pattern tallies (a cap block is not a strategy signal).
+Also read application limits now. In DB mode use `rolester data candidate get --json` (`application-limits.companies[]`); in legacy mode read `candidate/application-limits.yml`. Identify any per-company caps or cooldowns that could be inflating rejection counts — exclude cap-blocked entries from reject-pattern tallies (a cap block is not a strategy signal).
 
 ---
 
@@ -60,7 +60,7 @@ Run: `npm run analyze:outcomes`
 
 This produces the full JSON breakdown. Extract the following slices (flag any slice with N < 3 as unreliable / "small-N"):
 
-- **By role-family** (`byRoleFamily`) — counts keyed by the candidate's own family slugs. `classifyRoleFamily` in `outcome-analysis.mjs` derives these from `candidate/targeting.yml#role_families` (explicit `[{name, patterns[]}]`) → `role_buckets` (bucket `name` slugified, `titles` as patterns) → neutral title slug (no config). Do NOT hardcode any domain-specific family names here.
+- **By role-family** (`byRoleFamily`) — counts keyed by the candidate's own family slugs. `classifyRoleFamily` in `outcome-analysis.mjs` derives these from candidate targeting config `role_families` (explicit `[{name, patterns[]}]`) → `role_buckets` (bucket `name` slugified, `titles` as patterns) → neutral title slug (no config). Do NOT hardcode any domain-specific family names here.
 - **By fit-band** — `buildOutcomeSummary` does NOT emit a `byFitBand` field. Partition rejected applications by the **persisted `app.fitBucket`** field (written by `evaluate-job` at evaluation time, so it reflects the `fit_bands` thresholds that were in effect when each role was scored — the same bucket the dashboard shows). Do NOT re-derive bands by re-applying *current* `fit_bands` to `fitScore`: thresholds may have moved since these rows were evaluated, and silently re-bucketing the board is the exact consequential re-score STEP 7 gates as confirm-first. Fall back to `fitScore` + current `fit_bands` (`high_min` default 85, `med_min` default 65 — high ≥ high_min, med ≥ med_min, stretch < med_min) only for the rare row missing `fitBucket`.
 - **By channel** (`byChannel`) — keyed by each application's `channel` value (e.g. `referral`, `recruiter`, `board`, `portal`). Cross-filter to rejected-only for reject-rate; cross-filter to `offer`/`interview` for advance-rate.
 - **By mode** (`byMode`) — keyed by each application's `mode` value (e.g. `remote`, `hybrid`, `onsite`).
@@ -146,7 +146,7 @@ Construct the recommendation block as follows:
 
 1. **Re-rank sourced prospects** — `<specific family/channel to promote or deprioritize>` (affects `workspace/tracker.json` `priority`/`status` fields). N = `<N>`. [confirm-first if > 5 rows]
 2. **Tighten targeting.yml cut-signals** — add `"<proposed signal string>"` to `cut_signals`. N = `<N>`. [write-and-report if N ≥ 3 and single clear signal; confirm-first if broad]
-3. **Re-anchor comp** — propose new `compensation.target_base` or `compensation.minimum_base` in `candidate/profile.yml`. [confirm-first — consequential]
+3. **Re-anchor comp** — propose new candidate profile `compensation.target_base` or `compensation.minimum_base`. [confirm-first — consequential]
 4. **Fit recalibration** — `<high-fit-rejects pattern>`: spot-check with `rolester evaluate` on 2–3 rejecting roles, then propose `fit_bands` or `keep_signals` tweak. [confirm-first — re-scores board]
 5. **Double-down signal** — `<family or channel converting>`: increase sourcing weight here.
 
@@ -166,10 +166,10 @@ Produce one detailed block per accepted dimension (N ≥ 3 or explicit pattern).
 Name which family/channel to prioritize or deprioritize in `workspace/tracker.json` (direct edits to the `priority` or `status` fields of affected rows). State the before/after for each affected entry.
 
 **(b) Signal tuning**
-Propose specific strings to add to `candidate/targeting.yml#keep_signals` or `#cut_signals`. One proposed string per evidence line. Do not propose broad exclusions (e.g., "all companies over 500 employees") — those are consequential and go to confirm-first.
+Propose specific strings to add to candidate targeting `keep_signals` or `cut_signals`. One proposed string per evidence line. Do not propose broad exclusions (e.g., "all companies over 500 employees") — those are consequential and go to confirm-first.
 
 **(c) Comp re-anchor**
-Read `candidate/profile.yml#compensation.target_base`, `compensation.minimum_base`, and `compensation.current_comp_shareable`. `current_comp_shareable` is a read-only gate: if true, `current_base` may exist in profile but must NEVER appear in any output or recommendation regardless. All outbound comp uses `target_base`, `minimum_base`, or `expected_base` only (see foundations-spec §9).
+Read candidate profile `compensation.target_base`, `compensation.minimum_base`, and `compensation.current_comp_shareable`. `current_comp_shareable` is a read-only gate: if true, `current_base` may exist in profile but must NEVER appear in any output or recommendation regardless. All outbound comp uses `target_base`, `minimum_base`, or `expected_base` only (see foundations-spec §9).
 If comp-stage rejections cluster, or `warn` flags appear on below-floor applications: propose a new `target_base` or `minimum_base` value.
 **PRIVACY INVARIANT:** Never read, surface, log, or reference `current_base` in any output, recommendation, or artifact. Use only `target_base`, `minimum_base`, and `expected_base`.
 
@@ -186,27 +186,30 @@ If transcripts or rejection notes reveal a recurring overclaim or framing gap: p
 
 Present all recommendations together as a numbered list with evidence for each.
 
-**Write-and-report (unambiguous, low blast-radius):** a single new cut signal with clear evidence from ≥ 3 rejections; a new learning entry; a style note. Write it, then echo `Written to <file>: <key: value>`.
+**Write-and-report (unambiguous, low blast-radius):** a single new cut signal with clear evidence from >= 3 rejections; a new learning entry; a style note. Write it through the owning DB-aware command, then echo the CLI confirmation.
 
-**Confirm-first (consequential):** dropping the comp floor, adding a broad excluded-company entry, large re-rank (> 5 sourced roles), or any change to `targeting.yml#fit_bands` (a threshold change re-scores the entire board — always confirm first). Propose the exact change and get explicit user yes before writing.
+**Confirm-first (consequential):** dropping the comp floor, adding a broad excluded-company entry, large re-rank (> 5 sourced roles), or any change to candidate targeting `fit_bands` (a threshold change re-scores the entire board — always confirm first). Propose the exact change and get explicit user yes before writing.
 
-If the user states a new gate mid-flow ("never apply to X", "below $Y is a no", "add Z as a cut signal"), write it to the canonical file immediately (write-and-report for unambiguous; confirm-first for broad-exclusion/comp-drop) — a stated gate must never live only in chat.
+If the user states a new gate mid-flow ("never apply to X", "below $Y is a no", "add Z as a cut signal"), write it through `rolester gate` immediately (write-and-report for unambiguous; confirm-first for broad-exclusion/comp-drop) — a stated gate must never live only in chat.
 
 ---
 
 ## STEP 7 — WRITE-BACK (on accept)
 
-**(a) targeting.yml — signal changes**
-Open `candidate/targeting.yml`. Append accepted signals under `keep_signals` or `cut_signals` (preserve all existing entries). Save. Run `rolester tracker --verify`.
+**(a) Targeting signal changes**
+Use `rolester gate keep-signal "<signal>" --write` or `rolester gate cut-signal "<signal>" --write` for accepted signals. For fit-band threshold changes, use `rolester data candidate patch targeting --data ...` in DB mode after explicit confirmation; legacy YAML is fallback only when no DB exists. Run `rolester doctor`.
 
-**(b) profile.yml — comp re-anchor**
-Open `candidate/profile.yml`. If comp re-anchor accepted, update `compensation.target_base` or `compensation.minimum_base` only.
+**(b) Profile comp re-anchor**
+If comp re-anchor accepted, use `rolester gate comp-target <N> --write --confirm` or `rolester gate comp-floor <N> --write --confirm`.
 **Do NOT touch `compensation.current_base`** — it is a private gate input, not an output.
 
-**(c) tracker.json — re-rank**
-Edit `workspace/tracker.json` directly for any accepted re-rank changes (update `priority` or `status` fields on the affected rows).
+**(c) Re-rank write-back**
 
-**CTA clear (same write — no ghost CTAs):** For every row whose `status` changes to `deprioritized` or any terminal/inactive state (e.g. `withdrawn`, `dropped`, `closed`), in the **same** `tracker.json` write also:
+**DB workspaces:** never hand-edit `workspace/tracker.json`. Apply each accepted re-rank through the owning verbs — `rolester data app set-status` for status changes, `rolester data app set-fields` for `priority` and the `followUp` clears, `rolester data comm upsert` / `comm append-message` for the comm-side clears and the note (`node src/cli/data.mjs --help` for exact syntax).
+
+**Legacy workspaces:** edit `workspace/tracker.json` directly for any accepted re-rank changes (update `priority` or `status` fields on the affected rows).
+
+**CTA clear (same write — no ghost CTAs):** For every row whose `status` changes to `deprioritized` or any terminal/inactive state (e.g. `withdrawn`, `dropped`, `closed`), in the **same** write also:
 - Set `followUp.due` → `null` and `followUp.draft` → `null` (if the keys exist).
 - Set `comm.nextActionDue` → `null` and `comm.draft` → `null` (if the keys exist).
 - Rewrite `comm.nextAction` → `""` or remove the key.
@@ -214,7 +217,7 @@ Edit `workspace/tracker.json` directly for any accepted re-rank changes (update 
 
 Echo the cleared fields for each affected row: `Cleared CTAs on <company>/<role>: followUp.due, comm.nextActionDue, comm.draft → null; note appended.`
 
-Run `rolester tracker --verify` immediately after.
+Run `rolester data verify` (DB mode) or `rolester tracker --verify` (legacy) immediately after.
 
 **(d) learnings/<family>.md — append dated entry**
 For each affected role-family, compose the entry body as markdown using this template:
@@ -237,7 +240,7 @@ The `## <ISO-DATE> — <label>` heading is produced by the CLI (`--title` / `--d
    rolester learnings append "<role title or family>" --title "<short pattern label>" --body-file <path-to-temp-file> --write
    ```
 
-Pass `--family` if providing an explicit slug rather than a role title. Pass `--date YYYY-MM-DD` to override today's date. The CLI derives the family slug from `candidate/targeting.yml` and creates `candidate/learnings/` and the file on first `--write`.
+Pass `--family` if providing an explicit slug rather than a role title. Pass `--date YYYY-MM-DD` to override today's date. The CLI derives the family slug from candidate targeting config and creates `candidate/learnings/` and the file on first `--write`.
 
 **(e) writing-style.md**
 If writing/positioning change accepted, edit `candidate/writing-style.md` with the specific addition/modification. If new writing samples were added, run `npm run calibrate:style`.
@@ -293,4 +296,3 @@ Rules:
 - Learn from wins as strongly as rejections — double down on what is converting.
 - Hand drafting (follow-ups, withdrawals, recruiter outreach triggered by this review) to `email-comms`. This skill decides *what to change*, not the outreach itself.
 - Never invent outcomes or transcript content; use only what is recorded in `workspace/tracker.json` and `candidate/learnings/`.
-

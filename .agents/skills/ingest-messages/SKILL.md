@@ -101,8 +101,8 @@ recruiting-relevance and match threads to tracker applications in STEP 4.
 ## STEP 4 — MATCH TO TRACKER
 
 Read `workspace/tracker.json` (already loaded in STEP 1). Also read
-`candidate/targeting.yml` for `excluded_companies` and any company/domain signals
-relevant at match time.
+candidate targeting config through the shared DB-first accessor for
+`excluded_companies` and any company/domain signals relevant at match time.
 
 For each thread from STEP 3, attempt matching in priority order:
 
@@ -240,15 +240,15 @@ Privacy invariant: `summary` and `artifactPath` content must never echo
 If the user states a new gate mid-flow (e.g., "never follow up with this company",
 "add them to excluded"), apply the write-back rule using this discriminator:
 
-- **Write directly and report** (`Written to <file>: <key: value>`) when the change
-  affects only the single application in scope (e.g., set `nextAction: none` on one
-  record, add one company to `excluded_companies`).
+- **Write directly and report** when the change affects only the single
+  application in scope (e.g., set `nextAction: none` on one record) or is a
+  low-blast-radius supported gate (`rolester gate cut-signal` / `keep-signal`).
 - **Confirm first** when the change affects more than one application or has broad
   downstream effects (e.g., a comp floor change, adding a wildcard domain exclusion).
 
-Route each gate type to its canonical file:
-- Company exclusion → `candidate/targeting.yml#excluded_companies[]`
-- Comp floor change → `candidate/profile.yml#compensation.minimum_base`
+Route each gate type through its owning command:
+- Company exclusion → `rolester gate exclude-company "<Company>" --write --confirm`
+- Comp floor change → `rolester gate comp-floor <N> --write --confirm`
 - Per-application follow-up pause → `workspace/tracker.json` (that record's
   `nextAction`/`nextActionDue`)
 

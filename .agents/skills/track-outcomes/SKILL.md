@@ -23,7 +23,7 @@ gives the existing direct JSON-edit instructions, unchanged.
 Read in order:
 
 1. `candidate/targeting.yml` — `role_buckets`, `role_families` (if present), `cut_signals`, `excluded_companies`, and `reevaluation` thresholds (`rejection_total`, `rejection_per_family`).
-2. `candidate/application-limits.yml` — per-company caps and cooldowns.
+2. Application limits — DB mode: `rolester data candidate get --json` (`application-limits.companies[]`); legacy mode: `candidate/application-limits.yml`.
 3. `workspace/tracker.json` — the full applications array for current status, fitScore, channel, mode, appliedAt, note, and conversations[].
 
 If `candidate/targeting.yml#reevaluation` is absent, use defaults: `rejection_total: 7`, `rejection_per_family: 3`.
@@ -321,15 +321,15 @@ If `reevaluation.due` is `false` but `advanced.byFamily` shows a strong concentr
 
 ## STEP 7 — Write back mid-flow gate changes
 
-If the user states any new constraint during the outcome flow ("never apply to X again", "add this as a cut signal", "cap this company at 1 app"), write it to the canonical gate file immediately:
+If the user states any new constraint during the outcome flow ("never apply to X again", "add this as a cut signal", "cap this company at 1 app"), persist it through the owning DB-aware command immediately:
 
-- Exclusion → `candidate/targeting.yml#excluded_companies`
-- Cut signal → `candidate/targeting.yml#cut_signals`
-- Keep signal → `candidate/targeting.yml#keep_signals`
-- Per-company cap or cooldown → `candidate/application-limits.yml`
-- Comp floor or anchor change → `candidate/profile.yml#compensation`
+- Exclusion → `rolester gate exclude-company "<Company>" --write --confirm`
+- Cut signal → `rolester gate cut-signal "<signal>" --write`
+- Keep signal → `rolester gate keep-signal "<signal>" --write`
+- Per-company cap or cooldown → after confirmation, write `rolester data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
+- Comp floor or anchor change → `rolester gate comp-floor <N> --write --confirm` or `rolester gate comp-target <N> --write --confirm`
 
-**Friction rule:** write-and-report for unambiguous, low-blast-radius changes (one clear cut signal, a cap just hit). Confirm-first for consequential changes (broad exclusion, comp floor drop, large re-rank). After writing, echo `Written to <file>: <key: value>`.
+**Friction rule:** write-and-report for unambiguous, low-blast-radius changes (one clear cut signal). Confirm-first for consequential changes (broad exclusion, comp floor drop, large re-rank). After writing, echo the CLI confirmation.
 
 A stated gate must never live only in chat. Do not hardcode it into skill prose.
 

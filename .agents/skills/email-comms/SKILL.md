@@ -157,7 +157,7 @@ Then check `workspace/writing-samples/` for any files modified AFTER `writing-st
 
 ## STEP 4 — Comp gate (negotiation-comp messages ONLY)
 
-Read `candidate/profile.yml` and extract:
+Read candidate profile config through the shared DB-first accessor and extract:
 
 | Field | Use |
 |---|---|
@@ -171,7 +171,7 @@ Read `candidate/profile.yml` and extract:
 
 For OE-bucket roles: read `profile.compensation.oe_min_base` / `profile.compensation.oe_max_base` (foundations-spec §2; both confirmed in `profile.schema.json`) and apply them instead of the standard floor/anchor. The standard `minimum_base` / `target_base` do NOT apply for OE roles.
 
-If the user states a new comp boundary mid-flow (e.g., "I won't go below $210K on this one") — confirm-first, then write it to `candidate/profile.yml#compensation.minimum_base`. Echo: `Written to candidate/profile.yml: compensation.minimum_base: <value>`.
+If the user states a new comp boundary mid-flow (e.g., "I won't go below $210K on this one") — confirm-first, then run `rolester gate comp-floor <N> --write --confirm`. Echo the CLI confirmation.
 
 ---
 
@@ -253,7 +253,7 @@ When `cash_over_equity` is `true`, do not offer equity concessions before exhaus
 
 **Persistence:** every round's outbound draft is a `negotiation-comp` message appended to `communications[].messages[]` via STEP 6. The full round history accumulates in the thread so context is never lost between sessions.
 
-**Gate write-back:** if a new comp boundary emerges mid-negotiation (e.g., the candidate says "I won't go below $210K on this one"), apply the STEP 4 write-back rule — confirm-first, then write it directly to `candidate/profile.yml#compensation.minimum_base` (the per-offer walk-away). Echo: `Written to candidate/profile.yml: compensation.minimum_base: <value>`. `profile.compensation.minimum_base` is the single source of truth for the comp floor — there is no separate `targeting.comp_floor` field.
+**Gate write-back:** if a new comp boundary emerges mid-negotiation (e.g., the candidate says "I won't go below $210K on this one"), apply the STEP 4 write-back rule — confirm-first, then run `rolester gate comp-floor <N> --write --confirm` for the per-offer walk-away. `profile.compensation.minimum_base` is the single source of truth for the comp floor — there is no separate `targeting.comp_floor` field.
 
 ---
 
@@ -362,11 +362,11 @@ Branch on message type after capture:
 | Condition | Action | DB-mode command |
 |---|---|---|
 | Scheduling confirmed / interview booked | In the SAME `tracker.json` write: update `applications[].status` to the appropriate stage (phone-screen, onsite, etc.) AND update the communications record — `status → scheduled`, `nextActionDue = null`, `nextAction = 'Attend <stage> — <date>'` (or clear it if no further prep action is needed), `comm.draft = null` if a draft was staged. Both records must land in one write so neither leaves a ghost CTA. Hand off to `interview-prep` for prep materials. | `rolester data app set-status <id> "<stage>"` for the application row, then patch the comm record (read current row, apply the fields, persist): `rolester data comm upsert --data '<patched full comm row JSON>'`. Run both back-to-back, never deferring the second. |
-| Offer received | Before surfacing the comp comparison, write to `tracker.json` in one operation: comm `status → waiting`, `nextActionDue = null`, `nextAction = 'Evaluate offer and respond'` (set a real deadline if the employer gave one, else null), `comm.draft = null` if a draft was staged. Append a `note`-direction message to `messages[]` summarising the offer receipt. Then read `candidate/profile.yml#compensation.minimum_base` and `target_base`, surface whether the stated comp clears the floor, and recommend accept/negotiate/decline. Do not accept on the user's behalf. | Patch the comm record locally (status/nextActionDue/nextAction/draft), persist: `rolester data comm upsert --data '<patched full comm row JSON>'`; then append the note: `rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"<offer receipt summary>"}'`. Comp comparison itself is a read (`candidate/profile.yml`), unaffected by mode. |
+| Offer received | Before surfacing the comp comparison, write to `tracker.json` in one operation: comm `status → waiting`, `nextActionDue = null`, `nextAction = 'Evaluate offer and respond'` (set a real deadline if the employer gave one, else null), `comm.draft = null` if a draft was staged. Append a `note`-direction message to `messages[]` summarising the offer receipt. Then read the candidate config through the shared DB-first accessor (`profile.compensation.minimum_base` and `target_base`), surface whether the stated comp clears the floor, and recommend accept/negotiate/decline. Do not accept on the user's behalf. | Patch the comm record locally (status/nextActionDue/nextAction/draft), persist: `rolester data comm upsert --data '<patched full comm row JSON>'`; then append the note: `rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"<offer receipt summary>"}'`. Comp comparison itself is a candidate-config read: SQLite in DB mode, YAML only in legacy mode. |
 | Rejection or withdrawal | In the SAME `tracker.json` write as the STEP 6 capture: set `status = closed`, `nextActionDue = null`, `nextAction = null`, `comm.draft = null` (if any draft was staged). Do not rely on STEP 6's generic status field alone — state it explicitly here. Then hand off to `track-outcomes` for durable outcome recording and reevaluation-threshold check. | Same composition as STEP 6(b)'s DB branch — read-patch-persist `rolester data comm upsert --data '<patched full comm row JSON>'` with `status: "closed"`, `nextActionDue: null`, `nextAction: null`, `draft: null`. `track-outcomes` owns the durable app-row transition (its own DB verbs) — this call only closes the comm thread. |
 | Ghosting / no response after follow-up | In the SAME `tracker.json` write: set `status = closed` (or `blocked` if appropriate), `nextActionDue = null`, `nextAction = null`, `comm.draft = null` if a draft was staged. The due-date CTA must clear together with the status in one write. Hand off to `track-outcomes`. | Same read-patch-persist pattern: `rolester data comm upsert --data '<patched full comm row JSON>'` with the fields above. |
-| User states new exclusion mid-thread (e.g., "never email this company again") | Confirm-first, then append to `candidate/targeting.yml#excluded_companies` (field confirmed in `targeting.schema.json`). Echo: `Written to candidate/targeting.yml: excluded_companies += <company>`. Run `rolester doctor` to verify schema after write. | Unchanged in both modes — this is a `candidate/targeting.yml` write, not a `tracker.json` write; outside the Data Write Contract. |
-| User states new comp floor mid-thread | See STEP 4 comp write-back rule. | Unchanged in both modes — a `candidate/profile.yml` write, not a `tracker.json` write; outside the Data Write Contract. |
+| User states new exclusion mid-thread (e.g., "never email this company again") | Confirm-first, then run `rolester gate exclude-company "<Company>" --write --confirm`. Echo the CLI result. Run `rolester doctor` to verify after write. | `rolester gate` is DB-aware: it writes SQLite in DB mode and legacy YAML only in legacy mode. Never hand-edit `candidate/targeting.yml`. |
+| User states new comp floor mid-thread | See STEP 4 comp write-back rule; use `rolester gate comp-floor <N> --write --confirm`. | `rolester gate` is DB-aware: it writes SQLite in DB mode and legacy YAML only in legacy mode. Never hand-edit `candidate/profile.yml`. |
 
 ---
 

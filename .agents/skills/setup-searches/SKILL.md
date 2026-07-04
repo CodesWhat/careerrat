@@ -1,6 +1,6 @@
 ---
 name: setup-searches
-description: Build and maintain config/search-sources.yml from candidate targeting — generate a baseline from role buckets, curate enabled sources, add or import individual searches (including pasted board URLs with embedded filters preserved), and tune global filters. Upstream of search-jobs; does not scan.
+description: Build and maintain source config from candidate targeting through `rolester searches` — generate a baseline from role buckets, curate enabled sources, add or import individual searches (including pasted board URLs with embedded filters preserved), and tune global filters. Upstream of search-jobs; does not scan.
 ---
 
 # setup-searches
@@ -11,20 +11,19 @@ description: Build and maintain config/search-sources.yml from candidate targeti
 
 Run `rolester doctor` and inspect the output.
 
-- If `candidate/targeting.yml` is missing or fails schema: halt. Instruct the user to run `ingest-profile` (`rolester ingest`) first, then return here.
-- If `candidate/profile.yml` is missing or fails schema: same halt.
-- If `targeting.yml` exists but `role_buckets` is empty or absent: halt. The baseline generator will produce only a stub with no role-specific searches — a search catalog with no titles is useless. Tell the user to populate `role_buckets` in `candidate/targeting.yml` (or re-run `ingest-profile`) before continuing.
-- If both files pass and `role_buckets` is non-empty: proceed to STEP 1.
+- If candidate profile/targeting config is missing or fails schema, halt. Instruct the user to run `ingest-profile` (`rolester ingest`) first, then return here. In DB workspaces, read this through the shared DB-first config accessor; YAML is legacy fallback only.
+- If candidate targeting exists but `role_buckets` is empty or absent: halt. The baseline generator will produce only a stub with no role-specific searches — a search catalog with no titles is useless. Tell the user to populate `role_buckets` through onboarding/`ingest-profile` before continuing.
+- If candidate profile + targeting pass and `role_buckets` is non-empty: proceed to STEP 1.
 
 ## STEP 1 — Read targeting and profile
 
-Read `candidate/targeting.yml` and report back the detected values that will drive generation:
+Read candidate targeting config through the shared DB-first accessor and report back the detected values that will drive generation:
 
 - `role_buckets` — names, titles per bucket, priority flags
 - `keep_signals`, `cut_signals` — these become `title_filter.positive` / `title_filter.negative`; note if `cut_signals` is empty (hardcoded Intern/Junior fallback will apply per Foundation C)
 - `excluded_companies` — will be noted but does not affect search-source generation
 
-Read `candidate/profile.yml` and report:
+Read candidate profile config through the shared DB-first accessor and report:
 
 - `candidate.domain` — drives board/aggregator selection (e.g. "software engineering" → tech aggregator + job board; other domains → domain-appropriate boards, or no aggregator if none configured). Echo back detected domain so the user can correct before generation.
 - `compensation.minimum_base` — this is the value used for `salary_filter.min`. **Do not read or surface `current_base`** — it is private and must not appear in any output.
@@ -110,14 +109,14 @@ Review the generated filters and adjust as needed:
   - `fixed-hours` — always looks back a fixed window (`recency.windowHours`); use when a source does not support watermark-based deltas.
   - `manual` — no automatic date filter; the agent applies no recency constraint (use for sources with their own pagination).
   
-  To tune: edit the `recency` block directly in `config/search-sources.yml` for the relevant entry. Example for a 7-day lookback on a fixed-hours source:
+  To tune: use the owning source-config command when available. Do not hand-edit exported source YAML in DB workspaces. If no DB-aware command exists for recency yet, stop and report the helper gap rather than editing `config/search-sources.yml`. In legacy workspaces only, edit the `recency` block directly in `config/search-sources.yml` for the relevant entry. Example for a 7-day lookback on a fixed-hours source:
   ```yaml
   recency:
     mode: fixed-hours
     windowHours: 168
     safetyMinutes: 60
   ```
-  After editing, run `rolester doctor` to confirm the schema validates.
+  After tuning, run `rolester doctor` to confirm the schema validates.
 
 Use `rolester searches` to review the current state before finalizing.
 
@@ -136,7 +135,7 @@ Verify the auto-selected aggregator and board set is appropriate for the candida
 
 On initial setup, offer the user a one-time starter menu from the `docs/SOURCES.md`
 Curated Board Registry. This step is optional — skip it if the user declines or if
-`config/search-sources.yml` already has more than the auto-generated baseline entries.
+source config already has more than the auto-generated baseline entries.
 
 1. Read the `## Curated Board Registry` table in `docs/SOURCES.md`.
 2. Filter to rows where Domain tag includes `general` OR matches `profile.candidate.domain`
@@ -144,7 +143,7 @@ Curated Board Registry. This step is optional — skip it if the user declines o
    `tech/AI` + `remote` entries; a candidate with domain "finance" sees only `general` entries
    and gets a note that no domain-specific vetted boards exist yet for that domain).
 3. Exclude rows already in the dedup set (any board whose root domain already appears in
-   `config/search-sources.yml`).
+   source config).
 4. Exclude rows with Status `planned` that have no provider implementation — these cannot be
    added via the CLI yet. Note them to the user as "coming soon" if they look relevant.
 5. Present the filtered list as a pick-list:
@@ -178,23 +177,21 @@ This is a convenience starter menu — not a mandate. The auto-generated baselin
 already includes the field-neutral defaults for the candidate's domain. This step adds
 domain-specific niche boards the candidate might want.
 
-**Known limitation — board-preference persistence:** there is no
-`candidate/search-preferences.yml` yet, so there is no canonical config path that
-makes per-candidate board preferences (e.g. "always use this board", "never use
-LinkedIn") survive a future `--from-targeting` regeneration. Preferences written as
-comments in `config/search-sources.yml` are silently lost the next time the
-candidate runs `--from-targeting`. Until that file ships, explicitly warn the user
-of this limitation after writing any persistent board preference, and prefer
-encoding the intent as `targeting.yml` keep/cut signals (which DO survive
-regeneration) where possible.
+**Known limitation — board-preference persistence:** there is no canonical
+source-preference document yet that makes per-candidate board preferences (e.g.
+"always use this board", "never use LinkedIn") survive a future `--from-targeting`
+regeneration. Comment-only state in exported source YAML is not durable, especially
+in DB workspaces where the file is generated. Until a DB-backed helper ships,
+explicitly warn the user after writing any persistent board preference, and prefer
+encoding the intent as targeting keep/cut signals where possible.
 
 ## STEP 6 — Gate write-back
 
 If the user stated a new preference during this session that should survive future regenerations:
 
-- "Never show me LinkedIn" or "exclude provider X" — confirm-first (consequential: affects every future scan). Once confirmed: (1) disable the entry via `rolester searches --disable <index>`; (2) add a clearly marked comment at the top of `config/search-sources.yml` in the form `# PERSISTENT: exclude provider=<X> — re-disable after --from-targeting regeneration`; (3) warn the user that this preference will need to be re-applied after any `--from-targeting` run until `candidate/search-preferences.yml` exists.
-- "Always use [board]" — confirm-first; add the entry, then add a comment `# PERSISTENT: always include <label> (<provider>)` in `config/search-sources.yml`. Same regeneration-loss caveat applies.
-- Unambiguous, low-blast-radius preferences (one extra board the user just pasted) — write-and-report: add the entry via `--add-url` or `--add-query`, then echo `Added to config/search-sources.yml: <label> (<provider>)`.
+- "Never show me LinkedIn" or "exclude provider X" — confirm-first (consequential: affects every future scan). Once confirmed: disable the entry via `rolester searches --disable <index>`. Do not add comment-only state to exported source YAML in DB workspaces. Persist only supported source state through `rolester searches`; until a DB-backed source-preference helper exists, warn that this preference may need to be re-applied after `--from-targeting`.
+- "Always use [board]" — confirm-first; add the entry via `rolester searches`. Do not add comment-only state to exported source YAML in DB workspaces. Persist only supported source state through `rolester searches`; until a DB-backed source-preference helper exists, warn that this preference may need to be re-applied after `--from-targeting`.
+- Unambiguous, low-blast-radius preferences (one extra board the user just pasted) — write-and-report: add the entry via `--add-url` or `--add-query`, then echo `Added source: <label> (<provider>)`.
 
 Do not write board preferences to `candidate/targeting.yml` or `candidate/profile.yml` — those files govern targeting and identity, not source mechanics.
 
@@ -217,13 +214,13 @@ Then run:
 rolester doctor
 ```
 
-Confirm `config/search-sources.yml` passes `config/search-sources.schema.json`. If the CLI refused to write an invalid config, no errors should appear — but verify explicitly. If the doctor flags errors, fix them before handing off.
+Confirm source config passes schema validation. If the CLI refused to write an invalid config, no errors should appear — but verify explicitly. If the doctor flags errors, fix them before handing off.
 
 **URL spot-check:** For at least one `url-query` or `rss` entry, open the `target` or `rssUrl` value in a browser (or use WebFetch) and confirm it returns job results rather than a 404, redirect loop, or empty feed. If an entry resolves to an error page, disable it (`rolester searches --disable <index>`) and report to the user before handing off.
 
 ## Final handoff
 
-When `config/search-sources.yml` is ready, continue the post-onboarding discovery
+When source config is ready, continue the post-onboarding discovery
 pipeline in this exact order:
 
 ```
@@ -234,7 +231,7 @@ This skill only produces the baseline source config. It does not discover new bo
 discover companies, scan, dedupe, gate, or score. Hand off next to `research-boards`
 unless the user explicitly says to skip board discovery. After `research-boards`, run
 `discover-companies` before the first `search-jobs` sweep so employer ATS boards are
-wired into `config/sourced-scan.json`.
+wired into tracked-company source config through `rolester companies`.
 
 End every run by saying the next agent task plainly: `research-boards` next, or
 `rolester next --skip research-boards --write` if the user explicitly skipped board
@@ -261,6 +258,6 @@ discovery.
 - **Never fabricate sources or filters.** Only add entries the user explicitly requested or that `--from-targeting` derives from real targeting data.
 - **Preserve embedded filters** when importing a pasted URL. The `searchState` block must be written exactly as parsed from the URL — do not normalize, simplify, or drop query params.
 - **Salary floor is `compensation.minimum_base`.** Never read or surface `current_base` — it is private and must not appear in any output or log.
-- **Writes `config/`; reads `candidate/`.** Never write to `candidate/`; never commit candidate files.
+- **Writes source config through Rolester helpers; reads candidate config through DB-first accessors.** In DB workspaces, `config/` and `candidate/` files are compatibility exports; never hand-edit them. Never commit candidate files.
 - **Domain-general.** No board name, aggregator, or provider is hardcoded as canonical in this skill's prose. Board selection follows `profile.candidate.domain`. The skill must execute correctly for a trucking, nursing, or finance candidate.
 - **Do not scan or gate here.** `search-jobs` owns discovery and intake. `evaluate-job` is the fit gate.

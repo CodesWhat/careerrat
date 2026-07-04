@@ -309,10 +309,11 @@ If the user stated any new honesty boundary during this session (e.g. "never cla
 Terraform", "remove that certification claim", "add Kubernetes to do-not-claim"):
 
 - **Write-and-report** for unambiguous, low-blast-radius additions (one new tool to
-  do_not_claim, one claim to forbid): edit `candidate/honesty.yml` directly, then
-  echo `Written to candidate/honesty.yml: tools.do_not_claim += <tool>`.
+  do_not_claim, one claim to forbid): run `rolester gate do-not-claim "<tool>" --write`
+  or `rolester gate do-not-fabricate "<claim>" --write`, then echo the CLI confirmation.
 - **Confirm-first** for consequential changes (removing a confirmed tool, broad
-  claim rewrites): propose the exact YAML change, get a yes, then write.
+  claim rewrites): propose the exact candidate-config change, get a yes, then write
+  through the owning DB-aware command.
 
 The gate must not live only in chat. After writing, re-check the resume for
 compliance with the new boundary and fix if needed.

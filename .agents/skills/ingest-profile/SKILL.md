@@ -7,7 +7,7 @@ description: Interview a new candidate to produce all user-layer config files: p
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
-> **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing any summary or explanation output. Apply the register semantics from AGENTS.md#mode-switches. This skill's interview is conversational by design, but **step confirmations, progress summaries, and section wrap-ups** must respect the register — e.g. `exec-summary` means a one-line "Got it — moving to targets" not a paragraph recap. Capture the voice preference in STEP 0a before the main interview so the rest of the session uses it.
+> **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing any summary or explanation output. Apply the register semantics from AGENTS.md#mode-switches. This skill's interview is conversational by design, but **step confirmations, progress summaries, and section wrap-ups** must respect the register — e.g. `exec-summary` means a one-line "Got it — moving to targets" not a paragraph recap. Capture the voice preference in STEP 0a before the main interview so the rest of the session uses it.
 
 ## When to Use
 
@@ -30,7 +30,7 @@ Before asking anything:
    - If present and `complete: true`: setup is already done. Confirm which section the user wants to revisit and jump there directly.
    - If absent: this is a fresh setup — proceed normally.
 2. Run `rolester ingest --check --json` to see which fields fail validation or still hold placeholder values.
-3. Read any existing `candidate/` files (`profile.yml`, `targeting.yml`, `honesty.yml`, `form-defaults.yml`, `application-limits.yml`, `evidence.yml`). Note what is already populated.
+3. Read existing candidate config through the shared DB-first accessor. In legacy workspaces, YAML files are the fallback. Note what is already populated.
 4. Check session memory and any pasted or attached documents (résumé, LinkedIn export, notes).
 5. If the user supplied a résumé file path: run `rolester ingest --resume <path> --json` to seed profile and evidence YAML from the parsed content.
 6. For each section below, **open with a confirmation of what you already know** ("I have you as X — right?") rather than a cold question. Only ask for what is genuinely missing or unconfirmed.
@@ -86,13 +86,13 @@ Record which areas the user opts into as `optional_areas: ["benefits", "lifestyl
 > - **verbose** — full detail: complete rationale, all signals, everything.
 > This only controls how I talk to you, not how your applications or emails read."
 
-Record the answer as `agent_voice: "exec-summary"` | `"standard"` | `"technical"` | `"verbose"`. If the user skips or is unsure, default to `"standard"`. Write it to `candidate/modes.yml` via:
+Record the answer as `agent_voice: "exec-summary"` | `"standard"` | `"technical"` | `"verbose"`. If the user skips or is unsure, default to `"standard"`. Write it through the DB-aware modes CLI:
 
 ```
 rolester modes set agent_voice <value> --write
 ```
 
-(If modes.yml doesn't exist yet, the `--write` flag creates it from the template. Confirm: "Agent voice set to `<value>`.")
+In DB mode this writes SQLite; in legacy mode it writes `candidate/modes.yml`. Confirm: "Agent voice set to `<value>`."
 
 **Initialize `workspace/setup-state.json`:**
 
@@ -121,9 +121,9 @@ Tell the user:
 
 ## STEP 1 — DOMAIN + FIELD DETECTION
 
-1. If `candidate.domain` is not already set in `profile.yml`, ask: "What field or industry are you searching in?" Use any detected context (résumé text, job titles, stated background) as the opening statement to confirm rather than cold-ask.
-2. Write `candidate.domain` (free-text; e.g. `"software engineering"`, `"trucking/logistics"`, `"nursing"`, `"finance"`) to `profile.yml` under `candidate:`. This field gates board selection in STEP 15 (`--write-config`).
-3. If the candidate has clearly distinct search tracks (primary + secondary), record both in `profile.yml` as a note or as additional context strings alongside `domain`.
+1. If `candidate.domain` is not already set in candidate profile config, ask: "What field or industry are you searching in?" Use any detected context (résumé text, job titles, stated background) as the opening statement to confirm rather than cold-ask.
+2. Write `candidate.domain` (free-text; e.g. `"software engineering"`, `"trucking/logistics"`, `"nursing"`, `"finance"`) through `rolester data candidate patch profile --data ...` in DB mode. This field gates board selection in STEP 15 (`--write-config`).
+3. If the candidate has clearly distinct search tracks (primary + secondary), record both in candidate profile/targeting config as structured context.
 
 ---
 
@@ -132,7 +132,7 @@ Tell the user:
 1. Confirm or capture: `full_name`, `email`, `phone`, `location.city`/`state`/`country`, `linkedin`, `github` (if applicable), `portfolio` (if applicable). Replace every placeholder string from the template (`Jane Candidate`, `jane@example.com`, `+1-555-0100`, etc.).
 2. Ask where the source résumé lives (file path, paste, or URL) if not already provided.
 3. **Corrupt/bad-paste gate:** If `rolester ingest --resume <path>` produced empty contact or empty sections, say so and ask for a screenshot, plain-text paste, or different export before continuing. Never proceed on an unreadable parse.
-4. Write all identity fields to `candidate/profile.yml`.
+4. Write all identity fields through `rolester data candidate patch profile --data ...` in DB mode; legacy YAML is fallback only when no DB exists.
 
 ---
 
@@ -192,23 +192,23 @@ own; a project's existence is evidence of building it, not of its business impac
 
 1. Ask which employers and titles are accurate as stated. Identify any gaps, overlaps, or tenure edge cases that need care.
 2. Identify which metrics and outcomes are verified and citable with evidence.
-3. Write each verified claim to `candidate/evidence.yml` under `claims[]`: include `claim`, `evidence`, `metrics`, `links`, `allowed_wording`, `forbidden_wording`.
+3. Write each verified claim through `rolester data candidate evidence --data ...` in DB mode: include `claim`, `evidence`, `metrics`, `links`, `allowed_wording`, `forbidden_wording`.
 4. Never invent facts; ask or omit.
 
 ---
 
 ## STEP 4 — TARGET ROLES + ADJACENT ROLES + OE BUCKET
 
-1. Capture primary target title(s) and adjacent or stretch titles → write as `role_buckets[]` in `candidate/targeting.yml`. Each bucket needs `title`, `priority` (primary | adjacent | oe), and `comp_floor` (if different from the overall minimum).
+1. Capture primary target title(s) and adjacent or stretch titles → write as `role_buckets[]` through `rolester data candidate patch targeting --data ...` in DB mode. Each bucket needs titles and a priority (`primary` | `secondary` | `stretch` | `oe`).
 2. Explicitly ask about over-employment (concurrent secondary role): "Are you open to OE — a concurrent secondary position?" If yes:
    - Add a `role_bucket` entry with `priority: oe`.
    - Capture OE comp range (STEP 6e).
 3. Ask which job boards or aggregators the candidate typically uses. Write the answer as a candidate-specific board list. (These will be written to `config/search-sources.yml` via `--write-config` in STEP 15 so board selection reflects the candidate's domain, not a hardcoded tech list.)
-4. Ask how fresh sourced postings should be: "When we search, do you want **since last run** (default), **24 hours**, **7 days**, **14 days**, or **30 days**?" Write the answer to `targeting.yml#search_preferences.posting_age`:
+4. Ask how fresh sourced postings should be: "When we search, do you want **since last run** (default), **24 hours**, **7 days**, **14 days**, or **30 days**?" Write the answer to candidate targeting config at `search_preferences.posting_age`:
    - Since last run → `mode: "since-last-run"` and omit `days`.
    - Fixed window → `mode: "fixed-days"` and `days: <1|7|14|30 or user-specified positive number>`.
-   This controls generated source recency (`config/search-sources.yml#searches[].recency`) and LinkedIn-style time-posted filters. It is separate from `targeting.yml#legitimacy.max_posting_age_days`, which only flags stale/evergreen postings during evaluation.
-5. Ask which role families or seniority bands to exclude → write exclusions to `targeting.yml#cut_signals`.
+   This controls generated source recency (`config/search-sources.yml#searches[].recency`) and LinkedIn-style time-posted filters. It is separate from `legitimacy.max_posting_age_days`, which only flags stale/evergreen postings during evaluation.
+5. Ask which role families or seniority bands to exclude → write exclusions through `rolester gate cut-signal "<signal>" --write`.
 
 **ONGOING GATE WRITE-BACK:** If the user volunteers a new exclusion, cut signal, or OE preference at any point, write it immediately per the Gate Write-Back Rule below.
 
@@ -216,10 +216,10 @@ own; a project's existence is evidence of building it, not of its business impac
 
 ## STEP 5 — KEEP + CUT SIGNALS
 
-1. Ask: "What characteristics would make a role a priority?" Translate each stated preference into a concrete signal string in `targeting.yml#keep_signals`. Vague preferences ("good culture") are not signals; probe for specifics.
-2. Ask: "What would immediately disqualify a posting?" Translate each answer into a concrete string in `targeting.yml#cut_signals`.
+1. Ask: "What characteristics would make a role a priority?" Translate each stated preference into a concrete signal string in candidate targeting config (`keep_signals`). Vague preferences ("good culture") are not signals; probe for specifics.
+2. Ask: "What would immediately disqualify a posting?" Translate each answer into a concrete string in candidate targeting config (`cut_signals`).
 3. Hard cut signals: any one of these kills the posting (e.g. required clearance, mandatory on-site in a disqualifying city, specific excluded tool or practice).
-4. Write-back any exclusion the user names to `targeting.yml#excluded_companies` immediately and confirm with "Written to targeting.yml: excluded_companies: [<name>]".
+4. Write-back any exclusion the user names with `rolester gate exclude-company "<Company>" --write --confirm` and echo the CLI confirmation.
 
 ---
 
@@ -228,16 +228,16 @@ own; a project's existence is evidence of building it, not of its business impac
 Treat this section as private by default. Capture and write each field separately:
 
 1. **(a) current_base** — Ask only if the user wants market guidance or negotiation suggestions. Store with `current_comp_shareable: false`. **NEVER surface current_base in any outbound artifact** (résumé, cover letter, form field, message, packet). This is a private gate input; all outbound comp comes from the fields below.
-2. **(b) minimum_base** — Absolute walk-away floor; comp below this is a hard cut regardless of arrangement. Write to `profile.yml#compensation.minimum_base`.
-3. **(b2) Arrangement floors (the comp gate)** — Comp tolerance usually changes with the work arrangement, so capture a base floor for each and write them to `profile.yml#compensation.comp_floors`. Ask explicitly: *"What base salary would each of these need to clear — fully remote, hybrid in your home metro, onsite in your home metro, and relocating to a new city?"* Write the four numbers as `comp_floors.remote`, `comp_floors.hybrid`, `comp_floors.onsite`, and `comp_floors.relocation` (the default relocation floor). Also write the home-metro match terms (city/state/region words that mean "no relocation") to `comp_floors.home_metro` so the gate can tell a home-metro role from a relocation. These are a **hard gate**: `evaluate-job` cuts any posting whose band tops out below the floor for its arrangement, and a relocation miss is a hard cut (not a soft hold). If the user gives one number for everything, set all four equal to it. Confirm: "These become the comp gate — postings under the floor for their arrangement get cut automatically."
-4. **(c) target_base** — Default negotiation anchor (what to aim for in a salary conversation). Write to `profile.yml#compensation.target_base`.
-4. **(d) expected_base** — The number to enter in a salary **form field** on an application. May differ from the negotiation anchor (e.g. anchor = $160K, form field = $165K). Write to `profile.yml#compensation.expected_base`. Also write to `form-defaults.yml#expected_base` so apply-job has a direct lookup. Confirm: "This is what goes on application forms — never your current salary."
-5. **(e) OE range** — If an OE bucket was chosen in STEP 4: capture `oe_min_base` and `oe_max_base`. Write to `profile.yml#compensation`. The overall `minimum_base` does NOT apply to OE roles; each OE bucket has its own floor.
+2. **(b) minimum_base** — Absolute walk-away floor; comp below this is a hard cut regardless of arrangement. Write with `rolester gate comp-floor <N> --write --confirm`.
+3. **(b2) Arrangement floors (the comp gate)** — Comp tolerance usually changes with the work arrangement, so capture a base floor for each and write them through candidate profile config in DB mode. Ask explicitly: *"What base salary would each of these need to clear — fully remote, hybrid in your home metro, onsite in your home metro, and relocating to a new city?"* Write the four numbers as `comp_floors.remote`, `comp_floors.hybrid`, `comp_floors.onsite`, and `comp_floors.relocation` (the default relocation floor). Also write the home-metro match terms (city/state/region words that mean "no relocation") to `comp_floors.home_metro` so the gate can tell a home-metro role from a relocation. These are a **hard gate**: `evaluate-job` cuts any posting whose band tops out below the floor for its arrangement, and a relocation miss is a hard cut (not a soft hold). If the user gives one number for everything, set all four equal to it. Confirm: "These become the comp gate — postings under the floor for their arrangement get cut automatically."
+4. **(c) target_base** — Default negotiation anchor (what to aim for in a salary conversation). Write with `rolester gate comp-target <N> --write --confirm`.
+4. **(d) expected_base** — The number to enter in a salary **form field** on an application. May differ from the negotiation anchor (e.g. anchor = $160K, form field = $165K). Write with `rolester gate comp-expected <N> --write` and also patch `form-defaults.expected_base` in DB mode so apply-job has a direct lookup. Confirm: "This is what goes on application forms — never your current salary."
+5. **(e) OE range** — If an OE bucket was chosen in STEP 4: capture `oe_min_base` and `oe_max_base`. Write through candidate profile config in DB mode. The overall `minimum_base` does NOT apply to OE roles; each OE bucket has its own floor.
 6. **(f) Additional comp context** — Ask about: `cash_over_equity` preference, equity tolerance, bonus tolerance, currency.
-   - **Lifestyle-burden multiplier** (separate concept): "If a role requires more travel or on-site time than your norm, does your comp floor rise?" If yes, capture the premium amount or percentage as a free-text note in `profile.yml#compensation.relo_package_needs` under a key like `burden_premium` (e.g. `"$20K uplift for >2 days/week on-site"`). This feeds the lifestyle sliding-scale in `evaluate-job` and `apply-job`.
-   - **Relocation package arithmetic** (distinct concept): if the candidate would consider relocation, ask what they need covered (e.g. "first + last + deposit", "moving company + 30-day temp housing"). Write as a separate note in `profile.yml#compensation.relo_package_needs` (free-text field, §2 of foundations-spec). If both burden premium and relo needs exist, store both as a combined string: `"burden: $20K uplift for >2d/wk; relo: first+last+deposit+moving"`.
+   - **Lifestyle-burden multiplier** (separate concept): "If a role requires more travel or on-site time than your norm, does your comp floor rise?" If yes, capture the premium amount or percentage in candidate profile compensation notes under `relo_package_needs` with a key like `burden_premium` (e.g. `"$20K uplift for >2 days/week on-site"`). This feeds the lifestyle sliding-scale in `evaluate-job` and `apply-job`.
+   - **Relocation package arithmetic** (distinct concept): if the candidate would consider relocation, ask what they need covered (e.g. "first + last + deposit", "moving company + 30-day temp housing"). Write as a separate note in candidate profile compensation `relo_package_needs` (free-text field, §2 of foundations-spec). If both burden premium and relo needs exist, store both as a combined string: `"burden: $20K uplift for >2d/wk; relo: first+last+deposit+moving"`.
 
-7. **(g) Fit auto-drop floor** — Ask: "Below what fit score should roles auto-drop without asking you? (e.g. 80; leave blank to never auto-drop)" Write the answer as an integer to `targeting.yml#targeting.fit_bands.fit_floor`. This is optional — omit the field entirely when the user leaves it blank (no auto-drop, default behavior unchanged).
+7. **(g) Fit auto-drop floor** — Ask: "Below what fit score should roles auto-drop without asking you? (e.g. 80; leave blank to never auto-drop)" Write the answer as an integer to candidate targeting config at `fit_bands.fit_floor`. This is optional — omit the field entirely when the user leaves it blank (no auto-drop, default behavior unchanged).
 
 8. **(h) Unposted comp estimation** — No intake needed. When a job posting has no listed comp band, the gate automatically estimates a likely range from comparable roles already in the tracker (same role family + arrangement/metro). The estimate strengthens as more tracker rows accumulate. Nothing to capture here; it works from data the candidate already has.
 
@@ -245,7 +245,7 @@ Treat this section as private by default. Capture and write each field separatel
 
    > "Which benefits or perks actually matter to you — and in what order of priority? For example: health/dental/vision, 401k with employer match, equity/options, unlimited PTO, parental leave, learning budget, home-office stipend, commuter benefits. List the ones you care about, roughly in order."
 
-   Write the response as `compensation.benefits_priorities: string[]` in `candidate/profile.yml`. Capture the user's own words — don't normalize to a fixed list. Example shape:
+   Write the response as `compensation.benefits_priorities: string[]` in candidate profile config. Capture the user's own words — don't normalize to a fixed list. Example shape:
 
    ```yaml
    compensation:
@@ -258,7 +258,7 @@ Treat this section as private by default. Capture and write each field separatel
 
    This field informs comp negotiation framing and `email-comms` counter-offer drafts. If the user says "I don't care about benefits" or skips this, omit the field.
 
-After writing all comp fields: run `grep -i current_comp_shareable candidate/profile.yml` and confirm the output shows `current_comp_shareable: false`. If absent or true, write/correct it before continuing. Report: "current_base stored private; expected_base and minimum_base available for outbound use."
+After writing all comp fields: read candidate profile config and confirm `current_comp_shareable: false`. If absent or true, write/correct it before continuing. Report: "current_base stored private; expected_base and minimum_base available for outbound use."
 
 ---
 
@@ -267,9 +267,9 @@ After writing all comp fields: run `grep -i current_comp_shareable candidate/pro
 1. Capture: home city, state, country, timezone.
 2. Remote / hybrid / on-site tolerance. If hybrid is acceptable: max commute days per week.
 3. Travel tolerance (none / occasional / frequent / any).
-4. Relocation cities (if any). For each relo city, ask if there is a per-city comp floor that differs from the default relocation floor (STEP 6 b2). When one differs, write it **structurally** as an entry in `profile.yml#compensation.comp_floors.relocation_by_metro[]` — `{ label, floor, match: [<location words for that metro>] }` — so the gate enforces it (free-text notes are NOT read by the gate). High-cost metros (e.g. Bay Area) commonly carry a higher floor than the default.
+4. Relocation cities (if any). For each relo city, ask if there is a per-city comp floor that differs from the default relocation floor (STEP 6 b2). When one differs, write it **structurally** in candidate profile compensation as `comp_floors.relocation_by_metro[]` — `{ label, floor, match: [<location words for that metro>] }` — so the gate enforces it (free-text notes are NOT read by the gate). High-cost metros (e.g. Bay Area) commonly carry a higher floor than the default.
 5. Any family or lifestyle constraints that affect geography or travel.
-6. Write all location fields to `profile.yml#location`.
+6. Write all location fields through `rolester data candidate patch profile --data ...` in DB mode.
 
 ---
 
@@ -278,7 +278,7 @@ After writing all comp fields: run `grep -i current_comp_shareable candidate/pro
 1. Which countries is the candidate authorized to work in?
 2. Requires sponsorship now or in the future?
 3. Notice period (days/weeks) and earliest start date.
-4. Write to `profile.yml#authorization`.
+4. Write authorization fields through `rolester data candidate patch profile --data ...` in DB mode.
 
 ---
 
@@ -287,15 +287,15 @@ After writing all comp fields: run `grep -i current_comp_shareable candidate/pro
 1. Highest degree earned (or none).
 2. Should an education section appear on the résumé?
 3. How to handle postings where a degree is listed as required vs. preferred?
-4. Write education facts to `honesty.yml#education`. Write `degree_policy` to `targeting.yml`.
+4. Write education facts through `rolester data candidate patch honesty --data ...` and `degree_policy` through `rolester data candidate patch targeting --data ...` in DB mode.
 
 ---
 
 ## STEP 10 — EXCLUDED COMPANIES + CATEGORIES + APPLICATION LIMITS
 
-1. Ask for named companies to never apply to and company categories to exclude (e.g. defense contractors, tobacco, crypto). Write each to `targeting.yml#excluded_companies`. Include an optional per-company `comp_override_threshold` if the user would reconsider at a sufficiently high offer.
-2. Ask about headcount or funding-stage limits (if any) → add to `targeting.yml#cut_signals`.
-3. If the user mentions a per-company application cap or cooldown they already know ("I applied to Acme 3 months ago, 6-month cooldown"): write it immediately to `candidate/application-limits.yml` and confirm.
+1. Ask for named companies to never apply to and company categories to exclude (e.g. defense contractors, tobacco, crypto). Write each named exclusion through `rolester gate exclude-company "<Company>" --write --confirm`. Include an optional per-company `comp_override_threshold` only when the owning DB verb supports it; do not hand-edit YAML in DB mode.
+2. Ask about headcount or funding-stage limits (if any) → add to cut signals through `rolester gate cut-signal "<signal>" --write`.
+3. If the user mentions a per-company application cap or cooldown they already know ("I applied to Acme 3 months ago, 6-month cooldown"): after confirmation, write `rolester data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`.
 
 ---
 
@@ -304,16 +304,16 @@ After writing all comp fields: run `grep -i current_comp_shareable candidate/pro
 1. Default "how did you hear about us" source label.
 2. Work authorization and sponsorship answers for ATS form fields.
 3. Current employer and current title (as typically entered in ATS forms).
-4. LinkedIn, GitHub, portfolio URLs (confirm these match profile.yml).
+4. LinkedIn, GitHub, portfolio URLs (confirm these match candidate profile config).
 5. EEO/demographic default answer.
 6. `auto_submit` — confirm explicitly: "Do you want applications submitted automatically when a form is filled, or do you want a confirm step every time?" Default is `false` (confirm-first). Only flip to `true` on explicit opt-in.
-7. Write all fields to `candidate/form-defaults.yml`.
+7. Write all fields through `rolester data candidate patch form-defaults --data ...` in DB mode.
 
 ---
 
 ## STEP 12 — PUBLIC PROOF POINTS + HONESTY BOUNDARIES
 
-1. Collect key projects with verifiable outcomes and metrics. For each: public link (repo, demo, article, talk, press, case study), allowed claim wording, any forbidden phrasing. Write to `candidate/evidence.yml`.
+1. Collect key projects with verifiable outcomes and metrics. For each: public link (repo, demo, article, talk, press, case study), allowed claim wording, any forbidden phrasing. Write through `rolester data candidate evidence --data ...` in DB mode.
 2. Ask: "What is your core edge or differentiator in your field?" Capture the answer as a lead claim in `evidence.yml`.
 3. Skills and tools — capture in three buckets in `honesty.yml#tools`:
    - `confirmed`: proficient, can claim without qualification.
@@ -331,7 +331,7 @@ After writing all comp fields: run `grep -i current_comp_shareable candidate/pro
    - Check for a `.docx` résumé template in the repo root or `templates/`.
 2. Based on results, propose a toolchain: `pandoc` | `libreoffice` | `word` | `markdown-only`.
 3. Confirm with the user.
-4. Write `candidate.toolchain` to `profile.yml#candidate.toolchain` (EXACT enum value: `pandoc`, `libreoffice`, `word`, or `markdown-only`). This field is read by `tailor-application` and `apply-job` to call the right build command.
+4. Write `candidate.toolchain` through `rolester data candidate patch profile --data ...` in DB mode (EXACT enum value: `pandoc`, `libreoffice`, `word`, or `markdown-only`). This field is read by `tailor-application` and `apply-job` to call the right build command.
 
 ---
 
@@ -448,16 +448,16 @@ NEXT: run setup-searches, then research-boards, then discover-companies before t
 
 ## ONGOING GATE WRITE-BACK RULE
 
-Any time the user states a new gate during this interview — an exclusion, cut signal, comp floor, honesty boundary, per-company cap, or cooldown — write it to the appropriate `candidate/` file **immediately** and confirm before moving on:
+Any time the user states a new gate during this interview — an exclusion, cut signal, comp floor, honesty boundary, per-company cap, or cooldown — persist it through the owning DB-aware command **immediately** and confirm before moving on:
 
-- Exclusion → `targeting.yml#excluded_companies`
-- Cut or keep signal → `targeting.yml#cut_signals` / `keep_signals`
-- Comp floor or anchor → `profile.yml#compensation` (minimum_base, target_base, or expected_base only — not current_base)
-- Per-company cap / cooldown → `application-limits.yml`
-- Honesty boundary → `honesty.yml`
+- Exclusion → `rolester gate exclude-company "<Company>" --write --confirm`
+- Cut or keep signal → `rolester gate cut-signal "<signal>" --write` / `rolester gate keep-signal "<signal>" --write`
+- Comp floor or anchor → `rolester gate comp-floor <N> --write --confirm`, `rolester gate comp-target <N> --write --confirm`, or `rolester gate comp-expected <N> --write` (not current_base)
+- Honesty boundary → `rolester gate do-not-claim "<tool>" --write` or `rolester gate do-not-fabricate "<claim>" --write`
+- Per-company cap / cooldown → `rolester data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
 
 **Friction level:**
-- *Write-and-report* for unambiguous, low-blast-radius gates (one clear cut signal; a cap the user just named): write it, then echo `Written to <file>: <key: value>`.
+- *Write-and-report* for unambiguous, low-blast-radius gates (one clear cut signal): write it, then echo the CLI confirmation.
 - *Confirm-first* for consequential gates (broad company exclusion, lowering comp floor, large re-rank): propose the exact change, get a yes, then write.
 
 A stated gate must never live only in chat. It must never be hardcoded into a skill.
@@ -470,23 +470,23 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
 - Never invent facts. Ask or omit — do not guess.
 - Keep `current_base` private. Store it with `current_comp_shareable: false`. It must never appear in any résumé, cover letter, form field, ATS entry, recruiter message, interview packet, or shareable tracker note. This is enforced by field path: always read outbound comp from `expected_base`, `target_base`, or `minimum_base`.
 - Keep `current_base` separate from `expected_base`. They are different fields and must never be conflated. `expected_base` is what goes on forms; `current_base` is a private gate input only.
-- Translate stated preferences into explicit keep/cut signal lists in `targeting.yml`. Vague preferences are not signals.
+- Translate stated preferences into explicit keep/cut signal lists in candidate targeting config. Vague preferences are not signals.
 - Replace all placeholder identity values from the templates (`Jane Candidate`, `jane@example.com`, `+1-555-0100`, etc.). `rolester ingest --check --json` runs `lint:placeholders` and will reject any file that still contains known placeholder strings.
-- Treat all `candidate/` files as private user-layer data — they are gitignored and must never be committed to the system repo.
+- Treat all candidate setup data as private user-layer data. In DB workspaces it lives in SQLite; compatibility `candidate/` files are export/fallback only and must never be committed to the system repo.
 - Never surface domain-specific assumptions (tech/AI titles, specific cities, specific tool names) from skill prose. Every candidate-specific value lives in their config files.
 
 ---
 
 ## Outputs
 
-| Output file | Written by | Schema |
+| Output | Written by | Schema |
 |---|---|---|
-| `candidate/profile.yml` | direct edit (confirmed from template) | `config/profile.schema.json` |
-| `candidate/targeting.yml` | direct edit (confirmed from template) | `config/targeting.schema.json` |
-| `candidate/evidence.yml` | direct edit, or `rolester evidence add` (STEP 2b folder/repo scan) | `config/evidence.schema.json` |
-| `candidate/honesty.yml` | direct edit (confirmed from template) | `config/honesty.schema.json` |
-| `candidate/form-defaults.yml` | direct edit (confirmed from template) | `config/form-defaults.schema.json` |
-| `candidate/application-limits.yml` | direct edit on gate capture | (schema if present) |
+| `candidate_profile` / compatibility `candidate/profile.yml` | `rolester data candidate patch profile --data ...` in DB mode; compatibility YAML only via `write-config`/legacy mode | `config/profile.schema.json` |
+| `candidate_targeting` + search tracks/companies / compatibility `candidate/targeting.yml` | `rolester data candidate patch targeting --data ...` in DB mode; compatibility YAML only via `write-config`/legacy mode | `config/targeting.schema.json` |
+| `candidate_evidence_claims` / compatibility `candidate/evidence.yml` | `rolester data candidate evidence --data ...`, or `rolester evidence add` (STEP 2b folder/repo scan) | `config/evidence.schema.json` |
+| `candidate_honesty` / compatibility `candidate/honesty.yml` | `rolester data candidate patch honesty --data ...` in DB mode; compatibility YAML only via `write-config`/legacy mode | `config/honesty.schema.json` |
+| `candidate_form_defaults` / compatibility `candidate/form-defaults.yml` | `rolester data candidate patch form-defaults --data ...` in DB mode; compatibility YAML only via `write-config`/legacy mode | `config/form-defaults.schema.json` |
+| `candidate_application_limits` / compatibility `candidate/application-limits.yml` | `rolester data candidate limits upsert --data ...` in DB mode; compatibility YAML only via `write-config`/legacy mode | `config/application-limits.schema.json` |
 | `candidate/writing-style.md` | `npm run calibrate:style` from `workspace/writing-samples/` | — |
 | `candidate/AGENTS.md` | `rolester ingest --write-config` | — |
 | `config/search-sources.yml` | `rolester ingest --write-config` (domain-appropriate boards) | `config/search-sources.schema.json` |
@@ -512,8 +512,7 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
   behavior; `mode: "fixed-days"` plus `days: <positive number>` always scans that
   posting-age window. Do not confuse this with `legitimacy.max_posting_age_days`,
   which is a stale-posting review signal after a posting is found.
-- **`candidate/application-limits.yml` is intentionally schema-less.** There is no
-  `application-limits.schema.json`; the file is freeform YAML (per-company caps,
-  cooldowns, reevaluation thresholds) consumed directly by the skills. Write it
-  from `templates/application-limits.example.yml` and validate its structure
-  against that template by eye.
+- **Application limits are schema-backed in DB mode.** Use
+  `rolester data candidate limits upsert --data '<json row>'` for per-company
+  caps/cooldowns. `candidate/application-limits.yml` is legacy/export
+  compatibility only; do not hand-edit it in DB mode.

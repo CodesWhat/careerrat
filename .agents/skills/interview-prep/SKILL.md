@@ -473,7 +473,7 @@ candidate who solves in the moment rather than from memorized scripts.
 
 ## STEP 3 — Comp gate check
 
-Read `profile.yml#compensation.minimum_base` — the single walk-away floor.
+Read candidate config via the shared DB-first accessor (`profile.compensation.minimum_base`) — the single walk-away floor. In DB mode this comes from SQLite; YAML is legacy fallback only.
 
 - If the posted band is at or above the floor: no action needed; include the
   standard comp script (target, not current).
@@ -483,8 +483,8 @@ Read `profile.yml#compensation.minimum_base` — the single walk-away floor.
 - If the user states a new comp gate mid-session (e.g. "below $190K is a no"):
   - **Confirm-first** for broad changes (dropping the floor globally).
   - **Write-and-report** for unambiguous per-session adjustments.
-  - Write the confirmed value to `candidate/profile.yml#compensation.minimum_base`, then
-    echo `Written to candidate/profile.yml: compensation.minimum_base: <value>`.
+  - Run `rolester gate comp-floor <N> --write --confirm`, then echo the CLI confirmation.
+    `rolester gate` writes SQLite in DB mode and legacy YAML only in legacy mode; never hand-edit `candidate/profile.yml`.
 
 ---
 
@@ -596,9 +596,8 @@ Run `rolester tracker --verify` immediately after. Then write the outcome to the
 3. Append the call summary to `conversations[]` in `workspace/tracker.json`
    (STEP 6 mechanics).
 4. Confirm-first before any comp-boundary write-back:
-   - Per-offer walk-away floor ("I won't go below $X on this one"): write to
-     `candidate/profile.yml#compensation.minimum_base` directly. Echo:
-     `Written to candidate/profile.yml: compensation.minimum_base: <value>`.
+   - Per-offer walk-away floor ("I won't go below $X on this one"): use
+     `rolester gate comp-floor <N> --write --confirm` and echo the CLI confirmation.
    - Permanent sourcing floor change: `rolester gate comp-floor <N>` (dry-run);
      `rolester gate comp-floor <N> --write --confirm` to commit.
    - Comp target change: `rolester gate comp-target <N>` (dry-run);

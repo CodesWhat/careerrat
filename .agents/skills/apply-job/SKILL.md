@@ -14,7 +14,7 @@ a JD URL with clear application intent.
 
 | File | Purpose |
 | --- | --- |
-| `candidate/application-limits.yml` | Per-company caps and cooldowns (step-zero gate) |
+| `application-limits` config (`candidate/application-limits.yml` only in legacy/export mode) | Per-company caps and cooldowns (step-zero gate) |
 | `candidate/form-defaults.yml` | `auto_submit`, `expected_base` (primary salary form value), applicant contact facts |
 | `candidate/targeting.yml` | `excluded_companies`, `cut_signals`, `fit_bands`, `role_buckets[].priority` (OE bucket policy) |
 | `candidate/profile.yml` | `compensation.expected_base` (fallback when `form-defaults.yml#expected_base` absent), `compensation.oe_min_base`, `compensation.oe_max_base`, `candidate.toolchain`, contact facts |
@@ -31,12 +31,14 @@ write step below gives the `rolester data <verb>` command (Data Write Contract,
 AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
 gives the existing direct JSON-edit instructions, unchanged.
 
-Read `candidate/application-limits.yml` (if absent, skip silently and proceed).
+DB mode: read application limits from `rolester data candidate get --json`
+(`application-limits.companies[]`). Legacy mode: read
+`candidate/application-limits.yml` if present; skip silently when absent.
 
 - Look up the target company by name.
 - If `status: blocked` or the company's cap is already hit: halt. Report `reapply_after` date if set. Offer a bypass option (user must confirm explicitly to override).
 - If `status: caution`: warn and confirm before proceeding.
-- If a new cap or cooldown is stated by the user mid-flow (e.g. "limit me to 2 apps there per quarter"): write it back to `application-limits.yml` using *confirm-first* friction (propose the exact change, get a yes, write, echo `Written to application-limits.yml: <key: value>`).
+- If a new cap or cooldown is stated by the user mid-flow (e.g. "limit me to 2 apps there per quarter"): use *confirm-first* friction. In DB mode write it with `rolester data candidate limits upsert --data '<json row>'`; in legacy mode write the compatibility YAML. Echo the durable row that was written.
 
 Run `rolester tracker --summary` to confirm current application-limits context and echo the result.
 
@@ -437,7 +439,7 @@ a re-run never double-logs:
     --company "<Company>" --role "<Role>" --app-id <application id> --url "<posting URL>" --write
   ```
 
-If any new application limit was learned during the apply flow (e.g. a blocker message or FAQ stating a reapply window): write it back to `candidate/application-limits.yml` using *confirm-first* friction, then echo what was written.
+If any new application limit was learned during the apply flow (e.g. a blocker message or FAQ stating a reapply window): record it on the tracker row and, after confirmation, persist the durable limit with `rolester data candidate limits upsert --data '<json row>'` in DB mode. Legacy compatibility writes remain confirm-first.
 
 Commit with an emoji-conventional message (e.g. `✨ feat(apply): submit <Role> at <Company>`).
 
