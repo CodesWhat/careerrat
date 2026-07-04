@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 02 — Bounded AI Foundation
-status: Ready to execute
-stopped_at: Phase 02 planned; ready to execute
-last_updated: "2026-07-04T21:00:31.424Z"
+current_phase: 02
+status: In Progress
+stopped_at: Completed 02-01-PLAN.md
+last_updated: "2026-07-04T21:09:16.568Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 11
-  completed_plans: 4
-  percent: 20
+  completed_plans: 5
+  percent: 45
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -21,13 +21,13 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 02 — Bounded AI Foundation
+**Current focus:** Phase 02 — bounded-ai-foundation
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
-- **Current phase:** 02 — Bounded AI Foundation
-- **Current phase status:** Ready to execute
+- **Current phase:** 02
+- **Current phase status:** In Progress
 - **Next command:** `$gsd-execute-phase 2`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
@@ -57,9 +57,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-04T21:00:15.636Z
-**Stopped at:** Phase 02 planned; ready to execute
-**Resume file:** .planning/phases/02-bounded-ai-foundation/02-01-PLAN.md
+**Last session:** 2026-07-04T21:09:16.559Z
+**Stopped at:** Completed 02-01-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -69,6 +69,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 01-decomposition-map P02 | 2min | 1 tasks | 1 files |
 | Phase 01-decomposition-map P03 | 2min | 1 tasks | 1 files |
 | Phase 01-decomposition-map P04 | 2 min | 1 tasks | 1 files |
+| Phase 02-bounded-ai-foundation P01 | 3 min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -83,3 +84,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 01-decomposition-map]: POST /api/skill/run is retained for allowlisted tool-heavy, long-running, or human-watched workflows only. — The full skill runtime remains available without becoming the default path for cheap app or CLI work.
 - [Phase 01-decomposition-map]: Plan 01-04 kept Phase 1 runtime-free; no src/ files were modified. — The validation guard is a planning artifact test and did not require runtime implementation.
 - [Phase 01-decomposition-map]: The validation guard accepts explicit planned: owners and rejects bare missing owner paths. — This keeps future ownership explicit while proving current owner paths resolve in the repo.
+- [Phase 02-bounded-ai-foundation]: Plan 02-01 ships fallback structured invocation through runStructuredOneshot(); native provider request support remains a later adapter concern. — This keeps parse, validation, and retry ownership in the existing structured helper while later plans add native provider request adapters behind the same bounded contract.
+- [Phase 02-bounded-ai-foundation]: Bounded AI public envelopes whitelist metadata fields so raw prompts, model text, resumes, JDs, candidate facts, and page bodies stay out of responses. — This preserves the Phase 02 privacy and telemetry boundary while still returning renderable manual fallback metadata.
+- [Phase 02-bounded-ai-foundation]: Missing bounded AI labels return a safe AI_LABELS_INVALID envelope from runBoundedAI while requireBoundedAILabels remains a throwing guard for direct callers. — Routes get a stable response shape, and lower-level callers can still fail fast on label regressions before any invocation.

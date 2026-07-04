@@ -13,10 +13,10 @@
 
 ### AI Runtime
 
-- [ ] **AIR-01**: Bounded AI assists call through `callAI()` or `runStructuredOneshot()` with explicit skill/action labels.
-- [ ] **AIR-02**: Bounded AI assists validate model output against JSON schemas before downstream code can use it.
-- [ ] **AIR-03**: Bounded AI assists expose a no-AI degradation path that returns a clear 501-style response and leaves manual input possible.
-- [ ] **AIR-04**: AI usage and cost telemetry are preserved for BYOK and managed-proxy paths.
+- [x] **AIR-01**: Bounded AI assists call through `callAI()` or `runStructuredOneshot()` with explicit skill/action labels.
+- [x] **AIR-02**: Bounded AI assists validate model output against JSON schemas before downstream code can use it.
+- [x] **AIR-03**: Bounded AI assists expose a no-AI degradation path that returns a clear 501-style response and leaves manual input possible.
+- [x] **AIR-04**: AI usage and cost telemetry are preserved for BYOK and managed-proxy paths.
 
 ### Discovery
 
@@ -75,10 +75,10 @@
 | ARCH-01 | Phase 1 | Complete |
 | ARCH-02 | Phase 1 | Complete |
 | ARCH-03 | Phase 1 | Complete |
-| AIR-01 | Phase 2 | Pending |
-| AIR-02 | Phase 2 | Pending |
-| AIR-03 | Phase 2 | Pending |
-| AIR-04 | Phase 2 | Pending |
+| AIR-01 | Phase 2 | Complete |
+| AIR-02 | Phase 2 | Complete |
+| AIR-03 | Phase 2 | Complete |
+| AIR-04 | Phase 2 | Complete |
 | DISC-01 | Phase 3 | Pending |
 | DISC-02 | Phase 3 | Pending |
 | DISC-03 | Phase 3 | Pending |
@@ -94,6 +94,7 @@
 | VER-05 | Phase 5 | Pending |
 
 **Coverage:**
+
 - v1 requirements: 20 total
 - Mapped to phases: 20
 - Unmapped: 0
