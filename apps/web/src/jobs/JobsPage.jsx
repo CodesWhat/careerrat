@@ -3,6 +3,7 @@ import { useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
+import { FunnelSankey } from "./FunnelSankey.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
 import { JobFunnel } from "./JobFunnel.jsx";
 import { JobRow } from "./JobRow.jsx";
@@ -92,6 +93,8 @@ export function JobsPage() {
               ))}
             </div>
           )}
+
+          <FunnelSankey sankey={data.jobs.sankey} />
         </>
       ) : null}
 

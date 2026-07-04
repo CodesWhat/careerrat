@@ -1,0 +1,120 @@
+.funnel-sankey-card .card__body {
+  gap: 12px;
+}
+
+.funnel-sankey-card__meta {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.funnel-sankey {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+
+.funnel-sankey__frame {
+  min-width: 0;
+  overflow: hidden;
+}
+
+.funnel-sankey__svg {
+  display: block;
+  width: 100%;
+  height: auto;
+  min-height: 210px;
+}
+
+.funnel-sankey__link {
+  opacity: 0.52;
+  transition:
+    opacity 0.16s ease,
+    filter 0.16s ease;
+}
+
+.funnel-sankey__link:hover {
+  opacity: 0.8;
+  filter: drop-shadow(0 4px 10px rgba(var(--rgb-line), 0.12));
+}
+
+.funnel-sankey__node {
+  transition: opacity 0.16s ease;
+}
+
+.funnel-sankey__node rect {
+  transition:
+    filter 0.16s ease,
+    stroke 0.16s ease;
+}
+
+.funnel-sankey__node:hover rect {
+  filter: drop-shadow(0 4px 10px rgba(var(--rgb-line), 0.16));
+  stroke: var(--paper-surface);
+  stroke-width: 1.5px;
+}
+
+.funnel-sankey__node-label {
+  fill: var(--ink);
+  font-size: 14px;
+  font-weight: 750;
+  paint-order: stroke;
+  stroke: var(--paper-surface);
+  stroke-linejoin: round;
+  stroke-width: 5px;
+}
+
+.funnel-sankey__node-label--source {
+  font-size: 13px;
+}
+
+.funnel-sankey__node-label tspan {
+  fill: var(--ink-soft);
+  font-family: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+  font-weight: 700;
+}
+
+.funnel-sankey__legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px 16px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.funnel-sankey__legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.funnel-sankey__legend-swatch {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 auto;
+  border-radius: 2px;
+}
+
+.funnel-sankey-empty {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+}
+
+@media (max-width: 720px) {
+  .funnel-sankey-card__meta {
+    white-space: normal;
+  }
+
+  .funnel-sankey__svg {
+    min-height: 160px;
+  }
+
+  .funnel-sankey__node-label {
+    font-size: 15px;
+  }
+}

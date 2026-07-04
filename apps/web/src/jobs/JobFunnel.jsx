@@ -1,9 +1,8 @@
 import { KeyIcon } from "../components/icons.jsx";
 
 // JobFunnel — the bucket funnel bar chart (buildJobsFunnel,
-// dashboard-data.js:4260-4281). The Sankey round-depth diagram is a
-// deliberate M10 exception (M10 design doc §1) — link out to the legacy
-// dashboard for it rather than porting the custom SVG flow visualization.
+// dashboard-data.js:4260-4281). The round-depth Sankey is rendered separately
+// from the same server-derived jobs payload.
 export function JobFunnel({ funnel }) {
   if (!funnel?.length) return null;
   const max = Math.max(...funnel.map((f) => f.count || 0), 1);
