@@ -8,12 +8,14 @@
 // touches a real ATS API.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { companyAtsUpsert } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 
@@ -105,6 +107,7 @@ function leverFetchStub() {
 }
 
 after(() => {
+  closeAll();
   for (const root of cleanupRoots.splice(0)) {
     try {
       rmSync(root, { recursive: true, force: true });
@@ -133,6 +136,84 @@ test("POST /api/search/scan: happy path returns the summary and persists a scan-
     const outPath = userPath({ repoRoot }, `workspace/scan-results/sourced-${date}.json`);
     const written = JSON.parse(readFileSync(outPath, "utf8"));
     assert.deepEqual(written, body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/search/scan: in DB mode persists kept offers as sourced rows and exports tracker.json", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  companyAtsUpsert({
+    repoRoot,
+    entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+  });
+
+  const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
+  try {
+    const { status, body } = await postJson(server, "/api/search/scan", {});
+    assert.equal(status, 200);
+    assert.equal(body.new, 1);
+
+    const db = openDb({ repoRoot });
+    const rows = db
+      .prepare("SELECT data FROM sourced ORDER BY rowid ASC")
+      .all()
+      .map((row) => JSON.parse(row.data));
+    assert.equal(rows.length, 1);
+    assert.match(rows[0].id, /^sourced-acme-/);
+    assert.equal(rows[0].company, "Acme");
+    assert.equal(rows[0].role, "Director of IT");
+    assert.equal(rows[0].fitBasis, "triage");
+    assert.equal(rows[0].channel, "board");
+    assert.equal(rows[0].link, "https://jobs.lever.co/acme/abc");
+    assert.equal(typeof rows[0].fitScore, "number");
+    assert.match(rows[0].artifacts.jd, /^workspace\/jobs\/acme-director-of-it-/);
+    assert.equal(existsSync(userPath({ repoRoot }, rows[0].artifacts.jd)), true);
+
+    const tracker = JSON.parse(
+      readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+    );
+    assert.equal(tracker.sourced.length, 1);
+    assert.equal(tracker.sourced[0].id, rows[0].id);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/search/scan: DB source config is enough when legacy config files are absent", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  companyAtsUpsert({
+    repoRoot,
+    entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+  });
+
+  const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
+  try {
+    const { status, body } = await postJson(server, "/api/search/scan", {});
+    assert.equal(status, 200);
+    assert.equal(body.scanned, 1);
+    assert.equal(body.offers[0].company, "Acme");
+
+    const sources = await fetch(`${baseUrl(server)}/api/search/sources`);
+    assert.equal(sources.status, 200);
+    assert.equal((await sources.json()).trackedCompanies, 1);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/search/scan: DB mode ignores legacy source files when DB source config is empty", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  writeSourcedScanConfig(repoRoot, [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }]);
+
+  const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
+  try {
+    const { status, body } = await postJson(server, "/api/search/scan", {});
+    assert.equal(status, 400);
+    assert.match(body.error, /No search config/);
   } finally {
     await closeServer(server);
   }

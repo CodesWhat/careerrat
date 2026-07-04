@@ -11,6 +11,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 import { chromium } from "playwright";
 
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { captureAndPersistOffersIfDb } from "../src/core/scoring/sourced-persistence.mjs";
 import { extractReqId } from "../src/core/scoring/sourced-scanner.mjs";
 
 const args = process.argv.slice(2);
@@ -20,6 +21,7 @@ const waitForUser =
   args.includes("--login") || args.includes("--manual") || !args.includes("--no-manual");
 const limit = Number(valueAfter("--limit") || 250);
 const outPath = valueAfter("--out");
+const ingest = args.includes("--ingest");
 const profileRoot = valueAfter("--profile-root") || join(homedir(), ".rolester", "board-profiles");
 const browserChannel = (
   valueAfter("--browser") ||
@@ -43,12 +45,14 @@ Options:
   --browser NAME       Playwright browser channel. Use "chrome" for Google OAuth. Default: chromium.
   --profile-root DIR   Persistent browser profile root. Default: ~/.rolester/board-profiles.
   --out FILE           Output JSON file. Default: scan-results/<provider>-browser-<timestamp>.json.
+  --ingest             After capture, write offers to SQLite sourced rows and JD artifacts.
 
 Workflow:
   1. Run with --login the first time for each provider.
   2. Log in and select the saved search / last-24-hours filters in the opened browser.
   3. Press Enter in this terminal when the results list is ready.
-  4. Commit the generated scan-results JSON if it should become the next delta baseline.
+  4. Use --ingest in DB workspaces so captured offers become sourced rows immediately.
+     In legacy workspaces, commit the generated scan-results JSON if it should become the next delta baseline.
 `);
   process.exit(0);
 }
@@ -104,6 +108,15 @@ try {
   writeFileSync(out, JSON.stringify(snapshot, null, 2));
   console.log(`Wrote ${out}`);
   console.log(`Captured ${snapshot.offers.length} offers from ${provider}`);
+  if (ingest) {
+    const result = captureAndPersistOffersIfDb({
+      repoRoot: ROOT,
+      offers: snapshot.offers,
+      savedAt: now,
+    });
+    if (!result) throw new Error("capture ingest requires a Rolester SQLite database");
+    console.log(`Ingested ${result.persistedRows} captured offers into SQLite sourced rows`);
+  }
 } finally {
   await context.close();
 }

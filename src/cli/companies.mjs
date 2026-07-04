@@ -11,10 +11,13 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { companyAtsRemove, companyAtsUpsert, sourceConfigGet } from "../core/db/verbs.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
 
-const root = join(fileURLToPath(new URL("../..", import.meta.url)));
+const args = process.argv.slice(2);
+const root = optValueFrom(args, "--root") || join(fileURLToPath(new URL("../..", import.meta.url)));
 const pathCtx = { repoRoot: root };
 const CONFIG_REL = "config/sourced-scan.json";
 const CONFIG_PATH = userPath(pathCtx, CONFIG_REL);
@@ -30,7 +33,6 @@ const SUPPORTED_HOSTS = [
 ];
 const ATS_FAMILIES = "Ashby, Greenhouse, Lever, Workable, or SmartRecruiters";
 
-const args = process.argv.slice(2);
 const json = args.includes("--json");
 const write = args.includes("--write");
 
@@ -152,6 +154,26 @@ function runAdd() {
   }
 
   const next = { ...config, tracked_companies: [...companies, entry] };
+  if (dbExists(pathCtx)) {
+    const result = companyAtsUpsert({ ...pathCtx, entry });
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: result.status,
+          name: result.entry.name,
+          careers_url: result.entry.careers_url,
+          provider,
+          total: result.total,
+        })
+      );
+    } else {
+      const verb = result.status === "updated" ? "Updated" : "Added";
+      console.log(`${verb} ${result.entry.name} — ${result.entry.careers_url} (${provider})`);
+      console.log(`${result.total} tracked ${result.total === 1 ? "company" : "companies"} total.`);
+    }
+    return 0;
+  }
+
   writeConfig(next);
 
   if (json) {
@@ -215,6 +237,19 @@ function runRemove() {
   }
 
   const next = { ...config, tracked_companies: companies.filter((entry) => entry !== match) };
+  if (dbExists(pathCtx)) {
+    const result = companyAtsRemove({ ...pathCtx, name });
+    if (json) {
+      console.log(
+        JSON.stringify({ status: result.status, name: result.name || name, total: result.total })
+      );
+    } else {
+      console.log(`Removed ${result.name || name}`);
+      console.log(`${result.total} tracked ${result.total === 1 ? "company" : "companies"} total.`);
+    }
+    return 0;
+  }
+
   writeConfig(next);
 
   if (json) {
@@ -235,6 +270,7 @@ function runRemove() {
 // ---------------------------------------------------------------------------
 
 function loadConfig() {
+  if (dbExists(pathCtx)) return sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
   return loadScannerConfig(CONFIG_PATH);
 }
 
@@ -261,6 +297,11 @@ function writeConfig(config) {
 function optValue(flag) {
   const i = args.indexOf(flag);
   return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
+}
+
+function optValueFrom(argv, flag) {
+  const i = argv.indexOf(flag);
+  return i !== -1 && i + 1 < argv.length ? argv[i + 1] : null;
 }
 
 function printHelp() {

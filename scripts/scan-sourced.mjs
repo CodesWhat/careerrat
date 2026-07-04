@@ -36,10 +36,18 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { dbExists } from "../src/core/db/connection.mjs";
+import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
-import { parseYaml } from "../src/core/profile/yaml.mjs";
+import { loadCandidateConfig as loadStoredCandidateConfig } from "../src/core/profile/config-store.mjs";
+import { atomicWriteFile } from "../src/core/profile/gate-writer.mjs";
+import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
 import { renderSourcedIntake } from "../src/core/scoring/sourced-intake.mjs";
+import {
+  captureAndPersistOffersIfDb,
+  offersWithCapturedJobs,
+} from "../src/core/scoring/sourced-persistence.mjs";
 import {
   buildLocationFilter,
   buildTitleFilter,
@@ -55,7 +63,7 @@ import { buildSeenSets } from "../src/core/tracker/tracker-data.mjs";
 const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
 
 // ---------------------------------------------------------------------------
-// Shared helper — reads a candidate's targeting.yml/profile.yml for the
+// Shared helper — reads a candidate's DB-first targeting/profile docs for the
 // sweep's scoring context (keep/cut signals, comp floor, cold-family
 // down-weight, location bonus — see sourced-scanner.mjs's
 // scoreSourcedOfferFromConfig). Pure per-call (no module-level caching) so
@@ -64,26 +72,15 @@ const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
 // ---------------------------------------------------------------------------
 
 function loadCandidateConfig(pathCtx) {
-  let targeting = null;
-  let profile = null;
   try {
-    const targetingPath = userPath(pathCtx, "candidate/targeting.yml");
-    if (existsSync(targetingPath)) {
-      targeting = parseYaml(readFileSync(targetingPath, "utf8")) || null;
-    }
+    const config = loadStoredCandidateConfig(pathCtx);
+    const targeting = config?.targeting || null;
+    const profile = config?.profile || null;
+    if (targeting == null && profile == null) return {};
+    return { targeting, profile };
   } catch {
-    targeting = null;
+    return {};
   }
-  try {
-    const profilePath = userPath(pathCtx, "candidate/profile.yml");
-    if (existsSync(profilePath)) {
-      profile = parseYaml(readFileSync(profilePath, "utf8")) || null;
-    }
-  } catch {
-    profile = null;
-  }
-  if (targeting == null && profile == null) return {};
-  return { targeting, profile };
 }
 
 function toOutputOffer(offer) {
@@ -96,6 +93,71 @@ function toOutputOffer(offer) {
 
 function timestamp(date) {
   return date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
+}
+
+function loadScannerConfigForRun({ pathCtx, configPath }) {
+  if (!configPath && dbExists(pathCtx))
+    return sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  return loadScannerConfig(configPath || userPath(pathCtx, "config/sourced-scan.json"));
+}
+
+function loadSearchSourcesForRun(pathCtx) {
+  if (dbExists(pathCtx)) {
+    return sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
+  }
+  const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
+  if (!existsSync(searchSourcesPath)) return null;
+  return parseYaml(readFileSync(searchSourcesPath, "utf8"));
+}
+
+function searchListKey(config) {
+  if (Array.isArray(config?.searches)) return "searches";
+  if (Array.isArray(config?.sources)) return "sources";
+  return null;
+}
+
+function isFetchableSearchSource(source) {
+  return source && source.enabled !== false && (source.source_type === "rss" || source.rssUrl);
+}
+
+function stampSearchSourceWatermarks(config, savedAt) {
+  const key = searchListKey(config);
+  if (!key) return { config, stamped: 0 };
+  let stamped = 0;
+  const lastRunAt = savedAt.toISOString();
+  const searches = config[key].map((source) => {
+    if (!isFetchableSearchSource(source)) return source;
+    stamped += 1;
+    return { ...source, recency: { ...(source.recency || {}), lastRunAt } };
+  });
+  return { config: { ...config, [key]: searches }, stamped };
+}
+
+function persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt }) {
+  if (!searchSources) return null;
+  const { config, stamped } = stampSearchSourceWatermarks(searchSources, savedAt);
+  if (stamped === 0) return null;
+  if (dbExists(pathCtx)) {
+    return sourceConfigPut({ ...pathCtx, name: "search-sources", data: config });
+  }
+  const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
+  if (!existsSync(searchSourcesPath)) return null;
+  atomicWriteFile(searchSourcesPath, `${stringifyYaml(config)}\n`);
+  return { ok: true, stamped };
+}
+
+function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
+  if (dbExists({ repoRoot, env })) {
+    return (
+      captureAndPersistOffersIfDb({
+        repoRoot,
+        env,
+        offers,
+        savedAt,
+      })?.offers || []
+    );
+  }
+  return offersWithCapturedJobs({ repoRoot, env, offers, savedAt });
 }
 
 // ---------------------------------------------------------------------------
@@ -126,10 +188,8 @@ export async function runSourcedScan({
   limit = 0,
   timestamped = false,
 } = {}) {
-  void env;
-  const pathCtx = { repoRoot };
-  const resolvedConfigPath = configPath || userPath(pathCtx, "config/sourced-scan.json");
-  const config = loadScannerConfig(resolvedConfigPath);
+  const pathCtx = { repoRoot, env };
+  const config = loadScannerConfigForRun({ pathCtx, configPath });
   const candidateConfig = loadCandidateConfig(pathCtx);
   const { seenUrls, seenReqIds, seenCompanyRoles, tracker } = buildSeenSets(repoRoot);
 
@@ -156,12 +216,13 @@ export async function runSourcedScan({
   // the sweep; browser/auth source types (HiringCafe, Wellfound, authenticated
   // LinkedIn/Indeed) are agent-driven per the Browser Automation Contract and
   // not fetched here.
-  const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
   let sourcedFromSearches = { offers: [], errors: [] };
-  if (!companyFilter && existsSync(searchSourcesPath)) {
+  let searchSources = null;
+  if (!companyFilter) {
     try {
-      const searchSources = parseYaml(readFileSync(searchSourcesPath, "utf8"));
-      sourcedFromSearches = await scanSearchSources(searchSources, { fetchImpl });
+      searchSources = loadSearchSourcesForRun(pathCtx);
+      if (searchSources)
+        sourcedFromSearches = await scanSearchSources(searchSources, { fetchImpl });
     } catch (error) {
       sourcedFromSearches.errors.push({ company: "search-sources.yml", error: error.message });
     }
@@ -190,7 +251,12 @@ export async function runSourcedScan({
     filtered = { ...filtered, kept: checked, expired: dropped };
   }
 
-  const outputOffers = filtered.kept.map(toOutputOffer);
+  const savedAt = new Date();
+  const keptForOutput = limit > 0 ? filtered.kept.slice(0, limit) : filtered.kept;
+  const offersForOutput = write
+    ? captureOffersForOutput({ repoRoot, env, offers: keptForOutput, savedAt })
+    : keptForOutput;
+  const outputOffers = offersForOutput.map((offer) => toOutputOffer(offer));
   const summary = {
     scanned: scanned.offers.length,
     new: filtered.kept.length,
@@ -200,16 +266,17 @@ export async function runSourcedScan({
     invalid: filtered.invalid.length,
     expired: filtered.expired?.length || 0,
     errors: scanned.errors,
-    offers: limit > 0 ? outputOffers.slice(0, limit) : outputOffers,
+    offers: outputOffers,
   };
 
   if (write) {
     const scanResultsDir = userPath(pathCtx, "workspace/scan-results");
     mkdirSync(scanResultsDir, { recursive: true });
-    const stamp = timestamped ? timestamp(new Date()) : new Date().toISOString().slice(0, 10);
+    const stamp = timestamped ? timestamp(savedAt) : savedAt.toISOString().slice(0, 10);
     const out = join(scanResultsDir, `sourced-${stamp}.json`);
     writeFileSync(out, JSON.stringify(summary, null, 2));
     console.error(`Wrote ${out}`);
+    persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt });
   }
 
   if (intake) {
@@ -311,7 +378,7 @@ function toTrackerObject(offer, cfg) {
 async function main() {
   const args = process.argv.slice(2);
   const pathCtx = { repoRoot: _scriptRoot };
-  const configPath = valueAfter(args, "--config") || userPath(pathCtx, "config/sourced-scan.json");
+  const configPath = valueAfter(args, "--config");
   const companyFilter = valueAfter(args, "--company");
   const write = args.includes("--write");
   const intake = args.includes("--intake");

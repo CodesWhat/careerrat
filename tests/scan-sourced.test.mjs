@@ -21,14 +21,30 @@
 
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { runSourcedScan } from "../scripts/scan-sourced.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import {
+  candidateConfigPatch,
+  candidateSetupInitialize,
+  companyAtsUpsert,
+  sourceConfigGet,
+  sourceConfigPut,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
-import { stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -57,6 +73,25 @@ function writeTargeting(repoRoot, keepSignals) {
   );
 }
 
+function searchSourcesFixture() {
+  return {
+    searches: [
+      {
+        provider: "Example RSS",
+        source_type: "rss",
+        label: "Example feed",
+        rssUrl: "https://example.test/jobs.xml",
+        enabled: true,
+        recency: { mode: "since-last-run" },
+      },
+    ],
+  };
+}
+
+function writeSearchSourcesConfig(repoRoot, config = searchSourcesFixture()) {
+  writeFileSync(join(repoRoot, "config/search-sources.yml"), `${stringifyYaml(config)}\n`);
+}
+
 // A single-job Lever fixture, matching tests/sourced-scanner.test.mjs's own
 // Lever fixture shape.
 function leverFetchStub(title = "Director of IT") {
@@ -75,6 +110,28 @@ function leverFetchStub(title = "Director of IT") {
       );
     }
     throw new Error(`unexpected fetch: ${url}`);
+  };
+}
+
+function rssFetchStub() {
+  return async (url) => {
+    assert.equal(String(url), "https://example.test/jobs.xml");
+    return new Response(
+      `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>Example jobs</title>
+    <item>
+      <title>Acme — Director of IT (Remote)</title>
+      <link>https://example.test/jobs/director-it</link>
+      <description>Own corporate IT, identity, endpoint, and automation.</description>
+      <guid>director-it</guid>
+      <pubDate>Fri, 03 Jul 2026 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>`,
+      { status: 200 }
+    );
   };
 }
 
@@ -126,6 +183,12 @@ test("write:true persists workspace/scan-results/sourced-<date>.json; write:fals
     assert.ok(existsSync(outPath), "expected a persisted scan-results file");
     const written = JSON.parse(readFileSync(outPath, "utf8"));
     assert.deepEqual(written, summary);
+    assert.match(summary.offers[0].artifacts.jd, /^workspace\/jobs\/acme-director-of-it-/);
+    const jdText = readFileSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd), "utf8");
+    assert.match(jdText, /company: Acme/);
+    assert.match(jdText, /role: Director of IT/);
+    assert.match(jdText, /source: "?https:\/\/jobs\.lever\.co\/acme\/abc"?/);
+    assert.match(jdText, /Own corporate IT, identity, endpoint, and automation\./);
     assert.ok(
       !existsSync(userPath({ repoRoot }, "workspace/intake")),
       "intake:false must not write intake"
@@ -201,6 +264,167 @@ test("gracefully returns an empty scan when config/sourced-scan.json doesn't exi
     assert.equal(summary.scanned, 0);
     assert.equal(summary.new, 0);
     assert.deepEqual(summary.offers, []);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("DB mode scans sourced companies from SQLite without config/sourced-scan.json", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: leverFetchStub(),
+      write: false,
+      intake: false,
+    });
+
+    assert.equal(summary.scanned, 1);
+    assert.equal(summary.new, 1);
+    assert.equal(summary.offers[0].company, "Acme");
+    assert.equal(existsSync(userPath({ repoRoot }, "config/sourced-scan.json")), false);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("DB mode scoring uses SQLite targeting when candidate YAML is absent", async () => {
+  const repoA = tempRepo();
+  const repoB = tempRepo();
+  try {
+    for (const repoRoot of [repoA, repoB]) {
+      candidateSetupInitialize({ repoRoot });
+      companyAtsUpsert({
+        repoRoot,
+        entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+      });
+    }
+    candidateConfigPatch({
+      repoRoot: repoA,
+      name: "targeting",
+      patch: { keep_signals: ["director of it"] },
+    });
+    candidateConfigPatch({
+      repoRoot: repoB,
+      name: "targeting",
+      patch: { keep_signals: ["something else entirely"] },
+    });
+
+    const summaryA = await runSourcedScan({
+      repoRoot: repoA,
+      fetchImpl: leverFetchStub("Director of IT"),
+      write: false,
+      intake: false,
+    });
+    const summaryB = await runSourcedScan({
+      repoRoot: repoB,
+      fetchImpl: leverFetchStub("Director of IT"),
+      write: false,
+      intake: false,
+    });
+
+    assert.equal(existsSync(userPath({ repoRoot: repoA }, "candidate/targeting.yml")), false);
+    assert.equal(existsSync(userPath({ repoRoot: repoB }, "candidate/targeting.yml")), false);
+    assert.ok(
+      summaryA.offers[0].score > summaryB.offers[0].score,
+      `expected DB targeting keep-signal match (${summaryA.offers[0].score}) to outscore non-match (${summaryB.offers[0].score})`
+    );
+  } finally {
+    closeAll();
+    rmSync(repoA, { recursive: true, force: true });
+    rmSync(repoB, { recursive: true, force: true });
+  }
+});
+
+test("DB mode write:true persists scan offers through sourcedUpsertBatch and exports tracker", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: leverFetchStub(),
+      write: true,
+      intake: false,
+    });
+
+    const db = openDb({ repoRoot });
+    const rows = db
+      .prepare("SELECT data FROM sourced ORDER BY rowid ASC")
+      .all()
+      .map((row) => JSON.parse(row.data));
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].company, "Acme");
+    assert.equal(rows[0].role, "Director of IT");
+    assert.equal(rows[0].artifacts.jd, summary.offers[0].artifacts.jd);
+    assert.equal(existsSync(userPath({ repoRoot }, rows[0].artifacts.jd)), true);
+    assert.equal(rows[0].scanner.bodyChars, summary.offers[0].bodyChars);
+
+    const jobFiles = readdirSync(userPath({ repoRoot }, "workspace/jobs")).filter((name) =>
+      name.endsWith(".md")
+    );
+    assert.deepEqual(jobFiles, [summary.offers[0].artifacts.jd.replace("workspace/jobs/", "")]);
+
+    const tracker = JSON.parse(
+      readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+    );
+    assert.equal(tracker.sourced.length, 1);
+    assert.equal(tracker.sourced[0].id, rows[0].id);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("DB mode write:true stamps search-source watermarks in SQLite without writing YAML", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: searchSourcesFixture() });
+
+    await runSourcedScan({
+      repoRoot,
+      fetchImpl: rssFetchStub(),
+      write: true,
+      intake: false,
+    });
+
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    const lastRunAt = stored.searches[0].recency.lastRunAt;
+    assert.match(lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("legacy write:true stamps search-source watermarks in search-sources.yml", async () => {
+  const repoRoot = tempRepo();
+  try {
+    writeSourcedScanConfig(repoRoot, { tracked_companies: [] });
+    writeSearchSourcesConfig(repoRoot);
+
+    await runSourcedScan({
+      repoRoot,
+      fetchImpl: rssFetchStub(),
+      write: true,
+      intake: false,
+    });
+
+    const written = parseYaml(readFileSync(join(repoRoot, "config/search-sources.yml"), "utf8"));
+    assert.match(written.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

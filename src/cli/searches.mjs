@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// Rolester searches CLI — build and curate config/search-sources.yml.
+// Rolester searches CLI — build and curate search source config.
 //
 // This is the authoring surface for job-search SOURCES (the `setup-searches`
-// skill drives it). It builds and maintains the source list; it does not scan,
-// dedupe results, or gate jobs — that is `search-jobs` and `evaluate-job`.
+// skill drives it). In DB workspaces it reads/writes SQLite source config; in
+// legacy workspaces it reads/writes config/search-sources.yml. It builds and
+// maintains the source list; it does not scan, dedupe results, or gate jobs —
+// that is `search-jobs` and `evaluate-job`.
 //
 // Modes:
 //   --list                  Show current searches (index, provider, label, target, enabled).
@@ -22,10 +24,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mayRun } from "../core/automation/consent.mjs";
+import { dbExists } from "../core/db/connection.mjs";
+import { sourceConfigGet, sourceConfigPut } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { buildSearchSources } from "../core/profile/generate-search-sources.mjs";
 import { formatErrors } from "../core/profile/schema-validator.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
 import {
   addSearchFromQuery,
   addSearchFromUrl,
@@ -44,8 +48,6 @@ const CONFIG_REL = "config/search-sources.yml";
 const CONFIG_PATH = userPath(pathCtx, CONFIG_REL);
 const CONFIG_DISPLAY = displayPath(pathCtx, CONFIG_REL);
 const SCHEMA_PATH = join(root, "config/search-sources.schema.json");
-const TARGETING_PATH = userPath(pathCtx, "candidate/targeting.yml");
-const PROFILE_PATH = userPath(pathCtx, "candidate/profile.yml");
 
 const args = process.argv.slice(2);
 const json = args.includes("--json");
@@ -98,20 +100,34 @@ function runList() {
 }
 
 function runFromTargeting() {
-  if (!existsSync(TARGETING_PATH) || !existsSync(PROFILE_PATH)) {
+  const targeting = loadCandidateDoc("targeting", pathCtx);
+  const profile = loadCandidateDoc("profile", pathCtx);
+  if (!targeting || !profile) {
     console.error(
       "Need candidate/targeting.yml and candidate/profile.yml first. Run: rolester ingest"
     );
     return 1;
   }
-  const targeting = parseYaml(readFileSync(TARGETING_PATH, "utf8"));
-  const profile = parseYaml(readFileSync(PROFILE_PATH, "utf8"));
   const baseline = buildSearchSources(targeting, profile);
+  if (!Array.isArray(baseline.searches) || baseline.searches.length === 0) {
+    return failFromTargeting(
+      "No role titles found in candidate targeting; finish onboarding before generating search sources."
+    );
+  }
 
   const existing = loadConfig();
   const config = existing ? mergeSearchConfigs(existing, baseline) : baseline;
 
   return writeConfig(config, { mode: "from-targeting", added: config.searches.length });
+}
+
+function failFromTargeting(message) {
+  if (json) {
+    console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+  } else {
+    console.error(message);
+  }
+  return 1;
 }
 
 function runAddQuery() {
@@ -206,6 +222,10 @@ function warnIfAuthGateClosed(before, after) {
 // ---------------------------------------------------------------------------
 
 function loadConfig() {
+  if (dbExists(pathCtx)) {
+    const stored = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+    return stored.stored ? stored.data : null;
+  }
   if (!existsSync(CONFIG_PATH)) return null;
   return parseConfig(readFileSync(CONFIG_PATH, "utf8"));
 }
@@ -222,20 +242,22 @@ function writeConfig(config, meta) {
     console.error(formatErrors(result.errors));
     return 1;
   }
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, `${serializeConfig(config)}\n`);
+  const dbMode = dbExists(pathCtx);
+  if (dbMode) {
+    sourceConfigPut({ ...pathCtx, name: "search-sources", data: config });
+  } else {
+    mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+    writeFileSync(CONFIG_PATH, `${serializeConfig(config)}\n`);
+  }
   const rows = listSearches(config);
+  const wrote = dbMode ? "SQLite source config: search-sources" : CONFIG_DISPLAY;
   if (json) {
     console.log(
-      JSON.stringify(
-        { ...meta, wrote: CONFIG_DISPLAY, searches: rows, readiness: runReadiness(rows) },
-        null,
-        2
-      )
+      JSON.stringify({ ...meta, wrote, searches: rows, readiness: runReadiness(rows) }, null, 2)
     );
     return 0;
   }
-  console.log(`Wrote ${CONFIG_DISPLAY} (${rows.length} search${rows.length === 1 ? "" : "es"}).`);
+  console.log(`Wrote ${wrote} (${rows.length} search${rows.length === 1 ? "" : "es"}).`);
   printTable(rows);
   return 0;
 }

@@ -13,8 +13,8 @@
 //                              is already running (a single in-module flag —
 //                              this is one local dev-server process, not a
 //                              job queue). 400 if neither
-//                              config/search-sources.yml nor
-//                              config/sourced-scan.json exists yet.
+//                              DB source config (DB mode) or legacy source
+//                              files (legacy mode) are not configured yet.
 //   GET  /api/search/results   The newest workspace/scan-results/sourced-*.json
 //                              (by mtime, so it works regardless of whether
 //                              the file used --timestamped naming), or
@@ -32,6 +32,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
+import { dbExists } from "../core/db/connection.mjs";
+import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
 import { parseYaml } from "../core/profile/yaml.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
@@ -66,8 +68,26 @@ function readScanFile(scanResultsDir, fileName) {
   return JSON.parse(readFileSync(join(scanResultsDir, fileName), "utf8"));
 }
 
+function hasConfiguredDbSources(pathCtx) {
+  if (!dbExists(pathCtx)) return false;
+  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
+  return Boolean(
+    (Array.isArray(sourcedScan.tracked_companies) && sourcedScan.tracked_companies.length > 0) ||
+      (Array.isArray(searchSources.searches) && searchSources.searches.length > 0)
+  );
+}
+
+function hasRunnableSearchConfig(pathCtx) {
+  if (dbExists(pathCtx)) return hasConfiguredDbSources(pathCtx);
+  return (
+    existsSync(userPath(pathCtx, "config/search-sources.yml")) ||
+    existsSync(userPath(pathCtx, "config/sourced-scan.json"))
+  );
+}
+
 export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetchImpl = fetch }) {
-  const pathCtx = { repoRoot };
+  const pathCtx = { repoRoot, env };
 
   // A single in-module flag is enough here — see the header comment.
   let scanning = false;
@@ -88,9 +108,7 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
       return;
     }
 
-    const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
-    const sourcedScanPath = userPath(pathCtx, "config/sourced-scan.json");
-    if (!existsSync(searchSourcesPath) && !existsSync(sourcedScanPath)) {
+    if (!hasRunnableSearchConfig(pathCtx)) {
       sendJson(res, 400, {
         error: "No search config found — run /onboard write-config first",
       });
@@ -150,6 +168,23 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
   // GET /api/search/sources
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/search/sources", (_req, res) => {
+    if (dbExists(pathCtx)) {
+      const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
+      const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+      const list = Array.isArray(searchSources.searches) ? searchSources.searches : [];
+      const tracked = Array.isArray(sourcedScan.tracked_companies)
+        ? sourcedScan.tracked_companies
+        : [];
+      sendJson(res, 200, {
+        searches: {
+          enabled: list.filter((s) => s && s.enabled !== false).length,
+          total: list.length,
+        },
+        trackedCompanies: tracked.length,
+      });
+      return;
+    }
+
     const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
     let searches = { enabled: 0, total: 0 };
     if (existsSync(searchSourcesPath)) {
