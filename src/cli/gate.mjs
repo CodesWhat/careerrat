@@ -21,11 +21,13 @@ import { existsSync, readFileSync } from "node:fs";
 // agrees. A change that would make the file schema-invalid is always refused.
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-
+import { candidateConfigGet, candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { CANDIDATE_FILES } from "../core/profile/candidate-setup.mjs";
+import { candidateConfigSource } from "../core/profile/config-store.mjs";
 import {
   atomicWriteFile,
+  coerceValue,
   computeGateEdit,
   formatErrors,
   GATE_ROUTES,
@@ -68,18 +70,24 @@ if (!type || !value) {
   );
 }
 
+const route = GATE_ROUTES[type];
+if (!route) {
+  fail(
+    `unknown gate type "${type}". Run --list to see the ${Object.keys(GATE_ROUTES).length} types.`
+  );
+}
+
+const pathCtx = { repoRoot: opts.root };
+if (candidateConfigSource(pathCtx) === "db") {
+  handleDbGate(route);
+}
+
 const fileEntry = (() => {
-  const route = GATE_ROUTES[type];
-  if (!route)
-    fail(
-      `unknown gate type "${type}". Run --list to see the ${Object.keys(GATE_ROUTES).length} types.`
-    );
   const entry = CANDIDATE_FILES.find((f) => f.name === route.file);
   if (!entry) fail(`no candidate-file mapping for "${route.file}"`);
   return entry;
 })();
 
-const pathCtx = { repoRoot: opts.root };
 const candidatePath = userPath(pathCtx, fileEntry.candidatePath);
 const candidateDisplay = displayPath(pathCtx, fileEntry.candidatePath);
 if (!existsSync(candidatePath)) {
@@ -188,6 +196,138 @@ if (opts.json) {
 process.exit(0);
 
 // ---------------------------------------------------------------------------
+
+function handleDbGate(route) {
+  let plan;
+  try {
+    plan = computeDbGateEdit({ route, value, pathCtx });
+  } catch (err) {
+    fail(err.message);
+  }
+  const result = {
+    type,
+    file: `sqlite:${route.file}`,
+    path: route.path,
+    op: route.op,
+    value: plan.value,
+    friction: route.friction,
+    changed: plan.changed,
+    valid: true,
+    written: false,
+  };
+
+  if (!plan.changed) {
+    if (opts.json) console.log(JSON.stringify({ ...result, note: "already present" }, null, 2));
+    else console.log(`No change - ${route.path} already has "${plan.value}" in SQLite.`);
+    process.exit(0);
+  }
+
+  const diff =
+    route.op === "append"
+      ? `  + ${route.path}: ${plan.value}`
+      : `  ~ ${route.path}: ${plan.previous ?? "(empty)"} → ${plan.value}`;
+  const needsConfirm = route.friction === "confirm";
+
+  if (!opts.write) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify({ ...result, dryRun: true, requiresConfirm: needsConfirm }, null, 2)
+      );
+    } else {
+      console.log(`Proposed write to SQLite candidate config (${route.label || route.path}):`);
+      console.log(diff);
+      console.log(
+        `Friction: ${needsConfirm ? "confirm-first (get the user's yes, then --write --confirm)" : "write-and-report"}`
+      );
+      console.log("Dry run - pass --write to commit.");
+    }
+    process.exit(0);
+  }
+
+  if (needsConfirm && !opts.confirm) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify({ ...result, error: "confirm-first gate requires --confirm" }, null, 2)
+      );
+    } else {
+      console.error(
+        `This is a confirm-first gate (${route.path}). Confirm with the user, then re-run with --write --confirm:`
+      );
+      console.error(diff);
+    }
+    process.exit(2);
+  }
+
+  try {
+    candidateConfigPatch({ ...pathCtx, name: route.file, patch: plan.patch });
+  } catch (err) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify({ ...result, error: err.message, errors: err.errors || [] }, null, 2)
+      );
+    } else {
+      console.error(`Refusing: this change would make sqlite:${route.file} invalid:`);
+      if (err.errors) console.error(formatErrors(err.errors));
+      else console.error(err.message);
+    }
+    process.exit(1);
+  }
+  result.written = true;
+
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    const shown =
+      route.op === "append" ? `${route.path} += ${plan.value}` : `${route.path}: ${plan.value}`;
+    console.log(`Written to SQLite candidate config: ${shown}`);
+  }
+  process.exit(0);
+}
+
+function computeDbGateEdit({ route, value, pathCtx }) {
+  const coerced = coerceValue(route, value);
+  const config = candidateConfigGet(pathCtx);
+  const doc = route.file === "form-defaults" ? config["form-defaults"] : config[route.file];
+  const parts = route.path.split(".");
+  const previous = getPath(doc, parts);
+
+  if (route.op === "append") {
+    const current = Array.isArray(previous) ? previous : [];
+    const changed = !current.some((item) => String(item) === String(coerced));
+    const next = changed ? [...current, coerced] : current;
+    return {
+      value: coerced,
+      previous,
+      changed,
+      patch: buildPatch(parts, next),
+    };
+  }
+
+  const changed = previous !== coerced;
+  return {
+    value: coerced,
+    previous,
+    changed,
+    patch: buildPatch(parts, coerced),
+  };
+}
+
+function getPath(obj, parts) {
+  let cursor = obj;
+  for (const part of parts) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function buildPatch(parts, value) {
+  let out = value;
+  for (let i = parts.length - 1; i >= 0; i--) {
+    out = { [parts[i]]: out };
+  }
+  return out;
+}
 
 function fail(msg) {
   if (opts.json) console.log(JSON.stringify({ ok: false, error: msg }, null, 2));

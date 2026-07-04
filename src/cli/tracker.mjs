@@ -12,9 +12,9 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
 import { formatErrors, validate } from "../core/profile/schema-validator.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { computeFollowUps, rulesFromConfig } from "../core/tracker/cadence.mjs";
 import {
@@ -37,8 +37,6 @@ const OUT_LIBRARY_PATH = userPath(pathCtx, "workspace/library.json");
 const DASHBOARD_SHELL_PATH = join(root, "src/core/tracker/dashboard-shell.html");
 const DASHBOARD_DATA_PATH = join(root, "src/core/tracker/dashboard-data.js");
 const SCHEMA_PATH = join(root, "config/tracker.schema.json");
-const TARGETING_PATH = userPath(pathCtx, "candidate/targeting.yml");
-const TARGETING_DEMO = join(root, "templates/targeting.example.yml");
 
 const args = process.argv.slice(2);
 const json = args.includes("--json");
@@ -213,11 +211,8 @@ function loadTracker() {
 // demo still reflects the feature. Returns undefined when no block is set, so
 // the cadence engine uses its domain-neutral defaults (every kind on).
 function loadFollowUpRules() {
-  const targetingPath = existsSync(TARGETING_PATH) ? TARGETING_PATH : TARGETING_DEMO;
   try {
-    const targeting = existsSync(targetingPath)
-      ? parseYaml(readFileSync(targetingPath, "utf8"))
-      : null;
+    const targeting = loadCandidateDoc("targeting", { ...pathCtx, fallbackToTemplate: true });
     return rulesFromConfig(targeting?.follow_up);
   } catch {
     return undefined;

@@ -27,7 +27,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import {
   appendLearning,
   computeAppend,
@@ -38,7 +38,6 @@ import {
   resolveFamilySlug,
   slugifyFamily,
 } from "../core/profile/learnings.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -71,10 +70,8 @@ const [verb, ...rest] = opts.positional;
 
 // Load the candidate's targeting taxonomy once (drives slug classification).
 function loadTargeting() {
-  const path = userPath({ repoRoot: opts.root }, "candidate/targeting.yml");
-  if (!existsSync(path)) return undefined;
   try {
-    return parseYaml(readFileSync(path, "utf8"));
+    return loadCandidateDoc("targeting", { repoRoot: opts.root }) || undefined;
   } catch {
     return undefined;
   }

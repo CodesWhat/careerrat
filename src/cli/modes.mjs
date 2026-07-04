@@ -9,6 +9,8 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { dbExists } from "../core/db/connection.mjs";
+import { candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { atomicWriteFile } from "../core/profile/gate-writer.mjs";
 import {
@@ -99,6 +101,43 @@ if (!type || !value) {
 }
 if (!MODE_ROUTES[type]) {
   fail(`unknown mode type "${type}". Use usage or application.`);
+}
+
+if (dbExists(pathCtx)) {
+  const modes = loadModes({ root: opts.root });
+  const route = MODE_ROUTES[type];
+  if (!route.values.includes(value)) {
+    fail(`"${value}" is not valid for ${route.label}. Allowed: ${route.values.join(", ")}`);
+  }
+  const changed = modes.data?.[route.path] !== value;
+  const result = {
+    ok: true,
+    file: modesDisplay(),
+    source: "db",
+    path: route.path,
+    value,
+    changed,
+    written: false,
+  };
+  if (!changed) {
+    if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
+    else console.log(`No change - ${route.path} is already "${value}".`);
+    process.exit(0);
+  }
+  if (!opts.write) {
+    if (opts.json) console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
+    else {
+      console.log(`Proposed DB write for ${route.path}:`);
+      console.log(`  ~ ${route.path}: ${modes.data?.[route.path] || "(empty)"} -> ${value}`);
+      console.log("Dry run - pass --write to commit.");
+    }
+    process.exit(0);
+  }
+  candidateConfigPatch({ ...pathCtx, name: "modes", patch: { [route.path]: value } });
+  result.written = true;
+  if (opts.json) console.log(JSON.stringify(result, null, 2));
+  else console.log(`Written to SQLite candidate modes: ${route.path}: ${value}`);
+  process.exit(0);
 }
 
 const candidatePath = userPath(pathCtx, MODES_REL_PATH);

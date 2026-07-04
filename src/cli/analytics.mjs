@@ -22,7 +22,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import { buildReevaluationAnalytics } from "../core/tracker/outcome-analysis.mjs";
 
@@ -89,10 +89,8 @@ function loadTracker() {
 }
 
 function loadTargeting() {
-  const targetingPath = userPath(pathCtx, "candidate/targeting.yml");
-  if (!existsSync(targetingPath)) return undefined;
   try {
-    return parseYaml(readFileSync(targetingPath, "utf8"));
+    return loadCandidateDoc("targeting", pathCtx) || undefined;
   } catch {
     return undefined;
   }

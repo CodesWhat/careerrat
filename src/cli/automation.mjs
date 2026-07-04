@@ -4,8 +4,8 @@ import { existsSync, readFileSync } from "node:fs";
 //
 // Authenticated browser automation is OPT-IN and DEFAULTS OFF. This CLI shows the
 // capability/platform/consent matrix and toggles individual switches, never running
-// a browser itself — it only edits candidate/automation.yml (the agent and skills
-// read that, per AGENTS.md → Browser Automation Contract).
+// a browser itself. In DB workspaces it writes candidate_automation; in legacy
+// workspaces it patches candidate/automation.yml.
 //
 // Usage:
 //   node src/cli/automation.mjs status [--json]
@@ -20,7 +20,7 @@ import { existsSync, readFileSync } from "node:fs";
 // Default is a DRY RUN: it prints the target line + the resulting "is it live?"
 // verdict and writes nothing. Pass --write to commit. The first write scaffolds
 // candidate/automation.yml from the template. Edits are schema-validated and
-// comment-preserving; an invalid change is refused.
+// comment-preserving in legacy mode; an invalid change is refused.
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -32,6 +32,7 @@ import {
   automationStatus,
   CAPABILITIES,
   CAPABILITY_KEYS,
+  defaultAutomation,
   ensureAutomationFile,
   isCapability,
   isPlatform,
@@ -43,7 +44,9 @@ import {
   resolveEditPath,
 } from "../core/automation/consent.mjs";
 import { PROVIDER_PREFERENCE, PROVIDERS, resolveSession } from "../core/automation/session.mjs";
+import { candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { candidateConfigSource } from "../core/profile/config-store.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -122,6 +125,10 @@ if (spec.kind === "consent") {
 }
 
 const pathCtx = { repoRoot: opts.root };
+if (candidateConfigSource(pathCtx) === "db") {
+  handleDbAutomationEdit({ command: verb, kind, capability, platform, value: spec.value });
+}
+
 const candidatePath = userPath(pathCtx, AUTOMATION_FILE);
 const automationDisplay = displayPath(pathCtx, AUTOMATION_FILE);
 const templatePath = join(opts.root, AUTOMATION_TEMPLATE);
@@ -276,6 +283,10 @@ function handleSession(provider) {
   }
 
   const pathCtx = { repoRoot: opts.root };
+  if (candidateConfigSource(pathCtx) === "db") {
+    handleDbSession(provider);
+  }
+
   const candidatePath = userPath(pathCtx, AUTOMATION_FILE);
   const automationDisplay = displayPath(pathCtx, AUTOMATION_FILE);
   const templatePath = join(opts.root, AUTOMATION_TEMPLATE);
@@ -372,6 +383,179 @@ function handleSession(provider) {
   process.exit(0);
 }
 
+function handleDbAutomationEdit({ command, kind, capability, platform, value }) {
+  const loaded = loadAutomation({ root: opts.root });
+  const { parts, label } = resolveEditPath({ kind, capability, platform });
+  const currentData = mergeAutomationDefaults(loaded.data);
+  const previous = getPath(currentData, parts);
+  const nextData = structuredClone(currentData);
+  setPath(nextData, parts, value === true);
+  const changed = previous !== value;
+  const result = {
+    command,
+    file: "sqlite:automation",
+    path: parts.join("."),
+    label,
+    value: value === true,
+    previous,
+    changed,
+    valid: true,
+    willCreate: false,
+    written: false,
+  };
+  const verdict = kind === "platform" ? mayRun({ capability, platform, data: nextData }) : null;
+
+  if (!changed) {
+    if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
+    else console.log(`No change - ${result.path} is already ${result.value} in SQLite.`);
+    process.exit(0);
+  }
+
+  const diff = `  ~ ${result.path}: ${previous} → ${result.value}`;
+  if (!opts.write) {
+    if (opts.json) {
+      console.log(JSON.stringify({ ...result, dryRun: true, verdict }, null, 2));
+    } else {
+      console.log(`Proposed change to SQLite automation config (${label}):`);
+      console.log(diff);
+      printVerdict(verdict, capability, platform);
+      console.log("Dry run - pass --write to commit.");
+    }
+    process.exit(0);
+  }
+
+  try {
+    candidateConfigPatch({ ...pathCtx, name: "automation", patch: nextData });
+  } catch (err) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify({ ...result, error: err.message, errors: err.errors || [] }, null, 2)
+      );
+    } else {
+      console.error("Refusing: this change would make sqlite:automation invalid:");
+      if (err.errors)
+        for (const e of err.errors) console.error(`  ${e.path || "(root)"}: ${e.message}`);
+      else console.error(err.message);
+    }
+    process.exit(1);
+  }
+
+  result.written = true;
+  if (opts.json) {
+    console.log(JSON.stringify({ ...result, verdict }, null, 2));
+  } else {
+    console.log(`Written to SQLite automation config: ${result.path} = ${result.value}`);
+    printVerdict(verdict, capability, platform);
+  }
+  process.exit(0);
+}
+
+function handleDbSession(provider) {
+  const loaded = loadAutomation({ root: opts.root });
+  const currentData = mergeAutomationDefaults(loaded.data);
+  const { parts, label } = resolveEditPath({ kind: "session" });
+  const previous = getPath(currentData, parts);
+  const nextData = structuredClone(currentData);
+  setPath(nextData, parts, provider);
+  const changed = previous !== provider;
+  const preferredNote = PROVIDERS[provider].preferred
+    ? " (preferred)"
+    : " (fallback - extension is preferred)";
+  const result = {
+    command: "session",
+    file: "sqlite:automation",
+    path: parts.join("."),
+    label,
+    value: provider,
+    previous,
+    changed,
+    valid: true,
+    willCreate: false,
+    written: false,
+  };
+
+  if (!changed) {
+    if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
+    else console.log(`No change - session provider is already ${provider} in SQLite.`);
+    process.exit(0);
+  }
+
+  const diff = `  ~ ${result.path}: ${previous} → ${provider}`;
+  if (!opts.write) {
+    if (opts.json) {
+      console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
+    } else {
+      console.log(`Proposed change to SQLite automation config (${label}):`);
+      console.log(diff);
+      console.log(`  → session browser will be: ${provider}${preferredNote}`);
+      console.log("Dry run - pass --write to commit.");
+    }
+    process.exit(0);
+  }
+
+  try {
+    candidateConfigPatch({ ...pathCtx, name: "automation", patch: nextData });
+  } catch (err) {
+    if (opts.json) {
+      console.log(
+        JSON.stringify({ ...result, error: err.message, errors: err.errors || [] }, null, 2)
+      );
+    } else {
+      console.error("Refusing: this change would make sqlite:automation invalid:");
+      if (err.errors)
+        for (const e of err.errors) console.error(`  ${e.path || "(root)"}: ${e.message}`);
+      else console.error(err.message);
+    }
+    process.exit(1);
+  }
+
+  result.written = true;
+  if (opts.json) {
+    console.log(JSON.stringify(result, null, 2));
+  } else {
+    console.log(`Written to SQLite automation config: ${result.path} = ${provider}`);
+    console.log(`Session browser is now: ${provider}${preferredNote}`);
+  }
+  process.exit(0);
+}
+
+function mergeAutomationDefaults(data) {
+  return deepMerge(defaultAutomation(), data && typeof data === "object" ? data : {});
+}
+
+function deepMerge(base, patch) {
+  if (Array.isArray(patch)) return patch.slice();
+  if (!patch || typeof patch !== "object") return patch;
+  const out = { ...(base && typeof base === "object" && !Array.isArray(base) ? base : {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    out[key] =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? deepMerge(out[key], value)
+        : Array.isArray(value)
+          ? value.slice()
+          : value;
+  }
+  return out;
+}
+
+function getPath(obj, parts) {
+  let cursor = obj;
+  for (const part of parts) {
+    if (!cursor || typeof cursor !== "object") return undefined;
+    cursor = cursor[part];
+  }
+  return cursor;
+}
+
+function setPath(obj, parts, value) {
+  let cursor = obj;
+  for (let i = 0; i < parts.length - 1; i++) {
+    cursor[parts[i]] = cursor[parts[i]] || {};
+    cursor = cursor[parts[i]];
+  }
+  cursor[parts.at(-1)] = value;
+}
+
 function printVerdict(v, cap, plat) {
   if (!v) return;
   if (v.allowed) {
@@ -465,7 +649,8 @@ Options:
   --json      Machine-readable output
   --root DIR  Repo root (default: the rolester install)
 
-Edits patch candidate/automation.yml comment-preserving + schema-validated; the
-first write scaffolds it from templates/automation.example.yml. No credentials are
-ever stored — the browser session holds your logins. See docs/BROWSER.md.`);
+DB mode writes SQLite candidate_automation. Legacy mode patches
+candidate/automation.yml comment-preserving + schema-validated; the first legacy
+write scaffolds it from templates/automation.example.yml. No credentials are ever
+stored — the browser session holds your logins. See docs/BROWSER.md.`);
 }

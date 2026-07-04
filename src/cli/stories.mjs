@@ -41,6 +41,7 @@ import {
   writeStories,
 } from "../core/interview/story-bank.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { formatErrors, validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml } from "../core/profile/yaml.mjs";
 import { writeTrackerJson } from "../core/tracker/tracker-writer.mjs";
@@ -78,9 +79,9 @@ const [verb, ...rest] = opts.positional;
 // Load evidence.yml claims (the trace target). Absent → empty, with a note.
 function loadEvidence() {
   const path = userPath(pathCtx, "candidate/evidence.yml");
-  if (!existsSync(path)) return { claims: [], path, exists: false };
   try {
-    const data = parseYaml(readFileSync(path, "utf8")) || {};
+    const data = loadCandidateDoc("evidence", pathCtx);
+    if (!data) return { claims: [], path, exists: false };
     return { claims: Array.isArray(data.claims) ? data.claims : [], path, exists: true };
   } catch (err) {
     return { claims: [], path, exists: true, error: err.message };
