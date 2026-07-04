@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 status: In Progress
-stopped_at: Completed 02-01-PLAN.md
-last_updated: "2026-07-04T21:09:16.568Z"
+stopped_at: Completed 02-02-PLAN.md
+last_updated: "2026-07-04T21:15:49.554Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 11
-  completed_plans: 5
-  percent: 45
+  completed_plans: 6
+  percent: 55
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-04T21:09:16.559Z
-**Stopped at:** Completed 02-01-PLAN.md
+**Last session:** 2026-07-04T21:15:49.546Z
+**Stopped at:** Completed 02-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -70,6 +70,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 01-decomposition-map P03 | 2min | 1 tasks | 1 files |
 | Phase 01-decomposition-map P04 | 2 min | 1 tasks | 1 files |
 | Phase 02-bounded-ai-foundation P01 | 3 min | 1 tasks | 2 files |
+| Phase 02-bounded-ai-foundation P02 | 2 min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -87,3 +88,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 02-bounded-ai-foundation]: Plan 02-01 ships fallback structured invocation through runStructuredOneshot(); native provider request support remains a later adapter concern. — This keeps parse, validation, and retry ownership in the existing structured helper while later plans add native provider request adapters behind the same bounded contract.
 - [Phase 02-bounded-ai-foundation]: Bounded AI public envelopes whitelist metadata fields so raw prompts, model text, resumes, JDs, candidate facts, and page bodies stay out of responses. — This preserves the Phase 02 privacy and telemetry boundary while still returning renderable manual fallback metadata.
 - [Phase 02-bounded-ai-foundation]: Missing bounded AI labels return a safe AI_LABELS_INVALID envelope from runBoundedAI while requireBoundedAILabels remains a throwing guard for direct callers. — Routes get a stable response shape, and lower-level callers can still fail fast on label regressions before any invocation.
+- [Phase 02-bounded-ai-foundation]: callAI() exposes provider-neutral outputSchema, outputName, and outputMode options while keeping Anthropic output_config construction inside callAI(). — This preserves D-16 by keeping provider-native request bodies below route modules.
+- [Phase 02-bounded-ai-foundation]: Native structured-output proxy calls preserve x-rolester-skill and x-rolester-action headers while client-side usage logging remains BYOK-only. — This preserves D-09 and D-12 telemetry behavior across native output mode.
