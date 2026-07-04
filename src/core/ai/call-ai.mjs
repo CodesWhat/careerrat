@@ -126,9 +126,28 @@ async function* parseSSE(body) {
 // callAI()
 // ---------------------------------------------------------------------------
 
-function buildRequest(route, { model, system, messages, maxTokens, stream, skill, action }) {
+function buildRequest(
+  route,
+  {
+    model,
+    system,
+    messages,
+    maxTokens,
+    stream,
+    skill,
+    action,
+    outputSchema,
+    outputName,
+    outputMode,
+  }
+) {
   const body = { model, max_tokens: maxTokens, messages, stream };
   if (system) body.system = system;
+  if (outputMode === "native" && outputSchema) {
+    const format = { type: "json_schema", schema: outputSchema };
+    if (outputName) format.name = outputName;
+    body.output_config = { format };
+  }
 
   const headers = { "content-type": "application/json" };
   let url;
@@ -217,6 +236,9 @@ export async function callAI({
   signal,
   root,
   env = process.env,
+  outputSchema,
+  outputName,
+  outputMode = null,
 } = {}) {
   const route = resolveAIRoute(env);
   if (route.type === "none") throw new Error(route.error);
@@ -234,6 +256,9 @@ export async function callAI({
     stream,
     skill,
     action,
+    outputSchema,
+    outputName,
+    outputMode,
   });
 
   const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
