@@ -16,7 +16,7 @@ const APPLICATION_MODE_OPTIONS = modesSchema.properties.application_mode.enum.ma
 }));
 
 // Step 6 — Prefs / modes. Mirrors SettingsPage.jsx's Modes + Form Defaults
-// cards field-for-field (same schema-driven enums, same candidate files) —
+// cards field-for-field (same schema-driven enums, same candidate setup docs) —
 // small, low-cognitive-load settings, not novel data entry, per the M8
 // design doc's own framing for why these two live together here.
 export function PrefsStep({ state, goNext, goBack, showToast }) {

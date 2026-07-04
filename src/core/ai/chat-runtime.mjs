@@ -57,22 +57,18 @@ import {
   writeByokUsage,
 } from "./skill-runtime.mjs";
 
-// Default-restricted to ingest-profile (M2's original conversational target)
-// plus discover-companies (M8's addition — the onboarding wizard's "Roland,
-// find companies" button, see .agents/skills/discover-companies), plus M9's
-// two Lane C intake targets: email-comms (recruiter-email intake items) and
-// track-outcomes (interview-transcript intake items) — see
-// src/core/intake/dispatch.mjs's Lane C table. Widened deliberately, not
-// silently: every skill here is confirm-first by its own contract (an intake
-// item only reaches Lane C after POST /api/intake/confirm — see
-// intake-route.mjs's header comment) — the opposite of the one-shot embedded
-// runtime's posture ("nobody available to answer questions... rather than
-// asking", ONESHOT_POSTURE in skill-runtime.mjs), so these must run
-// conversationally here, never via runSkillStream. Same "empty string
-// explicitly locks it down, unset falls back to the default" semantics as
-// ROLESTER_RUNTIME_SKILLS (see skill-runtime.mjs's resolveSkillAllowlist
-// header comment) — deliberately shared logic, not a re-derived copy.
-const DEFAULT_CHAT_SKILLS = "ingest-profile,discover-companies,email-comms,track-outcomes";
+// Default-restricted to conversational setup and confirm-first workflow skills:
+// ingest-profile (M2's original interview target), research-boards /
+// discover-companies / search-jobs (the post-onboarding discovery pipeline
+// surfaced by Quick Start), plus M9's Lane C intake targets email-comms and
+// track-outcomes. Widened deliberately, not silently: these skills either ask
+// the user before consequential writes (research-boards/discover-companies) or
+// explicitly stop before tailoring/filling/submitting (search-jobs). The
+// opposite one-shot runtime remains narrower because nobody is present to
+// answer questions there. Same "empty string explicitly locks it down, unset
+// falls back to the default" semantics as ROLESTER_RUNTIME_SKILLS.
+const DEFAULT_CHAT_SKILLS =
+  "ingest-profile,research-boards,discover-companies,search-jobs,email-comms,track-outcomes";
 
 // discover-companies does real WebSearch fan-out (its own STEP 1: "run at
 // least 4 distinct queries") — a capability RUNTIME_TOOLS deliberately

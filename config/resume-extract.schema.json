@@ -3,7 +3,7 @@
   "$id": "https://rolester.local/schemas/resume-extract.schema.json",
   "title": "Rolester resume-extract skill output",
   "type": "object",
-  "required": ["candidate", "claims", "sections"],
+  "required": ["candidate", "claims", "sections", "targeting_suggestions"],
   "additionalProperties": false,
   "properties": {
     "candidate": {
@@ -41,6 +41,46 @@
         "skills": { "type": "integer" },
         "projects": { "type": "integer" },
         "other": { "type": "integer" }
+      }
+    },
+    "targeting_suggestions": {
+      "type": "object",
+      "required": ["role_buckets", "keep_signals", "tracked_companies"],
+      "additionalProperties": false,
+      "properties": {
+        "role_buckets": {
+          "type": "array",
+          "maxItems": 4,
+          "items": {
+            "type": "object",
+            "required": ["name", "priority", "titles"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": "string" },
+              "priority": {
+                "type": "string",
+                "enum": ["primary", "secondary", "stretch", "oe", "adjacent"]
+              },
+              "titles": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 8,
+                "items": { "type": "string" }
+              },
+              "notes": { "type": ["string", "null"] }
+            }
+          }
+        },
+        "keep_signals": {
+          "type": "array",
+          "maxItems": 12,
+          "items": { "type": "string" }
+        },
+        "tracked_companies": {
+          "type": "array",
+          "maxItems": 24,
+          "items": { "type": "string" }
+        }
       }
     }
   }

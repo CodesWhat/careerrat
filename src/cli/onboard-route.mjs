@@ -4,13 +4,13 @@
 // exactly the mount point for this, and `readJsonBodyCapped`/`sendJson` are
 // imported from skill-run-route.mjs rather than duplicated.
 //
-// Everything here was originally deliberately AI-free (M1): it seeds
-// candidate/ files from templates, parses a plain-text/markdown resume with
-// the zero-dep resume-parser.mjs (never calls a model), validates + writes
-// candidate YAML through the existing schema-validator.mjs/yaml.mjs
-// primitives, and stores a BYOK Anthropic key locally (ai-env.mjs). The
-// companion byte-static page is src/core/onboarding/onboard-page.mjs,
-// mounted at GET /onboard by tracker-dev.mjs. M8 adds exactly one AI-touching
+// The app onboarding surface is SQLite-primary: POST /api/onboard/init creates
+// candidate setup rows, candidate/profile/targeting/settings writes update
+// those rows, and YAML is materialized only by write-config as compatibility
+// output. The deterministic resume parser still handles plain-text/markdown
+// resumes without a model, while BYOK AI routes are optional assists. The
+// companion byte-static page is src/core/onboarding/onboard-page.mjs, mounted
+// at GET /onboard by tracker-dev.mjs. M8 adds exactly one AI-touching
 // route here (POST /api/onboard/resume-ai, for the PDF/image case
 // resume-parser.mjs can't handle) rather than a separate file, since it's the
 // same résumé-intake concern as the existing POST /api/onboard/resume and
@@ -23,20 +23,19 @@
 //   POST /api/onboard/resume             parse a pasted/loaded resume (2MB cap)
 //   POST /api/onboard/resume-ai          M8 — AI-extract a PDF/image resume (5MB
 //                                        cap, raw body bytes, ?name=<filename>)
-//   POST /api/onboard/candidate/:name    merge+validate+write one candidate file
+//   POST /api/onboard/candidate/:name    merge+validate+write one candidate setup doc
 //                                        (one concrete route per known name —
 //                                        see CANDIDATE_ROUTE_ENTRIES below)
 //   POST /api/onboard/evidence-seed      dedupe-merge claims into evidence.yml
 //   POST /api/onboard/write-config       same work as `rolester ingest --write-config`
+//   POST /api/onboard/quick-start        search-ready DB setup -> sources +
+//                                        next discovery handoff; gate/apply stay locked
 //   POST /api/settings/ai-key            store a BYOK Anthropic key locally
 //   GET  /api/settings/ai                report the resolved AI route (no key value)
 //
-// WRITE-SCOPE NOTE: storage-adapter.mjs's readFile/writeFile are scoped to
-// `workspace/` only (see that file's header) — they cannot address
-// candidate/config paths. Candidate/config writes below go straight to
-// gate-writer.mjs's atomicWriteFile() via userPath(), which is the exact same
-// primitive the adapter's writeFile delegates to internally, and the same
-// pattern gate-writer.mjs's own callers already use for candidate YAML edits.
+// WRITE-SCOPE NOTE: normal onboarding writes go through src/core/db/verbs/
+// candidate.mjs. Legacy YAML writes in this file are compatibility fallback
+// paths for non-DB workspaces and explicit write-config exports.
 //
 // HARD CONSTRAINT: this wizard never writes workspace/setup-state.json. That
 // file is agent-write-only by contract — ingest-profile (the AI-driven
@@ -49,11 +48,20 @@ import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { runStructuredOneshot } from "../core/ai/structured-oneshot.mjs";
+import { dbExists } from "../core/db/connection.mjs";
+import {
+  candidateArtifactExists,
+  candidateArtifactPut,
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
+  sourceConfigPut,
+} from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
-  ensureCandidateFiles,
   loadCandidate,
   OPTIONAL_CANDIDATE_FILES,
 } from "../core/profile/candidate-setup.mjs";
@@ -84,6 +92,13 @@ const RESUME_MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — resume text can be lon
 const RESUME_AI_MAX_BYTES = 5 * 1024 * 1024;
 const RESUME_AI_ALLOWED_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp"]);
 const RESUME_EXTRACT_SCHEMA_PATH = "config/resume-extract.schema.json";
+const TARGETING_PRIORITY_ALIASES = new Map([
+  ["primary", "primary"],
+  ["secondary", "secondary"],
+  ["adjacent", "secondary"],
+  ["stretch", "stretch"],
+  ["oe", "oe"],
+]);
 
 // Concrete candidate-file routes: CANDIDATE_FILES (profile, targeting,
 // evidence, honesty, form-defaults) plus the one OPTIONAL_CANDIDATE_FILES
@@ -110,6 +125,11 @@ const AUTOMATION_ROUTE_ENTRY = {
   candidatePath: "candidate/automation.yml",
   templatePath: "templates/automation.example.yml",
   schemaPath: "config/automation.schema.json",
+};
+
+const APPLICATION_LIMITS_COMPAT_ENTRY = {
+  name: "application-limits",
+  candidatePath: "candidate/application-limits.yml",
 };
 
 const CANDIDATE_ROUTE_ENTRIES = [
@@ -225,6 +245,208 @@ function writeYamlDoc(candidatePath, doc) {
   atomicWriteFile(candidatePath, `${stringifyYaml(doc)}\n`);
 }
 
+function compactStrings(values, limit) {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = String(value || "").trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+    if (out.length >= limit) break;
+  }
+  return out;
+}
+
+export function normalizeTargetingSeed(raw = {}) {
+  const roleBuckets = [];
+  for (const bucket of Array.isArray(raw.role_buckets) ? raw.role_buckets : []) {
+    const titles = compactStrings(bucket?.titles, 8);
+    if (!titles.length) continue;
+    const priority =
+      TARGETING_PRIORITY_ALIASES.get(String(bucket?.priority || "").toLowerCase()) || "secondary";
+    roleBuckets.push({
+      name: String(bucket?.name || (roleBuckets.length ? "Secondary" : "Primary")).trim(),
+      priority,
+      titles,
+      ...(String(bucket?.notes || "").trim()
+        ? { notes: String(bucket.notes).trim().slice(0, 240) }
+        : {}),
+    });
+    if (roleBuckets.length >= 4) break;
+  }
+
+  return {
+    role_buckets: roleBuckets,
+    keep_signals: compactStrings(raw.keep_signals, 12),
+    tracked_companies: compactStrings(raw.tracked_companies, 24),
+  };
+}
+
+const DB_STATE_ENTRIES = [
+  ...CANDIDATE_FILES,
+  ...OPTIONAL_CANDIDATE_FILES.filter((entry) => entry.name === "modes"),
+];
+
+function docFromCandidateConfig(config, name) {
+  if (name === "form-defaults") return config["form-defaults"];
+  return config[name];
+}
+
+function dbCandidateFiles(repoRoot, pathCtx, config) {
+  return DB_STATE_ENTRIES.map((entry) => {
+    const data = docFromCandidateConfig(config, entry.name);
+    const { valid, errors } = validate(data, readSchema(repoRoot, entry));
+    return {
+      name: entry.name,
+      path: displayPath(pathCtx, entry.candidatePath),
+      exists: true,
+      valid,
+      errors,
+    };
+  });
+}
+
+function dbSourceResumePresent(pathCtx) {
+  try {
+    return candidateArtifactExists({ ...pathCtx, id: "source-resume" });
+  } catch {
+    return false;
+  }
+}
+
+function exportCandidateCompatibilityFiles(pathCtx, config) {
+  const written = [];
+  for (const entry of [
+    ...DB_STATE_ENTRIES,
+    AUTOMATION_ROUTE_ENTRY,
+    APPLICATION_LIMITS_COMPAT_ENTRY,
+  ]) {
+    const data = docFromCandidateConfig(config, entry.name);
+    if (!data || (entry.name === "automation" && Object.keys(data).length === 0)) continue;
+    if (entry.name === "application-limits" && !(data.companies || []).length) continue;
+    const candidatePath = userPath(pathCtx, entry.candidatePath);
+    writeYamlDoc(candidatePath, data);
+    written.push(displayPath(pathCtx, entry.candidatePath));
+  }
+  return written;
+}
+
+function validateDbProfileAndTargeting(repoRoot, config) {
+  const profileEntry = CANDIDATE_FILES.find((f) => f.name === "profile");
+  const targetingEntry = CANDIDATE_FILES.find((f) => f.name === "targeting");
+  const profileCheck = validate(config.profile, readSchema(repoRoot, profileEntry));
+  const targetingCheck = validate(config.targeting, readSchema(repoRoot, targetingEntry));
+  return {
+    valid: profileCheck.valid && targetingCheck.valid,
+    profileErrors: profileCheck.errors,
+    targetingErrors: targetingCheck.errors,
+  };
+}
+
+function writeDbCompatibilityBundle(repoRoot, pathCtx, config) {
+  const written = exportCandidateCompatibilityFiles(pathCtx, config);
+  const sources = buildSearchSources(config.targeting, config.profile);
+  sourceConfigPut({ ...pathCtx, name: "search-sources", data: sources });
+  const searchConfigPath = userPath(pathCtx, "config/search-sources.yml");
+  mkdirSync(dirname(searchConfigPath), { recursive: true });
+  atomicWriteFile(searchConfigPath, `${stringifyYaml(sources)}\n`);
+  written.push(displayPath(pathCtx, "config/search-sources.yml"));
+
+  const template = readFileSync(join(repoRoot, "templates/AGENTS.md"), "utf8");
+  const agentsPath = userPath(pathCtx, "candidate/AGENTS.md");
+  mkdirSync(dirname(agentsPath), { recursive: true });
+  atomicWriteFile(
+    agentsPath,
+    renderLocalAgents({ template, profile: config.profile, targeting: config.targeting })
+  );
+  written.push(displayPath(pathCtx, "candidate/AGENTS.md"));
+
+  return { written, sources };
+}
+
+function sendCandidateError(res, err) {
+  sendJson(res, err?.code === "NO_DATABASE" ? 409 : 400, {
+    ok: false,
+    error: err?.message || String(err),
+    errors: err?.errors || undefined,
+  });
+}
+
+export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) {
+  const pathCtx = { repoRoot, env };
+  if (!dbExists(pathCtx)) {
+    return {
+      status: 409,
+      body: {
+        ok: false,
+        error: "SQLite candidate setup is required before quick-start sourcing",
+      },
+    };
+  }
+
+  let config;
+  try {
+    config = candidateConfigGet(pathCtx);
+  } catch (err) {
+    return {
+      status: err?.code === "NO_DATABASE" ? 409 : 400,
+      body: {
+        ok: false,
+        error: err?.message || String(err),
+        errors: err?.errors || undefined,
+      },
+    };
+  }
+
+  const setup = config.setup || {};
+  if (setup.readiness?.search_ready !== true) {
+    return {
+      status: 409,
+      body: {
+        ok: false,
+        error: "Candidate setup is not search-ready",
+        readiness: setup.readiness || {},
+        missing: setup.missing || {},
+      },
+    };
+  }
+
+  const check = validateDbProfileAndTargeting(repoRoot, config);
+  if (!check.valid) {
+    return {
+      status: 400,
+      body: {
+        ok: false,
+        error: "candidate profile and/or targeting DB docs do not validate",
+        profileErrors: check.profileErrors,
+        targetingErrors: check.targetingErrors,
+      },
+    };
+  }
+
+  const { written, sources } = writeDbCompatibilityBundle(repoRoot, pathCtx, config);
+  const searchCount = Array.isArray(sources?.searches) ? sources.searches.length : 0;
+  return {
+    status: 200,
+    body: {
+      ok: true,
+      written,
+      readiness: setup.readiness,
+      missing: setup.missing,
+      locks: {
+        gateReady: setup.readiness?.gate_ready === true,
+        applyReady: setup.readiness?.apply_ready === true,
+      },
+      searches: { count: searchCount },
+      nextSkill: "research-boards",
+      nextMessage:
+        "Search sources are ready. Run research-boards next, then discover-companies before the first search-jobs sweep.",
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // mountOnboardRoutes
 // ---------------------------------------------------------------------------
@@ -239,12 +461,42 @@ export function mountOnboardRoutes({
   // touching the real @anthropic-ai/claude-agent-sdk devDependency.
   runSkillStream = defaultRunSkillStream,
 }) {
-  const pathCtx = { repoRoot };
+  const pathCtx = { repoRoot, env };
 
   // -------------------------------------------------------------------------
   // GET /api/onboard/state — report-only; never runs ensureCandidateFiles.
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/onboard/state", (_req, res) => {
+    if (dbExists(pathCtx)) {
+      try {
+        const config = candidateConfigGet(pathCtx);
+        const automation = config.automation || {};
+        const { publishableToken, secretKey } = resolveLogoTokens(pathCtx, env);
+        const integrations = automation.integrations || {};
+        sendJson(res, 200, {
+          files: dbCandidateFiles(repoRoot, pathCtx, config),
+          data: {
+            profile: config.profile,
+            targeting: config.targeting,
+            "form-defaults": config["form-defaults"],
+            modes: config.modes,
+            setup: config.setup,
+          },
+          sourceResumePresent:
+            dbSourceResumePresent(pathCtx) ||
+            existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md")),
+          keyConfigured: resolveAIRoute(env).type !== "none",
+          searchSourcesPresent: existsSync(userPath(pathCtx, "config/search-sources.yml")),
+          logoImageTokenConfigured: !!(integrations.logo_dev_token || publishableToken),
+          logoSearchTokenConfigured: !!(integrations.logo_dev_secret_key || secretKey),
+        });
+        return;
+      } catch (err) {
+        sendCandidateError(res, err);
+        return;
+      }
+    }
+
     const load = loadCandidate({ root: repoRoot });
     const files = load.files.map(({ name, exists, valid, errors }) => ({
       name,
@@ -300,8 +552,8 @@ export function mountOnboardRoutes({
   // POST /api/onboard/init — template seeding, never overwrites.
   // -------------------------------------------------------------------------
   addRoute("POST", "/api/onboard/init", (_req, res) => {
-    const result = ensureCandidateFiles({ root: repoRoot });
-    sendJson(res, 200, result);
+    const result = candidateSetupInitialize(pathCtx);
+    sendJson(res, 200, { ok: true, ...result, dbInitialized: true });
   });
 
   // -------------------------------------------------------------------------
@@ -340,10 +592,19 @@ export function mountOnboardRoutes({
     };
 
     if (body?.save) {
-      const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
-      const dest = userPath(pathCtx, entry.candidatePath);
-      mkdirSync(dirname(dest), { recursive: true });
-      atomicWriteFile(dest, text);
+      if (dbExists(pathCtx)) {
+        candidateArtifactPut({
+          ...pathCtx,
+          id: "source-resume",
+          kind: "source-resume",
+          data: { text, savedAt: new Date().toISOString(), source: "resume-text" },
+        });
+      } else {
+        const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+        const dest = userPath(pathCtx, entry.candidatePath);
+        mkdirSync(dirname(dest), { recursive: true });
+        atomicWriteFile(dest, text);
+      }
     }
 
     sendJson(res, 200, { profileSeed, evidenceSeed, sections });
@@ -472,10 +733,25 @@ export function mountOnboardRoutes({
       evidence: String(c?.evidence ?? ""),
     }));
 
+    if (dbExists(pathCtx)) {
+      candidateArtifactPut({
+        ...pathCtx,
+        id: "source-resume",
+        kind: "source-resume",
+        data: {
+          path: savedRelPath,
+          filename: sanitizeUploadFilename(name),
+          savedAt: new Date().toISOString(),
+          source: "resume-ai",
+        },
+      });
+    }
+
     sendJson(res, 200, {
       profileSeed: { candidate: outcome.data.candidate || {} },
       evidenceSeed: { claims },
       sections: outcome.data.sections || {},
+      targetingSeed: normalizeTargetingSeed(outcome.data.targeting_suggestions),
       source: "ai",
     });
   });
@@ -499,6 +775,19 @@ export function mountOnboardRoutes({
           ok: false,
           errors: [{ path: "", message: "body.data must be an object" }],
         });
+        return;
+      }
+
+      if (dbExists(pathCtx)) {
+        try {
+          const result =
+            entry.name === "evidence"
+              ? candidateEvidenceMerge({ ...pathCtx, claims: patch.claims || [] })
+              : candidateConfigPatch({ ...pathCtx, name: entry.name, patch });
+          sendJson(res, 200, { ok: true, ...result });
+        } catch (err) {
+          sendCandidateError(res, err);
+        }
         return;
       }
 
@@ -533,6 +822,16 @@ export function mountOnboardRoutes({
     const posted = Array.isArray(body?.claims) ? body.claims : null;
     if (!posted) {
       sendJson(res, 400, { error: "body.claims must be an array" });
+      return;
+    }
+
+    if (dbExists(pathCtx)) {
+      try {
+        const result = candidateEvidenceMerge({ ...pathCtx, claims: posted });
+        sendJson(res, 200, result);
+      } catch (err) {
+        sendCandidateError(res, err);
+      }
       return;
     }
 
@@ -574,6 +873,30 @@ export function mountOnboardRoutes({
   // POST /api/onboard/write-config — mirrors `rolester ingest --write-config`.
   // -------------------------------------------------------------------------
   addRoute("POST", "/api/onboard/write-config", (_req, res) => {
+    if (dbExists(pathCtx)) {
+      let config;
+      try {
+        config = candidateConfigGet(pathCtx);
+      } catch (err) {
+        sendCandidateError(res, err);
+        return;
+      }
+
+      const check = validateDbProfileAndTargeting(repoRoot, config);
+      if (!check.valid) {
+        sendJson(res, 400, {
+          error: "candidate profile and/or targeting DB docs do not validate",
+          profileErrors: check.profileErrors,
+          targetingErrors: check.targetingErrors,
+        });
+        return;
+      }
+
+      const { written } = writeDbCompatibilityBundle(repoRoot, pathCtx, config);
+      sendJson(res, 200, { written });
+      return;
+    }
+
     const profilePath = userPath(pathCtx, "candidate/profile.yml");
     const targetingPath = userPath(pathCtx, "candidate/targeting.yml");
     if (!existsSync(profilePath) || !existsSync(targetingPath)) {
@@ -614,6 +937,14 @@ export function mountOnboardRoutes({
         displayPath(pathCtx, "candidate/AGENTS.md"),
       ],
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/quick-start — search-ready DB setup -> sourcing handoff.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/quick-start", (_req, res) => {
+    const result = prepareQuickStartSourcing({ repoRoot, env });
+    sendJson(res, result.status, result.body);
   });
 
   // -------------------------------------------------------------------------

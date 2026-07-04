@@ -3,9 +3,9 @@
 // data-fetching library: M7's data surface is one settings screen with no
 // cross-page cache invalidation need (see the M7 design memo §4). Every
 // Settings read/write funnels through the named functions below rather than
-// a raw fetch() scattered through components — when a real DB-backed
-// settings route eventually lands (see ROADMAP.md's "App-first rework"),
-// only this file changes.
+// a raw fetch() scattered through components. The backend keeps these route
+// names stable while writing SQLite in DB mode and YAML only as a legacy
+// compatibility export.
 
 export class ApiError extends Error {
   constructor(status, body) {
@@ -52,10 +52,9 @@ export function saveAiKey(apiKey) {
   });
 }
 
-// `patch` is deep-merged server-side onto the file's current contents:
+// `patch` is deep-merged server-side onto the current candidate setup doc:
 // object keys merge recursively, but any ARRAY in `patch` REPLACES the
-// corresponding array wholesale (see onboard-route.mjs#deepMerge's own doc
-// comment). Every array-typed field this is ever called with must be resent
+// corresponding array wholesale. Every array-typed field this is ever called with must be resent
 // in full — never a subset — or the rest silently truncates on write. None
 // of M7's Settings fields are arrays; a future section that edits one
 // (e.g. targeting.role_families) must respect this.
@@ -121,6 +120,22 @@ export function saveEvidenceSeed(claims) {
 
 export function writeConfig() {
   return apiFetch("/api/onboard/write-config", { method: "POST" });
+}
+
+export function startQuickSearch() {
+  return apiFetch("/api/onboard/quick-start", { method: "POST" });
+}
+
+export function getDiscoveryState() {
+  return apiFetch("/api/discovery/state");
+}
+
+export function startDiscoveryQuickStart() {
+  return apiFetch("/api/discovery/quick-start", { method: "POST" });
+}
+
+export function startDiscoveryNext() {
+  return apiFetch("/api/discovery/next", { method: "POST" });
 }
 
 // POST /api/assist/suggest — "Roland-suggest" chips. `kind` is "titles" or
@@ -221,6 +236,24 @@ export function createIntake({ text, inputKind } = {}) {
     method: "POST",
     body: JSON.stringify({ text, ...(inputKind ? { inputKind } : {}) }),
   });
+}
+
+export async function uploadIntakeFile(file) {
+  const res = await fetch(`/api/intake/upload?name=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+  });
+  const text = await res.text();
+  let body = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { raw: text };
+    }
+  }
+  if (!res.ok) throw new ApiError(res.status, body);
+  return body;
 }
 
 export function listIntake({ status, limit } = {}) {

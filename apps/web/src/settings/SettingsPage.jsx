@@ -245,7 +245,7 @@ export function SettingsPage() {
   return (
     <PageScaffold
       title="Settings"
-      subtitle="Reads and writes candidate/*.yml through the existing onboarding API — nothing here is a parallel store."
+      subtitle="Reads and writes the same SQLite-backed candidate setup used by onboarding."
       actions={
         toast ? (
           <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
@@ -261,7 +261,8 @@ export function SettingsPage() {
       >
         {sectionBanner.ai ? <InlineAlert message={sectionBanner.ai} /> : null}
         <p className="field__hint" style={{ margin: 0 }}>
-          The key is never echoed back after saving — only connection status is shown.
+          The key is never echoed back after saving. With ROLESTER_HOME it lives under
+          internal/ai.env; legacy repo-root workspaces use .internal/ai.env.
         </p>
         <div className="field-row">
           <Field label="Anthropic API key" htmlFor="ai-key">

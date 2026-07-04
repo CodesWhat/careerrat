@@ -7,10 +7,11 @@
 // terminal-first user, but the onboarding wizard (src/cli/onboard-route.mjs +
 // src/core/onboarding/onboard-page.mjs) needs a way to let someone paste a
 // key once and have it survive a server restart without editing shell rc
-// files. `.internal/ai.env` is that seam: a gitignored (`.internal/` is
-// already git-ignored wholesale — see .gitignore), file-mode-0600 dotenv this
-// module reads at server boot and writes to when the wizard's BYOK step
-// submits a key.
+// files. `.internal/ai.env` is the logical seam: in a legacy repo-root
+// workspace it resolves to repo `.internal/ai.env`; with ROLESTER_HOME set it
+// resolves to `<home>/internal/ai.env` (no dot) via userPath(). It is a
+// file-mode-0600 dotenv this module reads at server boot and writes to when
+// the wizard's BYOK step submits a key.
 //
 // Zero runtime deps: hand-rolled dotenv parsing (no `dotenv` package) — the
 // subset used here is deliberately tiny: `KEY=value` lines, an optional
@@ -71,7 +72,8 @@ function parseEnvLines(text) {
 // ---------------------------------------------------------------------------
 
 /**
- * Read `.internal/ai.env` (if present) and set any keys it defines into
+ * Read the logical `.internal/ai.env` path (repo `.internal/ai.env` in legacy
+ * mode, `<ROLESTER_HOME>/internal/ai.env` with ROLESTER_HOME) and set any keys it defines into
  * `env` that are not already set there. Called once at server boot
  * (tracker-dev.mjs's createDevServer factory) so a stored key works without
  * shell sourcing.
@@ -108,8 +110,8 @@ export function loadLocalAiEnv({ repoRoot, env = process.env } = {}) {
 // ---------------------------------------------------------------------------
 
 /**
- * Validate and persist an ANTHROPIC_API_KEY to `.internal/ai.env`, chmod'd
- * 0600, preserving any unrelated existing lines in the file. Sets
+ * Validate and persist an ANTHROPIC_API_KEY to the logical `.internal/ai.env`
+ * path, chmod'd 0600, preserving any unrelated existing lines in the file. Sets
  * `env.ANTHROPIC_API_KEY` immediately so the current process picks it up
  * without a restart.
  *

@@ -15,7 +15,6 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -23,13 +22,15 @@ import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
+import { closeAll, dbExists } from "../src/core/db/connection.mjs";
+import { candidateConfigGet } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
-import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { parseYaml } from "../src/core/profile/yaml.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -143,6 +144,7 @@ async function postJson(server, path, payload) {
 }
 
 after(() => {
+  closeAll();
   for (const root of cleanupRoots.splice(0)) {
     try {
       rmSync(root, { recursive: true, force: true });
@@ -177,7 +179,7 @@ describe("GET /api/onboard/state", () => {
     }
   });
 
-  it("reflects state after init: files exist+valid, resume present", async () => {
+  it("reflects state after init: DB setup docs exist+validate, no resume yet", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
@@ -186,10 +188,41 @@ describe("GET /api/onboard/state", () => {
       const body = await res.json();
       for (const f of body.files) {
         assert.equal(f.exists, true, `${f.name} should exist after init`);
-        assert.equal(f.valid, true, `${f.name} should validate — it's the untouched template`);
+        assert.equal(f.valid, true, `${f.name} should validate from DB defaults`);
       }
-      assert.equal(body.sourceResumePresent, true);
+      assert.equal(body.sourceResumePresent, false);
       assert.equal(body.searchSourcesPresent, false);
+      assert.equal(body.data.profile.candidate.full_name, "");
+      assert.deepEqual(body.data.targeting.role_buckets, []);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), false);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("exposes computed DB setup readiness for quick-start UI gates", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/resume", {
+        text: "Ada Lovelace\nada@example.com\nNew York, NY\n\nBuilt agent workflows.",
+        save: true,
+      });
+      await postJson(server, "/api/onboard/candidate/profile", {
+        data: {
+          candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+          location: { home: "New York, NY", remote: true },
+        },
+      });
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: { role_buckets: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }] },
+      });
+
+      const body = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(body.data.setup.readiness.search_ready, true);
+      assert.equal(body.data.setup.readiness.gate_ready, false);
+      assert.match(body.data.setup.missing.gate_ready.join("\n"), /compensation floor/i);
     } finally {
       await closeServer(server);
     }
@@ -219,6 +252,7 @@ describe("GET /api/onboard/state", () => {
       assert.equal(before.logoImageTokenConfigured, false);
       assert.equal(before.logoSearchTokenConfigured, false);
 
+      await postJson(server, "/api/onboard/init", {});
       await postJson(server, "/api/onboard/candidate/automation", {
         data: { integrations: { logo_dev_token: "pk_test" } },
       });
@@ -240,25 +274,42 @@ describe("GET /api/onboard/state", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /api/onboard/init", () => {
-  it("creates 7 template files on first run, and never overwrites on the second", async () => {
+  it("initializes neutral DB setup docs on first run and never writes candidate YAML", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
       const first = await postJson(server, "/api/onboard/init", {});
       assert.equal(first.status, 200);
-      assert.equal(first.body.created.length, 7);
-      assert.equal(first.body.existing.length, 0);
+      assert.equal(first.body.ok, true);
+      assert.equal(first.body.dbInitialized, true);
 
-      const profilePath = candidatePath(repoRoot, "candidate/profile.yml");
-      const sentinel = "# SENTINEL-DO-NOT-OVERWRITE\n";
-      const original = readFileSync(profilePath, "utf8");
-      writeFileSync(profilePath, sentinel + original);
+      const config = candidateConfigGet({ repoRoot });
+      assert.equal(config.profile.candidate.full_name, "");
+      assert.equal(config.profile.candidate.email, "");
+      assert.deepEqual(config.targeting.role_buckets, []);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), false);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/targeting.yml")), false);
 
       const second = await postJson(server, "/api/onboard/init", {});
-      assert.equal(second.body.created.length, 0);
-      assert.equal(second.body.existing.length, 7);
-      const stillThere = readFileSync(profilePath, "utf8");
-      assert.ok(stillThere.startsWith("# SENTINEL-DO-NOT-OVERWRITE"));
+      assert.equal(second.status, 200);
+      assert.equal(second.body.ok, true);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), false);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+describe("POST /api/onboard/init", () => {
+  it("initializes the local DB for app-first desktop use", async () => {
+    const repoRoot = buildTempRoot();
+    assert.equal(dbExists({ repoRoot }), false, "fixture starts without a db");
+    const { server } = await bootServer(repoRoot);
+    try {
+      const { status, body } = await postJson(server, "/api/onboard/init", {});
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(dbExists({ repoRoot }), true);
     } finally {
       await closeServer(server);
     }
@@ -308,17 +359,19 @@ describe("POST /api/onboard/resume", () => {
     }
   });
 
-  it("save:true writes candidate/SOURCE_RESUME.md via the atomic-write primitive", async () => {
+  it("save:true stores the source resume in SQLite without writing candidate/SOURCE_RESUME.md", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
+      await postJson(server, "/api/onboard/init", {});
       const { status } = await postJson(server, "/api/onboard/resume", {
         text: SAMPLE_RESUME,
         save: true,
       });
       assert.equal(status, 200);
-      const saved = readFileSync(candidatePath(repoRoot, "candidate/SOURCE_RESUME.md"), "utf8");
-      assert.equal(saved, SAMPLE_RESUME);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/SOURCE_RESUME.md")), false);
+      const state = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(state.sourceResumePresent, true);
     } finally {
       await closeServer(server);
     }
@@ -381,6 +434,23 @@ describe("POST /api/onboard/resume-ai", () => {
     candidate: { full_name: "Jane Doe", email: "jane.doe@example.com" },
     claims: [{ claim: "Led a team of 5 engineers.", evidence: "Resume, Experience section." }],
     sections: { experience: 1, education: 0, skills: 2, projects: 0, other: 0 },
+    targeting_suggestions: {
+      role_buckets: [
+        {
+          name: "Engineering leadership",
+          priority: "primary",
+          titles: ["Engineering Manager", "Staff Software Engineer"],
+          notes: "Matches recent team leadership and architecture scope.",
+        },
+        {
+          name: "Platform",
+          priority: "secondary",
+          titles: ["Platform Engineer"],
+        },
+      ],
+      keep_signals: ["team leadership", "platform architecture"],
+      tracked_companies: ["Stripe", "Ramp", "Linear"],
+    },
   });
   const VALID_FENCED_REPLY = `Here you go:\n\`\`\`json\n${VALID_REPLY}\n\`\`\`\n`;
 
@@ -398,6 +468,7 @@ describe("POST /api/onboard/resume-ai", () => {
     const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
     const { server } = await bootServer(repoRoot, {}, { runSkillStream });
     try {
+      await postJson(server, "/api/onboard/init", {});
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
       assert.equal(status, 200);
       assert.equal(body.source, "ai");
@@ -407,12 +478,38 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(body.evidenceSeed.claims[0].id, "resume-001");
       assert.equal(body.sections.experience, 1);
       assert.equal(body.sections.skills, 2);
+      assert.deepEqual(body.targetingSeed.role_buckets, [
+        {
+          name: "Engineering leadership",
+          priority: "primary",
+          titles: ["Engineering Manager", "Staff Software Engineer"],
+          notes: "Matches recent team leadership and architecture scope.",
+        },
+        {
+          name: "Platform",
+          priority: "secondary",
+          titles: ["Platform Engineer"],
+        },
+      ]);
+      assert.deepEqual(body.targetingSeed.keep_signals, [
+        "team leadership",
+        "platform architecture",
+      ]);
+      assert.deepEqual(body.targetingSeed.tracked_companies, ["Stripe", "Ramp", "Linear"]);
 
       const uploadDir = candidatePath(repoRoot, "workspace/intake/resume-uploads");
       const saved = readdirSync(uploadDir);
       assert.equal(saved.length, 1);
       assert.match(saved[0], /^\d+-resume\.pdf$/);
       assert.ok(readFileSync(join(uploadDir, saved[0])).equals(FAKE_PDF_BYTES));
+
+      const state = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(state.sourceResumePresent, true);
+      assert.equal(
+        state.data.setup.missing.search_ready.includes("source resume"),
+        false,
+        "PDF/image upload must satisfy the source-resume readiness input"
+      );
     } finally {
       await closeServer(server);
     }
@@ -561,25 +658,25 @@ describe("POST /api/onboard/resume-ai", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /api/onboard/candidate/:name", () => {
-  it("deep-merges posted data onto the template default, validates, and writes", async () => {
+  it("deep-merges posted data onto neutral DB defaults, validates, and writes no YAML", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
+      await postJson(server, "/api/onboard/init", {});
       const { status, body } = await postJson(server, "/api/onboard/candidate/profile", {
         data: { candidate: { full_name: "Ada Lovelace", email: "ada@example.com" } },
       });
       assert.equal(status, 200);
       assert.equal(body.ok, true);
 
-      const written = parseYaml(
-        readFileSync(candidatePath(repoRoot, "candidate/profile.yml"), "utf8")
-      );
+      const written = candidateConfigGet({ repoRoot }).profile;
       assert.equal(written.candidate.full_name, "Ada Lovelace");
       assert.equal(written.candidate.email, "ada@example.com");
-      // Sibling top-level keys from the template survive an object-merge patch.
-      assert.equal(written.compensation.target_base, 165000);
+      // Sibling top-level keys from the neutral DB defaults survive an object-merge patch.
+      assert.equal(written.compensation.target_base, null);
       // Sibling candidate.* fields not touched by the patch survive too.
-      assert.equal(written.candidate.domain, "software engineering");
+      assert.equal(written.candidate.domain, "");
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), false);
     } finally {
       await closeServer(server);
     }
@@ -589,12 +686,12 @@ describe("POST /api/onboard/candidate/:name", () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
+      await postJson(server, "/api/onboard/init", {});
       const valid = await postJson(server, "/api/onboard/candidate/profile", {
         data: { candidate: { full_name: "Grace Hopper", email: "grace@example.com" } },
       });
       assert.equal(valid.status, 200);
-      const profilePath = candidatePath(repoRoot, "candidate/profile.yml");
-      const beforeInvalid = readFileSync(profilePath, "utf8");
+      const beforeInvalid = candidateConfigGet({ repoRoot }).profile;
 
       // compensation must be an object per profile.schema.json — replacing it
       // with a bare string fails type validation.
@@ -605,12 +702,9 @@ describe("POST /api/onboard/candidate/:name", () => {
       assert.equal(invalid.body.ok, false);
       assert.ok(Array.isArray(invalid.body.errors) && invalid.body.errors.length > 0);
 
-      const afterInvalid = readFileSync(profilePath, "utf8");
-      assert.equal(
-        afterInvalid,
-        beforeInvalid,
-        "the file must be byte-identical — no write on invalid"
-      );
+      const afterInvalid = candidateConfigGet({ repoRoot }).profile;
+      assert.deepEqual(afterInvalid, beforeInvalid, "the DB doc must be unchanged on invalid");
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), false);
     } finally {
       await closeServer(server);
     }
@@ -620,6 +714,7 @@ describe("POST /api/onboard/candidate/:name", () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
+      await postJson(server, "/api/onboard/init", {});
       const { status, body } = await postJson(server, "/api/onboard/candidate/targeting", {});
       assert.equal(status, 400);
       assert.equal(body.ok, false);
@@ -632,15 +727,15 @@ describe("POST /api/onboard/candidate/:name", () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
+      await postJson(server, "/api/onboard/init", {});
       const { status, body } = await postJson(server, "/api/onboard/candidate/modes", {
         data: { usage_mode: "lean" },
       });
       assert.equal(status, 200);
       assert.equal(body.ok, true);
-      const written = parseYaml(
-        readFileSync(candidatePath(repoRoot, "candidate/modes.yml"), "utf8")
-      );
+      const written = candidateConfigGet({ repoRoot }).modes;
       assert.equal(written.usage_mode, "lean");
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/modes.yml")), false);
     } finally {
       await closeServer(server);
     }
@@ -669,21 +764,21 @@ describe("POST /api/onboard/candidate/:name", () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
+      await postJson(server, "/api/onboard/init", {});
       const { status, body } = await postJson(server, "/api/onboard/candidate/automation", {
         data: { integrations: { logo_dev_token: "pk_test", logo_dev_secret_key: "sk_test" } },
       });
       assert.equal(status, 200);
       assert.equal(body.ok, true);
 
-      const written = parseYaml(
-        readFileSync(candidatePath(repoRoot, "candidate/automation.yml"), "utf8")
-      );
+      const written = candidateConfigGet({ repoRoot }).automation;
       assert.equal(written.integrations.logo_dev_token, "pk_test");
       assert.equal(written.integrations.logo_dev_secret_key, "sk_test");
       // The rest of the template's opt-in-off matrix survives untouched —
       // writing logo.dev credentials never flips any automation switch on.
-      assert.equal(written.consent.linkedin, false);
-      assert.equal(written.capabilities.authenticated_search.enabled, false);
+      assert.equal(written.consent?.linkedin ?? false, false);
+      assert.equal(written.capabilities?.authenticated_search?.enabled ?? false, false);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/automation.yml")), false);
     } finally {
       await closeServer(server);
     }
@@ -710,10 +805,8 @@ describe("POST /api/onboard/evidence-seed", () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
-      // Seed an existing claim with a known id/text (mirrors what init would
-      // copy from templates/evidence.example.yml).
-      const evidencePath = candidatePath(repoRoot, "candidate/evidence.yml");
-      const seedDoc = {
+      await postJson(server, "/api/onboard/init", {});
+      const seed = await postJson(server, "/api/onboard/evidence-seed", {
         claims: [
           {
             id: "project-001",
@@ -721,9 +814,8 @@ describe("POST /api/onboard/evidence-seed", () => {
             evidence: "Prior evidence.",
           },
         ],
-      };
-      mkdirSync(candidatePath(repoRoot, "candidate"), { recursive: true });
-      writeFileSync(evidencePath, `${stringifyYaml(seedDoc)}\n`);
+      });
+      assert.equal(seed.status, 200);
 
       const { status, body } = await postJson(server, "/api/onboard/evidence-seed", {
         claims: [
@@ -737,7 +829,7 @@ describe("POST /api/onboard/evidence-seed", () => {
       assert.equal(body.added, 1);
       assert.equal(body.total, 2);
 
-      const written = parseYaml(readFileSync(evidencePath, "utf8"));
+      const written = candidateConfigGet({ repoRoot }).evidence;
       assert.equal(written.claims.length, 2);
       const ids = written.claims.map((c) => c.id);
       assert.equal(new Set(ids).size, 2, "ids must not collide");
@@ -745,6 +837,7 @@ describe("POST /api/onboard/evidence-seed", () => {
       const newClaim = written.claims.find((c) => c.claim === "Brand new claim from the resume.");
       assert.ok(newClaim);
       assert.notEqual(newClaim.id, "project-001");
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/evidence.yml")), false);
     } finally {
       await closeServer(server);
     }
@@ -754,6 +847,7 @@ describe("POST /api/onboard/evidence-seed", () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
+      await postJson(server, "/api/onboard/init", {});
       const { status, body } = await postJson(server, "/api/onboard/evidence-seed", {});
       assert.equal(status, 400);
       assert.match(body.error, /claims must be an array/);
@@ -768,7 +862,7 @@ describe("POST /api/onboard/evidence-seed", () => {
 // ---------------------------------------------------------------------------
 
 describe("POST /api/onboard/write-config", () => {
-  it("400s when profile.yml/targeting.yml don't exist yet", async () => {
+  it("400s when DB candidate setup has not been initialized yet", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
@@ -781,14 +875,36 @@ describe("POST /api/onboard/write-config", () => {
     }
   });
 
-  it("writes config/search-sources.yml and candidate/AGENTS.md once profile+targeting validate", async () => {
+  it("exports compatibility YAML, config/search-sources.yml, and candidate/AGENTS.md from DB setup", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
       await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/candidate/profile", {
+        data: { candidate: { full_name: "Ada Lovelace", email: "ada@example.com" } },
+      });
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: {
+          role_buckets: [
+            { name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] },
+          ],
+          keep_signals: ["agents"],
+          cut_signals: ["adtech"],
+        },
+      });
       const { status, body } = await postJson(server, "/api/onboard/write-config", {});
       assert.equal(status, 200);
-      assert.equal(body.written.length, 2);
+      assert.ok(body.written.length >= 4);
+
+      const exportedProfile = parseYaml(
+        readFileSync(candidatePath(repoRoot, "candidate/profile.yml"), "utf8")
+      );
+      assert.equal(exportedProfile.candidate.full_name, "Ada Lovelace");
+
+      const exportedTargeting = parseYaml(
+        readFileSync(candidatePath(repoRoot, "candidate/targeting.yml"), "utf8")
+      );
+      assert.equal(exportedTargeting.role_buckets[0].titles[0], "Applied AI Engineer");
 
       const searchSources = parseYaml(
         readFileSync(candidatePath(repoRoot, "config/search-sources.yml"), "utf8")
@@ -797,6 +913,81 @@ describe("POST /api/onboard/write-config", () => {
 
       const agents = readFileSync(candidatePath(repoRoot, "candidate/AGENTS.md"), "utf8");
       assert.match(agents, /## Candidate Context/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/onboard/quick-start
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboard/quick-start", () => {
+  it("409s when DB setup exists but is not search-ready", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+
+      const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
+      assert.equal(status, 409);
+      assert.equal(body.ok, false);
+      assert.match(body.error, /not search-ready/i);
+      assert.equal(body.readiness.search_ready, false);
+      assert.deepEqual(body.missing.search_ready, ["source resume", "role titles"]);
+      assert.equal(existsSync(candidatePath(repoRoot, "config/search-sources.yml")), false);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("writes search compatibility output and returns the discovery handoff once search-ready", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/resume", {
+        text: "Ada Lovelace\nada@example.com\nNew York, NY\n\nBuilt agent workflows.",
+        save: true,
+      });
+      await postJson(server, "/api/onboard/candidate/profile", {
+        data: {
+          candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+          location: { home: "New York, NY", remote: true },
+        },
+      });
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: {
+          role_buckets: [
+            { name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] },
+          ],
+        },
+      });
+
+      const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.readiness.search_ready, true);
+      assert.equal(body.readiness.gate_ready, false);
+      assert.equal(body.readiness.apply_ready, false);
+      assert.equal(body.nextSkill, "research-boards");
+      assert.match(body.nextMessage, /discover-companies/i);
+      assert.ok(body.written.some((path) => path.endsWith("config/search-sources.yml")));
+      assert.ok(body.written.some((path) => path.endsWith("candidate/AGENTS.md")));
+      assert.equal(body.searches.count > 0, true);
+
+      const searchSources = parseYaml(
+        readFileSync(candidatePath(repoRoot, "config/search-sources.yml"), "utf8")
+      );
+      assert.ok(Array.isArray(searchSources.searches));
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), true);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/targeting.yml")), true);
+      assert.equal(
+        existsSync(candidatePath(repoRoot, "candidate/SOURCE_RESUME.md")),
+        false,
+        "source resume remains DB artifact; quick-start only writes compatibility output"
+      );
     } finally {
       await closeServer(server);
     }

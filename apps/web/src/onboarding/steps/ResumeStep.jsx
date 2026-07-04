@@ -45,7 +45,7 @@ function readAsText(file) {
 // "evidence seed" screens into one review/edit step (the extraction already
 // returns evidenceSeed.claims alongside profileSeed — no reason to make
 // evidence its own screen, per the M8 design doc).
-export function ResumeStep({ state, aiEnabled, goNext, goBack, showToast }) {
+export function ResumeStep({ state, aiEnabled, setDraftSeeds, goNext, goBack, showToast }) {
   const fileInputRef = useRef(null);
   const [dragActive, setDragActive] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -77,6 +77,9 @@ export function ResumeStep({ state, aiEnabled, goNext, goBack, showToast }) {
     });
     const seedClaims = result.evidenceSeed?.claims ?? [];
     setClaims(seedClaims.map((c) => ({ ...c, selected: true })));
+    if (result.targetingSeed) {
+      setDraftSeeds?.((prev) => ({ ...prev, targeting: result.targetingSeed }));
+    }
   }
 
   async function handleFile(file) {

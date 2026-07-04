@@ -11,20 +11,25 @@ const SEARCH_DEBOUNCE_MS = 350;
 
 // Step 5 — Companies. Type-ahead (logo.dev Brand Search proxy, GET
 // /api/logos/search) + initials fallback, a collapsed logo.dev-credentials
-// panel (writes to candidate/automation.yml#integrations — see
+// panel (writes automation integrations through the candidate setup API — see
 // onboard-route.mjs's AUTOMATION_ROUTE_ENTRY comment for why that route
 // exists), and Roland's discover-companies chat panel. Saved company names
 // persist to targeting.yml#tracked_companies — the candidate's own shortlist
 // (distinct from config/sourced-scan.json's tracked_companies, which
 // discover-companies/`rolester companies` manage for the sweep itself).
-export function CompaniesStep({ state, aiEnabled, reload, goNext, goBack, showToast }) {
+export function CompaniesStep({ state, draftSeeds, aiEnabled, reload, goNext, goBack, showToast }) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
   const [noToken, setNoToken] = useState(false);
 
+  const savedCompanies = state?.data?.targeting?.tracked_companies ?? [];
+  const draftCompanies = draftSeeds?.targeting?.tracked_companies ?? [];
   const [companies, setCompanies] = useState(
-    (state?.data?.targeting?.tracked_companies ?? []).map((name) => ({ name, domain: null }))
+    (savedCompanies.length ? savedCompanies : draftCompanies).map((name) => ({
+      name,
+      domain: null,
+    }))
   );
 
   const [showCredentials, setShowCredentials] = useState(false);

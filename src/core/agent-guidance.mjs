@@ -64,6 +64,7 @@ export function buildAgentGuidance({
   missingSystem = [],
   skillsNotDiscoverable = [],
   modes = { valid: true },
+  candidateSetupReadiness = null,
   searchReadiness = {},
   companyAtsReadiness = {},
   discoverySkips = [],
@@ -111,6 +112,18 @@ export function buildAgentGuidance({
       message: "Ask your agent to run ingest-profile next.",
       reason:
         "Candidate setup is incomplete, so searches and gates do not have full targeting context.",
+    };
+  }
+  if (candidateSetupReadiness && candidateSetupReadiness.readiness?.search_ready !== true) {
+    const missing = candidateSetupReadiness.missing?.search_ready || [];
+    return {
+      ...base,
+      nextSkill: "ingest-profile",
+      command: "rolester ingest",
+      message: "Ask your agent to continue onboarding with ingest-profile next.",
+      reason: missing.length
+        ? `Candidate setup is not search-ready yet; missing: ${missing.join(", ")}.`
+        : "Candidate setup is not search-ready yet.",
     };
   }
   if (!searchReadiness.exists || !searchReadiness.valid || searchReadiness.enabled === 0) {

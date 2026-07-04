@@ -21,8 +21,10 @@ import {
 } from "../core/agent-guidance.mjs";
 import { automationStatus, loadAutomation } from "../core/automation/consent.mjs";
 import { detectSession } from "../core/automation/session.mjs";
+import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { candidateConfigSource, loadCandidateConfig } from "../core/profile/config-store.mjs";
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
@@ -120,7 +122,10 @@ const skillsNotDiscoverable = sourceSkills.filter(
   (name) => !checkPath(join(".claude", "skills", name, "SKILL.md"))
 );
 
-const missingUser = userPrereqs.filter((item) => !checkUserPath(item.path));
+const candidateSource = candidateConfigSource(pathCtx);
+const candidateSetupReadiness = loadCandidateSetupReadiness();
+const missingUser =
+  candidateSource === "db" ? [] : userPrereqs.filter((item) => !checkUserPath(item.path));
 const missingSystem = systemPrereqs.filter((path) => !checkPath(path));
 for (const dir of workspaceDirs) ensureUserDir(dir);
 
@@ -178,9 +183,11 @@ const searchReadiness = loadSearchReadiness();
 const companyAtsReadiness = loadCompanyAtsReadiness();
 const agentGuidance = buildAgentGuidance({
   missingUser,
+  candidateConfigSource: candidateSource,
   missingSystem,
   skillsNotDiscoverable,
   modes,
+  candidateSetupReadiness,
   searchReadiness,
   companyAtsReadiness,
   discoverySkips,
@@ -191,7 +198,8 @@ const result = {
     missingUser.length === 0 &&
     missingSystem.length === 0 &&
     skillsNotDiscoverable.length === 0 &&
-    modes.valid,
+    modes.valid &&
+    (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
   skillsNotDiscoverable,
@@ -220,6 +228,7 @@ const result = {
     detail: sessionBrowser.presence.detail,
   },
   setup,
+  candidateSetup: candidateSetupReadiness,
   discovery: {
     broadSources: searchReadiness,
     companyAts: companyAtsReadiness,
@@ -340,6 +349,16 @@ if (setup.present) {
   console.log("");
 }
 
+if (candidateSetupReadiness) {
+  const ready = candidateSetupReadiness.readiness || {};
+  console.log(
+    `Candidate setup readiness: search ${ready.search_ready ? "ready" : "needs setup"}, gate ${ready.gate_ready ? "ready" : "needs setup"}, apply ${ready.apply_ready ? "ready" : "needs setup"}.`
+  );
+  const missing = candidateSetupReadiness.missing?.search_ready || [];
+  if (missing.length) console.log(`  Search-ready missing: ${missing.join(", ")}.`);
+  console.log("");
+}
+
 console.log("Search readiness:");
 printSearchReadiness(searchReadiness);
 printCompanyAtsReadiness(companyAtsReadiness);
@@ -358,6 +377,9 @@ if (result.ok) {
 } else if (!modes.valid) {
   console.log("Rolester scaffold is present, but candidate/modes.yml is invalid.");
   console.log("Run `rolester modes status` for details.");
+} else if (candidateSetupReadiness?.readiness?.search_ready === false) {
+  console.log("Rolester scaffold is present, but candidate setup is not search-ready yet.");
+  console.log("Run the ingest-profile skill or continue onboarding.");
 } else if (missingUser.length === 0 && missingSystem.length === 0) {
   console.log("Scaffold and setup look good, but skills aren't discoverable yet.");
   console.log("Run `rolester install-skills` so Claude Code can invoke /apply-job etc.");
@@ -368,7 +390,33 @@ if (result.ok) {
 
 process.exit(result.ok ? 0 : 1);
 
+function loadCandidateSetupReadiness() {
+  if (candidateSource !== "db") return null;
+  try {
+    return loadCandidateConfig(pathCtx).setup || null;
+  } catch {
+    return null;
+  }
+}
+
 function loadSearchReadiness() {
+  if (candidateSource === "db") {
+    try {
+      const stored = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+      return summarizeSearchReadiness(stored.data, { exists: stored.stored });
+    } catch (err) {
+      return {
+        exists: false,
+        valid: false,
+        total: 0,
+        enabled: 0,
+        withLastRun: 0,
+        providers: [],
+        error: err.message,
+      };
+    }
+  }
+
   const configPath = userPath(pathCtx, "config/search-sources.yml");
   if (!existsSync(configPath)) {
     return {
@@ -382,16 +430,7 @@ function loadSearchReadiness() {
   }
   try {
     const config = parseConfig(readFileSync(configPath, "utf8"));
-    const searches = Array.isArray(config?.searches) ? config.searches : [];
-    const enabled = searches.filter((search) => search.enabled !== false);
-    return {
-      exists: true,
-      valid: true,
-      total: searches.length,
-      enabled: enabled.length,
-      withLastRun: searches.filter((search) => search.recency?.lastRunAt).length,
-      providers: [...new Set(enabled.map((search) => search.provider).filter(Boolean))].sort(),
-    };
+    return summarizeSearchReadiness(config, { exists: true });
   } catch (err) {
     return {
       exists: true,
@@ -405,9 +444,25 @@ function loadSearchReadiness() {
   }
 }
 
+function summarizeSearchReadiness(config, { exists }) {
+  const searches = Array.isArray(config?.searches) ? config.searches : [];
+  const enabled = searches.filter((search) => search.enabled !== false);
+  return {
+    exists,
+    valid: true,
+    total: searches.length,
+    enabled: enabled.length,
+    withLastRun: searches.filter((search) => search.recency?.lastRunAt).length,
+    providers: [...new Set(enabled.map((search) => search.provider).filter(Boolean))].sort(),
+  };
+}
+
 function loadCompanyAtsReadiness() {
   try {
-    const config = loadScannerConfig(userPath(pathCtx, "config/sourced-scan.json"));
+    const config =
+      candidateSource === "db"
+        ? sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data
+        : loadScannerConfig(userPath(pathCtx, "config/sourced-scan.json"));
     const companies = Array.isArray(config?.tracked_companies) ? config.tracked_companies : [];
     return {
       configured: companies.length > 0,

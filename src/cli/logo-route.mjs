@@ -59,7 +59,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { userPath } from "../core/paths/workspace.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { sendJson } from "./skill-run-route.mjs";
 
 const SEARCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // ~7 days, per the frozen contract.
@@ -79,10 +79,8 @@ function queryParam(req, name) {
 // ---------------------------------------------------------------------------
 
 function readAutomationDoc(pathCtx) {
-  const automationPath = userPath(pathCtx, "candidate/automation.yml");
-  if (!existsSync(automationPath)) return {};
   try {
-    return parseYaml(readFileSync(automationPath, "utf8")) || {};
+    return loadCandidateDoc("automation", pathCtx) || {};
   } catch {
     return {};
   }

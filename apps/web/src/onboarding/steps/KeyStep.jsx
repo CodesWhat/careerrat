@@ -58,7 +58,8 @@ export function KeyStep({ reload, goNext, goBack, showToast }) {
       <p className="field__hint" style={{ margin: 0 }}>
         Unlocks resume extraction from a PDF/image, title and keyword suggestion chips, and Roland's
         company search later in this wizard. The key is stored locally and never echoed back after
-        saving — you can add it later from Settings instead.
+        saving. With ROLESTER_HOME it lives under internal/ai.env; legacy repo-root workspaces use
+        .internal/ai.env.
       </p>
       {error ? <InlineAlert message={error} /> : null}
       <div className="field-row">

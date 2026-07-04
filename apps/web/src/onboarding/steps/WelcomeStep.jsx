@@ -4,11 +4,8 @@ import { Card } from "../../components/Card.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import { initOnboard } from "../../lib/api.js";
 
-// Step 1 — Welcome. Runs POST /api/onboard/init (ensureCandidateFiles: seeds
-// candidate/ from templates, NEVER overwrites an existing file — see
-// onboard-route.mjs's own header comment) so every later step always has a
-// valid template-default base to prefill from and deep-merge onto, exactly
-// like the legacy /onboard page's step 1.
+// Step 1 — Welcome. Runs POST /api/onboard/init, which initializes the
+// SQLite-backed candidate setup rows used by every later step.
 export function WelcomeStep({ state, goNext }) {
   const [starting, setStarting] = useState(false);
   const [error, setError] = useState(null);
@@ -34,11 +31,9 @@ export function WelcomeStep({ state, goNext }) {
   return (
     <Card title="Set up your workspace">
       <p>
-        Seven quick steps seed your candidate files, capture a resume, and connect an optional AI
-        key — the same <code>candidate/*.yml</code> files the classic setup page and the rolester
-        CLI already read and write. Every AI-assisted step (resume extraction, suggestion chips,
-        Roland's company search) degrades to a manual path when no key is configured — nothing here
-        ever hard-blocks on AI.
+        Seven quick steps build your profile, capture a resume, and connect an optional AI key.
+        Rolester stores setup in SQLite and can export compatibility files when you finish. Every
+        AI-assisted step degrades to a manual path when no key is configured.
       </p>
       {files.length ? (
         <p className="field__hint">Current workspace — {summaryParts.join(", ")}</p>

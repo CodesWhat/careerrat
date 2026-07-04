@@ -166,6 +166,22 @@ test("GET /api/health returns ok + the running package version", async () => {
   }
 });
 
+test("GET /api/discovery/state is mounted on the app server", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  const dev = await bootServer(repoRoot);
+  try {
+    const res = await fetch(`${baseUrl(dev)}/api/discovery/state`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(body.ok, true);
+    assert.ok(body.pipeline.includes("research-boards"));
+    assert.equal(body.activeDiscoveryChat, null);
+  } finally {
+    teardown(dev, repoRoot);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // M10 — boot-time Lane-C orphan reconciliation. createDevServer() must run
 // reconcileOrphanedLaneCIntakeItems() once before returning (see that

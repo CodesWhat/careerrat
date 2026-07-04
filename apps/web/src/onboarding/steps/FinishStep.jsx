@@ -1,9 +1,162 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
+import { useDashboardSnapshot } from "../../app-shell/DashboardContext.jsx";
 import { Button } from "../../components/Button.jsx";
 import { Card } from "../../components/Card.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
-import { addBoard, previewBoards, writeConfig } from "../../lib/api.js";
+import {
+  addBoard,
+  previewBoards,
+  startDiscoveryNext,
+  startDiscoveryQuickStart,
+  writeConfig,
+} from "../../lib/api.js";
+import { ChatPanel } from "../ChatPanel.jsx";
+
+const READINESS_ROWS = [
+  {
+    key: "search_ready",
+    label: "Search",
+    readyDetail: "Rolester can start sourcing roles now.",
+  },
+  {
+    key: "gate_ready",
+    label: "Gate",
+    readyDetail: "Jobs can be evaluated without guessing.",
+  },
+  {
+    key: "apply_ready",
+    label: "Apply",
+    readyDetail: "Tailoring and application flows are unlocked.",
+  },
+  {
+    key: "deep_ingest_complete",
+    label: "Deep ingest",
+    readyDetail: "Optional coaching context is complete.",
+  },
+];
+
+const DISCOVERY_CHAT_SKILLS = ["research-boards", "discover-companies", "search-jobs"];
+const NO_AI_DISCOVERY_HINT = "Add an AI key in the earlier step to use Roland's search.";
+
+function missingDetail(values) {
+  const missing = (Array.isArray(values) ? values : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (!missing.length) return "Needs setup details.";
+  const shown = missing.slice(0, 2).join(", ");
+  const suffix = missing.length > 2 ? `, and ${missing.length - 2} more` : "";
+  return `Needs ${shown}${suffix}.`;
+}
+
+function compactMissing(values) {
+  const out = [];
+  const seen = new Set();
+  for (const value of Array.isArray(values) ? values : []) {
+    const text = String(value || "").trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function listSentence(values) {
+  const items = compactMissing(values);
+  if (!items.length) return "";
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+export function buildReadinessRows(state) {
+  const setup = state?.data?.setup || {};
+  const readiness = setup.readiness || {};
+  const missing = setup.missing || {};
+  return READINESS_ROWS.map((row) => {
+    const ready = readiness[row.key] === true;
+    return {
+      key: row.key,
+      label: row.label,
+      status: ready ? "Ready" : "Needs setup",
+      detail: ready ? row.readyDetail : missingDetail(missing[row.key]),
+      ready,
+    };
+  });
+}
+
+export function buildQuickStartAction(state) {
+  const setup = state?.data?.setup || {};
+  const readiness = setup.readiness || {};
+  const missing = setup.missing || {};
+  if (readiness.search_ready !== true) {
+    const blockers = listSentence(missing.search_ready);
+    return {
+      enabled: false,
+      label: "Complete search setup",
+      detail: blockers ? `Needs ${blockers}.` : "Complete search setup to source roles.",
+    };
+  }
+
+  const gateApplyMissing = compactMissing([
+    ...(missing.gate_ready || []),
+    ...(missing.apply_ready || []),
+  ]);
+  const blockers = listSentence(gateApplyMissing);
+  return {
+    enabled: true,
+    label: "Prepare sourcing",
+    detail: blockers
+      ? `Rolester can prepare source setup now. Gate and apply stay locked until ${blockers} are complete.`
+      : "Rolester can prepare source setup now. Gate and apply are ready too.",
+  };
+}
+
+function errorMessage(err, fallback) {
+  return err?.body?.error || (err instanceof Error ? err.message : fallback);
+}
+
+export function extractDiscoveryGuidance(snapshot) {
+  const guidance =
+    snapshot?.data?.agentGuidance || snapshot?.agentGuidance || snapshot?.guidance || null;
+  const nextSkill = String(guidance?.nextSkill || "").trim();
+  if (!DISCOVERY_CHAT_SKILLS.includes(nextSkill)) return null;
+  return {
+    nextSkill,
+    message: guidance?.message || `Ask your agent to run ${nextSkill} next.`,
+    ctaLabel: guidance?.ctaLabel || `Run ${nextSkill}`,
+  };
+}
+
+export async function runQuickStartHandoff({
+  quickStart = startDiscoveryQuickStart,
+  reload,
+  refreshWorkspace,
+} = {}) {
+  const result = await quickStart();
+  await (refreshWorkspace || reload)?.();
+  return {
+    result,
+    chat: result.chat || null,
+    chatError: result.chatError || null,
+    guidance: extractDiscoveryGuidance(result),
+  };
+}
+
+export async function runNextDiscoveryHandoff({
+  continueDiscovery = startDiscoveryNext,
+  refreshWorkspace,
+} = {}) {
+  const result = await continueDiscovery();
+  await refreshWorkspace?.();
+  return {
+    result,
+    guidance: extractDiscoveryGuidance(result),
+    chat: result.chat || null,
+    chatError: result.chatError || null,
+  };
+}
 
 // Step 7 — Finish. Runs the existing POST /api/onboard/write-config
 // (regenerates config/search-sources.yml wholesale from targeting+profile,
@@ -14,17 +167,35 @@ import { addBoard, previewBoards, writeConfig } from "../../lib/api.js";
 // and the M8 design doc §6's flagged ordering hazard). Ends with the
 // explicit /chat evidence-interview handoff the design doc calls for: the
 // wizard and the deeper conversational interview are two independent entry
-// points into the same candidate files, not one linear flow.
-export function FinishStep({ state, goBack }) {
+// points into the same candidate setup state, not one linear flow.
+export function FinishStep({ state, reload, goBack, aiEnabled = true }) {
+  const dashboard = useDashboardSnapshot();
   const [writing, setWriting] = useState(false);
   const [written, setWritten] = useState(null);
   const [error, setError] = useState(null);
+  const [quickStarting, setQuickStarting] = useState(false);
+  const [quickStartResult, setQuickStartResult] = useState(null);
+  const [discoveryStarting, setDiscoveryStarting] = useState(false);
+  const [discoveryChat, setDiscoveryChat] = useState(null);
+  const [discoveryChatError, setDiscoveryChatError] = useState(null);
 
   const [preview, setPreview] = useState(null);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
 
   const configReady = !!written || !!state?.searchSourcesPresent;
+  const readinessRows = buildReadinessRows(state);
+  const searchReady = readinessRows.find((row) => row.key === "search_ready")?.ready;
+  const gateReady = readinessRows.find((row) => row.key === "gate_ready")?.ready;
+  const applyReady = readinessRows.find((row) => row.key === "apply_ready")?.ready;
+  const quickStartAction = buildQuickStartAction(state);
+  const discoveryGuidance = extractDiscoveryGuidance(dashboard.data) || quickStartResult?.guidance;
+  const discoveryAiEnabled = aiEnabled !== false;
+
+  async function refreshWorkspace() {
+    await reload?.();
+    await dashboard.refetch?.();
+  }
 
   async function handleWriteConfig() {
     setWriting(true);
@@ -32,10 +203,45 @@ export function FinishStep({ state, goBack }) {
     try {
       const result = await writeConfig();
       setWritten(result.written || []);
+      await reload?.();
     } catch (err) {
       setError(err?.body?.error || (err instanceof Error ? err.message : "write-config failed"));
     } finally {
       setWriting(false);
+    }
+  }
+
+  async function handleQuickStart() {
+    setQuickStarting(true);
+    setError(null);
+    setDiscoveryChatError(null);
+    try {
+      const { result, chat, chatError } = await runQuickStartHandoff({ refreshWorkspace });
+      setQuickStartResult(result);
+      setWritten(result.written || []);
+      setDiscoveryChat(chat);
+      setDiscoveryChatError(chatError);
+    } catch (err) {
+      setError(errorMessage(err, "quick-start failed"));
+    } finally {
+      setQuickStarting(false);
+    }
+  }
+
+  async function handleContinueDiscovery() {
+    setDiscoveryStarting(true);
+    setError(null);
+    setDiscoveryChatError(null);
+    try {
+      const { chat, chatError } = await runNextDiscoveryHandoff({
+        refreshWorkspace: dashboard.refetch,
+      });
+      setDiscoveryChat(chat);
+      setDiscoveryChatError(chatError);
+    } catch (err) {
+      setDiscoveryChatError(errorMessage(err, "Could not continue discovery"));
+    } finally {
+      setDiscoveryStarting(false);
     }
   }
 
@@ -76,10 +282,113 @@ export function FinishStep({ state, goBack }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {error ? <InlineAlert message={error} /> : null}
 
+      <Card title="Setup readiness">
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+            gap: 10,
+          }}
+        >
+          {readinessRows.map((row) => (
+            <div
+              key={row.key}
+              style={{
+                border: "1px solid var(--border)",
+                borderRadius: 8,
+                padding: 12,
+                minHeight: 96,
+              }}
+            >
+              <div className="field__hint" style={{ margin: 0 }}>
+                {row.label}
+              </div>
+              <strong>{row.status}</strong>
+              <p className="field__hint" style={{ margin: "6px 0 0" }}>
+                {row.detail}
+              </p>
+            </div>
+          ))}
+        </div>
+        <p className="field__hint" style={{ marginBottom: 0 }}>
+          {searchReady && (!gateReady || !applyReady)
+            ? "Search-ready: Rolester can source roles now while you finish setup for gating and applying."
+            : "Complete the search row to start sourcing; gate and apply unlock when their rows are ready."}
+        </p>
+      </Card>
+
+      <Card title="Quick start sourcing">
+        {discoveryAiEnabled ? (
+          <>
+            <p>{quickStartAction.detail}</p>
+            <Button
+              onClick={handleQuickStart}
+              disabled={!quickStartAction.enabled || quickStarting}
+            >
+              {quickStarting ? "Starting…" : quickStartAction.label}
+            </Button>
+          </>
+        ) : (
+          <p className="field__hint" style={{ margin: 0 }}>
+            {NO_AI_DISCOVERY_HINT}
+          </p>
+        )}
+        {quickStartResult ? (
+          <p className="field__hint">
+            Next agent: <code>{quickStartResult.nextSkill}</code>. {quickStartResult.nextMessage}
+          </p>
+        ) : null}
+      </Card>
+
+      <Card
+        title="Discovery pipeline"
+        actions={
+          discoveryAiEnabled && discoveryGuidance ? (
+            <Button
+              variant="secondary"
+              onClick={handleContinueDiscovery}
+              disabled={discoveryStarting || dashboard.noDatabase}
+            >
+              {discoveryStarting ? "Starting…" : discoveryGuidance.ctaLabel}
+            </Button>
+          ) : null
+        }
+      >
+        <p className="field__hint" style={{ marginTop: 0 }}>
+          {!discoveryAiEnabled
+            ? NO_AI_DISCOVERY_HINT
+            : discoveryGuidance
+              ? discoveryGuidance.message
+              : "No discovery handoff is ready yet. Prepare sourcing first, then refresh this task."}
+        </p>
+        <div className="chip-row">
+          {DISCOVERY_CHAT_SKILLS.map((skill) => (
+            <span
+              className={`chip ${discoveryGuidance?.nextSkill === skill ? "badge--ok" : ""}`}
+              key={skill}
+            >
+              {skill}
+            </span>
+          ))}
+        </div>
+        {discoveryChatError ? <InlineAlert message={discoveryChatError} /> : null}
+        {discoveryChat ? (
+          <div style={{ marginTop: 12 }}>
+            <ChatPanel
+              key={discoveryChat.chatId}
+              skill={
+                discoveryChat.skill || discoveryGuidance?.nextSkill || quickStartResult?.nextSkill
+              }
+              kickoffLabel="Run discovery"
+              initialChatId={discoveryChat.chatId}
+            />
+          </div>
+        ) : null}
+      </Card>
+
       <Card title="Finish setup">
         <p>
-          Generates <code>config/search-sources.yml</code> and <code>candidate/AGENTS.md</code> from
-          your profile and targeting.
+          Exports compatibility files and generates search sources from your profile and targeting.
         </p>
         <Button onClick={handleWriteConfig} disabled={writing}>
           {writing ? "Writing…" : "Write config"}

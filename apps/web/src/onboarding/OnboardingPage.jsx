@@ -56,6 +56,11 @@ function computeInitialStep(state) {
   return firstNotDone === -1 ? STEPS.length - 1 : firstNotDone;
 }
 
+export async function refreshThenAdvance({ load, setStepIndex, stepCount }) {
+  await load?.();
+  setStepIndex((i) => Math.min(i + 1, stepCount - 1));
+}
+
 export function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -63,6 +68,7 @@ export function OnboardingPage() {
   const [stepIndex, setStepIndex] = useState(0);
   const [hasPositioned, setHasPositioned] = useState(false);
   const [toast, setToast] = useState(null);
+  const [draftSeeds, setDraftSeeds] = useState({});
 
   const load = useCallback(async () => {
     try {
@@ -94,7 +100,7 @@ export function OnboardingPage() {
   }
 
   function goNext() {
-    setStepIndex((i) => Math.min(i + 1, STEPS.length - 1));
+    void refreshThenAdvance({ load, setStepIndex, stepCount: STEPS.length });
   }
   function goBack() {
     setStepIndex((i) => Math.max(i - 1, 0));
@@ -115,7 +121,7 @@ export function OnboardingPage() {
   return (
     <PageScaffold
       title="Onboarding"
-      subtitle="Seven quick steps through the same candidate/*.yml files the classic /onboard page and rolester CLI read and write."
+      subtitle="Seven quick steps to build your SQLite-backed profile, targeting, preferences, and search setup."
       actions={
         toast ? (
           <Toast message={toast.message} tone={toast.tone} onDismiss={() => setToast(null)} />
@@ -133,6 +139,8 @@ export function OnboardingPage() {
       </div>
       <Component
         state={state}
+        draftSeeds={draftSeeds}
+        setDraftSeeds={setDraftSeeds}
         aiEnabled={aiEnabled}
         reload={load}
         goNext={goNext}

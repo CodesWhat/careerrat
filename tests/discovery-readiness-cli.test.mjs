@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { closeAll } from "../src/core/db/connection.mjs";
+import { candidateSetupInitialize, sourceConfigPut } from "../src/core/db/verbs.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
@@ -248,6 +250,105 @@ test("rolester next can record skipped discovery steps and advance the handoff",
     assert.match(skipCompanies.stdout, /Skipped discover-companies/);
     assert.match(skipCompanies.stdout, /Next: ask your agent to run search-jobs/);
     assert.match(skipCompanies.stdout, /Discovery skip recorded/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("empty DB candidate setup routes doctor and next back to ingest-profile", () => {
+  const home = tempHome();
+  try {
+    const init = runRolester(["data", "candidate", "init"], home);
+    assert.equal(init.status, 0);
+
+    const doctor = runCli("src/cli/doctor.mjs", ["--json"], home);
+    const data = JSON.parse(doctor.stdout);
+    assert.equal(doctor.status, 1);
+    assert.equal(data.agentGuidance.nextSkill, "ingest-profile");
+    assert.match(data.agentGuidance.reason, /source resume/i);
+
+    const next = runRolester(["next"], home);
+    assert.equal(next.status, 0);
+    assert.match(next.stdout, /Next: ask your agent to run ingest-profile/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor reads company ATS readiness from DB source config when legacy config is absent", () => {
+  const home = tempHome();
+  try {
+    const init = runRolester(["data", "candidate", "init"], home);
+    assert.equal(init.status, 0);
+
+    const add = runRolester(
+      ["companies", "--add", "Acme", "--url", "https://jobs.lever.co/acme", "--write", "--json"],
+      home
+    );
+    assert.equal(add.status, 0);
+    assert.equal(JSON.parse(add.stdout).total, 1);
+    assert.equal(existsSync(join(home, "config/sourced-scan.json")), false);
+
+    const doctor = runCli("src/cli/doctor.mjs", ["--json"], home);
+    const data = JSON.parse(doctor.stdout);
+
+    assert.equal(data.discovery.companyAts.configured, true);
+    assert.equal(data.discovery.companyAts.total, 1);
+    assert.deepEqual(data.discovery.companyAts.providers, ["lever"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor reads broad search readiness from DB source config when legacy config is absent", () => {
+  const home = tempHome();
+  const env = { ...process.env, ROLESTER_HOME: home };
+  try {
+    candidateSetupInitialize({ repoRoot: ROOT, env });
+    sourceConfigPut({
+      repoRoot: ROOT,
+      env,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "HiringCafe",
+            label: "Director of IT",
+            query: "Director of IT",
+            enabled: true,
+            recency: { lastRunAt: "2026-07-03T12:00:00.000Z" },
+          },
+        ],
+      },
+    });
+
+    assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
+
+    const doctor = runCli("src/cli/doctor.mjs", ["--json"], home);
+    const data = JSON.parse(doctor.stdout);
+
+    assert.equal(data.discovery.broadSources.exists, true);
+    assert.equal(data.discovery.broadSources.valid, true);
+    assert.equal(data.discovery.broadSources.total, 1);
+    assert.equal(data.discovery.broadSources.enabled, 1);
+    assert.equal(data.discovery.broadSources.withLastRun, 1);
+    assert.deepEqual(data.discovery.broadSources.providers, ["HiringCafe"]);
+  } finally {
+    closeAll();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("searches --from-targeting refuses to persist an empty DB targeting baseline", () => {
+  const home = tempHome();
+  try {
+    const init = runRolester(["data", "candidate", "init"], home);
+    assert.equal(init.status, 0);
+
+    const result = runCli("src/cli/searches.mjs", ["--from-targeting", "--json"], home);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr || result.stdout, /role titles/i);
+    assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

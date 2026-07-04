@@ -60,6 +60,7 @@ import { mountBoardsRoutes } from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
+import { mountDiscoveryRoutes } from "./discovery-route.mjs";
 import { mountIntakeRoutes } from "./intake-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
@@ -309,6 +310,10 @@ export function createDevServer({
   // session — see chat-runtime.mjs's header comment for the long-lived
   // query()-with-streaming-input design decision.
   mountChatRoute({ addRoute, repoRoot, chatRuntime, env });
+  // App-facing supervised discovery pipeline. Shares the same chatRuntime as
+  // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to
+  // exactly one visible research-boards/discover-companies/search-jobs session.
+  mountDiscoveryRoutes({ addRoute, repoRoot, env, chatRuntime });
 
   addRoute("GET", "/chat", (_req, res) => {
     res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
@@ -524,6 +529,8 @@ export function createDevServer({
         "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
         "/api/skill/run, /api/onboard/state, /api/onboard/init, /api/onboard/resume, " +
         "/api/onboard/candidate/:name, /api/onboard/evidence-seed, /api/onboard/write-config, " +
+        "/api/onboard/quick-start, " +
+        "/api/discovery/state, /api/discovery/quick-start, /api/discovery/next, " +
         "/api/settings/ai-key, /api/settings/ai, /api/chat/start, /api/chat/events, /api/chat/message, " +
         "/api/chat/interrupt, /api/chat/close, /api/chat/by-skill, /api/chat/list, " +
         "/api/search/scan, /api/search/results, /api/search/sources, " +
@@ -866,6 +873,10 @@ Routes:
   POST /api/onboard/candidate/:name     Merge + validate + write one candidate file
   POST /api/onboard/evidence-seed       Dedupe-merge claims into candidate/evidence.yml
   POST /api/onboard/write-config        Generate config/search-sources.yml + candidate/AGENTS.md
+  POST /api/onboard/quick-start         Search-ready DB setup -> source config + discovery handoff
+  GET  /api/discovery/state             Current supervised discovery handoff state
+  POST /api/discovery/quick-start       Prepare sources and start/reuse first discovery chat
+  POST /api/discovery/next              Start/reuse the current next discovery chat
   POST /api/settings/ai-key             Store a BYOK Anthropic key in .internal/ai.env
   GET  /api/settings/ai                 { route, keyPresent } — never the key value
   POST /api/chat/start                  Start (or find the live) ingest-profile chat session (M2)
