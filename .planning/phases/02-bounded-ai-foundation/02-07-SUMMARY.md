@@ -131,11 +131,11 @@ status: complete
 - Added concrete forbidden-content scans across helper, assist, and resume-AI failure envelopes for prompt, raw model, resume, JD, candidate-fact, and page-body sentinels.
 - Preserved the final bounded-AI verification subset with no live AI credentials.
 
-## TDD Gate Compliance
+## Regression Gate Compliance
 
-- **RED:** `12225d3` - `test(02-07): add telemetry privacy regressions`
-- **GREEN:** No production GREEN commit was applicable. The new regressions passed immediately against existing production code from Plans 02-01 through 02-06, so this plan remained test-only as instructed.
-- **REFACTOR:** No refactor commit needed; Biome formatted the staged test changes during the test commit hook.
+- **Regression commit:** `12225d3` - `test(02-07): add telemetry privacy regressions`
+- **Production fix:** Not applicable. The new regressions passed against existing production code from Plans 02-01 through 02-06, so this plan remained test-only as instructed.
+- **Test cleanup:** No separate refactor commit needed; Biome formatted the staged test changes during the test commit hook.
 
 ## Task Commits
 
@@ -173,7 +173,7 @@ None - plan executed exactly as written.
 
 ## Issues Encountered
 
-- The TDD RED run did not fail because the behavior already existed from prior plans. This was investigated by the baseline run and the post-edit regression run; no production GREEN change was needed or allowed by the plan.
+- The regression baseline already passed before edits because the behavior existed from prior plans. This was investigated by the baseline run and the post-edit regression run; no production fix was needed or allowed by the plan.
 - `state.advance-plan` could not parse this project's compact `STATE.md` layout, matching prior Phase 02 close-out behavior. Other SDK handlers updated progress, metrics, decisions, session continuity, requirements, and roadmap state.
 - `roadmap.update-plan-progress 02` rewrote the five-column overview row as a four-column progress row. The row was repaired to preserve the existing ROADMAP shape while updating Phase 2 to `Complete (7/7, 2026-07-04)`.
 
