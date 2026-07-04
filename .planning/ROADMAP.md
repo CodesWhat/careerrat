@@ -8,7 +8,7 @@
 
 | Phase | Name | Goal | Requirements | Status |
 |-------|------|------|--------------|--------|
-| 1 | Decomposition Map | Classify current skill work into API, deterministic code, bounded AI, and retained skill runtime owners. | ARCH-01, ARCH-02, ARCH-03 | Pending |
+| 1 | Decomposition Map | Classify current skill work into API, deterministic code, bounded AI, and retained skill runtime owners. | ARCH-01, ARCH-02, ARCH-03 | In Progress |
 | 2 | Bounded AI Foundation | Make small structured AI routes first-class, observable, schema-validated app primitives. | AIR-01, AIR-02, AIR-03, AIR-04 | Pending |
 | 3 | Company Discovery API | Migrate `discover-companies` to AI seeds plus deterministic ATS resolution, scan, screening, confirmation, and writes. | DISC-01, DISC-02, DISC-03, DISC-04, DISC-05 | Pending |
 | 4 | Runtime Routing | Route app and agent surfaces through the cheapest correct layer while preserving full skill runs for tool-heavy workflows. | RUNT-01, RUNT-02, RUNT-03 | Pending |
@@ -23,12 +23,12 @@
 
 **Requirements:** ARCH-01, ARCH-02, ARCH-03
 
-**Plans:** 4 plans
+**Plans:** 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Create the skill decomposition inventory.
+- [x] 01-01-PLAN.md — Create the skill decomposition inventory.
 - [ ] 01-02-PLAN.md — Create the `discover-companies` target contract.
 - [ ] 01-03-PLAN.md — Create the runtime routing policy.
 

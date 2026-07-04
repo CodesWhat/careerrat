@@ -7,8 +7,8 @@
 
 ### Architecture
 
-- [ ] **ARCH-01**: Maintainer can read a skill decomposition inventory that classifies each skill step as deterministic code, bounded AI, full skill-agent run, prompt/spec, or deferred.
-- [ ] **ARCH-02**: The inventory maps each classified step to an existing or planned owner: TS module, API route, DB verb, CLI command, or retained skill runtime.
+- [x] **ARCH-01**: Maintainer can read a skill decomposition inventory that classifies each skill step as deterministic code, bounded AI, full skill-agent run, prompt/spec, or deferred.
+- [x] **ARCH-02**: The inventory maps each classified step to an existing or planned owner: TS module, API route, DB verb, CLI command, or retained skill runtime.
 - [ ] **ARCH-03**: The routing policy defines when UI, CLI, and agents should call local APIs instead of `POST /api/skill/run`.
 
 ### AI Runtime
@@ -72,8 +72,8 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| ARCH-01 | Phase 1 | Pending |
-| ARCH-02 | Phase 1 | Pending |
+| ARCH-01 | Phase 1 | Complete |
+| ARCH-02 | Phase 1 | Complete |
 | ARCH-03 | Phase 1 | Pending |
 | AIR-01 | Phase 2 | Pending |
 | AIR-02 | Phase 2 | Pending |
