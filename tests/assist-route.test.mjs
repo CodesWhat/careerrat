@@ -14,6 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
+import { suggestAssist } from "../apps/web/src/lib/api.js";
 import { buildAssistPrompt, mountAssistRoutes } from "../src/cli/assist-route.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -131,6 +132,21 @@ async function postJson(server, path, payload) {
   return { status: res.status, body };
 }
 
+function assertNoLegacySuggestionFields(body) {
+  assert.ok(!("suggestions" in body), "shared envelope must not expose top-level suggestions");
+  assert.ok(!("rationale" in body), "shared envelope must not expose top-level rationale");
+}
+
+function assertAssistLabels(body, kind, { used = true, retried = false } = {}) {
+  assert.equal(body.ai.used, used);
+  assert.equal(body.ai.skill, "assist");
+  assert.equal(body.ai.action, `suggest-${kind}`);
+  assert.equal(body.ai.operation, `assist.suggest.${kind}`);
+  assert.equal(body.ai.label, `assist:suggest-${kind}:assist.suggest.${kind}`);
+  assert.equal(body.ai.mode, "fallback");
+  assert.equal(body.ai.retried, retried);
+}
+
 after(() => {
   for (const root of cleanupRoots.splice(0)) {
     try {
@@ -189,11 +205,14 @@ test("POST /api/assist/suggest: happy path — 200 with suggestions + rationale,
       input: { titles: ["Senior Software Engineer"] },
     });
     assert.equal(status, 200);
-    assert.deepEqual(body, {
-      ok: true,
+    assert.equal(body.ok, true);
+    assert.deepEqual(body.data, {
       suggestions: ["Staff Engineer", "Principal Engineer"],
       rationale: "same level, broader scope",
     });
+    assertNoLegacySuggestionFields(body);
+    assertAssistLabels(body, "titles");
+    assert.equal(body.manual.available, true);
     assert.deepEqual(seenOptions.tools, []);
     assert.equal(seenOptions.maxTurns, 1);
     assert.ok(
@@ -218,8 +237,12 @@ test("POST /api/assist/suggest: omits rationale entirely when the model didn't r
       input: {},
     });
     assert.equal(status, 200);
-    assert.deepEqual(body, { ok: true, suggestions: ["Python", "Go"] });
-    assert.ok(!("rationale" in body));
+    assert.equal(body.ok, true);
+    assert.deepEqual(body.data, { suggestions: ["Python", "Go"] });
+    assert.ok(!("rationale" in body.data));
+    assertNoLegacySuggestionFields(body);
+    assertAssistLabels(body, "keywords");
+    assert.equal(body.manual.available, true);
   } finally {
     await closeServer(server);
   }
@@ -241,7 +264,9 @@ test("POST /api/assist/suggest: retry-then-ok — first reply malformed, second 
       input: {},
     });
     assert.equal(status, 200);
-    assert.deepEqual(body.suggestions, ["fixed"]);
+    assert.deepEqual(body.data.suggestions, ["fixed"]);
+    assertNoLegacySuggestionFields(body);
+    assertAssistLabels(body, "titles", { retried: true });
     assert.equal(callCount, 2, "loadSdk (and therefore invoke) must be called exactly twice");
   } finally {
     await closeServer(server);
@@ -260,7 +285,12 @@ test("POST /api/assist/suggest: 422s when the model never produces valid output,
     });
     assert.equal(status, 422);
     assert.equal(body.ok, false);
-    assert.match(body.error, /could not produce a valid suggestion/);
+    assert.equal(body.code, "AI_SCHEMA_INVALID");
+    assert.equal(body.manual.available, true);
+    assert.equal(body.ai.used, true);
+    assert.equal(body.ai.retried, true);
+    assertNoLegacySuggestionFields(body);
+    assert.match(body.error.message, /route schema/);
   } finally {
     await closeServer(server);
   }
@@ -276,7 +306,13 @@ test("POST /api/assist/suggest: 501s when no AI route is configured (route:'none
     });
     assert.equal(status, 501);
     assert.equal(body.ok, false);
-    assert.match(body.error, /no AI route configured/);
+    assert.equal(body.code, "NO_AI_ROUTE");
+    assert.equal(body.ai.used, false);
+    assert.equal(body.ai.skill, "assist");
+    assert.equal(body.ai.action, "suggest-titles");
+    assert.equal(body.ai.operation, "assist.suggest.titles");
+    assert.equal(body.manual.available, true);
+    assertNoLegacySuggestionFields(body);
   } finally {
     await closeServer(server);
   }
@@ -297,5 +333,50 @@ test("POST /api/assist/suggest: 400s on a bad/missing kind", async () => {
     assert.equal(missing.status, 400);
   } finally {
     await closeServer(server);
+  }
+});
+
+test("suggestAssist unwraps shared envelope data and preserves AI/manual metadata", async () => {
+  const originalFetch = globalThis.fetch;
+  const responseBody = {
+    ok: true,
+    data: { suggestions: ["Staff Engineer"], rationale: "same level" },
+    ai: {
+      used: true,
+      skill: "assist",
+      action: "suggest-titles",
+      operation: "assist.suggest.titles",
+      mode: "fallback",
+      retried: false,
+    },
+    manual: { available: true, action: "Edit targeting manually." },
+  };
+
+  globalThis.fetch = async (path, options = {}) => {
+    assert.equal(path, "/api/assist/suggest");
+    assert.equal(options.method, "POST");
+    assert.deepEqual(JSON.parse(options.body), {
+      kind: "titles",
+      input: { titles: ["Senior Software Engineer"] },
+    });
+    return new Response(JSON.stringify(responseBody), {
+      status: 200,
+      headers: { "content-type": "application/json" },
+    });
+  };
+
+  try {
+    const result = await suggestAssist("titles", {
+      titles: ["Senior Software Engineer"],
+    });
+
+    assert.deepEqual(result, {
+      suggestions: ["Staff Engineer"],
+      rationale: "same level",
+      ai: responseBody.ai,
+      manual: responseBody.manual,
+    });
+  } finally {
+    globalThis.fetch = originalFetch;
   }
 });
