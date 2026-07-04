@@ -18,6 +18,7 @@ import {
   appSetFields,
   appSetStatus,
   calendarBusyUpsert,
+  calendarWriteAppend,
   candidateApplicationLimitUpsert,
   candidateConfigGet,
   candidateConfigPatch,
@@ -25,8 +26,11 @@ import {
   candidateSetupInitialize,
   commAppendMessage,
   commMarkSent,
+  relationshipLeadSetStatus,
+  relationshipLeadUpsertBatch,
   sourcedPromote,
   sourcedUpsertBatch,
+  sourceWatermarkUpsert,
 } from "../core/db/verbs.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
@@ -308,6 +312,42 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
         throw badRequest("body.blocks must be a non-empty array");
       }
       return calendarBusyUpsert({ ...pathCtx, blocks: body.blocks, source: body.source });
+    });
+  });
+
+  addRoute("POST", "/api/data/calendar/write", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!body?.record) throw badRequest("body.record is required");
+      return calendarWriteAppend({ ...pathCtx, record: body.record });
+    });
+  });
+
+  addRoute("POST", "/api/data/source/watermark", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!body?.source && !body?.sources)
+        throw badRequest("body.source or body.sources is required");
+      return sourceWatermarkUpsert({
+        ...pathCtx,
+        source: body.source,
+        sources: body.sources,
+        at: body.at,
+      });
+    });
+  });
+
+  addRoute("POST", "/api/data/relationship/leads", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!Array.isArray(body?.leads) || body.leads.length === 0) {
+        throw badRequest("body.leads must be a non-empty array");
+      }
+      return relationshipLeadUpsertBatch({ ...pathCtx, leads: body.leads });
+    });
+  });
+
+  addRoute("POST", "/api/data/relationship/lead-status", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!body?.id || !body?.status) throw badRequest("body.id and body.status are required");
+      return relationshipLeadSetStatus({ ...pathCtx, ...body });
     });
   });
 }

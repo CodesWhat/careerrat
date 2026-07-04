@@ -12,7 +12,7 @@ export {
   appSetStatus,
   appUpsert,
 } from "./app.mjs";
-export { calendarBusyUpsert } from "./calendar.mjs";
+export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {
   candidateApplicationLimitUpsert,
   candidateArtifactExists,
@@ -32,7 +32,9 @@ export {
   intakeUpdate,
   reconcileOrphanedLaneCIntakeItems,
 } from "./intake.mjs";
+export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
 export { NotFoundError } from "./shared.mjs";
+export { sourceWatermarkUpsert } from "./source.mjs";
 export {
   companyAtsRemove,
   companyAtsUpsert,

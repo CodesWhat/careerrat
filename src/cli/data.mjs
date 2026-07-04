@@ -31,6 +31,10 @@
 //   node src/cli/data.mjs comm append-message <id> --data <json> | --data-file <path>
 //   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
 //   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+//   node src/cli/data.mjs calendar write --data <json> | --data-file <path>
+//   node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]
+//   node src/cli/data.mjs relationship leads upsert --data <json-array> | --data-file <path>
+//   node src/cli/data.mjs relationship lead set-status <id> <review|approved|rejected> [--at <iso>] [--follow-up-due <iso>] [--note <t>]
 //   node src/cli/data.mjs candidate init|get
 //   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
 //   node src/cli/data.mjs candidate evidence --data <json-array> | --data-file <path>
@@ -61,6 +65,7 @@ import {
   appSetStatus,
   appUpsert,
   calendarBusyUpsert,
+  calendarWriteAppend,
   candidateApplicationLimitUpsert,
   candidateConfigGet,
   candidateConfigPatch,
@@ -74,8 +79,11 @@ import {
   intakeList,
   intakeOne,
   intakeUpdate,
+  relationshipLeadSetStatus,
+  relationshipLeadUpsertBatch,
   sourcedPromote,
   sourcedUpsertBatch,
+  sourceWatermarkUpsert,
 } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { loadTrackerData, validateTrackerData } from "../core/tracker/tracker-data.mjs";
@@ -172,6 +180,12 @@ try {
       break;
     case "calendar":
       cmdCalendar(sub, rest);
+      break;
+    case "source":
+      cmdSource(sub, rest);
+      break;
+    case "relationship":
+      cmdRelationship(sub, rest);
       break;
     case "candidate":
       cmdCandidate(sub, rest);
@@ -395,8 +409,70 @@ function cmdCalendar(sub, _rest) {
           source: opts.source,
         })
       );
+    case "write":
+      return printResult(
+        calendarWriteAppend({
+          ...pathCtx,
+          record: readPayload("calendar write"),
+        })
+      );
     default:
       return fail(`unknown "calendar" command "${sub}". See --help.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// source <sub>
+// ---------------------------------------------------------------------------
+
+function cmdSource(sub, _rest) {
+  switch (sub) {
+    case "watermark":
+      return printResult(
+        sourceWatermarkUpsert({
+          ...pathCtx,
+          source: readPayload("source watermark"),
+          at: opts.at,
+        })
+      );
+    default:
+      return fail(`unknown "source" command "${sub}". See --help.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// relationship <sub>
+// ---------------------------------------------------------------------------
+
+function cmdRelationship(sub, rest) {
+  switch (sub) {
+    case "leads": {
+      const [action] = rest;
+      if (action !== "upsert") fail('relationship leads requires "upsert"');
+      return printResult(
+        relationshipLeadUpsertBatch({
+          ...pathCtx,
+          leads: readPayload("relationship leads upsert"),
+        })
+      );
+    }
+    case "lead": {
+      const [action, id, status] = rest;
+      if (action !== "set-status") fail('relationship lead requires "set-status"');
+      if (!id || !status) fail("relationship lead set-status requires <id> <status>");
+      return printResult(
+        relationshipLeadSetStatus({
+          ...pathCtx,
+          id,
+          status,
+          at: opts.at,
+          dueAt: opts.followUpDue,
+          note: opts.note,
+        })
+      );
+    }
+    default:
+      return fail(`unknown "relationship" command "${sub}". See --help.`);
   }
 }
 
@@ -549,6 +625,12 @@ Usage:
   node src/cli/data.mjs comm mark-sent <id> [--at <iso>] [--summary <t>]
 
   node src/cli/data.mjs calendar busy --data <json-array> | --data-file <path>
+  node src/cli/data.mjs calendar write --data <json> | --data-file <path>
+
+  node src/cli/data.mjs source watermark --data <json|json-array> | --data-file <path> [--at <iso>]
+
+  node src/cli/data.mjs relationship leads upsert --data <json-array> | --data-file <path>
+  node src/cli/data.mjs relationship lead set-status <id> <review|approved|rejected> [--at <iso>] [--follow-up-due <iso>] [--note <t>]
 
   node src/cli/data.mjs candidate init|get
   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>

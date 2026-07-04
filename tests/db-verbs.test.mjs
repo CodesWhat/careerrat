@@ -20,6 +20,7 @@ import {
   appSetStatus,
   appUpsert,
   calendarBusyUpsert,
+  calendarWriteAppend,
   candidateApplicationLimitUpsert,
   candidateArtifactPut,
   candidateConfigGet,
@@ -29,8 +30,11 @@ import {
   commAppendMessage,
   commMarkSent,
   commUpsert,
+  relationshipLeadSetStatus,
+  relationshipLeadUpsertBatch,
   sourcedPromote,
   sourcedUpsertBatch,
+  sourceWatermarkUpsert,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
@@ -85,6 +89,8 @@ function seedFixture(repoRoot) {
       company: "Initech",
       role: "Analyst",
       status: "reviewed-hold",
+      nextAction: "Find recruiter contact",
+      nextActionDue: "2030-01-02",
     },
     {
       id: "app-with-draft",
@@ -297,6 +303,17 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
       source: "calendar_read",
     })
   );
+  expectOneBump("calendarWriteAppend", () =>
+    calendarWriteAppend({
+      repoRoot,
+      record: {
+        provider: "google_calendar",
+        eventId: "event-1",
+        title: "Interview hold",
+        eventIso: "2030-01-04T14:00:00.000Z",
+      },
+    })
+  );
   expectOneBump("commUpsert", () =>
     commUpsert({
       repoRoot,
@@ -308,6 +325,32 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
       repoRoot,
       id: "comm-new",
       message: { direction: "outbound-sent", at: "2030-01-01T00:00:00.000Z" },
+    })
+  );
+  expectOneBump("relationshipLeadUpsertBatch", () =>
+    relationshipLeadUpsertBatch({
+      repoRoot,
+      leads: [
+        {
+          applicationId: "app-non-interview",
+          company: "Initech",
+          role: "Analyst",
+          name: "Jordan Lee",
+          type: "Recruiter",
+          platform: "linkedin",
+          url: "https://example.test/jordan",
+          basis: "Likely recruiting owner for the tracked role.",
+        },
+      ],
+    })
+  );
+  expectOneBump("relationshipLeadSetStatus", () =>
+    relationshipLeadSetStatus({
+      repoRoot,
+      id: "lead-initech-jordan-lee-linkedin",
+      status: "approved",
+      at: "2030-01-05T00:00:00.000Z",
+      dueAt: "2030-01-08",
     })
   );
   expectOneBump("sourcedUpsertBatch", () =>
@@ -345,6 +388,49 @@ test("activityAppend logs an activity row WITHOUT bumping meta.version or lastUp
   );
   assert.equal(activityCount(db), beforeActivity + 1, "activityAppend must still log its event");
   assert.ok(activityRow(db, result.event.id));
+});
+
+test("sourceWatermarkUpsert updates sources[] + meta.lastSweepAt without bumping freshness or logging activity", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const before = readMeta(db);
+  const beforeActivity = activityCount(db);
+
+  const result = sourceWatermarkUpsert({
+    repoRoot,
+    sources: [
+      {
+        id: "apple-mail",
+        kind: "apple-mail",
+        name: "Apple Mail",
+        lastRunAt: "2030-01-02T00:00:00.000Z",
+      },
+    ],
+    at: "2030-01-02T00:00:00.000Z",
+  });
+
+  const after = readMeta(db);
+  assert.equal(after.version, before.version, "source watermark must not bump version");
+  assert.equal(
+    after.lastUpdatedAt,
+    before.lastUpdatedAt,
+    "source watermark must not advance lastUpdatedAt"
+  );
+  assert.equal(activityCount(db), beforeActivity, "source watermark must not log activity");
+  assert.equal(result.meta.lastSweepAt, "2030-01-02T00:00:00.000Z");
+
+  const sourceRow = db.prepare("SELECT data FROM sources WHERE id = ?").get("apple-mail");
+  assert.equal(JSON.parse(sourceRow.data).lastRunAt, "2030-01-02T00:00:00.000Z");
+  const metaRow = db.prepare("SELECT last_sweep_at FROM meta WHERE id = 1").get();
+  assert.equal(metaRow.last_sweep_at, "2030-01-02T00:00:00.000Z");
+
+  const exportedTracker = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  assert.equal(exportedTracker.meta.lastSweepAt, "2030-01-02T00:00:00.000Z");
+  assert.equal(exportedTracker.sources[0].id, "apple-mail");
 });
 
 // ---------------------------------------------------------------------------
@@ -430,6 +516,178 @@ test("calendarBusyUpsert appends opaque busy blocks, dedupes provider/start/end,
   );
   assert.deepEqual(exportedTracker.calendarBusy, stored);
   assert.ok(activityRow(db, result.event.id));
+});
+
+test("calendarWriteAppend appends calendar write history, dedupes provider/event/date/title, and exports calendarWrites", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const first = calendarWriteAppend({
+    repoRoot,
+    record: {
+      provider: "google_calendar",
+      eventId: "evt-123",
+      title: "Interview hold",
+      eventIso: "2030-01-02T14:00:00.000Z",
+      summary: "Initial write.",
+    },
+  });
+  const second = calendarWriteAppend({
+    repoRoot,
+    record: {
+      provider: "google_calendar",
+      eventId: "evt-123",
+      title: "Interview hold",
+      eventIso: "2030-01-02T14:00:00.000Z",
+      summary: "Replacement write.",
+      artifactPath: "workspace/calendar/hold.ics",
+    },
+  });
+
+  assert.equal(first.count, 1);
+  assert.equal(second.count, 1);
+  const stored = readKv(db, "calendarWrites");
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].status, "written");
+  assert.equal(stored[0].summary, "Replacement write.");
+  assert.equal(stored[0].artifactPath, "workspace/calendar/hold.ics");
+  assert.match(stored[0].id, /^cal_[a-f0-9]{16}$/);
+  assert.ok(stored[0].wroteAt);
+
+  const exportedTracker = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  assert.deepEqual(exportedTracker.calendarWrites, stored);
+  assert.ok(activityRow(db, second.event.id));
+});
+
+test("relationshipLeadUpsertBatch stores review leads, dedupes company/name/platform, and clears sourcing CTAs on linked apps", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const result = relationshipLeadUpsertBatch({
+    repoRoot,
+    leads: [
+      {
+        applicationId: "app-non-interview",
+        company: "Initech",
+        role: "Analyst",
+        name: "Jordan Lee",
+        type: "Recruiter",
+        title: "Talent Partner",
+        platform: "linkedin",
+        url: "https://example.test/jordan",
+        basis: "Likely recruiting owner for the tracked role.",
+      },
+      {
+        applicationId: "app-non-interview",
+        company: "INITECH",
+        role: "Analyst",
+        name: "jordan lee",
+        platform: "linkedin",
+        basis: "Updated basis wins on duplicate.",
+      },
+    ],
+  });
+
+  assert.equal(result.count, 1);
+  assert.deepEqual(result.updatedApplications, ["app-non-interview"]);
+
+  const stored = readKv(db, "relationshipLeads");
+  assert.equal(stored.length, 1);
+  assert.equal(stored[0].id, "lead-initech-jordan-lee-linkedin");
+  assert.equal(stored[0].status, "review");
+  assert.equal(stored[0].basis, "Updated basis wins on duplicate.");
+  assert.ok(stored[0].foundAt);
+  assert.ok(stored[0].updatedAt);
+
+  const app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview").data
+  );
+  assert.equal(app.nextAction, "Review relationship leads — approve or reject in Network tab");
+  assert.equal(app.nextActionDue, null);
+
+  const exportedTracker = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  assert.deepEqual(exportedTracker.relationshipLeads, stored);
+  assert.ok(activityRow(db, result.event.id));
+});
+
+test("relationshipLeadSetStatus approves or rejects leads and updates linked app action state in the same transaction", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  relationshipLeadUpsertBatch({
+    repoRoot,
+    leads: [
+      {
+        applicationId: "app-non-interview",
+        company: "Initech",
+        role: "Analyst",
+        name: "Jordan Lee",
+        type: "Recruiter",
+        title: "Talent Partner",
+        platform: "linkedin",
+      },
+      {
+        applicationId: "app-non-interview",
+        company: "Initech",
+        role: "Analyst",
+        name: "Casey Park",
+        type: "Contact",
+        platform: "wellfound",
+      },
+    ],
+  });
+
+  const approved = relationshipLeadSetStatus({
+    repoRoot,
+    id: "lead-initech-jordan-lee-linkedin",
+    status: "approved",
+    at: "2030-01-05T00:00:00.000Z",
+    dueAt: "2030-01-08",
+  });
+  assert.equal(approved.lead.status, "approved");
+  assert.equal(approved.lead.approvedAt, "2030-01-05T00:00:00.000Z");
+
+  let app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview").data
+  );
+  assert.equal(app.nextAction, "Send outreach to Jordan Lee via email-comms");
+  assert.equal(app.nextActionDue, "2030-01-08");
+  assert.equal(app.conversations.at(-1).kind, "relationship lead approved");
+
+  const rejected = relationshipLeadSetStatus({
+    repoRoot,
+    id: "lead-initech-casey-park-wellfound",
+    status: "rejected",
+    at: "2030-01-06T00:00:00.000Z",
+    note: "Not relevant to this role.",
+  });
+  assert.equal(rejected.lead.status, "rejected");
+  assert.equal(rejected.lead.rejectedAt, "2030-01-06T00:00:00.000Z");
+
+  app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview").data
+  );
+  assert.equal(
+    app.nextAction,
+    "Send outreach to Jordan Lee via email-comms",
+    "an approved lead still exists, so rejecting another lead must not replace the outreach CTA"
+  );
+
+  const stored = readKv(db, "relationshipLeads");
+  assert.deepEqual(
+    stored.map((lead) => [lead.name, lead.status]),
+    [
+      ["Jordan Lee", "approved"],
+      ["Casey Park", "rejected"],
+    ]
+  );
 });
 
 // ---------------------------------------------------------------------------

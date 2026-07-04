@@ -82,7 +82,14 @@ async function postJson(server, path, payload) {
 function seedDb(repoRoot) {
   const sourceDir = join(repoRoot, "fixture-source");
   const applications = [
-    { id: "app-1", company: "Acme", role: "Staff Engineer", status: "reviewed-hold" },
+    {
+      id: "app-1",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      nextAction: "Find recruiter contact",
+      nextActionDue: "2030-01-01",
+    },
     { id: "app-2", company: "Globex", role: "PM", status: "interview" },
   ];
   const communications = [
@@ -504,6 +511,121 @@ test("POST /api/data/calendar/busy: 400 without blocks, 200 + persisted opaque b
     assert.equal(busy.length, 1);
     assert.equal(busy[0].label, "Busy");
     assert.equal(busy[0].source, "calendar_read");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/data/calendar/write: 400 without record, 200 + persisted calendarWrites row", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const missingRecord = await postJson(server, "/api/data/calendar/write", {});
+    assert.equal(missingRecord.status, 400);
+
+    const ok = await postJson(server, "/api/data/calendar/write", {
+      record: {
+        provider: "google_calendar",
+        eventId: "evt-1",
+        title: "Interview hold",
+        eventIso: "2030-01-02T14:00:00.000Z",
+      },
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.ok, true);
+    assert.equal(ok.body.data.count, 1);
+
+    const db = openDb({ repoRoot });
+    const writes = readKv(db, "calendarWrites");
+    assert.equal(writes.length, 1);
+    assert.equal(writes[0].provider, "google_calendar");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/data/source/watermark: updates sources[] and lastSweepAt without bumping version", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const missingSource = await postJson(server, "/api/data/source/watermark", {});
+    assert.equal(missingSource.status, 400);
+
+    const db = openDb({ repoRoot });
+    const before = db.prepare("SELECT version FROM meta WHERE id = 1").get().version;
+    const ok = await postJson(server, "/api/data/source/watermark", {
+      at: "2030-01-02T00:00:00.000Z",
+      source: {
+        id: "linkedin-messages",
+        kind: "linkedin-messages",
+        name: "LinkedIn Messages",
+        lastRunAt: "2030-01-02T00:00:00.000Z",
+      },
+    });
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.ok, true);
+    assert.equal(ok.body.meta.version, before);
+    assert.equal(ok.body.meta.lastSweepAt, "2030-01-02T00:00:00.000Z");
+
+    const source = db.prepare("SELECT data FROM sources WHERE id = ?").get("linkedin-messages");
+    assert.equal(JSON.parse(source.data).lastRunAt, "2030-01-02T00:00:00.000Z");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/data/relationship/leads and /api/data/relationship/lead-status persist Network lead state", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const missingLeads = await postJson(server, "/api/data/relationship/leads", {});
+    assert.equal(missingLeads.status, 400);
+
+    const upsert = await postJson(server, "/api/data/relationship/leads", {
+      leads: [
+        {
+          applicationId: "app-1",
+          company: "Acme",
+          role: "Staff Engineer",
+          name: "Jordan Lee",
+          type: "Recruiter",
+          platform: "linkedin",
+        },
+      ],
+    });
+    assert.equal(upsert.status, 200);
+    assert.equal(upsert.body.data.count, 1);
+
+    const db = openDb({ repoRoot });
+    let leads = readKv(db, "relationshipLeads");
+    assert.equal(leads[0].status, "review");
+    let app = JSON.parse(
+      db.prepare("SELECT data FROM applications WHERE id = ?").get("app-1").data
+    );
+    assert.equal(app.nextActionDue, null);
+
+    const missingStatus = await postJson(server, "/api/data/relationship/lead-status", {
+      id: "lead-acme-jordan-lee-linkedin",
+    });
+    assert.equal(missingStatus.status, 400);
+
+    const approved = await postJson(server, "/api/data/relationship/lead-status", {
+      id: "lead-acme-jordan-lee-linkedin",
+      status: "approved",
+      at: "2030-01-03T00:00:00.000Z",
+      dueAt: "2030-01-06",
+    });
+    assert.equal(approved.status, 200);
+    assert.equal(approved.body.data.lead.status, "approved");
+
+    leads = readKv(db, "relationshipLeads");
+    assert.equal(leads[0].status, "approved");
+    app = JSON.parse(db.prepare("SELECT data FROM applications WHERE id = ?").get("app-1").data);
+    assert.equal(app.nextAction, "Send outreach to Jordan Lee via email-comms");
+    assert.equal(app.nextActionDue, "2030-01-06");
   } finally {
     await closeServer(server);
   }
