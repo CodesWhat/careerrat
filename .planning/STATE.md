@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 01
 status: in_progress
-stopped_at: Completed 01-01-PLAN.md
-last_updated: "2026-07-04T17:59:41Z"
+stopped_at: Completed 01-02-PLAN.md
+last_updated: "2026-07-04T18:07:12.475Z"
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 25
+  completed_plans: 2
+  percent: 50
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -49,26 +49,29 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Next Steps
 
-1. Execute Phase 1 Plan 01-02: create the `discover-companies` target contract.
-2. Execute Phase 1 Plan 01-03: create the runtime routing policy.
-3. Execute Phase 1 Plan 01-04: create the decomposition-map validation test.
+1. Execute Phase 1 Plan 01-03: create the runtime routing policy.
+2. Execute Phase 1 Plan 01-04: create the decomposition-map validation test.
 
 ---
 *State initialized: 2026-07-04*
 
 ## Session
 
-**Last session:** 2026-07-04T17:59:09.377Z
-**Stopped at:** Completed 01-01-PLAN.md
-**Resume file:** .planning/phases/01-decomposition-map/01-02-PLAN.md
+**Last session:** 2026-07-04T18:07:12.467Z
+**Stopped at:** Completed 01-02-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | Phase 01-decomposition-map P01 | 40min | 1 tasks | 1 files |
+| Phase 01-decomposition-map P02 | 2min | 1 tasks | 1 files |
 
 ## Decisions
 
 - [Phase 01]: Plan 01-01 remains planning-only; runtime source under src/ was not modified. — The decomposition inventory is an architecture artifact for later implementation plans.
 - [Phase 01]: Skill runtime extraction is split into deterministic, bounded-AI, retained-runtime, prompt-spec, and deferred buckets. — This keeps future runtime work traceable to the cheapest correct owner before source changes begin.
+- [Phase 01]: Plan 01-02 remains planning-only; runtime source under src/ was not modified. — The discover-companies target contract is an architecture artifact for later implementation plans.
+- [Phase 01]: companySeedSchema output is advisory and not write-ready. — Deterministic resolver and confirmation paths own final URLs and writes.
+- [Phase 01]: Supported ATS promotion and unsupported public-page cache stay separate. — This preserves current scannable company writes while planning generic public-page extraction.
