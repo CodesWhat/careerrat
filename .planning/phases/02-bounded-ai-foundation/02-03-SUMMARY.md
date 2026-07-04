@@ -163,6 +163,7 @@ None - plan executed exactly as written.
 ## Issues Encountered
 
 - A local syntax check caught an implementation naming collision between the requested model option and fallback response model metadata before the GREEN verification run. It was corrected before commit, and the required test command passed afterward.
+- During close-out, `state.advance-plan` could not parse this project's compact `STATE.md` layout and `state.add-decision` rejected temp files outside the repo. The summary commit succeeded, then STATE/ROADMAP were repaired in a follow-up metadata commit.
 
 ## Known Stubs
 
