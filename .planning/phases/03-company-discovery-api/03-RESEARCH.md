@@ -279,7 +279,7 @@ const result = await runBoundedAI({
   env,
 });
 
-if (!result.ok && result.code === "AI_NO_ROUTE") {
+if (!result.ok && result.code === "NO_AI_ROUTE") {
   return manualSeeds.length ? { companies: manualSeeds } : noAiManualFallbackEnvelope();
 }
 ```
@@ -434,7 +434,7 @@ const STATUS_BY_CODE = {
   BAD_REQUEST: 400,
   CONFLICT: 409,
   VALIDATION_FAILED: 422,
-  AI_NO_ROUTE: 501,
+  NO_AI_ROUTE: 501,
   PROVIDER_FAILURE: 502,
 };
 ```
@@ -471,7 +471,7 @@ export const companySeedSchema = {
 };
 ```
 
-The `maxItems: 12` value is a recommended conservative default, not a locked decision; the phase context leaves exact batch size to planner discretion. [ASSUMED]
+The `maxItems: 12` value is the Phase 03 planner-pinned hard limit for seed and proposal batches. [VERIFIED: planner decision]
 
 ### Resolver Cache Record Shape
 
@@ -521,25 +521,25 @@ JSON data stored in SQLite should be checked with `json_valid(data)` when validi
 
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
-| A1 | Resolver fetches should reject localhost/private IP targets, cap redirects/timeouts, and validate post-redirect provider identity. | Common Pitfalls / Security Domain | Without these controls, a URL hint could become an SSRF-like local fetch risk. |
-| A2 | A default seed batch maximum of 12 is conservative enough for MVP planning. | Code Examples | If too small, proposal recall may be low; if too large, AI cost and scan latency rise. |
+| A1 | Resolver fetches must reject localhost/private IP targets, cap redirects at 3, cap fetches at 8000ms, and validate post-redirect provider identity. | Common Pitfalls / Security Domain | Without these controls, a URL hint could become an SSRF-like local fetch risk. |
+| A2 | Seed and proposal batches are capped at 12 items. | Code Examples / Open Questions (RESOLVED) | If too small, proposal recall may be low; if too large, AI cost and scan latency rise. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact cache TTL and refresh policy**
    - What we know: Re-resolve on explicit refresh, stale TTL, 404/403, provider change, repeated zero-job scans, failed extraction, or recorded refresh reason. [VERIFIED: .planning/phases/03-company-discovery-api/03-CONTEXT.md]
-   - What's unclear: Exact TTL durations and retry thresholds are delegated to planner discretion. [VERIFIED: .planning/phases/03-company-discovery-api/03-CONTEXT.md]
-   - Recommendation: Start with conservative TTL constants in `company-board-resolver.mjs`, covered by tests, and store `next_refresh_reason`.
+   - RESOLVED planner decision: define and test these constants in `company-board-resolver.mjs`: `RESOLUTION_CACHE_TTL_DAYS = 14`, `ZERO_JOB_REFRESH_THRESHOLD = 2`, `RESOLVER_FETCH_TIMEOUT_MS = 8000`, `RESOLVER_REDIRECT_CAP = 3`, `RESOLUTION_FAILURE_REFRESH_THRESHOLD = 2`, and `COMPANY_DISCOVERY_BATCH_MAX = 12`.
+   - RESOLVED planner decision: use this refresh reason enum across resolver cache and proposal decisions: `explicit-refresh`, `stale-ttl`, `http-403`, `http-404`, `redirect-provider-change`, `provider-change`, `zero-jobs-threshold`, `failed-extraction`, `resolver-failure-threshold`, and `manual-review`.
+   - RESOLVED planner decision: `refresh` decisions must call the resolver with `forceRefresh:true`, rescan supported ATS results when available, rerun the proposal gate, update cache/proposal state and version, and return refreshed proposal or rejection metadata without writing source config or sourced rows.
 
 2. **Proposal persistence model**
    - What we know: `GET /company-proposals` should read latest pending or cached proposal batch if persisted. [VERIFIED: .planning/phases/03-company-discovery-api/03-CONTEXT.md]
-   - What's unclear: Whether pending proposals live in a separate `company_discovery_proposals` table or inside the resolution cache payload.
-   - Recommendation: Use a small separate proposals table keyed by `proposal_batch_id`; keep resolver cache rows reusable across batches.
+   - RESOLVED planner decision: pending proposals live in a separate `company_discovery_proposals` table keyed by `proposal_batch_id`; resolver cache rows remain reusable across batches.
+   - RESOLVED planner decision: proposal records use a single camelCase API contract shared by gate and decision plans: `proposalId`, `company`, `why`, `roleFamily`, `roleSeen`, `careersUrl`, `jobBoardUrl`, `atsProvider`, `classification`, `confidenceTier`, `provenance`, `scanSummary`, `jdCapture`, `proposedAction`, `reviewReasons`, `rejectReasons`, `capturedOffers`, and `version`.
 
 3. **Minimal API verification surface**
    - What we know: Full confirmation UI is deferred. [VERIFIED: .planning/phases/03-company-discovery-api/03-CONTEXT.md]
-   - What's unclear: Whether planner wants a CLI/dev-only fixture to exercise decisions before Phase 04 UI.
-   - Recommendation: Verify with node tests and optional curl examples; do not build UI in Phase 03.
+   - RESOLVED planner decision: verify Phase 03 through `node:test` route and DB tests only; do not build a CLI/dev-only fixture or UI surface in Phase 03.
 
 ## Environment Availability
 
