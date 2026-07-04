@@ -9,7 +9,8 @@ classification_buckets:
   deferred: "Work intentionally left outside this phase or outside the first app-runtime migration slice."
 owner_types:
   existing_ts_module: "A checked-in JavaScript module that owns reusable runtime logic today."
-  planned_ts_module: "A future JavaScript module named for architectural ownership, prefixed with planned:."
+  planned_ts_module: "A future JavaScript module path, prefixed with planned:src/ or planned:scripts/."
+  planned_policy: "A named future policy, epic, consent surface, or migration slice that is not yet a module path."
   api_route: "A local HTTP route mounted by tracker-dev or a planned route module."
   db_verb: "A SQLite-backed data or source-config verb that owns durable mutations."
   cli_command: "A CLI surface used by skills, agents, or app routes."
@@ -253,12 +254,12 @@ skills:
     deferred:
       - step: "Browser-authenticated LinkedIn, Wellfound, webmail, or logged-in portal discovery."
         owner: "planned:v2-browser-surface"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-07"
       - step: "Vendor commitment for paid provider APIs before bakeoff data exists."
         owner: "planned:phase-provider-bakeoff-decision"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-10"
           - "D-11"
@@ -334,7 +335,7 @@ skills:
     deferred:
       - step: "Authenticated saved-search sources beyond explicit session-browser consent gates."
         owner: "planned:v2-authenticated-source-runner"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-07"
       - step: "Generic public career-page extractor integration into the scan offer shape."
@@ -390,7 +391,7 @@ skills:
     deferred:
       - step: "Full evaluate-job migration to deterministic and bounded assists is a v2 migration after discovery proves the pattern."
         owner: "planned:v2-evaluate-job-decomposition"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-12"
     notes:
@@ -433,12 +434,12 @@ skills:
     deferred:
       - step: "Auto-submit applications as a default product behavior."
         owner: "planned:v2-auto-submit-policy"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-07"
       - step: "Broader browser-authenticated apply surfaces outside explicit opt-in."
         owner: "planned:v2-browser-surface"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-07"
     notes:
@@ -480,7 +481,7 @@ skills:
     deferred:
       - step: "Communications migration beyond deterministic write verbs is v2 after discovery validates the decomposition pattern."
         owner: "planned:v2-comms-decomposition"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-12"
     notes:
@@ -532,7 +533,7 @@ skills:
     deferred:
       - step: "Full interview-prep migration is v2 after discovery and communications decomposition mature."
         owner: "planned:v2-interview-prep-decomposition"
-        owner_type: "planned_ts_module"
+        owner_type: "planned_policy"
         decisions:
           - "D-12"
     notes:

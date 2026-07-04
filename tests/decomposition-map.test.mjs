@@ -42,6 +42,13 @@ const requiredBuckets = [
   "prompt_spec",
   "deferred",
 ];
+const privateOwnerRoots = new Set([
+  "candidate",
+  "workspace",
+  ".internal",
+  ".rolester",
+  "tmp-skill-conversion",
+]);
 
 function assertContains(text, needle, label) {
   const normalizedText = text.replace(/\s+/g, " ");
@@ -78,30 +85,72 @@ function assertNonEmptyString(value, label) {
   assert.notEqual(value.trim(), "", `${label} must not be empty`);
 }
 
-function assertRepoOwnerPath(ownerRef, label = "owner") {
+function normalizeOwnerTarget(ownerRef) {
+  return path.posix.normalize(ownerRef.replaceAll("\\", "/")).replace(/^(\.\/)+/, "");
+}
+
+function assertSafeOwnerTarget(ownerRef, label) {
   assertNonEmptyString(ownerRef, label);
   assert.ok(!ownerRef.includes("\0"), `${label} must not contain null bytes: ${ownerRef}`);
+  const slashTarget = ownerRef.replaceAll("\\", "/");
+  assert.ok(
+    !path.posix.isAbsolute(slashTarget) && !path.win32.isAbsolute(ownerRef),
+    `${label} must be repo-relative: ${ownerRef}`
+  );
+  assert.ok(
+    !slashTarget.split("/").includes(".."),
+    `${label} must not traverse directories: ${ownerRef}`
+  );
+  const normalized = normalizeOwnerTarget(ownerRef);
+  assert.ok(normalized !== "" && normalized !== ".", `${label} target is required`);
+  assert.ok(
+    !normalized.split("/").includes(".."),
+    `${label} must not traverse directories after normalization: ${ownerRef}`
+  );
+  assert.ok(
+    !privateOwnerRoots.has(normalized.split("/")[0]),
+    `${label} must not point at private/generated workspace data: ${ownerRef}`
+  );
+  return normalized;
+}
+
+function assertRepoOwnerPath(ownerRef, label = "owner", ownerType = undefined) {
+  assertNonEmptyString(ownerRef, label);
 
   if (ownerRef.startsWith("planned:")) {
-    assert.notEqual(
-      ownerRef.slice("planned:".length).trim(),
-      "",
-      `${label} planned target is required`
+    const normalized = assertSafeOwnerTarget(
+      ownerRef.slice("planned:".length),
+      `${label} planned target`
     );
+    if (ownerType === "planned_ts_module") {
+      assert.match(
+        normalized,
+        /^(src|scripts)\/.+\.mjs$/,
+        `${label} planned_ts_module must target a future JS module path: ${ownerRef}`
+      );
+    }
+    if (ownerType === "planned_policy") {
+      assert.ok(
+        !/^(src|scripts)\//.test(normalized) && !normalized.endsWith(".mjs"),
+        `${label} planned_policy must be a policy or epic label, not a module path: ${ownerRef}`
+      );
+    }
     return;
   }
 
-  assert.ok(!path.isAbsolute(ownerRef), `${label} must be repo-relative: ${ownerRef}`);
-  assert.ok(
-    !ownerRef.split(/[\\/]/).includes(".."),
-    `${label} must not traverse directories: ${ownerRef}`
+  assert.notEqual(
+    ownerType,
+    "planned_ts_module",
+    `${label} planned_ts_module owners must use planned:: ${ownerRef}`
   );
-  assert.ok(
-    !/^(candidate|workspace|\.internal|\.rolester|tmp-skill-conversion)(\/|$)/.test(ownerRef),
-    `${label} must not point at private/generated workspace data: ${ownerRef}`
+  assert.notEqual(
+    ownerType,
+    "planned_policy",
+    `${label} planned_policy owners must use planned:: ${ownerRef}`
   );
 
-  const resolved = path.resolve(repoRoot, ownerRef);
+  const normalized = assertSafeOwnerTarget(ownerRef, label);
+  const resolved = path.resolve(repoRoot, normalized);
   assert.ok(
     resolved.startsWith(`${repoRoot}${path.sep}`),
     `${label} must stay inside the repo: ${ownerRef}`
@@ -150,8 +199,8 @@ test("each high-priority skill has required metadata and classification buckets"
       for (const [index, row] of entry[bucket].entries()) {
         const label = `${skill}.${bucket}[${index}]`;
         assertNonEmptyString(row.step, `${label}.step`);
-        assertRepoOwnerPath(row.owner, `${label}.owner`);
         assert.ok(allowedOwnerTypes.has(row.owner_type), `${label}.owner_type is invalid`);
+        assertRepoOwnerPath(row.owner, `${label}.owner`, row.owner_type);
         assertDecisionRefs(row.decisions, allowedDecisions, label);
       }
     }
