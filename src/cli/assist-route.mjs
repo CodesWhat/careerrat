@@ -24,16 +24,18 @@
 // mountAssistRoutes({addRoute, repoRoot, env, loadSdk}) registers:
 //
 //   POST /api/assist/suggest   { kind: "titles"|"keywords", input: {...} }
-//                              → { ok, suggestions: [string,...], rationale? }
-//                              501 no AI route configured (or the SDK
-//                              devDependency missing) — the standing
+//                              → shared bounded AI envelope with
+//                              { ok, data: { suggestions, rationale? }, ai, manual }
+//                              501 NO_AI_ROUTE when no AI route is configured
+//                              (or the SDK devDependency is missing) — the standing
 //                              "no key → assists degrade, never hard-block"
-//                              rule. 400 bad kind. 422 if the model never
-//                              produces valid structured output after one
-//                              retry.
+//                              rule. 400 bad kind. 422 AI_SCHEMA_INVALID if
+//                              the model never produces valid structured
+//                              output after one retry.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { BOUNDED_AI_CODES, runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import {
   buildChildEnv,
@@ -41,11 +43,23 @@ import {
   mapSdkMessage,
   writeByokUsage,
 } from "../core/ai/skill-runtime.mjs";
-import { runStructuredOneshot } from "../core/ai/structured-oneshot.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other route modules use.
 const ASSIST_SCHEMA_PATH = "config/assist-suggest.schema.json";
+const ASSIST_MANUAL = Object.freeze({
+  available: true,
+  reason: "manual-entry",
+  action: "Edit targeting fields manually.",
+});
+
+function assistLabels(kind) {
+  return {
+    skill: "assist",
+    action: `suggest-${kind}`,
+    operation: `assist.suggest.${kind}`,
+  };
+}
 
 // ---------------------------------------------------------------------------
 // Server-side prompt templates — one per kind. Kept small on purpose ("the
@@ -184,37 +198,28 @@ export function mountAssistRoutes({
 
     const input = body?.input && typeof body.input === "object" ? body.input : {};
     const skillLabel = `assist-${kind}`;
+    const labels = assistLabels(kind);
 
     async function invoke({ correction }) {
       const basePrompt = buildAssistPrompt(kind, input);
       const prompt = correction ? `${basePrompt}\n\n${correction}` : basePrompt;
-      return runBareOneshot({ prompt, repoRoot, env, skillLabel, loadSdk });
+      try {
+        return await runBareOneshot({ prompt, repoRoot, env, skillLabel, loadSdk });
+      } catch (err) {
+        if (err?.code === "SDK_NOT_INSTALLED") {
+          err.code = BOUNDED_AI_CODES.NO_AI_ROUTE;
+        }
+        throw err;
+      }
     }
 
-    let outcome;
-    try {
-      outcome = await runStructuredOneshot({ schema, maxRetries: 1, invoke });
-    } catch (err) {
-      // resolveAIRoute()/loadSdk() failures are "the AI assist isn't
-      // available" — 501 by the standing "no key → assists return 501"
-      // convention, never a hard block.
-      const status = err.code === "SDK_NOT_INSTALLED" || err.code === "NO_AI_ROUTE" ? 501 : 500;
-      sendJson(res, status, { ok: false, error: err.message });
-      return;
-    }
-
-    if (!outcome.ok) {
-      sendJson(res, 422, {
-        ok: false,
-        error: "could not produce a valid suggestion after a retry",
-      });
-      return;
-    }
-
-    sendJson(res, 200, {
-      ok: true,
-      suggestions: outcome.data.suggestions || [],
-      ...(outcome.data.rationale ? { rationale: outcome.data.rationale } : {}),
+    const result = await runBoundedAI({
+      labels,
+      schema,
+      manual: ASSIST_MANUAL,
+      maxRetries: 1,
+      invoke,
     });
+    sendJson(res, result.status, result.body);
   });
 }

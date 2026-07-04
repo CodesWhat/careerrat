@@ -143,11 +143,18 @@ export function startDiscoveryNext() {
 // produces valid structured output after one retry — both are ordinary
 // ApiError throws the caller catches and degrades on (hide/disable the
 // assist affordance), never a hard block.
-export function suggestAssist(kind, input) {
-  return apiFetch("/api/assist/suggest", {
+export async function suggestAssist(kind, input) {
+  const body = await apiFetch("/api/assist/suggest", {
     method: "POST",
     body: JSON.stringify({ kind, input }),
   });
+  const data = body?.data && typeof body.data === "object" ? body.data : {};
+  return {
+    suggestions: Array.isArray(data.suggestions) ? data.suggestions : [],
+    ...(data.rationale ? { rationale: data.rationale } : {}),
+    ...(body?.ai ? { ai: body.ai } : {}),
+    ...(body?.manual ? { manual: body.manual } : {}),
+  };
 }
 
 // GET /api/logos/search?q= — logo.dev Brand Search proxy. Always 200
