@@ -30,10 +30,10 @@ Rolester must complete job-search work locally with predictable cost: determinis
 - Phase 1 validated a skill decomposition inventory that classifies priority workflows into deterministic code, bounded structured AI, retained full-skill runtime, prompt/spec, and deferred owners.
 - Phase 1 validated a `discover-companies` target contract with AI seed schema, deterministic board resolution cache, scanner/extractor cascade, confirmation gate, write path, and bakeoff metrics.
 - Phase 1 validated a routing policy for when UI, CLI, and agents should call local APIs, DB/CLI owners, bounded AI assists, chat, or retained `POST /api/skill/run`.
+- Phase 2 validated the bounded-AI foundation: shared helper envelopes, provider-native structured-output support behind `callAI()`, bounded assist/intake/resume-AI migrations, no-AI/manual degradation, and metadata-only telemetry/privacy regressions.
 
 ### Active
 
-- [ ] Make structured AI assists the default app path for cheap bounded judgment tasks.
 - [ ] Migrate `discover-companies` from a whole-skill app action into seed-generation AI plus deterministic ATS resolution, scanning, dedupe, confirmation, and DB writes.
 - [ ] Keep `POST /api/skill/run` available only for workflows that need tool loops, long orchestration, or human-watched agent behavior.
 - [ ] Add cost and no-AI regression tests so deterministic routes cannot accidentally call a model.
@@ -71,6 +71,7 @@ The new architectural decision is to treat a skill as a product contract, not th
 | Structured AI owns candidate judgment seeds | Models are useful for "what companies might fit this profile" and reasons, but not trusted writes | Validated in Phase 1 |
 | `discover-companies` is the first migration target | It has obvious AI-vs-code boundaries and directly affects sourcing cost | Validated in Phase 1 |
 | GSD setup skips external research for now | The repo already contains the relevant direction in `ROADMAP.md`, `docs/ARCHITECTURE.md`, and current code | Completed in Phase 1 |
+| Bounded AI helpers own schemas, envelopes, no-AI degradation, and telemetry labels | Routes need one cheap structured-output contract before higher-level migrations can safely reuse AI | Validated in Phase 2 |
 
 ## Evolution
 
@@ -91,4 +92,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state
 
 ---
-*Last updated: 2026-07-04 after Phase 1 verification*
+*Last updated: 2026-07-04 after Phase 2 verification*
