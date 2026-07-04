@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 status: In Progress
-stopped_at: Completed 02-05-PLAN.md
-last_updated: "2026-07-04T22:21:37.328Z"
+stopped_at: Completed 02-06-PLAN.md
+last_updated: "2026-07-04T22:29:00.957Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 11
-  completed_plans: 9
-  percent: 82
+  completed_plans: 10
+  percent: 91
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-04T22:21:37.311Z
-**Stopped at:** Completed 02-05-PLAN.md
+**Last session:** 2026-07-04T22:29:00.889Z
+**Stopped at:** Completed 02-06-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -74,6 +74,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 02-bounded-ai-foundation P03 | 3 min | 1 tasks | 2 files |
 | Phase 02-bounded-ai-foundation P04 | 3 min | 1 tasks | 3 files |
 | Phase 02-bounded-ai-foundation P05 | 3 min | 1 tasks | 2 files |
+| Phase 02-bounded-ai-foundation P06 | 3 min | 1 tasks | 3 files |
 
 ## Decisions
 
@@ -101,3 +102,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 02-bounded-ai-foundation]: Intake classification now calls runBoundedAI() in fallback mode only after classifyDeterministically() returns null. — This preserves deterministic known-ATS shortcuts while moving model-shaped classification to the shared bounded helper.
 - [Phase 02-bounded-ai-foundation]: AI_SCHEMA_INVALID and NO_AI_ROUTE helper envelopes become existing needs-user intake classifications instead of thrown errors. — Raw paste capture stays manually actionable when schema validation exhausts or no AI route is configured.
 - [Phase 02-bounded-ai-foundation]: SDK_NOT_INSTALLED is normalized into the shared NO_AI_ROUTE degradation for intake classification. — Callers get one manual no-AI path with consistent bounded metadata.
+- [Phase 02-bounded-ai-foundation]: POST /api/onboard/resume-ai uses runBoundedAI() fallback mode while preserving the resume-extract Read-tool skill runtime adapter. — PDF/image extraction still needs local file Read, but response mapping now uses the shared bounded envelope.
+- [Phase 02-bounded-ai-foundation]: Resume-AI success transforms validated model output under body.data while extractResumeAi() unwraps that data for ResumeStep.applySeed(). — The route exposes shared ai/manual metadata without changing the onboarding review UI's seed contract.
+- [Phase 02-bounded-ai-foundation]: Only true NO_AI_ROUTE failures return 501 for resume-AI; SDK, allowlist, provider, proxy, timeout, transport, and skill-runtime failures return AI_PROVIDER_FAILED 502. — This keeps missing configuration separate from runtime/provider failures per the Phase 2 envelope policy.
