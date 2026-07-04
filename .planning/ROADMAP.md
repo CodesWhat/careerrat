@@ -23,14 +23,14 @@
 
 **Requirements:** ARCH-01, ARCH-02, ARCH-03
 
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 **Wave 1**
 
 - [x] 01-01-PLAN.md — Create the skill decomposition inventory.
 - [x] 01-02-PLAN.md — Create the `discover-companies` target contract.
-- [ ] 01-03-PLAN.md — Create the runtime routing policy.
+- [x] 01-03-PLAN.md — Create the runtime routing policy.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

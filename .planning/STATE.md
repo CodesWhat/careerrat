@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 01
 status: in_progress
-stopped_at: Completed 01-02-PLAN.md
-last_updated: "2026-07-04T18:07:12.475Z"
+stopped_at: Completed 01-03-PLAN.md
+last_updated: "2026-07-04T18:13:36.620Z"
 progress:
   total_phases: 5
   completed_phases: 0
   total_plans: 4
-  completed_plans: 2
-  percent: 50
+  completed_plans: 3
+  percent: 75
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-04T18:07:12.467Z
-**Stopped at:** Completed 01-02-PLAN.md
+**Last session:** 2026-07-04T18:13:19.370Z
+**Stopped at:** Completed 01-03-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -67,6 +67,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 |-------|------|----------|-------|
 | Phase 01-decomposition-map P01 | 40min | 1 tasks | 1 files |
 | Phase 01-decomposition-map P02 | 2min | 1 tasks | 1 files |
+| Phase 01-decomposition-map P03 | 2min | 1 tasks | 1 files |
 
 ## Decisions
 
@@ -75,3 +76,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 01]: Plan 01-02 remains planning-only; runtime source under src/ was not modified. — The discover-companies target contract is an architecture artifact for later implementation plans.
 - [Phase 01]: companySeedSchema output is advisory and not write-ready. — Deterministic resolver and confirmation paths own final URLs and writes.
 - [Phase 01]: Supported ATS promotion and unsupported public-page cache stay separate. — This preserves current scannable company writes while planning generic public-page extraction.
+- [Phase 01-decomposition-map]: Plan 01-03 remains planning-only; runtime source under src/ was not modified. — The routing policy is an architecture artifact for later implementation plans.
+- [Phase 01-decomposition-map]: UI, CLI, and agents must choose local deterministic or DB-owned routes before retained skill runtime. — This preserves the cheapest-correct route from D-02 and prevents full skill runtime overuse for deterministic scans, validation, dedupe, and writes.
+- [Phase 01-decomposition-map]: Bounded AI uses callAI() and runStructuredOneshot(); model output remains untrusted until schema and deterministic validation pass. — This preserves the D-03 boundary for judgment and ambiguity while keeping final writes deterministic.
+- [Phase 01-decomposition-map]: POST /api/skill/run is retained for allowlisted tool-heavy, long-running, or human-watched workflows only. — The full skill runtime remains available without becoming the default path for cheap app or CLI work.
