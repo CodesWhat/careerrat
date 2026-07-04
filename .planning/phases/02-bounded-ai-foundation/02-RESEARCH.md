@@ -376,22 +376,22 @@ Anthropic documents JSON outputs under `output_config.format` and says response 
 | A3 | Direct tool-less calls should prefer a `callAI()` adapter for native structured output. | Architecture Patterns | Medium; if Agent SDK query exposes a stable native structured-output option for this use case, planner can use it behind the same helper. |
 | A4 | Keep route schemas shallow and reduce optional/union-heavy fields for native mode. | Pitfalls | Medium; exact provider limits can shift, but current provider docs support this posture. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should Phase 2 migrate all current bounded routes or only add the helper plus one exemplar migration?**
+1. **RESOLVED: Should Phase 2 migrate all current bounded routes or only add the helper plus one exemplar migration?**
    - What we know: Phase decisions allow incremental migration and name assist, onboard resume-ai, and intake classification as first consumers. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
-   - What's unclear: The exact implementation slice belongs to PLAN.md. [ASSUMED]
-   - Recommendation: Plan Wave 1 helper/tests, Wave 2 migrate `assist-route`, and Wave 3 migrate `intake/classify` or `resume-ai` depending on risk. [ASSUMED]
+   - Answer reflected in plans: Phase 2 migrates the shared helper plus all three named current bounded consumers: `assist-route` in Plan 02-04, `intake/classify` in Plan 02-05, and `resume-ai` in Plan 02-06. [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-04-PLAN.md] [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-05-PLAN.md] [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-06-PLAN.md]
+   - Scope boundary: discovery company seed generation and other Phase 3 API behavior remain out of scope per the deferred ideas in CONTEXT.md. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
 
-2. **Does Phase 2 need OpenAI runtime support or only an abstraction that will not block it later?**
+2. **RESOLVED: Does Phase 2 need OpenAI runtime support or only an abstraction that will not block it later?**
    - What we know: Current runtime is Anthropic-shaped through `callAI()` and `ai-proxy`; OpenAI docs are selected as cross-provider reference. [VERIFIED: src/core/ai/call-ai.mjs] [VERIFIED: src/cli/ai-proxy.mjs] [CITED: https://developers.openai.com/api/docs/guides/structured-outputs]
-   - What's unclear: There is no locked decision to add an OpenAI provider in Phase 2. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
-   - Recommendation: Implement provider-neutral local API fields and Anthropic native adapter now; leave OpenAI adapter as a future implementation unless explicitly required. [ASSUMED]
+   - Answer reflected in plans: Phase 2 implements provider-neutral local API fields and Anthropic native structured-output request support through `callAI()` and the bounded helper. It does not add an OpenAI provider adapter in this phase because no locked decision or requirement scopes that provider implementation. [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-02-PLAN.md] [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-03-PLAN.md]
+   - Cross-provider constraint retained: app routes must call Rolester's local helper/API shape instead of encoding provider-specific request bodies, preserving D-16. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
 
-3. **Should provider failures use HTTP 500 or 502?**
+3. **RESOLVED: Should provider failures use HTTP 500 or 502?**
    - What we know: Current proxy unreachable returns 502; route-local unexpected AI failures often return 500. [VERIFIED: src/cli/ai-proxy.mjs] [VERIFIED: src/cli/assist-route.mjs]
-   - What's unclear: Phase context locks stable provider-failure code but not exact status. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
-   - Recommendation: Use a stable `AI_PROVIDER_FAILED` code and let planner choose 502 for upstream/provider/proxy transport failures and 500 for internal wrapper bugs. [ASSUMED]
+   - Answer reflected in plans: Provider, proxy, SDK, timeout, and transport failures use status 502 with `code:"AI_PROVIDER_FAILED"` and manual fallback metadata when available. Internal wrapper bugs are not classified as provider failures. [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-01-PLAN.md]
+   - Regression policy: final Phase 2 tests verify provider-failure envelopes do not expose raw prompts, raw model output, resumes, JDs, candidate facts, or page bodies. [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-07-PLAN.md]
 
 ## Environment Availability
 
