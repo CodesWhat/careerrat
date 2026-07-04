@@ -21,6 +21,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
 import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
 import { candidateConfigGet } from "../src/core/db/verbs.mjs";
@@ -463,7 +464,7 @@ describe("POST /api/onboard/resume-ai", () => {
     return { status: res.status, body };
   }
 
-  it("happy path: saves the upload, extracts on the first attempt, mirrors POST /api/onboard/resume's shape + source:'ai'", async () => {
+  it("happy path: returns the shared envelope with seed data under body.data and exact AI labels", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
     const { server } = await bootServer(repoRoot, {}, { runSkillStream });
@@ -471,14 +472,16 @@ describe("POST /api/onboard/resume-ai", () => {
       await postJson(server, "/api/onboard/init", {});
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
       assert.equal(status, 200);
-      assert.equal(body.source, "ai");
-      assert.equal(body.profileSeed.candidate.full_name, "Jane Doe");
-      assert.equal(body.profileSeed.candidate.email, "jane.doe@example.com");
-      assert.equal(body.evidenceSeed.claims.length, 1);
-      assert.equal(body.evidenceSeed.claims[0].id, "resume-001");
-      assert.equal(body.sections.experience, 1);
-      assert.equal(body.sections.skills, 2);
-      assert.deepEqual(body.targetingSeed.role_buckets, [
+      assert.equal(body.ok, true);
+      assert.equal(body.profileSeed, undefined);
+      assert.equal(body.data.source, "ai");
+      assert.equal(body.data.profileSeed.candidate.full_name, "Jane Doe");
+      assert.equal(body.data.profileSeed.candidate.email, "jane.doe@example.com");
+      assert.equal(body.data.evidenceSeed.claims.length, 1);
+      assert.equal(body.data.evidenceSeed.claims[0].id, "resume-001");
+      assert.equal(body.data.sections.experience, 1);
+      assert.equal(body.data.sections.skills, 2);
+      assert.deepEqual(body.data.targetingSeed.role_buckets, [
         {
           name: "Engineering leadership",
           priority: "primary",
@@ -491,11 +494,21 @@ describe("POST /api/onboard/resume-ai", () => {
           titles: ["Platform Engineer"],
         },
       ]);
-      assert.deepEqual(body.targetingSeed.keep_signals, [
+      assert.deepEqual(body.data.targetingSeed.keep_signals, [
         "team leadership",
         "platform architecture",
       ]);
-      assert.deepEqual(body.targetingSeed.tracked_companies, ["Stripe", "Ramp", "Linear"]);
+      assert.deepEqual(body.data.targetingSeed.tracked_companies, ["Stripe", "Ramp", "Linear"]);
+      assert.deepEqual(body.ai, {
+        used: true,
+        label: "resume-extract:resume-ai:onboard.resume-ai",
+        skill: "resume-extract",
+        action: "resume-ai",
+        operation: "onboard.resume-ai",
+        mode: "fallback",
+        retried: false,
+      });
+      assert.equal(body.manual.available, true);
 
       const uploadDir = candidatePath(repoRoot, "workspace/intake/resume-uploads");
       const saved = readdirSync(uploadDir);
@@ -525,7 +538,9 @@ describe("POST /api/onboard/resume-ai", () => {
     try {
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
       assert.equal(status, 200);
-      assert.equal(body.source, "ai");
+      assert.equal(body.ok, true);
+      assert.equal(body.data.source, "ai");
+      assert.equal(body.ai.retried, true);
       assert.equal(calls.length, 2, "invoke must be called exactly twice — one retry");
       assert.equal(calls[0].tools.length, 1);
       assert.equal(calls[0].tools[0], "Read");
@@ -537,12 +552,17 @@ describe("POST /api/onboard/resume-ai", () => {
 
   it("422s when the model never produces valid structured output, even after the retry", async () => {
     const repoRoot = buildTempRoot();
-    const runSkillStream = fakeRunSkillStream(["still not json", "still not json on retry either"]);
+    const invalidReply = "still not json on retry either";
+    const runSkillStream = fakeRunSkillStream(["still not json", invalidReply]);
     const { server } = await bootServer(repoRoot, {}, { runSkillStream });
     try {
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
       assert.equal(status, 422);
-      assert.match(body.error, /could not extract/);
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "AI_SCHEMA_INVALID");
+      assert.equal(body.manual.available, true);
+      assert.equal(body.raw, undefined);
+      assert.equal(JSON.stringify(body).includes(invalidReply), false);
     } finally {
       await closeServer(server);
     }
@@ -576,13 +596,19 @@ describe("POST /api/onboard/resume-ai", () => {
     try {
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
       assert.equal(status, 501);
-      assert.match(body.error, /no AI route configured/);
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "NO_AI_ROUTE");
+      assert.equal(body.ai.used, false);
+      assert.equal(body.ai.skill, "resume-extract");
+      assert.equal(body.ai.action, "resume-ai");
+      assert.equal(body.ai.operation, "onboard.resume-ai");
+      assert.equal(body.manual.available, true);
     } finally {
       await closeServer(server);
     }
   });
 
-  it("501s when runSkillStream rejects with SDK_NOT_INSTALLED", async () => {
+  it("502s when runSkillStream rejects with SDK_NOT_INSTALLED", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = async () => {
       const err = new Error("the claude-agent-sdk devDependency is not installed");
@@ -591,14 +617,18 @@ describe("POST /api/onboard/resume-ai", () => {
     };
     const { server } = await bootServer(repoRoot, {}, { runSkillStream });
     try {
-      const { status } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
-      assert.equal(status, 501);
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 502);
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "AI_PROVIDER_FAILED");
+      assert.equal(body.ai.used, true);
+      assert.equal(body.manual.available, true);
     } finally {
       await closeServer(server);
     }
   });
 
-  it("501s when runSkillStream rejects with SKILL_NOT_ALLOWED", async () => {
+  it("502s when runSkillStream rejects with SKILL_NOT_ALLOWED", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = async () => {
       const err = new Error("resume-extract is not in the runtime allowlist");
@@ -607,8 +637,55 @@ describe("POST /api/onboard/resume-ai", () => {
     };
     const { server } = await bootServer(repoRoot, {}, { runSkillStream });
     try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 502);
+      assert.equal(body.code, "AI_PROVIDER_FAILED");
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  for (const [code, message] of [
+    ["AI_PROVIDER_FAILED", "provider returned 500"],
+    ["AI_PROXY_FAILED", "proxy unavailable"],
+    ["AI_TIMEOUT", "provider timed out"],
+    ["AI_TRANSPORT_FAILED", "transport disconnected"],
+  ]) {
+    it(`502s with AI_PROVIDER_FAILED when runSkillStream rejects with ${code}`, async () => {
+      const repoRoot = buildTempRoot();
+      const runSkillStream = async () => {
+        const err = new Error(message);
+        err.code = code;
+        throw err;
+      };
+      const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+      try {
+        const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+        assert.equal(status, 502);
+        assert.equal(body.ok, false);
+        assert.equal(body.code, "AI_PROVIDER_FAILED");
+        assert.equal(body.ai.used, true);
+        assert.equal(body.manual.available, true);
+        assert.equal(JSON.stringify(body).includes(message), false);
+      } finally {
+        await closeServer(server);
+      }
+    });
+  }
+
+  it("keeps resume-extract constrained to the Read tool surface", async () => {
+    const repoRoot = buildTempRoot();
+    const calls = [];
+    const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY], {
+      onCall: (info) => calls.push(info),
+    });
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
       const { status } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
-      assert.equal(status, 501);
+      assert.equal(status, 200);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].skill, "resume-extract");
+      assert.deepEqual(calls[0].tools, ["Read"]);
     } finally {
       await closeServer(server);
     }
@@ -649,6 +726,66 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.match(body.error, /body is empty/);
     } finally {
       await closeServer(server);
+    }
+  });
+});
+
+describe("extractResumeAi", () => {
+  it("unwraps shared success envelope data for ResumeStep.applySeed()", async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            ok: true,
+            data: {
+              profileSeed: { candidate: { full_name: "Jane Doe" } },
+              evidenceSeed: { claims: [] },
+              sections: { experience: 1 },
+              targetingSeed: { role_buckets: [] },
+              source: "ai",
+            },
+            ai: { used: true },
+            manual: { available: true },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+
+      const result = await extractResumeAi({ name: "resume.pdf" });
+      assert.equal(result.ok, undefined);
+      assert.equal(result.source, "ai");
+      assert.equal(result.profileSeed.candidate.full_name, "Jane Doe");
+      assert.deepEqual(result.evidenceSeed.claims, []);
+      assert.equal(result.sections.experience, 1);
+      assert.deepEqual(result.targetingSeed.role_buckets, []);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  it("preserves ApiError body for shared error envelopes", async () => {
+    const originalFetch = globalThis.fetch;
+    try {
+      globalThis.fetch = async () =>
+        new Response(
+          JSON.stringify({
+            ok: false,
+            code: "AI_SCHEMA_INVALID",
+            manual: { available: true },
+          }),
+          { status: 422, headers: { "content-type": "application/json" } }
+        );
+
+      await assert.rejects(
+        () => extractResumeAi({ name: "resume.pdf" }),
+        (err) =>
+          err instanceof ApiError &&
+          err.status === 422 &&
+          err.body.code === "AI_SCHEMA_INVALID" &&
+          err.body.manual.available === true
+      );
+    } finally {
+      globalThis.fetch = originalFetch;
     }
   });
 });
