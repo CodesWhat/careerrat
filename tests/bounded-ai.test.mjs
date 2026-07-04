@@ -1,11 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  BOUNDED_AI_CODES,
-  BOUNDED_AI_MODES,
-  requireBoundedAILabels,
-  runBoundedAI,
-} from "../src/core/ai/bounded-ai.mjs";
+import * as boundedAI from "../src/core/ai/bounded-ai.mjs";
+
+const { BOUNDED_AI_CODES, BOUNDED_AI_MODES, extractAIText, requireBoundedAILabels, runBoundedAI } =
+  boundedAI;
 
 const LABELS = {
   skill: "discover-companies",
@@ -39,12 +37,28 @@ const SEED_SCHEMA = {
   },
 };
 
+const ROOT = "/tmp/rolester-test-root";
+
 function assertNoSensitiveFields(value) {
   const serialized = JSON.stringify(value);
   for (const field of ["raw", "prompt", "resume", "jd", "candidate", "bodyText"]) {
     assert.doesNotMatch(serialized, new RegExp(`"${field}"\\s*:`));
   }
 }
+
+test("extractAIText returns text from Anthropic-shaped content blocks", () => {
+  assert.equal(typeof extractAIText, "function");
+  assert.equal(
+    extractAIText([
+      { type: "tool_use", name: "ignored", input: {} },
+      { type: "text", text: '{"seeds":[]}' },
+      { type: "text", text: "\n" },
+      { type: "text", text: '{"ignored":true}' },
+    ]),
+    '{"seeds":[]}\n{"ignored":true}'
+  );
+  assert.equal(extractAIText("already text"), "already text");
+});
 
 test("requireBoundedAILabels rejects missing or blank labels before invocation", async () => {
   const cases = [
@@ -120,6 +134,56 @@ test("runBoundedAI returns a success envelope with route data and non-sensitive 
   assertNoSensitiveFields(result.body);
 });
 
+test("runBoundedAI native-preferred mode calls callAI with native output options and validates locally", async () => {
+  const calls = [];
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    structuredMode: "native-preferred",
+    call: async (options) => {
+      calls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: '{"seeds":[{"company":"Native Labs","reason":"uses agent workflows"}]}',
+          },
+        ],
+        model: "claude-native-test",
+      };
+    },
+    messages: [{ role: "user", content: "Suggest company seeds." }],
+    system: "Return company seed JSON.",
+    model: "claude-sonnet-test",
+    maxTokens: 512,
+    outputName: "company_seed_response",
+    root: ROOT,
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0], {
+    messages: [{ role: "user", content: "Suggest company seeds." }],
+    system: "Return company seed JSON.",
+    model: "claude-sonnet-test",
+    maxTokens: 512,
+    skill: LABELS.skill,
+    action: LABELS.action,
+    root: ROOT,
+    outputMode: "native",
+    outputSchema: SEED_SCHEMA,
+    outputName: "company_seed_response",
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.data, {
+    seeds: [{ company: "Native Labs", reason: "uses agent workflows" }],
+  });
+  assert.equal(result.body.ai.mode, "native");
+  assert.equal(result.body.ai.model, "claude-native-test");
+  assert.equal(result.body.ai.retried, false);
+  assertNoSensitiveFields(result.body);
+});
+
 test("runBoundedAI maps parse and schema exhaustion to a safe 422 manual envelope", async () => {
   const seenCorrections = [];
   const result = await runBoundedAI({
@@ -143,6 +207,81 @@ test("runBoundedAI maps parse and schema exhaustion to a safe 422 manual envelop
   assert.equal(result.body.ai.mode, BOUNDED_AI_MODES.fallback);
   assert.equal(result.body.ai.retried, true);
   assert.equal(result.body.manual.available, true);
+  assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI native-preferred mode locally rejects invalid native text after one retry", async () => {
+  const calls = [];
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    structuredMode: "native-preferred",
+    maxRetries: 1,
+    call: async (options) => {
+      calls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `not json with prompt/resume/jd/candidate/bodyText details ${calls.length}`,
+          },
+        ],
+        model: "claude-native-test",
+      };
+    },
+    messages: [{ role: "user", content: "Suggest company seeds." }],
+    model: "claude-sonnet-test",
+    maxTokens: 512,
+    outputName: "company_seed_response",
+    root: ROOT,
+  });
+
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].messages, [{ role: "user", content: "Suggest company seeds." }]);
+  assert.match(calls[1].messages.at(-1).content, /invalid JSON/);
+  assert.equal(result.status, 422);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.code, BOUNDED_AI_CODES.AI_SCHEMA_INVALID);
+  assert.equal(result.body.ai.mode, "native");
+  assert.equal(result.body.ai.retried, true);
+  assert.equal(result.body.ai.model, "claude-native-test");
+  assert.equal(result.body.manual.available, true);
+  assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI fallback structured mode uses invoke and does not call callAI", async () => {
+  let invoked = false;
+  let callInvoked = false;
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    structuredMode: "fallback",
+    call: async () => {
+      callInvoked = true;
+      throw new Error("call should not be used in fallback mode");
+    },
+    invoke: async ({ attempt, correction, labels }) => {
+      invoked = true;
+      assert.equal(attempt, 0);
+      assert.equal(correction, null);
+      assert.deepEqual(labels, LABELS);
+      return {
+        text: '```json\n{"seeds":[{"company":"Fallback Co","reason":"custom route"}]}\n```',
+        model: "claude-fallback-test",
+      };
+    },
+  });
+
+  assert.equal(invoked, true);
+  assert.equal(callInvoked, false);
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body.data, {
+    seeds: [{ company: "Fallback Co", reason: "custom route" }],
+  });
+  assert.equal(result.body.ai.mode, "fallback");
+  assert.equal(result.body.ai.model, "claude-fallback-test");
   assertNoSensitiveFields(result.body);
 });
 
@@ -181,6 +320,30 @@ test("runBoundedAI maps generic provider errors to a safe 502 manual envelope", 
   assert.equal(result.body.ok, false);
   assert.equal(result.body.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
   assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.manual.available, true);
+  assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI native-preferred mode maps provider failures to a safe 502 manual envelope", async () => {
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    structuredMode: "native-preferred",
+    call: async () => {
+      throw new Error("provider leaked raw prompt and resume text");
+    },
+    messages: [{ role: "user", content: "Suggest company seeds." }],
+    model: "claude-sonnet-test",
+    maxTokens: 512,
+    root: ROOT,
+  });
+
+  assert.equal(result.status, 502);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
+  assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.ai.mode, "native");
   assert.equal(result.body.manual.available, true);
   assertNoSensitiveFields(result.body);
 });
