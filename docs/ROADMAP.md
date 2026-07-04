@@ -253,18 +253,25 @@ nurse, a driver, and an engineer each bring their own config.
   that turns a pasted posting into a gate verdict, and packet generation. Your API key is
   stored locally in a permission-restricted, gitignored file, is never echoed back by any
   endpoint, and every AI feature degrades to a manual path without it.
+- **Database-backed setup and sourcing** — onboarding, settings, search setup, and the
+  sourcing sweep all read and write the local database first: setup readiness
+  (search-ready / gate-ready / apply-ready) is computed from stored facts and gates what
+  unlocks next, discovery hands off through supervised in-app agent chats, and importing a
+  legacy workspace brings its search sources along.
+- **File drops in capture** — the capture bar accepts binary files (a resume PDF, a JD
+  attachment, a screenshot), routed through the same confirm-first intake queue as pasted
+  text and links.
+- **Calendar busy blocks** — externally-sourced busy windows have a proper owning write
+  path, so scheduling can avoid double-booking in database-backed workspaces.
 
 ## In progress / up next
 
 The app-first surface is now the daily driver; current work is the follow-through:
 
-- **Finish migrating the writing skills to the data API** — a batch at a time, so every skill
-  write goes through the same verbs the UI buttons use (legacy workspaces keep working
+- **Finish migrating the writing skills to the data API** — most writing skills now go
+  through the same verbs the UI buttons use; the remaining batch is mail/message ingest,
+  calendar sync, interview prep, and relationship sourcing (legacy workspaces keep working
   unchanged).
-- **File drops in capture** — accept binary files (a resume PDF, a JD attachment) in the
-  capture bar, not just text and links.
-- **Calendar busy-block write path** — give externally-sourced busy windows a proper owning
-  verb so scheduling can avoid double-booking in database-backed workspaces.
 - **Classic dashboard parity, then retirement** — the Network and Library views (and the
   funnel diagram) still render on the classic tracker page; the app links out to them. The
   classic render path retires only once the app covers them.
