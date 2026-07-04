@@ -22,7 +22,7 @@ test("recruiter-email dispatches to Lane C: chat_skill email-comms", () => {
   assert.deepEqual(result, { lane: "C", action: "chat_skill", params: { skill: "email-comms" } });
 });
 
-test("interview-transcript dispatches to Lane C: chat_skill track-outcomes", () => {
+test("interview-transcript dispatches to Lane C: chat_skill interview-prep", () => {
   const result = resolveIntakeDispatch({
     kind: "interview-transcript",
     entities: {},
@@ -31,7 +31,7 @@ test("interview-transcript dispatches to Lane C: chat_skill track-outcomes", () 
   assert.deepEqual(result, {
     lane: "C",
     action: "chat_skill",
-    params: { skill: "track-outcomes" },
+    params: { skill: "interview-prep" },
   });
 });
 

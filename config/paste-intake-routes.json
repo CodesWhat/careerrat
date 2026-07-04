@@ -28,14 +28,14 @@
       "whatTheyPasted": "An interview invite",
       "routeTo": "`interview-prep`",
       "capturesInto": "application status + `conversations[]`",
-      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "track-outcomes" }
+      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "interview-prep" }
     },
     {
       "id": "interview-notes",
       "whatTheyPasted": "Interview notes / a transcript",
       "routeTo": "`interview-prep`",
       "capturesInto": "`conversations[]`",
-      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "track-outcomes" }
+      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "interview-prep" }
     },
     {
       "id": "status-change",
@@ -90,7 +90,7 @@
       "id": "employer-wishlist",
       "whatTheyPasted": "A wishlist of employers to target / \"find companies like X to add\"",
       "routeTo": "`discover-companies`",
-      "capturesInto": "`config/sourced-scan.json` `tracked_companies[]` (confirm-first)",
+      "capturesInto": "tracked-company source config through `rolester companies` (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) (confirm-first)",
       "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "discover-companies" }
     },
     {

@@ -28,7 +28,7 @@ export function resolveIntakeDispatch({ kind, entities = {}, trackerMatch = null
       return { lane: "C", action: "chat_skill", params: { skill: "email-comms" } };
 
     case "interview-transcript":
-      return { lane: "C", action: "chat_skill", params: { skill: "track-outcomes" } };
+      return { lane: "C", action: "chat_skill", params: { skill: "interview-prep" } };
 
     case "status-update": {
       const isUnambiguousApplicationMatch =

@@ -6,6 +6,7 @@
 //
 // Registers:
 //   POST /api/intake            capture: { text, inputKind? } -> classify pipeline
+//   POST /api/intake/upload     raw bytes, ?name=<filename> -> durable file item
 //   GET  /api/intake/list       ?status=&limit=
 //   GET  /api/intake/one        ?id=
 //   POST /api/intake/classify   { id } — re-run classification
@@ -40,6 +41,8 @@
 // resolve.mjs's own conventions) so every path here is testable without a
 // real network, SDK devDependency, or subprocess.
 
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname } from "node:path";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import {
@@ -56,9 +59,12 @@ import { resolveIntakeDispatch } from "../core/intake/dispatch.mjs";
 import { summarizeDispatch } from "../core/intake/dispatch-summary.mjs";
 import { matchTrackerRecord } from "../core/intake/match.mjs";
 import { resolveJobUrl } from "../core/intake/resolve.mjs";
-import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
+import { userPath } from "../core/paths/workspace.mjs";
+import { sanitizeUploadFilename } from "./onboard-route.mjs";
+import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap every other JSON-body route uses.
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // binary intake artifacts: PDFs/images/JDs.
 
 // A re-classify (POST /api/intake/classify) is allowed from any status short
 // of "confirmed and past it" — an item already being executed/decided is not
@@ -402,6 +408,79 @@ export function mountIntakeRoutes({
       fetchImpl,
       loadSdk,
     });
+    sendJson(res, 200, { ok: true, item: withDispatchSummary(finalItem) });
+  });
+
+  addRoute("POST", "/api/intake/upload", async (req, res) => {
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+    const name = (requestUrl.searchParams.get("name") || "").trim();
+    if (!name) {
+      sendJson(res, 400, { ok: false, error: "?name=<filename> is required" });
+      return;
+    }
+
+    try {
+      requireDb({ repoRoot, env });
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    let bytes;
+    try {
+      bytes = await readRawBodyCapped(req, MAX_UPLOAD_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { ok: false, error: err.message });
+      return;
+    }
+    if (!bytes.length) {
+      sendJson(res, 400, { ok: false, error: "request body is empty" });
+      return;
+    }
+
+    const relPath = `workspace/intake/uploads/${Date.now()}-${sanitizeUploadFilename(name)}`;
+    const absPath = userPath({ repoRoot, env }, relPath);
+    mkdirSync(dirname(absPath), { recursive: true });
+    writeFileSync(absPath, bytes);
+
+    let captured;
+    try {
+      captured = intakeCapture({ repoRoot, env, inputKind: "file", sourceFilePath: relPath });
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    const finalItem = intakeUpdate({
+      repoRoot,
+      env,
+      id: captured.id,
+      patch: {
+        status: "needs_you",
+        kind: "other",
+        classification: {
+          kind: "other",
+          entities: {
+            company: null,
+            role: null,
+            url: null,
+            statusTo: null,
+            statusNote: null,
+            contactName: null,
+            contactEmail: null,
+            interviewDate: null,
+          },
+          proposedAction: "File captured. Review it in Inbox and route it manually.",
+          confidence: 0,
+          needsUser: true,
+          needsUserReason:
+            "binary file was captured, but automatic file text extraction is not available for intake yet",
+        },
+        trackerMatch: null,
+        dispatch: null,
+      },
+    }).item;
+
     sendJson(res, 200, { ok: true, item: withDispatchSummary(finalItem) });
   });
 

@@ -56,6 +56,10 @@ function loadRoutesJson() {
   return JSON.parse(text);
 }
 
+function firstSkillFromRoute(routeTo) {
+  return routeTo.match(/`([^`]+)`/)?.[1] || null;
+}
+
 test("config/paste-intake-routes.json has the SAME NUMBER of rows as AGENTS.md's Paste Intake table", () => {
   const mdRows = parseAgentsMdTable();
   const routesDoc = loadRoutesJson();
@@ -116,5 +120,17 @@ test("every m9.kinds entry actually appears in config/intake-classify.schema.jso
         `row "${row.id}" declares m9.kind "${kind}" which is not in the classify schema's enum`
       );
     }
+  }
+});
+
+test("active Lane B/C route metadata uses the skill named by the Paste Intake route", () => {
+  const routesDoc = loadRoutesJson();
+  for (const row of routesDoc.routes) {
+    if (!["B", "C"].includes(row.m9.lane)) continue;
+    assert.equal(
+      row.m9.skill,
+      firstSkillFromRoute(row.routeTo),
+      `row "${row.id}" has m9.skill drift from its routeTo skill`
+    );
   }
 });

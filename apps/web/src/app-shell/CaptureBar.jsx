@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { Button } from "../components/Button.jsx";
 import { UploadIcon } from "../components/icons.jsx";
 import { kindLabel } from "../inbox/intake-labels.js";
-import { ApiError, createIntake } from "../lib/api.js";
+import { ApiError, createIntake, uploadIntakeFile } from "../lib/api.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 
 // CaptureBar — the M9 "docked capture bar": a persistent paste/drop/type
@@ -20,14 +20,10 @@ import { emitIntakeChanged } from "../lib/intake-events.js";
 // steps, Settings). Same scoping for drop: `onDrop` lives on this
 // component's own wrapper div, not `window`.
 //
-// File-drop honesty note: intake-route.mjs's POST /api/intake only accepts
-// `{ text, inputKind }` — unlike onboard-route.mjs's resume-ai route, M9's
-// backend has no raw-bytes upload endpoint for intake (the M9 design memo's
-// "workspace/intake/uploads/" file-drop path was scoped but not built in the
-// committed backend). Dropping a *text* file (a .txt/.md JD, a dragged link)
-// is handled here by reading it client-side and populating the textarea; a
-// PDF/image/binary drop degrades to an honest inline message rather than
-// silently doing nothing or inventing an upload call that doesn't exist.
+// Binary drops go through POST /api/intake/upload and land in Inbox as
+// capture-only file items. Dropping a *text* file (a .txt/.md JD, a dragged
+// link) is still handled client-side by reading it into the textarea, so the
+// user can inspect/edit before submitting the normal text intake path.
 export function CaptureBar() {
   const textareaRef = useRef(null);
   const [text, setText] = useState("");
@@ -73,6 +69,22 @@ export function CaptureBar() {
     }
   }
 
+  async function uploadFile(file) {
+    if (!file || submitting) return;
+    setSubmitting(true);
+    setError(null);
+    setDegradeNote(null);
+    try {
+      const { item } = await uploadIntakeFile(file);
+      setResult(item);
+      emitIntakeChanged();
+    } catch (err) {
+      setError(describeCaptureError(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   function handleKeyDown(e) {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
       e.preventDefault();
@@ -90,9 +102,7 @@ export function CaptureBar() {
     const hasText = !!e.clipboardData?.getData("text/plain");
     if (files.length && !hasText) {
       e.preventDefault();
-      setDegradeNote(
-        "Image/file pastes aren't wired up to intake yet — paste the text instead (a JD body, an email, a link)."
-      );
+      void uploadFile(files[0]);
     }
   }
 
@@ -120,9 +130,7 @@ export function CaptureBar() {
           setDegradeNote("Couldn't read that file as text — try pasting it instead.");
         }
       } else {
-        setDegradeNote(
-          `File drops aren't wired up to intake yet — "${file.name}" wasn't captured. Paste the text instead.`
-        );
+        await uploadFile(file);
       }
       return;
     }

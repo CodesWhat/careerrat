@@ -6,7 +6,15 @@
 // no real chat-runtime session pump — so Lane A/B/C execution is fully
 // observable and deterministic.
 import assert from "node:assert/strict";
-import { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -21,6 +29,7 @@ import {
   intakeUpdate,
   reconcileOrphanedLaneCIntakeItems,
 } from "../src/core/db/verbs.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -177,6 +186,16 @@ async function postJson(server, path, payload) {
   return { status: res.status, body };
 }
 
+async function postRaw(server, path, body, headers = {}) {
+  const res = await fetch(`${baseUrl(server)}${path}`, {
+    method: "POST",
+    headers,
+    body,
+  });
+  const parsed = await res.json().catch(() => ({}));
+  return { status: res.status, body: parsed };
+}
+
 function seedApp(repoRoot, app) {
   seedApps(repoRoot, [app]);
 }
@@ -230,6 +249,9 @@ test("every /api/intake route 409s with the fail-closed message when no db exist
 
     const dismiss = await postJson(server, "/api/intake/dismiss", { id: "x" });
     assert.equal(dismiss.status, 409);
+
+    const upload = await postRaw(server, "/api/intake/upload?name=jd.pdf", Buffer.from("%PDF-1.7"));
+    assert.equal(upload.status, 409);
   } finally {
     await closeServer(server);
   }
@@ -361,6 +383,41 @@ test("POST /api/intake: an ambiguous/unclassifiable paste ends at 'needs_you'", 
     assert.equal(status, 200);
     assert.equal(body.item.status, "needs_you");
     assert.equal(body.item.dispatch, null);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake/upload: captures binary files under workspace/intake/uploads and queues a needs_you item", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    const bytes = Buffer.from("%PDF-1.7\nfake pdf body\n");
+    const { status, body } = await postRaw(
+      server,
+      "/api/intake/upload?name=..%2Fprivate%20JD.pdf",
+      bytes,
+      { "content-type": "application/pdf" }
+    );
+
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.item.inputKind, "file");
+    assert.equal(body.item.status, "needs_you");
+    assert.equal(body.item.kind, "other");
+    assert.equal(body.item.rawInput, null);
+    assert.match(body.item.sourceFilePath, /^workspace\/intake\/uploads\/.+-private_JD\.pdf$/);
+    assert.equal(body.item.capturedPath, null);
+    assert.equal(body.item.dispatch, null);
+    assert.match(body.item.classification.needsUserReason, /binary file was captured/);
+
+    const savedAbsPath = userPath({ repoRoot }, body.item.sourceFilePath);
+    assert.equal(existsSync(savedAbsPath), true);
+    assert.deepEqual(readFileSync(savedAbsPath), bytes);
+
+    const stored = intakeOne({ repoRoot, id: body.item.id });
+    assert.equal(stored.sourceFilePath, body.item.sourceFilePath);
   } finally {
     await closeServer(server);
   }
