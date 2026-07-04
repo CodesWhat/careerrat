@@ -55,27 +55,66 @@ function assertContainsAll(text, needles, label) {
   }
 }
 
-function collectOwnerRefs(value, refs = []) {
-  if (Array.isArray(value)) {
-    for (const item of value) collectOwnerRefs(item, refs);
-    return refs;
-  }
-  if (!value || typeof value !== "object") return refs;
-  for (const [key, nested] of Object.entries(value)) {
-    if (key === "owner" && typeof nested === "string" && nested.trim() !== "") {
-      refs.push(nested);
-    } else {
-      collectOwnerRefs(nested, refs);
-    }
-  }
-  return refs;
-}
-
-function sectionBetween(text, startHeading, endHeading) {
+function requiredSection(text, startHeading, endHeading) {
   const start = text.indexOf(startHeading);
   assert.notEqual(start, -1, `expected section ${startHeading}`);
+  if (!endHeading) return text.slice(start);
   const end = endHeading ? text.indexOf(endHeading, start + startHeading.length) : -1;
-  return text.slice(start, end === -1 ? undefined : end);
+  assert.notEqual(end, -1, `expected section ${endHeading} after ${startHeading}`);
+  return text.slice(start, end);
+}
+
+function assertOrdered(text, phrases, label) {
+  let previous = -1;
+  for (const phrase of phrases) {
+    const next = text.indexOf(phrase);
+    assert.ok(next > previous, `${label} must contain ${phrase} in order`);
+    previous = next;
+  }
+}
+
+function assertNonEmptyString(value, label) {
+  assert.equal(typeof value, "string", `${label} must be a string`);
+  assert.notEqual(value.trim(), "", `${label} must not be empty`);
+}
+
+function assertRepoOwnerPath(ownerRef, label = "owner") {
+  assertNonEmptyString(ownerRef, label);
+  assert.ok(!ownerRef.includes("\0"), `${label} must not contain null bytes: ${ownerRef}`);
+
+  if (ownerRef.startsWith("planned:")) {
+    assert.notEqual(
+      ownerRef.slice("planned:".length).trim(),
+      "",
+      `${label} planned target is required`
+    );
+    return;
+  }
+
+  assert.ok(!path.isAbsolute(ownerRef), `${label} must be repo-relative: ${ownerRef}`);
+  assert.ok(
+    !ownerRef.split(/[\\/]/).includes(".."),
+    `${label} must not traverse directories: ${ownerRef}`
+  );
+  assert.ok(
+    !/^(candidate|workspace|\.internal|\.rolester|tmp-skill-conversion)(\/|$)/.test(ownerRef),
+    `${label} must not point at private/generated workspace data: ${ownerRef}`
+  );
+
+  const resolved = path.resolve(repoRoot, ownerRef);
+  assert.ok(
+    resolved.startsWith(`${repoRoot}${path.sep}`),
+    `${label} must stay inside the repo: ${ownerRef}`
+  );
+  assert.ok(existsSync(resolved), `${label} reference must exist: ${ownerRef}`);
+}
+
+function assertDecisionRefs(decisions, allowedDecisions, label) {
+  assert.ok(Array.isArray(decisions), `${label}.decisions must be an array`);
+  assert.ok(decisions.length > 0, `${label}.decisions must not be empty`);
+  for (const decision of decisions) {
+    assert.ok(allowedDecisions.has(decision), `${label}.decisions contains unknown ${decision}`);
+  }
 }
 
 test("skill-decomposition.yml parses and lists high-priority skills", () => {
@@ -87,29 +126,77 @@ test("skill-decomposition.yml parses and lists high-priority skills", () => {
   }
 });
 
-test("each high-priority skill has the required classification buckets", () => {
+test("each high-priority skill has required metadata and classification buckets", () => {
+  const allowedOwnerTypes = new Set(Object.keys(decomposition.owner_types ?? {}));
+  const allowedDecisions = new Set(Object.keys(decomposition.source_decisions ?? {}));
+
+  assert.deepEqual(
+    Object.keys(decomposition.classification_buckets ?? {}).sort(),
+    requiredBuckets.toSorted(),
+    "classification_buckets should declare the required bucket names"
+  );
+  assert.ok(allowedOwnerTypes.size > 0, "owner_types should be declared");
+  assert.equal(allowedDecisions.size, 14, "source_decisions should declare D-01 through D-14");
+
   for (const skill of requiredSkills) {
     const entry = decomposition.skills[skill];
+    assertRepoOwnerPath(entry.source, `${skill}.source`);
+    assert.ok(Array.isArray(entry.requirements), `${skill}.requirements must be an array`);
+    assert.ok(entry.requirements.length > 0, `${skill}.requirements must not be empty`);
+    assert.ok(Array.isArray(entry.notes), `${skill}.notes must be an array`);
+
     for (const bucket of requiredBuckets) {
       assert.ok(Array.isArray(entry[bucket]), `${skill}.${bucket} must be present as an array`);
+      for (const [index, row] of entry[bucket].entries()) {
+        const label = `${skill}.${bucket}[${index}]`;
+        assertNonEmptyString(row.step, `${label}.step`);
+        assertRepoOwnerPath(row.owner, `${label}.owner`);
+        assert.ok(allowedOwnerTypes.has(row.owner_type), `${label}.owner_type is invalid`);
+        assertDecisionRefs(row.decisions, allowedDecisions, label);
+      }
     }
   }
 });
 
-test("inventory owner references are existing repo paths or planned owners", () => {
-  const ownerRefs = collectOwnerRefs(decomposition.skills);
-  assert.ok(ownerRefs.length > 0, "expected owner references in decomposition inventory");
-
-  for (const ownerRef of ownerRefs) {
-    if (ownerRef.startsWith("planned:")) continue;
-    assert.ok(
-      existsSync(path.join(repoRoot, ownerRef)),
-      `owner reference must exist or use planned: prefix: ${ownerRef}`
-    );
-  }
-});
-
 test("discover-companies contract keeps seed, cache, cascade, and confirmation boundaries", () => {
+  assertOrdered(
+    discoverCompaniesText,
+    [
+      "## Phase Boundary",
+      "## Inputs",
+      "## AI Seed Schema",
+      "## Resolver Cache Contract",
+      "## Cheapest-First Sourcing Cascade",
+      "## Scanner And Extractor Cascade",
+      "## Proposal Gate",
+      "## Confirmation Contract",
+      "## Write Path",
+      "## Bakeoff Metrics",
+      "## Existing Code Owners",
+      "## Non-Goals",
+    ],
+    artifactPaths.discoverCompanies
+  );
+
+  const cascade = requiredSection(
+    discoverCompaniesText,
+    "## Cheapest-First Sourcing Cascade",
+    "## Scanner And Extractor Cascade"
+  );
+  assertOrdered(
+    cascade,
+    [
+      "existing DB/source config",
+      "cached company board resolution",
+      "direct ATS scanner/local scraper",
+      "free or cheap job API",
+      "targeted crawler/extractor",
+      "AI web search/extract",
+      "full skill runtime",
+    ],
+    "D-02 cheapest-first cascade"
+  );
+
   assertContainsAll(
     discoverCompaniesText,
     [
@@ -127,6 +214,7 @@ test("discover-companies contract keeps seed, cache, cascade, and confirmation b
       "last_verified_at",
       "last_scan_result",
       "failure_count",
+      "next_refresh_reason",
       "existing DB/source config",
       "cached company board resolution",
       "direct ATS scanner/local scraper",
@@ -148,9 +236,52 @@ test("discover-companies contract keeps seed, cache, cascade, and confirmation b
     ],
     artifactPaths.discoverCompanies
   );
+
+  for (let i = 1; i <= 14; i++) {
+    assertContains(
+      discoverCompaniesText,
+      `D-${String(i).padStart(2, "0")}`,
+      artifactPaths.discoverCompanies
+    );
+  }
 });
 
 test("routing policy distinguishes local APIs, DB/CLI owners, bounded AI, chat, and full skill runtime", () => {
+  assertOrdered(
+    routingPolicyText,
+    [
+      "## Phase Boundary",
+      "## Principles",
+      "## Decision Matrix",
+      "## Caller Rules",
+      "### UI",
+      "### CLI",
+      "### Agents",
+      "## Existing Route Owners",
+      "## No-AI Degradation",
+      "## Examples",
+      "## Drift Checks",
+    ],
+    artifactPaths.routingPolicy
+  );
+
+  const principles = requiredSection(routingPolicyText, "## Principles", "## Decision Matrix");
+  assertOrdered(
+    principles,
+    [
+      "Cheapest correct route first",
+      "DB/source config",
+      "cached resolution",
+      "deterministic scanners or local",
+      "cheap API lanes",
+      "targeted extractors",
+      "bounded AI",
+      "full skill runtime",
+    ],
+    "D-02 routing order"
+  );
+  assertContains(principles, "cost tier", artifactPaths.routingPolicy);
+
   assertContainsAll(
     routingPolicyText,
     [
@@ -164,19 +295,19 @@ test("routing policy distinguishes local APIs, DB/CLI owners, bounded AI, chat, 
     artifactPaths.routingPolicy
   );
 
-  const ui = sectionBetween(routingPolicyText, "### UI", "### CLI");
+  const ui = requiredSection(routingPolicyText, "### UI", "### CLI");
   assert.match(ui, /local API routes/i);
   assert.match(ui, /\/api\/data\/\*/);
   assert.match(ui, /bounded AI/i);
   assert.match(ui, /POST \/api\/skill\/run/);
 
-  const cli = sectionBetween(routingPolicyText, "### CLI", "### Agents");
+  const cli = requiredSection(routingPolicyText, "### CLI", "### Agents");
   assert.match(cli, /DB verbs and existing CLI helpers/i);
   assert.match(cli, /deterministic commands/i);
   assert.match(cli, /bounded AI/i);
   assert.match(cli, /skill or chat runtimes/i);
 
-  const agents = sectionBetween(routingPolicyText, "### Agents", "## Existing Route Owners");
+  const agents = requiredSection(routingPolicyText, "### Agents", "## Existing Route Owners");
   assert.match(agents, /deterministic route, DB verb, CLI helper, or\s+bounded AI owner/i);
   assert.match(agents, /\/api\/chat\/\*/);
   assert.match(agents, /POST \/api\/skill\/run/);
@@ -193,6 +324,10 @@ test("all Phase 1 artifacts keep the non-runtime boundary and D-01 through D-14 
 
   for (let i = 1; i <= 14; i++) {
     const decisionId = `D-${String(i).padStart(2, "0")}`;
+    assert.ok(
+      decomposition.source_decisions?.[decisionId],
+      `source_decisions missing ${decisionId}`
+    );
     assertContains(allArchitectureText, decisionId, "Phase 1 architecture artifacts");
   }
 });
