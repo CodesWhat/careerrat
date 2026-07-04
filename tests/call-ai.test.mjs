@@ -36,6 +36,16 @@ const NON_STREAM_BODY = {
   },
 };
 
+const OUTPUT_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    verdict: { type: "string" },
+    confidence: { type: "number" },
+  },
+  required: ["verdict", "confidence"],
+};
+
 function sseFixture(model) {
   const events = [
     [
@@ -193,6 +203,50 @@ test("callAI (BYOK, non-stream): hits the mock Anthropic base URL with x-api-key
   }
 });
 
+test("callAI (BYOK, native output): sends Anthropic json_schema output_config", async () => {
+  const upstream = await startMockUpstream();
+  try {
+    await callAI({
+      model: "claude-haiku-4-5",
+      messages: [{ role: "user", content: "classify" }],
+      maxTokens: 16,
+      outputMode: "native",
+      outputName: "classification",
+      outputSchema: OUTPUT_SCHEMA,
+      skill: "discover-companies",
+      action: "seed-generate",
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+    });
+
+    assert.equal(upstream.requests.length, 1);
+    const [req] = upstream.requests;
+    assert.equal(req.headers["x-api-key"], "sk-ant-test");
+    assert.equal(req.body.output_config.format.type, "json_schema");
+    assert.equal(req.body.output_config.format.name, "classification");
+    assert.deepEqual(req.body.output_config.format.schema, OUTPUT_SCHEMA);
+  } finally {
+    upstream.close();
+  }
+});
+
+test("callAI (BYOK, non-native): omits output_config when no outputSchema is provided", async () => {
+  const upstream = await startMockUpstream();
+  try {
+    await callAI({
+      model: "claude-haiku-4-5",
+      messages: [{ role: "user", content: "hi" }],
+      maxTokens: 16,
+      outputMode: "native",
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+    });
+
+    assert.equal(upstream.requests.length, 1);
+    assert.equal(Object.hasOwn(upstream.requests[0].body, "output_config"), false);
+  } finally {
+    upstream.close();
+  }
+});
+
 test("callAI (BYOK, non-stream): appends a usage_event when root is given", async () => {
   const upstream = await startMockUpstream();
   const root = tempRoot();
@@ -326,6 +380,40 @@ test("callAI (proxy path): sends Bearer token + x-rolester-* labels, never appen
     assert.equal(req.headers["x-api-key"], undefined);
 
     // The proxy is the one that meters — callAI must not also write client-side.
+    const events = readUsageEvents({ root });
+    assert.equal(events.length, 0);
+  } finally {
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("callAI (proxy path, native output): forwards json_schema body plus auth and labels", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  try {
+    await callAI({
+      model: "claude-haiku-4-5",
+      messages: [{ role: "user", content: "classify" }],
+      maxTokens: 16,
+      outputMode: "native",
+      outputName: "classification",
+      outputSchema: OUTPUT_SCHEMA,
+      skill: "discover-companies",
+      action: "seed-generate",
+      root,
+      env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "proxy-tok" },
+    });
+
+    assert.equal(upstream.requests.length, 1);
+    const [req] = upstream.requests;
+    assert.equal(req.headers.authorization, "Bearer proxy-tok");
+    assert.equal(req.headers["x-rolester-skill"], "discover-companies");
+    assert.equal(req.headers["x-rolester-action"], "seed-generate");
+    assert.equal(req.body.output_config.format.type, "json_schema");
+    assert.equal(req.body.output_config.format.name, "classification");
+    assert.deepEqual(req.body.output_config.format.schema, OUTPUT_SCHEMA);
+
     const events = readUsageEvents({ root });
     assert.equal(events.length, 0);
   } finally {
