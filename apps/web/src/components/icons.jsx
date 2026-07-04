@@ -73,6 +73,17 @@ export function LibraryIcon(props) {
   );
 }
 
+export function NetworkIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="6" cy="6" r="2.4" />
+      <circle cx="18" cy="8" r="2.4" />
+      <circle cx="10" cy="18" r="2.4" />
+      <path d="M8.3 6.9l7.4 0.7M6.8 8.2l2.4 7.5M16.6 10.1l-5 6" />
+    </Svg>
+  );
+}
+
 export function CalendarIcon(props) {
   return (
     <Svg {...props}>

@@ -5,25 +5,26 @@ import {
   InboxIcon,
   JobsIcon,
   LibraryIcon,
+  ListIcon,
+  NetworkIcon,
   OnboardingIcon,
   SettingsIcon,
 } from "../components/icons.jsx";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
-// The M7→M10 route map (see the M7 design memo's migration table + the M10
-// decisions memo's locked scope). "/", "/settings", "/onboarding", (M9)
-// "/inbox", and (M10) "/jobs"/"/calendar" are all real pages now — no more
-// stub badges. Library (and Network, which never got its own nav entry) stay
-// legacy-only per the M10 design doc §1 ("occasional-use reference tools,
-// not weekly-loop tools") — Library's item is a genuine EXTERNAL link to the
-// legacy dashboard (`/tracker`, still served by tracker-dev.mjs) rather than
-// an internal client route, since there's no SPA view backing it yet.
+// Route map: every nav item is a real SPA page served off the shared
+// GET /api/data/dashboard snapshot. Network and Library now have SPA views
+// (retirement-gate work); the Classic item stays a genuine EXTERNAL link to
+// the legacy dashboard (`/tracker`, still served by tracker-dev.mjs) until
+// the remaining retirement gates clear (Sankey + the demo bundle).
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: HomeIcon, end: true },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
   { to: "/onboarding", label: "Onboarding", icon: OnboardingIcon },
   { to: "/jobs", label: "Jobs", icon: JobsIcon },
   { to: "/calendar", label: "Calendar", icon: CalendarIcon },
+  { to: "/network", label: "Network", icon: NetworkIcon },
+  { to: "/library", label: "Library", icon: LibraryIcon },
 ];
 
 export function NavList() {
@@ -46,7 +47,7 @@ export function NavList() {
       {NAV_ITEMS.slice(3).map((item) => (
         <NavItem key={item.to} {...item} />
       ))}
-      <ExternalNavItem href="/tracker" label="Library" icon={LibraryIcon} />
+      <ExternalNavItem href="/tracker" label="Classic" icon={ListIcon} />
     </ul>
   );
 }
