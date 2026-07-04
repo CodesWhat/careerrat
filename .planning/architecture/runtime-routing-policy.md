@@ -28,7 +28,9 @@ The routing boundary is:
 1. Cheapest correct route first. Per D-02, callers must prefer existing
    DB/source config, cached resolution, deterministic scanners or local
    scrapers, cheap API lanes, targeted extractors, bounded AI, and only then the
-   full skill runtime.
+   full skill runtime. Treat this order as the cost tier ladder for routing:
+   cached/local work first, free or cheap APIs next, bounded model calls only
+   when they add judgment, and full skill runtime last.
 2. AI is for judgment and ambiguity. Per D-03, models may propose seeds, rank
    ambiguous options, summarize finite context, or resolve gaps. They must not
    own deterministic scans, URL validation, dedupe, persistence, or confirmed
