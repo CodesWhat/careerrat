@@ -263,6 +263,13 @@ nurse, a driver, and an engineer each bring their own config.
   text and links.
 - **Calendar busy blocks** — externally-sourced busy windows have a proper owning write
   path, so scheduling can avoid double-booking in database-backed workspaces.
+- **Network and Library in the app** — company relationship records (contacts and
+  conversation history behind a detail drawer) and the full evidence/story/writing-voice
+  bank (uncapped, with type/lane/family filters and search) are now first-class app views;
+  the classic dashboard remains reachable as a "Classic" link.
+- **Setup readiness on the home view** — while sourcing runs, the home view shows what's
+  still needed to unlock gating and applying (with per-item hints), and gets out of the way
+  once setup is complete.
 
 ## In progress / up next
 
@@ -272,9 +279,9 @@ The app-first surface is now the daily driver; current work is the follow-throug
   through the same verbs the UI buttons use; the remaining batch is mail/message ingest,
   calendar sync, interview prep, and relationship sourcing (legacy workspaces keep working
   unchanged).
-- **Classic dashboard parity, then retirement** — the Network and Library views (and the
-  funnel diagram) still render on the classic tracker page; the app links out to them. The
-  classic render path retires only once the app covers them.
+- **Classic dashboard retirement** — Network and Library now render in the app; what's
+  left on the classic tracker page is the funnel diagram and a final parity check on
+  activity/action state. The classic render path retires only once those are covered.
 - **Coaching loop** — turn a below-floor fit score from a verdict into a plan: name the gaps,
   suggest how to close them, re-ingest the new evidence, re-score.
 - **Desktop packaging polish** — signing/notarization and first-run experience for the
