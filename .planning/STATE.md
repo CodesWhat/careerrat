@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 status: In Progress
-stopped_at: Completed 02-04-PLAN.md
-last_updated: "2026-07-04T22:15:14.453Z"
+stopped_at: Completed 02-05-PLAN.md
+last_updated: "2026-07-04T22:21:37.328Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 11
-  completed_plans: 8
-  percent: 73
+  completed_plans: 9
+  percent: 82
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-04T22:14:46.465Z
-**Stopped at:** Completed 02-04-PLAN.md
+**Last session:** 2026-07-04T22:21:37.311Z
+**Stopped at:** Completed 02-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -73,6 +73,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 02-bounded-ai-foundation P02 | 2 min | 1 tasks | 2 files |
 | Phase 02-bounded-ai-foundation P03 | 3 min | 1 tasks | 2 files |
 | Phase 02-bounded-ai-foundation P04 | 3 min | 1 tasks | 3 files |
+| Phase 02-bounded-ai-foundation P05 | 3 min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -97,3 +98,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 02-bounded-ai-foundation]: Fallback mode remains explicit via structuredMode:"fallback" so custom invoke routes continue to use runStructuredOneshot(). — This preserves D-15 compatibility for routes that cannot use provider-native structured output yet.
 - [Phase 02-bounded-ai-foundation]: POST /api/assist/suggest now uses runBoundedAI() fallback mode around the existing tool-less runBareOneshot() path. — This preserves the cheap no-tool assist posture while moving schema retry, no-AI, and envelope behavior into the shared bounded helper.
 - [Phase 02-bounded-ai-foundation]: suggestAssist() unwraps body.data into the existing UI contract so TargetingStep.jsx stays unchanged. — The app wrapper owns envelope normalization, keeping the onboarding targeting step stable while preserving ai/manual metadata.
+- [Phase 02-bounded-ai-foundation]: Intake classification now calls runBoundedAI() in fallback mode only after classifyDeterministically() returns null. — This preserves deterministic known-ATS shortcuts while moving model-shaped classification to the shared bounded helper.
+- [Phase 02-bounded-ai-foundation]: AI_SCHEMA_INVALID and NO_AI_ROUTE helper envelopes become existing needs-user intake classifications instead of thrown errors. — Raw paste capture stays manually actionable when schema validation exhausts or no AI route is configured.
+- [Phase 02-bounded-ai-foundation]: SDK_NOT_INSTALLED is normalized into the shared NO_AI_ROUTE degradation for intake classification. — Callers get one manual no-AI path with consistent bounded metadata.
