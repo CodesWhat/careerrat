@@ -77,7 +77,7 @@ export function initOnboard() {
 }
 
 // The M1 deterministic path — .txt/.md resumes, or the paste-fallback
-// textarea any AI path (resume-ai) degrades to on 422/501.
+// textarea any AI path (resume-ai) degrades to on 422/501/502.
 export function parseResumeText(text, { save = true } = {}) {
   return apiFetch("/api/onboard/resume", {
     method: "POST",
@@ -91,8 +91,10 @@ export function parseResumeText(text, { save = true } = {}) {
 // (from a drop or a picker); its own `.type` becomes the request's
 // Content-Type, which the server ignores (it keys off the `name` query
 // param's extension, not the header). Same ApiError-on-!ok contract as
-// apiFetch, including status codes 501 (no key)/413 (too large)/422
-// (unparseable after retry)/400 (bad extension).
+// apiFetch, including status codes 501 (no key)/502 (provider/runtime
+// failure)/413 (too large)/422 (unparseable after retry)/400 (bad extension).
+// On success this unwraps the shared bounded-AI body.data envelope so
+// ResumeStep.applySeed() still receives the original seed object shape.
 export async function extractResumeAi(file) {
   const res = await fetch(`/api/onboard/resume-ai?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
@@ -108,6 +110,7 @@ export async function extractResumeAi(file) {
     }
   }
   if (!res.ok) throw new ApiError(res.status, body);
+  if (body?.ok === true && body?.data && typeof body.data === "object") return body.data;
   return body;
 }
 

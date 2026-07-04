@@ -13,8 +13,9 @@
 // at GET /onboard by tracker-dev.mjs. M8 adds exactly one AI-touching
 // route here (POST /api/onboard/resume-ai, for the PDF/image case
 // resume-parser.mjs can't handle) rather than a separate file, since it's the
-// same résumé-intake concern as the existing POST /api/onboard/resume and
-// mirrors that route's response shape byte-for-byte.
+// same résumé-intake concern as the existing POST /api/onboard/resume. The
+// route returns the shared bounded-AI envelope, while the web API wrapper
+// unwraps body.data for the wizard's existing seed shape.
 //
 // mountOnboardRoutes({ addRoute, repoRoot, env }) registers:
 //
@@ -45,9 +46,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, extname, join } from "node:path";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
+import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
-import { runStructuredOneshot } from "../core/ai/structured-oneshot.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import {
   candidateArtifactExists,
@@ -92,6 +93,16 @@ const RESUME_MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — resume text can be lon
 const RESUME_AI_MAX_BYTES = 5 * 1024 * 1024;
 const RESUME_AI_ALLOWED_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp"]);
 const RESUME_EXTRACT_SCHEMA_PATH = "config/resume-extract.schema.json";
+const RESUME_AI_LABELS = Object.freeze({
+  skill: "resume-extract",
+  action: "resume-ai",
+  operation: "onboard.resume-ai",
+});
+const RESUME_AI_MANUAL = Object.freeze({
+  available: true,
+  reason: "resume-ai-unavailable",
+  action: "paste-resume-text",
+});
 const TARGETING_PRIORITY_ALIASES = new Map([
   ["primary", "primary"],
   ["secondary", "secondary"],
@@ -457,7 +468,7 @@ export function mountOnboardRoutes({
   env = process.env,
   // Dependency-injected the same way tracker-dev.mjs's mountSkillRunRoute
   // wires runSkillStream — so POST /api/onboard/resume-ai's tests can drive
-  // a hand-rolled MOCKED runtime (happy/retry-then-ok/422/413/501) without
+  // a hand-rolled MOCKED runtime (happy/retry-then-ok/422/413/501/502) without
   // touching the real @anthropic-ai/claude-agent-sdk devDependency.
   runSkillStream = defaultRunSkillStream,
 }) {
@@ -616,14 +627,12 @@ export function mountOnboardRoutes({
   // Frozen M8 contract: the request body IS the file (no JSON envelope,
   // unlike every other route in this file) — `name` travels as a query
   // param purely so the server knows the original filename/extension.
-  // Saves under workspace/intake/resume-uploads/, then runs the new
+  // Saves under workspace/intake/resume-uploads/, then runs the
   // resume-extract skill one-shot (tools: ["Read"] only) over the embedded
   // runtime, buffers its reply, and parses/validates/retries via the shared
-  // structured-oneshot helper (src/core/ai/structured-oneshot.mjs — also
-  // used by POST /api/assist/suggest). The success response is shaped
-  // identically to POST /api/onboard/resume's above (profileSeed/
-  // evidenceSeed/sections) plus `source: "ai"`, so the wizard's review/edit
-  // UI is 100% parser-agnostic about which path produced the seed.
+  // bounded-AI fallback helper. The route keeps the Read-only skill adapter
+  // because PDF/image extraction needs local file access, while the response
+  // shape now uses the common bounded envelope.
   // -------------------------------------------------------------------------
   addRoute("POST", "/api/onboard/resume-ai", async (req, res) => {
     const requestUrl = new URL(req.url, "http://127.0.0.1");
@@ -693,41 +702,22 @@ export function mountOnboardRoutes({
       return rawText;
     }
 
-    let outcome;
-    try {
-      outcome = await runStructuredOneshot({ schema, maxRetries: 1, invoke: invokeResumeExtract });
-    } catch (err) {
-      // runSkillStream rejects (before ever calling onEvent) for a config
-      // problem — no AI route, the skill not allowlisted, or the SDK
-      // devDependency missing. Every one of those is "the AI assist isn't
-      // available," which is a 501 by the standing convention ("No API key
-      // → assists return 501") — never the generic 400 skill-run-route.mjs
-      // uses for its own SKILL_NOT_ALLOWED/NO_AI_ROUTE mapping, since this
-      // route has no not-a-skill-name/bad-request case to distinguish it
-      // from.
-      const status =
-        err.code === "SDK_NOT_INSTALLED" ||
-        err.code === "NO_AI_ROUTE" ||
-        err.code === "SKILL_NOT_ALLOWED"
-          ? 501
-          : 500;
-      sendJson(res, status, { error: err.message });
+    const outcome = await runBoundedAI({
+      labels: RESUME_AI_LABELS,
+      schema,
+      manual: RESUME_AI_MANUAL,
+      structuredMode: "fallback",
+      maxRetries: 1,
+      invoke: invokeResumeExtract,
+    });
+
+    if (!outcome.body.ok) {
+      sendJson(res, outcome.status, outcome.body);
       return;
     }
 
-    if (!outcome.ok) {
-      // Expected failure mode (the model never produced valid structured
-      // output after one retry) — the wizard's fallback is the existing
-      // paste-text textarea, keyed off this exact status per the frozen
-      // contract.
-      sendJson(res, 422, {
-        error: "could not extract a usable profile from this file after a retry",
-        raw: outcome.raw,
-      });
-      return;
-    }
-
-    const claims = (outcome.data.claims || []).map((c, i) => ({
+    const extracted = outcome.body.data || {};
+    const claims = (extracted.claims || []).map((c, i) => ({
       id: `resume-${String(i + 1).padStart(3, "0")}`,
       claim: String(c?.claim ?? ""),
       evidence: String(c?.evidence ?? ""),
@@ -747,12 +737,15 @@ export function mountOnboardRoutes({
       });
     }
 
-    sendJson(res, 200, {
-      profileSeed: { candidate: outcome.data.candidate || {} },
-      evidenceSeed: { claims },
-      sections: outcome.data.sections || {},
-      targetingSeed: normalizeTargetingSeed(outcome.data.targeting_suggestions),
-      source: "ai",
+    sendJson(res, outcome.status, {
+      ...outcome.body,
+      data: {
+        profileSeed: { candidate: extracted.candidate || {} },
+        evidenceSeed: { claims },
+        sections: extracted.sections || {},
+        targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
+        source: "ai",
+      },
     });
   });
 
