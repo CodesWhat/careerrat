@@ -194,9 +194,10 @@ test("classifyIntakeItem: a fully-resolved known-ATS URL skips AI entirely (aiSk
   assert.equal(outcome.data.entities.role, "Staff Engineer");
   assert.equal(outcome.data.needsUser, false);
   assert.equal(loadSdkCalled, false);
+  assert.equal(Object.hasOwn(outcome, "ai"), false);
 });
 
-test("classifyIntakeItem: a text input always goes through AI, even with no resolved context", async () => {
+test("classifyIntakeItem: a text input goes through bounded AI with intake labels", async () => {
   const repoRoot = tempRepo();
   let seenOptions = null;
   const outcome = await classifyIntakeItem({
@@ -210,6 +211,12 @@ test("classifyIntakeItem: a text input always goes through AI, even with no reso
   assert.equal(outcome.aiSkipped, false);
   assert.equal(outcome.ok, true);
   assert.equal(outcome.data.kind, "jd-text");
+  assert.equal(outcome.retried, false);
+  assert.equal(outcome.ai.used, true);
+  assert.equal(outcome.ai.skill, "intake");
+  assert.equal(outcome.ai.action, "classify");
+  assert.equal(outcome.ai.operation, "intake.classify");
+  assert.equal(outcome.ai.retried, false);
   assert.deepEqual(seenOptions.tools, []);
   assert.equal(seenOptions.maxTurns, 1);
 });
@@ -252,6 +259,7 @@ test("classifyIntakeItem: retry-then-ok — first reply malformed, second (corre
   });
   assert.equal(outcome.ok, true);
   assert.equal(outcome.retried, true);
+  assert.equal(outcome.ai.retried, true);
   assert.equal(outcome.data.kind, "jd-text");
   assert.equal(callCount, 2);
 });
@@ -267,6 +275,11 @@ test("classifyIntakeItem: never produces valid output even after the retry -> de
   });
   assert.equal(outcome.ok, true);
   assert.equal(outcome.retried, true);
+  assert.equal(outcome.ai.used, true);
+  assert.equal(outcome.ai.skill, "intake");
+  assert.equal(outcome.ai.action, "classify");
+  assert.equal(outcome.ai.operation, "intake.classify");
+  assert.equal(outcome.ai.retried, true);
   assert.equal(outcome.data.kind, "other");
   assert.equal(outcome.data.needsUser, true);
   assert.match(outcome.data.needsUserReason, /did not produce a valid classification/);
@@ -283,11 +296,15 @@ test("classifyIntakeItem: no AI route configured -> degrades to needs_you, never
   });
   assert.equal(outcome.ok, true);
   assert.equal(outcome.degraded, "NO_AI_ROUTE");
+  assert.equal(outcome.ai.used, false);
+  assert.equal(outcome.ai.skill, "intake");
+  assert.equal(outcome.ai.action, "classify");
+  assert.equal(outcome.ai.operation, "intake.classify");
   assert.equal(outcome.data.needsUser, true);
   assert.equal(outcome.data.kind, "other");
 });
 
-test("classifyIntakeItem: SDK devDependency missing -> degrades to needs_you, degraded:'SDK_NOT_INSTALLED'", async () => {
+test("classifyIntakeItem: SDK devDependency missing -> degrades through bounded no-AI fallback", async () => {
   const repoRoot = tempRepo();
   const outcome = await classifyIntakeItem({
     rawInput: "some paste",
@@ -301,7 +318,8 @@ test("classifyIntakeItem: SDK devDependency missing -> degrades to needs_you, de
     },
   });
   assert.equal(outcome.ok, true);
-  assert.equal(outcome.degraded, "SDK_NOT_INSTALLED");
+  assert.equal(outcome.degraded, "NO_AI_ROUTE");
+  assert.equal(outcome.ai.used, false);
   assert.equal(outcome.data.needsUser, true);
 });
 
