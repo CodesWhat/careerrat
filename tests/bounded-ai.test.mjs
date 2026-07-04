@@ -1,0 +1,186 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+  BOUNDED_AI_CODES,
+  BOUNDED_AI_MODES,
+  requireBoundedAILabels,
+  runBoundedAI,
+} from "../src/core/ai/bounded-ai.mjs";
+
+const LABELS = {
+  skill: "discover-companies",
+  action: "seed-generate",
+  operation: "company-seeds",
+};
+
+const MANUAL = {
+  available: true,
+  reason: "manual-entry",
+  action: "Enter suggestions manually.",
+};
+
+const SEED_SCHEMA = {
+  type: "object",
+  required: ["seeds"],
+  additionalProperties: false,
+  properties: {
+    seeds: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["company", "reason"],
+        additionalProperties: false,
+        properties: {
+          company: { type: "string" },
+          reason: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
+function assertNoSensitiveFields(value) {
+  const serialized = JSON.stringify(value);
+  for (const field of ["raw", "prompt", "resume", "jd", "candidate", "bodyText"]) {
+    assert.doesNotMatch(serialized, new RegExp(`"${field}"\\s*:`));
+  }
+}
+
+test("requireBoundedAILabels rejects missing or blank labels before invocation", async () => {
+  const cases = [
+    { name: "missing skill", labels: { action: "a", operation: "o" } },
+    { name: "blank skill", labels: { skill: "", action: "a", operation: "o" } },
+    { name: "whitespace skill", labels: { skill: " \n ", action: "a", operation: "o" } },
+    { name: "missing action", labels: { skill: "s", operation: "o" } },
+    { name: "blank action", labels: { skill: "s", action: "", operation: "o" } },
+    { name: "whitespace action", labels: { skill: "s", action: " \t ", operation: "o" } },
+    { name: "missing operation", labels: { skill: "s", action: "a" } },
+    { name: "blank operation", labels: { skill: "s", action: "a", operation: "" } },
+    { name: "whitespace operation", labels: { skill: "s", action: "a", operation: " \t " } },
+  ];
+
+  for (const { name, labels } of cases) {
+    assert.throws(
+      () => requireBoundedAILabels(labels),
+      (err) => err?.code === BOUNDED_AI_CODES.AI_LABELS_INVALID,
+      name
+    );
+
+    let invoked = false;
+    const result = await runBoundedAI({
+      labels,
+      schema: SEED_SCHEMA,
+      manual: MANUAL,
+      invoke: async () => {
+        invoked = true;
+        return '```json\n{"seeds":[]}\n```';
+      },
+    });
+    assert.equal(invoked, false, `${name}: invoke callback should not be called`);
+    assert.equal(result.status, 400);
+    assert.equal(result.body.ok, false);
+    assert.equal(result.body.code, BOUNDED_AI_CODES.AI_LABELS_INVALID);
+    assert.equal(result.body.ai.used, false);
+    assertNoSensitiveFields(result.body);
+  }
+});
+
+test("runBoundedAI returns a success envelope with route data and non-sensitive AI metadata", async () => {
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    invoke: async ({ attempt, correction, labels }) => {
+      assert.equal(attempt, 0);
+      assert.equal(correction, null);
+      assert.deepEqual(labels, LABELS);
+      return {
+        text: '```json\n{"seeds":[{"company":"Acme AI","reason":"agent workflow fit"}]}\n```',
+        model: "claude-haiku-4-5",
+      };
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, {
+    ok: true,
+    data: { seeds: [{ company: "Acme AI", reason: "agent workflow fit" }] },
+    ai: {
+      used: true,
+      label: "discover-companies:seed-generate:company-seeds",
+      skill: "discover-companies",
+      action: "seed-generate",
+      operation: "company-seeds",
+      mode: BOUNDED_AI_MODES.fallback,
+      retried: false,
+      model: "claude-haiku-4-5",
+    },
+    manual: MANUAL,
+  });
+  assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI maps parse and schema exhaustion to a safe 422 manual envelope", async () => {
+  const seenCorrections = [];
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    maxRetries: 1,
+    invoke: async ({ attempt, correction }) => {
+      seenCorrections.push(correction);
+      return `not json with prompt/resume/jd/candidate/bodyText details (attempt ${attempt})`;
+    },
+  });
+
+  assert.equal(seenCorrections.length, 2);
+  assert.equal(seenCorrections[0], null);
+  assert.match(seenCorrections[1], /invalid JSON/);
+  assert.equal(result.status, 422);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.code, BOUNDED_AI_CODES.AI_SCHEMA_INVALID);
+  assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.ai.mode, BOUNDED_AI_MODES.fallback);
+  assert.equal(result.body.ai.retried, true);
+  assert.equal(result.body.manual.available, true);
+  assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI maps no-AI route errors to a 501 manual envelope without marking AI used", async () => {
+  const err = new Error("no AI route configured: set ANTHROPIC_API_KEY");
+  err.code = BOUNDED_AI_CODES.NO_AI_ROUTE;
+
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    invoke: async () => {
+      throw err;
+    },
+  });
+
+  assert.equal(result.status, 501);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.code, BOUNDED_AI_CODES.NO_AI_ROUTE);
+  assert.equal(result.body.ai.used, false);
+  assert.equal(result.body.manual.available, true);
+  assertNoSensitiveFields(result.body);
+});
+
+test("runBoundedAI maps generic provider errors to a safe 502 manual envelope", async () => {
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    invoke: async () => {
+      throw new Error("upstream leaked raw prompt and resume text");
+    },
+  });
+
+  assert.equal(result.status, 502);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
+  assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.manual.available, true);
+  assertNoSensitiveFields(result.body);
+});
