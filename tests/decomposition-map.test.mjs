@@ -50,6 +50,7 @@ const privateOwnerRoots = new Set([
   ".rolester",
   "tmp-skill-conversion",
 ]);
+const plannedCapableOwnerTypes = new Set(["planned_ts_module", "planned_policy", "api_route"]);
 
 function assertContains(text, needle, label) {
   const normalizedText = text.replace(/\s+/g, " ");
@@ -137,15 +138,19 @@ function assertRepoOwnerPath(ownerRef, label = "owner", ownerType = undefined) {
   assertNonEmptyString(ownerRef, label);
 
   if (ownerRef.startsWith("planned:")) {
+    assert.ok(
+      plannedCapableOwnerTypes.has(ownerType),
+      `${label} planned owners must use a planned-capable owner_type: ${ownerRef}`
+    );
     const normalized = assertSafeOwnerTarget(
       ownerRef.slice("planned:".length),
       `${label} planned target`
     );
-    if (ownerType === "planned_ts_module") {
+    if (ownerType === "planned_ts_module" || ownerType === "api_route") {
       assert.match(
         normalized,
         /^(src|scripts)\/.+\.mjs$/,
-        `${label} planned_ts_module must target a future JS module path: ${ownerRef}`
+        `${label} planned module owner must target a future JS module path: ${ownerRef}`
       );
     }
     if (ownerType === "planned_policy") {
@@ -178,6 +183,26 @@ function assertRepoOwnerPath(ownerRef, label = "owner", ownerType = undefined) {
   );
   assert.ok(existsSync(resolved), `${label} reference must exist: ${ownerRef}`);
 }
+
+test("owner validation enforces planned owner type semantics", () => {
+  assert.throws(
+    () => assertRepoOwnerPath("planned:src/core/future.mjs", "bad owner", "existing_ts_module"),
+    /planned-capable owner_type/
+  );
+  assert.throws(
+    () => assertRepoOwnerPath("planned:src/core/future.mjs", "bad policy", "planned_policy"),
+    /not a file path/
+  );
+  assert.doesNotThrow(() =>
+    assertRepoOwnerPath("planned:src/core/future.mjs", "future module", "planned_ts_module")
+  );
+  assert.doesNotThrow(() =>
+    assertRepoOwnerPath("planned:src/cli/future-route.mjs", "future route", "api_route")
+  );
+  assert.doesNotThrow(() =>
+    assertRepoOwnerPath("planned:v2-browser-surface", "future policy", "planned_policy")
+  );
+});
 
 function assertDecisionRefs(decisions, allowedDecisions, label) {
   assert.ok(Array.isArray(decisions), `${label}.decisions must be an array`);
