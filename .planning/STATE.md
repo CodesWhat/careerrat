@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 02
 status: In Progress
-stopped_at: Completed 02-03-PLAN.md
-last_updated: "2026-07-04T22:08:13.024Z"
+stopped_at: Completed 02-04-PLAN.md
+last_updated: "2026-07-04T22:15:14.453Z"
 progress:
   total_phases: 5
   completed_phases: 1
   total_plans: 11
-  completed_plans: 7
-  percent: 64
+  completed_plans: 8
+  percent: 73
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-04T22:08:13.014Z
-**Stopped at:** Completed 02-03-PLAN.md
+**Last session:** 2026-07-04T22:14:46.465Z
+**Stopped at:** Completed 02-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -72,6 +72,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 02-bounded-ai-foundation P01 | 3 min | 1 tasks | 2 files |
 | Phase 02-bounded-ai-foundation P02 | 2 min | 1 tasks | 2 files |
 | Phase 02-bounded-ai-foundation P03 | 3 min | 1 tasks | 2 files |
+| Phase 02-bounded-ai-foundation P04 | 3 min | 1 tasks | 3 files |
 
 ## Decisions
 
@@ -94,3 +95,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 02-bounded-ai-foundation]: runBoundedAI() treats provider-native structured output as a reliability optimization, not a trust boundary; native responses still pass through parseStructuredJson(). — This preserves D-14 and keeps Rolester local validation as the final boundary before route data is exposed.
 - [Phase 02-bounded-ai-foundation]: Native-preferred mode calls callAI() or an injected call seam with outputMode:"native" and outputSchema while routes keep provider-specific request bodies out of their code. — This preserves D-16 by keeping native provider request details inside the helper/callAI boundary.
 - [Phase 02-bounded-ai-foundation]: Fallback mode remains explicit via structuredMode:"fallback" so custom invoke routes continue to use runStructuredOneshot(). — This preserves D-15 compatibility for routes that cannot use provider-native structured output yet.
+- [Phase 02-bounded-ai-foundation]: POST /api/assist/suggest now uses runBoundedAI() fallback mode around the existing tool-less runBareOneshot() path. — This preserves the cheap no-tool assist posture while moving schema retry, no-AI, and envelope behavior into the shared bounded helper.
+- [Phase 02-bounded-ai-foundation]: suggestAssist() unwraps body.data into the existing UI contract so TargetingStep.jsx stays unchanged. — The app wrapper owns envelope normalization, keeping the onboarding targeting step stable while preserving ai/manual metadata.

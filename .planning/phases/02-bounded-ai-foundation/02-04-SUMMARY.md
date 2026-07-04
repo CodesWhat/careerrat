@@ -166,7 +166,8 @@ None - plan executed exactly as written.
 
 ## Issues Encountered
 
-None.
+- `state.advance-plan` could not parse this project's compact `STATE.md` layout, matching the issue documented during Plan 02-03 close-out. Other SDK handlers updated progress, metrics, decisions, and session continuity.
+- `roadmap.update-plan-progress 02` rewrote the five-column overview row as a four-column progress table row. The row was repaired to preserve the existing ROADMAP shape while updating Phase 2 to `In Progress (4/7)`.
 
 ## Known Stubs
 
