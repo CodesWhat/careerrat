@@ -8,7 +8,7 @@
 
 | Phase | Name | Goal | Requirements | Status |
 |-------|------|------|--------------|--------|
-| 1 | Decomposition Map | Classify current skill work into API, deterministic code, bounded AI, and retained skill runtime owners. | ARCH-01, ARCH-02, ARCH-03 | In Progress |
+| 1 | Decomposition Map | Classify current skill work into API, deterministic code, bounded AI, and retained skill runtime owners. | ARCH-01, ARCH-02, ARCH-03 | Complete (4/4, 2026-07-04) |
 | 2 | Bounded AI Foundation | Make small structured AI routes first-class, observable, schema-validated app primitives. | AIR-01, AIR-02, AIR-03, AIR-04 | Pending |
 | 3 | Company Discovery API | Migrate `discover-companies` to AI seeds plus deterministic ATS resolution, scan, screening, confirmation, and writes. | DISC-01, DISC-02, DISC-03, DISC-04, DISC-05 | Pending |
 | 4 | Runtime Routing | Route app and agent surfaces through the cheapest correct layer while preserving full skill runs for tool-heavy workflows. | RUNT-01, RUNT-02, RUNT-03 | Pending |
@@ -23,7 +23,7 @@
 
 **Requirements:** ARCH-01, ARCH-02, ARCH-03
 
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -34,7 +34,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-04-PLAN.md — Create the decomposition-map validation test.
+- [x] 01-04-PLAN.md — Create the decomposition-map validation test.
 
 **Success Criteria**:
 
@@ -128,4 +128,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-07-04*
-*Last updated: 2026-07-04 after initialization*
+*Last updated: 2026-07-04 after Phase 1 Plan 01-04*
