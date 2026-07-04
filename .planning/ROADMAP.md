@@ -23,6 +23,14 @@
 
 **Requirements:** ARCH-01, ARCH-02, ARCH-03
 
+**Plans:** 4 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Create the skill decomposition inventory.
+- [ ] 01-02-PLAN.md — Create the `discover-companies` target contract.
+- [ ] 01-03-PLAN.md — Create the runtime routing policy.
+- [ ] 01-04-PLAN.md — Create the decomposition-map validation test.
+
 **Success Criteria**:
 1. A project-local decomposition artifact lists each high-priority skill and its deterministic, bounded-AI, full-skill, and deferred pieces.
 2. `discover-companies` has a detailed target contract that names its AI seed schema, deterministic resolver, scanner, confirmation, and write path.
