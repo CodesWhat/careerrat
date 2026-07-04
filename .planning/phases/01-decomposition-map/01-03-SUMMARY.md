@@ -43,6 +43,7 @@ key_decisions:
   - UI, CLI, and agents must choose local deterministic or DB-owned routes before retained skill runtime.
   - Bounded AI uses callAI() and runStructuredOneshot(); model output remains untrusted until schema and deterministic validation pass.
   - POST /api/skill/run is retained for allowlisted tool-heavy, long-running, or human-watched workflows only.
+  - Post-wave validation added explicit cost tier wording to the D-02 route-order principle.
 requirements-completed:
   - ARCH-03
 requirements_completed:
@@ -95,12 +96,14 @@ Planning-only runtime routing policy for UI, CLI, and agents that prefers local 
 - Added caller-specific rules for UI, CLI, and agents.
 - Referenced the current route/runtime owners for `/api/search/scan`, `/api/discovery/quick-start`, `/api/discovery/next`, `/api/chat/*`, and `POST /api/skill/run`.
 - Preserved the D-02 cheapest-correct-route order, D-03 bounded-AI posture, and D-12 skill-files-as-contracts boundary.
+- Added explicit cost tier wording after the wave spot-check found the stricter validation strategy expected that phrase.
 
 ## Task Commits
 
 Each task was committed atomically:
 
 1. **Task 1: Define runtime route selection policy** - `4af4848` (docs)
+2. **Post-wave validation fix: Add cost tier routing language** - `13f03f2` (docs)
 
 ## Requirements Completed
 
@@ -128,6 +131,7 @@ Each task was committed atomically:
 | `test -f tests/decomposition-map.test.mjs && node --test tests/decomposition-map.test.mjs || printf ...` | SKIP: `tests/decomposition-map.test.mjs` is created by Plan 01-04, so this later-phase verification is not available yet. |
 | Stub scan for TODO/FIXME/placeholder/empty UI-flow values | PASS: no matches in the created artifact. |
 | Commit hook structure guards | PASS |
+| Post-wave strict policy check for `cost tier` | PASS after `13f03f2` |
 
 ## Files Created/Modified
 
@@ -140,6 +144,7 @@ Each task was committed atomically:
 - Documented `/api/search/scan` and `/api/data/*` as local API/DB-owned paths for deterministic and mutation work.
 - Documented `callAI()` and `runStructuredOneshot()` as bounded AI owners for schema-validated finite assists.
 - Documented `/api/chat/*` as the conversational user-led handoff path and `POST /api/skill/run` as the retained full skill runtime path.
+- Documented the D-02 route order as a cost tier ladder after post-wave validation.
 
 ## Deviations from Plan
 
@@ -160,6 +165,7 @@ None. This plan added a planning Markdown policy only and introduced no runtime 
 ## Issues Encountered
 
 - An extra acceptance-proof command initially expected the local-first guard as one contiguous sentence. I adjusted the uncommitted policy wording before the task commit and reran all acceptance checks successfully.
+- The orchestrator's stricter wave spot-check expected the exact phrase `cost tier`; I added explicit cost tier ladder wording in `13f03f2` before Wave 2.
 - GSD metadata handlers had the same project-template mismatch seen in Plan 01-02: `state.advance-plan` could not parse a Current Plan field, `roadmap.update-plan-progress` briefly rewrote the Phase Overview row shape, and `state.update-progress` set the frontmatter percent to `0`. I kept the valid SDK updates and manually repaired only the STATE percent and ROADMAP Phase 1 row before the metadata commit.
 
 ## User Setup Required
@@ -175,7 +181,9 @@ Ready for Plan 01-04 to create the decomposition-map validation test. The policy
 - Found `.planning/architecture/runtime-routing-policy.md`.
 - Found `.planning/phases/01-decomposition-map/01-03-SUMMARY.md`.
 - Found task commit `4af4848`.
+- Found post-wave fix commit `13f03f2`.
 - Re-ran the plan automated verification command successfully.
+- Re-ran the stricter wave spot-check for `cost tier` successfully.
 - Confirmed no runtime files under `src/` were modified by this plan.
 - Unrelated pre-existing dirty paths were not edited, staged, or committed: `tests/release-safety.test.mjs` and `tmp-skill-conversion/`.
 
