@@ -465,7 +465,7 @@ test("VER-05 docs and app wrappers keep discovery routing split aligned", () => 
       "export function createCompanyProposals",
       'apiFetch("/api/discovery/company-proposals"',
       "export function getCompanyProposals",
-      "`/api/discovery/company-proposals${query}`",
+      "apiFetch(`/api/discovery/company-proposals",
       "export function decideCompanyProposal",
       'apiFetch("/api/discovery/company-proposal-decisions"',
     ],
