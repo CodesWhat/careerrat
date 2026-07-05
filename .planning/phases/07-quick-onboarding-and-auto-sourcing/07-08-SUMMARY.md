@@ -85,16 +85,15 @@ coverage:
         status: pass
     human_judgment: false
   - id: D5
-    description: "Full npm test gate was executed; one unrelated company discovery migration expectation remains failing."
+    description: "Full npm test gate passes after updating the company discovery cache test for the latest migration version."
     verification:
       - kind: integration
         ref: "npm test"
-        status: fail
+        status: pass
       - kind: integration
         ref: "node --test tests/company-discovery-cache-db.test.mjs"
-        status: fail
-    human_judgment: true
-    rationale: "The failure is outside the files and acceptance surface of 07-08: tests/company-discovery-cache-db.test.mjs expects DB user_version 6, while the current migration set reports 7."
+        status: pass
+    human_judgment: false
 
 duration: 7m44s
 completed: 2026-07-05
@@ -118,7 +117,7 @@ status: complete
 - Added the Jobs page `Search jobs` header action, gated on DB source setup and disabled as `Searching...` while a manual run is active.
 - Added `getSearchSources()` and wired Jobs manual reruns to `startSearchRun({ purpose: "manual-search" })`, which calls local `POST /api/sourcing/search/start`.
 - Added `tests/quick-onboarding-auto-sourcing-regression.test.mjs` to guard first/manual search against hidden chat/discovery/skill/browser runtime handoffs, enforce DB source-config readiness, and preserve deterministic DOCX raw-text parsing.
-- Ran the Phase 7 targeted backend/frontend/static rollups and the full `npm test` gate; the targeted rollups passed, while one unrelated company-discovery migration expectation failed in the full suite.
+- Ran the Phase 7 targeted backend/frontend/static rollups and the full `npm test` gate; after updating a stale company-discovery migration-version expectation for migration 007, the full suite passes.
 
 ## Task Commits
 
@@ -160,18 +159,12 @@ _Note: Task 1 followed the TDD RED/GREEN sequence required by the plan._
 - `npm exec -- biome check tests/quick-onboarding-auto-sourcing-regression.test.mjs` - passed after formatter write.
 - `node --test tests/onboard-route.test.mjs tests/search-route.test.mjs tests/scan-sourced.test.mjs tests/db-migrations.test.mjs tests/sourcing-runs.test.mjs tests/sourcing-route.test.mjs tests/quick-onboarding-auto-sourcing-regression.test.mjs` - passed, 106 tests.
 - `npm --workspace apps/web run test -- src/onboarding/steps/ResumeStep.test.jsx src/onboarding/steps/FinishStep.test.jsx src/pages/SetupReadinessCard.test.jsx src/jobs/JobsPage.test.jsx` - passed, 31 tests across 4 files.
-- `npm test` - failed with 1694 passing, 1 failing, 4 skipped.
-- `node --test tests/company-discovery-cache-db.test.mjs` - reproduced the same isolated failure.
+- `node --test tests/company-discovery-cache-db.test.mjs` - passed, 4 tests.
+- `npm test` - passed, 1695 passing, 0 failing, 4 skipped.
 
 ## Blocking Verification Gaps
 
-**1. Full `npm test` has one unrelated migration-version expectation failure**
-
-- **Command:** `npm test`
-- **Failure:** `tests/company-discovery-cache-db.test.mjs:93`
-- **Exact assertion:** `Expected values to be strictly equal: 7 !== 6`
-- **Reproduction:** `node --test tests/company-discovery-cache-db.test.mjs`
-- **Scope assessment:** Out of scope for 07-08. This plan touched Jobs page UI/API wrappers and the Phase 7 regression guard; it did not touch company discovery cache migrations or tests.
+None. The stale migration-version expectation in `tests/company-discovery-cache-db.test.mjs` was updated to compare fully migrated DBs against `ALL_MIGRATIONS.at(-1).id` while still verifying migration 006 is logged as `company-discovery-cache`.
 
 ## Deviations from Plan
 
@@ -180,7 +173,7 @@ None - plan executed as written. The only non-source-code commit was the planned
 ## Issues Encountered
 
 - The first draft of the new static regression test had helper false positives around destructured function parameters and multiline calls. The test helper was corrected before the Task 2 commit, and the isolated regression plus Biome check passed.
-- The full `npm test` gate exposed the unrelated company-discovery cache version expectation above; it is recorded as a blocking verification gap for follow-up.
+- The full `npm test` gate initially exposed a stale company-discovery cache version expectation; that test now follows the latest migration registry and the full suite passes.
 
 ## Known Stubs
 
@@ -192,7 +185,7 @@ None - no external service configuration required.
 
 ## Next Phase Readiness
 
-Phase 7's targeted quick-onboarding and auto-sourcing evidence is in place. Before `$gsd-verify-work`, address or explicitly waive the unrelated `tests/company-discovery-cache-db.test.mjs` migration-version failure so the full-suite gate is clean.
+Phase 7's targeted quick-onboarding and auto-sourcing evidence is in place, and the full-suite gate is clean.
 
 ## Self-Check: PASSED
 

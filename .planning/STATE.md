@@ -229,4 +229,4 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ### Blockers
 
-- Full npm test currently fails outside 07-08: tests/company-discovery-cache-db.test.mjs expects DB user_version 6 but current migrations report 7.
+- None.

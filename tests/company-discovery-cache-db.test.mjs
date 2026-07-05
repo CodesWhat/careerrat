@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import {
   candidateSetupInitialize,
   companyBoardResolutionGet,
@@ -93,7 +94,10 @@ function putResolution(repoRoot, companyKey, overrides = {}) {
 test("migration 006 creates resolver cache and proposal tables with JSON constraints and query indexes", () => {
   const { db } = setupRepo();
 
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 6);
+  assert.equal(db.prepare("PRAGMA user_version").get().user_version, ALL_MIGRATIONS.at(-1).id);
+  const migrationLog = db.prepare("SELECT id, name FROM _migrations WHERE id = ?").get(6);
+  assert.equal(migrationLog.id, 6);
+  assert.equal(migrationLog.name, "company-discovery-cache");
 
   const resolutionSql = tableSql(db, "company_board_resolutions");
   assert.match(resolutionSql, /data TEXT NOT NULL CHECK \(json_valid\(data\)\)/);
