@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
 status: In Progress
-stopped_at: Completed 07-05-PLAN.md
-last_updated: "2026-07-05T22:31:52.571Z"
+stopped_at: Completed 07-06-PLAN.md
+last_updated: "2026-07-05T22:47:03.051Z"
 progress:
   total_phases: 11
   completed_phases: 5
-  total_plans: 36
-  completed_plans: 33
-  percent: 92
+  total_plans: 45
+  completed_plans: 34
+  percent: 76
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T22:31:52.538Z
-**Stopped at:** Completed 07-05-PLAN.md
+**Last session:** 2026-07-05T22:47:03.044Z
+**Stopped at:** Completed 07-06-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -113,6 +113,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P03 | 4 min | 2 tasks | 4 files |
 | Phase 07 P04 | 8 min | 3 tasks | 10 files |
 | Phase 07 P05 | 3 min | 2 tasks | 5 files |
+| Phase 07 P06 | 12 min | 2 tasks | 9 files |
 
 ## Decisions
 
@@ -217,3 +218,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: Return existing first-search rows for running, completed, and failed display states unless retryFailed:true is explicitly requested. — This preserves duplicate-run protection while keeping failed first-search rows visible and actionable.
 - [Phase 07]: Create failed first-search retry work as a fresh running row with metadata.retryOf pointing at the failed run. — This backs D-12 actionability with a durable transition instead of only changing UI copy.
 - [Phase 07]: Keep stored run timestamps snake_case and return camelCase aliases for route consumers. — The DB payload remains canonical while later HTTP/React code can use route-facing field names without another transform.
+- [Phase 07]: Onboarding quick-start now starts local deterministic first-search work, while explicit discovery quick-start remains the chat handoff. — This keeps first search deterministic without removing the user-selected discovery path.
+- [Phase 07]: First-search retry is driven by latest durable failed run state and passes retryFailed:true server-side. — The client does not need to infer retry behavior from stale UI state.

@@ -14,7 +14,7 @@
 | 4 | Runtime Routing | Make the app use the cheapest correct runtime path by default. | RUNT-01, RUNT-02, RUNT-03 | Complete (5/5, 2026-07-05) |
 | 5 | Verification and Docs | Prove cost boundaries, no-AI degradation, discovery write safety, and documentation alignment. | VER-01, VER-02, VER-03, VER-04, VER-05 | Complete (5/5, 2026-07-05) |
 | 6 | Canonical DB App Shell | Make the Electron/React app DB-source-of-truth and remove compatibility surfaces from product paths. | APP-01, APP-02, APP-03, APP-04 | Complete (10/10, 2026-07-05) |
-| 7 | Quick Onboarding and Auto Sourcing | Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding. | ONB-01, ONB-02, RUN-01, RUN-02 | In Progress (5/8) |
+| 7 | Quick Onboarding and Auto Sourcing | Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding. | ONB-01, ONB-02, RUN-01, RUN-02 | In Progress (6/8) |
 | 8 | Deep Ingest Lane | Capture rich profile, project, story, and evidence context through drop-all intake plus an optional AI interview. | ING-01, ING-02, ING-03, ING-04 | Planned |
 | 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Planned |
 | 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Planned |
@@ -193,7 +193,7 @@ Plans:
 
 **Requirements:** ONB-01, ONB-02, RUN-01, RUN-02
 
-**Plans:** 5/8 plans executed
+**Plans:** 6/8 plans executed
 
 Plans:
 **Wave 0**
@@ -209,7 +209,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 07-06-PLAN.md — Implement first-search sourcing service, routes, and quick-start replacement.
+- [x] 07-06-PLAN.md — Implement first-search sourcing service, routes, and quick-start replacement.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
