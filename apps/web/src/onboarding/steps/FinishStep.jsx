@@ -178,6 +178,12 @@ export function DiscoveryChatPanel({ discoveryChat, discoveryGuidance, quickStar
   );
 }
 
+export function isSourceSetupReady({ state, quickStartResult } = {}) {
+  if (state?.searchSourcesPresent === true) return true;
+  const count = Number(quickStartResult?.searches?.count || 0);
+  return Number.isFinite(count) && count > 0;
+}
+
 // Step 7 — Finish. The app's source setup state is the DB `search-sources`
 // row. POST /api/onboard/write-config remains an explicit CLI/debug
 // compatibility export for candidate YAML, search-sources.yml, and AGENTS.md.
@@ -202,8 +208,8 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
 
-  const compatibilityExported = !!written;
-  const sourceSetupReady = compatibilityExported || !!state?.searchSourcesPresent;
+  const compatibilityExported = Array.isArray(written) && written.length > 0;
+  const sourceSetupReady = isSourceSetupReady({ state, quickStartResult });
   const readinessRows = buildReadinessRows(state);
   const searchReady = readinessRows.find((row) => row.key === "search_ready")?.ready;
   const gateReady = readinessRows.find((row) => row.key === "gate_ready")?.ready;
@@ -230,7 +236,7 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
     try {
       const result = await writeConfig();
       setWritten(result.written || []);
-      await reload?.();
+      await refreshWorkspace();
     } catch (err) {
       setError(err?.body?.error || (err instanceof Error ? err.message : "write-config failed"));
     } finally {
@@ -272,8 +278,8 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
     }
   }
 
-  // Recompute once after DB source setup exists. A compatibility export also
-  // refreshes the DB search-sources row before writing YAML.
+  // Recompute once after DB source setup exists; compatibility exports are
+  // intentionally not source-readiness signals.
   // biome-ignore lint/correctness/useExhaustiveDependencies: fires once on sourceSetupReady
   useEffect(() => {
     if (!sourceSetupReady) return;
@@ -414,7 +420,7 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
         <Button onClick={handleWriteConfig} disabled={writing}>
           {writing ? "Exporting…" : "Export compatibility files"}
         </Button>
-        {written ? (
+        {compatibilityExported ? (
           <p className="field__hint">Exported compatibility files: {written.join(", ")}</p>
         ) : sourceSetupReady ? (
           <p className="field__hint">SQLite source setup is ready.</p>

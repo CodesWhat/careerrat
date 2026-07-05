@@ -35,6 +35,7 @@ import {
   DiscoveryChatPanel,
   extractDiscoveryGuidance,
   FinishStep,
+  isSourceSetupReady,
   runNextDiscoveryHandoff,
   runQuickStartHandoff,
 } from "./FinishStep.jsx";
@@ -293,6 +294,22 @@ describe("runNextDiscoveryHandoff", () => {
     expect(calls).toEqual(["continueDiscovery", "refreshWorkspace"]);
     expect(outcome.chat).toEqual({ chatId: "chat-3", skill: "search-jobs", state: "running" });
     expect(outcome.guidance.nextSkill).toBe("search-jobs");
+  });
+});
+
+describe("isSourceSetupReady", () => {
+  it("does not treat compatibility export freshness as DB source setup", () => {
+    expect(
+      isSourceSetupReady({
+        state: { ...SEARCH_READY_STATE, searchSourcesPresent: false },
+        quickStartResult: { written: ["config/search-sources.yml", "candidate/AGENTS.md"] },
+      })
+    ).toBe(false);
+  });
+
+  it("accepts either existing DB source setup or quick-start-created searches", () => {
+    expect(isSourceSetupReady({ state: { searchSourcesPresent: true } })).toBe(true);
+    expect(isSourceSetupReady({ quickStartResult: { searches: { count: 1 } } })).toBe(true);
   });
 });
 

@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { test } from "node:test";
@@ -263,6 +264,33 @@ test("tracker-dev static byte pages are explicit compatibility/debug/export surf
         `\\bSTATIC_COMPATIBILITY_ROUTES\\b[\\s\\S]*path:\\s*["']${route.replace("/", "\\/")}["']`
       ),
       `tracker-dev must classify ${route} in STATIC_COMPATIBILITY_ROUTES`
+    );
+  }
+});
+
+test("tracker-dev help labels retained static pages as compatibility/debug/export", () => {
+  const result = spawnSync(process.execPath, [resolve(REPO_ROOT, TRACKER_DEV_FILE), "--help"], {
+    cwd: REPO_ROOT,
+    encoding: "utf8",
+  });
+
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(
+    result.stdout,
+    /Static compatibility\/debug\/export routes:/,
+    "tracker-dev --help must label retained static byte pages as compatibility/debug/export routes"
+  );
+  assert.doesNotMatch(
+    result.stdout,
+    /Retained utility pages and APIs:/,
+    "tracker-dev --help must not group retained static pages under normal utility pages"
+  );
+
+  for (const route of ["/evaluate", "/answer", "/onboard", "/search", "/packet"]) {
+    assert.match(
+      result.stdout,
+      new RegExp(`GET\\s+${route}\\b[\\s\\S]{0,100}Compatibility`, "i"),
+      `tracker-dev --help must classify ${route} as a compatibility route`
     );
   }
 });

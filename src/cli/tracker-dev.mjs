@@ -911,6 +911,9 @@ function openBrowser(url) {
 
 function printHelp() {
   const debugExportRoutes = DEBUG_EXPORT_ROUTES.map((route) => route.path).join(", ");
+  const staticCompatibilityRoutes = STATIC_COMPATIBILITY_ROUTES.map(
+    (route) => `  GET  ${route.path.padEnd(32)} Compatibility ${route.label}`
+  ).join("\n");
   process.stdout.write(`rolester tracker-dev — the embedded /app server (React product shell + local APIs)
 
 Usage:
@@ -925,13 +928,13 @@ Debug/export compatibility routes:
   GET  ${debugExportRoutes}
                                            Generated dashboard/static exports and raw compatibility feeds
 
-Retained utility pages and APIs:
-  GET  /evaluate                        Paste a JD → live evaluate-job verdict (P0-5)
-  GET  /answer                          Paste a screening question → live answer-question draft
-  GET  /onboard                         Non-AI onboarding wizard (M1) — seed candidate files, BYOK key
+Static compatibility/debug/export routes:
+${staticCompatibilityRoutes}
+
+Explicit user-selected chat page:
   GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
-  GET  /search                          Deterministic ATS-board sweep results + "Run sweep" (M3)
-  GET  /packet                          Review a gated app's tailored resume/cover letter/answers, or generate live (M4)
+
+Local app APIs:
   GET  /api/health                      { ok, version }
   GET  /api/runtime/config              { skills: [...] } — the embedded runtime's allowlist
   POST /api/skill/run                   Run a SKILL.md via the embedded Agent SDK runtime (SSE)
@@ -940,7 +943,7 @@ Retained utility pages and APIs:
   POST /api/onboard/resume              Parse a pasted/loaded resume (no AI)
   POST /api/onboard/candidate/:name     Merge + validate + write one candidate file
   POST /api/onboard/evidence-seed       Dedupe-merge claims into candidate/evidence.yml
-  POST /api/onboard/write-config        Generate config/search-sources.yml + candidate/AGENTS.md
+  POST /api/onboard/write-config        Export compatibility candidate/source files
   POST /api/onboard/quick-start         Search-ready DB setup -> source config + discovery handoff
   GET  /api/discovery/state             Current supervised discovery handoff state
   POST /api/discovery/quick-start       Prepare sources and start/reuse first discovery chat

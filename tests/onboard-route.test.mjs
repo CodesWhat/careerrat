@@ -1184,6 +1184,67 @@ describe("POST /api/onboard/write-config", () => {
       await closeServer(server);
     }
   });
+
+  it("exports compatibility YAML without clobbering existing DB search sources", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/candidate/profile", {
+        data: { candidate: { full_name: "Ada Lovelace", email: "ada@example.com" } },
+      });
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: {
+          role_buckets: [
+            { name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] },
+          ],
+        },
+      });
+
+      const existingSource = {
+        label: "Saved private search",
+        platform: "linkedin",
+        url: "https://www.linkedin.com/jobs/search/?keywords=agentic",
+        enabled: false,
+        auth: "browser",
+        recency: { lastRunAt: "2026-07-01T12:00:00Z" },
+      };
+      sourceConfigPut({
+        repoRoot,
+        name: "search-sources",
+        data: {
+          title_filter: { positive: [], negative: [] },
+          location_filter: { always_allow: [], allow: [], block: [] },
+          searches: [existingSource],
+          tracked_companies: [],
+          source_catalog: {},
+        },
+      });
+
+      const { status } = await postJson(server, "/api/onboard/write-config", {});
+      assert.equal(status, 200);
+
+      const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+      assert.equal(
+        stored.searches.some((source) => source.label === "Saved private search"),
+        true
+      );
+      const preserved = stored.searches.find((source) => source.label === "Saved private search");
+      assert.equal(preserved.enabled, false);
+      assert.equal(preserved.auth, "browser");
+      assert.equal(preserved.recency.lastRunAt, "2026-07-01T12:00:00Z");
+
+      const searchSources = parseYaml(
+        readFileSync(candidatePath(repoRoot, "config/search-sources.yml"), "utf8")
+      );
+      assert.equal(
+        searchSources.searches.some((source) => source.label === "Saved private search"),
+        true
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1254,6 +1315,70 @@ describe("POST /api/onboard/quick-start", () => {
         existsSync(candidatePath(repoRoot, "candidate/SOURCE_RESUME.md")),
         false,
         "source resume remains DB artifact; quick-start only writes compatibility output"
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("quick-start preserves existing DB source config entries and watermarks", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/resume", {
+        text: "Ada Lovelace\nada@example.com\nNew York, NY\n\nBuilt agent workflows.",
+        save: true,
+      });
+      await postJson(server, "/api/onboard/candidate/profile", {
+        data: {
+          candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+          location: { home: "New York, NY", remote: true },
+        },
+      });
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: {
+          role_buckets: [
+            { name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] },
+          ],
+        },
+      });
+
+      sourceConfigPut({
+        repoRoot,
+        name: "search-sources",
+        data: {
+          title_filter: { positive: [], negative: [] },
+          location_filter: { always_allow: [], allow: [], block: [] },
+          searches: [
+            {
+              label: "Existing board",
+              platform: "linkedin",
+              url: "https://www.linkedin.com/jobs/search/?keywords=existing",
+              enabled: false,
+              auth: "browser",
+              recency: { lastRunAt: "2026-07-02T15:30:00Z" },
+            },
+          ],
+          tracked_companies: [],
+          source_catalog: {},
+        },
+      });
+
+      const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+
+      const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+      const existing = stored.searches.find((source) => source.label === "Existing board");
+      assert.ok(existing, "quick-start must preserve existing DB source entries");
+      assert.equal(existing.enabled, false);
+      assert.equal(existing.auth, "browser");
+      assert.equal(existing.recency.lastRunAt, "2026-07-02T15:30:00Z");
+      assert.equal(
+        stored.searches.some((source) => source.label !== "Existing board"),
+        true,
+        "quick-start still adds generated baseline sources"
       );
     } finally {
       await closeServer(server);
