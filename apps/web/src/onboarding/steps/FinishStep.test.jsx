@@ -375,7 +375,7 @@ describe("FinishStep", () => {
     expect(html).not.toContain(">Prepare sourcing<");
     expect(html).not.toContain(">Run research-boards<");
     expect(html).toContain("Discovery chat handoffs are unavailable in this runtime.");
-    expect(html).toContain(">Write config<");
+    expect(html).toContain(">Export compatibility files<");
     expect(html).toContain("Go to Home");
     expect(chatMock.renders).toEqual([]);
   });
@@ -481,7 +481,7 @@ describe("FinishStep", () => {
     expect(html).not.toContain(">Prepare sourcing<");
     expect(html).not.toContain(">Run research-boards<");
     expect(html).toContain("Add an AI key in the earlier step");
-    expect(html).toContain(">Write config<");
+    expect(html).toContain(">Export compatibility files<");
     expect(html).toContain("Go to Home");
   });
 });

@@ -28,7 +28,7 @@
 //                                        (one concrete route per known name —
 //                                        see CANDIDATE_ROUTE_ENTRIES below)
 //   POST /api/onboard/evidence-seed      dedupe-merge claims into evidence.yml
-//   POST /api/onboard/write-config       same work as `rolester ingest --write-config`
+//   POST /api/onboard/write-config       export compatibility candidate/source files
 //   POST /api/onboard/quick-start        search-ready DB setup -> sources +
 //                                        next discovery handoff; gate/apply stay locked
 //   POST /api/settings/ai-key            store a BYOK Anthropic key locally
@@ -57,6 +57,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateSetupInitialize,
+  sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
@@ -327,6 +328,41 @@ function dbSourceResumePresent(pathCtx) {
   }
 }
 
+function searchEntryHasConfiguredPath(entry = {}) {
+  if (!entry || typeof entry !== "object") return false;
+  if (entry.enabled !== true) return false;
+  return Boolean(
+    String(entry.url || entry.query || entry.rssUrl || entry.rss_url || entry.apiUrl || "").trim()
+  );
+}
+
+function trackedCompanyHasConfiguredPath(entry = {}) {
+  if (!entry || typeof entry !== "object") return false;
+  const name = String(entry.name || "").trim();
+  const careersUrl = String(entry.careers_url || entry.url || "").trim();
+  if (!name || !careersUrl) return false;
+  try {
+    const url = new URL(careersUrl);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
+
+function dbSearchSourcesPresent(pathCtx) {
+  try {
+    const result = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+    if (result.stored !== true) return false;
+    const data = result.data || {};
+    const searches = Array.isArray(data.searches) ? data.searches : [];
+    if (searches.some(searchEntryHasConfiguredPath)) return true;
+    const trackedCompanies = Array.isArray(data.tracked_companies) ? data.tracked_companies : [];
+    return trackedCompanies.some(trackedCompanyHasConfiguredPath);
+  } catch {
+    return false;
+  }
+}
+
 function exportCandidateCompatibilityFiles(pathCtx, config) {
   const written = [];
   for (const entry of [
@@ -497,7 +533,7 @@ export function mountOnboardRoutes({
             dbSourceResumePresent(pathCtx) ||
             existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md")),
           keyConfigured: resolveAIRoute(env).type !== "none",
-          searchSourcesPresent: existsSync(userPath(pathCtx, "config/search-sources.yml")),
+          searchSourcesPresent: dbSearchSourcesPresent(pathCtx),
           logoImageTokenConfigured: !!(integrations.logo_dev_token || publishableToken),
           logoSearchTokenConfigured: !!(integrations.logo_dev_secret_key || secretKey),
         });
@@ -863,7 +899,9 @@ export function mountOnboardRoutes({
   });
 
   // -------------------------------------------------------------------------
-  // POST /api/onboard/write-config — mirrors `rolester ingest --write-config`.
+  // POST /api/onboard/write-config — exports CLI/debug compatibility files.
+  // The product source setup state remains SQLite `search-sources`; generated
+  // YAML is support output, not app readiness.
   // -------------------------------------------------------------------------
   addRoute("POST", "/api/onboard/write-config", (_req, res) => {
     if (dbExists(pathCtx)) {

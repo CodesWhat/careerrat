@@ -178,16 +178,15 @@ export function DiscoveryChatPanel({ discoveryChat, discoveryGuidance, quickStar
   );
 }
 
-// Step 7 — Finish. Runs the existing POST /api/onboard/write-config
-// (regenerates config/search-sources.yml wholesale from targeting+profile,
-// same as the legacy /onboard page's step 8). The "add your LinkedIn saved
-// search" affordance is deliberately HERE, after write-config, not on the
-// Targeting step — write-config's regen would silently drop an
-// earlier-added browser source (see boards-route.mjs's own header comment
-// and the M8 design doc §6's flagged ordering hazard). Ends with the
-// explicit /chat evidence-interview handoff the design doc calls for: the
-// wizard and the deeper conversational interview are two independent entry
-// points into the same candidate setup state, not one linear flow.
+// Step 7 — Finish. The app's source setup state is the DB `search-sources`
+// row. POST /api/onboard/write-config remains an explicit CLI/debug
+// compatibility export for candidate YAML, search-sources.yml, and AGENTS.md.
+// The "add your LinkedIn saved search" affordance is deliberately here, after
+// source setup exists, so a source added through the DB-backed boards route
+// is not overwritten by a later compatibility export. Ends with the explicit
+// /chat evidence-interview handoff the design doc calls for: the wizard and
+// the deeper conversational interview are two independent entry points into
+// the same candidate setup state, not one linear flow.
 export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCapabilities }) {
   const dashboard = useDashboardSnapshot();
   const [writing, setWriting] = useState(false);
@@ -203,7 +202,8 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState(false);
 
-  const configReady = !!written || !!state?.searchSourcesPresent;
+  const compatibilityExported = !!written;
+  const sourceSetupReady = compatibilityExported || !!state?.searchSourcesPresent;
   const readinessRows = buildReadinessRows(state);
   const searchReady = readinessRows.find((row) => row.key === "search_ready")?.ready;
   const gateReady = readinessRows.find((row) => row.key === "gate_ready")?.ready;
@@ -272,11 +272,11 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
     }
   }
 
-  // Recompute once, right after write-config succeeds — configReady is the
-  // deliberate trigger, not a live-typing field.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fires once on configReady
+  // Recompute once after DB source setup exists. A compatibility export also
+  // refreshes the DB search-sources row before writing YAML.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fires once on sourceSetupReady
   useEffect(() => {
-    if (!configReady) return;
+    if (!sourceSetupReady) return;
     const titles = state?.data?.targeting?.role_buckets?.[0]?.titles ?? [];
     if (!titles.length) return;
     const profile = state?.data?.profile ?? {};
@@ -289,7 +289,7 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
     })
       .then(setPreview)
       .catch(() => setPreview(null));
-  }, [configReady]);
+  }, [sourceSetupReady]);
 
   async function handleAddLinkedIn() {
     if (!preview?.linkedin?.url) return;
@@ -408,21 +408,20 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
 
       <Card title="Finish setup">
         <p>
-          Exports compatibility files and generates search sources from your profile and targeting.
+          Your app source setup is saved in SQLite. Export compatibility files only for CLI/debug
+          support.
         </p>
         <Button onClick={handleWriteConfig} disabled={writing}>
-          {writing ? "Writing…" : "Write config"}
+          {writing ? "Exporting…" : "Export compatibility files"}
         </Button>
         {written ? (
-          <p className="field__hint">Wrote: {written.join(", ")}</p>
-        ) : configReady ? (
-          <p className="field__hint">
-            Already written in a previous session — run again to refresh it.
-          </p>
+          <p className="field__hint">Exported compatibility files: {written.join(", ")}</p>
+        ) : sourceSetupReady ? (
+          <p className="field__hint">SQLite source setup is ready.</p>
         ) : null}
       </Card>
 
-      {configReady && preview?.linkedin?.url ? (
+      {sourceSetupReady && preview?.linkedin?.url ? (
         <Card title="Add your LinkedIn saved search">
           <p className="field__hint" style={{ margin: 0 }}>
             Enabling this still requires the usual authenticated-search consent (
@@ -439,7 +438,7 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCap
             </a>
           </div>
           {added ? (
-            <p className="field__hint">Added to config/search-sources.yml (disabled by default).</p>
+            <p className="field__hint">Added to DB source setup (disabled by default).</p>
           ) : (
             <Button variant="secondary" onClick={handleAddLinkedIn} disabled={adding}>
               {adding ? "Adding…" : "Add to my search sources"}
