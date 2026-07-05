@@ -10,12 +10,9 @@ import { ComingSoonPage } from "./pages/ComingSoonPage.jsx";
 import { HomePage } from "./pages/HomePage.jsx";
 import { SettingsPage } from "./settings/SettingsPage.jsx";
 
-// Route map. "/", "/settings", "/onboarding", (M9) "/inbox", (M10)
-// "/jobs"/"/calendar", and now "/network"/"/library" are all real pages,
-// every one served off the shared GET /api/data/dashboard snapshot (see
-// app-shell/DashboardContext.jsx). The legacy dashboard (`/tracker`) remains
-// reachable via the nav's Classic link until the retirement gates clear
-// (Sankey + demo bundle still render there).
+// Canonical /app route map. Every normal product route lives in this React SPA,
+// with data-backed pages served from the shared GET /api/data/dashboard snapshot
+// through app-shell/DashboardContext.jsx.
 export function App() {
   return (
     <AppShell>

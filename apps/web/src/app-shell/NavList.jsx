@@ -5,18 +5,14 @@ import {
   InboxIcon,
   JobsIcon,
   LibraryIcon,
-  ListIcon,
   NetworkIcon,
   OnboardingIcon,
   SettingsIcon,
 } from "../components/icons.jsx";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
-// Route map: every nav item is a real SPA page served off the shared
-// GET /api/data/dashboard snapshot. Network and Library now have SPA views
-// (retirement-gate work); the Classic item stays a genuine EXTERNAL link to
-// the legacy dashboard (`/tracker`, still served by tracker-dev.mjs) until
-// the remaining retirement gates clear (Sankey + the demo bundle).
+// Canonical /app product route map: every visible nav item is a React SPA page
+// served off the shared GET /api/data/dashboard snapshot where it needs app data.
 const NAV_ITEMS = [
   { to: "/", label: "Home", icon: HomeIcon, end: true },
   { to: "/settings", label: "Settings", icon: SettingsIcon },
@@ -47,7 +43,6 @@ export function NavList() {
       {NAV_ITEMS.slice(3).map((item) => (
         <NavItem key={item.to} {...item} />
       ))}
-      <ExternalNavItem href="/tracker" label="Classic" icon={ListIcon} />
     </ul>
   );
 }
@@ -64,20 +59,6 @@ function NavItem({ to, label, icon: Icon, end, badge }) {
         <span className="nav-item__label">{label}</span>
         {badge ? <span className="nav-item__badge">{badge}</span> : null}
       </NavLink>
-    </li>
-  );
-}
-
-// A genuine full-navigation link-out (leaves the SPA for the legacy
-// dashboard's own HTML page) — a plain <a>, never a react-router <NavLink>,
-// so the browser does a real navigation instead of a client-route no-op.
-function ExternalNavItem({ href, label, icon: Icon }) {
-  return (
-    <li>
-      <a href={href} className="nav-item" title={`${label} (legacy dashboard)`}>
-        <Icon className="nav-item__icon" />
-        <span className="nav-item__label">{label}</span>
-      </a>
     </li>
   );
 }
