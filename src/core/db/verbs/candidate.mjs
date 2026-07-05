@@ -84,7 +84,10 @@ const DEFAULTS = {
     tracked_companies: [],
     degree_policy: "",
     fit_bands: { high_min: 85, med_min: 65 },
-    search_preferences: { posting_age: { mode: "since-last-run" } },
+    search_preferences: {
+      posting_age: { mode: "since-last-run" },
+      cadence: { mode: "daily", recommended_from: "default" },
+    },
   },
   evidence: { claims: [] },
   honesty: {

@@ -46,6 +46,16 @@
             "mode": { "type": "string", "enum": ["since-last-run", "fixed-days"] },
             "days": { "type": "number" }
           }
+        },
+        "cadence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["daily", "every-3-days", "weekly", "manual"] },
+            "recommended_from": { "type": "string", "enum": ["default", "history"] },
+            "saved_at": { "type": "string" }
+          }
         }
       }
     },

@@ -147,6 +147,27 @@ export function startQuickSearch() {
   return apiFetch("/api/onboard/quick-start", { method: "POST" });
 }
 
+export function getSourcingRun({ purpose } = {}) {
+  const params = new URLSearchParams();
+  if (purpose) params.set("purpose", purpose);
+  const query = params.toString();
+  return apiFetch(`/api/sourcing/runs/latest${query ? `?${query}` : ""}`);
+}
+
+export function startFirstSearchRun(payload = {}) {
+  return apiFetch("/api/sourcing/first-run/start", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function startSearchRun(payload = {}) {
+  return apiFetch("/api/sourcing/search/start", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function getDiscoveryState() {
   return apiFetch("/api/discovery/state");
 }
