@@ -137,6 +137,7 @@ Copy rules:
 ### Layout
 
 - Use `PageScaffold wide` titled `Deep ingest`.
+- Primary focal point is the intake cluster until proposals exist; then the active review item and proposal editor become the visual anchor.
 - Desktop layout: top intake band, lane checklist below it, then a two-column workspace: review queue/source list at `260px-320px`, review detail at `minmax(0, 1fr)`.
 - Review detail desktop split: source preview and proposal editor as sibling panels in a responsive grid, each `minmax(280px, 1fr)`.
 - Mobile layout under 760px: stack intake, lane checklist, review queue, source preview, and proposal editor. Action rows wrap; primary/secondary text buttons become full-width when two or more actions share a row.
@@ -207,7 +208,7 @@ Lane statuses:
 - Queue filters: `All`, `Review`, `Gaps`, `Deferred`, `Confirmed`, `Failed`.
 - Each row shows target shape, source label, status badge, one-line proposed action/gap, source kind, and updated time.
 - Rows use status badges/icons/text; never a colored left border.
-- Row actions: `Review`, `Retry ingest`, `Defer`, `Mark not available`; show only actions valid for the row status.
+- Row actions: `Review proposal`, `Retry ingest`, `Defer lane`, `Mark not available`; show only actions valid for the row status.
 - The queue empty state changes by filter. For the main empty state use the copy in the Copywriting Contract. For filtered no-results use: `No items match this filter.`
 
 ### Source Preview
