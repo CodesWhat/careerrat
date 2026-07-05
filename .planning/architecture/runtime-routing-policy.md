@@ -4,14 +4,17 @@ This policy defines how Rolester UI controls, CLI commands, and agent workflows
 choose between deterministic local APIs, DB verbs, bounded AI assists,
 conversational handoffs, and the retained full skill runtime.
 
-## Phase Boundary
+## Current Phase 4 Boundary
 
-Phase 1 is documentation and validation only. This policy does not create new
-routes, DB verbs, schemas, migrations, UI controls, or runtime behavior. Later
-implementation phases may use it to update callers, but those plans must still
-change runtime source explicitly and test the changed behavior.
+Phase 4 makes this policy operational for app company discovery. The default
+Companies onboarding controls call local proposal create/read/decision routes:
+`POST /api/discovery/company-proposals`,
+`GET /api/discovery/company-proposals`, and
+`POST /api/discovery/company-proposal-decisions`. Those routes use the Phase 3
+proposal pipeline and confirmation write owners before any chat workflow is
+started.
 
-The routing boundary is:
+The retained routing boundary is:
 
 - Use existing deterministic code, local API routes, DB verbs, and CLI helpers
   for work that already has a local owner.
@@ -19,6 +22,9 @@ The routing boundary is:
   small schema-validated result is enough.
 - Use `/api/chat/*` for conversational skill handoffs where the user is present
   and the workflow should proceed turn by turn.
+- Use `/api/discovery/quick-start` and `/api/discovery/next` only for explicit
+  user-selected discovery chat handoffs that start or reuse visible
+  `/api/chat/*` sessions.
 - Use `POST /api/skill/run` only for allowlisted full skill execution that needs
   broad tools, long orchestration, live stream visibility, or retained
   human-watched agent behavior.
@@ -51,7 +57,7 @@ The routing boundary is:
 
 | Route class | Use when | Current or planned owner | Do not use for |
 | --- | --- | --- | --- |
-| deterministic local code | Inputs are already available locally and the work is scanning, filtering, scoring, dedupe, validation, file capture, rendering, or route orchestration. | `scripts/scan-sourced.mjs`, `src/core/scoring/sourced-scanner.mjs`, `src/core/scoring/sourced-persistence.mjs`, local route mounters such as `src/cli/search-route.mjs`. | Open-ended research, ambiguous judgment, browser-authenticated tasks, or long user-led workflows. |
+| deterministic local code | Inputs are already available locally and the work is scanning, filtering, scoring, dedupe, validation, file capture, rendering, proposal orchestration, or route orchestration. | `scripts/scan-sourced.mjs`, `src/core/scoring/sourced-scanner.mjs`, `src/core/scoring/sourced-persistence.mjs`, local route mounters such as `src/cli/search-route.mjs` and `src/cli/discovery-route.mjs`. | Open-ended research, ambiguous judgment, browser-authenticated tasks, or long user-led workflows. |
 | DB verb or CLI helper | The action mutates canonical state or source config and a DB verb or CLI already owns validation, idempotency, export, activity, or compatibility behavior. | `src/core/db/verbs/source-config.mjs`, `src/core/db/verbs/sourced.mjs`, `src/cli/data-route.mjs`, `src/cli/companies.mjs`, `src/cli/searches.mjs`. | Direct edits to generated workspace state, model-generated writes, or source updates that bypass existing validation. |
 | bounded structured AI | The caller needs a small finite model judgment, seed list, rewrite, classification, or normalization that can be expressed as schema-validated JSON. | `callAI()` in `src/core/ai/call-ai.mjs`, `runStructuredOneshot()` in `src/core/ai/structured-oneshot.mjs`, and route wrappers such as `src/cli/assist-route.mjs`. | Streaming tool loops, user interviews, confirmed writes, trusted final URLs, unrestricted web search, or anything that needs persistent agent state. |
 | conversational skill handoff | The user wants an agent-led workflow, the flow is confirm-first, or the skill needs turn-by-turn questions while keeping the app in control. | `/api/chat/*` backed by `src/core/ai/chat-runtime.mjs`, with current discovery handoffs from `src/cli/discovery-route.mjs` for `/api/discovery/quick-start` and `/api/discovery/next`. | Cheap deterministic scans, DB writes with local verbs, or one-shot bounded assists that do not need a live skill session. |
@@ -64,14 +70,18 @@ The routing boundary is:
 - Prefer local API routes for button-driven app actions that map to deterministic
   or DB-owned work. A search refresh uses `/api/search/scan`, not a full skill
   session, because `src/cli/search-route.mjs` already calls `runSourcedScan()`.
+- Use `/api/discovery/company-proposals` and
+  `/api/discovery/company-proposal-decisions` as the default app company
+  discovery path. Local proposal failures must surface locally; they must not
+  silently fall through to chat or `POST /api/skill/run`.
 - Use `/api/data/*` routes from `src/cli/data-route.mjs` for state mutations that
   map to DB verbs. The UI should not hand-edit `workspace/tracker.json`,
   `workspace/activity.jsonl`, or compatibility source files.
 - Use bounded AI routes for small assistive suggestions, where missing AI config
   can return a clear no-AI response and the UI can offer manual input.
-- Use `/api/discovery/quick-start` and `/api/discovery/next` for current
-  supervised discovery chat handoffs until later phases replace specific
-  decomposed pieces with local APIs.
+- Use `/api/discovery/quick-start` and `/api/discovery/next` for explicit
+  supervised discovery chat handoffs when the user chooses the agent-led
+  workflow.
 - Use `POST /api/skill/run` only for explicit full-skill actions that the
   runtime allowlist permits and that need streamed tool visibility or retained
   skill execution.
@@ -134,7 +144,9 @@ The routing boundary is:
   fenced-JSON extraction, schema validation, and one corrective retry.
 - `src/cli/discovery-route.mjs` owns current discovery handoff routes:
   `/api/discovery/state`, `/api/discovery/quick-start`, and
-  `/api/discovery/next`.
+  `/api/discovery/next`; it also owns the local company proposal routes
+  `/api/discovery/company-proposals` and
+  `/api/discovery/company-proposal-decisions`.
 - `src/core/ai/chat-runtime.mjs` owns multi-turn conversational skill sessions
   behind `/api/chat/*`.
 - `src/cli/skill-run-route.mjs` owns `GET /api/runtime/config` and
@@ -179,21 +191,24 @@ The routing boundary is:
    - Incorrect route: model output or a skill session writing source files
      directly.
 
-3. Generate company seed proposals:
-   - Caller: future company discovery API.
-   - Correct route class: bounded structured AI via `callAI()` and
-     `runStructuredOneshot()`.
-   - Reason: seed generation is model-shaped judgment, but output remains
-     advisory until deterministic resolver and confirmation paths validate it.
-   - Incorrect route: trusting the model's URL hints as final `careers_url`
-     writes.
+3. Generate and decide company proposals from the app:
+   - Caller: UI.
+   - Correct route: `POST /api/discovery/company-proposals`, latest reads via
+     `GET /api/discovery/company-proposals`, and confirmed decisions via
+     `POST /api/discovery/company-proposal-decisions`.
+   - Reason: seed generation may use bounded structured AI or manual seeds, but
+     deterministic resolver/scanner/gate code owns proposal evidence and the
+     decision route owns confirmed writes.
+   - Incorrect route: trusting model URL hints as final `careers_url` writes,
+     starting `/api/chat/*` after a local proposal error, or using
+     `POST /api/skill/run` for default company discovery.
 
 4. Continue a confirm-first discovery workflow:
    - Caller: UI or agent.
    - Correct route: `/api/discovery/next`, which currently starts or reuses a
      `/api/chat/*` session through `src/core/ai/chat-runtime.mjs`.
-   - Reason: the workflow remains user-led and confirm-first until later phases
-     decompose the specific substeps into local APIs.
+   - Reason: this is the explicit agent-led path for a user who wants the
+     workflow to proceed turn by turn.
    - Incorrect route: a hidden batch process that auto-approves board or company
      writes.
 

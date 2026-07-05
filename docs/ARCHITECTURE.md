@@ -1,6 +1,7 @@
 # Architecture
 
-Rolester is organized around skills plus deterministic scripts.
+Rolester is organized around deterministic local APIs, bounded AI assists,
+explicit chat handoffs, and retained skill runtime.
 
 ## Flow
 
@@ -81,9 +82,55 @@ Root `AGENTS.md` and `CLAUDE.md` instruct agents how to map user intent to the
 
 ## Layers
 
-### Skill Layer
+### Local API and DB Layer
 
-Skills make judgment calls:
+Deterministic code owns the default app path:
+
+- validate setup and runtime capabilities
+- build source URLs from config
+- scan supported providers
+- dedupe sourced roles and companies
+- resolve safe careers URLs
+- capture reachable job bodies
+- persist confirmed writes through DB verbs
+
+Company discovery uses this layer by default. The app calls
+`/api/discovery/company-proposals` to create/read proposal batches and
+`/api/discovery/company-proposal-decisions` to approve, reject, suppress,
+escalate, or refresh a proposal. Local proposal errors stay local; they do not
+silently start chat or the full skill runtime.
+
+### Bounded AI Layer
+
+Model calls are reserved for small schema-validated judgments:
+
+- seed company suggestions
+- classify finite pasted content
+- suggest bounded onboarding fields
+- normalize or rewrite a small artifact
+
+Bounded AI flows call `callAI()` or `runStructuredOneshot()`, return explicit
+no-AI/manual fallbacks, and treat model output as advisory until deterministic
+validation passes.
+
+### Conversational Chat Handoff Layer
+
+Agent-led workflows remain available when the user chooses them. Discovery
+quick-start and next actions call `/api/discovery/quick-start` or
+`/api/discovery/next`, which start or reuse visible `/api/chat/*` sessions.
+`ChatPanel` renders the live session instead of hiding a background runtime
+handoff.
+
+### Retained Full Skill Runtime
+
+`POST /api/skill/run` remains the allowlisted full runtime for workflows that
+need broad tools, long orchestration, streamed visibility, or retained
+`SKILL.md` execution. It is not the default route for deterministic scans,
+proposal decisions, source writes, or local app actions with existing owners.
+
+### Skill Contract Layer
+
+Skills define workflow contracts and judgment gates:
 
 - what to ask during onboarding
 - whether a job passes the body-read gate
@@ -92,17 +139,10 @@ Skills make judgment calls:
 - how to draft and summarize candidate communications
 - what to include in an interview packet
 
-### Script Layer
-
-Scripts should be deterministic:
-
-- validate setup
-- build source URLs from config
-- parse saved jobs
-- dedupe sourced roles
-- check link liveness
-- render documents
-- validate tracker state
+Product runtime decomposes those contracts into the cheapest correct owner:
+local APIs and DB verbs first, bounded AI for finite judgment, chat handoff for
+turn-by-turn work, and full skill runtime only when the tool loop is actually
+needed.
 
 ### Communication Layer
 
