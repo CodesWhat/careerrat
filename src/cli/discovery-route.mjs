@@ -166,6 +166,7 @@ export function mountDiscoveryRoutes({
   fetchImpl = fetch,
   resolveCompanyBoard,
   scanCompaniesImpl,
+  seedCall,
   now,
 }) {
   addRoute("POST", "/api/discovery/company-proposals", async (req, res) => {
@@ -189,8 +190,13 @@ export function mountDiscoveryRoutes({
         fetchImpl,
         resolveCompanyBoard,
         scanCompaniesImpl,
+        seedCall,
         now,
       });
+      if (result.body) {
+        sendJson(res, result.status || 500, result.body);
+        return;
+      }
       sendJson(res, 200, { ok: true, data: result.data, meta: result.meta });
     } catch (err) {
       sendJson(res, err.status || 500, {

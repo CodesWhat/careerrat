@@ -5,7 +5,9 @@ import {
   COMPANY_DISCOVERY_BATCH_MAX,
   resolveCompanyBoard as defaultResolveCompanyBoard,
 } from "./company-board-resolver.mjs";
+import { buildCompanySeedContext } from "./company-context.mjs";
 import { buildCompanyProposal } from "./company-proposal-gate.mjs";
+import { generateCompanySeeds } from "./company-seeds.mjs";
 
 function makeError(message, { code = "VALIDATION_FAILED", status = 422 } = {}) {
   const err = new Error(message);
@@ -29,32 +31,16 @@ function stableId(prefix, parts) {
   return `${prefix}_${hash}`;
 }
 
-function normalizeSeed(raw) {
-  const name = String(raw?.name || "").trim();
-  if (!name) return null;
-  const seed = {
-    name,
-    domain_hint: String(raw?.domain_hint || raw?.domainHint || "").trim(),
-    why: String(raw?.why || "").trim(),
-    role_family_hint: String(raw?.role_family_hint || raw?.roleFamilyHint || "").trim(),
-    confidence: String(raw?.confidence || "manual").trim(),
-    source_hint: String(raw?.source_hint || raw?.sourceHint || "manual").trim(),
-  };
-  for (const key of ["job_board_url", "careers_url"]) {
-    if (raw?.[key]) seed[key] = String(raw[key]).trim();
-  }
-  return seed;
-}
-
 function manualSeedsFromBody(body = {}) {
   const seeds = body.manualSeeds || body.manual_seeds || body.companies || body.seeds || [];
   if (!Array.isArray(seeds)) {
     throw makeError("manualSeeds must be an array");
   }
-  if (seeds.length > COMPANY_DISCOVERY_BATCH_MAX) {
-    throw makeError(`manual seed batch exceeds maximum of ${COMPANY_DISCOVERY_BATCH_MAX}`);
-  }
-  return seeds.map(normalizeSeed).filter(Boolean);
+  return seeds;
+}
+
+function requestedCountFromBody(body = {}) {
+  return body.requestedCount || body.requested_count || COMPANY_DISCOVERY_BATCH_MAX;
 }
 
 async function proposalForSeed({
@@ -107,15 +93,25 @@ export async function createCompanyProposalBatch({
   fetchImpl = fetch,
   resolveCompanyBoard = defaultResolveCompanyBoard,
   scanCompaniesImpl = scanCompanies,
+  buildSeedContext = buildCompanySeedContext,
+  generateSeeds = generateCompanySeeds,
+  seedCall,
   now = new Date(),
 } = {}) {
-  const seeds = manualSeedsFromBody(body);
-  if (seeds.length === 0) {
-    throw makeError("manualSeeds are required when no AI seed route is configured", {
-      code: "NO_AI_ROUTE",
-      status: 501,
-    });
-  }
+  const manualSeeds = manualSeedsFromBody(body);
+  const context = buildSeedContext({ repoRoot, env });
+  const seedResult = await generateSeeds({
+    repoRoot,
+    env,
+    context,
+    manualSeeds,
+    requestedCount: requestedCountFromBody(body),
+    call: seedCall,
+    now,
+  });
+  if (!seedResult.body?.ok) return { status: seedResult.status, body: seedResult.body };
+
+  const seeds = seedResult.body.data.companies;
 
   const createdDate = nowDate(now);
   const createdAt = createdDate.toISOString();
@@ -161,6 +157,11 @@ export async function createCompanyProposalBatch({
       rejected,
       counts: batch.counts,
     },
-    meta: { version: batch.version },
+    meta: {
+      version: batch.version,
+      ai: seedResult.body.ai,
+      manual: seedResult.body.manual,
+      seedSource: seedResult.body.ai?.used ? "ai" : "manual",
+    },
   };
 }
