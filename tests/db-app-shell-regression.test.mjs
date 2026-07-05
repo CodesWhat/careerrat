@@ -19,7 +19,14 @@ const PRODUCT_FILES = [
   "scripts/scan-sourced.mjs",
 ];
 
+const REACT_PRODUCT_PAGE_FILES = [
+  "apps/web/src/onboarding/steps/WelcomeStep.jsx",
+  "apps/web/src/onboarding/steps/FinishStep.jsx",
+];
+
 const TRACKER_DEV_FILE = "src/cli/tracker-dev.mjs";
+
+const LEGACY_STATIC_ROUTES = ["/onboard", "/search", "/packet", "/evaluate", "/answer", "/tracker"];
 
 const FORBIDDEN_PRODUCT_DEPENDENCIES = [
   {
@@ -76,6 +83,20 @@ const DEBUG_EXPORT_ROUTE_PATTERNS = [
     pattern: /addRoute\s*\(\s*["']GET["']\s*,\s*["']\/api\/activity["']/,
   },
 ];
+
+const LEGACY_STATIC_AFFORDANCE_PATTERNS = LEGACY_STATIC_ROUTES.flatMap((route) => [
+  {
+    name: `direct ${route} anchor`,
+    pattern: new RegExp(`(?:href|to)\\s*=\\s*["']${route.replace("/", "\\/")}["']`),
+  },
+  {
+    name: `normal UX label for ${route}`,
+    pattern: new RegExp(
+      `(classic|legacy|static|retained utility|utility page|compatibility page)[^\\n]{0,80}${route.replace("/", "\\/")}|${route.replace("/", "\\/")}[^\\n]{0,80}(classic|legacy|static|retained utility|utility page|compatibility page)`,
+      "i"
+    ),
+  },
+]);
 
 function readSource(file) {
   return readFileSync(resolve(REPO_ROOT, file), "utf8");
@@ -163,6 +184,13 @@ test("DB app shell guard scans the complete product boundary", () => {
   ]);
 });
 
+test("static affordance guard scans normal React product pages", () => {
+  assert.deepEqual(REACT_PRODUCT_PAGE_FILES, [
+    "apps/web/src/onboarding/steps/WelcomeStep.jsx",
+    "apps/web/src/onboarding/steps/FinishStep.jsx",
+  ]);
+});
+
 test("product files do not depend on generated tracker or activity exports", () => {
   for (const file of PRODUCT_FILES) {
     const source = stripJavaScriptComments(readSource(file));
@@ -171,6 +199,19 @@ test("product files do not depend on generated tracker or activity exports", () 
         source,
         dependency.pattern,
         `${relative(REPO_ROOT, resolve(REPO_ROOT, file))} must not use ${dependency.name}`
+      );
+    }
+  }
+});
+
+test("normal React product pages do not advertise legacy static-page affordances", () => {
+  for (const file of REACT_PRODUCT_PAGE_FILES) {
+    const source = stripJavaScriptComments(readSource(file));
+    for (const affordance of LEGACY_STATIC_AFFORDANCE_PATTERNS) {
+      assertNoMatch(
+        source,
+        affordance.pattern,
+        `${relative(REPO_ROOT, resolve(REPO_ROOT, file))} must not expose ${affordance.name}`
       );
     }
   }
@@ -192,6 +233,36 @@ test("compatibility routes in tracker-dev are explicitly classified as debug/exp
       source,
       route.pattern,
       `${TRACKER_DEV_FILE} must not register or branch on ${route.name} outside the debug/export allowlist`
+    );
+  }
+});
+
+test("tracker-dev static byte pages are explicit compatibility/debug/export surfaces", () => {
+  const source = stripJavaScriptComments(readSource(TRACKER_DEV_FILE));
+
+  assert.match(
+    source,
+    /\bSTATIC_COMPATIBILITY_ROUTES\b/,
+    "tracker-dev must define STATIC_COMPATIBILITY_ROUTES for retained static byte pages"
+  );
+  assert.match(
+    source,
+    /Static compatibility\/debug\/export routes:/,
+    "tracker-dev 404/help copy must label retained static byte pages as compatibility/debug/export routes"
+  );
+  assertNoMatch(
+    source,
+    /utility pages include[^`]+\/(?:evaluate|answer|onboard|search|packet)/i,
+    "tracker-dev must not group retained static byte pages under normal utility pages"
+  );
+
+  for (const route of ["/evaluate", "/answer", "/onboard", "/search", "/packet"]) {
+    assert.match(
+      source,
+      new RegExp(
+        `\\bSTATIC_COMPATIBILITY_ROUTES\\b[\\s\\S]*path:\\s*["']${route.replace("/", "\\/")}["']`
+      ),
+      `tracker-dev must classify ${route} in STATIC_COMPATIBILITY_ROUTES`
     );
   }
 });
