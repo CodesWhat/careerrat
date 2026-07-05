@@ -1,8 +1,8 @@
 ---
 phase: 6
 slug: canonical-db-app-shell
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-07-05
 ---
@@ -78,4 +78,4 @@ created: 2026-07-05
 - [ ] Feedback latency < 180s
 - [ ] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-07-05

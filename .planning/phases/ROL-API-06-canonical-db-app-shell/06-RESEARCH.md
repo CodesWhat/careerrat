@@ -401,22 +401,19 @@ All claims in this research were verified from project files, codebase inspectio
 |---|-------|---------|---------------|
 | - | No unverified assumptions recorded. | - | - |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Should legacy exact routes be removed or moved behind `/debug/*` / `/export/*` names?**  
+1. **RESOLVED — Should legacy exact routes be removed or moved behind `/debug/*` / `/export/*` names?**
    What we know: legacy routes still exist in `tracker-dev.mjs`, and locked decisions allow them only as explicit debug/export utilities. [VERIFIED: src/cli/tracker-dev.mjs + 06-CONTEXT.md]  
-   What's unclear: whether the executor should delete routes immediately or preserve them under clearer names for support. [VERIFIED: 06-CONTEXT.md]  
-   Recommendation: remove product navigation first, then keep only a small named debug/export allowlist if route compatibility is still needed. [VERIFIED: 06-CONTEXT.md]
+   Decision for Phase 6: remove normal product navigation and product copy for old routes, and keep only a small named debug/export allowlist if route compatibility is still needed. Do not preserve legacy routes as product UX. [VERIFIED: 06-CONTEXT.md + 06-01-PLAN.md + 06-04-PLAN.md]
 
-2. **Should scanner run state get a DB table in Phase 6?**  
+2. **RESOLVED — Should scanner run state get a DB table in Phase 6?**
    What we know: source config and sourced rows already have DB owners, while `/api/search/results` reads the newest `workspace/scan-results` report file. [VERIFIED: src/core/db/verbs/source-config.mjs + src/cli/search-route.mjs]  
-   What's unclear: whether Phase 6 needs durable scan-run history or only DB-derived current context. [VERIFIED: 06-CONTEXT.md]  
-   Recommendation: keep Phase 6 narrow unless product UI needs historical run metadata; at minimum, product scanner context should not depend on scan-result JSON files. [VERIFIED: 06-CONTEXT.md + codebase grep]
+   Decision for Phase 6: do not add a new scanner run-state migration/table unless implementation proves it is required. Build DB-derived current scanner context from existing DB source config, applications, sourced rows, activity/watermark data, and a helper seam; keep scan-result JSON files debug/report-only. [VERIFIED: 06-CONTEXT.md + 06-03-PLAN.md + 06-07-PLAN.md]
 
-3. **Should source setup reuse `/api/boards/*` names or move under `/api/data/source-config/*`?**  
+3. **RESOLVED — Should source setup reuse `/api/boards/*` names or move under `/api/data/source-config/*`?**
    What we know: current board add route is legacy YAML-backed, while DB source config verbs already exist. [VERIFIED: src/cli/boards-route.mjs + src/core/db/verbs/source-config.mjs]  
-   What's unclear: exact route naming is delegated to the planner. [VERIFIED: 06-CONTEXT.md]  
-   Recommendation: prefer a DB-owned route namespace that makes source config ownership obvious, and leave URL preview as pure deterministic helper. [VERIFIED: codebase grep]
+   Decision for Phase 6: keep `POST /api/boards/preview` as a pure deterministic helper and migrate the existing product caller `POST /api/boards/add` to DB source config verbs. The planner may add clearer DB source-config aliases later, but this phase must make the currently reachable product route DB-owned. [VERIFIED: 06-CONTEXT.md + 06-03-PLAN.md + 06-06-PLAN.md]
 
 ## Environment Availability
 
