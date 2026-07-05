@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
 status: In Progress
-stopped_at: Completed 06-03-PLAN.md
-last_updated: "2026-07-05T16:52:47.823Z"
+stopped_at: Completed 06-04-PLAN.md
+last_updated: "2026-07-05T17:02:23.062Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 31
-  percent: 49
+  completed_plans: 32
+  percent: 50
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T16:52:47.813Z
-**Stopped at:** Completed 06-03-PLAN.md
+**Last session:** 2026-07-05T17:02:23.054Z
+**Stopped at:** Completed 06-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -102,6 +102,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P01 | 3 min | 2 tasks | 3 files |
 | Phase 06 P02 | 1 min | 1 tasks | 2 files |
 | Phase 06 P03 | 5 min | 3 tasks | 4 files |
+| Phase 06 P04 | 5 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -172,3 +173,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: Wave 0 source setup and scanner coverage stays test-only and RED against current file-backed product route behavior. — Implementation moves to Phase 6 Wave 1 after all RED contracts are present.
 - [Phase 06]: Source setup and scanner product routes are specified as fail-closed HTTP 409 when SQLite is absent; legacy config and scan-result files are not sufficient product state. — This preserves APP-02/APP-03 and decisions D-04 through D-08.
 - [Phase 06]: DB-mode scanner seen sets must come from SQLite application and sourced rows, not from generated workspace/tracker.json exports. — Generated tracker exports are compatibility artifacts only.
+- [Phase 06]: Normal React app navigation now contains only /app SPA product routes; legacy /tracker remains outside the nav. — This makes APP-01 green for the NavList RED guard.
+- [Phase 06]: tracker-dev keeps generated dashboard, raw tracker/activity, and storage-adapter feed routes only as named debug/export compatibility routes. — This keeps remaining generated-file access auditable for APP-04.
+- [Phase 06]: Missing generated tracker exports skip only the debug/export render path; /app and DB APIs still boot. — This preserves APP-03 by preventing compatibility exports from becoming product prerequisites.
