@@ -180,7 +180,7 @@ test("rejects unsafe scheme and local/private host hints before cache promotion"
 test("rejects redirect targets that become local or private", async () => {
   const repoRoot = setupRepo();
   const fetchImpl = fetchFrom({
-    "https://acme.example": response("", {
+    "https://acme.example/": response("", {
       status: 302,
       headers: { location: "http://127.0.0.1/admin" },
     }),
@@ -235,7 +235,7 @@ test("resolves a supported ATS hint through provider inference and persists cach
 test("discovers a supported ATS board from public homepage and careers links within the redirect cap", async () => {
   const repoRoot = setupRepo();
   const fetchImpl = fetchFrom({
-    "https://acme.example": response("", {
+    "https://acme.example/": response("", {
       status: 301,
       headers: { location: "/careers" },
     }),
