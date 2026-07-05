@@ -7,7 +7,7 @@
 <user_constraints>
 ## User Constraints (from CONTEXT.md)
 
-All content in this section is copied from `.planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md`. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
+All content in this section is copied from `.planning/phases/08-deep-ingest-lane/08-CONTEXT.md`. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
 
 ### Locked Decisions
 
@@ -53,17 +53,17 @@ The user delegated implementation details to the planner and executor: choose ex
 
 | ID | Description | Research Support |
 |----|-------------|------------------|
-| ING-01 | Accept a drop-all intake for resumes, notes, LinkedIn/project links, repos, portfolios, pasted facts, recruiter context, and job context. [VERIFIED: .planning/REQUIREMENTS.md] | Plan a target-aware Deep ingest source API plus React intake surface that handles paste, file, URL, repo, portfolio, recruiter/job context, and explicit local path sources; every source must become a proposal, gap, deferred item, not-available item, manual fallback, or failure row. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| ING-01 | Accept a drop-all intake for resumes, notes, LinkedIn/project links, repos, portfolios, pasted facts, recruiter context, and job context. [VERIFIED: .planning/REQUIREMENTS.md] | Plan a target-aware Deep ingest source API plus React intake surface that handles paste, file, URL, repo, portfolio, recruiter/job context, and explicit local path sources; every source must become a proposal, gap, deferred item, not-available item, manual fallback, or failure row. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 | ING-02 | Derive evidence, story bank entries, honesty boundaries, writing voice, role-specific signals, and unanswered gaps into DB state. [VERIFIED: .planning/REQUIREMENTS.md] | Plan new SQLite-native deep-ingest source/proposal/lane tables and DB verbs that confirm reviewed proposals into trusted candidate evidence plus new DB-backed story, honesty, voice, role-signal, and gap state. [VERIFIED: src/core/db/verbs/candidate.mjs] |
-| ING-03 | Provide deeper context through structured React forms and an optional AI interview. [VERIFIED: .planning/REQUIREMENTS.md] | Reconcile roadmap text with locked Phase 8 scope: build structured forms and bounded AI proposal extraction/manual fallback now; do not plan a chat/interview lane because D-07 defers it. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| ING-03 | Provide deeper context through structured React forms and an optional AI interview. [VERIFIED: .planning/REQUIREMENTS.md] | Reconcile roadmap text with locked Phase 8 scope: build structured forms and bounded AI proposal extraction/manual fallback now; do not plan a chat/interview lane because D-07 defers it. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 | ING-04 | Make deep-ingest progress durable, resumable, visible in readiness, and independent from already-running sourcing. [VERIFIED: .planning/REQUIREMENTS.md] | Plan terminal lane state in DB, recompute `deep_ingest_complete` from lane terminality, update onboarding/dashboard readiness, and avoid coupling deep ingest to sourcing run execution. [VERIFIED: src/core/db/verbs/candidate.mjs] |
 </phase_requirements>
 
 ## Summary
 
-Phase 8 should be planned as a new SQLite-native product subsystem, not as a retrofit of `candidate/` files, generated tracker artifacts, or the legacy `ingest-profile` skill path. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] The existing codebase already has the core pieces the planner should reuse: DB migrations and verbs through `node:sqlite`, fail-closed local app routes, bounded AI envelopes, intake capture/upload patterns, candidate readiness computation, library/onboarding UI patterns, and validation logic for evidence, stories, writing style, placeholders, and private compensation leakage. [VERIFIED: src/core/db/connection.mjs] [VERIFIED: src/core/ai/bounded-ai.mjs] [VERIFIED: src/core/interview/story-bank.mjs]
+Phase 8 should be planned as a new SQLite-native product subsystem, not as a retrofit of `candidate/` files, generated tracker artifacts, or the legacy `ingest-profile` skill path. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] The existing codebase already has the core pieces the planner should reuse: DB migrations and verbs through `node:sqlite`, fail-closed local app routes, bounded AI envelopes, intake capture/upload patterns, candidate readiness computation, library/onboarding UI patterns, and validation logic for evidence, stories, writing style, placeholders, and private compensation leakage. [VERIFIED: src/core/db/connection.mjs] [VERIFIED: src/core/ai/bounded-ai.mjs] [VERIFIED: src/core/interview/story-bank.mjs]
 
-The planner should create a vertical MVP that captures sources, scans/fetches within explicit limits, stores source artifacts and proposal rows, validates proposals, shows a context-aware review/editor UI, and only writes trusted candidate facts after user confirmation. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md] The full AI interview is out of scope for Phase 8; any plan that builds `/chat`, an interview transcript UI, or default `POST /api/skill/run` routing for deep ingest contradicts the locked decisions. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] [VERIFIED: AGENTS.md]
+The planner should create a vertical MVP that captures sources, scans/fetches within explicit limits, stores source artifacts and proposal rows, validates proposals, shows a context-aware review/editor UI, and only writes trusted candidate facts after user confirmation. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] The full AI interview is out of scope for Phase 8; any plan that builds `/chat`, an interview transcript UI, or default `POST /api/skill/run` routing for deep ingest contradicts the locked decisions. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] [VERIFIED: AGENTS.md]
 
 **Primary recommendation:** Use existing Rolester DB verbs/routes, `runBoundedAI`, schema validators, and bespoke React/CSS components to build a proposal-first Deep ingest lane with no new runtime packages. [VERIFIED: package.json]
 
@@ -71,14 +71,14 @@ The planner should create a vertical MVP that captures sources, scans/fetches wi
 
 | Capability | Primary Tier | Secondary Tier | Rationale |
 |------------|--------------|----------------|-----------|
-| Target-aware source intake | Browser / Client | API / Backend | The user chooses target shape and submits paste/file/link material in React; the API persists the source and enforces body/file caps. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md] |
-| File, URL, repo, and local-path scanning | API / Backend | Database / Storage | Deterministic scanning/fetching belongs outside the browser and before AI; source artifacts and scan outcomes must be durable DB state. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md] |
+| Target-aware source intake | Browser / Client | API / Backend | The user chooses target shape and submits paste/file/link material in React; the API persists the source and enforces body/file caps. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md] |
+| File, URL, repo, and local-path scanning | API / Backend | Database / Storage | Deterministic scanning/fetching belongs outside the browser and before AI; source artifacts and scan outcomes must be durable DB state. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] |
 | Bounded extraction proposals | API / Backend | External AI service | `runBoundedAI` owns schema validation, provider/no-provider fallback, labels, and safe error envelopes; model output remains a proposal, not trusted fact. [VERIFIED: src/core/ai/bounded-ai.mjs] |
-| Proposal review and editing | Browser / Client | API / Backend | The UI shows source preview, validation badges, editable proposal fields, and confirm/defer/not-available actions; backend verifies state transitions. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md] |
+| Proposal review and editing | Browser / Client | API / Backend | The UI shows source preview, validation badges, editable proposal fields, and confirm/defer/not-available actions; backend verifies state transitions. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md] |
 | Trusted candidate state writes | API / Backend | Database / Storage | Confirm verbs should write evidence, stories, honesty, voice, role signals, and lane state in SQLite transactions after review. [VERIFIED: src/core/db/verbs/shared.mjs] |
 | `deep_ingest_complete` readiness | API / Backend | Browser / Client | Current readiness is computed in candidate DB code and displayed by onboarding/dashboard cards; Phase 8 should change the computation to terminal lane state. [VERIFIED: src/core/db/verbs/candidate.mjs] |
 | Library and onboarding visibility | Browser / Client | API / Backend | Existing Library and onboarding screens already render setup/library state and should read new DB-backed view models. [VERIFIED: apps/web/src/library/LibraryPage.jsx] |
-| Sourcing independence | API / Backend | Database / Storage | Locked Phase 8 requires deep ingest not to block sourcing after `search_ready`; keep any sourcing run state separate from deep-ingest lane state. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| Sourcing independence | API / Backend | Database / Storage | Locked Phase 8 requires deep ingest not to block sourcing after `search_ready`; keep any sourcing run state separate from deep-ingest lane state. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 
 ## Project Constraints (from AGENTS.md)
 
@@ -104,8 +104,8 @@ The planner should create a vertical MVP that captures sources, scans/fetches wi
 | `node:sqlite` `DatabaseSync` | Built into Node 24. [CITED: https://nodejs.org/api/sqlite.html] | SQLite connection, migrations, transactions, JSON table access. | Existing DB layer uses `DatabaseSync`, WAL, foreign keys, busy timeout, and fail-closed DB access. [VERIFIED: src/core/db/connection.mjs] |
 | SQLite | CLI `3.51.0` installed. [VERIFIED: environment probe] | Persistent local DB for source artifacts, proposals, candidate state, and lane terminality. | Existing migrations use JSON blobs with `CHECK(json_valid(data))`, generated columns, and indexes; SQLite documents generated columns and JSON functions for this pattern. [VERIFIED: src/core/db/migrations/003-candidate-setup.mjs] [CITED: https://sqlite.org/gencol.html] [CITED: https://sqlite.org/json1.html] |
 | Rolester DB verb layer | Local modules. [VERIFIED: src/core/db/verbs/index.mjs] | Transactional domain writes, exports, setup recomputation, and activity patterns. | New durable behavior should follow `requireDb`, `withTransaction`, and verb exports instead of ad hoc route-side SQL. [VERIFIED: src/core/db/verbs/shared.mjs] |
-| Rolester bounded AI runtime | Local modules. [VERIFIED: src/core/ai/bounded-ai.mjs] | Schema-validated extraction proposals with no-AI/manual fallback. | AI-SPEC selects `runBoundedAI` + `callAI` + `runStructuredOneshot` and explicitly rejects a new AI framework for Phase 8. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md] |
-| React / React DOM | Installed `19.2.7`; app declares `^19.0.0`. [VERIFIED: npm ls] [VERIFIED: apps/web/package.json] | Deep ingest page, target selector, source preview, proposal editor, and readiness UI. | Existing app is a bespoke React app; UI-SPEC requires local components and CSS, not a new design system. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md] |
+| Rolester bounded AI runtime | Local modules. [VERIFIED: src/core/ai/bounded-ai.mjs] | Schema-validated extraction proposals with no-AI/manual fallback. | AI-SPEC selects `runBoundedAI` + `callAI` + `runStructuredOneshot` and explicitly rejects a new AI framework for Phase 8. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] |
+| React / React DOM | Installed `19.2.7`; app declares `^19.0.0`. [VERIFIED: npm ls] [VERIFIED: apps/web/package.json] | Deep ingest page, target selector, source preview, proposal editor, and readiness UI. | Existing app is a bespoke React app; UI-SPEC requires local components and CSS, not a new design system. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md] |
 | Vite / Vitest | Installed Vite `6.4.3`, Vitest `3.2.6`. [VERIFIED: npm ls] | Frontend dev server, build, and React unit tests. | Existing web workspace already uses Vite/Vitest scripts. [VERIFIED: apps/web/package.json] |
 | `node:test` | Built into Node. [CITED: https://nodejs.org/api/test.html] | Backend DB, route, scanner, and bounded-AI unit tests. | Existing backend tests are `.test.mjs` files run by `node --test`. [VERIFIED: package.json] |
 
@@ -118,17 +118,17 @@ The planner should create a vertical MVP that captures sources, scans/fetches wi
 | `src/core/profile/evidence-writer.mjs` | Local. [VERIFIED: src/core/profile/evidence-writer.mjs] | Guarded evidence claim write pattern and schema round-trip checks. | Reuse validation ideas, but write confirmed Phase 8 evidence through DB verbs. [VERIFIED: src/core/db/verbs/candidate.mjs] |
 | `src/core/profile/writing-style.mjs` | Local. [VERIFIED: src/core/profile/writing-style.mjs] | Writing sample signal extraction without importing facts from samples. | Use as deterministic baseline for writing voice proposals and tests. [VERIFIED: tests/writing-style.test.mjs] |
 | `src/cli/skill-run-route.mjs` body readers | Local. [VERIFIED: src/cli/skill-run-route.mjs] | Capped JSON/raw request body helpers and upload-safe behavior. | Reuse or mirror for deep-ingest upload/source routes. [VERIFIED: src/cli/intake-route.mjs] |
-| Local React components and CSS tokens | Local. [VERIFIED: apps/web/src/styles/app.css] | Page scaffolding, cards, buttons, form controls, alerts, chips, icons. | Use for all Phase 8 UI surfaces. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md] |
+| Local React components and CSS tokens | Local. [VERIFIED: apps/web/src/styles/app.css] | Page scaffolding, cards, buttons, form controls, alerts, chips, icons. | Use for all Phase 8 UI surfaces. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md] |
 
 ### Alternatives Considered
 
 | Instead of | Could Use | Tradeoff |
 |------------|-----------|----------|
 | Rolester DB verbs | ORM or ad hoc SQL in routes | Adds migration/write paths that bypass existing fail-closed DB and export patterns. Use current DB verb layer. [VERIFIED: src/core/db/verbs/shared.mjs] |
-| `runBoundedAI` | LangChain, LlamaIndex, or agent framework | Phase 8 is bounded extraction, not tool orchestration; AI-SPEC rejects a new external framework. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md] |
+| `runBoundedAI` | LangChain, LlamaIndex, or agent framework | Phase 8 is bounded extraction, not tool orchestration; AI-SPEC rejects a new external framework. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] |
 | Thin local route modules | Express, multer, or a new HTTP framework | The current dev server mounts exact route handlers; adding Express is unnecessary scope. [VERIFIED: src/cli/tracker-dev.mjs] |
-| DB-backed Library state | `candidate/stories.yml` / `candidate/writing-style.md` | Locked context says existing files may remain compatibility surfaces but are not product acceptance targets. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
-| Target-aware Deep ingest page | Generic Inbox-only review | D-04/D-06 require context-aware review surfaces when type-specific review is clearer. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| DB-backed Library state | `candidate/stories.yml` / `candidate/writing-style.md` | Locked context says existing files may remain compatibility surfaces but are not product acceptance targets. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
+| Target-aware Deep ingest page | Generic Inbox-only review | D-04/D-06 require context-aware review surfaces when type-specific review is clearer. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 
 **Installation:**
 ```bash
@@ -181,7 +181,7 @@ Quick onboarding / sourcing:
   deep_ingest_complete -> computed separately from lane terminal states
 ```
 
-This architecture keeps source acquisition, model calls, validation, review, and trusted writes as separate stages so unreadable sources and failed AI routes become visible states instead of silent success. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md]
+This architecture keeps source acquisition, model calls, validation, review, and trusted writes as separate stages so unreadable sources and failed AI routes become visible states instead of silent success. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md]
 
 ### Recommended Project Structure
 
@@ -204,7 +204,7 @@ src/core/deep-ingest/
 │   └── lane-state.mjs
 └── view-model.mjs            # dashboard/library/deep-ingest UI model
 
-src/core/db/migrations/007-deep-ingest.mjs
+src/core/db/migrations/008-deep-ingest.mjs
 src/core/db/verbs/deep-ingest.mjs
 src/cli/deep-ingest-route.mjs
 config/deep-ingest-source.schema.json
@@ -219,11 +219,11 @@ tests/deep-ingest-ai.test.mjs
 tests/deep-ingest-source-scanner.test.mjs
 ```
 
-Use migration version 7 because the live migration head is `006-company-discovery-cache.mjs`. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md]
+Use migration version 8 because the live migration head includes `007-sourcing-runs.mjs`. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-PATTERNS.md]
 
 ### Pattern 1: SQLite-Native Source, Proposal, and Lane State
 
-**What:** Add DB tables for source artifacts, proposals, proposal decisions, lane status, and confirmed DB-backed story/voice/honesty/role-signal state. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]  
+**What:** Add DB tables for source artifacts, proposals, proposal decisions, lane status, and confirmed DB-backed story/voice/honesty/role-signal state. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]  
 **When to use:** Any data that the Deep ingest UI, Library, onboarding readiness, or downstream application generation will reuse. [VERIFIED: .planning/REQUIREMENTS.md]  
 **Example:**
 ```sql
@@ -267,11 +267,11 @@ export function mountDeepIngestRoutes({ root, server }) {
 
 ### Pattern 3: Proposal-First Bounded AI
 
-**What:** Deterministic scanning prepares source text/chunks, bounded AI proposes lane-specific JSON, validators mark proposal state, and the user must confirm or edit before trusted writes. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md]  
-**When to use:** Evidence, story, writing voice, honesty, role signal, and gap extraction when deterministic parsing is insufficient. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]  
+**What:** Deterministic scanning prepares source text/chunks, bounded AI proposes lane-specific JSON, validators mark proposal state, and the user must confirm or edit before trusted writes. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md]  
+**When to use:** Evidence, story, writing voice, honesty, role signal, and gap extraction when deterministic parsing is insufficient. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]  
 **Example:**
 ```javascript
-// Source: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md
+// Source: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md
 const envelope = await runBoundedAI({
   labels: {
     skill: "deep-ingest",
@@ -296,7 +296,7 @@ const envelope = await runBoundedAI({
 
 ### Pattern 4: Grounding, Privacy, and Honesty Validators
 
-**What:** Treat schema validity as necessary but insufficient; each proposal needs source provenance, quote/span support when text exists, conflict/privacy checks, and user review status. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md]  
+**What:** Treat schema validity as necessary but insufficient; each proposal needs source provenance, quote/span support when text exists, conflict/privacy checks, and user review status. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md]  
 **When to use:** Before storing a proposal as reviewable and again before confirmation. [VERIFIED: src/core/interview/story-bank.mjs]  
 **Example:**
 ```javascript
@@ -315,11 +315,11 @@ export function validateGrounding({ sourceId, sourceText, items }) {
 
 ### Pattern 5: Terminal Lane Readiness
 
-**What:** `deep_ingest_complete` is true only when every required lane is terminal: `completed`, `deferred`, or `not_available`. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]  
+**What:** `deep_ingest_complete` is true only when every required lane is terminal: `completed`, `deferred`, or `not_available`. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]  
 **When to use:** Candidate setup recomputation and onboarding/dashboard readiness. [VERIFIED: apps/web/src/onboarding/steps/FinishStep.jsx]  
 **Example:**
 ```javascript
-// Source: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md
+// Source: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md
 const TERMINAL_LANE_STATUSES = new Set(["completed", "deferred", "not_available"]);
 
 export function computeDeepIngestComplete(lanes) {
@@ -332,9 +332,9 @@ export function computeDeepIngestComplete(lanes) {
 ### Anti-Patterns to Avoid
 
 - **Expanding `intake_items` into the product data model:** Intake is workflow bookkeeping; Deep ingest needs reusable candidate state and lane progress. [VERIFIED: src/core/db/migrations/002-intake.mjs]
-- **Direct AI-to-trusted-write:** Bounded AI output must pass schema validation, deterministic checks, and user confirmation before trusted candidate facts change. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
-- **Building the deferred AI interview:** D-07 explicitly defers chat/interview UX to a future phase. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
-- **Using `candidate/stories.yml` or `candidate/writing-style.md` as acceptance targets:** Existing files may remain compatibility surfaces, but Phase 8 product state should be DB-backed. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
+- **Direct AI-to-trusted-write:** Bounded AI output must pass schema validation, deterministic checks, and user confirmation before trusted candidate facts change. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
+- **Building the deferred AI interview:** D-07 explicitly defers chat/interview UX to a future phase. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
+- **Using `candidate/stories.yml` or `candidate/writing-style.md` as acceptance targets:** Existing files may remain compatibility surfaces, but Phase 8 product state should be DB-backed. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
 - **Rendering fetched source HTML:** Source text is untrusted data and should be shown as escaped/sanitized plain preview. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md]
 
 ## Don't Hand-Roll
@@ -345,54 +345,54 @@ export function computeDeepIngestComplete(lanes) {
 | Model invocation, retry, and safe envelopes | Custom fetch-to-AI code | `runBoundedAI`, `callAI`, `runStructuredOneshot` | Existing runtime handles labels, no-route/manual fallback, schema retries, and safe error envelopes. [VERIFIED: src/core/ai/bounded-ai.mjs] |
 | JSON schema validation | Ad hoc object checks | `schema-validator.mjs` plus config schemas | Existing candidate/evidence/story paths validate schema round trips. [VERIFIED: src/core/profile/schema-validator.mjs] |
 | Evidence/story honesty checks | New loose string heuristics only | Existing evidence/story validators, placeholder lint, comp guard patterns | Current modules already catch missing refs, placeholders, and private comp leakage. [VERIFIED: src/core/interview/story-bank.mjs] |
-| Generic ingest UI from scratch | A new design system or chat UI | `PageScaffold`, local buttons/forms/cards/chips, Deep ingest page contract | UI-SPEC locks bespoke React/CSS components and forbids chat/interview UI for this phase. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md] |
-| Full repository crawling | Unbounded `git clone`, authenticated scan, or recursive fetch | Bounded public README/docs/package metadata scan | D-14/D-15 require bounded best-effort scanning and explicit gaps for private/huge/unreadable sources. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| Generic ingest UI from scratch | A new design system or chat UI | `PageScaffold`, local buttons/forms/cards/chips, Deep ingest page contract | UI-SPEC locks bespoke React/CSS components and forbids chat/interview UI for this phase. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md] |
+| Full repository crawling | Unbounded `git clone`, authenticated scan, or recursive fetch | Bounded public README/docs/package metadata scan | D-14/D-15 require bounded best-effort scanning and explicit gaps for private/huge/unreadable sources. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 | HTML preview or source instruction handling | Render remote HTML or obey source-provided instructions | Escaped plain text preview and fixed extraction prompts | Source material is untrusted input. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md] |
 
-**Key insight:** Phase 8 is mostly an orchestration and state-modeling phase; the hard part is preserving provenance, terminal lane semantics, and confirm-first writes across deterministic scanners, optional AI, and manual fallback. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md]
+**Key insight:** Phase 8 is mostly an orchestration and state-modeling phase; the hard part is preserving provenance, terminal lane semantics, and confirm-first writes across deterministic scanners, optional AI, and manual fallback. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md]
 
 ## Common Pitfalls
 
 ### Pitfall 1: Treating Saved Source As Successful Ingest
-**What goes wrong:** A source row exists, but it produced no proposal, gap, manual fallback, deferred item, or not-available reason. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md]  
+**What goes wrong:** A source row exists, but it produced no proposal, gap, manual fallback, deferred item, or not-available reason. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md]  
 **Why it happens:** The implementation stops at upload/capture and does not model scan/proposal outcome states. [VERIFIED: src/core/db/migrations/002-intake.mjs]  
-**How to avoid:** Every source submit must resolve to exactly one visible review state. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md]  
+**How to avoid:** Every source submit must resolve to exactly one visible review state. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md]  
 **Warning signs:** UI says complete while source status is only `captured` or `uploaded`. [ASSUMED]
 
 ### Pitfall 2: Letting Model Output Become Trusted Candidate Truth
-**What goes wrong:** Schema-valid model JSON becomes reusable evidence, stories, or voice without user confirmation. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md]  
+**What goes wrong:** Schema-valid model JSON becomes reusable evidence, stories, or voice without user confirmation. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md]  
 **Why it happens:** The plan combines proposal generation and candidate writes in one endpoint. [ASSUMED]  
-**How to avoid:** Separate proposal rows from confirm/edit/defer/not-available verbs. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]  
+**How to avoid:** Separate proposal rows from confirm/edit/defer/not-available verbs. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]  
 **Warning signs:** A route named `extract-and-save` or a DB transaction containing a model call. [ASSUMED]
 
 ### Pitfall 3: Reintroducing The Deferred Interview
-**What goes wrong:** The plan adds chat UX, role/job follow-up interview prompts, or `/api/chat/*` as the Deep ingest completion path. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]  
+**What goes wrong:** The plan adds chat UX, role/job follow-up interview prompts, or `/api/chat/*` as the Deep ingest completion path. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]  
 **Why it happens:** ING-03 still mentions an optional AI interview in the roadmap requirements. [VERIFIED: .planning/REQUIREMENTS.md]  
-**How to avoid:** Treat D-07 as the binding refinement: structured forms and bounded extraction only in Phase 8. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]  
-**Warning signs:** Visible copy says "AI interview", "chat", "agent", or "automation". [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md]
+**How to avoid:** Treat D-07 as the binding refinement: structured forms and bounded extraction only in Phase 8. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]  
+**Warning signs:** Visible copy says "AI interview", "chat", "agent", or "automation". [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md]
 
 ### Pitfall 4: Counting Artifacts Instead Of Terminal Lanes
-**What goes wrong:** `deep_ingest_complete` stays false for users who intentionally mark a lane not available, or true after only one artifact is saved. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]  
+**What goes wrong:** `deep_ingest_complete` stays false for users who intentionally mark a lane not available, or true after only one artifact is saved. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]  
 **Why it happens:** Current candidate readiness heuristics use older evidence/company/signal checks rather than lane terminality. [VERIFIED: src/core/db/verbs/candidate.mjs]  
-**How to avoid:** Store per-lane status/reason and compute readiness from required terminal lane statuses. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md]  
+**How to avoid:** Store per-lane status/reason and compute readiness from required terminal lane statuses. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md]  
 **Warning signs:** `deep_ingest_complete` depends only on evidence count or target companies. [VERIFIED: src/core/db/verbs/candidate.mjs]
 
 ### Pitfall 5: Privacy Leakage Through Proposals Or Logs
 **What goes wrong:** Private current compensation, contact details, protected-trait inferences, local file paths, or proprietary source bodies leak into proposal text, telemetry, or outbound-ready evidence. [VERIFIED: AGENTS.md]  
-**Why it happens:** Proposal validation only checks JSON shape and ignores privacy/honesty boundaries. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md]  
+**Why it happens:** Proposal validation only checks JSON shape and ignores privacy/honesty boundaries. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md]  
 **How to avoid:** Add privacy/honesty validators before proposal display and confirmation; keep AI telemetry metadata-only. [VERIFIED: src/core/ai/call-ai.mjs]  
 **Warning signs:** Tests assert schema success but do not assert absence of `current_base`, source bodies, or protected-trait fields. [ASSUMED]
 
 ### Pitfall 6: Migration Number Collision
 **What goes wrong:** Phase 8 creates a stale or non-sequential migration file number after the live head has already been observed. [ASSUMED]  
 **Why it happens:** A plan carries an older migration assumption instead of matching the live migration registry. [VERIFIED: src/core/db/migrations.mjs]  
-**How to avoid:** Use `src/core/db/migrations/007-deep-ingest.mjs` and register migration version 7 because the live head is `006-company-discovery-cache.mjs`. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md]  
-**Warning signs:** Plan references a stale higher-number migration or blocks on another phase occupying version 7. [ASSUMED]
+**How to avoid:** Use `src/core/db/migrations/008-deep-ingest.mjs` and register migration version 8 after `007-sourcing-runs.mjs`. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-PATTERNS.md]  
+**Warning signs:** Plan references a stale lower-number migration or blocks on another phase occupying version 8. [ASSUMED]
 
 ### Pitfall 7: Inaccessible File Controls
 **What goes wrong:** A drag/drop-only source input is not keyboard-usable or screen-reader discoverable. [CITED: https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API/File_drag_and_drop]  
 **Why it happens:** The file input is hidden in a way that removes it from interaction instead of being associated with a labeled control. [CITED: https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Elements/input/file]  
-**How to avoid:** Use a visible button/label pattern plus drag/drop, and keep `Ingest source` disabled until target shape and content are valid. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md]  
+**How to avoid:** Use a visible button/label pattern plus drag/drop, and keep `Ingest source` disabled until target shape and content are valid. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md]  
 **Warning signs:** The only affordance says "drop files here" and has no keyboard path. [ASSUMED]
 
 ## Code Examples
@@ -446,7 +446,7 @@ export function confirmDeepIngestProposal({ root, proposalId, edits, decision })
 
 ### Source Outcome State
 ```javascript
-// Source: .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md
+// Source: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md
 const SOURCE_OUTCOME_STATUSES = [
   "proposal_ready",
   "manual_fallback",
@@ -461,22 +461,22 @@ const SOURCE_OUTCOME_STATUSES = [
 
 | Old Approach | Current Approach | When Changed | Impact |
 |--------------|------------------|--------------|--------|
-| Candidate setup and rich profile material lived primarily in `candidate/` files. | App-first SQLite product state is canonical; candidate files are compatibility exports. | Locked by prior app/DB phases and AGENTS.md. [VERIFIED: AGENTS.md] | Phase 8 should add DB-backed story, voice, honesty, role-signal, source, and lane state. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
-| Generic paste intake deferred profile/project material to `ingest-profile`. | Deep ingest should provide target-aware review and confirmation inside the app. | Phase 8 context. [VERIFIED: config/paste-intake-routes.json] | Update generic capture routing only as an entry point; do not force all review through Inbox. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| Candidate setup and rich profile material lived primarily in `candidate/` files. | App-first SQLite product state is canonical; candidate files are compatibility exports. | Locked by prior app/DB phases and AGENTS.md. [VERIFIED: AGENTS.md] | Phase 8 should add DB-backed story, voice, honesty, role-signal, source, and lane state. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
+| Generic paste intake deferred profile/project material to `ingest-profile`. | Deep ingest should provide target-aware review and confirmation inside the app. | Phase 8 context. [VERIFIED: config/paste-intake-routes.json] | Update generic capture routing only as an entry point; do not force all review through Inbox. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 | Full skill runtime or chat could own complex setup workflows. | Local app APIs and bounded AI proposals own default product flows; full skill runtime remains allowlisted for human-watched workflows. | AGENTS runtime routing contract. [VERIFIED: AGENTS.md] | Deep ingest routes should not call `/api/skill/run` by default. [VERIFIED: AGENTS.md] |
-| Schema-valid AI output could be mistaken for usable extracted data. | Schema validation, grounding, privacy checks, and user confirmation are all required. | Phase 8 AI-SPEC and locked decisions. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md] | Planner must include validator tests and proposal state tests. [VERIFIED: tests/bounded-ai.test.mjs] |
+| Schema-valid AI output could be mistaken for usable extracted data. | Schema validation, grounding, privacy checks, and user confirmation are all required. | Phase 8 AI-SPEC and locked decisions. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] | Planner must include validator tests and proposal state tests. [VERIFIED: tests/bounded-ai.test.mjs] |
 
 **Deprecated/outdated:**
-- Using the full AI interview as Phase 8 scope is outdated because D-07 defers it. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
-- Treating `candidate/stories.yml` and `candidate/writing-style.md` as product acceptance targets is outdated for this phase. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
-- Link-only profile/project capture is insufficient because D-13/D-15 require active best-effort scan/fetch/parse and explicit gaps. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
+- Using the full AI interview as Phase 8 scope is outdated because D-07 defers it. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
+- Treating `candidate/stories.yml` and `candidate/writing-style.md` as product acceptance targets is outdated for this phase. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
+- Link-only profile/project capture is insufficient because D-13/D-15 require active best-effort scan/fetch/parse and explicit gaps. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
 
 ## Assumptions Log
 
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | Suggested table/module names such as `deep_ingest_sources`, `deep_ingest_proposals`, and `src/core/deep-ingest/` are recommended planning names, not locked product decisions. [ASSUMED] | Recommended Project Structure | Low; planner can rename while preserving architecture. |
-| A2 | The live migration head is `006-company-discovery-cache.mjs`, so Phase 8 uses `src/core/db/migrations/007-deep-ingest.mjs` and migration version 7. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md] | Recommended Project Structure / Pitfalls | Low; stale higher-number or external dependency references would break DB migration order. |
+| A2 | The live migration head includes `007-sourcing-runs.mjs`, so Phase 8 uses `src/core/db/migrations/008-deep-ingest.mjs` and migration version 8. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-PATTERNS.md] | Recommended Project Structure / Pitfalls | Low; stale higher-number or external dependency references would break DB migration order. |
 | A3 | MVP public URL extraction can rely on built-in `fetch` plus plain-text extraction/caps without adding a package. [ASSUMED] | Standard Stack / Open Questions | Medium; complex pages may require manual fallback or future parser package. |
 
 ## Open Questions (RESOLVED)
@@ -485,7 +485,7 @@ const SOURCE_OUTCOME_STATUSES = [
    - What we know: existing candidate DB state covers evidence and some honesty/profile setup, while stories and writing style are still file-backed. [VERIFIED: src/core/db/verbs/candidate.mjs] [VERIFIED: src/core/interview/story-bank.mjs]
    - What's unclear: whether to store each lane in separate normalized tables, JSON blob tables with generated columns, or a mixed model. [ASSUMED]
    - Recommendation: use JSON blob tables with generated searchable columns for the MVP, matching current candidate migrations. [VERIFIED: src/core/db/migrations/003-candidate-setup.mjs]
-   - RESOLVED: Use new SQLite-native Deep ingest tables for sources, source chunks, proposals, lane states, story bank, writing voice, honesty boundaries, and role signals. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-01-PLAN.md]
+   - RESOLVED: Use new SQLite-native Deep ingest tables for sources, source chunks, proposals, lane states, story bank, writing voice, honesty boundaries, and role signals. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-01-PLAN.md]
 
 2. **Whether deep-ingest writes should create tracker activity events**
    - What we know: candidate setup/intake DB verbs exist outside the full tracker-visible write contract, while tracker-visible domain verbs use `runVerb` and activity logging patterns. [VERIFIED: src/core/db/verbs/intake.mjs] [VERIFIED: src/core/db/verbs/shared.mjs]
@@ -494,16 +494,16 @@ const SOURCE_OUTCOME_STATUSES = [
    - RESOLVED: Confirmed trusted candidate/lane-state changes are tracker-visible and should emit activity/metadata through the new DB verbs; raw source/proposal creation can stay internal unless surfaced in readiness or Library. [VERIFIED: AGENTS.md]
 
 3. **Bounded repo and URL scan limits**
-   - What we know: D-14 requires bounded public repo README/docs/package metadata scanning and explicit gaps for unsupported/private/huge sources. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
+   - What we know: D-14 requires bounded public repo README/docs/package metadata scanning and explicit gaps for unsupported/private/huge sources. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
    - What's unclear: exact file count, byte count, timeout, and host allow/deny rules. [ASSUMED]
    - Recommendation: planner should set small constants in one module and include tests for too-large, login-gated, and unsupported sources. [ASSUMED]
-   - RESOLVED: Plans must set bounded defaults explicitly: capped request/file bodies, capped source text/chunks, URL timeout/byte cap, and a repo allowlist for README/docs/package metadata with file-count and aggregate-byte caps. Exact constants are named in Plan 08-03. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-03-PLAN.md]
+   - RESOLVED: Plans must set bounded defaults explicitly: capped request/file bodies, capped source text/chunks, URL timeout/byte cap, and a repo allowlist for README/docs/package metadata with file-count and aggregate-byte caps. Exact constants are named in Plan 08-03. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-03-PLAN.md]
 
 4. **Phase 7 dependency surface**
    - What we know: Phase 7 is in progress and owns quick onboarding/auto-sourcing context that Phase 8 must not block. [VERIFIED: .planning/STATE.md]
    - What's unclear: final names for Phase 7 sourcing run tables/routes if they land before Phase 8. [ASSUMED]
    - Recommendation: Wave 0 should inspect actual migration and route files before creating Phase 8 DB tasks. [ASSUMED]
-   - RESOLVED: The live migration head is 006, so Phase 8 uses `src/core/db/migrations/007-deep-ingest.mjs` and registers migration version 7. There is no Phase 7 migration dependency for Phase 8 execution. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md]
+   - RESOLVED: The live migration head includes 007-sourcing-runs, so Phase 8 uses `src/core/db/migrations/008-deep-ingest.mjs` and registers migration version 8.  [VERIFIED: .planning/phases/08-deep-ingest-lane/08-PATTERNS.md]
 
 ## Environment Availability
 
@@ -539,7 +539,7 @@ const SOURCE_OUTCOME_STATUSES = [
 |--------|----------|-----------|-------------------|--------------|
 | ING-01 | Source intake accepts paste, file, URL, repo, portfolio, recruiter/job context, and local path input; every source resolves to a visible outcome. [VERIFIED: .planning/REQUIREMENTS.md] | backend + frontend | `node --test tests/deep-ingest-source-scanner.test.mjs tests/deep-ingest-route.test.mjs && npm --workspace apps/web run test -- src/deep-ingest/DeepIngestPage.test.jsx` | no; Wave 0. [VERIFIED: file search] |
 | ING-02 | Confirmed proposals write trusted DB-backed evidence, story, honesty, voice, role signal, and gap state only after validation/review. [VERIFIED: .planning/REQUIREMENTS.md] | unit + integration | `node --test tests/deep-ingest-db.test.mjs tests/deep-ingest-ai.test.mjs tests/story-bank.test.mjs tests/writing-style.test.mjs` | no; Wave 0 for new deep-ingest tests. [VERIFIED: file search] |
-| ING-03 | Structured forms and bounded AI proposal/manual fallback work; chat/interview UI is absent. [VERIFIED: .planning/REQUIREMENTS.md] [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] | frontend + static guard | `npm --workspace apps/web run test -- src/deep-ingest/DeepIngestPage.test.jsx src/onboarding/steps/FinishStep.test.jsx && node --test tests/deep-ingest-ai.test.mjs` | no; Wave 0 for DeepIngest tests. [VERIFIED: file search] |
+| ING-03 | Structured forms and bounded AI proposal/manual fallback work; chat/interview UI is absent. [VERIFIED: .planning/REQUIREMENTS.md] [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] | frontend + static guard | `npm --workspace apps/web run test -- src/deep-ingest/DeepIngestPage.test.jsx src/onboarding/steps/FinishStep.test.jsx && node --test tests/deep-ingest-ai.test.mjs` | no; Wave 0 for DeepIngest tests. [VERIFIED: file search] |
 | ING-04 | Lane terminality drives `deep_ingest_complete`, onboarding/dashboard readiness, and does not block sourcing after `search_ready`. [VERIFIED: .planning/REQUIREMENTS.md] | unit + integration | `node --test tests/deep-ingest-db.test.mjs tests/db-verbs.test.mjs tests/data-route.test.mjs && npm --workspace apps/web run test -- src/onboarding/steps/FinishStep.test.jsx src/library/LibraryPage.test.jsx` | partial; existing readiness/library tests need updates. [VERIFIED: tests/db-verbs.test.mjs] |
 
 ### Sampling Rate
@@ -565,7 +565,7 @@ const SOURCE_OUTCOME_STATUSES = [
 | ASVS Category | Applies | Standard Control |
 |---------------|---------|------------------|
 | V2 Authentication | no | Local app Phase 8 does not introduce user authentication; do not add auth assumptions. [VERIFIED: AGENTS.md] |
-| V3 Session Management | no | No browser session or server-side session feature is planned for Deep ingest. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| V3 Session Management | no | No browser session or server-side session feature is planned for Deep ingest. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 | V4 Access Control | yes | Confirm-first DB verbs, no default full skill runtime, fail-closed DB routes, and explicit user actions for local path/private source handling. [VERIFIED: AGENTS.md] [VERIFIED: src/cli/data-route.mjs] |
 | V5 Input Validation | yes | JSON Schema validation, body caps, target-shape enums, source-kind validation, filename/path/URL safety checks, grounding validators. [VERIFIED: src/core/profile/schema-validator.mjs] [VERIFIED: src/cli/intake-route.mjs] |
 | V6 Cryptography | yes | Use existing AI key storage/secret loading; do not implement custom crypto or echo secrets. [VERIFIED: AGENTS.md] |
@@ -577,18 +577,18 @@ const SOURCE_OUTCOME_STATUSES = [
 |---------|--------|---------------------|
 | Prompt injection from pasted notes, fetched pages, or repo README content | Tampering | Treat source as data, use fixed system prompts, bounded schemas, no model tools, and no source-instruction execution. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md] |
 | SSRF or unsafe URL fetch | Information Disclosure / Tampering | Restrict schemes, cap time/bytes, reject local/private-network targets unless explicitly designed and tested. [ASSUMED] |
-| Local path traversal or accidental private file ingestion | Information Disclosure | Require explicit local path input, normalize paths, show source preview/metadata, and store gaps for unsupported/unreadable paths. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| Local path traversal or accidental private file ingestion | Information Disclosure | Require explicit local path input, normalize paths, show source preview/metadata, and store gaps for unsupported/unreadable paths. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 | Oversized files/repos causing resource exhaustion | Denial of Service | Enforce request body caps, source text caps, chunk caps, timeout caps, and bounded repo file allowlists. [VERIFIED: src/cli/skill-run-route.mjs] |
-| Candidate fact fabrication or credential inflation | Tampering | Require grounding quote/span, confidence, validation status, and user confirmation before trusted writes. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md] |
+| Candidate fact fabrication or credential inflation | Tampering | Require grounding quote/span, confidence, validation status, and user confirmation before trusted writes. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] |
 | Current compensation, protected-trait, or proprietary data leakage | Information Disclosure | Use privacy validators, metadata-only telemetry, and AGENTS honesty/compensation boundaries. [VERIFIED: AGENTS.md] [VERIFIED: candidate/AGENTS.md] |
-| Bypassing review with direct DB writes | Elevation of Privilege | Separate proposal creation from confirmation verbs; tests must assert unconfirmed proposals do not alter trusted candidate state. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md] |
+| Bypassing review with direct DB writes | Elevation of Privilege | Separate proposal creation from confirmation verbs; tests must assert unconfirmed proposals do not alter trusted candidate state. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `.planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md` — locked Phase 8 scope, decisions, refs, and deferred ideas.
-- `.planning/phases/ROL-API-08-deep-ingest-lane/08-AI-SPEC.md` — bounded AI proposal contract, failure modes, eval strategy.
-- `.planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md` — required UI layout, controls, copy, statuses, and visual constraints.
+- `.planning/phases/08-deep-ingest-lane/08-CONTEXT.md` — locked Phase 8 scope, decisions, refs, and deferred ideas.
+- `.planning/phases/08-deep-ingest-lane/08-AI-SPEC.md` — bounded AI proposal contract, failure modes, eval strategy.
+- `.planning/phases/08-deep-ingest-lane/08-UI-SPEC.md` — required UI layout, controls, copy, statuses, and visual constraints.
 - `.planning/REQUIREMENTS.md` — ING-01 through ING-04 requirement text.
 - `.planning/ROADMAP.md` — phase goal and success criteria.
 - `.planning/STATE.md` — current milestone and prior app/DB/bounded-AI decisions.
@@ -611,7 +611,7 @@ const SOURCE_OUTCOME_STATUSES = [
 
 **Confidence breakdown:**
 - Standard stack: HIGH — based on package files, installed versions, local code, and official Node/SQLite docs. [VERIFIED: package.json] [CITED: https://nodejs.org/api/sqlite.html]
-- Architecture: HIGH — locked by Phase 8 context, AI-SPEC, UI-SPEC, AGENTS, and current code owners. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
+- Architecture: HIGH — locked by Phase 8 context, AI-SPEC, UI-SPEC, AGENTS, and current code owners. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
 - Pitfalls: HIGH/MEDIUM — direct conflicts and existing code traps are verified; scan-limit details remain planner assumptions. [VERIFIED: src/core/db/verbs/candidate.mjs] [ASSUMED]
 
 **Research date:** 2026-07-05  

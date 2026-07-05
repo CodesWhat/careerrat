@@ -8,7 +8,7 @@
 
 | New/Modified File | Role | Data Flow | Closest Analog | Match Quality |
 |---|---|---:|---|---|
-| `src/core/db/migrations/007-deep-ingest.mjs` | migration | CRUD, batch | `src/core/db/migrations/003-candidate-setup.mjs`; `src/core/db/migrations/006-company-discovery-cache.mjs` | exact |
+| `src/core/db/migrations/008-deep-ingest.mjs` | migration | CRUD, batch | `src/core/db/migrations/003-candidate-setup.mjs`; `src/core/db/migrations/006-company-discovery-cache.mjs` | exact |
 | `src/core/db/migrations.mjs` | config | batch | `src/core/db/migrations.mjs` | exact |
 | `src/core/db/verbs/deep-ingest.mjs` | service | CRUD, transform | `src/core/db/verbs/candidate.mjs`; `src/core/db/verbs/intake.mjs`; `src/core/db/verbs/company-discovery.mjs` | exact |
 | `src/core/db/verbs/index.mjs` | config | transform | `src/core/db/verbs/index.mjs` | exact |
@@ -59,7 +59,7 @@
 
 ### SQLite Migration And Registry
 
-**Applies to:** `src/core/db/migrations/007-deep-ingest.mjs`, `src/core/db/migrations.mjs`
+**Applies to:** `src/core/db/migrations/008-deep-ingest.mjs`, `src/core/db/migrations.mjs`
 
 **Analogs:** `src/core/db/migrations/003-candidate-setup.mjs`, `src/core/db/migrations/002-intake.mjs`, `src/core/db/migrations/006-company-discovery-cache.mjs`, `src/core/db/migrations.mjs`
 
@@ -112,7 +112,7 @@ for (let i = 0; i < ALL_MIGRATIONS.length; i += 1) {
 }
 ```
 
-**Planner note:** Current migration files end at `006-company-discovery-cache.mjs`; create `007-deep-ingest.mjs` unless another migration lands first. Use JSON payload columns plus generated columns for lane/status/source indexes. Do not create legacy `candidate/` YAML as part of migration.
+**Planner note:** Current migration files include `007-sourcing-runs.mjs`; create `008-deep-ingest.mjs` as the next migration unless another migration lands first. Use JSON payload columns plus generated columns for lane/status/source indexes. Do not create legacy `candidate/` YAML as part of migration.
 
 ---
 
@@ -895,5 +895,5 @@ No file is fully without an analog. `src/core/deep-ingest/repo-scanner.mjs` has 
 
 **Analog search scope:** `src/core/db`, `src/cli`, `src/core/ai`, `src/core/intake`, `src/core/profile`, `src/core/tracker`, `apps/web/src`, `config`, `tests`  
 **Project skills checked:** 26 local `.agents/skills/*/SKILL.md` indexes; relevant contracts folded into shared DB-first, confirm-first, durable-capture, privacy, and repo-evidence notes above  
-**Current migration head observed:** `006-company-discovery-cache.mjs`  
+**Current migration head observed:** `007-sourcing-runs.mjs`  
 **Pattern extraction date:** 2026-07-05
