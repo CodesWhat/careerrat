@@ -5,7 +5,7 @@ milestone_name: milestone
 current_phase: 04
 status: Ready to execute
 stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-07-05T02:04:30.976Z"
+last_updated: "2026-07-05T02:04:51.452Z"
 progress:
   total_phases: 5
   completed_phases: 3
@@ -136,3 +136,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 03-company-discovery-api]: Decision expectedVersion is checked against the proposal version while the DB patch uses the current batch version. — This keeps user-visible stale proposal checks and DB-level conflict-safe writes aligned.
 - [Phase 04-runtime-routing]: GET /api/runtime/config exposes only skill names, route type, and booleans; secrets and raw env values remain unreported.
 - [Phase 04-runtime-routing]: Discovery chat handoff availability is derived from chat runtime allowlist membership for research-boards, discover-companies, or search-jobs.
+- [Phase 04-runtime-routing]: Onboarding AI controls now derive from runtimeConfig.ai.available instead of state.keyConfigured. — Managed proxy AI can enable controls without a local key while runtime config failure keeps local/manual discovery available.
+- [Phase 04-runtime-routing]: OnboardingPage remains the only runtime capability loader; steps receive runtimeCapabilities as props. — This keeps runtime capability requests centralized and prevents individual steps from hardcoding runtime-route behavior.
