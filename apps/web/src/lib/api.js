@@ -133,6 +133,10 @@ export function getDiscoveryState() {
   return apiFetch("/api/discovery/state");
 }
 
+export function getRuntimeConfig() {
+  return apiFetch("/api/runtime/config");
+}
+
 export function startDiscoveryQuickStart() {
   return apiFetch("/api/discovery/quick-start", { method: "POST" });
 }

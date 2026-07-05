@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
-import { getOnboardState } from "../lib/api.js";
+import { getOnboardState, getRuntimeConfig } from "../lib/api.js";
 import { CompaniesStep } from "./steps/CompaniesStep.jsx";
 import { FinishStep } from "./steps/FinishStep.jsx";
 import { KeyStep } from "./steps/KeyStep.jsx";
@@ -12,9 +12,9 @@ import { WelcomeStep } from "./steps/WelcomeStep.jsx";
 import { WizardRail } from "./WizardRail.jsx";
 
 // The 7 steps per the M8 design doc's wizard section. Each step component
-// gets the same prop bag (state, aiEnabled, reload, goNext, goBack,
-// showToast) whether or not it needs every one of them — one shape, no
-// per-step prop-drilling puzzle. Completion (doneFlags below) is DERIVED
+// gets the same prop bag (state, runtimeCapabilities, aiEnabled, reload,
+// goNext, goBack, showToast) whether or not it needs every one of them —
+// one shape, no per-step prop-drilling puzzle. Completion (doneFlags below) is DERIVED
 // from GET /api/onboard/state every time, never a separately-tracked
 // "wizard progress" file — the wizard has no state of its own beyond "which
 // step is focused right now," matching the "resumable via derived state"
@@ -61,10 +61,62 @@ export async function refreshThenAdvance({ load, setStepIndex, stepCount }) {
   setStepIndex((i) => Math.min(i + 1, stepCount - 1));
 }
 
+function stringList(values) {
+  return Array.isArray(values)
+    ? values.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+}
+
+function normalizeRuntimeError(err) {
+  return err instanceof Error ? err : new Error("Runtime config unavailable");
+}
+
+export function deriveRuntimeCapabilities({ onboardState: _onboardState, runtimeConfig } = {}) {
+  const skills = stringList(runtimeConfig?.skills);
+  const chatSkills = stringList(runtimeConfig?.chatSkills);
+  const aiAvailable = runtimeConfig?.ai?.available === true;
+  const aiRoute = String(runtimeConfig?.ai?.route || "none").trim() || "none";
+  const discovery = runtimeConfig?.discovery || {};
+
+  return {
+    aiAvailable,
+    aiRoute: aiAvailable ? aiRoute : "none",
+    companyProposals: discovery.companyProposals !== false,
+    manualCompanySeeds: discovery.manualCompanySeeds !== false,
+    discoveryChatHandoffs: aiAvailable && discovery.chatHandoffs === true,
+    fullSkillRun: aiAvailable && skills.length > 0,
+    skills,
+    chatSkills,
+  };
+}
+
+export async function loadOnboardingRuntimeState({
+  getState = getOnboardState,
+  getRuntime = getRuntimeConfig,
+} = {}) {
+  const state = await getState();
+  let runtimeConfig = null;
+  let runtimeError = null;
+
+  try {
+    runtimeConfig = await getRuntime();
+  } catch (err) {
+    runtimeError = normalizeRuntimeError(err);
+  }
+
+  return {
+    state,
+    runtimeConfig,
+    runtimeCapabilities: deriveRuntimeCapabilities({ onboardState: state, runtimeConfig }),
+    runtimeError,
+  };
+}
+
 export function OnboardingPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [state, setState] = useState(null);
+  const [runtimeCapabilities, setRuntimeCapabilities] = useState(() => deriveRuntimeCapabilities());
   const [stepIndex, setStepIndex] = useState(0);
   const [hasPositioned, setHasPositioned] = useState(false);
   const [toast, setToast] = useState(null);
@@ -72,14 +124,15 @@ export function OnboardingPage() {
 
   const load = useCallback(async () => {
     try {
-      const next = await getOnboardState();
-      setState(next);
-      setLoadError(null);
+      const next = await loadOnboardingRuntimeState();
+      setState(next.state);
+      setRuntimeCapabilities(next.runtimeCapabilities);
+      setLoadError(next.runtimeError?.message || null);
       if (!hasPositioned) {
-        setStepIndex(computeInitialStep(next));
+        setStepIndex(computeInitialStep(next.state));
         setHasPositioned(true);
       }
-      return next;
+      return next.state;
     } catch (err) {
       setLoadError(err instanceof Error ? err.message : "Failed to load onboarding state");
       return null;
@@ -116,7 +169,7 @@ export function OnboardingPage() {
 
   const doneFlags = deriveDoneFlags(state);
   const { Component } = STEPS[stepIndex];
-  const aiEnabled = !!state?.keyConfigured;
+  const aiEnabled = runtimeCapabilities.aiAvailable;
 
   return (
     <PageScaffold
@@ -141,6 +194,7 @@ export function OnboardingPage() {
         state={state}
         draftSeeds={draftSeeds}
         setDraftSeeds={setDraftSeeds}
+        runtimeCapabilities={runtimeCapabilities}
         aiEnabled={aiEnabled}
         reload={load}
         goNext={goNext}
