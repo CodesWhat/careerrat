@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 status: Ready to plan
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-07-04T23:59:07.696Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-07-05T00:07:21.808Z"
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 12
-  percent: 67
+  completed_plans: 13
+  percent: 72
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-04T23:58:38.327Z
-**Stopped at:** Completed 03-01-PLAN.md
+**Last session:** 2026-07-05T00:07:21.797Z
+**Stopped at:** Completed 03-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -77,6 +77,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 02-bounded-ai-foundation P06 | 3 min | 1 tasks | 3 files |
 | Phase 02-bounded-ai-foundation P07 | 3 min | 1 tasks | 5 files |
 | Phase 03-company-discovery-api P01 | 4min | 1 tasks | 9 files |
+| Phase 03-company-discovery-api P02 | 4min | 1 tasks | 4 files |
 
 ## Decisions
 
@@ -111,3 +112,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 03-company-discovery-api]: Proposal creation is limited to pending DB proposal state; tracked company source config and sourced rows are left for explicit decision routes. — Preserves the Phase 03 confirm-first boundary and prevents generation from becoming a write path.
 - [Phase 03-company-discovery-api]: The Phase 03 batch maximum is pinned at COMPANY_DISCOVERY_BATCH_MAX = 12. — Keeps manual seed proposal generation bounded for cost, latency, and denial-of-service control.
 - [Phase 03-company-discovery-api]: The route is an exact thin adapter that delegates resolver, scanner, and persistence behavior to core seams. — Matches the established discovery-route pattern and keeps tests hermetic through injection.
+- [Phase 03-company-discovery-api]: Resolver cache and proposal state remain DB-owned app state; source-config, sourced rows, activity, and generated tracker/dashboard files are not written by these verbs. — Preserves D-29/D-30 and keeps proposal generation separate from confirmed discovery writes.
+- [Phase 03-company-discovery-api]: Due-refresh logic uses the pinned Phase 03 constants: 14-day TTL, failure threshold 2, and zero-job threshold 2. — Keeps cache invalidation deterministic and aligned with the resolved research decisions.
+- [Phase 03-company-discovery-api]: Proposal state patches require expectedVersion and return code CONFLICT without mutating stored JSON on stale attempts. — Provides the D-23 conflict boundary for later decision routes.

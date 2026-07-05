@@ -24,7 +24,7 @@
 - [x] **DISC-02**: Company discovery resolves seed companies to supported ATS careers URLs using deterministic code, not model-generated final URLs.
 - [x] **DISC-03**: Company discovery scans resolved ATS boards for current roles using existing provider APIs before proposing a company.
 - [x] **DISC-04**: Company discovery enforces dedupe, excluded-company, relevance, comp-plausibility, and supported-ATS gates before presentation.
-- [ ] **DISC-05**: Company discovery writes confirmed additions only through the existing source-config/companies write path.
+- [x] **DISC-05**: Company discovery writes confirmed additions only through the existing source-config/companies write path.
 
 ### Runtime Routing
 
@@ -83,7 +83,7 @@
 | DISC-02 | Phase 3 | Complete |
 | DISC-03 | Phase 3 | Complete |
 | DISC-04 | Phase 3 | Complete |
-| DISC-05 | Phase 3 | Pending |
+| DISC-05 | Phase 3 | Complete |
 | RUNT-01 | Phase 4 | Pending |
 | RUNT-02 | Phase 4 | Pending |
 | RUNT-03 | Phase 4 | Pending |
