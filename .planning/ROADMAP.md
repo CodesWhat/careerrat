@@ -154,6 +154,22 @@ Plans:
 
 **Requirements:** APP-01, APP-02, APP-03, APP-04
 
+**Plans:** 7 plans
+
+Plans:
+**Wave 0**
+
+- [ ] 06-01-PLAN.md — Add static and nav RED guards for DB app shell retirement.
+- [ ] 06-02-PLAN.md — Add packet route RED tests for DB-derived application rows.
+- [ ] 06-03-PLAN.md — Add source setup, scanner context, and scanner seen-set RED tests.
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [ ] 06-04-PLAN.md — Retire legacy product nav and classify debug/export routes.
+- [ ] 06-05-PLAN.md — Migrate packet product APIs to DB-derived reads.
+- [ ] 06-06-PLAN.md — Migrate board/source setup product writes to DB source config.
+- [ ] 06-07-PLAN.md — Migrate scanner context, results, and seen sets to DB-derived state.
+
 **Success Criteria**:
 
 1. React `/app` is the canonical product surface; legacy `/onboard`, `/tracker`, generated `tracker.html`, and static dashboard routes are debug/export-only or removed from product navigation.
