@@ -42,21 +42,49 @@
 
 ## v2 Requirements
 
-### Broader Skill Migration
+### App Shell and DB Source of Truth
 
-- **MIGR-01**: Apply the same decomposition pattern to `research-boards`.
-- **MIGR-02**: Apply the same decomposition pattern to `evaluate-job` where body capture and gate math can be made deterministic.
-- **MIGR-03**: Apply the same decomposition pattern to communications and interview prep only after discovery proves the pattern.
+- **APP-01**: Electron/React `/app` is the canonical product surface; compatibility surfaces are not part of the normal UX.
+- **APP-02**: Dashboard, packet, tracker/activity, scanner context, and source setup views read DB-derived snapshots.
+- **APP-03**: `workspace/tracker.json` and `workspace/activity.jsonl` are compatibility/export artifacts only.
+- **APP-04**: Static regression guards prevent product routes or React app code from depending on generated tracker/activity files as source of truth.
 
-### Browser Surface
+### Quick Onboarding and Auto Sourcing
 
-- **BROW-01**: Browser-authenticated sources such as LinkedIn, Wellfound, and webmail can plug into the same deterministic write and confirmation layer.
-- **BROW-02**: Browser automation preserves the session-browser permission model from `AGENTS.md`.
+- **ONB-01**: Quick onboarding captures the minimum profile, resume, role, location, comp, and search posture needed to start searching.
+- **ONB-02**: Resume support treats PDF as the standard, keeps text/markdown fallback, and records board-required import/export formats such as DOCX where needed.
+- **RUN-01**: A DB-backed sourcing run starts automatically when candidate setup first reaches `search_ready`.
+- **RUN-02**: React surfaces durable sourcing run progress, errors, and results while returning the user to deeper onboarding.
 
-### Product Controls
+### Deep Ingest
 
-- **PROD-01**: User-facing spend caps and route-level cost estimates are visible in settings.
-- **PROD-02**: Managed-AI proxy go-live gates are wired to app runtime controls after pilot pay-intent.
+- **ING-01**: The app supports drop-all intake for resumes, notes, LinkedIn/project links, repos, portfolios, pasted facts, recruiter context, and job context.
+- **ING-02**: Deep ingest derives evidence, story bank entries, honesty boundaries, writing voice, role-specific signals, and unanswered gaps into DB state.
+- **ING-03**: Deep ingest combines structured forms with an optional AI interview that asks role/job-dependent follow-ups.
+- **ING-04**: Deep ingest progress is durable, resumable, visible in readiness state, and independent from any running sourcing job.
+
+### Public Discovery Intelligence
+
+- **PUB-01**: Public company/job-board intelligence is stored separately from candidate proposal, fit, comp, tracker, and notes data.
+- **PUB-02**: Sync-home is opt-in and enabled by default, with scrub tests proving no PII, candidate context, comp floors, fit scores, private notes, tracker IDs, or local paths leave the machine.
+- **PUB-03**: Public records include stable IDs, company/domain, careers URL, ATS/provider, provenance, freshness, confidence, and conflict metadata.
+- **DSC-01**: Discovery uses a scanner cascade: supported ATS APIs, deterministic public-page extraction, scraper/API fallback, then bounded AI fallback.
+- **DSC-02**: Board/source discovery and search sweeps run through local APIs with DB-backed run state, not default chat or full skill runtime.
+- **DSC-03**: Unsupported or custom careers pages can produce current jobs or clear review/cache metadata without poisoning confirmed ATS sources.
+
+### Local Packet Engine
+
+- **PKT-01**: Evaluate/gate, packet generation, and artifact stamping are app-local APIs that write through DB verbs.
+- **PKT-02**: Packets include ATS-optimized resumes, cover letters when appropriate, and evidence-grounded answers with honesty/placeholder gates.
+- **PKT-03**: Company-specific questions such as "why this company" or recent tools are captured and answered; EEO, disability, and demographic questions are excluded from generated-answer automation.
+- **PKT-04**: Exports support board-required formats, with PDF as standard and DOCX where upload workflows require it.
+
+### Runtime and Desktop Hardening
+
+- **SEC-01**: Static checks fail new app-default calls to full skill runtime where a local API owner exists.
+- **SEC-02**: The retained skill runtime removes broad `Write`, `Edit`, and `Bash` tools by default; tool-heavy execution is explicit.
+- **DESK-01**: Electron first-run, database initialization, routing, packaging, error recovery, and update/notarization readiness are verified for pilot use.
+- **DESK-02**: Product docs teach the app-first workflow and no longer present compatibility surfaces as the normal path.
 
 ## Out of Scope
 
@@ -66,7 +94,7 @@
 | Full browser automation migration | Deferred to v2 because current app scope is browser-free discovery and apply packets. |
 | Automatic application submission | Current product promise is packet generation and supervised user action. |
 | Model-generated ATS URLs as trusted writes | URL resolution must be deterministic and validated against supported providers. |
-| One-shot migration of every skill | Too large and risky; discovery is the first proof point. |
+| One-shot migration of every skill | Too large and risky; app-product migration is sequenced by surface and user workflow. |
 
 ## Traceability
 
@@ -92,13 +120,40 @@
 | VER-03 | Phase 5 | Complete |
 | VER-04 | Phase 5 | Complete |
 | VER-05 | Phase 5 | Complete |
+| APP-01 | Phase 6 | Planned |
+| APP-02 | Phase 6 | Planned |
+| APP-03 | Phase 6 | Planned |
+| APP-04 | Phase 6 | Planned |
+| ONB-01 | Phase 7 | Planned |
+| ONB-02 | Phase 7 | Planned |
+| RUN-01 | Phase 7 | Planned |
+| RUN-02 | Phase 7 | Planned |
+| ING-01 | Phase 8 | Planned |
+| ING-02 | Phase 8 | Planned |
+| ING-03 | Phase 8 | Planned |
+| ING-04 | Phase 8 | Planned |
+| PUB-01 | Phase 9 | Planned |
+| PUB-02 | Phase 9 | Planned |
+| PUB-03 | Phase 9 | Planned |
+| DSC-01 | Phase 9 | Planned |
+| DSC-02 | Phase 9 | Planned |
+| DSC-03 | Phase 9 | Planned |
+| PKT-01 | Phase 10 | Planned |
+| PKT-02 | Phase 10 | Planned |
+| PKT-03 | Phase 10 | Planned |
+| PKT-04 | Phase 10 | Planned |
+| SEC-01 | Phase 11 | Planned |
+| SEC-02 | Phase 11 | Planned |
+| DESK-01 | Phase 11 | Planned |
+| DESK-02 | Phase 11 | Planned |
 
 **Coverage:**
 
 - v1 requirements: 20 total
-- Mapped to phases: 20
+- v2 product requirements: 26 total
+- Mapped to phases: 46
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-07-04*
-*Last updated: 2026-07-04 after initialization*
+*Last updated: 2026-07-05 after v2 app-product planning*

@@ -1,34 +1,34 @@
 ---
 gsd_state_version: 1.0
-milestone: v1.0
-milestone_name: milestone
-current_phase: 05
-status: Milestone complete
-stopped_at: Phase 05 verified; milestone complete
-last_updated: "2026-07-05T13:17:12.692Z"
+milestone: v2.0
+milestone_name: app-product milestone
+current_phase: 06
+status: Ready to plan
+stopped_at: v2 app-product roadmap created
+last_updated: "2026-07-05T14:08:19.601Z"
 progress:
-  total_phases: 5
+  total_phases: 11
   completed_phases: 5
   total_plans: 28
   completed_plans: 28
-  percent: 100
+  percent: 45
 ---
 
-# State: Rolester Skill-to-API Runtime
+# State: Rolester App-First Job Search Runtime
 
 ## Project Reference
 
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** v1.0 milestone complete
+**Current focus:** Phase 06 - Canonical DB App Shell
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
-- **Current phase:** 05
-- **Current phase status:** Milestone complete
-- **Next command:** `$gsd-progress`
+- **Current phase:** 06
+- **Current phase status:** Ready to plan
+- **Next command:** `$gsd-plan-phase 6`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -40,15 +40,21 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - Existing user changes in `tests/release-safety.test.mjs` and `tmp-skill-conversion/` are not part of this GSD initialization.
 - `discover-companies` is now the proof-point migration: local proposal APIs are the default app path, and full skill/chat paths remain explicit.
 - Phase 5 completed all five verification/docs plans across three waves and passed canonical verification.
+- Compatibility surfaces are not product requirements for v2; `/app` plus DB-derived state is the canonical product path.
+- Quick onboarding should trigger background sourcing as soon as the candidate is `search_ready`, then continue into deeper profile ingest.
+- Public company/job-board sync-home is opt-in, enabled by default, and limited to scrubbed public records with no PII or candidate-private state.
+- Deep ingest should support both drop-all intake and role/job-aware AI interview paths.
+- PDF is the standard packet format, with DOCX or other board-required formats supported where needed.
 
 ## Open Questions
 
-- None blocking for Phase 5 planning.
+- None blocking for Phase 6 planning.
 
 ## Next Steps
 
-1. Review `.planning/phases/05-verification-and-docs/05-VERIFICATION.md` and `05-VERIFICATION-ROLLUP.md` if you want the closeout evidence.
-2. Use `$gsd-progress` for the current GSD handoff before deciding whether to ship or start v2 planning.
+1. Run `$gsd-plan-phase 6` to decompose the Canonical DB App Shell phase.
+2. Execute Phase 6 before Phase 7 so quick onboarding and auto-sourcing build on the canonical DB app surface.
+3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
 
 ---
 *State initialized: 2026-07-04*

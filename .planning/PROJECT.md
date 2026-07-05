@@ -1,10 +1,10 @@
-# Rolester Skill-to-API Runtime
+# Rolester App-First Job Search Runtime
 
 ## What This Is
 
-Rolester is a local-first job-search engine that is moving from agent-only skill execution toward an app runtime where most work is deterministic TypeScript and AI is used only for bounded judgment. The project keeps the existing skill files as orchestration specs for CLI agents, but decomposes product flows into local APIs, DB verbs, scanners, validators, and small structured AI calls.
+Rolester is a local-first job-search engine that is moving from agent-only skill execution toward an Electron/React app runtime where most work is deterministic TypeScript and AI is used only for bounded judgment. The project keeps the existing skill files as orchestration specs for CLI agents, but product flows should run through local APIs, DB verbs, scanners, validators, and small structured AI calls.
 
-The paid app and the free BYO-agent surface should use the same core engine. UI buttons, CLI commands, and agents should converge on one local data/API layer instead of starting a whole `SKILL.md` loop for work that code can perform cheaply and reliably.
+The paid app and the free BYO-agent surface should use the same core engine. UI buttons, CLI commands, and agents should converge on one local data/API layer instead of starting a whole `SKILL.md` loop for work that code can perform cheaply and reliably. Compatibility exports can remain for agents and debugging, but they are not product requirements.
 
 ## Core Value
 
@@ -14,7 +14,7 @@ Rolester must complete job-search work locally with predictable cost: determinis
 
 - **Customer**: Job seekers who want a managed local app without giving up the open-core agent workflow.
 - **Revenue model**: Paid convenience layer for managed AI, packaged desktop UX, updates, and future billing/auth; free BYO-agent remains the funnel.
-- **Success metric**: A pilot user can onboard, discover roles, evaluate, and prepare apply packets from the app with lower AI spend than full skill-agent runs.
+- **Success metric**: A pilot user can onboard, have sourcing start automatically once enough data exists, keep enriching their profile, discover roles, evaluate, and prepare apply packets from the app with lower AI spend than full skill-agent runs.
 - **Strategy notes**: `ROADMAP.md` Productization and App-first rework sections remain the source for the broader open-core plan.
 
 ## Requirements
@@ -37,12 +37,17 @@ Rolester must complete job-search work locally with predictable cost: determinis
 
 ### Active
 
-- None for v1.0; all v1 requirements are complete.
+- Make Electron/React `/app` the canonical DB-backed product surface and remove compatibility surfaces from normal UX.
+- Start background sourcing automatically when quick onboarding first reaches `search_ready`, then return the user to deeper onboarding.
+- Build deep ingest as both "drop everything you have" intake and an optional role/job-aware AI interview.
+- Store public company/job-board intelligence separately from private candidate data, with sync-home opt-in, on by default, and scrubbed of PII/private context.
+- Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI.
+- Lock down app-default runtime paths so broad tool-heavy skill execution is explicit, not the normal button behavior.
 
 ### Out of Scope
 
 - Hosted SaaS data storage - Shape 2 keeps candidate data, browser state, and job artifacts local.
-- Browser automation for LinkedIn, Wellfound, webmail, or authenticated ATS portals - defer to the v2 browser surface.
+- Browser automation for LinkedIn, Wellfound, webmail, or authenticated ATS portals - defer until after the app-first local/API path is solid.
 - Auto-submit applications - the current app remains apply-packet first.
 - Rewriting every skill in one pass - migrate by high-leverage flows, starting with discovery.
 - Replacing the skill docs - skills remain the agent-facing contract and a useful source of truth.
@@ -54,6 +59,10 @@ The current app already contains both runtime shapes. `src/core/ai/skill-runtime
 The new architectural decision is to treat a skill as a product contract, not the default implementation mechanism. For example, `discover-companies` should not run an entire agent skill just to find employer names. A bounded AI call can propose candidate company seeds as JSON, then TypeScript can resolve careers URLs, scan roles through existing provider APIs, enforce dedupe/exclusion rules, present proposals, and write confirmed additions through `rolester companies` or DB source-config verbs.
 
 Phase 3 turned that `discover-companies` split into working local APIs. Phase 4 routed app surfaces to those APIs by default while keeping explicit chat handoffs and the allowlisted full skill runtime available for workflows that still need tool loops or human-watched orchestration. Phase 5 locked those boundaries with final cost/no-AI regressions, confirm-first write-safety coverage, documentation alignment, and a passing focused verification rollup.
+
+The next milestone applies that foundation to the actual product shape: the Electron/React app becomes canonical, DB state is the product source of truth, quick onboarding triggers background sourcing, deep ingest keeps enriching the candidate while sourcing runs, public company intelligence can sync home without PII, and packet generation moves out of default whole-skill runtime.
+
+The concise product brief for this milestone is `.planning/APP-PRODUCT-PLAN.md`.
 
 ## Constraints
 
@@ -79,6 +88,11 @@ Phase 3 turned that `discover-companies` split into working local APIs. Phase 4 
 | Local company proposal routes are the app default | Company discovery in the app should create/read/decide local proposals before any chat/full skill runtime is considered | Validated in Phase 4 |
 | Discovery chat and full skill runtime are explicit paths | Agent-led workflows remain available, but only after user action and runtime capability gating | Validated in Phase 4 |
 | Focused verification is the Phase 5 signal | Unrelated local edits in `tests/release-safety.test.mjs` make full `npm test` a noisy signal for this phase | Validated in Phase 5 |
+| Compatibility surfaces are not product requirements | The Electron/React app and DB are the user-facing product; generated tracker/dashboard surfaces can remain as export/debug aids only | Planned for Phase 6 |
+| Quick onboarding should trigger sourcing immediately | The user should not wait for a full profile interview before Rolester starts finding jobs | Planned for Phase 7 |
+| Public intelligence sync is opt-in and on by default | Building shared company/board knowledge is useful, but only scrubbed public records may leave the machine | Planned for Phase 9 |
+| Deep ingest uses both drop-all intake and AI interview | Different candidates have different evidence sources; the app should accept raw material and ask targeted follow-ups based on role/job context | Planned for Phase 8 |
+| PDF is the standard packet format, with board-required formats supported | Job boards commonly accept PDF, but the product must handle upload requirements such as DOCX when needed | Planned for Phase 10 |
 
 ## Evolution
 
@@ -99,4 +113,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state
 
 ---
-*Last updated: 2026-07-05 after Phase 5 verification*
+*Last updated: 2026-07-05 after v2 app-product planning*

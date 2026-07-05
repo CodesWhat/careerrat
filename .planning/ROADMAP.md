@@ -13,6 +13,12 @@
 | 3 | Company Discovery API | Migrate `discover-companies` to AI seeds plus deterministic ATS resolution, scan, screening, confirmation, and writes. | DISC-01, DISC-02, DISC-03, DISC-04, DISC-05 | Complete (7/7, 2026-07-05) |
 | 4 | Runtime Routing | Make the app use the cheapest correct runtime path by default. | RUNT-01, RUNT-02, RUNT-03 | Complete (5/5, 2026-07-05) |
 | 5 | Verification and Docs | Prove cost boundaries, no-AI degradation, discovery write safety, and documentation alignment. | VER-01, VER-02, VER-03, VER-04, VER-05 | Complete (5/5, 2026-07-05) |
+| 6 | Canonical DB App Shell | Make the Electron/React app DB-source-of-truth and remove compatibility surfaces from product paths. | APP-01, APP-02, APP-03, APP-04 | Planned |
+| 7 | Quick Onboarding and Auto Sourcing | Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding. | ONB-01, ONB-02, RUN-01, RUN-02 | Planned |
+| 8 | Deep Ingest Lane | Capture rich profile, project, story, and evidence context through drop-all intake plus an optional AI interview. | ING-01, ING-02, ING-03, ING-04 | Planned |
+| 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Planned |
+| 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Planned |
+| 11 | Runtime Lockdown and Desktop Release | Remove broad skill-tool power from app defaults and harden the desktop product path for pilot use. | SEC-01, SEC-02, DESK-01, DESK-02 | Planned |
 
 ## Phase Details
 
@@ -141,6 +147,91 @@ Plans:
 4. Tests cover dedupe, excluded company, unsupported ATS, and confirmed write behavior.
 5. `AGENTS.md`, `docs/ARCHITECTURE.md`, and route docs describe the final split consistently.
 
+### Phase 6: Canonical DB App Shell
+
+**Goal:** Make the Electron/React app DB-source-of-truth and remove compatibility surfaces from product paths.
+**Mode:** mvp
+
+**Requirements:** APP-01, APP-02, APP-03, APP-04
+
+**Success Criteria**:
+
+1. React `/app` is the canonical product surface; legacy `/onboard`, `/tracker`, generated `tracker.html`, and static dashboard routes are debug/export-only or removed from product navigation.
+2. App routes including dashboard, packet, tracker/activity, scanner context, and source setup read DB-derived snapshots directly.
+3. `workspace/tracker.json` and `workspace/activity.jsonl` remain compatibility exports only and are not app dependencies.
+4. Static tests fail if a product route or React app path reads generated tracker/activity files as source of truth.
+
+### Phase 7: Quick Onboarding and Auto Sourcing
+
+**Goal:** Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding.
+**Mode:** mvp
+
+**Requirements:** ONB-01, ONB-02, RUN-01, RUN-02
+
+**Success Criteria**:
+
+1. Quick onboarding captures enough profile, resume, target role, location, comp floor, and search posture to mark `search_ready` without requiring deep ingest.
+2. Resume intake supports the formats candidates and job boards actually need, with PDF as the standard and text/markdown fallback; export needs for DOCX/PDF are recorded for packet generation.
+3. When `search_ready` first becomes true, the app starts a DB-backed sourcing run automatically and returns the user to onboarding/deep ingest instead of launching a hidden skill.
+4. React shows durable sourcing run state, progress, errors, and results while all writes go through DB verbs.
+
+### Phase 8: Deep Ingest Lane
+
+**Goal:** Capture rich profile, project, story, and evidence context through drop-all intake plus an optional AI interview.
+**Mode:** mvp
+
+**Requirements:** ING-01, ING-02, ING-03, ING-04
+
+**Success Criteria**:
+
+1. The app accepts a "drop everything" intake: resumes, notes, LinkedIn/project links, repos, portfolio links, pasted facts, and recruiter/job context.
+2. Deep ingest derives evidence claims, story bank entries, honesty boundaries, writing voice, role-specific keep/cut signals, and unanswered gaps into DB state.
+3. The user can complete deeper context through both structured React forms and an AI interview; the interview asks role/job-dependent follow-ups rather than a fixed form.
+4. Deep ingest progress is durable, resumable, visible in onboarding/dashboard readiness, and independent from the already-running sourcing job.
+
+### Phase 9: Public Company Intelligence and Scanner Cascade
+
+**Goal:** Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery.
+**Mode:** mvp
+
+**Requirements:** PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03
+
+**Success Criteria**:
+
+1. Public company/job-board intelligence is stored separately from candidate-specific proposal, fit, comp, tracker, and notes data.
+2. Sync-home is opt-in and enabled by default, but every publish path has scrub tests proving no PII, candidate context, comp floors, fit scores, private notes, tracker IDs, or local paths leave the machine.
+3. Public records include stable IDs, company/domain, careers URL, ATS/provider, provenance, freshness, confidence, and conflict/freshness metadata.
+4. Discovery uses a scanner cascade: supported ATS APIs first, generic deterministic public-page extraction second, optional scraper/API fallback third, bounded AI fallback last for ambiguous pages.
+5. Board/source discovery and search sweeps run through local APIs and DB-backed run state rather than defaulting to chat or full skill runtime.
+
+### Phase 10: Local Packet Engine
+
+**Goal:** Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI.
+**Mode:** mvp
+
+**Requirements:** PKT-01, PKT-02, PKT-03, PKT-04
+
+**Success Criteria**:
+
+1. Evaluate/gate, packet generation, and artifact stamping are app-local APIs using DB verbs; `tailor-application`, `answer-question`, and `evaluate-job` skill runtime are not the product default.
+2. Packets include ATS-optimized resume, cover letter when appropriate, and application-answer markdown for company-specific prompts such as "why this company" or recent tools.
+3. EEO/disability/demographic questions are explicitly identified and excluded from generated-answer automation.
+4. Packet export supports board-required formats, with PDF as standard and DOCX support where boards require uploadable documents.
+
+### Phase 11: Runtime Lockdown and Desktop Release
+
+**Goal:** Remove broad skill-tool power from app defaults and harden the desktop product path for pilot use.
+**Mode:** mvp
+
+**Requirements:** SEC-01, SEC-02, DESK-01, DESK-02
+
+**Success Criteria**:
+
+1. App buttons call local APIs, DB verbs, bounded AI, or explicit chat; static checks fail on new app-default calls to `POST /api/skill/run`.
+2. The retained skill runtime no longer exposes broad `Write`, `Edit`, or `Bash` tools by default; tool-heavy execution is explicit and reserved for browser/auth/interview workflows that actually need it.
+3. Electron first-run, database initialization, app routing, packaging, error recovery, and update/notarization readiness are verified for pilot use.
+4. Product docs reflect the final app-first workflow and no longer teach compatibility surfaces as the normal user path.
+
 ## Requirement Coverage
 
 | Requirement | Phase |
@@ -165,7 +256,33 @@ Plans:
 | VER-03 | Phase 5 |
 | VER-04 | Phase 5 |
 | VER-05 | Phase 5 |
+| APP-01 | Phase 6 |
+| APP-02 | Phase 6 |
+| APP-03 | Phase 6 |
+| APP-04 | Phase 6 |
+| ONB-01 | Phase 7 |
+| ONB-02 | Phase 7 |
+| RUN-01 | Phase 7 |
+| RUN-02 | Phase 7 |
+| ING-01 | Phase 8 |
+| ING-02 | Phase 8 |
+| ING-03 | Phase 8 |
+| ING-04 | Phase 8 |
+| PUB-01 | Phase 9 |
+| PUB-02 | Phase 9 |
+| PUB-03 | Phase 9 |
+| DSC-01 | Phase 9 |
+| DSC-02 | Phase 9 |
+| DSC-03 | Phase 9 |
+| PKT-01 | Phase 10 |
+| PKT-02 | Phase 10 |
+| PKT-03 | Phase 10 |
+| PKT-04 | Phase 10 |
+| SEC-01 | Phase 11 |
+| SEC-02 | Phase 11 |
+| DESK-01 | Phase 11 |
+| DESK-02 | Phase 11 |
 
 ---
 *Roadmap created: 2026-07-04*
-*Last updated: 2026-07-05 after Phase 04 verification*
+*Last updated: 2026-07-05 after v2 app-product planning*
