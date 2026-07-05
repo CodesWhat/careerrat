@@ -111,6 +111,24 @@ discovery step is intentionally skipped, record it with `rolester next --skip <s
 where `<step>` is `research-boards` or `discover-companies`, so doctor,
 `rolester next`, and the dashboard stop recommending it.
 
+## Runtime Routing for Company Discovery
+
+The app default for company discovery is the local company proposal path:
+create/read proposal batches with `/api/discovery/company-proposals` and decide
+them with `/api/discovery/company-proposal-decisions`. Bounded AI may supply
+company seed judgment only; seed output is advisory until deterministic
+validation, resolver/scanner/gate checks, and confirm-first source config writes
+through `rolester companies` or the DB/source-config owners approve it.
+
+Local proposal errors do not silently start chat, `/api/chat/*`, the full skill
+runtime, or `POST /api/skill/run`; they surface locally with manual input, retry,
+or no-AI fallback paths. `/api/discovery/quick-start` and
+`/api/discovery/next` are explicit user-selected chat handoffs that start or
+reuse visible `/api/chat/*` sessions. `POST /api/skill/run` remains the retained
+allowlisted full skill runtime for tool-heavy, long-running, or human-watched
+workflows, not the default app path for proposal creation, proposal decisions,
+deterministic validation, dedupe, or confirmed writes.
+
 ## Keeping Current
 
 Run `rolester update` to pull the latest code from npm. Source checkouts should

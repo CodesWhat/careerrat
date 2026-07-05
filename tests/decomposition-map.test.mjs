@@ -69,8 +69,9 @@ function assertContainsAll(text, needles, label) {
 }
 
 function assertMatchesAll(text, patterns, label) {
+  const normalizedText = text.replace(/\s+/g, " ");
   for (const pattern of patterns) {
-    assert.match(text, pattern, `${label} should match ${pattern}`);
+    assert.match(normalizedText, pattern, `${label} should match ${pattern}`);
   }
 }
 

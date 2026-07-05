@@ -94,11 +94,13 @@ Deterministic code owns the default app path:
 - capture reachable job bodies
 - persist confirmed writes through DB verbs
 
-Company discovery uses this layer by default. The app calls
+Company discovery uses the local company proposal APIs by default. The app calls
 `/api/discovery/company-proposals` to create/read proposal batches and
 `/api/discovery/company-proposal-decisions` to approve, reject, suppress,
 escalate, or refresh a proposal. Local proposal errors stay local; they do not
 silently start chat or the full skill runtime.
+Confirmed company writes remain confirm-first source config or DB-owner work,
+not React state, generated tracker files, or model output.
 
 ### Bounded AI Layer
 
@@ -112,6 +114,8 @@ Model calls are reserved for small schema-validated judgments:
 Bounded AI flows call `callAI()` or `runStructuredOneshot()`, return explicit
 no-AI/manual fallbacks, and treat model output as advisory until deterministic
 validation passes.
+For company discovery, bounded AI is limited to company seed judgment; the
+resolver, scanner, proposal gate, and confirmed writes stay deterministic.
 
 ### Conversational Chat Handoff Layer
 

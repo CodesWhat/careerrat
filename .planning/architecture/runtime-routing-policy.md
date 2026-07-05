@@ -15,6 +15,9 @@ routes: `POST /api/discovery/company-proposals`,
 `POST /api/discovery/company-proposal-decisions`. Those routes use the Phase 3
 proposal pipeline and confirmation write owners before any chat workflow is
 started.
+For app company discovery, bounded AI is limited to company seed judgment; seed
+output is advisory until deterministic validation, resolver/scanner/gate checks,
+and confirm-first source config or DB-owner writes approve it.
 
 The retained routing boundary is:
 
