@@ -39,6 +39,35 @@ function proposalCompanyName(proposal) {
   return proposal?.company?.name || proposal?.name || "Company";
 }
 
+function proposalConfidenceLabel(proposal) {
+  return proposal?.confidenceTier || "review";
+}
+
+function rejectedProposalLabel() {
+  return "rejected";
+}
+
+function ProposalChipRow({ proposals, labelForProposal }) {
+  const list = Array.isArray(proposals) ? proposals : [];
+  if (!list.length) return null;
+  return (
+    <div className="chip-row">
+      {list.map((proposal) => {
+        const name = proposalCompanyName(proposal);
+        const label = labelForProposal(proposal);
+        return (
+          <span className="chip" key={proposal.proposalId || `${name}-${label}`}>
+            <CompanyAvatar name={name} domain={proposal?.company?.domain} />
+            <span className="chip__label">
+              {name} · {label}
+            </span>
+          </span>
+        );
+      })}
+    </div>
+  );
+}
+
 export function proposalSeedsFromCompanies(companies = []) {
   return (Array.isArray(companies) ? companies : [])
     .map((company) => {
@@ -381,34 +410,14 @@ export function CompaniesStep({
             <p className="field__hint" style={{ margin: "0 0 8px" }}>
               {counts.proposals} proposed · {counts.rejected} rejected
             </p>
-            {proposalBatch.proposals?.length ? (
-              <div className="chip-row">
-                {proposalBatch.proposals.map((proposal) => (
-                  <span className="chip" key={proposal.proposalId || proposalCompanyName(proposal)}>
-                    <CompanyAvatar
-                      name={proposalCompanyName(proposal)}
-                      domain={proposal?.company?.domain}
-                    />
-                    <span className="chip__label">
-                      {proposalCompanyName(proposal)} · {proposal.confidenceTier || "review"}
-                    </span>
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {proposalBatch.rejected?.length ? (
-              <div className="chip-row">
-                {proposalBatch.rejected.map((proposal) => (
-                  <span className="chip" key={proposal.proposalId || proposalCompanyName(proposal)}>
-                    <CompanyAvatar
-                      name={proposalCompanyName(proposal)}
-                      domain={proposal?.company?.domain}
-                    />
-                    <span className="chip__label">{proposalCompanyName(proposal)} · rejected</span>
-                  </span>
-                ))}
-              </div>
-            ) : null}
+            <ProposalChipRow
+              proposals={proposalBatch.proposals}
+              labelForProposal={proposalConfidenceLabel}
+            />
+            <ProposalChipRow
+              proposals={proposalBatch.rejected}
+              labelForProposal={rejectedProposalLabel}
+            />
           </div>
         ) : null}
       </div>
