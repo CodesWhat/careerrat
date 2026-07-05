@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
 status: In Progress
-stopped_at: Completed 06-01-PLAN.md
-last_updated: "2026-07-05T16:36:10.440Z"
+stopped_at: Completed 06-02-PLAN.md
+last_updated: "2026-07-05T16:43:56.348Z"
 progress:
   total_phases: 11
   completed_phases: 5
-  total_plans: 36
-  completed_plans: 29
-  percent: 47
+  total_plans: 28
+  completed_plans: 28
+  percent: 45
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T16:36:10.404Z
-**Stopped at:** Completed 06-01-PLAN.md
+**Last session:** 2026-07-05T16:43:56.217Z
+**Stopped at:** Completed 06-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -100,6 +100,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 05-verification-and-docs P01 | 4 min | 1 tasks | 2 files |
 | Phase 05-verification-and-docs P02 | 3 min | 2 tasks | 3 files |
 | Phase 06 P01 | 3 min | 2 tasks | 3 files |
+| Phase 06 P02 | 1 min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -165,3 +166,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: Wave 0 remains intentionally test-only; both new 06-01 tests are RED against current source and are verified through commands that require nonzero underlying test exits. — This preserves RED coverage before DB app shell implementation begins.
 - [Phase 06]: The 06-01 static guard strips JavaScript comments before token scans and requires tracker-dev compatibility routes to move behind named debug/export classification symbols. — This keeps generated-file access auditable and prevents comments from creating false positives.
 - [Phase 06]: The 06-01 NavList regression preserves canonical SPA labels and the Inbox badge while failing the Classic `/tracker` affordance. — This isolates APP-01 coverage from unrelated app shell behavior.
+- [Phase 06]: Wave 0 packet route coverage stays test-only and RED against the current tracker-export-backed implementation. — This preserves APP-02 and APP-03 coverage before the packet product API migrates to DB-derived reads.
+- [Phase 06]: Packet fixtures seed SQLite through importFromTracker while asserting workspace/tracker.json is absent from the temp runtime workspace. — This prevents the RED tests from passing through generated tracker exports.
