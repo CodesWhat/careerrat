@@ -136,7 +136,9 @@ test("existing routes still work alongside the new /search route", async () => {
     assert.equal(onboard.status, 200);
 
     const sources = await fetch(`${baseUrl(dev)}/api/search/sources`);
-    assert.equal(sources.status, 200);
+    // No DB is seeded in this fixture. The DB-first route should still be
+    // mounted and answering with a setup conflict, not falling through.
+    assert.equal(sources.status, 409);
   } finally {
     teardown(dev, repoRoot);
   }

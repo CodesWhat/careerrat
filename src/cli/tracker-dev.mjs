@@ -583,8 +583,13 @@ export function createDevServer({
       "Not found. Product app route: /app, /app/*.\n" +
       `Debug/export compatibility routes: ${debugExportPaths}.\n` +
       "App APIs and utility pages include /api/health, /api/runtime/config, /api/skill/run, " +
-      "/evaluate, /answer, /onboard, /chat, /search, /packet, /api/onboard/*, " +
+      "/evaluate, /answer, /onboard, /chat, /search, /packet, /api/onboard/state, " +
+      "/api/onboard/resume, /api/onboard/profile, /api/onboard/targeting, " +
+      "/api/onboard/form-defaults, /api/onboard/evidence, /api/onboard/ai-key, " +
+      "/api/onboard/finish, /api/onboard/*, " +
       "/api/discovery/*, /api/settings/*, /api/chat/*, /api/search/*, /api/packet*, " +
+      "/api/search/scan, /api/search/results, /api/search/sources, " +
+      "/api/packet/list, /api/packet?id=:id, " +
       "/api/data/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
     );
   }

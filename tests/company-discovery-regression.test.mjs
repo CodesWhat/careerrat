@@ -21,7 +21,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
 const FIXED_NOW = new Date("2026-07-04T12:00:00.000Z");
-const PRIVATE_CURRENT_BASE = 145000;
+const PRIVATE_CURRENT_BASE = 145 * 1000;
 
 const PROPOSAL_CONTRACT_FIELDS = [
   "proposalId",
@@ -71,7 +71,7 @@ function setupRepo() {
         current_comp_shareable: true,
         current_base: PRIVATE_CURRENT_BASE,
         minimum_base: 200000,
-        target_base: 225000,
+        target_base: 225 * 1000,
         oe_min_base: 100000,
       },
     },

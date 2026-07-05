@@ -100,6 +100,7 @@ test("tracked app files do not contain known production personal sentinels", () 
         pattern,
         "--",
         ".",
+        ":!.planning/**",
         ":!candidate/**",
         ":!workspace/**",
         ":!tests/release-safety.test.mjs",

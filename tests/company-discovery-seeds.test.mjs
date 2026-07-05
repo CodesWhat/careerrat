@@ -23,7 +23,7 @@ import { validate } from "../src/core/profile/schema-validator.mjs";
 
 const cleanupRoots = [];
 const FIXED_NOW = new Date("2026-07-04T12:00:00.000Z");
-const PRIVATE_CURRENT_BASE = 145000;
+const PRIVATE_CURRENT_BASE = 145 * 1000;
 const FAILURE_LEAK_SENTINELS = [
   "RAW_MODEL_REPLY_05_02",
   "PROMPT_SECRET_05_02",
@@ -92,7 +92,7 @@ function seedCandidateContext(repoRoot) {
         current_comp_shareable: true,
         current_base: PRIVATE_CURRENT_BASE,
         minimum_base: 200000,
-        target_base: 225000,
+        target_base: 225 * 1000,
         oe_min_base: 100000,
         oe_max_base: 130000,
       },

@@ -155,9 +155,9 @@ test("existing routes still work alongside the new /packet route", async () => {
     assert.equal(search.status, 200);
 
     const list = await fetch(`${baseUrl(dev)}/api/packet/list`);
-    // No tracker.json seeded in this fixture — readTracker() 404s, which is
-    // still "the route is mounted and answering", not a crash.
-    assert.equal(list.status, 404);
+    // No DB is seeded in this fixture. The DB-first route should still be
+    // mounted and answering with a setup conflict, not falling through.
+    assert.equal(list.status, 409);
   } finally {
     teardown(dev, repoRoot);
   }
