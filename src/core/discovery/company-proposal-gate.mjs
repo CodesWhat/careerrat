@@ -320,14 +320,15 @@ export function buildCompanyProposal({
     viableOffers.some((candidate) => candidate.url === offer.url)
   );
   const jdCapture = jdCaptureSummary(captured);
+  const compStateForViableOffer = (offer) => compStates[offers.indexOf(offer)];
   const hasClearComp = viableOffers.some(
-    (offer, index) => compStates[offers.indexOf(offer)] === "clears-floor"
+    (offer) => compStateForViableOffer(offer) === "clears-floor"
   );
   const reviewReasons = [];
 
   if (!hasClearComp) {
     for (const offer of viableOffers) {
-      const reason = compReviewReason(compStates[offers.indexOf(offer)]);
+      const reason = compReviewReason(compStateForViableOffer(offer));
       if (COMP_REVIEW_FLAGS.has(reason) && !reviewReasons.includes(reason)) {
         reviewReasons.push(reason);
       }
