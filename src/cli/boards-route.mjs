@@ -25,42 +25,44 @@
 //                              don't satisfy that builder (never a 500 for a
 //                              partial preview).
 //   POST /api/boards/add      { url, label? } -> 200 { ok:true, searches }
-//                              Reads config/search-sources.yml (or an empty
-//                              config), calls the EXISTING addSearchFromUrl
-//                              (search-sources.mjs) — same platform/auth/
-//                              enabled:false gating every other pasted-URL
-//                              source already gets — validates against
-//                              config/search-sources.schema.json, writes.
-//
-// ORDERING NOTE (see the design doc's §6 "Open risks #3"): POST
-// /api/onboard/write-config regenerates config/search-sources.yml WHOLESALE
-// from targeting — calling POST /api/boards/add before write-config would
-// have its entry silently dropped. The wizard's own step ordering is the
-// fix (add AFTER Finish's write-config runs), not anything enforced here.
+//                              Reads DB source config, calls the EXISTING
+//                              addSearchFromUrl (search-sources.mjs) — same
+//                              platform/auth/enabled:false gating every other
+//                              pasted-URL source already gets — validates
+//                              against config/search-sources.schema.json, and
+//                              persists through DB source-config verbs.
 
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { userPath } from "../core/paths/workspace.mjs";
-import { atomicWriteFile } from "../core/profile/gate-writer.mjs";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { sourceConfigGet, sourceConfigPut } from "../core/db/verbs/source-config.mjs";
 import { buildHiringCafeUrl } from "../core/providers/hiringcafe.mjs";
 import { buildLinkedInSearchUrl, salaryBandForMinimumBase } from "../core/providers/linkedin.mjs";
 import {
   addSearchFromUrl,
-  emptyConfig,
   listSearches,
-  parseConfig,
-  serializeConfig,
   validateConfig,
 } from "../core/providers/search-sources.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other M8 route modules use.
-const SEARCH_SOURCES_REL_PATH = "config/search-sources.yml";
+const SEARCH_SOURCES_CONFIG_NAME = "search-sources";
 const SEARCH_SOURCES_SCHEMA_PATH = "config/search-sources.schema.json";
 
+export function readDbSearchSources(pathCtx = {}) {
+  return sourceConfigGet({ ...pathCtx, name: SEARCH_SOURCES_CONFIG_NAME }).data;
+}
+
+export function writeDbSearchSources(pathCtx = {}, next) {
+  return sourceConfigPut({ ...pathCtx, name: SEARCH_SOURCES_CONFIG_NAME, data: next }).data;
+}
+
+function sendSourceConfigError(res, err) {
+  const status = err?.code === "NO_DATABASE" ? 409 : 500;
+  sendJson(res, status, { ok: false, error: err?.message || "source config failed" });
+}
+
 export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
-  void env; // accepted for call-site symmetry with the other M8 mount*Routes() functions.
-  const pathCtx = { repoRoot };
+  const pathCtx = { repoRoot, env };
 
   // -------------------------------------------------------------------------
   // POST /api/boards/preview
@@ -136,10 +138,20 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
     }
     const label = body?.label ? String(body.label) : undefined;
 
-    const configPath = userPath(pathCtx, SEARCH_SOURCES_REL_PATH);
-    const current = existsSync(configPath)
-      ? parseConfig(readFileSync(configPath, "utf8"))
-      : emptyConfig();
+    try {
+      new URL(url);
+    } catch {
+      sendJson(res, 400, { error: `addSearchFromUrl: unparseable URL: ${url}` });
+      return;
+    }
+
+    let current;
+    try {
+      current = readDbSearchSources(pathCtx);
+    } catch (err) {
+      sendSourceConfigError(res, err);
+      return;
+    }
 
     let next;
     try {
@@ -156,8 +168,14 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       return;
     }
 
-    mkdirSync(dirname(configPath), { recursive: true });
-    atomicWriteFile(configPath, `${serializeConfig(next)}\n`);
-    sendJson(res, 200, { ok: true, searches: listSearches(next) });
+    let stored;
+    try {
+      stored = writeDbSearchSources(pathCtx, next);
+    } catch (err) {
+      sendSourceConfigError(res, err);
+      return;
+    }
+
+    sendJson(res, 200, { ok: true, searches: listSearches(stored) });
   });
 }
