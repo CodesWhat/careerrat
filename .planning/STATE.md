@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
 status: In Progress
-stopped_at: Completed 07-07-PLAN.md
-last_updated: "2026-07-05T22:59:13.492Z"
+stopped_at: Completed 07-08-PLAN.md
+last_updated: "2026-07-05T23:13:23.941Z"
 progress:
   total_phases: 11
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 45
-  completed_plans: 35
-  percent: 78
+  completed_plans: 36
+  percent: 55
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T22:59:13.483Z
-**Stopped at:** Completed 07-07-PLAN.md
+**Last session:** 2026-07-05T23:13:23.794Z
+**Stopped at:** Completed 07-08-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -115,6 +115,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P05 | 3 min | 2 tasks | 5 files |
 | Phase 07 P06 | 12 min | 2 tasks | 9 files |
 | Phase 07 P07 | 8 min | 2 tasks | 7 files |
+| Phase 07 P08 | 7m44s | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -224,3 +225,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: Cadence is stored under targeting.search_preferences.cadence with a daily/default baseline and does not affect search_ready. — Search scheduling preference remains separate from quick-onboarding readiness.
 - [Phase 07]: First-search start/retry uses startFirstSearchRun() and /api/sourcing/first-run/start; no discovery/chat/skill route is used by the first-search task. — This preserves deterministic local first-search behavior.
 - [Phase 07]: The explicit deeper interview link remains separate from the first-search task. — This keeps deep onboarding available without treating it as first-search runtime escalation.
+- [Phase 07]: Jobs manual reruns use POST /api/sourcing/search/start and the no-hidden-runtime regression guard remains slice-scoped to first/manual search paths. — Keeps repeat sourcing deterministic while allowing explicit retained chat/deep-interview routes outside this slice.
+
+### Blockers
+
+- Full npm test currently fails outside 07-08: tests/company-discovery-cache-db.test.mjs expects DB user_version 6 but current migrations report 7.
