@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { companyAtsUpsert } from "../src/core/db/verbs.mjs";
+import { companyAtsUpsert, sourceConfigPut, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 
@@ -45,6 +45,53 @@ function writeSearchSourcesConfig(repoRoot, searches = []) {
     join(repoRoot, "config/search-sources.yml"),
     `${stringifyYaml({ title_filter: {}, location_filter: null, searches })}\n`
   );
+}
+
+function putDbSearchSources(repoRoot, searches = []) {
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches,
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+}
+
+function seedDbSourcedRow(repoRoot, patch = {}) {
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-acme-director",
+        company: "Acme",
+        role: "Director of IT",
+        status: "sourced",
+        source: "scanner",
+        channel: "board",
+        link: "https://jobs.lever.co/acme/db-row",
+        loc: "Remote",
+        base: "verify",
+        fitScore: 88,
+        fitBucket: "high",
+        fitBasis: "triage",
+        gate: "likely-keep",
+        sourcedAt: "2026-07-05T00:00:00Z",
+        updatedAt: "2026-07-05T00:00:00Z",
+        artifacts: { jd: "workspace/jobs/acme-director-of-it-db-row.md" },
+        ...patch,
+      },
+    ],
+  });
+}
+
+function writeScanResult(repoRoot, fileName, summary) {
+  const dir = userPath({ repoRoot }, "workspace/scan-results");
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, fileName), JSON.stringify(summary, null, 2));
 }
 
 function bootServer(repoRoot, opts = {}) {
@@ -121,21 +168,15 @@ after(() => {
 // POST /api/search/scan
 // ---------------------------------------------------------------------------
 
-test("POST /api/search/scan: happy path returns the summary and persists a scan-results file", async () => {
+test("POST /api/search/scan: legacy source files without DB -> 409", async () => {
   const repoRoot = tempRepo();
   writeSourcedScanConfig(repoRoot, [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }]);
+  writeSearchSourcesConfig(repoRoot, [{ provider: "HiringCafe", label: "legacy", enabled: true }]);
   const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
   try {
     const { status, body } = await postJson(server, "/api/search/scan", {});
-    assert.equal(status, 200);
-    assert.equal(body.scanned, 1);
-    assert.equal(body.new, 1);
-    assert.equal(body.offers[0].company, "Acme");
-
-    const date = new Date().toISOString().slice(0, 10);
-    const outPath = userPath({ repoRoot }, `workspace/scan-results/sourced-${date}.json`);
-    const written = JSON.parse(readFileSync(outPath, "utf8"));
-    assert.deepEqual(written, body);
+    assert.equal(status, 409);
+    assert.match(body.error, /database/i);
   } finally {
     await closeServer(server);
   }
@@ -219,26 +260,26 @@ test("POST /api/search/scan: DB mode ignores legacy source files when DB source 
   }
 });
 
-test("POST /api/search/scan: 400 when neither search-sources.yml nor sourced-scan.json exists", async () => {
+test("POST /api/search/scan: missing DB -> 409 instead of legacy no-config handling", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
   try {
     const { status, body } = await postJson(server, "/api/search/scan", {});
-    assert.equal(status, 400);
-    assert.match(body.error, /onboard write-config/);
+    assert.equal(status, 409);
+    assert.match(body.error, /database/i);
   } finally {
     await closeServer(server);
   }
 });
 
-test("POST /api/search/scan: succeeds when only search-sources.yml exists (no sourced-scan.json)", async () => {
+test("POST /api/search/scan: legacy search-sources.yml alone is not sufficient product state", async () => {
   const repoRoot = tempRepo();
   writeSearchSourcesConfig(repoRoot, []);
   const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
   try {
     const { status, body } = await postJson(server, "/api/search/scan", {});
-    assert.equal(status, 200);
-    assert.equal(body.scanned, 0);
+    assert.equal(status, 409);
+    assert.match(body.error, /database/i);
   } finally {
     await closeServer(server);
   }
@@ -246,7 +287,11 @@ test("POST /api/search/scan: succeeds when only search-sources.yml exists (no so
 
 test("POST /api/search/scan: 409 while a scan is already in flight", async () => {
   const repoRoot = tempRepo();
-  writeSourcedScanConfig(repoRoot, [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }]);
+  openDb({ repoRoot });
+  companyAtsUpsert({
+    repoRoot,
+    entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+  });
 
   let releaseFirst;
   const gate = new Promise((resolve) => {
@@ -280,67 +325,59 @@ test("POST /api/search/scan: 409 while a scan is already in flight", async () =>
 // GET /api/search/results
 // ---------------------------------------------------------------------------
 
-test("GET /api/search/results: 404 when no scan-results files exist yet", async () => {
+test("GET /api/search/results: scan-result files without DB -> 409", async () => {
   const repoRoot = tempRepo();
+  writeScanResult(repoRoot, "sourced-2026-01-01.json", {
+    scanned: 1,
+    offers: [{ company: "File Corp", title: "File Role", url: "https://example.test/file" }],
+  });
   const server = await bootServer(repoRoot);
   try {
     const res = await fetch(`${baseUrl(server)}/api/search/results`);
-    assert.equal(res.status, 404);
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, /database/i);
   } finally {
     await closeServer(server);
   }
 });
 
-test("GET /api/search/results: returns the newest persisted summary, wrapped with a date", async () => {
+test("GET /api/search/results: returns DB sourced rows and ignores contradictory scan-result JSON", async () => {
   const repoRoot = tempRepo();
-  const dir = userPath({ repoRoot }, "workspace/scan-results");
-  mkdirSync(dir, { recursive: true });
-  const fixtureSummary = {
-    scanned: 3,
-    new: 2,
+  openDb({ repoRoot });
+  seedDbSourcedRow(repoRoot);
+  writeScanResult(repoRoot, "sourced-2026-01-01.json", {
+    scanned: 99,
+    new: 99,
     filteredTitle: 1,
     filteredLocation: 0,
     duplicates: 0,
     invalid: 0,
     expired: 0,
     errors: [],
-    offers: [{ company: "Acme", title: "Director of IT", url: "https://jobs.lever.co/acme/abc" }],
-  };
-  writeFileSync(join(dir, "sourced-2026-01-01.json"), JSON.stringify(fixtureSummary));
+    offers: [
+      {
+        company: "File Corp",
+        title: "File-only duplicate",
+        url: "https://jobs.lever.co/file/legacy",
+      },
+    ],
+  });
 
   const server = await bootServer(repoRoot);
   try {
     const res = await fetch(`${baseUrl(server)}/api/search/results`);
     assert.equal(res.status, 200);
     const body = await res.json();
-    assert.equal(body.date, "2026-01-01");
-    assert.equal(body.scanned, 3);
-    assert.deepEqual(body.offers, fixtureSummary.offers);
-  } finally {
-    await closeServer(server);
-  }
-});
-
-test("GET /api/search/results?date=YYYY-MM-DD: returns that day's file, 404 if missing", async () => {
-  const repoRoot = tempRepo();
-  const dir = userPath({ repoRoot }, "workspace/scan-results");
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "sourced-2026-01-01.json"), JSON.stringify({ scanned: 1, offers: [] }));
-  writeFileSync(join(dir, "sourced-2026-01-02.json"), JSON.stringify({ scanned: 2, offers: [] }));
-
-  const server = await bootServer(repoRoot);
-  try {
-    const hit = await fetch(`${baseUrl(server)}/api/search/results?date=2026-01-01`);
-    assert.equal(hit.status, 200);
-    const hitBody = await hit.json();
-    assert.equal(hitBody.date, "2026-01-01");
-    assert.equal(hitBody.scanned, 1);
-
-    const miss = await fetch(`${baseUrl(server)}/api/search/results?date=2026-03-03`);
-    assert.equal(miss.status, 404);
-
-    const malformed = await fetch(`${baseUrl(server)}/api/search/results?date=not-a-date`);
-    assert.equal(malformed.status, 400);
+    assert.equal(body.source, "db");
+    assert.equal(body.scanned, 1);
+    assert.equal(body.new, 1);
+    assert.equal(body.offers.length, 1);
+    assert.equal(body.offers[0].id, "sourced-acme-director");
+    assert.equal(body.offers[0].company, "Acme");
+    assert.equal(body.offers[0].title, "Director of IT");
+    assert.equal(body.offers[0].url, "https://jobs.lever.co/acme/db-row");
+    assert.equal(body.offers[0].score, 88);
+    assert.equal(body.offers[0].fit, "high");
   } finally {
     await closeServer(server);
   }
@@ -350,28 +387,46 @@ test("GET /api/search/results?date=YYYY-MM-DD: returns that day's file, 404 if m
 // GET /api/search/sources
 // ---------------------------------------------------------------------------
 
-test("GET /api/search/sources: zeroes out when neither config file exists", async () => {
+test("GET /api/search/sources: legacy config files without DB -> 409", async () => {
   const repoRoot = tempRepo();
+  writeSearchSourcesConfig(repoRoot, [
+    { provider: "HiringCafe", label: "legacy", enabled: true },
+    { provider: "HiringCafe", label: "legacy disabled", enabled: false },
+  ]);
+  writeSourcedScanConfig(repoRoot, [
+    { name: "Legacy", careers_url: "https://jobs.lever.co/legacy" },
+  ]);
   const server = await bootServer(repoRoot);
   try {
     const res = await fetch(`${baseUrl(server)}/api/search/sources`);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.deepEqual(body, { searches: { enabled: 0, total: 0 }, trackedCompanies: 0 });
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, /database/i);
   } finally {
     await closeServer(server);
   }
 });
 
-test("GET /api/search/sources: reports enabled/total searches and tracked-company count", async () => {
+test("GET /api/search/sources: reports only DB enabled/total searches and tracked-company count", async () => {
   const repoRoot = tempRepo();
-  writeSearchSourcesConfig(repoRoot, [
+  openDb({ repoRoot });
+  putDbSearchSources(repoRoot, [
     { provider: "HiringCafe", label: "A", enabled: true },
     { provider: "HiringCafe", label: "B", enabled: true },
     { provider: "HiringCafe", label: "C", enabled: false },
   ]);
+  companyAtsUpsert({
+    repoRoot,
+    entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+  });
+
+  writeSearchSourcesConfig(repoRoot, [
+    { provider: "HiringCafe", label: "legacy 1", enabled: true },
+    { provider: "HiringCafe", label: "legacy 2", enabled: true },
+    { provider: "HiringCafe", label: "legacy 3", enabled: true },
+    { provider: "HiringCafe", label: "legacy 4", enabled: true },
+  ]);
   writeSourcedScanConfig(repoRoot, [
-    { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    { name: "Legacy", careers_url: "https://jobs.lever.co/legacy" },
     { name: "Beta", careers_url: "https://job-boards.greenhouse.io/beta" },
   ]);
 
@@ -379,7 +434,7 @@ test("GET /api/search/sources: reports enabled/total searches and tracked-compan
   try {
     const res = await fetch(`${baseUrl(server)}/api/search/sources`);
     const body = await res.json();
-    assert.deepEqual(body, { searches: { enabled: 2, total: 3 }, trackedCompanies: 2 });
+    assert.deepEqual(body, { searches: { enabled: 2, total: 3 }, trackedCompanies: 1 });
   } finally {
     await closeServer(server);
   }
