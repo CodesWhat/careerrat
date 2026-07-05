@@ -471,3 +471,67 @@ test("GET /api/search/sources: reports only DB enabled/total searches and tracke
     await closeServer(server);
   }
 });
+
+test("GET /api/search/sources: reports deterministic attempted source counts separately from browser/auth/url-query sources", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  putDbSearchSources(repoRoot, [
+    {
+      provider: "Custom RSS",
+      label: "RSS fetchable",
+      source_type: "rss",
+      rssUrl: "https://example.test/jobs.xml",
+      enabled: true,
+    },
+    {
+      provider: "HiringCafe",
+      label: "Browser board",
+      source_type: "browser",
+      url: "https://hiring.cafe/search?q=ai",
+      enabled: true,
+    },
+    {
+      provider: "LinkedIn",
+      label: "Authenticated saved search",
+      source_type: "auth",
+      url: "https://www.linkedin.com/jobs/search/?keywords=ai",
+      enabled: true,
+    },
+    {
+      provider: "Generic",
+      label: "URL query only",
+      url: "https://example.test/jobs?query=ai",
+      enabled: true,
+    },
+    {
+      provider: "Custom RSS",
+      label: "Disabled RSS",
+      source_type: "rss",
+      rssUrl: "https://example.test/disabled.xml",
+      enabled: false,
+    },
+  ]);
+  companyAtsUpsert({
+    repoRoot,
+    entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+  });
+  companyAtsUpsert({
+    repoRoot,
+    entry: { name: "Beta", careers_url: "https://job-boards.greenhouse.io/beta" },
+  });
+
+  const server = await bootServer(repoRoot);
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/search/sources`);
+    const body = await res.json();
+    assert.equal(res.status, 200);
+    assert.deepEqual(body.deterministicSources, {
+      attempted: 3,
+      rss: 1,
+      supportedAtsCompanies: 2,
+      skipped: 3,
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
