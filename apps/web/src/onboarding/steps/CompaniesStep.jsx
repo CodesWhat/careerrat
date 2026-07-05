@@ -148,7 +148,7 @@ function ProposalActionCard({ batchId, proposal, decidingAction, onDecision }) {
   const name = proposalCompanyName(proposal);
   const approveEnabled = proposal?.proposedAction === "approve-supported-ats";
   return (
-    <div className="company-row" data-proposal-id={proposalId} style={{ alignItems: "flex-start" }}>
+    <div className="company-row company-row--proposal" data-proposal-id={proposalId}>
       <CompanyAvatar name={name} domain={proposal?.company?.domain} />
       <span className="company-row__name">
         {name}
@@ -157,7 +157,7 @@ function ProposalActionCard({ batchId, proposal, decidingAction, onDecision }) {
           {proposal?.roleSeen ? ` · ${proposal.roleSeen}` : ""}
         </span>
       </span>
-      <div className="wizard-actions" style={{ justifyContent: "flex-start", margin: 0 }}>
+      <div className="proposal-actions">
         {PROPOSAL_DECISION_ACTIONS.map(([action, label]) => {
           const disabled =
             !batchId ||

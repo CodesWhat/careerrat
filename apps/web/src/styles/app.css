@@ -81,6 +81,48 @@ button {
   padding: 32px clamp(20px, 4vw, 48px);
 }
 
+@media (max-width: 760px) {
+  .app-shell {
+    flex-direction: column;
+  }
+
+  .app-shell__nav {
+    width: 100%;
+    flex-direction: row;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-right: none;
+    border-bottom: 1px solid var(--paper-edge);
+  }
+
+  .app-shell__brand {
+    padding: 0;
+  }
+
+  .app-shell__nav-footer {
+    margin-top: 0;
+    margin-left: auto;
+    padding: 0;
+  }
+
+  .app-shell__content {
+    padding: 20px;
+  }
+
+  .page-scaffold {
+    max-width: none;
+  }
+
+  .page-scaffold__header {
+    flex-direction: column;
+  }
+
+  .capture-bar {
+    margin: 0 20px 20px;
+  }
+}
+
 /* ── Nav list ───────────────────────────────────────────────────────────── */
 
 .nav-list {
@@ -90,6 +132,21 @@ button {
   display: flex;
   flex-direction: column;
   gap: 2px;
+}
+
+@media (max-width: 760px) {
+  .nav-list {
+    flex: 1 1 100%;
+    flex-direction: row;
+    gap: 4px;
+    order: 3;
+    overflow-x: auto;
+    padding-bottom: 2px;
+  }
+
+  .nav-item {
+    white-space: nowrap;
+  }
 }
 
 .nav-item {
@@ -604,7 +661,42 @@ button {
 
 .company-row__name {
   flex: 1;
+  min-width: 0;
   font-size: 13px;
+}
+
+.company-row--proposal {
+  align-items: flex-start;
+}
+
+.proposal-actions {
+  display: flex;
+  flex: 1 1 260px;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+@media (max-width: 640px) {
+  .company-row--proposal {
+    flex-wrap: wrap;
+  }
+
+  .company-row--proposal .company-row__name {
+    flex: 1 1 calc(100% - 38px);
+  }
+
+  .company-row--proposal .proposal-actions {
+    flex-basis: 100%;
+    padding-left: 38px;
+  }
+
+  .company-row--proposal .proposal-actions .btn {
+    flex: 1 1 calc(50% - 10px);
+    min-width: 0;
+  }
 }
 
 .board-preview {
@@ -715,6 +807,7 @@ button {
 
 .capture-bar__input {
   flex: 1;
+  min-width: 0;
   resize: none;
   min-height: 2.4rem;
   max-height: 8rem;
