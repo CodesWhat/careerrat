@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
 status: In Progress
-stopped_at: Completed 06-02-PLAN.md
-last_updated: "2026-07-05T16:43:56.348Z"
+stopped_at: Completed 06-03-PLAN.md
+last_updated: "2026-07-05T16:52:47.823Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 30
-  percent: 48
+  completed_plans: 31
+  percent: 49
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Continue Phase 6 Wave 0 with 06-03 RED coverage plan.
-2. Execute Phase 6 Wave 1 only after Wave 0 RED coverage is complete.
+1. Execute Phase 6 Wave 1 now that Wave 0 RED coverage is complete.
+2. Keep 06-04 through 06-07 focused on making the RED contracts green before the final rollup.
 3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T16:43:56.217Z
-**Stopped at:** Completed 06-02-PLAN.md
+**Last session:** 2026-07-05T16:52:47.813Z
+**Stopped at:** Completed 06-03-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -101,6 +101,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 05-verification-and-docs P02 | 3 min | 2 tasks | 3 files |
 | Phase 06 P01 | 3 min | 2 tasks | 3 files |
 | Phase 06 P02 | 1 min | 1 tasks | 2 files |
+| Phase 06 P03 | 5 min | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -168,3 +169,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: The 06-01 NavList regression preserves canonical SPA labels and the Inbox badge while failing the Classic `/tracker` affordance. — This isolates APP-01 coverage from unrelated app shell behavior.
 - [Phase 06]: Wave 0 packet route coverage stays test-only and RED against the current tracker-export-backed implementation. — This preserves APP-02 and APP-03 coverage before the packet product API migrates to DB-derived reads.
 - [Phase 06]: Packet fixtures seed SQLite through importFromTracker while asserting workspace/tracker.json is absent from the temp runtime workspace. — This prevents the RED tests from passing through generated tracker exports.
+- [Phase 06]: Wave 0 source setup and scanner coverage stays test-only and RED against current file-backed product route behavior. — Implementation moves to Phase 6 Wave 1 after all RED contracts are present.
+- [Phase 06]: Source setup and scanner product routes are specified as fail-closed HTTP 409 when SQLite is absent; legacy config and scan-result files are not sufficient product state. — This preserves APP-02/APP-03 and decisions D-04 through D-08.
+- [Phase 06]: DB-mode scanner seen sets must come from SQLite application and sourced rows, not from generated workspace/tracker.json exports. — Generated tracker exports are compatibility artifacts only.
