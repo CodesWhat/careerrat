@@ -116,6 +116,15 @@ Plans:
 
 **Requirements:** VER-01, VER-02, VER-03, VER-04, VER-05
 
+**Plans:** 5 plans
+
+Plans:
+- [ ] 05-01-PLAN.md — Cost-boundary regression lock for deterministic discovery paths.
+- [ ] 05-02-PLAN.md — Structured-output and no-AI route negative coverage.
+- [ ] 05-03-PLAN.md — Confirm-first write safety rollup.
+- [ ] 05-04-PLAN.md — Docs alignment and docs drift guard.
+- [ ] 05-05-PLAN.md — Final focused verification rollup.
+
 **Success Criteria**:
 
 1. Tests prove deterministic discovery resolver/scanner/write paths do not invoke AI.
