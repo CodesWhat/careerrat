@@ -515,10 +515,10 @@ describe("GET /api/onboard/state", () => {
           searches: [
             {
               provider: "HiringCafe",
-              source_type: "url-query",
-              label: "HiringCafe — Applied AI",
+              source_type: "rss",
+              label: "Applied AI RSS",
               enabled: true,
-              url: "https://hiring.cafe/?search=applied%20ai",
+              rssUrl: "https://example.test/jobs.xml",
             },
           ],
           tracked_companies: [],
@@ -533,6 +533,93 @@ describe("GET /api/onboard/state", () => {
       const body = await res.json();
       assert.equal(res.status, 200);
       assert.equal(body.searchSourcesPresent, true);
+      assert.deepEqual(body.deterministicSources, {
+        attempted: 1,
+        rss: 1,
+        supportedAtsCompanies: 0,
+        skipped: 0,
+      });
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("does not report browser or URL-query sources as runnable first-search setup", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      sourceConfigPut({
+        repoRoot,
+        name: "search-sources",
+        data: {
+          title_filter: { positive: [], negative: [] },
+          location_filter: { always_allow: [], allow: [], block: [] },
+          searches: [
+            {
+              provider: "HiringCafe",
+              source_type: "url-query",
+              label: "HiringCafe — Applied AI",
+              enabled: true,
+              url: "https://hiring.cafe/?search=applied%20ai",
+            },
+            {
+              provider: "Wellfound",
+              source_type: "browser",
+              label: "Wellfound — Applied AI",
+              enabled: true,
+              url: "https://wellfound.com/jobs",
+            },
+          ],
+          tracked_companies: [],
+          source_catalog: {},
+        },
+      });
+
+      const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.searchSourcesPresent, false);
+      assert.deepEqual(body.deterministicSources, {
+        attempted: 0,
+        rss: 0,
+        supportedAtsCompanies: 0,
+        skipped: 2,
+      });
+      assert.deepEqual(
+        body.data.sourcing.sourceSetup.deterministicSources,
+        body.deterministicSources
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("reports supported sourced-scan ATS companies as runnable first-search setup", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      sourceConfigPut({
+        repoRoot,
+        name: "sourced-scan",
+        data: {
+          title_filter: {},
+          location_filter: null,
+          tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
+        },
+      });
+
+      const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.searchSourcesPresent, true);
+      assert.deepEqual(body.deterministicSources, {
+        attempted: 1,
+        rss: 0,
+        supportedAtsCompanies: 1,
+        skipped: 0,
+      });
     } finally {
       await closeServer(server);
     }

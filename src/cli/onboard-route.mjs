@@ -60,6 +60,7 @@ import {
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
 import {
+  countDeterministicSources,
   latestSourcingRunForUi,
   runFirstSearchInBackground,
   startFirstSearchRun,
@@ -339,39 +340,16 @@ function dbSourceResumePresent(pathCtx) {
   }
 }
 
-function searchEntryHasConfiguredPath(entry = {}) {
-  if (!entry || typeof entry !== "object") return false;
-  if (entry.enabled !== true) return false;
-  return Boolean(
-    String(entry.url || entry.query || entry.rssUrl || entry.rss_url || entry.apiUrl || "").trim()
-  );
-}
-
-function trackedCompanyHasConfiguredPath(entry = {}) {
-  if (!entry || typeof entry !== "object") return false;
-  const name = String(entry.name || "").trim();
-  const careersUrl = String(entry.careers_url || entry.url || "").trim();
-  if (!name || !careersUrl) return false;
-  try {
-    const url = new URL(careersUrl);
-    return url.protocol === "https:" || url.protocol === "http:";
-  } catch {
-    return false;
-  }
+function dbDeterministicSourceCounts(pathCtx) {
+  const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
+  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  return countDeterministicSources({ searchSources, sourcedScan });
 }
 
 function dbSearchSourcesPresent(pathCtx) {
-  try {
-    const result = sourceConfigGet({ ...pathCtx, name: "search-sources" });
-    if (result.stored !== true) return false;
-    const data = result.data || {};
-    const searches = Array.isArray(data.searches) ? data.searches : [];
-    if (searches.some(searchEntryHasConfiguredPath)) return true;
-    const trackedCompanies = Array.isArray(data.tracked_companies) ? data.tracked_companies : [];
-    return trackedCompanies.some(trackedCompanyHasConfiguredPath);
-  } catch {
-    return false;
-  }
+  const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
+  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  return countDeterministicSources({ searchSources, sourcedScan }).attempted > 0;
 }
 
 function exportCandidateCompatibilityFiles(pathCtx, config) {
@@ -735,6 +713,7 @@ export function mountOnboardRoutes({
           env,
           purpose: "first-search",
         });
+        const deterministicSources = dbDeterministicSourceCounts(pathCtx);
         sendJson(res, 200, {
           files: dbCandidateFiles(repoRoot, pathCtx, config),
           data: {
@@ -743,9 +722,13 @@ export function mountOnboardRoutes({
             "form-defaults": config["form-defaults"],
             modes: config.modes,
             setup: config.setup,
-            sourcing: { firstSearchRun },
+            sourcing: {
+              firstSearchRun,
+              sourceSetup: { deterministicSources },
+            },
           },
           sourcing: { firstSearchRun },
+          deterministicSources,
           sourceResumePresent:
             dbSourceResumePresent(pathCtx) ||
             existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md")),

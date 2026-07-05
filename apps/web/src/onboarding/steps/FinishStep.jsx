@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useDashboardSnapshot } from "../../app-shell/DashboardContext.jsx";
 import { Button } from "../../components/Button.jsx";
 import { Card } from "../../components/Card.jsx";
@@ -210,8 +210,30 @@ function firstSearchCounts(run) {
   };
 }
 
-export function buildFirstSearchTask({ state, run } = {}) {
+export function deterministicSourceAttemptsFromState(state) {
+  const values = [
+    state?.data?.sourcing?.sourceSetup?.deterministicSources?.attempted,
+    state?.data?.sourcing?.deterministicSources?.attempted,
+    state?.deterministicSources?.attempted,
+  ];
+  for (const value of values) {
+    const number = Number(value);
+    if (Number.isFinite(number)) return number;
+  }
+  return null;
+}
+
+export function isSourceSetupReady({ state, firstSearchRun } = {}) {
+  const attempted = deterministicSourceAttemptsFromState(state);
+  if (attempted != null) return attempted > 0;
+  if (state?.searchSourcesPresent === true) return true;
+  const run = unwrapRun(firstSearchRun);
+  return run?.status === "running" || run?.status === "completed";
+}
+
+export function buildFirstSearchTask({ state, run, sourceSetupReady } = {}) {
   const searchReady = state?.data?.setup?.readiness?.search_ready === true;
+  const sourcesReady = sourceSetupReady ?? isSourceSetupReady({ state, firstSearchRun: run });
   const currentRun = unwrapRun(run);
   const status = currentRun?.status || "not_started";
   const normalizedStatus = FIRST_SEARCH_STATUS[status] ? status : "not_started";
@@ -274,13 +296,15 @@ export function buildFirstSearchTask({ state, run } = {}) {
     status: normalizedStatus,
     label: statusMeta.label,
     badgeClass: statusMeta.badgeClass,
-    detail: searchReady
-      ? "Complete Search setup, choose a cadence, then start the first deterministic search."
-      : "Complete Search setup before starting the first deterministic search.",
+    detail: !searchReady
+      ? "Complete Search setup before starting the first deterministic search."
+      : sourcesReady
+        ? "Complete Search setup, choose a cadence, then start the first deterministic search."
+        : "Add an RSS source or supported public ATS company before starting the first deterministic search.",
     counts,
-    canStart: searchReady,
+    canStart: searchReady && sourcesReady,
     canRetry: false,
-    canDefer: searchReady,
+    canDefer: searchReady && sourcesReady,
   };
 }
 
@@ -350,17 +374,11 @@ export async function continueDeepOnboardingAction({
 } = {}) {
   if (!firstSearchTask?.canStart) return "continue";
   if (searchChoice === "later") {
-    await deferFirstSearch?.();
-    return "deferred";
+    const ok = await deferFirstSearch?.();
+    return ok === false ? "blocked" : "deferred";
   }
-  await startFirstSearch?.();
-  return "started";
-}
-
-export function isSourceSetupReady({ state, firstSearchRun } = {}) {
-  if (state?.searchSourcesPresent === true) return true;
-  const run = unwrapRun(firstSearchRun);
-  return run?.status === "running" || run?.status === "completed";
+  const ok = await startFirstSearch?.();
+  return ok === false ? "blocked" : "started";
 }
 
 // Step 7 — Finish. The app's source setup state is the DB `search-sources`
@@ -372,6 +390,7 @@ export function isSourceSetupReady({ state, firstSearchRun } = {}) {
 // deeper-onboarding handoff: the wizard and richer evidence intake are separate
 // entry points into the same candidate setup state, not one linear flow.
 export function FinishStep({ state, reload, goBack }) {
+  const navigate = useNavigate();
   const dashboard = useDashboardSnapshot();
   const [writing, setWriting] = useState(false);
   const [written, setWritten] = useState(null);
@@ -440,8 +459,10 @@ export function FinishStep({ state, reload, goBack }) {
         setFirstSearchRun: setLocalFirstSearchRun,
       });
       await refreshWorkspace();
+      return true;
     } catch (err) {
       setError(errorMessage(err, "first search failed"));
+      return false;
     } finally {
       setQuickStarting(false);
     }
@@ -458,8 +479,10 @@ export function FinishStep({ state, reload, goBack }) {
       });
       setSearchChoice("later");
       await refreshWorkspace();
+      return true;
     } catch (err) {
       setError(errorMessage(err, "Could not save cadence"));
+      return false;
     } finally {
       setSavingCadence(false);
     }
@@ -479,12 +502,13 @@ export function FinishStep({ state, reload, goBack }) {
   }
 
   async function handleContinueDeepOnboarding() {
-    await continueDeepOnboardingAction({
+    const result = await continueDeepOnboardingAction({
       firstSearchTask,
       searchChoice,
       startFirstSearch: handleStartFirstSearch,
       deferFirstSearch: handleDeferFirstSearch,
     });
+    if (result !== "blocked") navigate("/chat");
   }
 
   // Recompute once after DB source setup exists; compatibility exports are
@@ -663,7 +687,9 @@ export function FinishStep({ state, reload, goBack }) {
               Continue deep onboarding
             </Button>
           ) : (
-            <Link to="/onboarding">Continue deep onboarding</Link>
+            <Button variant="secondary" onClick={() => navigate("/chat")}>
+              Continue deep onboarding
+            </Button>
           )}
         </div>
       </Card>

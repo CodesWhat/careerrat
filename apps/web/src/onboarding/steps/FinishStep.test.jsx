@@ -60,6 +60,11 @@ const SEARCH_READY_STATE = {
         deep_ingest_complete: ["deeper evidence bank"],
       },
     },
+    sourcing: {
+      sourceSetup: {
+        deterministicSources: { attempted: 1, rss: 1, supportedAtsCompanies: 0, skipped: 0 },
+      },
+    },
     targeting: {
       search_preferences: {},
     },
@@ -76,6 +81,7 @@ function stateWithFirstSearch(firstSearchRun, extra = {}) {
       ...(extra.data || {}),
       firstSearchRun,
       sourcing: {
+        ...(SEARCH_READY_STATE.data.sourcing || {}),
         ...(extra.data?.sourcing || {}),
         firstSearchRun,
       },
@@ -228,6 +234,63 @@ describe("FinishStep first-search setup task", () => {
     expectNoFirstSearchRuntimeTokens(html);
   });
 
+  it("does not enable first search when explicit deterministic source counts are zero", () => {
+    const task = FinishStepModule.buildFirstSearchTask({
+      state: stateWithFirstSearch(
+        { status: "not_started" },
+        {
+          searchSourcesPresent: true,
+          deterministicSources: { attempted: 0, rss: 0, supportedAtsCompanies: 0, skipped: 1 },
+          data: {
+            sourcing: {
+              sourceSetup: {
+                deterministicSources: {
+                  attempted: 0,
+                  rss: 0,
+                  supportedAtsCompanies: 0,
+                  skipped: 1,
+                },
+              },
+            },
+          },
+        }
+      ),
+      run: { status: "not_started" },
+    });
+
+    expect(task.canStart).toBe(false);
+    expect(task.canDefer).toBe(false);
+    expect(task.detail).toContain("Add an RSS source or supported public ATS company");
+  });
+
+  it("enables first search when supported ATS-only source setup is runnable", () => {
+    const task = FinishStepModule.buildFirstSearchTask({
+      state: stateWithFirstSearch(
+        { status: "not_started" },
+        {
+          searchSourcesPresent: true,
+          deterministicSources: { attempted: 1, rss: 0, supportedAtsCompanies: 1, skipped: 0 },
+          data: {
+            sourcing: {
+              sourceSetup: {
+                deterministicSources: {
+                  attempted: 1,
+                  rss: 0,
+                  supportedAtsCompanies: 1,
+                  skipped: 0,
+                },
+              },
+            },
+          },
+        }
+      ),
+      run: { status: "not_started" },
+    });
+
+    expect(task.canStart).toBe(true);
+    expect(task.canDefer).toBe(true);
+  });
+
   it("persists a non-default cadence before starting the first search", async () => {
     expect(FinishStepModule.saveCadenceAndStartFirstSearch).toBeTypeOf("function");
     const calls = [];
@@ -314,6 +377,16 @@ describe("FinishStep first-search setup task", () => {
 
     expect(result).toBe("started");
     expect(calls).toEqual(["start"]);
+  });
+
+  it("blocks deep onboarding handoff when the first search start fails", async () => {
+    const result = await FinishStepModule.continueDeepOnboardingAction({
+      firstSearchTask: { canStart: true },
+      searchChoice: "now",
+      startFirstSearch: async () => false,
+    });
+
+    expect(result).toBe("blocked");
   });
 
   it("records the explicit Not now choice before continuing deep onboarding", async () => {
