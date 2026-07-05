@@ -1,65 +1,129 @@
 ---
 phase: ROL-API-06-canonical-db-app-shell
-reviewed: 2026-07-05T17:47:00Z
+reviewed: 2026-07-05T19:25:21Z
 depth: standard
 files_reviewed: 8
 files_reviewed_list:
-  - scripts/scan-sourced.mjs
-  - src/cli/packet-route.mjs
-  - src/cli/search-route.mjs
-  - src/core/onboarding/packet-page.mjs
-  - tests/packet-page.test.mjs
-  - tests/packet-route.test.mjs
-  - tests/scan-sourced.test.mjs
-  - tests/search-route.test.mjs
+  - tests/db-app-shell-regression.test.mjs
+  - apps/web/src/onboarding/steps/WelcomeStep.test.jsx
+  - apps/web/src/onboarding/steps/WelcomeStep.jsx
+  - src/cli/tracker-dev.mjs
+  - tests/onboard-route.test.mjs
+  - src/cli/onboard-route.mjs
+  - apps/web/src/onboarding/steps/FinishStep.jsx
+  - apps/web/src/onboarding/steps/FinishStep.test.jsx
 findings:
-  critical: 0
-  warning: 0
+  critical: 1
+  warning: 2
   info: 0
-  total: 0
-status: clean
+  total: 3
+status: issues_found
 ---
 
 # Phase ROL-API-06-canonical-db-app-shell: Code Review Report
 
-**Reviewed:** 2026-07-05T17:47:00Z
+**Reviewed:** 2026-07-05T19:25:21Z
 **Depth:** standard
 **Files Reviewed:** 8
-**Status:** clean
+**Status:** issues_found
 
 ## Summary
 
-Re-reviewed the patched Phase 6 source/test files after the packet artifact endpoint fix. All prior findings are resolved, and no new actionable bugs, security issues, or code quality risks were found in the current changed scope.
-
-All reviewed files meet quality standards. No issues found.
+Reviewed the Phase 6 gap-closure changes for DB-mode onboarding source readiness and legacy/static-page demotion. The read-side `searchSourcesPresent` fix is pointed at SQLite now, but the export/quick-start writer still replaces the existing DB `search-sources` config with a regenerated baseline. That can drop user-curated sources, disabled/auth state, and watermarks.
 
 ## Narrative Findings (AI reviewer)
 
-No critical, warning, or info findings in the reviewed scope.
+## Critical Issues
 
-## Resolved Findings
+### CR-01: Compatibility Export Clobbers Existing SQLite Search Sources
 
-- Prior scanner blocker resolved: `scripts/scan-sourced.mjs` treats explicit `configPath` runs as standalone, avoiding DB dedupe, DB search-source scans, DB sourced-row persistence, generated tracker export, and DB watermark writes. Coverage exists in `tests/scan-sourced.test.mjs`.
-- Prior packet binary-artifact blocker resolved: `src/cli/packet-route.mjs` now returns PDF/DOCX metadata instead of decoding binary files as Markdown, and `src/core/onboarding/packet-page.mjs` renders binary artifacts as open links.
-- Prior packet artifact endpoint blocker resolved: `/api/packet/artifact` now requires `id` plus `kind=resume|coverLetter|answers`, reads application state through `readPacketApplicationsFromDb(pathCtx)`, preserves DB fail-closed behavior, and serves only the DB-referenced binary artifact for that app/kind.
-- Prior search preflight warning resolved: `src/cli/search-route.mjs` now returns a JSON 500 for unexpected source-config preflight failures instead of throwing past the HTTP response handler.
+**File:** `src/cli/onboard-route.mjs:395`
+
+**Issue:** `writeDbCompatibilityBundle()` builds a fresh baseline from profile/targeting and writes it directly with `sourceConfigPut()` at lines 397-398. Both quick-start (`prepareQuickStartSourcing()` at line 476) and explicit `/api/onboard/write-config` export (line 926) call this helper. In DB mode, a user may already have sources added through `/api/boards/add`, `rolester searches --add-url`, disabled authenticated sources, or source watermarks. This path replaces that whole SQLite row, so a normal Finish/Quick Start action can silently delete curated DB source setup while producing a passing compatibility YAML export. The tests at `tests/onboard-route.test.mjs:1145` and `tests/onboard-route.test.mjs:1212` only assert that a generated file exists; they never seed an existing DB config and assert preservation.
+
+**Fix:**
+```js
+import { mergeSearchConfigs } from "../core/providers/search-sources.mjs";
+
+function buildSearchSourceExport(pathCtx, targeting, profile) {
+  const baseline = buildSearchSources(targeting, profile);
+  const existing = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+  return existing.stored ? mergeSearchConfigs(existing.data, baseline) : baseline;
+}
+
+// For quick-start: persist the merged config.
+const sources = buildSearchSourceExport(pathCtx, config.targeting, config.profile);
+sourceConfigPut({ ...pathCtx, name: "search-sources", data: sources });
+
+// For compatibility-only export: write YAML from `sources`, but do not replace
+// SQLite unless the route is intentionally preparing source setup.
+```
+
+Add route tests that pre-store a custom search with `enabled: false`, `auth/platform`, and a `recency.lastRunAt`, then call both `/api/onboard/write-config` and `/api/discovery/quick-start`/`/api/onboard/quick-start` and assert the custom entry and watermark survive.
+
+## Warnings
+
+### WR-01: FinishStep Still Treats Compatibility Export As Source Readiness
+
+**File:** `apps/web/src/onboarding/steps/FinishStep.jsx:205`
+
+**Issue:** `sourceSetupReady` is computed as `compatibilityExported || !!state?.searchSourcesPresent` at line 206. That recreates the false-readiness class the phase was closing: a local "export compatibility files" result can unlock source-ready UI paths (`previewBoards()` at lines 278-292 and the LinkedIn add card at line 424) without relying on the backend's DB-derived `searchSourcesPresent`. The copy says export is CLI/debug support only, but the state machine still uses export freshness as product readiness.
+
+**Fix:** Keep these concepts separate. Derive product readiness only from backend DB state (or a quick-start response that actually wrote/merged DB source setup), and keep `written` only for the export status message.
+
+```jsx
+const compatibilityExported = Array.isArray(written) && written.length > 0;
+const sourceSetupReady =
+  state?.searchSourcesPresent === true || (quickStartResult?.searches?.count ?? 0) > 0;
+
+async function handleWriteConfig() {
+  const result = await writeConfig();
+  setWritten(result.written || []);
+  await refreshWorkspace();
+}
+```
+
+Extend `FinishStep.test.jsx` with a case where `state.searchSourcesPresent` is false but `writeConfig()` returns written files; assert the LinkedIn source card and "SQLite source setup is ready" state do not appear until refreshed DB state reports readiness.
+
+### WR-02: Tracker-dev Help Still Presents Static Pages As Utility UX
+
+**File:** `src/cli/tracker-dev.mjs:928`
+
+**Issue:** `printHelp()` still groups `/evaluate`, `/answer`, `/onboard`, `/search`, and `/packet` under `Retained utility pages and APIs:` and describes them as normal pages at lines 928-934. The new regression test only scans the 404/help string from `buildNotFoundText()` and a narrow source regex; it does not execute `rolester tracker-dev --help`, so this user-facing help path still violates the Phase 6 requirement that static byte pages be compatibility/debug/export surfaces, not product utilities.
+
+**Fix:** Split the help output into explicit buckets and test the actual CLI help output.
+
+```text
+Static compatibility/debug/export pages (not normal product UX):
+  GET  /evaluate  Compatibility evaluation page
+  GET  /answer    Compatibility answer drafting page
+  GET  /onboard   Compatibility onboarding page
+  GET  /search    Compatibility search page
+  GET  /packet    Compatibility packet page
+
+Explicit user-selected chat page:
+  GET  /chat
+
+Local app APIs:
+  GET  /api/health
+  ...
+```
+
+Add a regression that spawns `node src/cli/tracker-dev.mjs --help` and asserts the output contains the compatibility/debug/export heading and does not contain `Retained utility pages` around those static routes.
 
 ## Verification
 
 Ran:
 
 ```bash
-node --test tests/scan-sourced.test.mjs tests/packet-route.test.mjs tests/packet-page.test.mjs tests/search-route.test.mjs tests/db-app-shell-regression.test.mjs
+node --test tests/db-app-shell-regression.test.mjs tests/onboard-route.test.mjs
+npm --workspace apps/web run test -- src/onboarding/steps/WelcomeStep.test.jsx src/onboarding/steps/FinishStep.test.jsx
 ```
 
-Result: 50/50 tests passed.
-
-## Residual Risks And Test Gaps
-
-The review was scoped to the eight changed files listed in the frontmatter, not a full repository audit. The packet artifact tests cover the DB-referenced PDF path, missing artifact kind, raw path rejection, and no-DB 409 behavior; future coverage could add a DOCX-specific serve assertion, but the shared binary path and content-type branch are otherwise straightforward.
+Result: both commands passed. The passing tests do not cover the source-config preservation or `--help` copy failures above.
 
 ---
 
-_Reviewed: 2026-07-05T17:47:00Z_
+_Reviewed: 2026-07-05T19:25:21Z_
 _Reviewer: the agent (gsd-code-reviewer)_
 _Depth: standard_
