@@ -24,6 +24,15 @@ import { validate } from "../src/core/profile/schema-validator.mjs";
 const cleanupRoots = [];
 const FIXED_NOW = new Date("2026-07-04T12:00:00.000Z");
 const PRIVATE_CURRENT_BASE = 145000;
+const FAILURE_LEAK_SENTINELS = [
+  "RAW_MODEL_REPLY_05_02",
+  "PROMPT_SECRET_05_02",
+  "CANDIDATE_FACT_SECRET_05_02",
+  "PRIVATE_COMP_SECRET_05_02",
+  "current_base",
+  "current_comp_shareable",
+  String(PRIVATE_CURRENT_BASE),
+];
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-company-discovery-seeds-"));
@@ -51,6 +60,13 @@ function assertNoCurrentCompLeak(value) {
     false,
     "must not leak private current base value"
   );
+}
+
+function assertNoFailureLeak(value, sentinels = FAILURE_LEAK_SENTINELS) {
+  const serialized = JSON.stringify(value);
+  for (const sentinel of sentinels) {
+    assert.equal(serialized.includes(sentinel), false, `must not leak ${sentinel}`);
+  }
 }
 
 function seedCandidateContext(repoRoot) {
@@ -142,6 +158,23 @@ function validSeed(overrides = {}) {
     role_family_hint: "Applied AI",
     confidence: "high",
     source_hint: "candidate keep signals",
+    ...overrides,
+  };
+}
+
+function minimalSeedContext(overrides = {}) {
+  return {
+    profileDomain: "applied AI",
+    roleFamilies: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }],
+    keepSignals: ["agent workflows"],
+    cutSignals: [],
+    excludedCompanies: [],
+    trackedCompanies: [],
+    applications: [],
+    sourcedCompanies: [],
+    compensationFloors: { currency: "USD", minimum_base: 200000 },
+    locationPosture: { remote: true },
+    dedupe: { companies: [] },
     ...overrides,
   };
 }
@@ -371,6 +404,141 @@ test("AI company seed generation uses native-preferred bounded AI with exact lab
   assertNoCurrentCompLeak(result.body);
 });
 
-test("VER-02 company seed structured-output negative regressions are implemented", () => {
-  assert.fail("RED: add malformed retry, schema rejection, and safe envelope tests");
+test("malformed company seed JSON gets exactly one corrective retry before succeeding", async () => {
+  const calls = [];
+
+  const result = await generateCompanySeeds({
+    context: minimalSeedContext(),
+    requestedCount: 1,
+    now: FIXED_NOW,
+    call: async (options) => {
+      calls.push(options);
+      if (calls.length === 1) {
+        return {
+          content: [{ type: "text", text: "not json for company seeds" }],
+          model: "claude-native-test",
+        };
+      }
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              companies: [
+                validSeed({
+                  name: "Retry Seeds Co",
+                  domain_hint: "retry.example",
+                  confidence: "medium",
+                }),
+              ],
+            }),
+          },
+        ],
+        model: "claude-native-test",
+      };
+    },
+  });
+
+  assert.equal(calls.length, 2);
+  assert.equal(calls[0].messages.length, 1);
+  assert.equal(calls[1].messages.length, 2);
+  assert.match(calls[1].messages.at(-1).content, /invalid JSON/);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.ai.mode, "native");
+  assert.equal(result.body.ai.retried, true);
+  assert.deepEqual(result.body.data.companies, [
+    {
+      name: "Retry Seeds Co",
+      domain_hint: "retry.example",
+      why: "Builds agentic developer workflow tools.",
+      role_family_hint: "Applied AI",
+      confidence: "medium",
+      source_hint: "candidate keep signals",
+    },
+  ]);
+});
+
+test("schema-invalid company seed trusted fields return AI_SCHEMA_INVALID manual envelopes", async () => {
+  for (const field of ["careers_url", "provider", "approved"]) {
+    const calls = [];
+    const result = await generateCompanySeeds({
+      context: minimalSeedContext(),
+      requestedCount: 1,
+      call: async (options) => {
+        calls.push(options);
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                companies: [
+                  validSeed({
+                    name: `Blocked ${field}`,
+                    [field]: "trusted-field-secret-05-02",
+                  }),
+                ],
+              }),
+            },
+          ],
+          model: "claude-native-test",
+        };
+      },
+    });
+
+    assert.equal(calls.length, 2, `${field} should receive exactly one retry`);
+    assert.match(calls[1].messages.at(-1).content, new RegExp(field));
+    assert.equal(result.status, 422, field);
+    assert.equal(result.body.ok, false, field);
+    assert.equal(result.body.code, BOUNDED_AI_CODES.AI_SCHEMA_INVALID, field);
+    assert.equal(result.body.manual.available, true, field);
+    assert.equal(result.body.ai.used, true, field);
+    assert.equal(result.body.ai.retried, true, field);
+    assert.equal(result.body.data, undefined, field);
+    assert.ok(
+      result.body.error.details.some((error) => error.path.includes(field)),
+      `${field} should be named in schema details`
+    );
+    assertNoFailureLeak(result.body, ["trusted-field-secret-05-02"]);
+  }
+});
+
+test("exhausted malformed company seed output returns safe manual metadata without prompt or model leakage", async () => {
+  const calls = [];
+
+  const result = await generateCompanySeeds({
+    context: minimalSeedContext({
+      profileDomain: "CANDIDATE_FACT_SECRET_05_02",
+      keepSignals: ["PROMPT_SECRET_05_02"],
+      compensationFloors: {
+        currency: "USD",
+        minimum_base: PRIVATE_CURRENT_BASE,
+        note: "PRIVATE_COMP_SECRET_05_02",
+      },
+    }),
+    requestedCount: 1,
+    call: async (options) => {
+      calls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: `not json ${FAILURE_LEAK_SENTINELS.join(" ")}`,
+          },
+        ],
+        model: "claude-native-test",
+      };
+    },
+  });
+
+  assert.equal(calls.length, 2);
+  assert.match(calls[1].messages.at(-1).content, /invalid JSON/);
+  assert.equal(result.status, 422);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.code, BOUNDED_AI_CODES.AI_SCHEMA_INVALID);
+  assert.equal(result.body.manual.available, true);
+  assert.equal(result.body.ai.used, true);
+  assert.equal(result.body.ai.retried, true);
+  assertNoFailureLeak(result.body);
 });
