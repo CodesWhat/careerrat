@@ -1,6 +1,12 @@
 import { createHash } from "node:crypto";
 import { companyProposalBatchPut } from "../db/verbs/company-discovery.mjs";
-import { scanCompanies } from "../scoring/sourced-scanner.mjs";
+import { offersWithCapturedJobs as defaultOffersWithCapturedJobs } from "../scoring/sourced-persistence.mjs";
+import {
+  buildLocationFilter,
+  buildTitleFilter,
+  filterAndDedupeOffers,
+  scanCompanies,
+} from "../scoring/sourced-scanner.mjs";
 import {
   COMPANY_DISCOVERY_BATCH_MAX,
   resolveCompanyBoard as defaultResolveCompanyBoard,
@@ -43,6 +49,65 @@ function requestedCountFromBody(body = {}) {
   return body.requestedCount || body.requested_count || COMPANY_DISCOVERY_BATCH_MAX;
 }
 
+function scoringConfigFromContext(context = {}) {
+  return {
+    targeting: {
+      role_buckets: Array.isArray(context.roleFamilies)
+        ? context.roleFamilies.map((family) => ({
+            name: family.name,
+            priority: family.priority,
+            titles: family.titles,
+          }))
+        : [],
+      keep_signals: context.keepSignals || [],
+      cut_signals: context.cutSignals || [],
+      excluded_companies: context.excludedCompanies || [],
+    },
+    profile: {
+      compensation: {
+        minimum_base: context.compensationFloors?.minimum_base,
+      },
+      location: {
+        home: context.locationPosture?.home,
+        relocation: context.locationPosture?.relocation || [],
+      },
+    },
+  };
+}
+
+function offerHasScannerGate(offer) {
+  return Boolean(offer?.gate && offer?.score != null);
+}
+
+function prepareScanResult(scanResult = {}, context = {}) {
+  const offers = Array.isArray(scanResult.offers) ? scanResult.offers : [];
+  const unscored = offers.filter((offer) => !offerHasScannerGate(offer));
+  if (unscored.length === 0) return { ...scanResult, offers };
+
+  const scored = filterAndDedupeOffers(unscored, {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    titleFilter: buildTitleFilter(),
+    locationFilter: buildLocationFilter(),
+    config: scoringConfigFromContext(context),
+  });
+  const scoredByUrl = new Map(scored.kept.map((offer) => [offer.url, offer]));
+  const preparedOffers = offers
+    .map((offer) => (offerHasScannerGate(offer) ? offer : scoredByUrl.get(offer.url)))
+    .filter(Boolean);
+
+  return {
+    ...scanResult,
+    offers: preparedOffers,
+    filteredTitle: scored.filteredTitle,
+    filteredLocation: scored.filteredLocation,
+    duplicates: scored.duplicates,
+    possibleDuplicates: scored.possibleDuplicates,
+    invalid: scored.invalid,
+  };
+}
+
 async function proposalForSeed({
   repoRoot,
   env,
@@ -52,8 +117,11 @@ async function proposalForSeed({
   fetchImpl,
   resolveCompanyBoard,
   scanCompaniesImpl,
+  offersWithCapturedJobs,
   createdAt,
+  context,
 }) {
+  const proposalId = stableId("cpp", [batchId, seed.name, String(index), createdAt]);
   try {
     const resolution = await resolveCompanyBoard({ repoRoot, env, seed, fetchImpl });
     const scanConfig = {
@@ -66,21 +134,32 @@ async function proposalForSeed({
         },
       ],
     };
-    const scanResult = await scanCompaniesImpl(scanConfig, { fetchImpl });
-    const proposalId = stableId("cpp", [batchId, seed.name, String(index), createdAt]);
+    const rawScanResult = await scanCompaniesImpl(scanConfig, { fetchImpl });
+    const scanResult = prepareScanResult(rawScanResult, context);
+    const capturedOffers = offersWithCapturedJobs({
+      repoRoot,
+      env,
+      offers: Array.isArray(scanResult?.offers) ? scanResult.offers : [],
+      savedAt: new Date(createdAt),
+    });
     return buildCompanyProposal({
       seed,
       resolution,
-      scanResult,
+      scanResult: { ...scanResult, offers: capturedOffers },
+      context,
+      capturedOffers,
       proposalId,
       version: 1,
     });
   } catch (err) {
     return {
       rejected: {
+        proposalId,
         company: { name: seed.name, domain: seed.domain_hint || "" },
+        classification: "rejected",
+        confidenceTier: "rejected",
         reason: err.code || "proposal-generation-failed",
-        rejectReasons: [err.message],
+        rejectReasons: [err.code || err.message || "proposal-generation-failed"],
       },
     };
   }
@@ -93,6 +172,7 @@ export async function createCompanyProposalBatch({
   fetchImpl = fetch,
   resolveCompanyBoard = defaultResolveCompanyBoard,
   scanCompaniesImpl = scanCompanies,
+  offersWithCapturedJobs = defaultOffersWithCapturedJobs,
   buildSeedContext = buildCompanySeedContext,
   generateSeeds = generateCompanySeeds,
   seedCall,
@@ -129,7 +209,9 @@ export async function createCompanyProposalBatch({
       fetchImpl,
       resolveCompanyBoard,
       scanCompaniesImpl,
+      offersWithCapturedJobs,
       createdAt,
+      context,
     });
     if (result.proposal) proposals.push(result.proposal);
     if (result.rejected) rejected.push(result.rejected);

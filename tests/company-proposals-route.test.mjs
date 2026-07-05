@@ -274,6 +274,7 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
             title: "Applied AI Engineer",
             url: "https://jobs.lever.co/acme/ai-engineer",
             location: "Remote",
+            comp: "$220,000 - $260,000",
             bodyText:
               "Build agentic developer workflows, LLM tool use, and customer-facing AI prototypes.",
             fit: "high",
@@ -323,6 +324,7 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
     currentRoleCount: 1,
     matchingRoleCount: 1,
     errors: [],
+    compStatus: "clears-floor",
   });
 
   const { companyProposalBatchLatest } = await import("../src/core/db/verbs/company-discovery.mjs");
@@ -417,6 +419,7 @@ test("POST /api/discovery/company-proposals turns AI seeds into deterministic re
             title: "Applied AI Engineer",
             url: "https://jobs.lever.co/seeded/ai-engineer",
             location: "Remote",
+            comp: "$220,000 - $260,000",
             bodyText: "Build agentic developer workflows and customer-facing prototypes.",
             fit: "high",
             score: 90,
