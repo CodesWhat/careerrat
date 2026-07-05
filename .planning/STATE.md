@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
 status: In Progress
-stopped_at: Completed 06-05-PLAN.md
-last_updated: "2026-07-05T17:08:18.447Z"
+stopped_at: Completed 06-06-PLAN.md
+last_updated: "2026-07-05T17:13:52.843Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 33
-  percent: 51
+  completed_plans: 34
+  percent: 52
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Continue Phase 6 Wave 1 with 06-06 source setup after 06-05 packet migration.
-2. Keep 06-06 and 06-07 focused on making the remaining RED contracts green before the final rollup.
+1. Continue Phase 6 Wave 1 with 06-07 scanner context/results after 06-06 source setup.
+2. Keep 06-07 focused on making the remaining RED contracts green before the final rollup.
 3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T17:08:18.438Z
-**Stopped at:** Completed 06-05-PLAN.md
+**Last session:** 2026-07-05T17:13:52.836Z
+**Stopped at:** Completed 06-06-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -104,6 +104,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P03 | 5 min | 3 tasks | 4 files |
 | Phase 06 P04 | 5 min | 2 tasks | 4 files |
 | Phase 06 P05 | 1 min | 1 tasks | 3 files |
+| Phase 06 P06 | 4 min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -179,3 +180,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: Missing generated tracker exports skip only the debug/export render path; /app and DB APIs still boot. — This preserves APP-03 by preventing compatibility exports from becoming product prerequisites.
 - [Phase 06]: Packet product APIs now read application rows through requireDb() and assembleTrackerObject(db), not generated tracker exports. — This makes the APP-02 packet route contract green while preserving existing tracker-shaped stage classification.
 - [Phase 06]: Packet list/detail routes translate missing SQLite state to HTTP 409 setup errors. — This preserves APP-03 by treating missing DB as a product setup failure instead of falling back to workspace/tracker.json.
+- [Phase 06]: Board additions now read and write DB `search-sources` config through source-config verbs instead of `config/search-sources.yml`. — This makes the APP-02 source setup write contract green and keeps legacy YAML as non-canonical compatibility state.
+- [Phase 06]: Malformed board URLs are validated before DB access so bad input remains HTTP 400 while missing DB remains HTTP 409. — This preserves the D-04/D-06 API boundary between request validation and setup failure.
+- [Phase 06]: Board preview remains deterministic and DB-free. — Preview URL construction stays a pure helper-backed route while only persisted source setup requires SQLite.
