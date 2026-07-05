@@ -23,7 +23,15 @@ export {
   candidateSetupInitialize,
 } from "./candidate.mjs";
 export { commAppendMessage, commMarkSent, commUpsert } from "./comm.mjs";
-export { companyProposalBatchLatest, companyProposalBatchPut } from "./company-discovery.mjs";
+export {
+  companyBoardResolutionGet,
+  companyBoardResolutionListDue,
+  companyBoardResolutionUpsert,
+  companyProposalBatchGet,
+  companyProposalBatchLatest,
+  companyProposalBatchPatchState,
+  companyProposalBatchPut,
+} from "./company-discovery.mjs";
 export {
   InvalidTransitionError,
   intakeCapture,
