@@ -34,7 +34,7 @@
 
 ### Verification
 
-- [ ] **VER-01**: Tests prove deterministic discovery steps do not call AI.
+- [x] **VER-01**: Tests prove deterministic discovery steps do not call AI.
 - [ ] **VER-02**: Tests cover structured-output parse failure, corrective retry, and schema rejection.
 - [ ] **VER-03**: Tests cover no-AI behavior for migrated app routes.
 - [ ] **VER-04**: Tests cover duplicate/excluded company handling and confirmed source-config writes.
@@ -87,7 +87,7 @@
 | RUNT-01 | Phase 4 | Complete |
 | RUNT-02 | Phase 4 | Complete |
 | RUNT-03 | Phase 4 | Complete |
-| VER-01 | Phase 5 | Pending |
+| VER-01 | Phase 5 | Complete |
 | VER-02 | Phase 5 | Pending |
 | VER-03 | Phase 5 | Pending |
 | VER-04 | Phase 5 | Pending |

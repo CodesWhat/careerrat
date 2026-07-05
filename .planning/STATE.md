@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 05
 status: Ready to execute
-stopped_at: Phase 05 planned; ready to execute Phase 05
-last_updated: "2026-07-05T12:33:55.944Z"
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-07-05T12:41:36.721Z"
 progress:
   total_phases: 5
   completed_phases: 4
   total_plans: 28
-  completed_plans: 23
+  completed_plans: 24
   percent: 80
 ---
 
@@ -55,8 +55,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T12:32:24Z
-**Stopped at:** Phase 05 planned; ready to execute Phase 05.
+**Last session:** 2026-07-05T12:41:12.162Z
+**Stopped at:** Completed 05-01-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -91,6 +91,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 05-verification-and-docs P03 | planned | 2 tasks | 3 files |
 | Phase 05-verification-and-docs P04 | planned | 2 tasks | 4 files |
 | Phase 05-verification-and-docs P05 | planned | 1 tasks | 1 files |
+| Phase 05-verification-and-docs P01 | 4 min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -149,3 +150,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 04-runtime-routing]: FinishStep discovery handoffs remain explicit button-triggered chat sessions. — Quick-start/next routes are gated by runtimeCapabilities.discoveryChatHandoffs.
 - [Phase 04-runtime-routing]: Proposal review UAT passed after a mobile action-row overflow fix. — Browser UAT covered desktop/mobile local proposal, conflict, refresh, no-AI, and no /api/skill/run behavior.
 - [Phase 05-verification-and-docs]: Phase 5 planning is verification-first and fail-closed. — The final rollup plan cannot complete unless backend tests, frontend tests, and static scans all pass.
+- [Phase 05-verification-and-docs]: Company seed generation remains the only discovery module allowed to use bounded AI; deterministic resolver, context, gate, proposal, and decision modules are statically forbidden from direct AI seams. — This preserves VER-01 by keeping model use in the bounded seed owner and making deterministic discovery owners mechanically AI-free.
+- [Phase 05-verification-and-docs]: Local company proposal create/read/decision route slices are checked separately so explicit quick-start/next chat handoff routes can remain available outside the local proposal path. — The route module intentionally contains both local proposal routes and explicit chat handoff routes, so slice-based checks avoid weakening either boundary.
