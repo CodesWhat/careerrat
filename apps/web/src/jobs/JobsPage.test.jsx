@@ -44,7 +44,12 @@ const DASHBOARD_DATA = {
   },
 };
 
-function renderJobsPage({ searchSources = null, searchRun = null, loading = false } = {}) {
+function renderJobsPage({
+  searchSources = null,
+  searchRun = null,
+  manualSearchError = null,
+  loading = false,
+} = {}) {
   dashboardMock.snapshot = {
     data: {
       ...DASHBOARD_DATA,
@@ -52,7 +57,7 @@ function renderJobsPage({ searchSources = null, searchRun = null, loading = fals
       sourceSetup: searchSources,
       searchRun,
       manualSearchRun: searchRun,
-      sourcing: { manualSearchRun: searchRun },
+      sourcing: { manualSearchRun: searchRun, manualSearchError },
     },
     loading,
     error: null,
@@ -115,6 +120,38 @@ describe("JobsPage manual search action", () => {
     });
 
     expect(html).toContain("Searching...");
+  });
+
+  it("surfaces manual search errors through an inline alert", () => {
+    const html = renderJobsPage({
+      searchSources: {
+        ready: true,
+        searches: { enabled: 1, total: 1 },
+        trackedCompanies: 0,
+      },
+      manualSearchError: "Source setup could not be read.",
+    });
+
+    expect(html).toContain("inline-alert--error");
+    expect(html).toContain("Source setup could not be read.");
+  });
+
+  it("getSearchSources targets GET /api/search/sources", async () => {
+    expect(Api.getSearchSources).toBeTypeOf("function");
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ ok: true, ready: true }), {
+        status: 200,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const body = await Api.getSearchSources();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/search/sources",
+      expect.objectContaining({ method: "GET" })
+    );
+    expect(body.ready).toBe(true);
   });
 
   it("startSearchRun targets POST /api/sourcing/search/start and does not use chat or discovery wrappers", async () => {
