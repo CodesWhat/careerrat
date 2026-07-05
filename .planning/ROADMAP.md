@@ -10,7 +10,7 @@
 |-------|------|------|--------------|--------|
 | 1 | Decomposition Map | Classify current skill work into API, deterministic code, bounded AI, and retained skill runtime owners. | ARCH-01, ARCH-02, ARCH-03 | Complete (4/4, 2026-07-04) |
 | 2 | Bounded AI Foundation | Provide the reusable runtime pieces needed for cheap structured AI calls. | AIR-01, AIR-02, AIR-03, AIR-04 | Complete (7/7, 2026-07-04) |
-| 3 | Company Discovery API | Migrate `discover-companies` to AI seeds plus deterministic ATS resolution, scan, screening, confirmation, and writes. | DISC-01, DISC-02, DISC-03, DISC-04, DISC-05 | In Progress (1/7) |
+| 3 | Company Discovery API | 1/7 | In Progress|  |
 | 4 | Runtime Routing | Route app and agent surfaces through the cheapest correct layer while preserving full skill runs for tool-heavy workflows. | RUNT-01, RUNT-02, RUNT-03 | Pending |
 | 5 | Verification and Docs | Prove cost boundaries, no-AI degradation, discovery write safety, and documentation alignment. | VER-01, VER-02, VER-03, VER-04, VER-05 | Pending |
 
