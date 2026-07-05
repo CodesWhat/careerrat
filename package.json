@@ -156,5 +156,13 @@
     "lefthook": "^2.1.9",
     "playwright": "^1.60.0",
     "turbo": "^2.9.18"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.2": true,
+    "fsevents@2.3.3": true,
+    "lefthook@2.1.9": true,
+    "sharp@0.34.5": true
   }
 }
