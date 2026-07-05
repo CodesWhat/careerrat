@@ -6,6 +6,7 @@ import { Field, TextField } from "../../components/form.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import {
   createCompanyProposals,
+  decideCompanyProposal,
   getCompanyProposals,
   saveCandidateFile,
   searchLogos,
@@ -13,6 +14,15 @@ import {
 import { ChatPanel } from "../ChatPanel.jsx";
 
 const SEARCH_DEBOUNCE_MS = 350;
+const PROPOSAL_CONFLICT_MESSAGE =
+  "Proposal changed. Review the refreshed proposal before deciding.";
+const PROPOSAL_DECISION_ACTIONS = [
+  ["approve-supported-ats", "Approve ATS"],
+  ["reject", "Reject"],
+  ["suppress", "Suppress"],
+  ["escalate", "Escalate"],
+  ["refresh", "Refresh"],
+];
 
 function errorMessage(err, fallback) {
   return (
@@ -20,6 +30,19 @@ function errorMessage(err, fallback) {
     err?.body?.message ||
     (err instanceof Error ? err.message : null) ||
     fallback
+  );
+}
+
+function proposalRouteErrorMessage(err, fallback) {
+  const base = errorMessage(err, fallback);
+  const manualAction = err?.body?.manual?.action;
+  if (manualAction && manualAction !== base) return `${base}. ${manualAction}`;
+  return base;
+}
+
+function isConflictError(err) {
+  return (
+    err?.status === 409 || err?.body?.code === "CONFLICT" || err?.body?.error?.code === "CONFLICT"
   );
 }
 
@@ -45,6 +68,135 @@ function proposalConfidenceLabel(proposal) {
 
 function rejectedProposalLabel() {
   return "rejected";
+}
+
+function proposalStatusLabel(proposal) {
+  return (
+    proposal?.decision?.status || proposal?.decision?.action || proposalConfidenceLabel(proposal)
+  );
+}
+
+function withProposalCounts(batch) {
+  if (!batch) return null;
+  const proposals = Array.isArray(batch.proposals) ? batch.proposals : [];
+  const rejected = Array.isArray(batch.rejected) ? batch.rejected : [];
+  return {
+    ...batch,
+    proposals,
+    rejected,
+    counts: {
+      ...(batch.counts || {}),
+      proposals: proposals.length,
+      rejected: rejected.length,
+    },
+  };
+}
+
+function replaceProposal(list, proposal) {
+  const proposals = Array.isArray(list) ? list : [];
+  return proposals.map((item) => (item?.proposalId === proposal?.proposalId ? proposal : item));
+}
+
+function removeProposal(list, proposalId) {
+  return (Array.isArray(list) ? list : []).filter((item) => item?.proposalId !== proposalId);
+}
+
+function proposalBatchFromDecisionOutcome(batch, outcome) {
+  if (!batch || !outcome) return batch || null;
+  if (outcome.refreshedProposal) {
+    return withProposalCounts({
+      ...batch,
+      proposals: replaceProposal(batch.proposals, outcome.refreshedProposal),
+    });
+  }
+  if (outcome.proposal) {
+    return withProposalCounts({
+      ...batch,
+      proposals: replaceProposal(batch.proposals, outcome.proposal),
+    });
+  }
+  if (outcome.rejected) {
+    return withProposalCounts({
+      ...batch,
+      proposals: removeProposal(batch.proposals, outcome.rejected.proposalId),
+      rejected: [...(Array.isArray(batch.rejected) ? batch.rejected : []), outcome.rejected],
+    });
+  }
+  return batch;
+}
+
+function decisionMetadataProposal(outcome) {
+  return outcome?.proposal || outcome?.refreshedProposal || outcome?.rejected || null;
+}
+
+function ProposalDecisionSummary({ outcome }) {
+  if (!outcome || outcome.conflict) return null;
+  const decision = outcome.decision;
+  const proposal = decisionMetadataProposal(outcome);
+  if (!decision && !proposal) return null;
+  const details = [
+    decision?.action,
+    decision?.status,
+    proposal ? proposalCompanyName(proposal) : null,
+    proposal?.confidenceTier,
+  ].filter(Boolean);
+  return <p className="field__hint">Last decision: {details.join(" · ")}</p>;
+}
+
+function ProposalActionCard({ batchId, proposal, decidingAction, onDecision }) {
+  const proposalId = proposal?.proposalId;
+  const name = proposalCompanyName(proposal);
+  const approveEnabled = proposal?.proposedAction === "approve-supported-ats";
+  return (
+    <div className="company-row" data-proposal-id={proposalId} style={{ alignItems: "flex-start" }}>
+      <CompanyAvatar name={name} domain={proposal?.company?.domain} />
+      <span className="company-row__name">
+        {name}
+        <span className="field__hint" style={{ display: "block", margin: "2px 0 0" }}>
+          {proposalStatusLabel(proposal)}
+          {proposal?.roleSeen ? ` · ${proposal.roleSeen}` : ""}
+        </span>
+      </span>
+      <div className="wizard-actions" style={{ justifyContent: "flex-start", margin: 0 }}>
+        {PROPOSAL_DECISION_ACTIONS.map(([action, label]) => {
+          const disabled =
+            !batchId ||
+            !proposalId ||
+            Boolean(decidingAction) ||
+            (action === "approve-supported-ats" && !approveEnabled);
+          return (
+            <Button
+              key={action}
+              variant={action === "approve-supported-ats" ? "primary" : "secondary"}
+              data-action={action}
+              onClick={() => onDecision(proposal, action)}
+              disabled={disabled}
+            >
+              {decidingAction === `${proposalId}:${action}` ? "Working..." : label}
+            </Button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ProposalActionList({ batch, decidingAction, onDecision }) {
+  const proposals = Array.isArray(batch?.proposals) ? batch.proposals : [];
+  if (!proposals.length) return null;
+  return (
+    <div style={{ marginTop: 10 }}>
+      {proposals.map((proposal) => (
+        <ProposalActionCard
+          key={proposal.proposalId || proposalCompanyName(proposal)}
+          batchId={batch?.batchId}
+          proposal={proposal}
+          decidingAction={decidingAction}
+          onDecision={onDecision}
+        />
+      ))}
+    </div>
+  );
 }
 
 function ProposalChipRow({ proposals, labelForProposal }) {
@@ -102,6 +254,49 @@ export async function runCompanyProposalCreate({
   return { created, pending };
 }
 
+export async function runCompanyProposalDecision({
+  batchId,
+  proposal,
+  action,
+  decideProposal = decideCompanyProposal,
+  readProposals = getCompanyProposals,
+} = {}) {
+  const payload = {
+    batchId,
+    proposalId: proposal?.proposalId,
+    action,
+    expectedVersion: proposal?.version,
+  };
+  try {
+    const result = await decideProposal(payload);
+    const pending = await runCompanyProposalRead({ readProposals });
+    const data = result?.data || {};
+    return {
+      result,
+      pending,
+      decision: data.decision || null,
+      proposal: data.proposal || null,
+      refreshedProposal: data.refreshedProposal || null,
+      rejected: data.rejected || null,
+      conflict: false,
+    };
+  } catch (err) {
+    if (!isConflictError(err)) throw err;
+    const pending = await runCompanyProposalRead({ readProposals });
+    return {
+      result: null,
+      pending,
+      decision: null,
+      proposal: null,
+      refreshedProposal: null,
+      rejected: null,
+      conflict: true,
+      message: PROPOSAL_CONFLICT_MESSAGE,
+      error: err,
+    };
+  }
+}
+
 // Step 5 — Companies. Type-ahead (logo.dev Brand Search proxy, GET
 // /api/logos/search) + initials fallback, a collapsed logo.dev-credentials
 // panel (writes automation integrations through the candidate setup API — see
@@ -119,6 +314,7 @@ export function CompaniesStep({
   goNext,
   goBack,
   showToast,
+  initialProposalBatch = null,
 }) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
@@ -141,10 +337,13 @@ export function CompaniesStep({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [proposalBatch, setProposalBatch] = useState(null);
+  const [proposalBatch, setProposalBatch] = useState(initialProposalBatch);
   const [proposalLoading, setProposalLoading] = useState(false);
   const [proposalCreating, setProposalCreating] = useState(false);
+  const [proposalDeciding, setProposalDeciding] = useState(null);
   const [proposalError, setProposalError] = useState(null);
+  const [proposalConflict, setProposalConflict] = useState(null);
+  const [proposalDecisionResult, setProposalDecisionResult] = useState(null);
 
   const canUseCompanyProposals = runtimeCapabilities.companyProposals !== false;
   const canUseManualSeeds = runtimeCapabilities.manualCompanySeeds !== false;
@@ -216,6 +415,7 @@ export function CompaniesStep({
   async function handleLoadCompanyProposals() {
     setProposalLoading(true);
     setProposalError(null);
+    setProposalConflict(null);
     try {
       const response = await runCompanyProposalRead();
       setProposalBatch(proposalBatchFromResponse(response));
@@ -229,13 +429,37 @@ export function CompaniesStep({
   async function handleCreateCompanyProposals() {
     setProposalCreating(true);
     setProposalError(null);
+    setProposalConflict(null);
     try {
       const { created, pending } = await runCompanyProposalCreate({ manualSeeds });
       setProposalBatch(proposalBatchFromResponse(pending) || proposalBatchFromResponse(created));
+      setProposalDecisionResult(null);
     } catch (err) {
-      setProposalError(errorMessage(err, "Could not create company proposals"));
+      setProposalError(proposalRouteErrorMessage(err, "Could not create company proposals"));
     } finally {
       setProposalCreating(false);
+    }
+  }
+
+  async function handleCompanyProposalDecision(proposal, action) {
+    const decidingKey = `${proposal?.proposalId}:${action}`;
+    setProposalDeciding(decidingKey);
+    setProposalError(null);
+    setProposalConflict(null);
+    try {
+      const outcome = await runCompanyProposalDecision({
+        batchId: proposalBatch?.batchId,
+        proposal,
+        action,
+      });
+      const pendingBatch = proposalBatchFromResponse(outcome.pending);
+      setProposalBatch(pendingBatch || proposalBatchFromDecisionOutcome(proposalBatch, outcome));
+      setProposalDecisionResult(outcome);
+      if (outcome.conflict) setProposalConflict(outcome.message);
+    } catch (err) {
+      setProposalError(proposalRouteErrorMessage(err, `Could not ${action} company proposal`));
+    } finally {
+      setProposalDeciding(null);
     }
   }
 
@@ -379,6 +603,8 @@ export function CompaniesStep({
           Company proposals
         </p>
         {proposalError ? <InlineAlert message={proposalError} /> : null}
+        {proposalConflict ? <InlineAlert tone="warning" message={proposalConflict} /> : null}
+        <ProposalDecisionSummary outcome={proposalDecisionResult} />
         <div className="wizard-actions" style={{ justifyContent: "flex-start" }}>
           <Button
             variant="secondary"
@@ -413,6 +639,11 @@ export function CompaniesStep({
             <ProposalChipRow
               proposals={proposalBatch.proposals}
               labelForProposal={proposalConfidenceLabel}
+            />
+            <ProposalActionList
+              batch={proposalBatch}
+              decidingAction={proposalDeciding}
+              onDecision={handleCompanyProposalDecision}
             />
             <ProposalChipRow
               proposals={proposalBatch.rejected}
