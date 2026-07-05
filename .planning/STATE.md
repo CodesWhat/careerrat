@@ -2,10 +2,10 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
-current_phase: 06
-status: In Progress
-stopped_at: Completed 06-10-PLAN.md
-last_updated: "2026-07-05T19:18:49.914Z"
+current_phase: 07
+status: Ready for planning
+stopped_at: Phase 6 verified complete
+last_updated: "2026-07-05T19:31:50Z"
 progress:
   total_phases: 11
   completed_phases: 6
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 06 — Canonical DB App Shell
+**Current focus:** Phase 07 — Quick Onboarding and Auto Sourcing
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
-- **Current phase:** 06
-- **Current phase status:** Complete
-- **Next command:** `$gsd-verify-work 6`
+- **Current phase:** 07
+- **Current phase status:** Ready for planning
+- **Next command:** `$gsd-plan-phase 7`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -52,9 +52,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Run the Phase 6 verification rollup / UAT now that all 10 plans are complete.
-2. Start Phase 7 quick onboarding and auto-sourcing planning/execution.
-3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
+1. Start Phase 7 quick onboarding and auto-sourcing planning.
+2. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
+3. Use the Phase 6 verification report as the handoff that `/app` and DB source-of-truth migration are complete.
 
 ---
 *State initialized: 2026-07-04*
