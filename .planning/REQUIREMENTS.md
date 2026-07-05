@@ -45,8 +45,8 @@
 ### App Shell and DB Source of Truth
 
 - [x] **APP-01**: Electron/React `/app` is the canonical product surface; compatibility surfaces are not part of the normal UX.
-- **APP-02**: Dashboard, packet, tracker/activity, scanner context, and source setup views read DB-derived snapshots.
-- **APP-03**: `workspace/tracker.json` and `workspace/activity.jsonl` are compatibility/export artifacts only.
+- [x] **APP-02**: Dashboard, packet, tracker/activity, scanner context, and source setup views read DB-derived snapshots.
+- [x] **APP-03**: `workspace/tracker.json` and `workspace/activity.jsonl` are compatibility/export artifacts only.
 - [x] **APP-04**: Static regression guards prevent product routes or React app code from depending on generated tracker/activity files as source of truth.
 
 ### Quick Onboarding and Auto Sourcing
@@ -121,8 +121,8 @@
 | VER-04 | Phase 5 | Complete |
 | VER-05 | Phase 5 | Complete |
 | APP-01 | Phase 6 | Complete |
-| APP-02 | Phase 6 | Planned |
-| APP-03 | Phase 6 | Planned |
+| APP-02 | Phase 6 | Complete |
+| APP-03 | Phase 6 | Complete |
 | APP-04 | Phase 6 | Complete |
 | ONB-01 | Phase 7 | Planned |
 | ONB-02 | Phase 7 | Planned |

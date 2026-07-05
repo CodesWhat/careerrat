@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
 status: In Progress
-stopped_at: Completed 06-09-PLAN.md
-last_updated: "2026-07-05T19:08:36.574Z"
+stopped_at: Completed 06-10-PLAN.md
+last_updated: "2026-07-05T19:18:49.914Z"
 progress:
   total_phases: 11
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 38
-  completed_plans: 37
-  percent: 54
+  completed_plans: 38
+  percent: 55
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -27,8 +27,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 - **Project initialized:** 2026-07-04
 - **Current phase:** 06
-- **Current phase status:** In Progress
-- **Next command:** `$gsd-execute-phase 6`
+- **Current phase status:** Complete
+- **Next command:** `$gsd-verify-work 6`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Continue Phase 6 Wave 3 with 06-10 DB-mode onboarding source-readiness and compatibility export-copy gap closure.
-2. Re-run the Phase 6 verification rollup after 06-10 lands.
+1. Run the Phase 6 verification rollup / UAT now that all 10 plans are complete.
+2. Start Phase 7 quick onboarding and auto-sourcing planning/execution.
 3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T19:08:36.564Z
-**Stopped at:** Completed 06-09-PLAN.md
+**Last session:** 2026-07-05T19:18:49.906Z
+**Stopped at:** Completed 06-10-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -107,6 +107,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P06 | 4 min | 1 tasks | 2 files |
 | Phase 06 P07 | 4 min | 3 tasks | 5 files |
 | Phase 06 P09 | 3 min | 2 tasks | 5 files |
+| Phase 06 P10 | 6 min | 2 tasks | 5 files |
 
 ## Decisions
 
@@ -191,3 +192,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: React /app onboarding keeps only the canonical Get started action; the legacy /onboard page is not presented as a user fallback. — This closes the APP-01 onboarding legacy-affordance gap.
 - [Phase 06]: Retained byte-static pages remain mounted, but tracker-dev route discovery now classifies them as compatibility/debug/export surfaces. — This keeps compatibility pages explicit without making them normal product UX.
 - [Phase 06]: Static guard coverage now includes normal React onboarding product pages beyond NavList. — This preserves APP-04 coverage for legacy static-page affordances in product pages.
+- [Phase 06]: DB-mode onboarding source readiness now comes from SQLite `sourceConfigGet({ name: "search-sources" })` and requires a stored row with an enabled configured source. — Compatibility YAML, default rows, empty arrays, and source-catalog metadata no longer mark setup ready.
+- [Phase 06]: FinishStep separates SQLite source setup readiness from compatibility export freshness. — The export button is explicit CLI/debug support, not normal product source setup state.
+- [Phase 06]: LinkedIn saved-search additions in onboarding report DB source setup, not `config/search-sources.yml`. — This keeps `/app` source setup aligned with DB source-of-truth decisions D-04, D-06, and D-07.
