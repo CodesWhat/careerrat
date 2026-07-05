@@ -60,5 +60,29 @@ test("company ATS verbs keep sourced-scan config in SQLite without writing compa
 });
 
 test("VER-04 company ATS source-config owner does not write generated tracker exports", () => {
-  assert.fail("VER-04 source-config ownership assertions are not implemented yet");
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  const trackerPath = userPath({ repoRoot }, "workspace/tracker.json");
+  const trackerHtmlPath = userPath({ repoRoot }, "workspace/tracker.html");
+  const activityPath = userPath({ repoRoot }, "workspace/activity.jsonl");
+
+  const added = companyAtsUpsert({
+    repoRoot,
+    entry: { name: "Owner Boundary Co", careers_url: "https://jobs.lever.co/owner-boundary" },
+  });
+  assert.equal(added.status, "added");
+  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
+    { name: "Owner Boundary Co", careers_url: "https://jobs.lever.co/owner-boundary" },
+  ]);
+
+  const duplicate = companyAtsUpsert({
+    repoRoot,
+    entry: { name: "owner boundary co", careers_url: "https://jobs.lever.co/owner-boundary" },
+  });
+  assert.equal(duplicate.status, "already-tracked");
+
+  assert.equal(existsSync(userPath({ repoRoot }, "config/sourced-scan.json")), false);
+  assert.equal(existsSync(trackerPath), false);
+  assert.equal(existsSync(trackerHtmlPath), false);
+  assert.equal(existsSync(activityPath), false);
 });

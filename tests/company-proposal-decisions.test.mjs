@@ -241,6 +241,10 @@ test("POST /api/discovery/company-proposal-decisions approves a pending supporte
   assert.equal(body.data.proposal.version, 2);
   assert.equal(body.meta.version, 2);
 
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ["companyAtsUpsert", "sourcedUpsertBatch"]
+  );
   assert.equal(calls.filter((call) => call.name === "companyAtsUpsert").length, 1);
   assert.deepEqual(calls[0].args.entry, {
     name: "Acme AI",
@@ -556,5 +560,121 @@ test("decision endpoint fails closed for missing records, stale versions, decide
 });
 
 test("VER-04 invalid and review-only decisions fail closed without confirmed writes", async () => {
-  assert.fail("VER-04 invalid decision write-safety assertions are not implemented yet");
+  const repoRoot = setupRepo();
+  const calls = [];
+  const server = bootServer(repoRoot, {
+    companyAtsUpsertImpl: forbidden("companyAtsUpsert", calls),
+    sourcedUpsertBatchImpl: forbidden("sourcedUpsertBatch", calls),
+    captureAndPersistOffersIfDbImpl: forbidden("captureAndPersistOffersIfDb", calls),
+    writeTrackerImpl: forbidden("writeTracker", calls),
+  });
+  const trackerPath = userPath({ repoRoot }, "workspace/tracker.json");
+  const activityPath = userPath({ repoRoot }, "workspace/activity.jsonl");
+
+  let response = await postJson(
+    server,
+    "/api/discovery/company-proposal-decisions",
+    decisionRequest({ batchId: "missing-batch" })
+  );
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "CONFLICT");
+
+  putBatch(repoRoot, pendingBatch());
+  for (const [label, request, expectedStatus, expectedCode] of [
+    ["missing proposal", decisionRequest({ proposalId: "missing-proposal" }), 409, "CONFLICT"],
+    ["stale version", decisionRequest({ expectedVersion: 0 }), 409, "CONFLICT"],
+    ["unsupported action", decisionRequest({ action: "launch-full-skill" }), 400, "BAD_REQUEST"],
+  ]) {
+    response = await postJson(server, "/api/discovery/company-proposal-decisions", request);
+    assert.equal(response.status, expectedStatus, label);
+    assert.equal(response.body.code, expectedCode, label);
+  }
+
+  putBatch(
+    repoRoot,
+    pendingBatch({
+      batchId: "batch-decided-ver04",
+      proposals: [
+        {
+          ...supportedProposal({ proposalId: "proposal-decided-ver04" }),
+          version: 2,
+          decision: { action: "reject", status: "rejected" },
+        },
+      ],
+    })
+  );
+  response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+    batchId: "batch-decided-ver04",
+    proposalId: "proposal-decided-ver04",
+    action: "approve-supported-ats",
+    expectedVersion: 2,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "CONFLICT");
+
+  for (const [label, proposal] of [
+    [
+      "borderline review-only approval",
+      supportedProposal({
+        proposalId: "proposal-borderline-ver04",
+        confidenceTier: "borderline",
+        proposedAction: "review",
+        reviewReasons: ["scanner-review"],
+      }),
+    ],
+    [
+      "unsupported cache-only approval",
+      supportedProposal({
+        proposalId: "proposal-unsupported-ver04",
+        classification: "unsupported_public",
+        atsProvider: "",
+        jobBoardUrl: "",
+        confidenceTier: "borderline",
+        proposedAction: "cache-only",
+      }),
+    ],
+  ]) {
+    const batchId = `batch-${proposal.proposalId}`;
+    putBatch(repoRoot, pendingBatch({ batchId, proposals: [proposal] }));
+    response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+      batchId,
+      proposalId: proposal.proposalId,
+      action: "approve-supported-ats",
+      expectedVersion: 1,
+    });
+    assert.equal(response.status, 422, label);
+    assert.equal(response.body.code, "VALIDATION_FAILED", label);
+  }
+
+  putBatch(
+    repoRoot,
+    pendingBatch({
+      batchId: "batch-rejected-ver04",
+      proposals: [],
+      rejected: [
+        {
+          proposalId: "proposal-rejected-ver04",
+          company: { name: "Rejected Co", domain: "rejected.example" },
+          classification: "rejected",
+          confidenceTier: "rejected",
+          proposedAction: "reject",
+          rejectReasons: ["excluded-company"],
+          version: 1,
+        },
+      ],
+    })
+  );
+  response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+    batchId: "batch-rejected-ver04",
+    proposalId: "proposal-rejected-ver04",
+    action: "approve-supported-ats",
+    expectedVersion: 1,
+  });
+  assert.equal(response.status, 422);
+  assert.equal(response.body.code, "VALIDATION_FAILED");
+
+  assert.equal(calls.length, 0);
+  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, []);
+  assert.equal(existsSync(trackerPath), false);
+  assert.equal(existsSync(activityPath), false);
 });
