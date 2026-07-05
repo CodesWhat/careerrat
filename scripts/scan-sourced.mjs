@@ -37,6 +37,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
+import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -160,6 +161,11 @@ function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
   return offersWithCapturedJobs({ repoRoot, env, offers, savedAt });
 }
 
+export function buildSeenSetsForRun(pathCtx) {
+  if (dbExists(pathCtx)) return buildDbSeenSets(pathCtx);
+  return buildSeenSets(pathCtx.repoRoot);
+}
+
 // ---------------------------------------------------------------------------
 // runSourcedScan — the orchestration, importable. src/cli/search-route.mjs
 // calls this in-process for POST /api/search/scan; main() below is just the
@@ -191,7 +197,7 @@ export async function runSourcedScan({
   const pathCtx = { repoRoot, env };
   const config = loadScannerConfigForRun({ pathCtx, configPath });
   const candidateConfig = loadCandidateConfig(pathCtx);
-  const { seenUrls, seenReqIds, seenCompanyRoles, tracker } = buildSeenSets(repoRoot);
+  const { seenUrls, seenReqIds, seenCompanyRoles, tracker } = buildSeenSetsForRun(pathCtx);
 
   // Outcome-aware scoring: down-weight role families the candidate's own
   // results show never convert via cold board apply (see
