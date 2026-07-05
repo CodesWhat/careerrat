@@ -84,6 +84,7 @@ describe("JobsPage manual search action", () => {
         ready: true,
         searches: { enabled: 1, total: 1 },
         trackedCompanies: 1,
+        deterministicSources: { attempted: 1, rss: 1, supportedAtsCompanies: 0, skipped: 0 },
       },
     });
 
@@ -98,6 +99,21 @@ describe("JobsPage manual search action", () => {
         ready: false,
         searches: { enabled: 0, total: 0 },
         trackedCompanies: 0,
+        deterministicSources: { attempted: 0, rss: 0, supportedAtsCompanies: 0, skipped: 0 },
+      },
+    });
+
+    expect(html).toContain("Finish Search setup before running a job search.");
+    expect(html).not.toContain("page-scaffold__actions");
+    expect(html).not.toContain(">Search jobs<");
+  });
+
+  it("does not show the manual search action when only non-deterministic sources exist", () => {
+    const html = renderJobsPage({
+      searchSources: {
+        searches: { enabled: 1, total: 1 },
+        trackedCompanies: 0,
+        deterministicSources: { attempted: 0, rss: 0, supportedAtsCompanies: 0, skipped: 1 },
       },
     });
 
@@ -112,6 +128,7 @@ describe("JobsPage manual search action", () => {
         ready: true,
         searches: { enabled: 1, total: 1 },
         trackedCompanies: 0,
+        deterministicSources: { attempted: 1, rss: 1, supportedAtsCompanies: 0, skipped: 0 },
       },
       searchRun: {
         purpose: "manual-search",
@@ -128,6 +145,7 @@ describe("JobsPage manual search action", () => {
         ready: true,
         searches: { enabled: 1, total: 1 },
         trackedCompanies: 0,
+        deterministicSources: { attempted: 1, rss: 1, supportedAtsCompanies: 0, skipped: 0 },
       },
       manualSearchError: "Source setup could not be read.",
     });
@@ -189,5 +207,58 @@ describe("JobsPage manual search action", () => {
 
     expect(calls).toEqual(["startSearchRun", "refetch"]);
     expect(result.run.status).toBe("running");
+  });
+
+  it("surfaces accepted manual-search failures instead of silently refetching", async () => {
+    const calls = [];
+    const errors = [];
+    const runs = [];
+
+    const result = await JobsPageModule.runJobsPageSearch({
+      startSearchRun: async () => {
+        calls.push("startSearchRun");
+        return {
+          ok: true,
+          run: {
+            id: "manual-2",
+            status: "failed",
+            error: {
+              code: "NO_DETERMINISTIC_SOURCES",
+              message: "Add an RSS source or supported public ATS company, then retry.",
+            },
+          },
+        };
+      },
+      refetch: async () => {
+        calls.push("refetch");
+      },
+      setSearchError: (message) => {
+        errors.push(message);
+      },
+      setSearchRun: (run) => {
+        runs.push(run);
+      },
+    });
+
+    expect(calls).toEqual(["startSearchRun"]);
+    expect(errors).toEqual([
+      null,
+      "Add an RSS source or supported public ATS company, then retry.",
+    ]);
+    expect(runs).toEqual([
+      {
+        id: "manual-2",
+        status: "failed",
+        error: {
+          code: "NO_DETERMINISTIC_SOURCES",
+          message: "Add an RSS source or supported public ATS company, then retry.",
+        },
+      },
+    ]);
+    expect(result).toEqual({
+      ok: false,
+      error: "Add an RSS source or supported public ATS company, then retry.",
+      run: runs[0],
+    });
   });
 });

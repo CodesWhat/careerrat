@@ -60,6 +60,7 @@ import {
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
 import {
+  latestSourcingRunForUi,
   runFirstSearchInBackground,
   startFirstSearchRun,
 } from "../core/onboarding/first-search-run.mjs";
@@ -729,6 +730,11 @@ export function mountOnboardRoutes({
         const automation = config.automation || {};
         const { publishableToken, secretKey } = resolveLogoTokens(pathCtx, env);
         const integrations = automation.integrations || {};
+        const firstSearchRun = latestSourcingRunForUi({
+          repoRoot,
+          env,
+          purpose: "first-search",
+        });
         sendJson(res, 200, {
           files: dbCandidateFiles(repoRoot, pathCtx, config),
           data: {
@@ -737,7 +743,9 @@ export function mountOnboardRoutes({
             "form-defaults": config["form-defaults"],
             modes: config.modes,
             setup: config.setup,
+            sourcing: { firstSearchRun },
           },
+          sourcing: { firstSearchRun },
           sourceResumePresent:
             dbSourceResumePresent(pathCtx) ||
             existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md")),

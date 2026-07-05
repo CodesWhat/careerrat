@@ -342,6 +342,21 @@ export async function retryFirstSearch({
   return result;
 }
 
+export async function continueDeepOnboardingAction({
+  firstSearchTask,
+  searchChoice = "now",
+  startFirstSearch,
+  deferFirstSearch,
+} = {}) {
+  if (!firstSearchTask?.canStart) return "continue";
+  if (searchChoice === "later") {
+    await deferFirstSearch?.();
+    return "deferred";
+  }
+  await startFirstSearch?.();
+  return "started";
+}
+
 export function isSourceSetupReady({ state, firstSearchRun } = {}) {
   if (state?.searchSourcesPresent === true) return true;
   const run = unwrapRun(firstSearchRun);
@@ -461,6 +476,15 @@ export function FinishStep({ state, reload, goBack }) {
     } finally {
       setQuickStarting(false);
     }
+  }
+
+  async function handleContinueDeepOnboarding() {
+    await continueDeepOnboardingAction({
+      firstSearchTask,
+      searchChoice,
+      startFirstSearch: handleStartFirstSearch,
+      deferFirstSearch: handleDeferFirstSearch,
+    });
   }
 
   // Recompute once after DB source setup exists; compatibility exports are
@@ -630,7 +654,17 @@ export function FinishStep({ state, reload, goBack }) {
             </>
           ) : null}
           {firstSearchTask.showSourcedLink ? <Link to="/jobs">View sourced roles</Link> : null}
-          <Link to="/onboarding">Continue deep onboarding</Link>
+          {firstSearchTask.canStart ? (
+            <Button
+              variant="secondary"
+              onClick={handleContinueDeepOnboarding}
+              disabled={quickStarting || savingCadence}
+            >
+              Continue deep onboarding
+            </Button>
+          ) : (
+            <Link to="/onboarding">Continue deep onboarding</Link>
+          )}
         </div>
       </Card>
 

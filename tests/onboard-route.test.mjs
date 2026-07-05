@@ -26,6 +26,11 @@ import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
 import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
+import {
+  sourcingRunComplete,
+  sourcingRunFail,
+  sourcingRunStart,
+} from "../src/core/db/verbs/sourcing-runs.mjs";
 import { candidateConfigGet } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
@@ -397,6 +402,60 @@ describe("GET /api/onboard/state", () => {
       assert.equal(body.data.setup.readiness.search_ready, true);
       assert.equal(body.data.setup.readiness.gate_ready, false);
       assert.match(body.data.setup.missing.gate_ready.join("\n"), /compensation floor/i);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("exposes durable first-search run status for onboarding reloads", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+
+      const running = sourcingRunStart({
+        repoRoot,
+        purpose: "first-search",
+        trigger: "search-ready",
+      });
+      const runningState = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(runningState.data.sourcing.firstSearchRun.run.id, running.run.id);
+      assert.equal(runningState.data.sourcing.firstSearchRun.run.status, "running");
+      assert.equal(runningState.sourcing.firstSearchRun.run.status, "running");
+
+      sourcingRunFail({
+        repoRoot,
+        id: running.run.id,
+        error: {
+          code: "NO_DETERMINISTIC_SOURCES",
+          message: "No deterministic first-search sources are ready.",
+        },
+      });
+      const failedState = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(failedState.data.sourcing.firstSearchRun.run.status, "failed");
+      assert.equal(
+        failedState.data.sourcing.firstSearchRun.run.error.code,
+        "NO_DETERMINISTIC_SOURCES"
+      );
+
+      const retry = sourcingRunStart({
+        repoRoot,
+        purpose: "first-search",
+        retryFailed: true,
+        trigger: "first-search-retry",
+      });
+      sourcingRunComplete({
+        repoRoot,
+        id: retry.run.id,
+        summary: { sourcesAttempted: 2, rolesFound: 1 },
+      });
+      const completedState = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(completedState.data.sourcing.firstSearchRun.run.id, retry.run.id);
+      assert.equal(completedState.data.sourcing.firstSearchRun.run.status, "completed");
+      assert.deepEqual(completedState.data.sourcing.firstSearchRun.run.summary, {
+        sourcesAttempted: 2,
+        rolesFound: 1,
+      });
     } finally {
       await closeServer(server);
     }

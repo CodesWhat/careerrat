@@ -297,6 +297,43 @@ describe("FinishStep first-search setup task", () => {
     ]);
   });
 
+  it("starts first search before continuing deep onboarding when Search now is selected", async () => {
+    expect(FinishStepModule.continueDeepOnboardingAction).toBeTypeOf("function");
+    const calls = [];
+
+    const result = await FinishStepModule.continueDeepOnboardingAction({
+      firstSearchTask: { canStart: true },
+      searchChoice: "now",
+      startFirstSearch: async () => {
+        calls.push("start");
+      },
+      deferFirstSearch: async () => {
+        calls.push("defer");
+      },
+    });
+
+    expect(result).toBe("started");
+    expect(calls).toEqual(["start"]);
+  });
+
+  it("records the explicit Not now choice before continuing deep onboarding", async () => {
+    const calls = [];
+
+    const result = await FinishStepModule.continueDeepOnboardingAction({
+      firstSearchTask: { canStart: true },
+      searchChoice: "later",
+      startFirstSearch: async () => {
+        calls.push("start");
+      },
+      deferFirstSearch: async () => {
+        calls.push("defer");
+      },
+    });
+
+    expect(result).toBe("deferred");
+    expect(calls).toEqual(["defer"]);
+  });
+
   it("renders saved cadence as compact text after state refresh", () => {
     const html = renderFinish(
       stateWithFirstSearch(

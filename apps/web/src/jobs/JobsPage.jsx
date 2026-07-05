@@ -24,6 +24,9 @@ const TABS = [
 
 export function hasDbSourceSetup(sourceSetup) {
   if (!sourceSetup || typeof sourceSetup !== "object") return false;
+  if (sourceSetup.deterministicSources && typeof sourceSetup.deterministicSources === "object") {
+    return Number(sourceSetup.deterministicSources.attempted || 0) > 0;
+  }
   if (sourceSetup.ready === true) return true;
 
   const enabledSearches =
@@ -62,7 +65,15 @@ export async function runJobsPageSearch({
   try {
     setSearchError?.(null);
     const result = await startSearchRunFn({ purpose: "manual-search" });
-    setSearchRun?.(unwrapRun(result));
+    const run = unwrapRun(result);
+    setSearchRun?.(run);
+    if (run?.status === "failed") {
+      const message =
+        run.error?.message ||
+        "Search failed. Add an RSS source or supported public ATS company, then retry.";
+      setSearchError?.(message);
+      return { ok: false, error: message, run };
+    }
     await refetch?.();
     return result;
   } catch (error) {
