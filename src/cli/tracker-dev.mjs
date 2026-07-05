@@ -2,9 +2,9 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync, watch } from "node:fs";
 // Rolester tracker dev server — promoted (Productization Phase 0, P0-2) from a
-// live-reloading dashboard preview into the embedded app server: it still serves
-// the hot-reloading dashboard, and now also serves the JSON API surface (tracker/
-// activity/health) the embedded runtime and future clients read from directly.
+// live-reloading dashboard preview into the embedded app server: /app is the
+// product shell, while generated dashboard/tracker feeds remain debug/export
+// compatibility utilities.
 //
 // Usage:
 //   rolester tracker-dev                 Serve http://localhost:7777 with live reload
@@ -80,6 +80,44 @@ const PACKAGE_VERSION = (() => {
     return null;
   }
 })();
+
+export const DEBUG_EXPORT_ROUTES = Object.freeze([
+  { path: "/", kind: "legacy-dashboard-html", label: "legacy generated dashboard HTML" },
+  { path: "/index.html", kind: "legacy-dashboard-html", label: "legacy generated dashboard HTML" },
+  { path: "/tracker", kind: "legacy-dashboard-html", label: "legacy generated dashboard HTML" },
+  {
+    path: "/tracker.html",
+    kind: "legacy-dashboard-html",
+    label: "legacy generated dashboard HTML",
+  },
+  {
+    path: "/dashboard-data.js",
+    kind: "generated-dashboard-module",
+    label: "dashboard data export",
+  },
+  {
+    path: "/workspace/dashboard-data.js",
+    kind: "generated-dashboard-module",
+    label: "dashboard data export",
+  },
+  { path: "/workspace/tracker.json", kind: "raw-tracker-export", label: "raw tracker export" },
+  { path: "/workspace/activity.jsonl", kind: "raw-activity-export", label: "raw activity export" },
+  { path: "/workspace/modes.json", kind: "workspace-json-export", label: "modes export" },
+  { path: "/workspace/settings.json", kind: "workspace-json-export", label: "settings export" },
+  { path: "/workspace/library.json", kind: "workspace-json-export", label: "library export" },
+  { path: "/api/tracker", kind: "storage-adapter-tracker", label: "raw tracker adapter feed" },
+  { path: "/api/activity", kind: "storage-adapter-activity", label: "raw activity adapter feed" },
+]);
+
+const DEBUG_EXPORT_ROUTE_BY_PATH = new Map(DEBUG_EXPORT_ROUTES.map((route) => [route.path, route]));
+
+export function isDebugExportRoute(url) {
+  return DEBUG_EXPORT_ROUTE_BY_PATH.has(url);
+}
+
+function getDebugExportRoute(url) {
+  return DEBUG_EXPORT_ROUTE_BY_PATH.get(url) || null;
+}
 
 // A monotonic-ish stamp for SSE payloads without Date.now() determinism worries.
 let tick = 0;
@@ -227,26 +265,6 @@ export function createDevServer({
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-
-  addRoute("GET", "/api/tracker", (_req, res) => {
-    let data;
-    try {
-      data = adapter.readTracker();
-    } catch (err) {
-      const status = /no tracker\.json/.test(err.message) ? 404 : 500;
-      sendJson(res, status, { error: err.message });
-      return;
-    }
-    sendJson(res, 200, data);
-  });
-
-  addRoute("GET", "/api/activity", (_req, res) => {
-    try {
-      sendJson(res, 200, adapter.readActivity());
-    } catch (err) {
-      sendJson(res, 500, { error: err.message });
-    }
-  });
 
   addRoute("GET", "/api/health", (_req, res) => {
     sendJson(res, 200, { ok: true, version: PACKAGE_VERSION });
@@ -427,70 +445,8 @@ export function createDevServer({
       return;
     }
 
-    if (url === "/" || url === "/index.html" || url === "/tracker" || url === "/tracker.html") {
-      if (!existsSync(OUT_HTML)) {
-        res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
-        res.end(
-          placeholderPage(
-            "Rendering…",
-            "The dashboard is still rendering. This page will refresh automatically."
-          )
-        );
-        return;
-      }
-      let html;
-      try {
-        html = readFileSync(OUT_HTML, "utf8");
-      } catch (err) {
-        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end(`Could not read workspace/tracker.html: ${err.message}`);
-        return;
-      }
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-      });
-      res.end(injectLiveReload(html));
-      return;
-    }
-
-    if (url === "/dashboard-data.js" || url === "/workspace/dashboard-data.js") {
-      serveFile(OUT_DATA, res, "text/javascript; charset=utf-8");
-      return;
-    }
-
-    if (url === "/workspace/tracker.json") {
-      serveFile(TRACKER_JSON, res, "application/json; charset=utf-8");
-      return;
-    }
-
-    if (url === "/workspace/modes.json") {
-      serveFile(OUT_MODES, res, "application/json; charset=utf-8");
-      return;
-    }
-
-    if (url === "/workspace/settings.json") {
-      serveFile(OUT_SETTINGS, res, "application/json; charset=utf-8");
-      return;
-    }
-
-    if (url === "/workspace/library.json") {
-      serveFile(OUT_LIBRARY, res, "application/json; charset=utf-8");
-      return;
-    }
-
-    // The Activity Pulse feed. Optional — serve an empty body (not 404) before any
-    // skill has written an event, so the client degrades to the empty-state cleanly.
-    if (url === "/workspace/activity.jsonl") {
-      if (!existsSync(ACTIVITY_JSONL)) {
-        res.writeHead(200, {
-          "Content-Type": "application/x-ndjson; charset=utf-8",
-          "Cache-Control": "no-store",
-        });
-        res.end("");
-        return;
-      }
-      serveFile(ACTIVITY_JSONL, res, "application/x-ndjson; charset=utf-8");
+    if (isDebugExportRoute(url)) {
+      serveDebugExportRoute(url, res);
       return;
     }
 
@@ -506,45 +462,132 @@ export function createDevServer({
       return;
     }
 
-    // M7 — the Vite + React app shell. Additive only: inserted after every
-    // legacy exact-path route above and before the final 404, so none of the
-    // existing routes (/, /tracker, /onboard, /chat, /search, /evaluate,
-    // /answer, /packet) are affected. SPA-fallback contract: a request under
-    // /app/* that names a real built file (has an extension — hashed assets
-    // like /app/assets/index-abc123.js) is served from apps/web/dist as a
-    // static file; anything else (client-side routes like /app/settings) falls
-    // back to the built index.html, same pattern as any SPA host.
+    // M7 — the canonical Vite + React app shell. SPA-fallback contract: a
+    // request under /app/* that names a real built file (has an extension —
+    // hashed assets like /app/assets/index-abc123.js) is served from
+    // apps/web/dist as a static file; anything else (client-side routes like
+    // /app/settings) falls back to the built index.html, same pattern as any
+    // SPA host.
     if (url === "/app" || url.startsWith("/app/")) {
       serveApp(url, res);
       return;
     }
 
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-    res.end(
-      "Not found. The dev server serves /, /tracker, /evaluate, /answer, /onboard, /chat, /search, /packet, " +
-        "/app/* (the Vite/React app shell), " +
-        "/dashboard-data.js, " +
-        "/workspace/dashboard-data.js, " +
-        "/workspace/tracker.json, /workspace/modes.json, /workspace/settings.json, /workspace/library.json, " +
-        "/workspace/activity.jsonl, /api/tracker, /api/activity, /api/health, /api/runtime/config, " +
-        "/api/skill/run, /api/onboard/state, /api/onboard/init, /api/onboard/resume, " +
-        "/api/onboard/candidate/:name, /api/onboard/evidence-seed, /api/onboard/write-config, " +
-        "/api/onboard/quick-start, " +
-        "/api/discovery/state, /api/discovery/quick-start, /api/discovery/next, " +
-        "/api/settings/ai-key, /api/settings/ai, /api/chat/start, /api/chat/events, /api/chat/message, " +
-        "/api/chat/interrupt, /api/chat/close, /api/chat/by-skill, /api/chat/list, " +
-        "/api/search/scan, /api/search/results, /api/search/sources, " +
-        "/api/packet/list, /api/packet, " +
-        "/api/data/snapshot, /api/data/applications, /api/data/applications/one, " +
-        "/api/data/sourced, /api/data/communications, /api/data/activity, " +
-        "/api/data/dashboard, " +
-        "/api/data/app/status, /api/data/app/fields, /api/data/app/interview, /api/data/app/artifact, " +
-        "/api/data/sourced/promote, /api/data/comm/message, /api/data/comm/send, " +
-        "/api/intake, /api/intake/list, /api/intake/one, /api/intake/classify, " +
-        "/api/intake/confirm, /api/intake/dismiss, " +
-        "/assets/*, /fonts/*, and /__livereload."
-    );
+    res.end(buildNotFoundText());
   });
+
+  function serveDebugExportRoute(url, res) {
+    const route = getDebugExportRoute(url);
+    if (!route) {
+      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end("Debug/export route not found");
+      return;
+    }
+
+    switch (route.kind) {
+      case "legacy-dashboard-html":
+        serveLegacyDashboardHtml(res);
+        return;
+      case "generated-dashboard-module":
+        serveFile(OUT_DATA, res, "text/javascript; charset=utf-8");
+        return;
+      case "raw-tracker-export":
+        serveFile(TRACKER_JSON, res, "application/json; charset=utf-8");
+        return;
+      case "raw-activity-export":
+        serveActivityExport(res);
+        return;
+      case "workspace-json-export":
+        if (route.path.endsWith("modes.json")) {
+          serveFile(OUT_MODES, res, "application/json; charset=utf-8");
+        } else if (route.path.endsWith("settings.json")) {
+          serveFile(OUT_SETTINGS, res, "application/json; charset=utf-8");
+        } else {
+          serveFile(OUT_LIBRARY, res, "application/json; charset=utf-8");
+        }
+        return;
+      case "storage-adapter-tracker":
+        serveStorageAdapterTracker(res);
+        return;
+      case "storage-adapter-activity":
+        serveStorageAdapterActivity(res);
+        return;
+      default:
+        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+        res.end(`Unhandled debug/export route: ${route.kind}`);
+    }
+  }
+
+  function serveLegacyDashboardHtml(res) {
+    if (!existsSync(OUT_HTML)) {
+      res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
+      res.end(
+        placeholderPage(
+          "Debug/export dashboard not rendered",
+          "The generated dashboard export is not available yet. The product app remains at <code>/app</code>."
+        )
+      );
+      return;
+    }
+    let html;
+    try {
+      html = readFileSync(OUT_HTML, "utf8");
+    } catch (err) {
+      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
+      res.end(`Could not read workspace/tracker.html: ${err.message}`);
+      return;
+    }
+    res.writeHead(200, {
+      "Content-Type": "text/html; charset=utf-8",
+      "Cache-Control": "no-store",
+    });
+    res.end(injectLiveReload(html));
+  }
+
+  function serveActivityExport(res) {
+    if (!existsSync(ACTIVITY_JSONL)) {
+      res.writeHead(200, {
+        "Content-Type": "application/x-ndjson; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end("");
+      return;
+    }
+    serveFile(ACTIVITY_JSONL, res, "application/x-ndjson; charset=utf-8");
+  }
+
+  function serveStorageAdapterTracker(res) {
+    let data;
+    try {
+      data = adapter.readTracker();
+    } catch (err) {
+      const status = /no tracker\.json/.test(err.message) ? 404 : 500;
+      sendJson(res, status, { error: err.message });
+      return;
+    }
+    sendJson(res, 200, data);
+  }
+
+  function serveStorageAdapterActivity(res) {
+    try {
+      sendJson(res, 200, adapter.readActivity());
+    } catch (err) {
+      sendJson(res, 500, { error: err.message });
+    }
+  }
+
+  function buildNotFoundText() {
+    const debugExportPaths = DEBUG_EXPORT_ROUTES.map((route) => route.path).join(", ");
+    return (
+      "Not found. Product app route: /app, /app/*.\n" +
+      `Debug/export compatibility routes: ${debugExportPaths}.\n` +
+      "App APIs and utility pages include /api/health, /api/runtime/config, /api/skill/run, " +
+      "/evaluate, /answer, /onboard, /chat, /search, /packet, /api/onboard/*, " +
+      "/api/discovery/*, /api/settings/*, /api/chat/*, /api/search/*, /api/packet*, " +
+      "/api/data/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
+    );
+  }
 
   function serveFile(path, res, contentType) {
     let body;
@@ -767,18 +810,16 @@ async function main() {
   const dev = createDevServer({ repoRoot: DEFAULT_ROOT });
   const pathCtx = dev.pathCtx;
 
-  if (!existsSync(userPath(pathCtx, "workspace/tracker.json"))) {
+  if (existsSync(userPath(pathCtx, "workspace/tracker.json"))) {
+    log("initial debug/export render…");
+    const first = await dev.renderOnce();
+    if (!first.ok) {
+      log(`initial debug/export render failed: ${first.error}`);
+    }
+  } else {
     log(
-      `No ${displayPath(pathCtx, "workspace/tracker.json")} yet. Seed one from templates/tracker.json.`
+      `No ${displayPath(pathCtx, "workspace/tracker.json")} yet; skipping debug/export render. /app and DB APIs will still serve.`
     );
-    process.exit(1);
-  }
-
-  log("initial render…");
-  const first = await dev.renderOnce();
-  if (!first.ok) {
-    log(`initial render failed: ${first.error}`);
-    process.exit(1);
   }
 
   dev.startWatching();
@@ -839,7 +880,8 @@ function openBrowser(url) {
 }
 
 function printHelp() {
-  process.stdout.write(`rolester tracker-dev — the embedded app server (live-reloading dashboard + JSON API)
+  const debugExportRoutes = DEBUG_EXPORT_ROUTES.map((route) => route.path).join(", ");
+  process.stdout.write(`rolester tracker-dev — the embedded /app server (React product shell + local APIs)
 
 Usage:
   rolester tracker-dev                 Serve http://localhost:7777 with live reload
@@ -847,23 +889,19 @@ Usage:
   rolester tracker-dev --open       Open the page in your browser on start
 
 Routes:
-  GET  /, /tracker                     Rendered dashboard HTML (live-reloading)
+  GET  /app, /app/*                     Canonical Vite + React product shell (M7) — build via \`npm run app:build\`
+
+Debug/export compatibility routes:
+  GET  ${debugExportRoutes}
+                                           Generated dashboard/static exports and raw compatibility feeds
+
+Retained utility pages and APIs:
   GET  /evaluate                        Paste a JD → live evaluate-job verdict (P0-5)
   GET  /answer                          Paste a screening question → live answer-question draft
   GET  /onboard                         Non-AI onboarding wizard (M1) — seed candidate files, BYOK key
   GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
   GET  /search                          Deterministic ATS-board sweep results + "Run sweep" (M3)
   GET  /packet                          Review a gated app's tailored resume/cover letter/answers, or generate live (M4)
-  GET  /app, /app/*                     The Vite + React app shell (M7) — build via \`npm run app:build\`
-  GET  /dashboard-data.js               Dashboard data module
-  GET  /workspace/dashboard-data.js     Same, under its workspace-relative path
-  GET  /workspace/tracker.json          Raw tracker.json (static file)
-  GET  /workspace/modes.json            Modes config
-  GET  /workspace/settings.json         Settings config
-  GET  /workspace/library.json          Evidence library
-  GET  /workspace/activity.jsonl        Activity Pulse feed (NDJSON)
-  GET  /api/tracker                     Raw tracker.json via the StorageAdapter (JSON)
-  GET  /api/activity                    Activity feed via the StorageAdapter (JSON array)
   GET  /api/health                      { ok, version }
   GET  /api/runtime/config              { skills: [...] } — the embedded runtime's allowlist
   POST /api/skill/run                   Run a SKILL.md via the embedded Agent SDK runtime (SSE)
