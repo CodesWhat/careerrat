@@ -67,6 +67,7 @@ import { mountOnboardRoutes } from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
+import { mountSourcingRoutes } from "./sourcing-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -372,6 +373,7 @@ export function createDevServer({
   // prefillFromQuery()) — the two pages are deliberately linked, not merged,
   // so a scan can be re-run/browsed without re-running evaluate-job.
   mountSearchRoutes({ addRoute, repoRoot, env });
+  mountSourcingRoutes({ addRoute, repoRoot, env });
 
   addStaticCompatibilityPage("/search", SEARCH_PAGE_HTML);
 
@@ -612,8 +614,10 @@ export function createDevServer({
       "/api/onboard/finish, /api/onboard/*, " +
       "/api/discovery/*, /api/settings/*, /api/chat/start, /api/chat/events, " +
       "/api/chat/message, /api/chat/interrupt, /api/chat/close, /api/chat/by-skill, " +
-      "/api/chat/list, /api/chat/*, /api/search/*, /api/packet*, " +
+      "/api/chat/list, /api/chat/*, /api/search/*, /api/sourcing/*, /api/packet*, " +
       "/api/search/scan, /api/search/results, /api/search/sources, " +
+      "/api/sourcing/runs/latest, /api/sourcing/first-run/start, " +
+      "/api/sourcing/search/start, " +
       "/api/packet/list, /api/packet?id=:id, " +
       "/api/data/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
     );
@@ -944,7 +948,7 @@ Local app APIs:
   POST /api/onboard/candidate/:name     Merge + validate + write one candidate file
   POST /api/onboard/evidence-seed       Dedupe-merge claims into candidate/evidence.yml
   POST /api/onboard/write-config        Export compatibility candidate/source files
-  POST /api/onboard/quick-start         Search-ready DB setup -> source config + discovery handoff
+  POST /api/onboard/quick-start         Search-ready DB setup -> durable local first search
   GET  /api/discovery/state             Current supervised discovery handoff state
   POST /api/discovery/quick-start       Prepare sources and start/reuse first discovery chat
   POST /api/discovery/next              Start/reuse the current next discovery chat
@@ -960,6 +964,9 @@ Local app APIs:
   POST /api/search/scan                 Run the deterministic ATS-board sweep, persist + return the summary (M3)
   GET  /api/search/results              Newest (or ?date=YYYY-MM-DD) persisted sweep summary
   GET  /api/search/sources              Search-source/tracked-company presence counts
+  GET  /api/sourcing/runs/latest        Latest durable sourcing run (?purpose=first-search|manual-search)
+  POST /api/sourcing/first-run/start    Start/retry/reuse the onboarding first search
+  POST /api/sourcing/search/start       Start/reuse a manual deterministic sourcing run
   GET  /api/packet/list                 Gated applications + artifact presence + NEEDS YOU counts (M4)
   GET  /api/packet?id=<appId>           One application's resolved resume/coverLetter/answers (M4)
   GET  /api/data/snapshot               sqlite data layer: meta + table counts (M6, 409 if no db yet)

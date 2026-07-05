@@ -342,6 +342,6 @@ export function latestSourcingRunForUi({
   const latest = sourcingRunLatest({ repoRoot, env, purpose });
   return {
     ...latest,
-    run: mapSourcingRunForUi(latest.run),
+    run: latest.run ? mapSourcingRunForUi(latest.run) : null,
   };
 }

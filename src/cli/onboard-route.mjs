@@ -29,8 +29,7 @@
 //                                        see CANDIDATE_ROUTE_ENTRIES below)
 //   POST /api/onboard/evidence-seed      dedupe-merge claims into evidence.yml
 //   POST /api/onboard/write-config       export compatibility candidate/source files
-//   POST /api/onboard/quick-start        search-ready DB setup -> sources +
-//                                        next discovery handoff; gate/apply stay locked
+//   POST /api/onboard/quick-start        search-ready DB setup -> durable local first search
 //   POST /api/settings/ai-key            store a BYOK Anthropic key locally
 //   GET  /api/settings/ai                report the resolved AI route (no key value)
 //
@@ -60,6 +59,10 @@ import {
   sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
+import {
+  runFirstSearchInBackground,
+  startFirstSearchRun,
+} from "../core/onboarding/first-search-run.mjs";
 import {
   extractDocxResumeText as defaultExtractDocxResumeText,
   looksLikeUsableResumeText,
@@ -607,6 +610,97 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
   };
 }
 
+export function prepareQuickStartFirstSearch({
+  repoRoot,
+  env = process.env,
+  fetchImpl = fetch,
+} = {}) {
+  const pathCtx = { repoRoot, env };
+  if (!dbExists(pathCtx)) {
+    return {
+      status: 409,
+      body: {
+        ok: false,
+        error: "SQLite candidate setup is required before quick-start sourcing",
+      },
+    };
+  }
+
+  let config;
+  try {
+    config = candidateConfigGet(pathCtx);
+  } catch (err) {
+    return {
+      status: err?.code === "NO_DATABASE" ? 409 : 400,
+      body: {
+        ok: false,
+        error: err?.message || String(err),
+        errors: err?.errors || undefined,
+      },
+    };
+  }
+
+  const setup = config.setup || {};
+  if (setup.readiness?.search_ready !== true) {
+    return {
+      status: 409,
+      body: {
+        ok: false,
+        error: "Candidate setup is not search-ready",
+        readiness: setup.readiness || {},
+        missing: setup.missing || {},
+      },
+    };
+  }
+
+  const check = validateDbProfileAndTargeting(repoRoot, config);
+  if (!check.valid) {
+    return {
+      status: 400,
+      body: {
+        ok: false,
+        error: "candidate profile and/or targeting DB docs do not validate",
+        profileErrors: check.profileErrors,
+        targetingErrors: check.targetingErrors,
+      },
+    };
+  }
+
+  try {
+    const result = startFirstSearchRun({ repoRoot, env, retryFailed: false });
+    if (result.reused !== true && result.run?.status === "running") {
+      void runFirstSearchInBackground({
+        repoRoot,
+        env,
+        fetchImpl,
+        runId: result.run.id,
+      }).catch(() => {});
+    }
+    return {
+      status: result.reused ? 200 : 202,
+      body: {
+        ...result,
+        locks: {
+          gateReady: setup.readiness?.gate_ready === true,
+          applyReady: setup.readiness?.apply_ready === true,
+        },
+      },
+    };
+  } catch (err) {
+    return {
+      status: err?.code === "NO_DATABASE" || err?.code === "NOT_SEARCH_READY" ? 409 : 500,
+      body: {
+        ok: false,
+        error: err?.message || String(err),
+        code: err?.code || undefined,
+        readiness: err?.readiness || undefined,
+        missing: err?.missing || undefined,
+        errors: err?.errors || undefined,
+      },
+    };
+  }
+}
+
 // ---------------------------------------------------------------------------
 // mountOnboardRoutes
 // ---------------------------------------------------------------------------
@@ -621,6 +715,7 @@ export function mountOnboardRoutes({
   // touching the real @anthropic-ai/claude-agent-sdk devDependency.
   runSkillStream = defaultRunSkillStream,
   extractDocxResumeText = defaultExtractDocxResumeText,
+  fetchImpl = fetch,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -1193,10 +1288,10 @@ export function mountOnboardRoutes({
   });
 
   // -------------------------------------------------------------------------
-  // POST /api/onboard/quick-start — search-ready DB setup -> sourcing handoff.
+  // POST /api/onboard/quick-start — search-ready DB setup -> durable first search.
   // -------------------------------------------------------------------------
   addRoute("POST", "/api/onboard/quick-start", (_req, res) => {
-    const result = prepareQuickStartSourcing({ repoRoot, env });
+    const result = prepareQuickStartFirstSearch({ repoRoot, env, fetchImpl });
     sendJson(res, result.status, result.body);
   });
 
