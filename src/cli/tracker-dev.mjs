@@ -587,7 +587,9 @@ export function createDevServer({
       "/api/onboard/resume, /api/onboard/profile, /api/onboard/targeting, " +
       "/api/onboard/form-defaults, /api/onboard/evidence, /api/onboard/ai-key, " +
       "/api/onboard/finish, /api/onboard/*, " +
-      "/api/discovery/*, /api/settings/*, /api/chat/*, /api/search/*, /api/packet*, " +
+      "/api/discovery/*, /api/settings/*, /api/chat/start, /api/chat/events, " +
+      "/api/chat/message, /api/chat/interrupt, /api/chat/close, /api/chat/by-skill, " +
+      "/api/chat/list, /api/chat/*, /api/search/*, /api/packet*, " +
       "/api/search/scan, /api/search/results, /api/search/sources, " +
       "/api/packet/list, /api/packet?id=:id, " +
       "/api/data/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
