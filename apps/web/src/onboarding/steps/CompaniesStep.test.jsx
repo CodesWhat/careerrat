@@ -23,6 +23,7 @@ vi.mock("../ChatPanel.jsx", () => ({
   },
 }));
 
+import * as CompaniesStepModule from "./CompaniesStep.jsx";
 import {
   CompaniesStep,
   proposalSeedsFromCompanies,
@@ -49,6 +50,38 @@ const LOCAL_CAPABILITIES = {
   chatSkills: [],
 };
 
+const SUPPORTED_PROPOSAL = {
+  proposalId: "proposal-supported",
+  company: { name: "Acme AI", domain: "acme.example" },
+  why: "Strong applied AI fit.",
+  roleSeen: "Applied AI Engineer",
+  jobBoardUrl: "https://jobs.lever.co/acme",
+  atsProvider: "lever",
+  confidenceTier: "high-confidence",
+  proposedAction: "approve-supported-ats",
+  version: 3,
+};
+
+const REVIEW_PROPOSAL = {
+  proposalId: "proposal-review",
+  company: { name: "Review Co", domain: "review.example" },
+  why: "Needs review before approval.",
+  roleSeen: "AI Architect",
+  jobBoardUrl: "https://jobs.ashbyhq.com/review",
+  atsProvider: "ashby",
+  confidenceTier: "borderline",
+  proposedAction: "review",
+  version: 4,
+};
+
+const ACTION_BATCH = {
+  batchId: "batch-actions",
+  status: "pending",
+  counts: { proposals: 2, rejected: 0 },
+  proposals: [SUPPORTED_PROPOSAL, REVIEW_PROPOSAL],
+  rejected: [],
+};
+
 function renderCompaniesStep(props = {}) {
   return renderToStaticMarkup(
     <CompaniesStep
@@ -63,6 +96,10 @@ function renderCompaniesStep(props = {}) {
       {...props}
     />
   );
+}
+
+function buttonFor(section, action) {
+  return section.match(new RegExp(`<button[^>]*data-action="${action}"[^>]*>`))?.[0] || "";
 }
 
 beforeEach(() => {
@@ -173,6 +210,175 @@ describe("runCompanyProposalCreate", () => {
   });
 });
 
+describe("runCompanyProposalDecision", () => {
+  it("sends the proposal decision contract and refreshes pending proposals after success", async () => {
+    const decision = { action: "reject", status: "rejected" };
+    const decidedProposal = {
+      ...SUPPORTED_PROPOSAL,
+      version: 4,
+      decision,
+    };
+    const decisionResponse = {
+      ok: true,
+      data: {
+        decision,
+        proposal: decidedProposal,
+      },
+      meta: { version: 7 },
+    };
+    const pending = {
+      ok: true,
+      data: { batch: { batchId: "batch-actions", proposals: [decidedProposal], rejected: [] } },
+      meta: { found: true, status: "pending" },
+    };
+    const calls = [];
+
+    await expect(
+      CompaniesStepModule.runCompanyProposalDecision({
+        batchId: "batch-actions",
+        proposal: SUPPORTED_PROPOSAL,
+        action: "reject",
+        decideProposal: async (payload) => {
+          calls.push(["decide", payload]);
+          return decisionResponse;
+        },
+        readProposals: async (payload) => {
+          calls.push(["read", payload]);
+          return pending;
+        },
+      })
+    ).resolves.toEqual({
+      result: decisionResponse,
+      pending,
+      decision,
+      proposal: decidedProposal,
+      refreshedProposal: null,
+      rejected: null,
+      conflict: false,
+    });
+
+    expect(calls).toEqual([
+      [
+        "decide",
+        {
+          batchId: "batch-actions",
+          proposalId: "proposal-supported",
+          action: "reject",
+          expectedVersion: 3,
+        },
+      ],
+      ["read", { status: "pending" }],
+    ]);
+  });
+
+  it("preserves refresh and rejected metadata returned by the decision route", async () => {
+    const refreshedProposal = { ...SUPPORTED_PROPOSAL, version: 4 };
+    const rejected = {
+      proposalId: "proposal-rejected",
+      company: { name: "Rejected Co" },
+      confidenceTier: "rejected",
+      rejectReasons: ["no-current-role-signal"],
+      version: 4,
+    };
+    const pending = {
+      ok: true,
+      data: { batch: { batchId: "batch-actions", proposals: [], rejected: [rejected] } },
+      meta: { found: true, status: "pending" },
+    };
+
+    await expect(
+      CompaniesStepModule.runCompanyProposalDecision({
+        batchId: "batch-actions",
+        proposal: SUPPORTED_PROPOSAL,
+        action: "refresh",
+        decideProposal: async () => ({
+          ok: true,
+          data: {
+            decision: { action: "refresh", status: "refreshed" },
+            refreshedProposal,
+            rejected: null,
+          },
+        }),
+        readProposals: async () => pending,
+      })
+    ).resolves.toMatchObject({
+      decision: { action: "refresh", status: "refreshed" },
+      refreshedProposal,
+      rejected: null,
+      pending,
+    });
+
+    await expect(
+      CompaniesStepModule.runCompanyProposalDecision({
+        batchId: "batch-actions",
+        proposal: SUPPORTED_PROPOSAL,
+        action: "refresh",
+        decideProposal: async () => ({
+          ok: true,
+          data: {
+            decision: { action: "refresh", status: "rejected" },
+            refreshedProposal: null,
+            rejected,
+          },
+        }),
+        readProposals: async () => pending,
+      })
+    ).resolves.toMatchObject({
+      decision: { action: "refresh", status: "rejected" },
+      refreshedProposal: null,
+      rejected,
+      pending,
+    });
+  });
+
+  it("treats stale-version conflicts as a local refresh-needed state without starting chat", async () => {
+    const pending = {
+      ok: true,
+      data: { batch: ACTION_BATCH },
+      meta: { found: true, status: "pending" },
+    };
+    const calls = [];
+    const conflict = {
+      status: 409,
+      body: { code: "CONFLICT", error: { message: "proposal changed; refresh required" } },
+    };
+
+    await expect(
+      CompaniesStepModule.runCompanyProposalDecision({
+        batchId: "batch-actions",
+        proposal: SUPPORTED_PROPOSAL,
+        action: "approve-supported-ats",
+        decideProposal: async (payload) => {
+          calls.push(["decide", payload]);
+          throw conflict;
+        },
+        readProposals: async (payload) => {
+          calls.push(["read", payload]);
+          return pending;
+        },
+      })
+    ).resolves.toMatchObject({
+      conflict: true,
+      pending,
+      message: "Proposal changed. Review the refreshed proposal before deciding.",
+    });
+
+    expect(calls).toEqual([
+      [
+        "decide",
+        {
+          batchId: "batch-actions",
+          proposalId: "proposal-supported",
+          action: "approve-supported-ats",
+          expectedVersion: 3,
+        },
+      ],
+      ["read", { status: "pending" }],
+    ]);
+    expect(chatMock.renders).toEqual([]);
+  });
+});
+
 describe("CompaniesStep", () => {
   it("renders the local proposal control before the explicit secondary chat handoff", () => {
     const html = renderCompaniesStep({
@@ -202,5 +408,23 @@ describe("CompaniesStep", () => {
     expect(html).toContain(">Find boards from shortlist<");
     expect(html).not.toContain("CHAT:discover-companies");
     expect(chatMock.renders).toEqual([]);
+  });
+
+  it("renders all local proposal decision actions and gates approval to supported ATS proposals", () => {
+    const html = renderCompaniesStep({ initialProposalBatch: ACTION_BATCH });
+    const supportedSection = html.slice(
+      html.indexOf('data-proposal-id="proposal-supported"'),
+      html.indexOf('data-proposal-id="proposal-review"')
+    );
+    const reviewSection = html.slice(html.indexOf('data-proposal-id="proposal-review"'));
+
+    for (const action of ["approve-supported-ats", "reject", "suppress", "escalate", "refresh"]) {
+      expect(supportedSection).toContain(`data-action="${action}"`);
+      expect(reviewSection).toContain(`data-action="${action}"`);
+    }
+
+    expect(buttonFor(supportedSection, "approve-supported-ats")).not.toContain("disabled");
+    expect(buttonFor(reviewSection, "approve-supported-ats")).toContain("disabled");
+    expect(html).not.toContain("CHAT:discover-companies");
   });
 });
