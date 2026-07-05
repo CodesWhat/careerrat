@@ -204,7 +204,7 @@ src/core/deep-ingest/
 │   └── lane-state.mjs
 └── view-model.mjs            # dashboard/library/deep-ingest UI model
 
-src/core/db/migrations/00X-deep-ingest.mjs
+src/core/db/migrations/007-deep-ingest.mjs
 src/core/db/verbs/deep-ingest.mjs
 src/cli/deep-ingest-route.mjs
 config/deep-ingest-source.schema.json
@@ -219,7 +219,7 @@ tests/deep-ingest-ai.test.mjs
 tests/deep-ingest-source-scanner.test.mjs
 ```
 
-Use the next available migration number at implementation time because adjacent Phase 7 plans may add sourcing-run migrations before Phase 8 lands. [ASSUMED]
+Use migration version 7 because the live migration head is `006-company-discovery-cache.mjs`. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md]
 
 ### Pattern 1: SQLite-Native Source, Proposal, and Lane State
 
@@ -384,10 +384,10 @@ export function computeDeepIngestComplete(lanes) {
 **Warning signs:** Tests assert schema success but do not assert absence of `current_base`, source bodies, or protected-trait fields. [ASSUMED]
 
 ### Pitfall 6: Migration Number Collision
-**What goes wrong:** Phase 8 creates a migration file number already used by in-flight Phase 7 sourcing work. [ASSUMED]  
-**Why it happens:** Phase 7 is in progress and may add DB structure before Phase 8 implementation. [VERIFIED: .planning/STATE.md]  
-**How to avoid:** Planner should include a Wave 0 task to inspect `src/core/db/migrations/` and choose the next available number. [ASSUMED]  
-**Warning signs:** Plan hardcodes `007-deep-ingest` without checking current migration files. [ASSUMED]
+**What goes wrong:** Phase 8 creates a stale or non-sequential migration file number after the live head has already been observed. [ASSUMED]  
+**Why it happens:** A plan carries an older migration assumption instead of matching the live migration registry. [VERIFIED: src/core/db/migrations.mjs]  
+**How to avoid:** Use `src/core/db/migrations/007-deep-ingest.mjs` and register migration version 7 because the live head is `006-company-discovery-cache.mjs`. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md]  
+**Warning signs:** Plan references a stale higher-number migration or blocks on another phase occupying version 7. [ASSUMED]
 
 ### Pitfall 7: Inaccessible File Controls
 **What goes wrong:** A drag/drop-only source input is not keyboard-usable or screen-reader discoverable. [CITED: https://developer.mozilla.org/en-US/docs/Web/API/HTML_Drag_and_Drop_API/File_drag_and_drop]  
@@ -476,30 +476,34 @@ const SOURCE_OUTCOME_STATUSES = [
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | Suggested table/module names such as `deep_ingest_sources`, `deep_ingest_proposals`, and `src/core/deep-ingest/` are recommended planning names, not locked product decisions. [ASSUMED] | Recommended Project Structure | Low; planner can rename while preserving architecture. |
-| A2 | Phase 7 may add migrations before Phase 8 lands, so the final migration number must be selected by inspecting current files. [ASSUMED] | Recommended Project Structure / Pitfalls | Medium; collision breaks DB migration order. |
+| A2 | The live migration head is `006-company-discovery-cache.mjs`, so Phase 8 uses `src/core/db/migrations/007-deep-ingest.mjs` and migration version 7. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md] | Recommended Project Structure / Pitfalls | Low; stale higher-number or external dependency references would break DB migration order. |
 | A3 | MVP public URL extraction can rely on built-in `fetch` plus plain-text extraction/caps without adding a package. [ASSUMED] | Standard Stack / Open Questions | Medium; complex pages may require manual fallback or future parser package. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Exact DB table split for confirmed story, voice, honesty, and role-signal state**
    - What we know: existing candidate DB state covers evidence and some honesty/profile setup, while stories and writing style are still file-backed. [VERIFIED: src/core/db/verbs/candidate.mjs] [VERIFIED: src/core/interview/story-bank.mjs]
    - What's unclear: whether to store each lane in separate normalized tables, JSON blob tables with generated columns, or a mixed model. [ASSUMED]
    - Recommendation: use JSON blob tables with generated searchable columns for the MVP, matching current candidate migrations. [VERIFIED: src/core/db/migrations/003-candidate-setup.mjs]
+   - RESOLVED: Use new SQLite-native Deep ingest tables for sources, source chunks, proposals, lane states, story bank, writing voice, honesty boundaries, and role signals. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-01-PLAN.md]
 
 2. **Whether deep-ingest writes should create tracker activity events**
    - What we know: candidate setup/intake DB verbs exist outside the full tracker-visible write contract, while tracker-visible domain verbs use `runVerb` and activity logging patterns. [VERIFIED: src/core/db/verbs/intake.mjs] [VERIFIED: src/core/db/verbs/shared.mjs]
    - What's unclear: whether every confirmed deep-ingest candidate fact should appear in Activity Pulse. [ASSUMED]
    - Recommendation: log user-visible confirmations/defer/not-available decisions through the shared DB write pattern, but do not treat scanner progress as tracker outcome state. [ASSUMED]
+   - RESOLVED: Confirmed trusted candidate/lane-state changes are tracker-visible and should emit activity/metadata through the new DB verbs; raw source/proposal creation can stay internal unless surfaced in readiness or Library. [VERIFIED: AGENTS.md]
 
 3. **Bounded repo and URL scan limits**
    - What we know: D-14 requires bounded public repo README/docs/package metadata scanning and explicit gaps for unsupported/private/huge sources. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-CONTEXT.md]
    - What's unclear: exact file count, byte count, timeout, and host allow/deny rules. [ASSUMED]
    - Recommendation: planner should set small constants in one module and include tests for too-large, login-gated, and unsupported sources. [ASSUMED]
+   - RESOLVED: Plans must set bounded defaults explicitly: capped request/file bodies, capped source text/chunks, URL timeout/byte cap, and a repo allowlist for README/docs/package metadata with file-count and aggregate-byte caps. Exact constants are named in Plan 08-03. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-03-PLAN.md]
 
 4. **Phase 7 dependency surface**
    - What we know: Phase 7 is in progress and owns quick onboarding/auto-sourcing context that Phase 8 must not block. [VERIFIED: .planning/STATE.md]
    - What's unclear: final names for Phase 7 sourcing run tables/routes if they land before Phase 8. [ASSUMED]
    - Recommendation: Wave 0 should inspect actual migration and route files before creating Phase 8 DB tasks. [ASSUMED]
+   - RESOLVED: The live migration head is 006, so Phase 8 uses `src/core/db/migrations/007-deep-ingest.mjs` and registers migration version 7. There is no Phase 7 migration dependency for Phase 8 execution. [VERIFIED: .planning/phases/ROL-API-08-deep-ingest-lane/08-PATTERNS.md]
 
 ## Environment Availability
 
