@@ -370,3 +370,7 @@ test("AI company seed generation uses native-preferred bounded AI with exact lab
   ]);
   assertNoCurrentCompLeak(result.body);
 });
+
+test("VER-02 company seed structured-output negative regressions are implemented", () => {
+  assert.fail("RED: add malformed retry, schema rejection, and safe envelope tests");
+});
