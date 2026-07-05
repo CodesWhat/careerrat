@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
 status: In Progress
-stopped_at: Completed 07-01-PLAN.md
-last_updated: "2026-07-05T21:37:23.768Z"
+stopped_at: Completed 07-02-PLAN.md
+last_updated: "2026-07-05T21:45:13.151Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 29
-  percent: 81
+  completed_plans: 30
+  percent: 83
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T21:37:23.758Z
-**Stopped at:** Completed 07-01-PLAN.md
+**Last session:** 2026-07-05T21:45:13.141Z
+**Stopped at:** Completed 07-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -109,6 +109,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P09 | 3 min | 2 tasks | 5 files |
 | Phase 06 P10 | 6 min | 2 tasks | 5 files |
 | Phase 07 P01 | 6 min | 3 tasks | 2 files |
+| Phase 07 P02 | 5 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -199,3 +200,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: Plan 07-01 is intentionally RED and test-only; implementation remains in later Phase 7 plans. — This preserves ONB-02 contracts before DOCX parser/UI implementation begins.
 - [Phase 07]: DOCX backend tests generate a minimal valid DOCX fixture in test code instead of committing a binary fixture. — This keeps fixtures source-visible while still requiring real DOCX byte parsing.
 - [Phase 07]: ResumeStep tests separate resume input parsing from packet output-format preferences. — form-defaults.document_formats records PDF/DOCX export needs without routing DOCX through AI.
+- [Phase 07]: Plan 07-02 is intentionally RED and test-only; implementation remains in later Phase 7 plans. — This preserves RUN-01/RUN-02 contracts before sourcing run state and first-search routing are implemented.
+- [Phase 07]: The sourcing_runs contract requires generated JSON columns and explicit latest-purpose/running-status indexes. — This keeps durable run reads queryable while preserving JSON state payloads for summary and error details.
+- [Phase 07]: First-search route responses are forbidden from carrying chat, skill-runtime, or discovery-skill handoff tokens. — This locks the first search to deterministic local code instead of hidden agent runtime.
+- [Phase 07]: Deterministic source counts distinguish fetchable RSS and supported ATS companies from browser/auth/url-query-only sources. — This keeps automatic first search on unauthenticated deterministic sources only.
