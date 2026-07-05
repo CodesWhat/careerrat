@@ -28,10 +28,17 @@
 // track-outcomes) rather than guessing or hardcoding the allowlist into the
 // static page.
 
+import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { resolveAllowedChatSkills } from "../core/ai/chat-runtime.mjs";
 import { resolveAllowedSkills } from "../core/ai/skill-runtime.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB cap per the P0-4 spec.
 const HEARTBEAT_MS = 15000;
+const DISCOVERY_CHAT_HANDOFF_SKILLS = new Set([
+  "research-boards",
+  "discover-companies",
+  "search-jobs",
+]);
 
 // Exported so other route mounters (src/cli/onboard-route.mjs) reuse the
 // exact same JSON-response and capped-body-read primitives instead of
@@ -131,7 +138,22 @@ function statusForRunError(err) {
 
 export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = process.env }) {
   addRoute("GET", "/api/runtime/config", (_req, res) => {
-    sendJson(res, 200, { skills: resolveAllowedSkills({ repoRoot, env }) });
+    const skills = resolveAllowedSkills({ repoRoot, env });
+    const chatSkills = resolveAllowedChatSkills({ repoRoot, env });
+    const route = resolveAIRoute(env);
+    sendJson(res, 200, {
+      skills,
+      chatSkills,
+      ai: {
+        available: route.type !== "none",
+        route: route.type,
+      },
+      discovery: {
+        companyProposals: true,
+        manualCompanySeeds: true,
+        chatHandoffs: chatSkills.some((skill) => DISCOVERY_CHAT_HANDOFF_SKILLS.has(skill)),
+      },
+    });
   });
 
   addRoute("POST", "/api/skill/run", async (req, res) => {
