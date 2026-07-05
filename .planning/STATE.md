@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
-status: Ready to plan
-stopped_at: Phase 6 context gathered
-last_updated: "2026-07-05T14:22:32.745Z"
+status: In Progress
+stopped_at: Completed 06-01-PLAN.md
+last_updated: "2026-07-05T16:36:10.440Z"
 progress:
   total_phases: 11
   completed_phases: 5
-  total_plans: 28
-  completed_plans: 28
-  percent: 45
+  total_plans: 36
+  completed_plans: 29
+  percent: 47
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 06 - Canonical DB App Shell
+**Current focus:** Phase 06 — Canonical DB App Shell
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
 - **Current phase:** 06
-- **Current phase status:** Ready to plan
-- **Next command:** `$gsd-plan-phase 6`
+- **Current phase status:** In Progress
+- **Next command:** `$gsd-execute-phase 6`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Run `$gsd-plan-phase 6` to decompose the Canonical DB App Shell phase.
-2. Execute Phase 6 before Phase 7 so quick onboarding and auto-sourcing build on the canonical DB app surface.
+1. Continue Phase 6 Wave 0 with 06-02 and 06-03 RED coverage plans.
+2. Execute Phase 6 Wave 1 only after Wave 0 RED coverage is complete.
 3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
 
 ---
@@ -61,9 +61,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T14:22:32.738Z
-**Stopped at:** Phase 6 context gathered
-**Resume file:** .planning/phases/ROL-API-06-canonical-db-app-shell/06-CONTEXT.md
+**Last session:** 2026-07-05T16:36:10.404Z
+**Stopped at:** Completed 06-01-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -99,6 +99,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 05-verification-and-docs P05 | planned | 1 tasks | 1 files |
 | Phase 05-verification-and-docs P01 | 4 min | 1 tasks | 2 files |
 | Phase 05-verification-and-docs P02 | 3 min | 2 tasks | 3 files |
+| Phase 06 P01 | 3 min | 2 tasks | 3 files |
 
 ## Decisions
 
@@ -161,3 +162,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 05-verification-and-docs]: Local company proposal create/read/decision route slices are checked separately so explicit quick-start/next chat handoff routes can remain available outside the local proposal path. — The route module intentionally contains both local proposal routes and explicit chat handoff routes, so slice-based checks avoid weakening either boundary.
 - [Phase 05-verification-and-docs]: Structured-output negative coverage stayed test-only because existing production code already returns safe bounded-AI envelopes for malformed, schema-invalid, and no-AI paths. — This preserves Phase 05 scope while locking VER-02 and VER-03 behavior through hermetic tests.
 - [Phase 05-verification-and-docs]: Route failure side-effect assertions compare source config to the fixture pre-failure state instead of assuming an empty source config. — This proves failures do not write while preserving seeded prompt and dedupe context.
+- [Phase 06]: Wave 0 remains intentionally test-only; both new 06-01 tests are RED against current source and are verified through commands that require nonzero underlying test exits. — This preserves RED coverage before DB app shell implementation begins.
+- [Phase 06]: The 06-01 static guard strips JavaScript comments before token scans and requires tracker-dev compatibility routes to move behind named debug/export classification symbols. — This keeps generated-file access auditable and prevents comments from creating false positives.
+- [Phase 06]: The 06-01 NavList regression preserves canonical SPA labels and the Inbox badge while failing the Classic `/tracker` affordance. — This isolates APP-01 coverage from unrelated app shell behavior.
