@@ -160,4 +160,13 @@ describe("ResumeStep DOCX intake", () => {
       showPaste: true,
     });
   });
+
+  it("lists DOCX in unsupported-file fallback guidance", () => {
+    const describeResumeUploadError = ResumeStepModule.describeResumeUploadError;
+    expect(describeResumeUploadError).toBeTypeOf("function");
+
+    expect(
+      describeResumeUploadError(new Error("unsupported"), { mode: "unsupported", ext: "zip" })
+    ).message.toContain(".docx");
+  });
 });
