@@ -40,7 +40,6 @@ export function WelcomeStep({ state, goNext }) {
       ) : null}
       {error ? <InlineAlert message={error} /> : null}
       <div className="wizard-actions">
-        <a href="/onboard">Prefer the classic step-by-step page?</a>
         <Button onClick={handleStart} disabled={starting}>
           {starting ? "Starting…" : "Get started"}
         </Button>

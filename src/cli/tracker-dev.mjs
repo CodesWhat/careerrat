@@ -109,14 +109,37 @@ export const DEBUG_EXPORT_ROUTES = Object.freeze([
   { path: "/api/activity", kind: "storage-adapter-activity", label: "raw activity adapter feed" },
 ]);
 
+export const STATIC_COMPATIBILITY_ROUTES = Object.freeze([
+  { path: "/evaluate", kind: "static-evaluate", label: "compatibility evaluation page" },
+  { path: "/answer", kind: "static-answer", label: "compatibility answer drafting page" },
+  { path: "/onboard", kind: "static-onboard", label: "compatibility onboarding page" },
+  { path: "/search", kind: "static-search", label: "compatibility search page" },
+  { path: "/packet", kind: "static-packet", label: "compatibility packet page" },
+]);
+
 const DEBUG_EXPORT_ROUTE_BY_PATH = new Map(DEBUG_EXPORT_ROUTES.map((route) => [route.path, route]));
+const STATIC_COMPATIBILITY_ROUTE_BY_PATH = new Map(
+  STATIC_COMPATIBILITY_ROUTES.map((route) => [route.path, route])
+);
 
 export function isDebugExportRoute(url) {
   return DEBUG_EXPORT_ROUTE_BY_PATH.has(url);
 }
 
+export function isStaticCompatibilityRoute(url) {
+  return STATIC_COMPATIBILITY_ROUTE_BY_PATH.has(url);
+}
+
 function getDebugExportRoute(url) {
   return DEBUG_EXPORT_ROUTE_BY_PATH.get(url) || null;
+}
+
+function getStaticCompatibilityRoute(url) {
+  return STATIC_COMPATIBILITY_ROUTE_BY_PATH.get(url) || null;
+}
+
+function formatRouteList(routes) {
+  return routes.map((route) => `${route.path} (${route.label})`).join(", ");
 }
 
 // A monotonic-ish stamp for SSE payloads without Date.now() determinism worries.
@@ -266,6 +289,18 @@ export function createDevServer({
     routes.set(`${method} ${path}`, handler);
   }
 
+  function addStaticCompatibilityPage(path, html) {
+    const route = getStaticCompatibilityRoute(path);
+    if (!route) throw new Error(`Unclassified static compatibility route: ${path}`);
+    addRoute("GET", path, (_req, res) => {
+      res.writeHead(200, {
+        "Content-Type": "text/html; charset=utf-8",
+        "Cache-Control": "no-store",
+      });
+      res.end(html);
+    });
+  }
+
   addRoute("GET", "/api/health", (_req, res) => {
     sendJson(res, 200, { ok: true, version: PACKAGE_VERSION });
   });
@@ -281,18 +316,12 @@ export function createDevServer({
   // P0-5 — the headline paste → evaluate-job → live verdict slice's UI. A
   // byte-static page (see src/core/ai/evaluate-page.mjs); it calls the two
   // routes above from client-side JS.
-  addRoute("GET", "/evaluate", (_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(EVALUATE_PAGE_HTML);
-  });
+  addStaticCompatibilityPage("/evaluate", EVALUATE_PAGE_HTML);
 
   // Interactive Q&A slice (POC apply-packet item 3) — a byte-static page (see
   // src/core/ai/answer-page.mjs); it calls the two routes above from
   // client-side JS, same as /evaluate.
-  addRoute("GET", "/answer", (_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(ANSWER_PAGE_HTML);
-  });
+  addStaticCompatibilityPage("/answer", ANSWER_PAGE_HTML);
 
   // M1 of the paid-POC journey — the non-AI onboarding wizard. Its HTTP
   // surface (candidate file seeding, resume parsing, BYOK key storage) is
@@ -303,10 +332,7 @@ export function createDevServer({
   // candidate's workspace is legible before any paid AI usage starts.
   mountOnboardRoutes({ addRoute, repoRoot, env });
 
-  addRoute("GET", "/onboard", (_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(ONBOARD_PAGE_HTML);
-  });
+  addStaticCompatibilityPage("/onboard", ONBOARD_PAGE_HTML);
 
   // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
   // prompt templates for the Targeting step's "Roland-suggest" chips
@@ -347,10 +373,7 @@ export function createDevServer({
   // so a scan can be re-run/browsed without re-running evaluate-job.
   mountSearchRoutes({ addRoute, repoRoot, env });
 
-  addRoute("GET", "/search", (_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(SEARCH_PAGE_HTML);
-  });
+  addStaticCompatibilityPage("/search", SEARCH_PAGE_HTML);
 
   // M4 of the paid-POC journey — the /packet view: review a gated
   // application's tailored resume/cover letter/answers, or generate them live
@@ -361,10 +384,7 @@ export function createDevServer({
   // registered above, so no new skill-run mechanics are needed here.
   mountPacketRoutes({ addRoute, repoRoot, env });
 
-  addRoute("GET", "/packet", (_req, res) => {
-    res.writeHead(200, { "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" });
-    res.end(PACKET_PAGE_HTML);
-  });
+  addStaticCompatibilityPage("/packet", PACKET_PAGE_HTML);
 
   // M6 — the sqlite-backed data layer's JSON API (src/cli/data-route.mjs).
   // Fail-closed per decision 7: every route 409s with a clear "no database
@@ -578,12 +598,15 @@ export function createDevServer({
   }
 
   function buildNotFoundText() {
-    const debugExportPaths = DEBUG_EXPORT_ROUTES.map((route) => route.path).join(", ");
+    const debugExportPaths = formatRouteList(DEBUG_EXPORT_ROUTES);
+    const staticCompatibilityPaths = formatRouteList(STATIC_COMPATIBILITY_ROUTES);
     return (
       "Not found. Product app route: /app, /app/*.\n" +
       `Debug/export compatibility routes: ${debugExportPaths}.\n` +
-      "App APIs and utility pages include /api/health, /api/runtime/config, /api/skill/run, " +
-      "/evaluate, /answer, /onboard, /chat, /search, /packet, /api/onboard/state, " +
+      `Static compatibility/debug/export routes: ${staticCompatibilityPaths}.\n` +
+      "Explicit user-selected chat page: /chat.\n" +
+      "Local app APIs include /api/health, /api/runtime/config, /api/skill/run, " +
+      "/api/onboard/state, " +
       "/api/onboard/resume, /api/onboard/profile, /api/onboard/targeting, " +
       "/api/onboard/form-defaults, /api/onboard/evidence, /api/onboard/ai-key, " +
       "/api/onboard/finish, /api/onboard/*, " +
