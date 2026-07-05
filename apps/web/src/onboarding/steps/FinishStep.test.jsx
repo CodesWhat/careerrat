@@ -1,6 +1,7 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+import * as Api from "../../lib/api.js";
 
 const dashboardMock = vi.hoisted(() => ({
   snapshot: {
@@ -29,16 +30,19 @@ vi.mock("../ChatPanel.jsx", () => ({
   },
 }));
 
-import {
-  buildQuickStartAction,
-  buildReadinessRows,
-  DiscoveryChatPanel,
-  extractDiscoveryGuidance,
-  FinishStep,
-  isSourceSetupReady,
-  runNextDiscoveryHandoff,
-  runQuickStartHandoff,
-} from "./FinishStep.jsx";
+import * as FinishStepModule from "./FinishStep.jsx";
+
+const { buildQuickStartAction, buildReadinessRows, FinishStep } = FinishStepModule;
+
+const FORBIDDEN_FIRST_SEARCH_TOKENS = [
+  "chat",
+  "skill",
+  "research-boards",
+  "discover-companies",
+  "search-jobs",
+  "/api/chat",
+  "/api/skill/run",
+];
 
 const SEARCH_READY_STATE = {
   data: {
@@ -53,31 +57,70 @@ const SEARCH_READY_STATE = {
         search_ready: [],
         gate_ready: ["compensation floor"],
         apply_ready: ["evidence claims"],
+        deep_ingest_complete: ["deeper evidence bank"],
       },
     },
+    targeting: {
+      search_preferences: {},
+    },
   },
+  searchSourcesPresent: true,
 };
 
-describe("buildReadinessRows", () => {
-  it("maps DB setup readiness into quick-start status rows", () => {
-    const rows = buildReadinessRows({
-      data: {
-        setup: {
-          readiness: {
-            search_ready: true,
-            gate_ready: false,
-            apply_ready: false,
-            deep_ingest_complete: false,
-          },
-          missing: {
-            search_ready: [],
-            gate_ready: ["compensation floor"],
-            apply_ready: ["evidence claims"],
-            deep_ingest_complete: ["deeper evidence bank"],
-          },
-        },
+function stateWithFirstSearch(firstSearchRun, extra = {}) {
+  return {
+    ...SEARCH_READY_STATE,
+    ...extra,
+    data: {
+      ...SEARCH_READY_STATE.data,
+      ...(extra.data || {}),
+      firstSearchRun,
+      sourcing: {
+        ...(extra.data?.sourcing || {}),
+        firstSearchRun,
       },
-    });
+    },
+    firstSearchRun,
+  };
+}
+
+function renderFinish(state = SEARCH_READY_STATE) {
+  dashboardMock.snapshot = {
+    data: null,
+    noDatabase: false,
+    refetch: async () => {},
+  };
+  chatMock.renders = [];
+
+  return renderToStaticMarkup(
+    <MemoryRouter>
+      <FinishStep
+        state={state}
+        aiEnabled={true}
+        runtimeCapabilities={{ discoveryChatHandoffs: false, aiAvailable: true }}
+        reload={async () => {}}
+        goBack={() => {}}
+      />
+    </MemoryRouter>
+  );
+}
+
+function expectNoFirstSearchRuntimeTokens(markup) {
+  const lower = markup.toLowerCase();
+  for (const token of FORBIDDEN_FIRST_SEARCH_TOKENS) {
+    expect(lower, `first-search UI leaked ${token}`).not.toContain(token.toLowerCase());
+  }
+  expect(chatMock.renders).toEqual([]);
+}
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  vi.unstubAllGlobals();
+});
+
+describe("buildReadinessRows", () => {
+  it("maps staged DB setup readiness without merging search/gate/apply gates", () => {
+    const rows = buildReadinessRows(SEARCH_READY_STATE);
 
     expect(rows).toEqual([
       {
@@ -113,34 +156,18 @@ describe("buildReadinessRows", () => {
 });
 
 describe("buildQuickStartAction", () => {
-  it("enables sourcing when search-ready but keeps gate/apply caveats visible", () => {
-    const action = buildQuickStartAction({
-      data: {
-        setup: {
-          readiness: {
-            search_ready: true,
-            gate_ready: false,
-            apply_ready: false,
-            deep_ingest_complete: false,
-          },
-          missing: {
-            search_ready: [],
-            gate_ready: ["compensation floor", "work authorization"],
-            apply_ready: ["evidence claims"],
-          },
-        },
-      },
-    });
+  it("prompts for first deterministic search while keeping stricter readiness caveats visible", () => {
+    const action = buildQuickStartAction(SEARCH_READY_STATE);
 
     expect(action).toEqual({
       enabled: true,
-      label: "Prepare sourcing",
+      label: "Search jobs now",
       detail:
-        "Rolester can prepare source setup now. Gate and apply stay locked until compensation floor, work authorization, and evidence claims are complete.",
+        "Rolester can start the first deterministic search now. Gate and apply stay locked until compensation floor and evidence claims are complete.",
     });
   });
 
-  it("disables sourcing until the search-ready fields are complete", () => {
+  it("does not offer first search until search-ready fields are complete", () => {
     const action = buildQuickStartAction({
       data: {
         setup: {
@@ -154,351 +181,142 @@ describe("buildQuickStartAction", () => {
 
     expect(action).toEqual({
       enabled: false,
-      label: "Complete search setup",
+      label: "Complete Search setup",
       detail: "Needs source resume and role titles.",
     });
   });
 });
 
-describe("runQuickStartHandoff", () => {
-  it("calls the backend discovery quick-start route, refreshes state, and exposes the returned chat", async () => {
+describe("first-search API wrappers", () => {
+  it("startFirstSearchRun targets POST /api/sourcing/first-run/start", async () => {
+    expect(Api.startFirstSearchRun).toBeTypeOf("function");
+    const fetchMock = vi.fn(async () => {
+      return new Response(JSON.stringify({ ok: true, run: { id: "run-1", status: "running" } }), {
+        status: 202,
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const body = await Api.startFirstSearchRun();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/sourcing/first-run/start",
+      expect.objectContaining({ method: "POST" })
+    );
+    expect(body.run.status).toBe("running");
+  });
+});
+
+describe("FinishStep first-search setup task", () => {
+  it("renders cadence choices, default recommendation copy, and a yes-by-default search prompt", () => {
+    const html = renderFinish(stateWithFirstSearch({ status: "not_started" }));
+
+    expect(html).toContain("Search now?");
+    expect(html).toContain("Daily");
+    expect(html).toContain("Every 3 days");
+    expect(html).toContain("Weekly");
+    expect(html).toContain("Manual only");
+    expect(html).toContain("Default recommendation - no local history yet");
+    expect(html).toContain("Search jobs now");
+    expect(html).toContain("Not now");
+    expect(html).toContain("Not started");
+    expectNoFirstSearchRuntimeTokens(html);
+  });
+
+  it("persists a non-default cadence before starting the first search", async () => {
+    expect(FinishStepModule.saveCadenceAndStartFirstSearch).toBeTypeOf("function");
     const calls = [];
-    const outcome = await runQuickStartHandoff({
-      quickStart: async () => {
-        calls.push("quickStart");
-        return {
-          ok: true,
-          written: ["config/search-sources.yml"],
-          nextSkill: "research-boards",
-          nextMessage:
-            "Search sources are ready. Run research-boards next, then discover-companies before search-jobs.",
-          guidance: {
-            nextSkill: "research-boards",
-            message:
-              "Ask your agent to run research-boards next, then discover-companies before search-jobs.",
-          },
-          chat: { chatId: "chat-1", skill: "research-boards", state: "running" },
-        };
+
+    await FinishStepModule.saveCadenceAndStartFirstSearch({
+      mode: "every-3-days",
+      saveCandidateFile: async (name, patch) => {
+        calls.push(["save", name, patch]);
+        return { ok: true };
       },
-      refreshWorkspace: async () => {
-        calls.push("refreshWorkspace");
+      startFirstSearchRun: async () => {
+        calls.push(["start"]);
+        return { ok: true, run: { id: "run-2", status: "running" } };
       },
     });
 
-    expect(calls).toEqual(["quickStart", "refreshWorkspace"]);
-    expect(outcome.chat).toEqual({ chatId: "chat-1", skill: "research-boards", state: "running" });
-    expect(outcome.chatError).toBe(null);
-    expect(outcome.guidance.nextSkill).toBe("research-boards");
+    expect(calls).toEqual([
+      ["save", "targeting", { search_preferences: { cadence: { mode: "every-3-days" } } }],
+      ["start"],
+    ]);
   });
 
-  it("keeps the prepared source result when the backend reports no chat", async () => {
-    const outcome = await runQuickStartHandoff({
-      quickStart: async () => ({
+  it("renders saved cadence as compact text after state refresh", () => {
+    const html = renderFinish(
+      stateWithFirstSearch(
+        { status: "not_started" },
+        {
+          data: {
+            targeting: {
+              search_preferences: {
+                cadence: { mode: "every-3-days" },
+              },
+            },
+          },
+        }
+      )
+    );
+
+    expect(html).toContain("Cadence: Every 3 days");
+  });
+
+  it("keeps deep onboarding available while the first search is running", () => {
+    const html = renderFinish(stateWithFirstSearch({ status: "running" }));
+
+    expect(html).toContain("Running");
+    expect(html).toContain("Searching deterministic public sources...");
+    expect(html).toContain("Continue deep onboarding");
+    expectNoFirstSearchRuntimeTokens(html);
+  });
+
+  it("shows completed run counts and sourced-role navigation", () => {
+    const html = renderFinish(
+      stateWithFirstSearch({
+        status: "completed",
+        summary: { sourcesAttempted: 3, rolesFound: 2 },
+      })
+    );
+
+    expect(html).toContain("Completed");
+    expect(html).toContain("3 sources attempted");
+    expect(html).toContain("2 roles found");
+    expect(html).toContain("View sourced roles");
+    expectNoFirstSearchRuntimeTokens(html);
+  });
+
+  it("shows actionable failed state copy and retry starts a new first-run request", async () => {
+    const html = renderFinish(
+      stateWithFirstSearch({
+        status: "failed",
+        error: { message: "No deterministic sources were fetchable." },
+      })
+    );
+
+    expect(html).toContain("Failed");
+    expect(html).toContain(
+      "First search failed. Review the source setup message, fix the issue, then retry."
+    );
+    expect(html).toContain("No deterministic sources were fetchable.");
+    expect(html).toContain("Retry search");
+    expectNoFirstSearchRuntimeTokens(html);
+
+    expect(FinishStepModule.retryFirstSearch).toBeTypeOf("function");
+    let displayedRun = null;
+    const result = await FinishStepModule.retryFirstSearch({
+      startFirstSearchRun: async () => ({
         ok: true,
-        written: [],
-        nextSkill: "research-boards",
-        chat: null,
-        chatError: "no AI route configured",
+        run: { id: "run-retry", status: "running" },
       }),
-    });
-
-    expect(outcome.result.ok).toBe(true);
-    expect(outcome.chat).toBe(null);
-    expect(outcome.chatError).toBe("no AI route configured");
-  });
-
-  it("uses an already-running discovery chat returned by the backend", async () => {
-    const outcome = await runQuickStartHandoff({
-      quickStart: async () => ({
-        ok: true,
-        written: [],
-        guidance: { nextSkill: "research-boards" },
-        chat: {
-          chatId: "existing-chat",
-          skill: "research-boards",
-          state: "running",
-          reused: true,
-        },
-      }),
-    });
-
-    expect(outcome.chat).toEqual({
-      chatId: "existing-chat",
-      skill: "research-boards",
-      state: "running",
-      reused: true,
-    });
-    expect(outcome.chatError).toBe(null);
-  });
-});
-
-describe("extractDiscoveryGuidance", () => {
-  it("accepts only the supervised discovery skills from the dashboard guidance", () => {
-    expect(
-      extractDiscoveryGuidance({
-        data: {
-          agentGuidance: {
-            nextSkill: "discover-companies",
-            message: "Ask your agent to run discover-companies next before search-jobs.",
-            ctaLabel: "Run discover-companies",
-          },
-        },
-      })
-    ).toEqual({
-      nextSkill: "discover-companies",
-      message: "Ask your agent to run discover-companies next before search-jobs.",
-      ctaLabel: "Run discover-companies",
-    });
-
-    expect(
-      extractDiscoveryGuidance({
-        data: { agentGuidance: { nextSkill: "evaluate-job", message: "Gate a role." } },
-      })
-    ).toBe(null);
-
-    expect(
-      extractDiscoveryGuidance({
-        guidance: {
-          nextSkill: "search-jobs",
-          message: "Ask your agent to run search-jobs next for the first sweep.",
-        },
-      })
-    ).toEqual({
-      nextSkill: "search-jobs",
-      message: "Ask your agent to run search-jobs next for the first sweep.",
-      ctaLabel: "Run search-jobs",
-    });
-  });
-});
-
-describe("runNextDiscoveryHandoff", () => {
-  it("calls the backend next route and returns the current discovery chat", async () => {
-    const calls = [];
-    const outcome = await runNextDiscoveryHandoff({
-      continueDiscovery: async () => {
-        calls.push("continueDiscovery");
-        return {
-          ok: true,
-          guidance: {
-            nextSkill: "search-jobs",
-            message: "Ask your agent to run search-jobs next for the first sweep.",
-          },
-          chat: { chatId: "chat-3", skill: "search-jobs", state: "running" },
-        };
-      },
-      refreshWorkspace: async () => {
-        calls.push("refreshWorkspace");
+      setFirstSearchRun: (run) => {
+        displayedRun = run;
       },
     });
 
-    expect(calls).toEqual(["continueDiscovery", "refreshWorkspace"]);
-    expect(outcome.chat).toEqual({ chatId: "chat-3", skill: "search-jobs", state: "running" });
-    expect(outcome.guidance.nextSkill).toBe("search-jobs");
-  });
-});
-
-describe("isSourceSetupReady", () => {
-  it("does not treat compatibility export freshness as DB source setup", () => {
-    expect(
-      isSourceSetupReady({
-        state: { ...SEARCH_READY_STATE, searchSourcesPresent: false },
-        quickStartResult: { written: ["config/search-sources.yml", "candidate/AGENTS.md"] },
-      })
-    ).toBe(false);
-  });
-
-  it("accepts either existing DB source setup or quick-start-created searches", () => {
-    expect(isSourceSetupReady({ state: { searchSourcesPresent: true } })).toBe(true);
-    expect(isSourceSetupReady({ quickStartResult: { searches: { count: 1 } } })).toBe(true);
-  });
-});
-
-describe("FinishStep", () => {
-  it("frames compatibility-file generation as explicit export support", () => {
-    dashboardMock.snapshot = {
-      data: null,
-      noDatabase: false,
-      refetch: async () => {},
-    };
-
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <FinishStep
-          state={SEARCH_READY_STATE}
-          aiEnabled={true}
-          runtimeCapabilities={{ discoveryChatHandoffs: true }}
-          reload={async () => {}}
-          goBack={() => {}}
-        />
-      </MemoryRouter>
-    );
-
-    expect(html).toContain("Your app source setup is saved in SQLite.");
-    expect(html).toContain("Export compatibility files only for CLI/debug support.");
-    expect(html).toContain(">Export compatibility files<");
-    expect(html).not.toContain("generates search sources from your profile and targeting");
-    expect(html).not.toContain(">Write config<");
-  });
-
-  it("treats source readiness separately from compatibility export freshness", () => {
-    dashboardMock.snapshot = {
-      data: null,
-      noDatabase: false,
-      refetch: async () => {},
-    };
-
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <FinishStep
-          state={{ ...SEARCH_READY_STATE, searchSourcesPresent: true }}
-          aiEnabled={true}
-          runtimeCapabilities={{ discoveryChatHandoffs: true }}
-          reload={async () => {}}
-          goBack={() => {}}
-        />
-      </MemoryRouter>
-    );
-
-    expect(html).toContain("SQLite source setup is ready.");
-    expect(html).not.toContain("Already written in a previous session");
-  });
-
-  it("hides discovery chat CTAs when runtime capability disables handoffs while keeping manual finish available", () => {
-    dashboardMock.snapshot = {
-      data: {
-        agentGuidance: {
-          nextSkill: "research-boards",
-          message: "Ask your agent to run research-boards next.",
-          ctaLabel: "Run research-boards",
-        },
-      },
-      noDatabase: false,
-      refetch: async () => {},
-    };
-    chatMock.renders = [];
-
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <FinishStep
-          state={SEARCH_READY_STATE}
-          aiEnabled={true}
-          runtimeCapabilities={{ discoveryChatHandoffs: false }}
-          reload={async () => {}}
-          goBack={() => {}}
-        />
-      </MemoryRouter>
-    );
-
-    expect(html).not.toContain(">Prepare sourcing<");
-    expect(html).not.toContain(">Run research-boards<");
-    expect(html).toContain("Discovery chat handoffs are unavailable in this runtime.");
-    expect(html).toContain(">Export compatibility files<");
-    expect(html).toContain("Go to Home");
-    expect(chatMock.renders).toEqual([]);
-  });
-
-  it("uses runtime capability handoffs ahead of legacy aiEnabled and keeps returned chats renderable", () => {
-    dashboardMock.snapshot = {
-      data: {
-        agentGuidance: {
-          nextSkill: "research-boards",
-          message: "Ask your agent to run research-boards next.",
-          ctaLabel: "Run research-boards",
-        },
-      },
-      noDatabase: false,
-      refetch: async () => {},
-    };
-    chatMock.renders = [];
-
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <FinishStep
-          state={SEARCH_READY_STATE}
-          aiEnabled={false}
-          runtimeCapabilities={{ discoveryChatHandoffs: true }}
-          reload={async () => {}}
-          goBack={() => {}}
-        />
-      </MemoryRouter>
-    );
-
-    expect(html).toContain(">Prepare sourcing<");
-    expect(html).toContain(">Run research-boards<");
-    expect(html).not.toContain("Add an AI key in the earlier step");
-
-    const chatHtml = renderToStaticMarkup(
-      <DiscoveryChatPanel
-        discoveryChat={{ chatId: "chat-1", skill: "research-boards" }}
-        discoveryGuidance={{
-          nextSkill: "research-boards",
-          message: "Ask your agent to run research-boards next.",
-        }}
-        quickStartResult={null}
-      />
-    );
-
-    expect(chatHtml).toContain("CHAT:research-boards:chat-1");
-    expect(chatMock.renders).toEqual([{ skill: "research-boards", initialChatId: "chat-1" }]);
-  });
-
-  it("ignores non-discovery guidance even when discovery handoffs are available", () => {
-    dashboardMock.snapshot = {
-      data: {
-        agentGuidance: {
-          nextSkill: "evaluate-job",
-          message: "Ask your agent to evaluate a sourced role.",
-          ctaLabel: "Run evaluate-job",
-        },
-      },
-      noDatabase: false,
-      refetch: async () => {},
-    };
-
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <FinishStep
-          state={SEARCH_READY_STATE}
-          aiEnabled={true}
-          runtimeCapabilities={{ discoveryChatHandoffs: true }}
-          reload={async () => {}}
-          goBack={() => {}}
-        />
-      </MemoryRouter>
-    );
-
-    expect(html).not.toContain(">Run evaluate-job<");
-    expect(html).toContain("No discovery handoff is ready yet.");
-  });
-
-  it("hides discovery CTAs without an AI key while keeping the manual finish path available", () => {
-    dashboardMock.snapshot = {
-      data: {
-        agentGuidance: {
-          nextSkill: "research-boards",
-          message: "Ask your agent to run research-boards next.",
-          ctaLabel: "Run research-boards",
-        },
-      },
-      noDatabase: false,
-      refetch: async () => {},
-    };
-
-    const html = renderToStaticMarkup(
-      <MemoryRouter>
-        <FinishStep
-          state={SEARCH_READY_STATE}
-          aiEnabled={false}
-          reload={async () => {}}
-          goBack={() => {}}
-        />
-      </MemoryRouter>
-    );
-
-    expect(html).not.toContain(">Prepare sourcing<");
-    expect(html).not.toContain(">Run research-boards<");
-    expect(html).toContain("Add an AI key in the earlier step");
-    expect(html).toContain(">Export compatibility files<");
-    expect(html).toContain("Go to Home");
+    expect(result.run.status).toBe("running");
+    expect(displayedRun).toEqual({ id: "run-retry", status: "running" });
   });
 });

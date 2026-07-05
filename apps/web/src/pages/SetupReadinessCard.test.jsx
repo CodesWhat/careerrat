@@ -33,10 +33,10 @@ const INCOMPLETE_SETUP = {
   },
 };
 
-function renderCard(setup) {
+function renderCard(setup, props = {}) {
   return renderToStaticMarkup(
     <MemoryRouter>
-      <SetupReadinessCard setup={setup} />
+      <SetupReadinessCard setup={setup} {...props} />
     </MemoryRouter>
   );
 }
@@ -64,5 +64,20 @@ describe("SetupReadinessCard", () => {
     expect(markup).toContain("evidence claims");
     expect(markup).toContain("deeper evidence bank");
     expect(markup).toContain("/onboarding");
+  });
+
+  it("shows first-search status as checklist context rather than a nag", () => {
+    const markup = renderCard(INCOMPLETE_SETUP, {
+      firstSearchRun: {
+        status: "running",
+        summary: { sourcesAttempted: 2, rolesFound: 0 },
+      },
+    });
+
+    expect(markup).toContain("First search");
+    expect(markup).toContain("Running");
+    expect(markup).toContain("Searching deterministic public sources...");
+    expect(markup).not.toContain("Search jobs now");
+    expect(markup).not.toContain("nag");
   });
 });

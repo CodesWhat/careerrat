@@ -16,6 +16,13 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { closeAll } from "../src/core/db/connection.mjs";
+import {
+  candidateArtifactPut,
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateSetupInitialize,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
   CANDIDATE_FILES,
@@ -25,6 +32,7 @@ import {
   loadCandidate,
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
+import { validate } from "../src/core/profile/schema-validator.mjs";
 
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 
@@ -33,6 +41,7 @@ import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 // ---------------------------------------------------------------------------
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const dbRoots = [];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -67,6 +76,24 @@ function buildTempRoot() {
 function candidatePath(root, relPath) {
   return userPath({ repoRoot: root }, relPath);
 }
+
+function buildDbRoot() {
+  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-candidate-db-"));
+  dbRoots.push(repoRoot);
+  candidateSetupInitialize({ repoRoot });
+  return repoRoot;
+}
+
+function formDefaultsSchema() {
+  return JSON.parse(readFileSync(join(REAL_ROOT, "config/form-defaults.schema.json"), "utf8"));
+}
+
+after(() => {
+  closeAll();
+  for (const root of dbRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -321,5 +348,99 @@ describe("candidate-setup", () => {
     } finally {
       rmSync(emptyRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("candidate setup DB readiness and document formats", () => {
+  it("keeps search_ready earlier than gate_ready/apply_ready when compensation is absent", () => {
+    const repoRoot = buildDbRoot();
+
+    candidateArtifactPut({
+      repoRoot,
+      id: "source-resume",
+      kind: "source-resume",
+      data: {
+        format: "text",
+        text: "AI builder with identity automation and agent workflow experience.",
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [
+          {
+            name: "AI builder",
+            priority: "primary",
+            titles: ["Applied AI Engineer", "Forward Deployed Engineer"],
+          },
+        ],
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        candidate: {
+          full_name: "Scott Candidate",
+          email: "scott@example.com",
+        },
+        location: {
+          home: "New York, NY",
+          remote: true,
+          hybrid: true,
+          onsite: false,
+          relocation: [],
+        },
+      },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.equal(config.profile.compensation.minimum_base, null);
+    assert.equal(config.setup.readiness.search_ready, true);
+    assert.equal(config.setup.readiness.gate_ready, false);
+    assert.equal(config.setup.readiness.apply_ready, false);
+    assert.deepEqual(config.setup.missing.search_ready, []);
+    assert.match(config.setup.missing.gate_ready.join("\n"), /compensation floor/i);
+    assert.match(config.setup.missing.apply_ready.join("\n"), /compensation floor/i);
+  });
+
+  it("defaults form-defaults.document_formats to PDF packets with no board-required exports", () => {
+    const repoRoot = buildDbRoot();
+    const config = candidateConfigGet({ repoRoot });
+
+    assert.deepEqual(config["form-defaults"].document_formats, {
+      default_packet_format: "pdf",
+      required_export_formats: [],
+    });
+  });
+
+  it("validates DOCX as a board-required export format and rejects unknown formats", () => {
+    const schema = formDefaultsSchema();
+
+    const docxAllowed = validate(
+      {
+        auto_submit: false,
+        document_formats: {
+          default_packet_format: "pdf",
+          required_export_formats: ["docx"],
+        },
+      },
+      schema
+    );
+    assert.equal(docxAllowed.valid, true, JSON.stringify(docxAllowed.errors));
+
+    const unknownRejected = validate(
+      {
+        auto_submit: false,
+        document_formats: {
+          default_packet_format: "pdf",
+          required_export_formats: ["pages"],
+        },
+      },
+      schema
+    );
+    assert.equal(unknownRejected.valid, false, "unknown export formats must be rejected");
+    assert.match(JSON.stringify(unknownRejected.errors), /document_formats|pages|enum/i);
   });
 });
