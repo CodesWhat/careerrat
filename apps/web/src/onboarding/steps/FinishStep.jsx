@@ -38,6 +38,11 @@ const READINESS_ROWS = [
 
 const DISCOVERY_CHAT_SKILLS = ["research-boards", "discover-companies", "search-jobs"];
 const NO_AI_DISCOVERY_HINT = "Add an AI key in the earlier step to use Roland's search.";
+const NO_HANDOFF_DISCOVERY_HINT = "Discovery chat handoffs are unavailable in this runtime.";
+
+function hasRuntimeDiscoveryHandoff(runtimeCapabilities) {
+  return Object.hasOwn(runtimeCapabilities || {}, "discoveryChatHandoffs");
+}
 
 function missingDetail(values) {
   const missing = (Array.isArray(values) ? values : [])
@@ -158,6 +163,21 @@ export async function runNextDiscoveryHandoff({
   };
 }
 
+export function DiscoveryChatPanel({ discoveryChat, discoveryGuidance, quickStartResult }) {
+  if (!discoveryChat) return null;
+
+  return (
+    <div style={{ marginTop: 12 }}>
+      <ChatPanel
+        key={discoveryChat.chatId}
+        skill={discoveryChat.skill || discoveryGuidance?.nextSkill || quickStartResult?.nextSkill}
+        kickoffLabel="Run discovery"
+        initialChatId={discoveryChat.chatId}
+      />
+    </div>
+  );
+}
+
 // Step 7 — Finish. Runs the existing POST /api/onboard/write-config
 // (regenerates config/search-sources.yml wholesale from targeting+profile,
 // same as the legacy /onboard page's step 8). The "add your LinkedIn saved
@@ -168,7 +188,7 @@ export async function runNextDiscoveryHandoff({
 // explicit /chat evidence-interview handoff the design doc calls for: the
 // wizard and the deeper conversational interview are two independent entry
 // points into the same candidate setup state, not one linear flow.
-export function FinishStep({ state, reload, goBack, aiEnabled = true }) {
+export function FinishStep({ state, reload, goBack, aiEnabled = true, runtimeCapabilities }) {
   const dashboard = useDashboardSnapshot();
   const [writing, setWriting] = useState(false);
   const [written, setWritten] = useState(null);
@@ -190,7 +210,14 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true }) {
   const applyReady = readinessRows.find((row) => row.key === "apply_ready")?.ready;
   const quickStartAction = buildQuickStartAction(state);
   const discoveryGuidance = extractDiscoveryGuidance(dashboard.data) || quickStartResult?.guidance;
-  const discoveryAiEnabled = aiEnabled !== false;
+  const runtimeControlsDiscoveryHandoffs = hasRuntimeDiscoveryHandoff(runtimeCapabilities);
+  const discoveryAiEnabled = runtimeControlsDiscoveryHandoffs
+    ? runtimeCapabilities.discoveryChatHandoffs === true
+    : aiEnabled !== false;
+  const discoveryUnavailableHint =
+    runtimeControlsDiscoveryHandoffs && runtimeCapabilities?.aiAvailable !== false
+      ? NO_HANDOFF_DISCOVERY_HINT
+      : NO_AI_DISCOVERY_HINT;
 
   async function refreshWorkspace() {
     await reload?.();
@@ -356,7 +383,7 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true }) {
       >
         <p className="field__hint" style={{ marginTop: 0 }}>
           {!discoveryAiEnabled
-            ? NO_AI_DISCOVERY_HINT
+            ? discoveryUnavailableHint
             : discoveryGuidance
               ? discoveryGuidance.message
               : "No discovery handoff is ready yet. Prepare sourcing first, then refresh this task."}
@@ -372,18 +399,11 @@ export function FinishStep({ state, reload, goBack, aiEnabled = true }) {
           ))}
         </div>
         {discoveryChatError ? <InlineAlert message={discoveryChatError} /> : null}
-        {discoveryChat ? (
-          <div style={{ marginTop: 12 }}>
-            <ChatPanel
-              key={discoveryChat.chatId}
-              skill={
-                discoveryChat.skill || discoveryGuidance?.nextSkill || quickStartResult?.nextSkill
-              }
-              kickoffLabel="Run discovery"
-              initialChatId={discoveryChat.chatId}
-            />
-          </div>
-        ) : null}
+        <DiscoveryChatPanel
+          discoveryChat={discoveryChat}
+          discoveryGuidance={discoveryGuidance}
+          quickStartResult={quickStartResult}
+        />
       </Card>
 
       <Card title="Finish setup">
