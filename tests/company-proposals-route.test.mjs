@@ -841,7 +841,137 @@ test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-p
 });
 
 test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail closed before confirmed writes", async () => {
-  assert.fail("VER-04 proposal creation write-safety assertions are not implemented yet");
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  appUpsert({
+    repoRoot,
+    row: {
+      id: "app-ver04-applied",
+      company: "Applied Already Co",
+      role: "Applied AI Engineer",
+      status: "applied",
+    },
+  });
+  sourcedUpsertBatch({
+    repoRoot,
+    rows: [
+      {
+        id: "sourced-ver04-already",
+        company: "Sourced Already Co",
+        role: "Forward Deployed Engineer",
+        fitScore: 82,
+      },
+    ],
+  });
+  const sourceBefore = JSON.parse(
+    JSON.stringify(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies)
+  );
+  const trackerPath = userPath({ repoRoot }, "workspace/tracker.json");
+  const activityPath = userPath({ repoRoot }, "workspace/activity.jsonl");
+  const trackerBefore = existsSync(trackerPath) ? readFileSync(trackerPath, "utf8") : null;
+  const activityBefore = existsSync(activityPath) ? readFileSync(activityPath, "utf8") : null;
+
+  const calls = [];
+  const chatRuntime = fakeChatRuntime();
+  const server = bootServer(repoRoot, {
+    chatRuntime,
+    resolveCompanyBoard: async ({ seed }) => {
+      calls.push({ name: "resolveCompanyBoard", seed });
+      if (seed.name === "Unsupported Cache Co") {
+        return {
+          ok: true,
+          companyName: seed.name,
+          companyDomain: "unsupported-cache.example",
+          careersUrl: "https://unsupported-cache.example/careers",
+          jobBoardUrl: "",
+          atsProvider: "",
+          classification: "unsupported_public",
+          confidence: "medium",
+          provenance: [{ source: "cache", url: "https://unsupported-cache.example/careers" }],
+          cacheOnly: true,
+        };
+      }
+      return supportedResolution(seed);
+    },
+    scanCompaniesImpl: async (config) => {
+      const company = config.tracked_companies[0].name;
+      calls.push({ name: "scanCompanies", company });
+      if (company === "Unsupported Cache Co") {
+        return { offers: [], errors: [{ company, error: "unsupported provider" }] };
+      }
+      return { offers: [matchingOffer(company)], errors: [] };
+    },
+    companyAtsUpsert: forbidden("companyAtsUpsert", calls),
+    sourcedUpsertBatch: forbidden("sourcedUpsertBatch", calls),
+    captureAndPersistOffersIfDb: forbidden("captureAndPersistOffersIfDb", calls),
+    writeTracker: forbidden("writeTracker", calls),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    manualSeeds: [
+      "Tracked ATS Co",
+      "Candidate Target Co",
+      "Excluded Co",
+      "Applied Already Co",
+      "Sourced Already Co",
+      "Unsupported Cache Co",
+    ],
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.data.counts, { seeds: 6, proposals: 1, rejected: 5 });
+
+  const rejectedReasons = new Map(
+    body.data.rejected.map((entry) => [entry.company.name, entry.rejectReasons])
+  );
+  for (const name of ["Tracked ATS Co", "Candidate Target Co"]) {
+    assert.ok(rejectedReasons.get(name)?.includes("already-tracked"), name);
+  }
+  assert.ok(rejectedReasons.get("Excluded Co")?.includes("excluded-company"));
+  assert.ok(rejectedReasons.get("Applied Already Co")?.includes("already-in-play"));
+  assert.ok(rejectedReasons.get("Sourced Already Co")?.includes("already-in-play"));
+  for (const rejected of body.data.rejected) {
+    assert.equal(rejected.classification, "rejected", rejected.company.name);
+    assert.equal(rejected.confidenceTier, "rejected", rejected.company.name);
+    assert.equal(rejected.proposedAction, "reject", rejected.company.name);
+    assert.equal(rejected.capturedOffers.length, 0, rejected.company.name);
+  }
+
+  const unsupported = body.data.proposals[0];
+  assertProposalContract(unsupported);
+  assert.equal(unsupported.company.name, "Unsupported Cache Co");
+  assert.equal(unsupported.classification, "unsupported_public");
+  assert.equal(unsupported.confidenceTier, "borderline");
+  assert.equal(unsupported.proposedAction, "cache-only");
+  assert.notEqual(unsupported.proposedAction, "approve-supported-ats");
+  assert.equal(unsupported.atsProvider, "");
+  assert.ok(unsupported.reviewReasons.includes("unsupported-public-cache"));
+  assert.equal(unsupported.capturedOffers.length, 0);
+
+  assert.equal(chatRuntime.starts.length, 0);
+  for (const name of [
+    "companyAtsUpsert",
+    "sourcedUpsertBatch",
+    "captureAndPersistOffersIfDb",
+    "writeTracker",
+  ]) {
+    assert.equal(
+      calls.some((call) => call.name === name),
+      false,
+      `${name} must not be called`
+    );
+  }
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies,
+    sourceBefore
+  );
+  assert.equal(existsSync(trackerPath) ? readFileSync(trackerPath, "utf8") : null, trackerBefore);
+  assert.equal(
+    existsSync(activityPath) ? readFileSync(activityPath, "utf8") : null,
+    activityBefore
+  );
+  assertNoCurrentCompLeak(body);
 });
 
 test("POST /api/discovery/company-proposals returns no-AI manual fallback without chat, full runtime, or writes", async () => {
