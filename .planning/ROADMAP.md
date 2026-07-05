@@ -13,7 +13,7 @@
 | 3 | Company Discovery API | Migrate `discover-companies` to AI seeds plus deterministic ATS resolution, scan, screening, confirmation, and writes. | DISC-01, DISC-02, DISC-03, DISC-04, DISC-05 | Complete (7/7, 2026-07-05) |
 | 4 | Runtime Routing | Make the app use the cheapest correct runtime path by default. | RUNT-01, RUNT-02, RUNT-03 | Complete (5/5, 2026-07-05) |
 | 5 | Verification and Docs | Prove cost boundaries, no-AI degradation, discovery write safety, and documentation alignment. | VER-01, VER-02, VER-03, VER-04, VER-05 | Complete (5/5, 2026-07-05) |
-| 6 | Canonical DB App Shell | Make the Electron/React app DB-source-of-truth and remove compatibility surfaces from product paths. | APP-01, APP-02, APP-03, APP-04 | In Progress (7/8) |
+| 6 | Canonical DB App Shell | Make the Electron/React app DB-source-of-truth and remove compatibility surfaces from product paths. | APP-01, APP-02, APP-03, APP-04 | In Progress (8/10) |
 | 7 | Quick Onboarding and Auto Sourcing | Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding. | ONB-01, ONB-02, RUN-01, RUN-02 | Planned |
 | 8 | Deep Ingest Lane | Capture rich profile, project, story, and evidence context through drop-all intake plus an optional AI interview. | ING-01, ING-02, ING-03, ING-04 | Planned |
 | 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Planned |
@@ -154,7 +154,7 @@ Plans:
 
 **Requirements:** APP-01, APP-02, APP-03, APP-04
 
-**Plans:** 7/8 plans complete
+**Plans:** 8/10 plans complete
 
 Plans:
 **Wave 0**
@@ -172,7 +172,12 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 06-08-PLAN.md — Run the final backend, frontend, and global static-guard rollup.
+- [x] 06-08-PLAN.md — Run the final backend, frontend, and global static-guard rollup.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 06-09-PLAN.md — Close onboarding legacy affordance and static compatibility route-copy gaps.
+- [ ] 06-10-PLAN.md — Close DB-mode onboarding source-readiness and compatibility export-copy gaps.
 
 **Success Criteria**:
 
