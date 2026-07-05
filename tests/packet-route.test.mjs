@@ -3,18 +3,20 @@
 // (src/cli/packet-route.mjs) — GET /api/packet/list, GET /api/packet?id=.
 // Mirrors tests/search-route.test.mjs's bootServer(): a bare addRoute Map
 // wrapped in http.createServer, no full tracker-dev.mjs dev server needed.
-// Fixtures write workspace/tracker.json + workspace/tailored/*.md directly
-// under repoRoot (the same legacy-layout convention search-route.test.mjs
-// uses — writing workspace/tracker.json is itself what makes
-// resolveUserPaths() treat repoRoot/workspace as the workspace root).
+// Fixtures seed SQLite from fixture-source/tracker.json while preserving
+// workspace/tailored/*.md directly under repoRoot. The packet route must not
+// read workspace/tracker.json as product state, so this suite asserts the
+// runtime workspace has no generated tracker export.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
+import { closeAll } from "../src/core/db/connection.mjs";
+import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 
 const cleanupRoots = [];
 
@@ -25,10 +27,22 @@ function tempRepo() {
   return repoRoot;
 }
 
-function writeTracker(repoRoot, applications) {
+function importTrackerFixture(repoRoot, applications) {
+  const sourceDir = join(repoRoot, "fixture-source");
+  mkdirSync(sourceDir, { recursive: true });
   writeFileSync(
-    join(repoRoot, "workspace/tracker.json"),
-    JSON.stringify({ applications, sourced: [], sources: [], communications: [] }, null, 2)
+    join(sourceDir, "tracker.json"),
+    JSON.stringify(
+      { meta: {}, applications, sourced: [], sources: [], communications: [] },
+      null,
+      2
+    )
+  );
+  importFromTracker({ repoRoot, sourceDir });
+  assert.equal(
+    existsSync(join(repoRoot, "workspace/tracker.json")),
+    false,
+    "packet tests must seed DB rows without creating a generated tracker export"
   );
 }
 
@@ -75,6 +89,7 @@ async function getJson(server, path) {
 }
 
 after(() => {
+  closeAll();
   for (const root of cleanupRoots.splice(0)) {
     try {
       rmSync(root, { recursive: true, force: true });
@@ -114,7 +129,7 @@ function seedStandardFixture(repoRoot) {
     "# Hooli — SRE\n\nWithdrawn but still on file.\n"
   );
 
-  writeTracker(repoRoot, [
+  importTrackerFixture(repoRoot, [
     {
       id: "app-1",
       company: "Acme",
@@ -200,12 +215,14 @@ test("GET /api/packet/list: only gated-in applications, with presence booleans a
   }
 });
 
-test("GET /api/packet/list: 404 when no tracker.json exists yet", async () => {
+test("GET /api/packet/list: 409 when no database exists yet", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot);
   try {
-    const { status } = await getJson(server, "/api/packet/list");
-    assert.equal(status, 404);
+    const { status, body } = await getJson(server, "/api/packet/list");
+    assert.equal(status, 409);
+    assert.match(body.error, /database/i);
+    assert.match(body.error, /data import|data init|setup/i);
   } finally {
     await closeServer(server);
   }
@@ -314,12 +331,14 @@ test("GET /api/packet: 400 when ?id= is missing", async () => {
   }
 });
 
-test("GET /api/packet?id=: 404 when no tracker.json exists yet", async () => {
+test("GET /api/packet?id=: 409 when no database exists yet", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot);
   try {
-    const { status } = await getJson(server, "/api/packet?id=app-1");
-    assert.equal(status, 404);
+    const { status, body } = await getJson(server, "/api/packet?id=app-1");
+    assert.equal(status, 409);
+    assert.match(body.error, /database/i);
+    assert.match(body.error, /data import|data init|setup/i);
   } finally {
     await closeServer(server);
   }
