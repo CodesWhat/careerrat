@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 status: Ready to plan
-stopped_at: Completed 03-03-PLAN.md
-last_updated: "2026-07-05T00:16:34.531Z"
+stopped_at: Completed 03-04-PLAN.md
+last_updated: "2026-07-05T00:26:41.180Z"
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 14
-  percent: 78
+  completed_plans: 15
+  percent: 83
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-05T00:16:01.801Z
-**Stopped at:** Completed 03-03-PLAN.md
+**Last session:** 2026-07-05T00:26:41.171Z
+**Stopped at:** Completed 03-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -79,6 +79,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 03-company-discovery-api P01 | 4min | 1 tasks | 9 files |
 | Phase 03-company-discovery-api P02 | 4min | 1 tasks | 4 files |
 | Phase 03-company-discovery-api P03 | 6min | 1 tasks | 2 files |
+| Phase 03-company-discovery-api P04 | 12min | 1 tasks | 6 files |
 
 ## Decisions
 
@@ -119,3 +120,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 03-company-discovery-api]: Seed URL hints remain untrusted until resolver checks scheme, host, DNS/lookup result, redirects, and supported provider identity. — Preserves DISC-02 deterministic URL authority and prevents model/manual hints from becoming final write authority.
 - [Phase 03-company-discovery-api]: Supported ATS promotion uses sourced-scanner inferProvider(); unsupported public pages are persisted as cache-only and non-promotable. — Preserves the supported/unsupported split and keeps unsupported public pages out of approve-supported-ats flows.
 - [Phase 03-company-discovery-api]: Resolver refresh policy exports the pinned Phase 03 constants and REFRESH_REASONS enum for downstream decision plans. — Keeps TTL, zero-job, failure, scan-status, and explicit refresh behavior consistent across resolver and later decision routes.
+- [Phase 03-company-discovery-api]: Company seed output is advisory only; schema excludes final URL, provider, API URL, approval, and write-state fields. — Keeps AI/manual seed input from becoming trusted write authority.
+- [Phase 03-company-discovery-api]: Candidate seed prompts may include minimum base and OE floor only; current compensation keys and values are excluded. — Preserves the AGENTS.md current-comp privacy boundary while still allowing fit-aware seed generation.
+- [Phase 03-company-discovery-api]: No manual seeds plus no AI route returns the shared bounded-AI 501 manual fallback envelope instead of launching chat/full skill. — Preserves deterministic API behavior and avoids hidden runtime escalation.
