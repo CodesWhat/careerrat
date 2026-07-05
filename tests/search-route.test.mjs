@@ -272,6 +272,38 @@ test("POST /api/search/scan: missing DB -> 409 instead of legacy no-config handl
   }
 });
 
+test("POST /api/search/scan: invalid DB source config shape returns JSON 500", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  db.prepare(
+    `INSERT INTO candidate_source_configs (name, data, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(name) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
+  ).run("sourced-scan", "null", "2026-07-05T00:00:00Z");
+
+  const server = await bootServer(repoRoot, { fetchImpl: leverFetchStub() });
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2000);
+    let res;
+    try {
+      res = await fetch(`${baseUrl(server)}/api/search/scan`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: "{}",
+        signal: controller.signal,
+      });
+    } finally {
+      clearTimeout(timeout);
+    }
+    const body = await res.json();
+    assert.equal(res.status, 500);
+    assert.equal(body.ok, false);
+    assert.match(body.error, /Cannot read|tracked_companies|null/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/search/scan: legacy search-sources.yml alone is not sufficient product state", async () => {
   const repoRoot = tempRepo();
   writeSearchSourcesConfig(repoRoot, []);

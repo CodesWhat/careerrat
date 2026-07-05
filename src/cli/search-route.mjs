@@ -99,7 +99,8 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
       hasConfig = hasConfiguredDbSourcesOnly(pathCtx);
     } catch (err) {
       if (sendDbError(res, err)) return;
-      throw err;
+      sendJson(res, 500, { ok: false, error: err?.message || String(err) });
+      return;
     }
 
     if (!hasConfig) {

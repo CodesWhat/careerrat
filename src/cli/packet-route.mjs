@@ -51,7 +51,7 @@
 // surface that could hint at *why* the path was rejected.
 
 import { existsSync, readFileSync } from "node:fs";
-import { isAbsolute, join, normalize, sep } from "node:path";
+import { basename, extname, isAbsolute, join, normalize, sep } from "node:path";
 import { requireDb } from "../core/db/connection.mjs";
 import { assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { markdownToHtml } from "../core/documents/export.mjs";
@@ -65,6 +65,9 @@ import { sendJson } from "./skill-run-route.mjs";
 // taxonomy note: the canonical ladder is a small, deliberately-duplicated
 // contract across a few homes, not a single importable constant everywhere.
 const TERMINAL_STAGE_IDS = new Set(["rejected", "withdrawn"]);
+const TEXT_ARTIFACT_RE = /\.(?:md|markdown|txt)$/i;
+const BINARY_ARTIFACT_RE = /\.(?:pdf|docx)$/i;
+const PACKET_ARTIFACT_KINDS = new Set(["resume", "coverLetter", "answers"]);
 
 function queryParam(req, name) {
   const url = new URL(req.url, "http://127.0.0.1");
@@ -92,7 +95,8 @@ function looksLikePath(value) {
   if (typeof value !== "string") return false;
   if (value.includes("\n")) return false;
   if (value.length > 300) return false;
-  return /\.(?:md|markdown|txt|pdf|docx)$/i.test(value.trim());
+  const trimmed = value.trim();
+  return TEXT_ARTIFACT_RE.test(trimmed) || BINARY_ARTIFACT_RE.test(trimmed);
 }
 
 function stripWorkspacePrefix(value) {
@@ -112,11 +116,31 @@ function resolveArtifactPath(workspaceDir, relPath) {
   return full;
 }
 
+function artifactKind(storedPath) {
+  const ext = extname(storedPath).replace(/^\./, "").toLowerCase();
+  return ext || "file";
+}
+
+function artifactContentType(storedPath) {
+  const kind = artifactKind(storedPath);
+  if (kind === "pdf") return "application/pdf";
+  if (kind === "docx") {
+    return "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  }
+  if (kind === "md" || kind === "markdown") return "text/markdown; charset=utf-8";
+  if (kind === "txt") return "text/plain; charset=utf-8";
+  return "application/octet-stream";
+}
+
+function artifactUrl(appId, kind) {
+  return `/api/packet/artifact?id=${encodeURIComponent(String(appId))}&kind=${encodeURIComponent(kind)}`;
+}
+
 // Resolve one stamped artifact value to its { path, markdown } content.
 // Returns null when the value is empty, the path is unsafe/unreadable, or the
 // resolved file doesn't exist — every one of those collapses to the same
 // "not available" shape the /packet UI already renders as "offer Generate".
-function resolveArtifactContent(workspaceDir, storedValue) {
+function resolveArtifactContent(workspaceDir, storedValue, { appId = null, kind = null } = {}) {
   if (typeof storedValue !== "string" || !storedValue.trim()) return null;
   const trimmed = storedValue.trim();
 
@@ -126,6 +150,17 @@ function resolveArtifactContent(workspaceDir, storedValue) {
 
   const full = resolveArtifactPath(workspaceDir, stripWorkspacePrefix(trimmed));
   if (!full || !existsSync(full)) return null;
+  if (BINARY_ARTIFACT_RE.test(trimmed)) {
+    return {
+      path: trimmed,
+      markdown: null,
+      html: null,
+      binary: true,
+      kind: artifactKind(trimmed),
+      url: appId && kind ? artifactUrl(appId, kind) : null,
+    };
+  }
+
   let text;
   try {
     text = readFileSync(full, "utf8");
@@ -143,15 +178,22 @@ function needsYouFindings(markdown) {
   return lintArtifact(markdown).findings.filter((f) => f.pattern === "needs-you-marker");
 }
 
-function buildArtifactView(workspaceDir, storedValue, { includeNeedsYou = false } = {}) {
-  const resolved = resolveArtifactContent(workspaceDir, storedValue);
+function buildArtifactView(
+  workspaceDir,
+  storedValue,
+  { includeNeedsYou = false, appId = null, kind = null } = {}
+) {
+  const resolved = resolveArtifactContent(workspaceDir, storedValue, { appId, kind });
   if (!resolved) return null;
   const view = {
     path: resolved.path,
     markdown: resolved.markdown,
-    html: markdownToHtml(resolved.markdown),
+    html: resolved.binary ? null : markdownToHtml(resolved.markdown || ""),
+    binary: Boolean(resolved.binary),
+    kind: resolved.kind ?? null,
+    url: resolved.url ?? null,
   };
-  if (includeNeedsYou) {
+  if (includeNeedsYou && !resolved.binary) {
     view.needsYou = needsYouFindings(resolved.markdown).map((f) => ({
       line: f.line,
       text: f.text,
@@ -162,7 +204,7 @@ function buildArtifactView(workspaceDir, storedValue, { includeNeedsYou = false 
 
 function countNeedsYou(workspaceDir, storedAnswersValue) {
   const resolved = resolveArtifactContent(workspaceDir, storedAnswersValue);
-  if (!resolved) return 0;
+  if (!resolved || resolved.binary) return 0;
   return needsYouFindings(resolved.markdown).length;
 }
 
@@ -255,10 +297,72 @@ export function mountPacketRoutes({ addRoute, repoRoot, env = process.env }) {
       role: app.role ?? null,
       resumeNote: artifacts.resumeNote ?? null,
       artifacts: {
-        resume: buildArtifactView(workspaceDir, artifacts.resume),
-        coverLetter: buildArtifactView(workspaceDir, artifacts.coverLetter),
-        answers: buildArtifactView(workspaceDir, artifacts.answers, { includeNeedsYou: true }),
+        resume: buildArtifactView(workspaceDir, artifacts.resume, {
+          appId: app.id,
+          kind: "resume",
+        }),
+        coverLetter: buildArtifactView(workspaceDir, artifacts.coverLetter, {
+          appId: app.id,
+          kind: "coverLetter",
+        }),
+        answers: buildArtifactView(workspaceDir, artifacts.answers, {
+          includeNeedsYou: true,
+          appId: app.id,
+          kind: "answers",
+        }),
       },
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/packet/artifact?id=<appId>&kind=resume|coverLetter|answers
+  // -------------------------------------------------------------------------
+  addRoute("GET", "/api/packet/artifact", (req, res) => {
+    const id = queryParam(req, "id");
+    const kind = queryParam(req, "kind");
+    if (!id || !PACKET_ARTIFACT_KINDS.has(kind)) {
+      sendJson(res, 400, { error: "?id= and kind=resume|coverLetter|answers are required" });
+      return;
+    }
+
+    let packetRows;
+    try {
+      packetRows = readPacketApplicationsFromDb(pathCtx);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    const app = packetRows.applications.find((a) => String(a?.id) === String(id));
+    const storedPath = app?.artifacts?.[kind];
+    if (!app || typeof storedPath !== "string" || !BINARY_ARTIFACT_RE.test(storedPath.trim())) {
+      sendJson(res, 404, { error: "artifact not found" });
+      return;
+    }
+
+    const workspaceDir = resolveUserPaths(pathCtx).workspaceDir;
+    const full = resolveArtifactPath(workspaceDir, stripWorkspacePrefix(storedPath.trim()));
+    if (!full || !existsSync(full)) {
+      sendJson(res, 404, { error: "artifact not found" });
+      return;
+    }
+
+    let body;
+    try {
+      body = readFileSync(full);
+    } catch {
+      sendJson(res, 404, { error: "artifact not found" });
+      return;
+    }
+
+    const fileName = basename(full)
+      .replace(/["\r\n]/g, "")
+      .replace(/[^\x20-\x7E]/g, "_");
+    res.writeHead(200, {
+      "Content-Type": artifactContentType(storedPath),
+      "Content-Disposition": `inline; filename="${fileName}"`,
+      "Cache-Control": "no-store",
+    });
+    res.end(body);
   });
 }

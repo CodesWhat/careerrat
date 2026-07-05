@@ -107,6 +107,12 @@ test("the needs-you-link and NEEDS YOU highlighting are built client-side per ar
   assert.match(PACKET_PAGE_HTML, /highlightNeedsYou/);
 });
 
+test("binary packet artifacts render as open links instead of markdown panes", () => {
+  assert.match(PACKET_PAGE_HTML, /artifact\.binary/);
+  assert.match(PACKET_PAGE_HTML, /setAttribute\("data-hook", "artifact-open-link"\)/);
+  assert.match(PACKET_PAGE_HTML, /artifact\.url/);
+});
+
 // ---------------------------------------------------------------------------
 // Inline <script> — syntax-only guard, never executed (see client-script.test.mjs)
 // ---------------------------------------------------------------------------

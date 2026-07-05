@@ -41,7 +41,10 @@ import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
-import { loadCandidateConfig as loadStoredCandidateConfig } from "../src/core/profile/config-store.mjs";
+import {
+  loadLegacyCandidateConfig,
+  loadCandidateConfig as loadStoredCandidateConfig,
+} from "../src/core/profile/config-store.mjs";
 import { parseYaml } from "../src/core/profile/yaml.mjs";
 import {
   captureAndPersistOffersIfDb,
@@ -69,9 +72,11 @@ const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
 // repoRoot, including a fresh tempdir per test/request.
 // ---------------------------------------------------------------------------
 
-function loadCandidateConfig(pathCtx) {
+function loadCandidateConfig(pathCtx, { standaloneConfigMode = false } = {}) {
   try {
-    const config = loadStoredCandidateConfig(pathCtx);
+    const config = standaloneConfigMode
+      ? loadLegacyCandidateConfig(pathCtx)
+      : loadStoredCandidateConfig(pathCtx);
     const targeting = config?.targeting || null;
     const profile = config?.profile || null;
     if (targeting == null && profile == null) return {};
@@ -155,6 +160,10 @@ function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
 
 export function buildSeenSetsForRun(pathCtx) {
   if (dbExists(pathCtx)) return buildDbSeenSets(pathCtx);
+  return emptySeenContext();
+}
+
+function emptySeenContext() {
   return {
     seenUrls: new Set(),
     seenReqIds: new Set(),
@@ -194,9 +203,12 @@ export async function runSourcedScan({
   void intake;
   void timestamped;
   const pathCtx = { repoRoot, env };
+  const standaloneConfigMode = Boolean(configPath);
   const config = loadScannerConfigForRun({ pathCtx, configPath });
-  const candidateConfig = loadCandidateConfig(pathCtx);
-  const { seenUrls, seenReqIds, seenCompanyRoles, tracker } = buildSeenSetsForRun(pathCtx);
+  const candidateConfig = loadCandidateConfig(pathCtx, { standaloneConfigMode });
+  const { seenUrls, seenReqIds, seenCompanyRoles, tracker } = standaloneConfigMode
+    ? emptySeenContext()
+    : buildSeenSetsForRun(pathCtx);
 
   // Outcome-aware scoring: down-weight role families the candidate's own
   // results show never convert via cold board apply (see
@@ -223,7 +235,7 @@ export async function runSourcedScan({
   // not fetched here.
   let sourcedFromSearches = { offers: [], errors: [] };
   let searchSources = null;
-  if (!companyFilter) {
+  if (!companyFilter && !standaloneConfigMode) {
     try {
       searchSources = loadSearchSourcesForRun(pathCtx);
       if (searchSources)
@@ -259,7 +271,9 @@ export async function runSourcedScan({
   const savedAt = new Date();
   const keptForOutput = limit > 0 ? filtered.kept.slice(0, limit) : filtered.kept;
   const offersForOutput = write
-    ? captureOffersForOutput({ repoRoot, env, offers: keptForOutput, savedAt })
+    ? standaloneConfigMode
+      ? offersWithCapturedJobs({ repoRoot, env, offers: keptForOutput, savedAt })
+      : captureOffersForOutput({ repoRoot, env, offers: keptForOutput, savedAt })
     : keptForOutput;
   const outputOffers = offersForOutput.map((offer) => toOutputOffer(offer));
   const summary = {
@@ -274,7 +288,9 @@ export async function runSourcedScan({
     offers: outputOffers,
   };
 
-  if (write) persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt });
+  if (write && !standaloneConfigMode) {
+    persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt });
+  }
 
   return summary;
 }

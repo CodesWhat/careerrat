@@ -262,6 +262,63 @@ test("GET /api/packet?id=: resolves resume/coverLetter/answers to {path, markdow
   }
 });
 
+test("GET /api/packet?id=: PDF artifacts return binary link metadata, not decoded markdown", async () => {
+  const repoRoot = tempRepo();
+  writeArtifact(repoRoot, "tailored/Acme — Staff Engineer.pdf", "%PDF-1.4\nfake pdf body\n");
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-pdf",
+      company: "Acme",
+      role: "Staff Engineer",
+      status: "reviewed-hold",
+      artifacts: {
+        resume: "workspace/tailored/Acme — Staff Engineer.pdf",
+      },
+    },
+  ]);
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await getJson(server, "/api/packet?id=app-pdf");
+    assert.equal(status, 200);
+    assert.equal(body.artifacts.resume.path, "workspace/tailored/Acme — Staff Engineer.pdf");
+    assert.equal(body.artifacts.resume.markdown, null);
+    assert.equal(body.artifacts.resume.html, null);
+    assert.equal(body.artifacts.resume.binary, true);
+    assert.equal(body.artifacts.resume.kind, "pdf");
+    assert.equal(body.artifacts.resume.url, "/api/packet/artifact?id=app-pdf&kind=resume");
+
+    const artifact = await fetch(`${baseUrl(server)}${body.artifacts.resume.url}`);
+    assert.equal(artifact.status, 200);
+    assert.match(artifact.headers.get("content-type") || "", /application\/pdf/);
+    assert.match(await artifact.text(), /^%PDF-1\.4/);
+
+    const missingKind = await fetch(
+      `${baseUrl(server)}/api/packet/artifact?id=app-pdf&kind=coverLetter`
+    );
+    assert.equal(missingKind.status, 404);
+
+    const rawPath = await fetch(
+      `${baseUrl(server)}/api/packet/artifact?path=${encodeURIComponent("workspace/tailored/Acme — Staff Engineer.pdf")}`
+    );
+    assert.equal(rawPath.status, 400);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("GET /api/packet/artifact: 409 when no database exists yet", async () => {
+  const repoRoot = tempRepo();
+  writeArtifact(repoRoot, "tailored/Acme — Staff Engineer.pdf", "%PDF-1.4\nfake pdf body\n");
+  const server = await bootServer(repoRoot);
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/packet/artifact?id=app-pdf&kind=resume`);
+    assert.equal(res.status, 409);
+    assert.match((await res.json()).error, /database/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("GET /api/packet?id=: missing artifacts serve as null (never generated)", async () => {
   const repoRoot = tempRepo();
   seedStandardFixture(repoRoot);

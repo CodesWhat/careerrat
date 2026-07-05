@@ -42,6 +42,7 @@ import {
   companyAtsUpsert,
   sourceConfigGet,
   sourceConfigPut,
+  sourcedUpsertBatch,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
@@ -412,6 +413,94 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
     const lastRunAt = stored.searches[0].recency.lastRunAt;
     assert.match(lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("explicit config mode in a DB workspace captures output without mutating DB product state", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({ repoRoot, name: "search-sources", data: searchSourcesFixture() });
+    const configPath = writeSourcedScanConfig(repoRoot);
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: leverFetchStub(),
+      configPath,
+      write: true,
+      intake: false,
+    });
+
+    assert.equal(summary.scanned, 1);
+    assert.equal(summary.new, 1);
+    assert.deepEqual(summary.errors, []);
+    assert.match(summary.offers[0].artifacts.jd, /^workspace\/jobs\/acme-director-of-it-/);
+    assert.equal(existsSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd)), true);
+
+    const db = openDb({ repoRoot });
+    const rows = db.prepare("SELECT data FROM sourced ORDER BY rowid ASC").all();
+    assert.equal(rows.length, 0, "explicit config mode must not write sourced DB rows");
+    assert.equal(
+      existsSync(userPath({ repoRoot }, "workspace/tracker.json")),
+      false,
+      "explicit config mode must not export tracker.json through DB persistence"
+    );
+
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(
+      stored.searches[0].recency.lastRunAt,
+      undefined,
+      "explicit config mode must not stamp DB search-source watermarks"
+    );
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("explicit config mode does not dedupe against DB sourced rows", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourcedUpsertBatch({
+      repoRoot,
+      rows: [
+        {
+          id: "sourced-existing-acme",
+          company: "Acme",
+          role: "Director of IT",
+          status: "sourced",
+          source: "scanner",
+          channel: "board",
+          link: "https://jobs.lever.co/acme/abc",
+          loc: "Remote",
+          base: "verify",
+          fitScore: 80,
+          fitBucket: "high",
+          fitBasis: "triage",
+          gate: "likely-keep",
+          sourcedAt: "2026-07-05T00:00:00Z",
+          updatedAt: "2026-07-05T00:00:00Z",
+          artifacts: {},
+        },
+      ],
+    });
+    const configPath = writeSourcedScanConfig(repoRoot);
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: leverFetchStub(),
+      configPath,
+      write: false,
+      intake: false,
+    });
+
+    assert.equal(summary.new, 1);
+    assert.equal(summary.duplicates, 0);
+    assert.equal(summary.offers[0].url, "https://jobs.lever.co/acme/abc");
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });

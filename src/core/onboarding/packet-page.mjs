@@ -196,6 +196,16 @@ export const PACKET_PAGE_HTML = `<!doctype html>
   }
   .artifact-body { font-size: 0.92rem; line-height: 1.55; }
   .artifact-body :first-child { margin-top: 0; }
+  .artifact-link {
+    color: var(--accent);
+    text-decoration: none;
+    font-size: 0.9rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.45rem 0.8rem;
+    display: inline-block;
+  }
+  .artifact-link:hover { text-decoration: underline; }
   mark.needs-you {
     background: var(--warn);
     color: #1c1f24;
@@ -451,6 +461,21 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     pathLine.setAttribute("data-hook", "artifact-path");
     pathLine.textContent = artifact.path || "(inline text — no file path)";
     pane.appendChild(pathLine);
+
+    if (artifact.binary) {
+      var linkWrap = document.createElement("div");
+      linkWrap.className = "artifact-body";
+      var openLink = document.createElement("a");
+      openLink.className = "artifact-link";
+      openLink.setAttribute("data-hook", "artifact-open-link");
+      openLink.href = artifact.url || "#";
+      openLink.target = "_blank";
+      openLink.rel = "noopener";
+      openLink.textContent = "Open " + String(artifact.kind || "file").toUpperCase() + " artifact";
+      linkWrap.appendChild(openLink);
+      pane.appendChild(linkWrap);
+      return;
+    }
 
     var body = document.createElement("div");
     body.className = "artifact-body";
