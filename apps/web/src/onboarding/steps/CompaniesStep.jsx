@@ -4,20 +4,93 @@ import { Card } from "../../components/Card.jsx";
 import { CompanyAvatar } from "../../components/CompanyAvatar.jsx";
 import { Field, TextField } from "../../components/form.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
-import { saveCandidateFile, searchLogos } from "../../lib/api.js";
+import {
+  createCompanyProposals,
+  getCompanyProposals,
+  saveCandidateFile,
+  searchLogos,
+} from "../../lib/api.js";
 import { ChatPanel } from "../ChatPanel.jsx";
 
 const SEARCH_DEBOUNCE_MS = 350;
+
+function errorMessage(err, fallback) {
+  return (
+    err?.body?.error?.message ||
+    err?.body?.message ||
+    (err instanceof Error ? err.message : null) ||
+    fallback
+  );
+}
+
+function proposalBatchFromResponse(response) {
+  if (response?.data && "batch" in response.data) return response.data.batch;
+  return response?.data || null;
+}
+
+function proposalCounts(batch) {
+  return {
+    proposals: batch?.counts?.proposals ?? batch?.proposals?.length ?? 0,
+    rejected: batch?.counts?.rejected ?? batch?.rejected?.length ?? 0,
+  };
+}
+
+function proposalCompanyName(proposal) {
+  return proposal?.company?.name || proposal?.name || "Company";
+}
+
+export function proposalSeedsFromCompanies(companies = []) {
+  return (Array.isArray(companies) ? companies : [])
+    .map((company) => {
+      const name =
+        typeof company === "string" ? company.trim() : String(company?.name || "").trim();
+      const domain =
+        typeof company === "string"
+          ? ""
+          : String(company?.domain || company?.domain_hint || "").trim();
+      if (!name) return null;
+      return {
+        name,
+        ...(domain ? { domain_hint: domain } : {}),
+      };
+    })
+    .filter(Boolean);
+}
+
+export function runCompanyProposalRead({ readProposals = getCompanyProposals } = {}) {
+  return readProposals({ status: "pending" });
+}
+
+export async function runCompanyProposalCreate({
+  manualSeeds,
+  createProposals = createCompanyProposals,
+  readProposals = getCompanyProposals,
+} = {}) {
+  const created = await createProposals({
+    manualSeeds: Array.isArray(manualSeeds) ? manualSeeds : [],
+  });
+  const pending = await runCompanyProposalRead({ readProposals });
+  return { created, pending };
+}
 
 // Step 5 — Companies. Type-ahead (logo.dev Brand Search proxy, GET
 // /api/logos/search) + initials fallback, a collapsed logo.dev-credentials
 // panel (writes automation integrations through the candidate setup API — see
 // onboard-route.mjs's AUTOMATION_ROUTE_ENTRY comment for why that route
-// exists), and Roland's discover-companies chat panel. Saved company names
+// exists), and local company proposals backed by Phase 3 discovery APIs.
+// Saved company names
 // persist to targeting.yml#tracked_companies — the candidate's own shortlist
 // (distinct from config/sourced-scan.json's tracked_companies, which
 // discover-companies/`rolester companies` manage for the sweep itself).
-export function CompaniesStep({ state, draftSeeds, aiEnabled, reload, goNext, goBack, showToast }) {
+export function CompaniesStep({
+  state,
+  draftSeeds,
+  runtimeCapabilities = {},
+  reload,
+  goNext,
+  goBack,
+  showToast,
+}) {
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -39,6 +112,16 @@ export function CompaniesStep({ state, draftSeeds, aiEnabled, reload, goNext, go
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [proposalBatch, setProposalBatch] = useState(null);
+  const [proposalLoading, setProposalLoading] = useState(false);
+  const [proposalCreating, setProposalCreating] = useState(false);
+  const [proposalError, setProposalError] = useState(null);
+
+  const canUseCompanyProposals = runtimeCapabilities.companyProposals !== false;
+  const canUseManualSeeds = runtimeCapabilities.manualCompanySeeds !== false;
+  const showDiscoveryChat = runtimeCapabilities.discoveryChatHandoffs === true;
+  const manualSeeds = proposalSeedsFromCompanies(companies);
+  const counts = proposalCounts(proposalBatch);
 
   useEffect(() => {
     const trimmed = query.trim();
@@ -98,6 +181,32 @@ export function CompaniesStep({ state, draftSeeds, aiEnabled, reload, goNext, go
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSavingCreds(false);
+    }
+  }
+
+  async function handleLoadCompanyProposals() {
+    setProposalLoading(true);
+    setProposalError(null);
+    try {
+      const response = await runCompanyProposalRead();
+      setProposalBatch(proposalBatchFromResponse(response));
+    } catch (err) {
+      setProposalError(errorMessage(err, "Could not load company proposals"));
+    } finally {
+      setProposalLoading(false);
+    }
+  }
+
+  async function handleCreateCompanyProposals() {
+    setProposalCreating(true);
+    setProposalError(null);
+    try {
+      const { created, pending } = await runCompanyProposalCreate({ manualSeeds });
+      setProposalBatch(proposalBatchFromResponse(pending) || proposalBatchFromResponse(created));
+    } catch (err) {
+      setProposalError(errorMessage(err, "Could not create company proposals"));
+    } finally {
+      setProposalCreating(false);
     }
   }
 
@@ -238,18 +347,80 @@ export function CompaniesStep({ state, draftSeeds, aiEnabled, reload, goNext, go
 
       <div>
         <p className="field__label" style={{ margin: "0 0 6px" }}>
-          Roland — find companies for you
+          Company proposals
         </p>
-        {aiEnabled ? (
-          <ChatPanel skill="discover-companies" kickoffLabel="Ask Roland to find companies" />
-        ) : (
-          <p className="field__hint">Add an AI key in the earlier step to use Roland's search.</p>
-        )}
-        <p className="field__hint">
-          Roland proposes companies confirm-first in the panel above and adds accepted ones to your
-          scan list separately — company chips added here are just your own shortlist.
-        </p>
+        {proposalError ? <InlineAlert message={proposalError} /> : null}
+        <div className="wizard-actions" style={{ justifyContent: "flex-start" }}>
+          <Button
+            variant="secondary"
+            onClick={handleLoadCompanyProposals}
+            disabled={proposalLoading || !canUseCompanyProposals}
+          >
+            {proposalLoading ? "Loading…" : "Load pending proposals"}
+          </Button>
+          <Button
+            onClick={handleCreateCompanyProposals}
+            disabled={
+              proposalCreating ||
+              !canUseCompanyProposals ||
+              !canUseManualSeeds ||
+              manualSeeds.length === 0
+            }
+          >
+            {proposalCreating ? "Finding…" : "Find boards from shortlist"}
+          </Button>
+        </div>
+        {!canUseCompanyProposals ? (
+          <p className="field__hint">Local company proposals are unavailable in this runtime.</p>
+        ) : null}
+        {canUseCompanyProposals && !manualSeeds.length ? (
+          <p className="field__hint">Add at least one company to create local proposals.</p>
+        ) : null}
+        {proposalBatch ? (
+          <div style={{ marginTop: 12 }}>
+            <p className="field__hint" style={{ margin: "0 0 8px" }}>
+              {counts.proposals} proposed · {counts.rejected} rejected
+            </p>
+            {proposalBatch.proposals?.length ? (
+              <div className="chip-row">
+                {proposalBatch.proposals.map((proposal) => (
+                  <span className="chip" key={proposal.proposalId || proposalCompanyName(proposal)}>
+                    <CompanyAvatar
+                      name={proposalCompanyName(proposal)}
+                      domain={proposal?.company?.domain}
+                    />
+                    <span className="chip__label">
+                      {proposalCompanyName(proposal)} · {proposal.confidenceTier || "review"}
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            {proposalBatch.rejected?.length ? (
+              <div className="chip-row">
+                {proposalBatch.rejected.map((proposal) => (
+                  <span className="chip" key={proposal.proposalId || proposalCompanyName(proposal)}>
+                    <CompanyAvatar
+                      name={proposalCompanyName(proposal)}
+                      domain={proposal?.company?.domain}
+                    />
+                    <span className="chip__label">{proposalCompanyName(proposal)} · rejected</span>
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ) : null}
       </div>
+
+      {showDiscoveryChat ? (
+        <div>
+          <p className="field__label" style={{ margin: "0 0 6px" }}>
+            Agent-led discovery
+          </p>
+          <ChatPanel skill="discover-companies" kickoffLabel="Ask Roland to find companies" />
+        </div>
+      ) : null}
 
       <div className="wizard-actions">
         <Button variant="secondary" onClick={goBack}>

@@ -137,6 +137,25 @@ export function getRuntimeConfig() {
   return apiFetch("/api/runtime/config");
 }
 
+export function createCompanyProposals(payload = {}) {
+  return apiFetch("/api/discovery/company-proposals", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function getCompanyProposals({ status } = {}) {
+  const query = status ? `?status=${encodeURIComponent(status)}` : "";
+  return apiFetch(`/api/discovery/company-proposals${query}`);
+}
+
+export function decideCompanyProposal(payload = {}) {
+  return apiFetch("/api/discovery/company-proposal-decisions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 export function startDiscoveryQuickStart() {
   return apiFetch("/api/discovery/quick-start", { method: "POST" });
 }
