@@ -6,11 +6,17 @@ import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { candidateSetupInitialize, sourceConfigGet } from "../src/core/db/verbs.mjs";
+import {
+  candidateConfigPatch,
+  candidateSetupInitialize,
+  sourceConfigGet,
+  sourceConfigPut,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
 const FIXED_NOW = new Date("2026-07-04T12:00:00.000Z");
+const PRIVATE_CURRENT_BASE = 145000;
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-company-proposals-route-"));
@@ -46,6 +52,71 @@ function forbidden(name, calls) {
   };
 }
 
+function assertNoCurrentCompLeak(value) {
+  const serialized = JSON.stringify(value);
+  assert.equal(serialized.includes("current_base"), false, "must not leak current_base key");
+  assert.equal(
+    serialized.includes("current_comp_shareable"),
+    false,
+    "must not leak current_comp_shareable key"
+  );
+  assert.equal(
+    serialized.includes(String(PRIVATE_CURRENT_BASE)),
+    false,
+    "must not leak private current base value"
+  );
+}
+
+function seedCandidateForAICompanyDiscovery(repoRoot) {
+  candidateSetupInitialize({ repoRoot });
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      candidate: { domain: "identity automation and applied AI" },
+      location: {
+        home: "New York, NY",
+        remote: true,
+        hybrid: true,
+        onsite: false,
+        relocation: ["NYC metro"],
+      },
+      compensation: {
+        currency: "USD",
+        current_comp_shareable: true,
+        current_base: PRIVATE_CURRENT_BASE,
+        minimum_base: 200000,
+        target_base: 225000,
+        oe_min_base: 100000,
+      },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [
+        {
+          name: "Applied AI",
+          priority: "primary",
+          titles: ["Applied AI Engineer", "Forward Deployed Engineer"],
+        },
+      ],
+      keep_signals: ["agentic developer workflows", "customer-facing prototypes"],
+      cut_signals: ["pure ML research"],
+      tracked_companies: ["Candidate Target Co"],
+      excluded_companies: ["Excluded Co"],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      tracked_companies: [{ name: "Tracked ATS Co", careers_url: "https://jobs.lever.co/tracked" }],
+    },
+  });
+}
+
 function bootServer(repoRoot, opts = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
@@ -59,6 +130,7 @@ function bootServer(repoRoot, opts = {}) {
     loadAgentGuidance: () => null,
     resolveCompanyBoard: opts.resolveCompanyBoard,
     scanCompaniesImpl: opts.scanCompaniesImpl,
+    seedCall: opts.seedCall,
     fetchImpl: opts.fetchImpl,
     now: opts.now || FIXED_NOW,
     runSkillStream: opts.runSkillStream,
@@ -226,6 +298,111 @@ test("POST /api/discovery/company-proposals creates a persisted manual-seed prop
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.html")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/activity.jsonl")), false);
+});
+
+test("POST /api/discovery/company-proposals turns AI seeds into deterministic resolver/scanner proposals", async () => {
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  const calls = [];
+  const aiCalls = [];
+  const chatRuntime = fakeChatRuntime();
+  const server = bootServer(repoRoot, {
+    chatRuntime,
+    seedCall: async (options) => {
+      aiCalls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              companies: [
+                {
+                  name: "Seeded AI Co",
+                  domain_hint: "seeded.example",
+                  why: "Matches agentic workflows.",
+                  role_family_hint: "Applied AI",
+                  confidence: "high",
+                  source_hint: "bounded-ai",
+                },
+              ],
+            }),
+          },
+        ],
+        model: "claude-native-test",
+      };
+    },
+    resolveCompanyBoard: async ({ seed }) => {
+      calls.push({ name: "resolveCompanyBoard", seed });
+      assert.equal(seed.name, "Seeded AI Co");
+      assert.equal(seed.provider, undefined);
+      assert.equal(seed.approved, undefined);
+      return {
+        ok: true,
+        companyName: seed.name,
+        companyDomain: "seeded.example",
+        careersUrl: "https://jobs.lever.co/seeded",
+        jobBoardUrl: "https://jobs.lever.co/seeded",
+        atsProvider: "lever",
+        apiUrl: "https://api.lever.co/v0/postings/seeded",
+        confidence: "high",
+        provenance: [{ source: "ai-domain-hint", url: "https://seeded.example" }],
+      };
+    },
+    scanCompaniesImpl: async (config) => {
+      calls.push({ name: "scanCompanies", config });
+      return {
+        offers: [
+          {
+            company: "Seeded AI Co",
+            title: "Applied AI Engineer",
+            url: "https://jobs.lever.co/seeded/ai-engineer",
+            location: "Remote",
+            bodyText: "Build agentic developer workflows and customer-facing prototypes.",
+            fit: "high",
+            score: 90,
+            gate: "likely-keep",
+            ratingReason: "matches keep signal",
+          },
+        ],
+        errors: [],
+      };
+    },
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    requestedCount: 1,
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.deepEqual(body.data.counts, {
+    seeds: 1,
+    proposals: 1,
+    rejected: 0,
+  });
+  assert.equal(body.data.proposals.length, 1);
+  assert.equal(body.data.proposals[0].company.name, "Seeded AI Co");
+  assert.equal(body.data.proposals[0].confidenceTier, "high-confidence");
+  assert.equal(body.meta.ai.used, true);
+  assert.equal(body.meta.ai.skill, "discover-companies");
+  assert.equal(body.meta.ai.action, "seed-generate");
+  assert.equal(body.meta.ai.operation, "company-seeds");
+
+  assert.equal(aiCalls.length, 1);
+  assert.equal(aiCalls[0].skill, "discover-companies");
+  assert.equal(aiCalls[0].action, "seed-generate");
+  assert.equal(aiCalls[0].outputMode, "native");
+  assert.equal(aiCalls[0].outputName, "company_seed_response");
+  assert.match(aiCalls[0].messages[0].content, /identity automation and applied AI/);
+  assert.match(aiCalls[0].messages[0].content, /Tracked ATS Co/);
+  assert.match(aiCalls[0].messages[0].content, /Excluded Co/);
+  assert.match(aiCalls[0].messages[0].content, /200000/);
+  assertNoCurrentCompLeak(aiCalls[0]);
+  assertNoCurrentCompLeak(body);
+
+  assert.equal(chatRuntime.starts.length, 0);
+  assert.equal(calls.filter((call) => call.name === "resolveCompanyBoard").length, 1);
+  assert.equal(calls.filter((call) => call.name === "scanCompanies").length, 1);
 });
 
 test("POST /api/discovery/company-proposals maps malformed JSON to 400", async () => {
