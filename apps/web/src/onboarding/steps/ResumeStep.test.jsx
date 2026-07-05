@@ -20,8 +20,8 @@ const BASE_STATE = {
     profile: { candidate: {} },
     "form-defaults": {
       document_formats: {
-        standard: "pdf",
-        board_required: [],
+        default_packet_format: "pdf",
+        required_export_formats: [],
       },
     },
   },
@@ -62,8 +62,8 @@ describe("ResumeStep document format preferences", () => {
           profile: { candidate: {} },
           "form-defaults": {
             document_formats: {
-              standard: "pdf",
-              board_required: ["docx"],
+              default_packet_format: "pdf",
+              required_export_formats: ["docx"],
             },
           },
         },
@@ -82,8 +82,8 @@ describe("ResumeStep document format preferences", () => {
 
     expect(apiMocks.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
       document_formats: {
-        standard: "pdf",
-        board_required: ["docx"],
+        default_packet_format: "pdf",
+        required_export_formats: ["docx"],
       },
     });
     expect(apiMocks.extractResumeDocx).not.toHaveBeenCalled();
