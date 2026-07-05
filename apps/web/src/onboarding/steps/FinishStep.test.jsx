@@ -229,6 +229,8 @@ describe("FinishStep first-search setup task", () => {
 
     await FinishStepModule.saveCadenceAndStartFirstSearch({
       mode: "every-3-days",
+      existingSearchPreferences: { posting_age: { mode: "since-last-run" } },
+      now: () => "2026-07-05T22:30:00.000Z",
       saveCandidateFile: async (name, patch) => {
         calls.push(["save", name, patch]);
         return { ok: true };
@@ -240,8 +242,53 @@ describe("FinishStep first-search setup task", () => {
     });
 
     expect(calls).toEqual([
-      ["save", "targeting", { search_preferences: { cadence: { mode: "every-3-days" } } }],
+      [
+        "save",
+        "targeting",
+        {
+          search_preferences: {
+            posting_age: { mode: "since-last-run" },
+            cadence: {
+              mode: "every-3-days",
+              recommended_from: "default",
+              saved_at: "2026-07-05T22:30:00.000Z",
+            },
+          },
+        },
+      ],
       ["start"],
+    ]);
+  });
+
+  it("saves cadence without starting a run when the user chooses Not now", async () => {
+    expect(FinishStepModule.saveCadencePreference).toBeTypeOf("function");
+    const calls = [];
+
+    await FinishStepModule.saveCadencePreference({
+      mode: "manual",
+      existingSearchPreferences: { posting_age: { mode: "fixed-days", days: 7 } },
+      now: () => "2026-07-05T22:45:00.000Z",
+      saveCandidateFile: async (name, patch) => {
+        calls.push(["save", name, patch]);
+        return { ok: true };
+      },
+    });
+
+    expect(calls).toEqual([
+      [
+        "save",
+        "targeting",
+        {
+          search_preferences: {
+            posting_age: { mode: "fixed-days", days: 7 },
+            cadence: {
+              mode: "manual",
+              recommended_from: "default",
+              saved_at: "2026-07-05T22:45:00.000Z",
+            },
+          },
+        },
+      ],
     ]);
   });
 
@@ -288,6 +335,24 @@ describe("FinishStep first-search setup task", () => {
     expectNoFirstSearchRuntimeTokens(html);
   });
 
+  it("shows truthful zero-result completed copy without a sourced-role link", () => {
+    const html = renderFinish(
+      stateWithFirstSearch({
+        status: "completed",
+        summary: { sourcesAttempted: 3, rolesFound: 0 },
+      })
+    );
+
+    expect(html).toContain("Completed");
+    expect(html).toContain("3 sources attempted");
+    expect(html).toContain("0 roles found");
+    expect(html).toContain(
+      "Search completed. No matching roles found yet; refine titles or add a source, then search again from Jobs."
+    );
+    expect(html).not.toContain("View sourced roles");
+    expectNoFirstSearchRuntimeTokens(html);
+  });
+
   it("shows actionable failed state copy and retry starts a new first-run request", async () => {
     const html = renderFinish(
       stateWithFirstSearch({
@@ -306,16 +371,21 @@ describe("FinishStep first-search setup task", () => {
 
     expect(FinishStepModule.retryFirstSearch).toBeTypeOf("function");
     let displayedRun = null;
+    let retryPayload = null;
     const result = await FinishStepModule.retryFirstSearch({
-      startFirstSearchRun: async () => ({
-        ok: true,
-        run: { id: "run-retry", status: "running" },
-      }),
+      startFirstSearchRun: async (payload) => {
+        retryPayload = payload;
+        return {
+          ok: true,
+          run: { id: "run-retry", status: "running" },
+        };
+      },
       setFirstSearchRun: (run) => {
         displayedRun = run;
       },
     });
 
+    expect(retryPayload).toEqual({ retry: true });
     expect(result.run.status).toBe("running");
     expect(displayedRun).toEqual({ id: "run-retry", status: "running" });
   });
