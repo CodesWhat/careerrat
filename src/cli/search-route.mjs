@@ -27,6 +27,7 @@
 import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
 import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
+import { countDeterministicSources } from "../core/onboarding/first-search-run.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other route modules use.
@@ -171,6 +172,7 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
           total: list.length,
         },
         trackedCompanies: tracked.length,
+        deterministicSources: countDeterministicSources({ searchSources, sourcedScan }),
       });
     } catch (err) {
       if (sendDbError(res, err)) return;

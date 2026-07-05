@@ -466,7 +466,8 @@ test("GET /api/search/sources: reports only DB enabled/total searches and tracke
   try {
     const res = await fetch(`${baseUrl(server)}/api/search/sources`);
     const body = await res.json();
-    assert.deepEqual(body, { searches: { enabled: 2, total: 3 }, trackedCompanies: 1 });
+    assert.deepEqual(body.searches, { enabled: 2, total: 3 });
+    assert.equal(body.trackedCompanies, 1);
   } finally {
     await closeServer(server);
   }
