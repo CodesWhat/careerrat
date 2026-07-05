@@ -6,6 +6,7 @@
 import { DISCOVERY_PIPELINE } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import { candidateConfigGet } from "../core/db/verbs.mjs";
+import { applyCompanyProposalDecision } from "../core/discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { prepareQuickStartSourcing } from "./onboard-route.mjs";
@@ -156,6 +157,15 @@ function locksFromPrepared(body) {
   );
 }
 
+function discoveryRouteError(res, err, fallbackCode) {
+  const status = err.status || fallbackCode;
+  sendJson(res, status, {
+    ok: false,
+    code: err.code || (status === 400 ? "BAD_REQUEST" : "COMPANY_DISCOVERY_FAILED"),
+    error: { message: err.message },
+  });
+}
+
 export function mountDiscoveryRoutes({
   addRoute,
   repoRoot,
@@ -166,8 +176,13 @@ export function mountDiscoveryRoutes({
   fetchImpl = fetch,
   resolveCompanyBoard,
   scanCompaniesImpl,
+  gateProposal,
   seedCall,
   now,
+  companyAtsUpsertImpl,
+  sourcedUpsertBatchImpl,
+  captureAndPersistOffersIfDbImpl,
+  writeTrackerImpl,
 }) {
   addRoute("POST", "/api/discovery/company-proposals", async (req, res) => {
     let body;
@@ -204,6 +219,36 @@ export function mountDiscoveryRoutes({
         code: err.code || "COMPANY_PROPOSAL_FAILED",
         error: { message: err.message },
       });
+    }
+  });
+
+  addRoute("POST", "/api/discovery/company-proposal-decisions", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, COMPANY_PROPOSAL_BODY_MAX_BYTES);
+    } catch (err) {
+      discoveryRouteError(res, err, err.status || 400);
+      return;
+    }
+
+    try {
+      const result = await applyCompanyProposalDecision({
+        repoRoot,
+        env,
+        body,
+        fetchImpl,
+        resolveCompanyBoard,
+        scanCompaniesImpl,
+        gateProposal,
+        now,
+        companyAtsUpsertImpl,
+        sourcedUpsertBatchImpl,
+        captureAndPersistOffersIfDbImpl,
+        writeTrackerImpl,
+      });
+      sendJson(res, 200, { ok: true, data: result.data, meta: result.meta });
+    } catch (err) {
+      discoveryRouteError(res, err, err.status || 500);
     }
   });
 
