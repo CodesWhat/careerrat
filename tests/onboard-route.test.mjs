@@ -774,6 +774,27 @@ describe("POST /api/onboard/resume-docx", () => {
       await closeServer(server);
     }
   });
+
+  it("rejects non-DOCX uploads before extraction", async () => {
+    const repoRoot = buildTempRoot();
+    let extractorCalled = false;
+    const extractDocxResumeText = async () => {
+      extractorCalled = true;
+      return { ok: true, text: "Jane Doe\njane@example.com" };
+    };
+    const { server } = await bootServer(repoRoot, {}, { extractDocxResumeText });
+    try {
+      await postJson(server, "/api/onboard/init", {});
+
+      const { status, body } = await postResumeDocx(server, "resume.pdf", Buffer.from("%PDF"));
+
+      assert.equal(status, 400);
+      assert.match(body.error, /resume-docx accepts DOCX/i);
+      assert.equal(extractorCalled, false, "extension validation must fail before DOCX parsing");
+    } finally {
+      await closeServer(server);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
