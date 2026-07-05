@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
 status: In Progress
-stopped_at: Completed 06-04-PLAN.md
-last_updated: "2026-07-05T17:02:23.062Z"
+stopped_at: Completed 06-05-PLAN.md
+last_updated: "2026-07-05T17:08:18.447Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 32
-  percent: 50
+  completed_plans: 33
+  percent: 51
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Execute Phase 6 Wave 1 now that Wave 0 RED coverage is complete.
-2. Keep 06-04 through 06-07 focused on making the RED contracts green before the final rollup.
+1. Continue Phase 6 Wave 1 with 06-06 source setup after 06-05 packet migration.
+2. Keep 06-06 and 06-07 focused on making the remaining RED contracts green before the final rollup.
 3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T17:02:23.054Z
-**Stopped at:** Completed 06-04-PLAN.md
+**Last session:** 2026-07-05T17:08:18.438Z
+**Stopped at:** Completed 06-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -103,6 +103,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P02 | 1 min | 1 tasks | 2 files |
 | Phase 06 P03 | 5 min | 3 tasks | 4 files |
 | Phase 06 P04 | 5 min | 2 tasks | 4 files |
+| Phase 06 P05 | 1 min | 1 tasks | 3 files |
 
 ## Decisions
 
@@ -176,3 +177,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: Normal React app navigation now contains only /app SPA product routes; legacy /tracker remains outside the nav. — This makes APP-01 green for the NavList RED guard.
 - [Phase 06]: tracker-dev keeps generated dashboard, raw tracker/activity, and storage-adapter feed routes only as named debug/export compatibility routes. — This keeps remaining generated-file access auditable for APP-04.
 - [Phase 06]: Missing generated tracker exports skip only the debug/export render path; /app and DB APIs still boot. — This preserves APP-03 by preventing compatibility exports from becoming product prerequisites.
+- [Phase 06]: Packet product APIs now read application rows through requireDb() and assembleTrackerObject(db), not generated tracker exports. — This makes the APP-02 packet route contract green while preserving existing tracker-shaped stage classification.
+- [Phase 06]: Packet list/detail routes translate missing SQLite state to HTTP 409 setup errors. — This preserves APP-03 by treating missing DB as a product setup failure instead of falling back to workspace/tracker.json.
