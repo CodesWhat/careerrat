@@ -154,7 +154,7 @@ Plans:
 
 **Requirements:** APP-01, APP-02, APP-03, APP-04
 
-**Plans:** 7 plans
+**Plans:** 8 plans
 
 Plans:
 **Wave 0**
@@ -169,6 +169,10 @@ Plans:
 - [ ] 06-05-PLAN.md — Migrate packet product APIs to DB-derived reads.
 - [ ] 06-06-PLAN.md — Migrate board/source setup product writes to DB source config.
 - [ ] 06-07-PLAN.md — Migrate scanner context, results, and seen sets to DB-derived state.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 06-08-PLAN.md — Run the final backend, frontend, and global static-guard rollup.
 
 **Success Criteria**:
 
