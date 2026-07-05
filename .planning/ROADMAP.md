@@ -119,10 +119,18 @@ Plans:
 **Plans:** 5 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 05-01-PLAN.md — Cost-boundary regression lock for deterministic discovery paths.
 - [ ] 05-02-PLAN.md — Structured-output and no-AI route negative coverage.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 05-03-PLAN.md — Confirm-first write safety rollup.
 - [ ] 05-04-PLAN.md — Docs alignment and docs drift guard.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 05-05-PLAN.md — Final focused verification rollup.
 
 **Success Criteria**:

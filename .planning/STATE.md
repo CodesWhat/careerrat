@@ -3,13 +3,13 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 05 - Verification and Docs
-status: Ready to plan
-stopped_at: Phase 04 complete; ready to plan Phase 05
-last_updated: "2026-07-05T03:08:29.493Z"
+status: Ready to execute
+stopped_at: Phase 05 planned; ready to execute Phase 05
+last_updated: "2026-07-05T12:32:24Z"
 progress:
   total_phases: 5
   completed_phases: 4
-  total_plans: 23
+  total_plans: 28
   completed_plans: 23
   percent: 80
 ---
@@ -27,8 +27,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 - **Project initialized:** 2026-07-04
 - **Current phase:** 05 - Verification and Docs
-- **Current phase status:** Ready to plan
-- **Next command:** `$gsd-plan-phase 5`
+- **Current phase status:** Ready to execute
+- **Next command:** `$gsd-execute-phase 5`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -39,7 +39,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - Formal GSD project subagents are not installed in this runtime, so initialization was performed inline.
 - Existing user changes in `tests/release-safety.test.mjs` and `tmp-skill-conversion/` are not part of this GSD initialization.
 - `discover-companies` is now the proof-point migration: local proposal APIs are the default app path, and full skill/chat paths remain explicit.
-- Phase 5 should lock in regression coverage and documentation alignment without broadening into new runtime migrations unless the user asks.
+- Phase 5 is planned as five verification/docs plans across three waves; execution should not broaden into new runtime migrations unless a planned test exposes a defect.
 
 ## Open Questions
 
@@ -47,16 +47,16 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Plan Phase 5 with `$gsd-plan-phase 5`.
-2. Execute Phase 5 after the verification/docs plan is accepted.
+1. Execute Phase 5 with `$gsd-execute-phase 5`.
+2. Use the focused validation commands in `05-VALIDATION.md`; do not use dirty `tests/release-safety.test.mjs` as the primary signal.
 
 ---
 *State initialized: 2026-07-04*
 
 ## Session
 
-**Last session:** 2026-07-05T03:08:29.493Z
-**Stopped at:** Phase 04 complete; ready to plan Phase 05.
+**Last session:** 2026-07-05T12:32:24Z
+**Stopped at:** Phase 05 planned; ready to execute Phase 05.
 **Resume file:** None
 
 ## Performance Metrics
@@ -86,6 +86,11 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 04-runtime-routing P03 | 3min | 3 tasks | 3 files |
 | Phase 04-runtime-routing P04 | 3min | 3 tasks | 2 files |
 | Phase 04-runtime-routing P05 | 3min | 3 tasks | 4 files |
+| Phase 05-verification-and-docs P01 | planned | 1 tasks | 1 files |
+| Phase 05-verification-and-docs P02 | planned | 2 tasks | 2 files |
+| Phase 05-verification-and-docs P03 | planned | 2 tasks | 3 files |
+| Phase 05-verification-and-docs P04 | planned | 2 tasks | 4 files |
+| Phase 05-verification-and-docs P05 | planned | 1 tasks | 1 files |
 
 ## Decisions
 
@@ -143,3 +148,4 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 04-runtime-routing]: Proposal decisions route through the local Phase 3 decision endpoint with expectedVersion. — Stale conflicts reload proposals and stay in the local panel instead of launching chat or retained skill runtime.
 - [Phase 04-runtime-routing]: FinishStep discovery handoffs remain explicit button-triggered chat sessions. — Quick-start/next routes are gated by runtimeCapabilities.discoveryChatHandoffs.
 - [Phase 04-runtime-routing]: Proposal review UAT passed after a mobile action-row overflow fix. — Browser UAT covered desktop/mobile local proposal, conflict, refresh, no-AI, and no /api/skill/run behavior.
+- [Phase 05-verification-and-docs]: Phase 5 planning is verification-first and fail-closed. — The final rollup plan cannot complete unless backend tests, frontend tests, and static scans all pass.
