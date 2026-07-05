@@ -8,12 +8,13 @@ import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { mountBoardsRoutes } from "../src/cli/boards-route.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
-import { parseYaml } from "../src/core/profile/yaml.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -70,6 +71,7 @@ async function postJson(server, path, body) {
 }
 
 after(() => {
+  closeAll();
   for (const root of cleanupRoots.splice(0)) {
     try {
       rmSync(root, { recursive: true, force: true });
@@ -158,8 +160,24 @@ test("POST /api/boards/add: an unparseable URL -> 400, nothing written", async (
   }
 });
 
-test("POST /api/boards/add: a LinkedIn URL persists an auth:true, enabled:false browser source", async () => {
+test("POST /api/boards/add: valid URL without an initialized DB -> 409", async () => {
   const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/boards/add", {
+      url: "https://www.linkedin.com/jobs/search/?keywords=%22Forward%20Deployed%20Engineer%22",
+    });
+    assert.equal(status, 409);
+    assert.match(body.error, /database/i);
+    assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/boards/add: a LinkedIn URL persists an auth:true, enabled:false DB browser source", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
   const server = await bootServer(repoRoot);
   try {
     const linkedinUrl =
@@ -176,13 +194,12 @@ test("POST /api/boards/add: a LinkedIn URL persists an auth:true, enabled:false 
     assert.equal(body.searches[0].platform, "linkedin");
     assert.equal(body.searches[0].enabled, false);
 
-    const written = parseYaml(
-      readFileSync(userPath({ repoRoot }, "config/search-sources.yml"), "utf8")
-    );
-    assert.equal(written.searches.length, 1);
-    assert.equal(written.searches[0].url, linkedinUrl);
-    assert.equal(written.searches[0].label, "LinkedIn — FDE");
-    assert.equal(written.searches[0].enabled, false);
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(stored.searches.length, 1);
+    assert.equal(stored.searches[0].url, linkedinUrl);
+    assert.equal(stored.searches[0].label, "LinkedIn — FDE");
+    assert.equal(stored.searches[0].enabled, false);
+    assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
   } finally {
     await closeServer(server);
   }
@@ -190,16 +207,26 @@ test("POST /api/boards/add: a LinkedIn URL persists an auth:true, enabled:false 
 
 test("POST /api/boards/add: appends onto an existing config rather than overwriting it", async () => {
   const repoRoot = tempRepo();
-  const existingConfigPath = userPath({ repoRoot }, "config/search-sources.yml");
-  mkdirSync(dirname(existingConfigPath), { recursive: true });
-  writeFileSync(
-    existingConfigPath,
-    "title_filter:\n  positive: []\n  negative: []\n" +
-      "location_filter:\n  always_allow: []\n  allow: []\n  block: []\n" +
-      "searches:\n  - provider: HiringCafe\n    source_type: url-query\n    label: existing\n" +
-      "    query: existing\n    enabled: true\n" +
-      "tracked_companies: []\nsource_catalog: {}\n"
-  );
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: { positive: [], negative: [] },
+      location_filter: { always_allow: [], allow: [], block: [] },
+      searches: [
+        {
+          provider: "HiringCafe",
+          source_type: "url-query",
+          label: "existing",
+          query: "existing",
+          enabled: true,
+        },
+      ],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
   const server = await bootServer(repoRoot);
   try {
     const { status, body } = await postJson(server, "/api/boards/add", {
@@ -207,6 +234,11 @@ test("POST /api/boards/add: appends onto an existing config rather than overwrit
     });
     assert.equal(status, 200);
     assert.equal(body.searches.length, 2);
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.equal(stored.searches.length, 2);
+    assert.equal(stored.searches[0].label, "existing");
+    assert.equal(stored.searches[1].platform, "linkedin");
+    assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
   } finally {
     await closeServer(server);
   }
