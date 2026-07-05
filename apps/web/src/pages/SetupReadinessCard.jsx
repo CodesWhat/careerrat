@@ -9,6 +9,29 @@ const READINESS_ROWS = [
   { key: "deep_ingest_complete", label: "Deep ingest" },
 ];
 
+const FIRST_SEARCH = {
+  not_started: {
+    label: "Not started",
+    color: "var(--mustard)",
+    detail: "No search run yet",
+  },
+  running: {
+    label: "Running",
+    color: "var(--mustard)",
+    detail: "Searching deterministic public sources...",
+  },
+  completed: {
+    label: "Completed",
+    color: "var(--teal)",
+    detail: "Search completed.",
+  },
+  failed: {
+    label: "Failed",
+    color: "var(--m-error)",
+    detail: "First search failed. Retry from onboarding.",
+  },
+};
+
 const chipStyle = {
   alignItems: "flex-start",
   border: "1px solid var(--paper-edge)",
@@ -49,12 +72,39 @@ function isComplete(setup) {
   return READINESS_ROWS.every((row) => readiness[row.key] === true);
 }
 
-export function SetupReadinessCard({ setup }) {
+function unwrapRun(value) {
+  if (!value || typeof value !== "object") return null;
+  if (value.run && typeof value.run === "object") return value.run;
+  return value;
+}
+
+function firstSearchContext(setup, firstSearchRun) {
+  const run =
+    unwrapRun(firstSearchRun) ||
+    unwrapRun(setup?.firstSearchRun) ||
+    unwrapRun(setup?.sourcing?.firstSearchRun);
+  if (!run) return null;
+  const status = FIRST_SEARCH[run.status] ? run.status : "not_started";
+  const summary = run.summary || {};
+  const sourcesAttempted = Number(summary.sourcesAttempted ?? summary.attemptedSources ?? 0);
+  const rolesFound = Number(summary.rolesFound ?? summary.new ?? summary.offerCount ?? 0);
+  const counts =
+    status === "completed" && Number.isFinite(sourcesAttempted) && Number.isFinite(rolesFound)
+      ? ` ${sourcesAttempted} sources attempted, ${rolesFound} roles found.`
+      : "";
+  return {
+    ...FIRST_SEARCH[status],
+    counts,
+  };
+}
+
+export function SetupReadinessCard({ setup, firstSearchRun }) {
   if (!setup || isComplete(setup)) return null;
 
   const readiness = setup.readiness || {};
   const missing = setup.missing || {};
   const searchReady = readiness.search_ready === true;
+  const firstSearch = firstSearchContext(setup, firstSearchRun);
 
   return (
     <Card
@@ -94,6 +144,33 @@ export function SetupReadinessCard({ setup }) {
             </div>
           );
         })}
+        {firstSearch ? (
+          <div
+            className="chip"
+            style={{
+              ...chipStyle,
+              color: firstSearch.color,
+            }}
+          >
+            <ClockIcon style={iconStyle} />
+            <span style={{ minWidth: 0 }}>
+              <span style={{ display: "block" }}>First search</span>
+              <span
+                className="field__hint"
+                style={{ color: firstSearch.color, display: "block", marginTop: 3 }}
+              >
+                {firstSearch.label}
+              </span>
+              <span
+                className="field__hint"
+                style={{ color: firstSearch.color, display: "block", marginTop: 3 }}
+              >
+                {firstSearch.detail}
+                {firstSearch.counts}
+              </span>
+            </span>
+          </div>
+        ) : null}
       </div>
     </Card>
   );
