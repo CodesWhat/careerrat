@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 status: Ready to plan
-stopped_at: Completed 03-02-PLAN.md
-last_updated: "2026-07-05T00:07:21.808Z"
+stopped_at: Completed 03-03-PLAN.md
+last_updated: "2026-07-05T00:16:34.531Z"
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 13
-  percent: 72
+  completed_plans: 14
+  percent: 78
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-05T00:07:21.797Z
-**Stopped at:** Completed 03-02-PLAN.md
+**Last session:** 2026-07-05T00:16:01.801Z
+**Stopped at:** Completed 03-03-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -78,6 +78,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 02-bounded-ai-foundation P07 | 3 min | 1 tasks | 5 files |
 | Phase 03-company-discovery-api P01 | 4min | 1 tasks | 9 files |
 | Phase 03-company-discovery-api P02 | 4min | 1 tasks | 4 files |
+| Phase 03-company-discovery-api P03 | 6min | 1 tasks | 2 files |
 
 ## Decisions
 
@@ -115,3 +116,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 03-company-discovery-api]: Resolver cache and proposal state remain DB-owned app state; source-config, sourced rows, activity, and generated tracker/dashboard files are not written by these verbs. — Preserves D-29/D-30 and keeps proposal generation separate from confirmed discovery writes.
 - [Phase 03-company-discovery-api]: Due-refresh logic uses the pinned Phase 03 constants: 14-day TTL, failure threshold 2, and zero-job threshold 2. — Keeps cache invalidation deterministic and aligned with the resolved research decisions.
 - [Phase 03-company-discovery-api]: Proposal state patches require expectedVersion and return code CONFLICT without mutating stored JSON on stale attempts. — Provides the D-23 conflict boundary for later decision routes.
+- [Phase 03-company-discovery-api]: Seed URL hints remain untrusted until resolver checks scheme, host, DNS/lookup result, redirects, and supported provider identity. — Preserves DISC-02 deterministic URL authority and prevents model/manual hints from becoming final write authority.
+- [Phase 03-company-discovery-api]: Supported ATS promotion uses sourced-scanner inferProvider(); unsupported public pages are persisted as cache-only and non-promotable. — Preserves the supported/unsupported split and keeps unsupported public pages out of approve-supported-ats flows.
+- [Phase 03-company-discovery-api]: Resolver refresh policy exports the pinned Phase 03 constants and REFRESH_REASONS enum for downstream decision plans. — Keeps TTL, zero-job, failure, scan-status, and explicit refresh behavior consistent across resolver and later decision routes.
