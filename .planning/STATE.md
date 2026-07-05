@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 06
 status: In Progress
-stopped_at: Completed 06-06-PLAN.md
-last_updated: "2026-07-05T17:13:52.843Z"
+stopped_at: Completed 06-07-PLAN.md
+last_updated: "2026-07-05T17:21:17.451Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 34
-  percent: 52
+  completed_plans: 35
+  percent: 53
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Continue Phase 6 Wave 1 with 06-07 scanner context/results after 06-06 source setup.
-2. Keep 06-07 focused on making the remaining RED contracts green before the final rollup.
+1. Continue Phase 6 Wave 2 with 06-08 final backend, frontend, and static-guard rollup.
+2. Keep 06-08 focused on validating the full DB app shell boundary after Wave 1 migrations.
 3. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T17:13:52.836Z
-**Stopped at:** Completed 06-06-PLAN.md
+**Last session:** 2026-07-05T17:21:17.443Z
+**Stopped at:** Completed 06-07-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -105,6 +105,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P04 | 5 min | 2 tasks | 4 files |
 | Phase 06 P05 | 1 min | 1 tasks | 3 files |
 | Phase 06 P06 | 4 min | 1 tasks | 2 files |
+| Phase 06 P07 | 4 min | 3 tasks | 5 files |
 
 ## Decisions
 
@@ -183,3 +184,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: Board additions now read and write DB `search-sources` config through source-config verbs instead of `config/search-sources.yml`. — This makes the APP-02 source setup write contract green and keeps legacy YAML as non-canonical compatibility state.
 - [Phase 06]: Malformed board URLs are validated before DB access so bad input remains HTTP 400 while missing DB remains HTTP 409. — This preserves the D-04/D-06 API boundary between request validation and setup failure.
 - [Phase 06]: Board preview remains deterministic and DB-free. — Preview URL construction stays a pure helper-backed route while only persisted source setup requires SQLite.
+- [Phase 06]: DB scanner context reads only SQLite application and sourced rows; generated tracker exports are not part of DB-mode duplicate context. — This preserves APP-02/APP-03 DB source-of-truth boundaries for scanner context.
+- [Phase 06]: Legacy tracker-export seen sets remain available only when no SQLite database exists, preserving compatibility CLI mode outside product routes. — This keeps existing non-product CLI compatibility while product search routes fail closed without DB.
+- [Phase 06]: Search product routes now require SQLite for scan, sources, and results; legacy config and scan-result files are ignored as product state. — This mitigates generated-file dependency regressions in the search route boundary.
