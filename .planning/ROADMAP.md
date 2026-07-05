@@ -79,6 +79,29 @@ Plans:
 
 **Requirements:** RUNT-01, RUNT-02, RUNT-03
 
+**Plans:** 5 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Extend runtime config capability metadata while retaining `POST /api/skill/run`.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 04-02-PLAN.md — Load runtime capabilities into the onboarding app and pass them to steps.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 04-03-PLAN.md — Make Companies step default to local company proposal create/read routes.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 04-04-PLAN.md — Wire Companies step proposal decisions through the local decision route.
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 04-05-PLAN.md — Preserve explicit discovery chat handoffs and close routing docs.
+
 **Success Criteria**:
 
 1. App discovery controls call the new company discovery API instead of starting a whole skill session.
@@ -128,4 +151,4 @@ Plans:
 
 ---
 *Roadmap created: 2026-07-04*
-*Last updated: 2026-07-04 after Phase 2 verification*
+*Last updated: 2026-07-05 after Phase 04 planning*

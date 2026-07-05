@@ -343,22 +343,25 @@ if (!skill) {
 | A2 | Extending `GET /api/runtime/config` is preferable to adding a separate capability route. | Standard Stack, Architecture Patterns | If maintainers want a new route, the same capability payload and tests still apply, but route docs and client wiring change. |
 | A3 | Runtime config can initially report AI route/allowlist capability without proving the SDK dynamic import on every page load. | Architecture Patterns, Open Questions | If the UI requires installed-SDK precision, the planner should add an async SDK availability check with caching and tests for missing SDK. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Which screen owns the final proposal review UI?**
    - What we know: `CompaniesStep.jsx` is the current company discovery surface and still defaults to `ChatPanel skill="discover-companies"`. [VERIFIED: codebase grep]
    - What's unclear: `.planning/STATE.md` still asks whether proposal confirmation belongs in `/search`, `/app`, or a dedicated discovery drawer. [VERIFIED: .planning/STATE.md]
    - Recommendation: implement the first Phase 4 slice in `CompaniesStep.jsx` and keep API wrappers reusable. [ASSUMED]
+   - RESOLVED: Phase 4 will put the first proposal review implementation in `CompaniesStep.jsx`, because that is the existing company discovery surface. API wrappers stay reusable so a later `/search`, `/app`, or drawer surface can reuse the same local routes without changing Phase 3 core behavior.
 
 2. **How precise should runtime config be about SDK availability?**
    - What we know: `GET /api/runtime/config` currently returns only one-shot skill allowlist, while `runSkillStream()` and chat runtime return clear 501/400 errors when AI route or SDK is missing. [VERIFIED: codebase grep] [VERIFIED: tests]
    - What's unclear: whether the UI needs to know SDK install status before the user clicks an AI control. [ASSUMED]
    - Recommendation: expose AI route, one-shot allowlist, chat allowlist, and discovery capability flags first; preserve click-time 501/400 errors for SDK-specific failures unless a new cached SDK check is planned. [ASSUMED]
+   - RESOLVED: Phase 4 will expose AI route, one-shot allowlist, chat allowlist, and discovery capability flags from `GET /api/runtime/config`, but will not add an eager SDK dynamic-import probe. SDK-specific failures remain click-time route errors covered by existing runtime tests.
 
 3. **Should quick-start be split into non-chat setup and chat start?**
    - What we know: `/api/discovery/quick-start` currently prepares source config and starts/reuses a discovery chat. [VERIFIED: codebase grep]
    - What's unclear: whether Phase 4 should decompose quick-start too or only the company discovery control. [ASSUMED]
    - Recommendation: preserve quick-start behavior for RUNT-03 and focus RUNT-02 on the company proposal control; splitting quick-start can be a later cleanup. [ASSUMED]
+   - RESOLVED: Phase 4 will preserve `/api/discovery/quick-start` and `/api/discovery/next` as explicit agent-led handoffs. The default company discovery control moves to local proposals; splitting quick-start into setup-only and chat-start actions is deferred.
 
 ## Environment Availability
 
