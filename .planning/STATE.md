@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 03
 status: Ready to plan
-stopped_at: Completed 03-04-PLAN.md
-last_updated: "2026-07-05T00:26:41.180Z"
+stopped_at: Completed 03-05-PLAN.md
+last_updated: "2026-07-05T00:36:30.154Z"
 progress:
   total_phases: 5
   completed_phases: 2
   total_plans: 18
-  completed_plans: 15
-  percent: 83
+  completed_plans: 16
+  percent: 89
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-05T00:26:41.171Z
-**Stopped at:** Completed 03-04-PLAN.md
+**Last session:** 2026-07-05T00:36:30.145Z
+**Stopped at:** Completed 03-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -80,6 +80,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 03-company-discovery-api P02 | 4min | 1 tasks | 4 files |
 | Phase 03-company-discovery-api P03 | 6min | 1 tasks | 2 files |
 | Phase 03-company-discovery-api P04 | 12min | 1 tasks | 6 files |
+| Phase 03-company-discovery-api P05 | 7min | 1 tasks | 3 files |
 
 ## Decisions
 
@@ -123,3 +124,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 03-company-discovery-api]: Company seed output is advisory only; schema excludes final URL, provider, API URL, approval, and write-state fields. — Keeps AI/manual seed input from becoming trusted write authority.
 - [Phase 03-company-discovery-api]: Candidate seed prompts may include minimum base and OE floor only; current compensation keys and values are excluded. — Preserves the AGENTS.md current-comp privacy boundary while still allowing fit-aware seed generation.
 - [Phase 03-company-discovery-api]: No manual seeds plus no AI route returns the shared bounded-AI 501 manual fallback envelope instead of launching chat/full skill. — Preserves deterministic API behavior and avoids hidden runtime escalation.
+- [Phase 03-company-discovery-api]: High-confidence proposals require supported ATS proof, current viable role evidence, JD capture, clean dedupe/exclusion/in-play checks, and comp clearing minimum_base. — This keeps discovery proposals confirm-first and prevents weak scanner hits from becoming approval actions.
+- [Phase 03-company-discovery-api]: Unposted, uncertain, or top-of-band-only compensation remains borderline/review-only; below-floor posted compensation rejects with comp-below-floor. — Proposal confidence now reflects D-24/D-25 comp plausibility without using current compensation.
+- [Phase 03-company-discovery-api]: Proposal generation captures JD artifacts with offersWithCapturedJobs() but does not persist sourced rows before approval. — Captured evidence is available for Plan 03-06 while preserving the confirmation-only write boundary.
