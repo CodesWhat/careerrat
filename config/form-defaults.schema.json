@@ -21,6 +21,28 @@
       "type": "object",
       "additionalProperties": { "type": ["string", "number", "boolean", "null"] }
     },
+    "document_formats": {
+      "description": "Packet export preferences for generated application artifacts.",
+      "type": "object",
+      "required": ["default_packet_format", "required_export_formats"],
+      "additionalProperties": false,
+      "properties": {
+        "default_packet_format": {
+          "type": "string",
+          "enum": ["pdf", "docx"],
+          "default": "pdf"
+        },
+        "required_export_formats": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["pdf", "docx"]
+          },
+          "uniqueItems": true,
+          "default": []
+        }
+      }
+    },
     "confirm_current_role": { "type": "boolean" },
     "confirm_current_disclosure": { "type": "boolean" },
     "auto_submit": { "type": "boolean" }

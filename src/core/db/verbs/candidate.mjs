@@ -105,6 +105,10 @@ const DEFAULTS = {
     portfolio: null,
     eeo_default: "Prefer not to answer",
     screening_answers: {},
+    document_formats: {
+      default_packet_format: "pdf",
+      required_export_formats: [],
+    },
     confirm_current_role: false,
     auto_submit: false,
   },
