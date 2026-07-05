@@ -58,3 +58,7 @@ test("company ATS verbs keep sourced-scan config in SQLite without writing compa
   assert.equal(removed.status, "removed");
   assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, []);
 });
+
+test("VER-04 company ATS source-config owner does not write generated tracker exports", () => {
+  assert.fail("VER-04 source-config ownership assertions are not implemented yet");
+});

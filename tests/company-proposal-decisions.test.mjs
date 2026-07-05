@@ -554,3 +554,7 @@ test("decision endpoint fails closed for missing records, stale versions, decide
   assert.equal(response.status, 422);
   assert.equal(response.body.code, "VALIDATION_FAILED");
 });
+
+test("VER-04 invalid and review-only decisions fail closed without confirmed writes", async () => {
+  assert.fail("VER-04 invalid decision write-safety assertions are not implemented yet");
+});
