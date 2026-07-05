@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
 status: In Progress
-stopped_at: Completed 07-02-PLAN.md
-last_updated: "2026-07-05T21:45:13.151Z"
+stopped_at: Completed 07-03-PLAN.md
+last_updated: "2026-07-05T22:09:25.908Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 30
-  percent: 83
+  completed_plans: 31
+  percent: 86
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T21:45:13.141Z
-**Stopped at:** Completed 07-02-PLAN.md
+**Last session:** 2026-07-05T22:07:43.342Z
+**Stopped at:** Completed 07-03-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -110,6 +110,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P10 | 6 min | 2 tasks | 5 files |
 | Phase 07 P01 | 6 min | 3 tasks | 2 files |
 | Phase 07 P02 | 5 min | 2 tasks | 4 files |
+| Phase 07 P03 | 4 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -204,3 +205,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: The sourcing_runs contract requires generated JSON columns and explicit latest-purpose/running-status indexes. — This keeps durable run reads queryable while preserving JSON state payloads for summary and error details.
 - [Phase 07]: First-search route responses are forbidden from carrying chat, skill-runtime, or discovery-skill handoff tokens. — This locks the first search to deterministic local code instead of hidden agent runtime.
 - [Phase 07]: Deterministic source counts distinguish fetchable RSS and supported ATS companies from browser/auth/url-query-only sources. — This keeps automatic first search on unauthenticated deterministic sources only.
+- [Phase 07]: Plan 07-03 remained test-only and intentionally RED; implementation is left to later Phase 7 plans. — The plan's purpose is to define failing contracts for subsequent implementation work.
+- [Phase 07]: Document format contracts use form-defaults.document_formats.default_packet_format and required_export_formats. — PDF remains the default packet format while board-required exports such as DOCX are explicitly modeled.
+- [Phase 07]: First-search UI contracts replace discovery-chat quick-start expectations with local sourcing-run expectations. — Phase 7 routes first search through deterministic sourcing run state instead of chat or retained skill runtime.
