@@ -37,8 +37,8 @@
 - [x] **VER-01**: Tests prove deterministic discovery steps do not call AI.
 - [x] **VER-02**: Tests cover structured-output parse failure, corrective retry, and schema rejection.
 - [x] **VER-03**: Tests cover no-AI behavior for migrated app routes.
-- [ ] **VER-04**: Tests cover duplicate/excluded company handling and confirmed source-config writes.
-- [ ] **VER-05**: Documentation updates keep `AGENTS.md`, `docs/ARCHITECTURE.md`, and app route behavior aligned.
+- [x] **VER-04**: Tests cover duplicate/excluded company handling and confirmed source-config writes.
+- [x] **VER-05**: Documentation updates keep `AGENTS.md`, `docs/ARCHITECTURE.md`, and app route behavior aligned.
 
 ## v2 Requirements
 
@@ -90,8 +90,8 @@
 | VER-01 | Phase 5 | Complete |
 | VER-02 | Phase 5 | Complete |
 | VER-03 | Phase 5 | Complete |
-| VER-04 | Phase 5 | Pending |
-| VER-05 | Phase 5 | Pending |
+| VER-04 | Phase 5 | Complete |
+| VER-05 | Phase 5 | Complete |
 
 **Coverage:**
 

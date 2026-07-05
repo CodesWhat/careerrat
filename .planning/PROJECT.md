@@ -33,11 +33,11 @@ Rolester must complete job-search work locally with predictable cost: determinis
 - Phase 2 validated the bounded-AI foundation: shared helper envelopes, provider-native structured-output support behind `callAI()`, bounded assist/intake/resume-AI migrations, no-AI/manual degradation, and metadata-only telemetry/privacy regressions.
 - Phase 3 validated the Company Discovery API: bounded/manual company seeds, deterministic safe ATS resolution/cache, provider scanning, JD capture, proposal gating, latest-pending reads, refresh decisions, and confirmed writes through existing company/source paths.
 - Phase 4 validated Runtime Routing: app discovery controls default to local proposal APIs, runtime config drives AI/chat capability gating, explicit discovery chat handoffs remain available, and retained `POST /api/skill/run` stays allowlisted/documented for tool-heavy workflows.
+- Phase 5 validated verification and docs: deterministic discovery paths are AI-free, structured/no-AI failures degrade safely, confirm-first company writes are locked, docs match route behavior, and the final focused backend/frontend/static gate passes.
 
 ### Active
 
-- [ ] Add cost and no-AI regression tests so deterministic routes cannot accidentally call a model.
-- [ ] Finish documentation alignment across `AGENTS.md`, `docs/ARCHITECTURE.md`, and app route behavior.
+- None for v1.0; all v1 requirements are complete.
 
 ### Out of Scope
 
@@ -53,7 +53,7 @@ The current app already contains both runtime shapes. `src/core/ai/skill-runtime
 
 The new architectural decision is to treat a skill as a product contract, not the default implementation mechanism. For example, `discover-companies` should not run an entire agent skill just to find employer names. A bounded AI call can propose candidate company seeds as JSON, then TypeScript can resolve careers URLs, scan roles through existing provider APIs, enforce dedupe/exclusion rules, present proposals, and write confirmed additions through `rolester companies` or DB source-config verbs.
 
-Phase 3 turned that `discover-companies` split into working local APIs. Phase 4 routed app surfaces to those APIs by default while keeping explicit chat handoffs and the allowlisted full skill runtime available for workflows that still need tool loops or human-watched orchestration. Phase 5 should lock those boundaries with final cost/no-AI regressions and documentation alignment.
+Phase 3 turned that `discover-companies` split into working local APIs. Phase 4 routed app surfaces to those APIs by default while keeping explicit chat handoffs and the allowlisted full skill runtime available for workflows that still need tool loops or human-watched orchestration. Phase 5 locked those boundaries with final cost/no-AI regressions, confirm-first write-safety coverage, documentation alignment, and a passing focused verification rollup.
 
 ## Constraints
 
@@ -78,6 +78,7 @@ Phase 3 turned that `discover-companies` split into working local APIs. Phase 4 
 | Runtime config is the UI capability source | App controls need server-owned booleans for AI, local proposals, manual seeds, chat handoffs, and retained full skill runtime | Validated in Phase 4 |
 | Local company proposal routes are the app default | Company discovery in the app should create/read/decide local proposals before any chat/full skill runtime is considered | Validated in Phase 4 |
 | Discovery chat and full skill runtime are explicit paths | Agent-led workflows remain available, but only after user action and runtime capability gating | Validated in Phase 4 |
+| Focused verification is the Phase 5 signal | Unrelated local edits in `tests/release-safety.test.mjs` make full `npm test` a noisy signal for this phase | Validated in Phase 5 |
 
 ## Evolution
 
@@ -98,4 +99,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state
 
 ---
-*Last updated: 2026-07-05 after Phase 4 verification*
+*Last updated: 2026-07-05 after Phase 5 verification*

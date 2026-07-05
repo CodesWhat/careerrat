@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 current_phase: 05
-status: Ready to execute
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-07-05T12:51:03.075Z"
+status: Milestone complete
+stopped_at: Phase 05 verified; milestone complete
+last_updated: "2026-07-05T13:17:12.692Z"
 progress:
   total_phases: 5
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 28
-  completed_plans: 25
-  percent: 89
+  completed_plans: 28
+  percent: 100
 ---
 
 # State: Rolester Skill-to-API Runtime
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 05 — Verification and Docs
+**Current focus:** v1.0 milestone complete
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
 - **Current phase:** 05
-- **Current phase status:** Ready to execute
-- **Next command:** `$gsd-execute-phase 5`
+- **Current phase status:** Milestone complete
+- **Next command:** `$gsd-progress`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -39,7 +39,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - Formal GSD project subagents are not installed in this runtime, so initialization was performed inline.
 - Existing user changes in `tests/release-safety.test.mjs` and `tmp-skill-conversion/` are not part of this GSD initialization.
 - `discover-companies` is now the proof-point migration: local proposal APIs are the default app path, and full skill/chat paths remain explicit.
-- Phase 5 is planned as five verification/docs plans across three waves; execution should not broaden into new runtime migrations unless a planned test exposes a defect.
+- Phase 5 completed all five verification/docs plans across three waves and passed canonical verification.
 
 ## Open Questions
 
@@ -47,8 +47,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Execute Phase 5 with `$gsd-execute-phase 5`.
-2. Use the focused validation commands in `05-VALIDATION.md`; do not use dirty `tests/release-safety.test.mjs` as the primary signal.
+1. Review `.planning/phases/05-verification-and-docs/05-VERIFICATION.md` and `05-VERIFICATION-ROLLUP.md` if you want the closeout evidence.
+2. Use `$gsd-progress` for the current GSD handoff before deciding whether to ship or start v2 planning.
 
 ---
 *State initialized: 2026-07-04*
