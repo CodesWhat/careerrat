@@ -2,33 +2,33 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-current_phase: 04
-status: Ready to execute
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-07-05T02:04:51.452Z"
+current_phase: 05 - Verification and Docs
+status: Ready to plan
+stopped_at: Phase 04 complete; ready to plan Phase 05
+last_updated: "2026-07-05T03:08:29.493Z"
 progress:
   total_phases: 5
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 23
-  completed_plans: 20
-  percent: 60
+  completed_plans: 23
+  percent: 80
 ---
 
 # State: Rolester Skill-to-API Runtime
 
 ## Project Reference
 
-See: `.planning/PROJECT.md` (updated 2026-07-04)
+See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 04 — runtime-routing
+**Current focus:** Phase 05 - Verification and Docs
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
-- **Current phase:** 04
-- **Current phase status:** Ready to execute
-- **Next command:** `$gsd-execute-phase 4`
+- **Current phase:** 05 - Verification and Docs
+- **Current phase status:** Ready to plan
+- **Next command:** `$gsd-plan-phase 5`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -38,27 +38,25 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - GSD should operate from `/Users/sbenson/code/rolester/.planning`, not the parent `/Users/sbenson/code/.planning`.
 - Formal GSD project subagents are not installed in this runtime, so initialization was performed inline.
 - Existing user changes in `tests/release-safety.test.mjs` and `tmp-skill-conversion/` are not part of this GSD initialization.
-- The first implementation target is `discover-companies` because the AI-vs-code boundary is clear and cost-sensitive.
+- `discover-companies` is now the proof-point migration: local proposal APIs are the default app path, and full skill/chat paths remain explicit.
+- Phase 5 should lock in regression coverage and documentation alignment without broadening into new runtime migrations unless the user asks.
 
 ## Open Questions
 
-- What exact schema should company seed generation return?
-- Should the migrated discovery API be exposed as a new `/api/discovery/companies/*` route, a `rolester data` verb, or both?
-- Which current app screen should own proposal confirmation: `/search`, `/app`, or a dedicated discovery drawer?
-- Should skill decomposition live in docs only, or as machine-readable metadata that routes can consume?
+- None blocking for Phase 5 planning.
 
 ## Next Steps
 
-1. Execute Phase 4 with `$gsd-execute-phase 4`.
-2. Verify Phase 4 runtime routing after execution completes.
+1. Plan Phase 5 with `$gsd-plan-phase 5`.
+2. Execute Phase 5 after the verification/docs plan is accepted.
 
 ---
 *State initialized: 2026-07-04*
 
 ## Session
 
-**Last session:** 2026-07-05T02:04:30.968Z
-**Stopped at:** Completed 04-02-PLAN.md
+**Last session:** 2026-07-05T03:08:29.493Z
+**Stopped at:** Phase 04 complete; ready to plan Phase 05.
 **Resume file:** None
 
 ## Performance Metrics
@@ -85,6 +83,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 03-company-discovery-api P07 | 4 min | 1 tasks | 2 files |
 | Phase 04-runtime-routing P01 | 3 min | 3 tasks | 4 files |
 | Phase 04-runtime-routing P02 | 3min | 3 tasks | 3 files |
+| Phase 04-runtime-routing P03 | 3min | 3 tasks | 3 files |
+| Phase 04-runtime-routing P04 | 3min | 3 tasks | 2 files |
+| Phase 04-runtime-routing P05 | 3min | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -138,3 +139,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 04-runtime-routing]: Discovery chat handoff availability is derived from chat runtime allowlist membership for research-boards, discover-companies, or search-jobs.
 - [Phase 04-runtime-routing]: Onboarding AI controls now derive from runtimeConfig.ai.available instead of state.keyConfigured. — Managed proxy AI can enable controls without a local key while runtime config failure keeps local/manual discovery available.
 - [Phase 04-runtime-routing]: OnboardingPage remains the only runtime capability loader; steps receive runtimeCapabilities as props. — This keeps runtime capability requests centralized and prevents individual steps from hardcoding runtime-route behavior.
+- [Phase 04-runtime-routing]: CompaniesStep uses local proposal create/read routes as the primary company discovery action. — The discover-companies chat handoff is only shown as an explicit secondary path when runtime capabilities allow it.
+- [Phase 04-runtime-routing]: Proposal decisions route through the local Phase 3 decision endpoint with expectedVersion. — Stale conflicts reload proposals and stay in the local panel instead of launching chat or retained skill runtime.
+- [Phase 04-runtime-routing]: FinishStep discovery handoffs remain explicit button-triggered chat sessions. — Quick-start/next routes are gated by runtimeCapabilities.discoveryChatHandoffs.
+- [Phase 04-runtime-routing]: Proposal review UAT passed after a mobile action-row overflow fix. — Browser UAT covered desktop/mobile local proposal, conflict, refresh, no-AI, and no /api/skill/run behavior.

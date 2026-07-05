@@ -32,13 +32,12 @@ Rolester must complete job-search work locally with predictable cost: determinis
 - Phase 1 validated a routing policy for when UI, CLI, and agents should call local APIs, DB/CLI owners, bounded AI assists, chat, or retained `POST /api/skill/run`.
 - Phase 2 validated the bounded-AI foundation: shared helper envelopes, provider-native structured-output support behind `callAI()`, bounded assist/intake/resume-AI migrations, no-AI/manual degradation, and metadata-only telemetry/privacy regressions.
 - Phase 3 validated the Company Discovery API: bounded/manual company seeds, deterministic safe ATS resolution/cache, provider scanning, JD capture, proposal gating, latest-pending reads, refresh decisions, and confirmed writes through existing company/source paths.
+- Phase 4 validated Runtime Routing: app discovery controls default to local proposal APIs, runtime config drives AI/chat capability gating, explicit discovery chat handoffs remain available, and retained `POST /api/skill/run` stays allowlisted/documented for tool-heavy workflows.
 
 ### Active
 
-- [ ] Keep `POST /api/skill/run` available only for workflows that need tool loops, long orchestration, or human-watched agent behavior.
-- [ ] Route app discovery controls to the new company discovery API instead of launching a whole skill session.
 - [ ] Add cost and no-AI regression tests so deterministic routes cannot accidentally call a model.
-- [ ] Update routing docs so agents, UI, and APIs agree on which layer owns each action.
+- [ ] Finish documentation alignment across `AGENTS.md`, `docs/ARCHITECTURE.md`, and app route behavior.
 
 ### Out of Scope
 
@@ -54,7 +53,7 @@ The current app already contains both runtime shapes. `src/core/ai/skill-runtime
 
 The new architectural decision is to treat a skill as a product contract, not the default implementation mechanism. For example, `discover-companies` should not run an entire agent skill just to find employer names. A bounded AI call can propose candidate company seeds as JSON, then TypeScript can resolve careers URLs, scan roles through existing provider APIs, enforce dedupe/exclusion rules, present proposals, and write confirmed additions through `rolester companies` or DB source-config verbs.
 
-Phase 3 turned that `discover-companies` split into working local APIs. The remaining Phase 4 work is routing the app and agent surfaces to those APIs by default while keeping full skill sessions available for workflows that still need tool loops or human-watched orchestration.
+Phase 3 turned that `discover-companies` split into working local APIs. Phase 4 routed app surfaces to those APIs by default while keeping explicit chat handoffs and the allowlisted full skill runtime available for workflows that still need tool loops or human-watched orchestration. Phase 5 should lock those boundaries with final cost/no-AI regressions and documentation alignment.
 
 ## Constraints
 
@@ -76,6 +75,9 @@ Phase 3 turned that `discover-companies` split into working local APIs. The rema
 | GSD setup skips external research for now | The repo already contains the relevant direction in `ROADMAP.md`, `docs/ARCHITECTURE.md`, and current code | Completed in Phase 1 |
 | Bounded AI helpers own schemas, envelopes, no-AI degradation, and telemetry labels | Routes need one cheap structured-output contract before higher-level migrations can safely reuse AI | Validated in Phase 2 |
 | Company discovery proposals remain confirm-first | Seed generation, resolution, scanning, and gating can be automated, but tracked source and sourced-row writes require explicit approval | Validated in Phase 3 |
+| Runtime config is the UI capability source | App controls need server-owned booleans for AI, local proposals, manual seeds, chat handoffs, and retained full skill runtime | Validated in Phase 4 |
+| Local company proposal routes are the app default | Company discovery in the app should create/read/decide local proposals before any chat/full skill runtime is considered | Validated in Phase 4 |
+| Discovery chat and full skill runtime are explicit paths | Agent-led workflows remain available, but only after user action and runtime capability gating | Validated in Phase 4 |
 
 ## Evolution
 
@@ -96,4 +98,4 @@ This document evolves at phase transitions and milestone boundaries.
 5. Update Context with current state
 
 ---
-*Last updated: 2026-07-05 after Phase 3 verification*
+*Last updated: 2026-07-05 after Phase 4 verification*
