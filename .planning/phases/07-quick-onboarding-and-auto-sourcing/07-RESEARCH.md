@@ -442,24 +442,21 @@ export function countDeterministicSources(searchSources = {}, sourcedScan = {}) 
 |---|-------|---------|---------------|
 | A1 | A SQLite run row plus in-process background promise is sufficient for first-run orchestration in this local app. | Standard Stack / Architecture Patterns | If Rolester needs multi-process workers, run locking and recovery need a stronger queue model. |
 | A2 | Basic resume-text quality checks can detect empty/garbled DOCX extraction well enough for onboarding. | Architecture Patterns / Common Pitfalls | If checks are too loose, bad DOCX text can unlock `search_ready`; if too strict, valid resumes need manual fallback. |
-| A3 | Successful zero-result scans should usually be `Completed` with refinement guidance rather than `Failed`. | Common Pitfalls | If product wants zero deterministic sources to be actionable failure, UI copy and status mapping must differ. |
+| A3 | Successful scans with attempted deterministic sources can be `Completed` even with zero jobs; runs with zero deterministic sources attempted must be `Failed` with actionable source-setup guidance. | Common Pitfalls | If the UI treats missing deterministic sources as success, users see a completed setup with nothing actionable to fix. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Where should first-search routes live?**
    - What we know: onboarding owns the first prompt and search route owns scan execution. [VERIFIED: src/cli/onboard-route.mjs] [VERIFIED: src/cli/search-route.mjs]
-   - What's unclear: whether to add `src/cli/sourcing-route.mjs` or extend existing onboard/search routes.
-   - Recommendation: add a small sourcing route if run-state endpoints are shared by onboarding and Jobs.
+   - Resolution: add a small `src/cli/sourcing-route.mjs` because run-state endpoints are shared by onboarding and Jobs.
 
 2. **How should zero deterministic sources be displayed?**
    - What we know: generated source setup may include non-fetchable browser/url-query entries that the deterministic scanner skips. [VERIFIED: src/core/profile/generate-search-sources.mjs] [VERIFIED: src/core/scoring/sourced-scanner.mjs]
-   - What's unclear: whether zero fetchable sources should count as `Completed` with guidance or `Failed`/`Needs setup`. [VERIFIED: 07-CONTEXT.md]
-   - Recommendation: show `Completed` only when at least one deterministic source was attempted; otherwise show `Failed` with an actionable source-setup message.
+   - Resolution: show `Completed` only when at least one deterministic source was attempted; otherwise show `Failed` with an actionable source-setup message.
 
 3. **What is the exact cadence schema?**
    - What we know: `targeting.search_preferences.posting_age` exists and maps fixed days to generated recency. [VERIFIED: config/targeting.schema.json] [VERIFIED: src/core/profile/generate-search-sources.mjs]
-   - What's unclear: whether cadence should be a new `search_preferences.cadence` object or a run-level preference table.
-   - Recommendation: add `targeting.search_preferences.cadence` for user preference, and keep actual run history in `sourcing_runs`.
+   - Resolution: add `targeting.search_preferences.cadence` for user preference, and keep actual run history in `sourcing_runs`.
 
 ## Environment Availability
 
@@ -551,7 +548,7 @@ export function countDeterministicSources(searchSources = {}, sourcedScan = {}) 
 - `src/core/scoring/sourced-scanner.mjs` - public ATS/RSS scanner behavior and browser/auth skip. [VERIFIED: codebase rg]
 - `src/core/scoring/sourced-persistence.mjs` - JD capture and sourced row persistence. [VERIFIED: codebase rg]
 - `apps/web/src/onboarding/steps/FinishStep.jsx` and `FinishStep.test.jsx` - existing readiness/quick-start UI and chat-handoff tests. [VERIFIED: codebase rg]
-- `.planning/phases/ROL-API-07-quick-onboarding-and-auto-sourcing/07-CONTEXT.md` - locked Phase 7 decisions. [VERIFIED: codebase rg]
+- `.planning/phases/07-quick-onboarding-and-auto-sourcing/07-CONTEXT.md` - locked Phase 7 decisions. [VERIFIED: codebase rg]
 - `./AGENTS.md` - app routing, DB write, source setup, privacy, and automation constraints. [VERIFIED: codebase rg]
 
 ### Secondary (MEDIUM confidence)

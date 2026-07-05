@@ -193,6 +193,32 @@ Plans:
 
 **Requirements:** ONB-01, ONB-02, RUN-01, RUN-02
 
+**Plans:** 8 plans
+
+Plans:
+**Wave 0**
+
+- [ ] 07-01-PLAN.md — Add RED DOCX resume intake contracts.
+- [ ] 07-02-PLAN.md — Add RED durable sourcing run and first-search route contracts.
+- [ ] 07-03-PLAN.md — Add RED first-search UI, readiness, and Jobs search action contracts.
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [ ] 07-04-PLAN.md — Implement deterministic DOCX upload through onboarding.
+- [ ] 07-05-PLAN.md — Implement durable SQLite sourcing run state.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 07-06-PLAN.md — Implement first-search sourcing service, routes, and quick-start replacement.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 07-07-PLAN.md — Wire first-search task UI, cadence, and setup-card status.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 07-08-PLAN.md — Wire Jobs-page manual search and final Phase 7 regression rollup.
+
 **Success Criteria**:
 
 1. Quick onboarding captures enough profile, resume, target role, location, comp floor, and search posture to mark `search_ready` without requiring deep ingest.
