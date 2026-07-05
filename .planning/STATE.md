@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
-status: Ready to execute
-stopped_at: Phase 7 planning complete
-last_updated: "2026-07-05T21:26:06.939Z"
+status: In Progress
+stopped_at: Completed 07-01-PLAN.md
+last_updated: "2026-07-05T21:37:23.768Z"
 progress:
   total_phases: 11
   completed_phases: 5
-  total_plans: 28
-  completed_plans: 28
-  percent: 45
+  total_plans: 36
+  completed_plans: 29
+  percent: 81
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -27,7 +27,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 - **Project initialized:** 2026-07-04
 - **Current phase:** 07
-- **Current phase status:** Ready to execute
+- **Current phase status:** In Progress
 - **Next command:** `$gsd-execute-phase 7`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
@@ -61,9 +61,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T20:51:39.354Z
-**Stopped at:** Phase 8 UI-SPEC approved
-**Resume file:** .planning/phases/ROL-API-08-deep-ingest-lane/08-UI-SPEC.md
+**Last session:** 2026-07-05T21:37:23.758Z
+**Stopped at:** Completed 07-01-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -108,6 +108,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 06 P07 | 4 min | 3 tasks | 5 files |
 | Phase 06 P09 | 3 min | 2 tasks | 5 files |
 | Phase 06 P10 | 6 min | 2 tasks | 5 files |
+| Phase 07 P01 | 6 min | 3 tasks | 2 files |
 
 ## Decisions
 
@@ -195,3 +196,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 06]: DB-mode onboarding source readiness now comes from SQLite `sourceConfigGet({ name: "search-sources" })` and requires a stored row with an enabled configured source. — Compatibility YAML, default rows, empty arrays, and source-catalog metadata no longer mark setup ready.
 - [Phase 06]: FinishStep separates SQLite source setup readiness from compatibility export freshness. — The export button is explicit CLI/debug support, not normal product source setup state.
 - [Phase 06]: LinkedIn saved-search additions in onboarding report DB source setup, not `config/search-sources.yml`. — This keeps `/app` source setup aligned with DB source-of-truth decisions D-04, D-06, and D-07.
+- [Phase 07]: Plan 07-01 is intentionally RED and test-only; implementation remains in later Phase 7 plans. — This preserves ONB-02 contracts before DOCX parser/UI implementation begins.
+- [Phase 07]: DOCX backend tests generate a minimal valid DOCX fixture in test code instead of committing a binary fixture. — This keeps fixtures source-visible while still requiring real DOCX byte parsing.
+- [Phase 07]: ResumeStep tests separate resume input parsing from packet output-format preferences. — form-defaults.document_formats records PDF/DOCX export needs without routing DOCX through AI.
