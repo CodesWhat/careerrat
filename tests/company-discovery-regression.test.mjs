@@ -626,3 +626,7 @@ test("static ownership checks reject generated-file write seams and require supp
   assert.match(decisions, /sourcedUpsertBatch/);
   assert.doesNotMatch(decisions, /sourceConfigPut|config\/sourced-scan\.json/);
 });
+
+test("VER-01 deterministic discovery paths do not call AI, chat, or retained full skill runtime", () => {
+  assert.fail("VER-01 cost-boundary regression assertions are not implemented yet");
+});
