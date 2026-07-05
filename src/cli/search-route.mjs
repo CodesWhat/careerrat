@@ -13,13 +13,8 @@
 //                              is already running (a single in-module flag —
 //                              this is one local dev-server process, not a
 //                              job queue). 400 if neither
-//                              DB source config (DB mode) or legacy source
-//                              files (legacy mode) are not configured yet.
-//   GET  /api/search/results   The newest workspace/scan-results/sourced-*.json
-//                              (by mtime, so it works regardless of whether
-//                              the file used --timestamped naming), or
-//                              ?date=YYYY-MM-DD for a specific day. 404 if
-//                              none exist yet.
+//                              DB source config is not configured yet.
+//   GET  /api/search/results   DB sourced rows in stable database row order.
 //   GET  /api/search/sources   {searches:{enabled,total}, trackedCompanies}
 //                              — the presence/health strip
 //                              src/core/onboarding/search-page.mjs's header
@@ -29,13 +24,9 @@
 // the same way `runSkillStream` is in skill-run-route.mjs, so tests can drive
 // a scan against a stub network instead of hitting real ATS APIs.
 
-import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { join } from "node:path";
 import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
-import { dbExists } from "../core/db/connection.mjs";
+import { readDbScannerRows } from "../core/db/scan-context.mjs";
 import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
-import { userPath } from "../core/paths/workspace.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other route modules use.
@@ -46,30 +37,7 @@ function queryParam(req, name) {
   return url.searchParams.get(name);
 }
 
-// Newest sourced-*.json in workspace/scan-results by mtime — not filename
-// sort: a --timestamped run's filename ("sourced-20260703-153045.json") and a
-// plain run's ("sourced-2026-07-03.json") don't compare consistently as
-// strings, but mtime always reflects "most recently written" correctly.
-function findLatestScanFile(scanResultsDir) {
-  let entries;
-  try {
-    entries = readdirSync(scanResultsDir);
-  } catch {
-    return null;
-  }
-  const files = entries
-    .filter((name) => /^sourced-.+\.json$/.test(name))
-    .map((name) => ({ name, mtimeMs: statSync(join(scanResultsDir, name)).mtimeMs }))
-    .sort((a, b) => b.mtimeMs - a.mtimeMs);
-  return files[0]?.name || null;
-}
-
-function readScanFile(scanResultsDir, fileName) {
-  return JSON.parse(readFileSync(join(scanResultsDir, fileName), "utf8"));
-}
-
-function hasConfiguredDbSources(pathCtx) {
-  if (!dbExists(pathCtx)) return false;
+function hasConfiguredDbSourcesOnly(pathCtx) {
   const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
   const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
   return Boolean(
@@ -78,12 +46,30 @@ function hasConfiguredDbSources(pathCtx) {
   );
 }
 
-function hasRunnableSearchConfig(pathCtx) {
-  if (dbExists(pathCtx)) return hasConfiguredDbSources(pathCtx);
-  return (
-    existsSync(userPath(pathCtx, "config/search-sources.yml")) ||
-    existsSync(userPath(pathCtx, "config/sourced-scan.json"))
-  );
+function sendDbError(res, error) {
+  if (error?.code !== "NO_DATABASE") return false;
+  sendJson(res, 409, { ok: false, error: error.message });
+  return true;
+}
+
+function toSearchResultOffer(row = {}) {
+  return {
+    id: row.id,
+    company: row.company,
+    title: row.role || row.title,
+    role: row.role || row.title,
+    url: row.link || row.url,
+    location: row.loc || row.location,
+    comp: row.base || row.comp,
+    score: row.fitScore,
+    fit: row.fitBucket,
+    gate: row.gate,
+    source: row.source,
+    channel: row.channel,
+    artifacts: row.artifacts || {},
+    sourcedAt: row.sourcedAt,
+    updatedAt: row.updatedAt,
+  };
 }
 
 export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetchImpl = fetch }) {
@@ -108,7 +94,15 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
       return;
     }
 
-    if (!hasRunnableSearchConfig(pathCtx)) {
+    let hasConfig = false;
+    try {
+      hasConfig = hasConfiguredDbSourcesOnly(pathCtx);
+    } catch (err) {
+      if (sendDbError(res, err)) return;
+      throw err;
+    }
+
+    if (!hasConfig) {
       sendJson(res, 400, {
         error: "No search config found — run /onboard write-config first",
       });
@@ -120,6 +114,7 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
       const summary = await runSourcedScan({ repoRoot, env, fetchImpl, write: true });
       sendJson(res, 200, summary);
     } catch (err) {
+      if (sendDbError(res, err)) return;
       sendJson(res, 500, { error: err.message });
     } finally {
       scanning = false;
@@ -130,36 +125,30 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
   // GET /api/search/results — ?date=YYYY-MM-DD optional
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/search/results", (req, res) => {
-    const scanResultsDir = userPath(pathCtx, "workspace/scan-results");
     const dateParam = queryParam(req, "date");
 
-    if (dateParam) {
-      if (!DATE_RE.test(dateParam)) {
-        sendJson(res, 400, { error: "date must be YYYY-MM-DD" });
-        return;
-      }
-      const fileName = `sourced-${dateParam}.json`;
-      if (!existsSync(join(scanResultsDir, fileName))) {
-        sendJson(res, 404, { error: `no scan results for ${dateParam}` });
-        return;
-      }
-      try {
-        sendJson(res, 200, { date: dateParam, ...readScanFile(scanResultsDir, fileName) });
-      } catch (err) {
-        sendJson(res, 500, { error: err.message });
-      }
+    if (dateParam && !DATE_RE.test(dateParam)) {
+      sendJson(res, 400, { error: "date must be YYYY-MM-DD" });
       return;
     }
 
-    const latest = findLatestScanFile(scanResultsDir);
-    if (!latest) {
-      sendJson(res, 404, { error: "no scan results yet — run a sweep first" });
-      return;
-    }
     try {
-      const date = latest.replace(/^sourced-/, "").replace(/\.json$/, "");
-      sendJson(res, 200, { date, ...readScanFile(scanResultsDir, latest) });
+      const rows = readDbScannerRows(pathCtx);
+      const filteredRows = dateParam
+        ? rows.filter((row) => String(row.sourcedAt || row.updatedAt || "").startsWith(dateParam))
+        : rows;
+      const offers = filteredRows.map(toSearchResultOffer);
+      sendJson(res, 200, {
+        ok: true,
+        source: "db",
+        date: dateParam || null,
+        count: offers.length,
+        scanned: offers.length,
+        new: offers.length,
+        offers,
+      });
     } catch (err) {
+      if (sendDbError(res, err)) return;
       sendJson(res, 500, { error: err.message });
     }
   });
@@ -168,7 +157,7 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
   // GET /api/search/sources
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/search/sources", (_req, res) => {
-    if (dbExists(pathCtx)) {
+    try {
       const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
       const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
       const list = Array.isArray(searchSources.searches) ? searchSources.searches : [];
@@ -182,35 +171,9 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
         },
         trackedCompanies: tracked.length,
       });
-      return;
+    } catch (err) {
+      if (sendDbError(res, err)) return;
+      sendJson(res, 500, { error: err.message });
     }
-
-    const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
-    let searches = { enabled: 0, total: 0 };
-    if (existsSync(searchSourcesPath)) {
-      try {
-        const doc = parseYaml(readFileSync(searchSourcesPath, "utf8")) || {};
-        const list = Array.isArray(doc.searches) ? doc.searches : [];
-        searches = {
-          enabled: list.filter((s) => s && s.enabled !== false).length,
-          total: list.length,
-        };
-      } catch {
-        // keep the zeroed default — a malformed config shouldn't 500 the strip
-      }
-    }
-
-    let trackedCompanies = 0;
-    const sourcedScanPath = userPath(pathCtx, "config/sourced-scan.json");
-    if (existsSync(sourcedScanPath)) {
-      try {
-        const doc = JSON.parse(readFileSync(sourcedScanPath, "utf8"));
-        trackedCompanies = Array.isArray(doc.tracked_companies) ? doc.tracked_companies.length : 0;
-      } catch {
-        // keep zero
-      }
-    }
-
-    sendJson(res, 200, { searches, trackedCompanies });
   });
 }
