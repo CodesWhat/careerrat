@@ -114,7 +114,7 @@ test("GET /api/runtime/config returns the evaluate-job-only default allowlist", 
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /application\/json/);
     const body = await res.json();
-    assert.deepEqual(body, { skills: ["evaluate-job"] });
+    assert.deepEqual(body.skills, ["evaluate-job"]);
   } finally {
     teardown(dev, repoRoot);
   }
@@ -128,7 +128,7 @@ test("GET /api/runtime/config reflects ROLESTER_RUNTIME_SKILLS opting more skill
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);
     const body = await res.json();
-    assert.deepEqual(body, { skills: ["evaluate-job", "track-outcomes"] });
+    assert.deepEqual(body.skills, ["evaluate-job", "track-outcomes"]);
   } finally {
     teardown(dev, repoRoot);
   }
@@ -142,7 +142,7 @@ test("GET /api/runtime/config never lists a skill directory without a SKILL.md",
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);
     const body = await res.json();
-    assert.deepEqual(body, { skills: ["evaluate-job"] });
+    assert.deepEqual(body.skills, ["evaluate-job"]);
   } finally {
     teardown(dev, repoRoot);
   }

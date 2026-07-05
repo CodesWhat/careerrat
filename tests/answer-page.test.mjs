@@ -112,7 +112,7 @@ test("GET /api/runtime/config includes answer-question in the default allowlist"
     assert.equal(res.status, 200);
     assert.match(res.headers.get("content-type") || "", /application\/json/);
     const body = await res.json();
-    assert.deepEqual(body, { skills: ["evaluate-job", "answer-question"] });
+    assert.deepEqual(body.skills, ["evaluate-job", "answer-question"]);
   } finally {
     teardown(dev, repoRoot);
   }
@@ -124,7 +124,7 @@ test("GET /api/runtime/config omits answer-question when its SKILL.md isn't disc
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);
     const body = await res.json();
-    assert.deepEqual(body, { skills: ["evaluate-job"] });
+    assert.deepEqual(body.skills, ["evaluate-job"]);
   } finally {
     teardown(dev, repoRoot);
   }

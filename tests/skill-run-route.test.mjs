@@ -7,18 +7,21 @@
 // tests/skill-runtime.test.mjs.
 
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { test } from "node:test";
 import { mountSkillRunRoute } from "../src/cli/skill-run-route.mjs";
 
 // A minimal addRoute-based harness mirroring tracker-dev.mjs's own routing
 // table (method+path -> handler), without pulling in the whole dev server.
-function bootRouteServer(runSkillStream) {
+function bootRouteServer(runSkillStream, { repoRoot = "/fake/repo", env = {} } = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-  mountSkillRunRoute({ addRoute, repoRoot: "/fake/repo", runSkillStream });
+  mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env });
 
   const server = createServer((req, res) => {
     const url = (req.url || "/").split("?")[0];
@@ -32,6 +35,16 @@ function bootRouteServer(runSkillStream) {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));
   });
+}
+
+function tempRepoWithSkills(skillNames = []) {
+  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-run-route-"));
+  for (const name of skillNames) {
+    const dir = join(repoRoot, ".agents/skills", name);
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "SKILL.md"), `---\nname: ${name}\n---\n# ${name}\n`, "utf8");
+  }
+  return repoRoot;
 }
 
 function baseUrl(server) {
@@ -62,6 +75,87 @@ async function readSseBody(res, { stopWhen } = {}) {
   }
   return text;
 }
+
+// ---------------------------------------------------------------------------
+// GET /api/runtime/config — read-only capability metadata
+// ---------------------------------------------------------------------------
+
+test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery capabilities without starting a skill run", async () => {
+  const repoRoot = tempRepoWithSkills([
+    "evaluate-job",
+    "answer-question",
+    "tailor-application",
+    "resume-extract",
+    "ingest-profile",
+    "research-boards",
+    "discover-companies",
+    "search-jobs",
+  ]);
+  let called = false;
+  const server = await bootRouteServer(
+    async () => {
+      called = true;
+    },
+    {
+      repoRoot,
+      env: {
+        ROLESTER_RUNTIME_SKILLS: "evaluate-job,answer-question",
+        ROLESTER_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies,search-jobs",
+        ANTHROPIC_API_KEY: "sk-ant-test",
+      },
+    }
+  );
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/runtime/config`);
+    assert.equal(res.status, 200);
+    assert.match(res.headers.get("content-type") || "", /application\/json/);
+    assert.match(res.headers.get("cache-control") || "", /no-store/);
+    const body = await res.json();
+    assert.deepEqual(body, {
+      skills: ["evaluate-job", "answer-question"],
+      chatSkills: ["ingest-profile", "research-boards", "discover-companies", "search-jobs"],
+      ai: { available: true, route: "byok" },
+      discovery: {
+        companyProposals: true,
+        manualCompanySeeds: true,
+        chatHandoffs: true,
+      },
+    });
+    assert.equal(called, false);
+  } finally {
+    await closeServer(server);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("GET /api/runtime/config: reports no AI route and no discovery chat handoff when discovery chat skills are unavailable", async () => {
+  const repoRoot = tempRepoWithSkills(["evaluate-job", "ingest-profile"]);
+  const server = await bootRouteServer(async () => {}, {
+    repoRoot,
+    env: {
+      ROLESTER_RUNTIME_SKILLS: "evaluate-job",
+      ROLESTER_CHAT_SKILLS: "ingest-profile",
+    },
+  });
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/runtime/config`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(body, {
+      skills: ["evaluate-job"],
+      chatSkills: ["ingest-profile"],
+      ai: { available: false, route: "none" },
+      discovery: {
+        companyProposals: true,
+        manualCompanySeeds: true,
+        chatHandoffs: false,
+      },
+    });
+  } finally {
+    await closeServer(server);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Body validation — never reaches runSkillStream
