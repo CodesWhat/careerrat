@@ -54,6 +54,40 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
+test("migration 007 is registered as sourcing-runs", () => {
+  const latest = ALL_MIGRATIONS.at(-1);
+  assert.equal(latest.id, 7);
+  assert.equal(latest.name, "sourcing-runs");
+});
+
+test("migration 007 creates durable sourcing_runs state table and lookup indexes", () => {
+  const db = freshDb();
+  runMigrations(db);
+
+  const columns = db.prepare("PRAGMA table_xinfo('sourcing_runs')").all();
+  const columnByName = new Map(columns.map((column) => [column.name, column]));
+  assert.equal(columnByName.get("id")?.type, "TEXT");
+  assert.equal(columnByName.get("data")?.type, "TEXT");
+  for (const generated of ["purpose", "status", "started_at", "completed_at", "updated_at"]) {
+    assert.ok(columnByName.has(generated), `expected generated column ${generated}`);
+    assert.notEqual(columnByName.get(generated).hidden, 0, `${generated} must be generated`);
+  }
+
+  const createSql = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'sourcing_runs'")
+    .get()?.sql;
+  assert.match(createSql || "", /json_valid\(data\)/);
+  assert.match(createSql || "", /json_extract\(data,\s*'\$\.purpose'\)/);
+  assert.match(createSql || "", /json_extract\(data,\s*'\$\.status'\)/);
+
+  const indexes = db
+    .prepare("PRAGMA index_list('sourcing_runs')")
+    .all()
+    .map((row) => row.name);
+  assert.ok(indexes.includes("idx_sourcing_runs_latest_purpose"));
+  assert.ok(indexes.includes("idx_sourcing_runs_running_status"));
+});
+
 test("a gap in the migration id sequence is rejected", () => {
   const db = freshDb();
   const gappy = [
