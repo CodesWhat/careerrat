@@ -15,15 +15,17 @@ import {
   readdirSync,
   readFileSync,
   rmSync,
+  writeFileSync,
 } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
 import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
+import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { candidateConfigGet } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
@@ -31,7 +33,7 @@ import {
   COPY_ONLY_CANDIDATE_FILES,
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
-import { parseYaml } from "../src/core/profile/yaml.mjs";
+import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -283,6 +285,109 @@ describe("GET /api/onboard/state", () => {
       // Never echoed — the raw token value must not appear anywhere in the
       // state response.
       assert.equal(JSON.stringify(after).includes("pk_test"), false);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("reports DB source readiness from stored SQLite search-sources without compatibility YAML", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      sourceConfigPut({
+        repoRoot,
+        name: "search-sources",
+        data: {
+          title_filter: { positive: [], negative: [] },
+          location_filter: { always_allow: [], allow: [], block: [] },
+          searches: [
+            {
+              provider: "HiringCafe",
+              source_type: "url-query",
+              label: "HiringCafe — Applied AI",
+              enabled: true,
+              url: "https://hiring.cafe/?search=applied%20ai",
+            },
+          ],
+          tracked_companies: [],
+          source_catalog: {},
+        },
+      });
+
+      assert.equal(sourceConfigGet({ repoRoot, name: "search-sources" }).stored, true);
+      assert.equal(existsSync(candidatePath(repoRoot, "config/search-sources.yml")), false);
+
+      const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.searchSourcesPresent, true);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("ignores compatibility search-sources YAML when DB source config is absent", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      const configPath = candidatePath(repoRoot, "config/search-sources.yml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(
+        configPath,
+        `${stringifyYaml({
+          searches: [
+            {
+              provider: "HiringCafe",
+              source_type: "url-query",
+              label: "Compatibility only",
+              enabled: true,
+              url: "https://hiring.cafe/?search=compatibility",
+            },
+          ],
+        })}\n`
+      );
+
+      assert.equal(sourceConfigGet({ repoRoot, name: "search-sources" }).stored, false);
+
+      const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.searchSourcesPresent, false);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("does not treat stored defaults or source-catalog metadata as DB source readiness", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      sourceConfigPut({
+        repoRoot,
+        name: "search-sources",
+        data: {
+          title_filter: { positive: [], negative: [] },
+          location_filter: { always_allow: [], allow: [], block: [] },
+          searches: [],
+          tracked_companies: [],
+          source_catalog: { examples: ["https://example.com/search"] },
+        },
+      });
+      const configPath = candidatePath(repoRoot, "config/search-sources.yml");
+      mkdirSync(dirname(configPath), { recursive: true });
+      writeFileSync(configPath, "searches: []\n");
+
+      const stored = sourceConfigGet({ repoRoot, name: "search-sources" });
+      assert.equal(stored.stored, true);
+      assert.deepEqual(stored.data.searches, []);
+
+      const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
+      const body = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(body.searchSourcesPresent, false);
     } finally {
       await closeServer(server);
     }

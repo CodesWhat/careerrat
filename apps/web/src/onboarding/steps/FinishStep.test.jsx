@@ -297,6 +297,55 @@ describe("runNextDiscoveryHandoff", () => {
 });
 
 describe("FinishStep", () => {
+  it("frames compatibility-file generation as explicit export support", () => {
+    dashboardMock.snapshot = {
+      data: null,
+      noDatabase: false,
+      refetch: async () => {},
+    };
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <FinishStep
+          state={SEARCH_READY_STATE}
+          aiEnabled={true}
+          runtimeCapabilities={{ discoveryChatHandoffs: true }}
+          reload={async () => {}}
+          goBack={() => {}}
+        />
+      </MemoryRouter>
+    );
+
+    expect(html).toContain("Your app source setup is saved in SQLite.");
+    expect(html).toContain("Export compatibility files only for CLI/debug support.");
+    expect(html).toContain(">Export compatibility files<");
+    expect(html).not.toContain("generates search sources from your profile and targeting");
+    expect(html).not.toContain(">Write config<");
+  });
+
+  it("treats source readiness separately from compatibility export freshness", () => {
+    dashboardMock.snapshot = {
+      data: null,
+      noDatabase: false,
+      refetch: async () => {},
+    };
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <FinishStep
+          state={{ ...SEARCH_READY_STATE, searchSourcesPresent: true }}
+          aiEnabled={true}
+          runtimeCapabilities={{ discoveryChatHandoffs: true }}
+          reload={async () => {}}
+          goBack={() => {}}
+        />
+      </MemoryRouter>
+    );
+
+    expect(html).toContain("SQLite source setup is ready.");
+    expect(html).not.toContain("Already written in a previous session");
+  });
+
   it("hides discovery chat CTAs when runtime capability disables handoffs while keeping manual finish available", () => {
     dashboardMock.snapshot = {
       data: {
