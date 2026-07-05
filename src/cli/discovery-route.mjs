@@ -5,6 +5,7 @@
 
 import { DISCOVERY_PIPELINE } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
+import { companyProposalBatchLatest } from "../core/db/verbs/company-discovery.mjs";
 import { candidateConfigGet } from "../core/db/verbs.mjs";
 import { applyCompanyProposalDecision } from "../core/discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
@@ -181,8 +182,6 @@ export function mountDiscoveryRoutes({
   now,
   companyAtsUpsertImpl,
   sourcedUpsertBatchImpl,
-  captureAndPersistOffersIfDbImpl,
-  writeTrackerImpl,
 }) {
   addRoute("POST", "/api/discovery/company-proposals", async (req, res) => {
     let body;
@@ -222,6 +221,22 @@ export function mountDiscoveryRoutes({
     }
   });
 
+  addRoute("GET", "/api/discovery/company-proposals", (req, res) => {
+    try {
+      const url = new URL(req.url || "/", "http://127.0.0.1");
+      const statusParam = String(url.searchParams.get("status") || "pending").trim();
+      const status = statusParam === "all" ? null : statusParam || "pending";
+      const result = companyProposalBatchLatest({ repoRoot, env, status });
+      sendJson(res, 200, {
+        ok: true,
+        data: { batch: result.batch },
+        meta: { status, found: Boolean(result.batch) },
+      });
+    } catch (err) {
+      discoveryRouteError(res, err, err.code === "NO_DATABASE" ? 409 : 500);
+    }
+  });
+
   addRoute("POST", "/api/discovery/company-proposal-decisions", async (req, res) => {
     let body;
     try {
@@ -243,8 +258,6 @@ export function mountDiscoveryRoutes({
         now,
         companyAtsUpsertImpl,
         sourcedUpsertBatchImpl,
-        captureAndPersistOffersIfDbImpl,
-        writeTrackerImpl,
       });
       sendJson(res, 200, { ok: true, data: result.data, meta: result.meta });
     } catch (err) {
