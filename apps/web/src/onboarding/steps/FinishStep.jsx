@@ -681,7 +681,7 @@ export function FinishStep({ state, reload, goBack }) {
           writing samples — continue through the richer onboarding path when ready.
         </p>
         <div className="links" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <Link to="/onboarding">Continue deep onboarding</Link>
+          <a href="/chat">Start the deeper interview</a>
           <Link to="/">Go to Home</Link>
           <Link to="/settings">Go to Settings</Link>
         </div>

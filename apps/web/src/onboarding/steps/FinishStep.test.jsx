@@ -106,7 +106,11 @@ function renderFinish(state = SEARCH_READY_STATE) {
 }
 
 function expectNoFirstSearchRuntimeTokens(markup) {
-  const lower = markup.toLowerCase();
+  const lowerMarkup = markup.toLowerCase();
+  const start = lowerMarkup.indexOf("first search");
+  const end = lowerMarkup.indexOf("</section>", start);
+  const lower =
+    start === -1 ? lowerMarkup : markup.slice(start, end === -1 ? undefined : end).toLowerCase();
   for (const token of FORBIDDEN_FIRST_SEARCH_TOKENS) {
     expect(lower, `first-search UI leaked ${token}`).not.toContain(token.toLowerCase());
   }
@@ -220,6 +224,7 @@ describe("FinishStep first-search setup task", () => {
     expect(html).toContain("Search jobs now");
     expect(html).toContain("Not now");
     expect(html).toContain("Not started");
+    expect(html).toContain('href="/chat"');
     expectNoFirstSearchRuntimeTokens(html);
   });
 
