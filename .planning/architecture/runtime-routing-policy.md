@@ -4,11 +4,13 @@ This policy defines how Rolester UI controls, CLI commands, and agent workflows
 choose between deterministic local APIs, DB verbs, bounded AI assists,
 conversational handoffs, and the retained full skill runtime.
 
-## Current Phase 4 Boundary
+## Phase Boundary
 
-Phase 4 makes this policy operational for app company discovery. The default
-Companies onboarding controls call local proposal create/read/decision routes:
-`POST /api/discovery/company-proposals`,
+Phase 1 is documentation and validation only; this document originated as that
+planning artifact and remains the routing contract future phases are measured
+against. Phase 4 now makes the policy operational for app company discovery. The
+default Companies onboarding controls call local proposal create/read/decision
+routes: `POST /api/discovery/company-proposals`,
 `GET /api/discovery/company-proposals`, and
 `POST /api/discovery/company-proposal-decisions`. Those routes use the Phase 3
 proposal pipeline and confirmation write owners before any chat workflow is
