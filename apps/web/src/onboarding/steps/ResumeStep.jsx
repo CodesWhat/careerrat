@@ -6,6 +6,7 @@ import { UploadIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import {
   extractResumeAi,
+  extractResumeDocx,
   parseResumeText,
   saveCandidateFile,
   saveEvidenceSeed,
@@ -14,8 +15,13 @@ import {
 // .txt/.md keep using the existing zero-AI deterministic parse
 // (POST /api/onboard/resume); pdf/image go through the AI extraction route
 // (POST /api/onboard/resume-ai) — see onboard-route.mjs's own split.
+const DOCX_EXTENSIONS = new Set(["docx"]);
 const TEXT_EXTENSIONS = new Set(["txt", "md", "markdown"]);
 const BINARY_EXTENSIONS = new Set(["pdf", "png", "jpg", "jpeg", "webp"]);
+const LOCAL_ACCEPT = ".docx,.txt,.md,.markdown";
+const AI_ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
+const DOCX_FALLBACK_COPY =
+  "We could not read usable text from that DOCX. The original file was saved; paste text or upload PDF, TXT, or Markdown.";
 
 const PROFILE_FIELDS = [
   "full_name",
@@ -41,6 +47,115 @@ function readAsText(file) {
   });
 }
 
+function unsupportedFileMessage(ext) {
+  return `Unsupported file type "${ext || "file"}" — use .docx, .txt, .md, .markdown, .pdf, .png, .jpg, .jpeg, or .webp, or paste your resume text below.`;
+}
+
+function documentFormatsFromState(state) {
+  const raw = state?.data?.["form-defaults"]?.document_formats || {};
+  const defaultPacketFormat = raw.default_packet_format || raw.standard || "pdf";
+  const requiredExportFormats = Array.isArray(raw.required_export_formats)
+    ? raw.required_export_formats
+    : Array.isArray(raw.board_required)
+      ? raw.board_required
+      : [];
+  return {
+    defaultPacketFormat,
+    requiredExportFormats,
+  };
+}
+
+export function getResumeUploadMode(filename, { aiEnabled = false } = {}) {
+  const ext = extOf(filename);
+  if (DOCX_EXTENSIONS.has(ext)) return "docx";
+  if (TEXT_EXTENSIONS.has(ext)) return "text";
+  if (BINARY_EXTENSIONS.has(ext)) return aiEnabled ? "ai" : "ai-unavailable";
+  return "unsupported";
+}
+
+export async function parseResumeFileForReview(
+  file,
+  { aiEnabled = false, readText = readAsText } = {}
+) {
+  const mode = getResumeUploadMode(file?.name, { aiEnabled });
+  if (mode === "docx") {
+    const seed = await extractResumeDocx(file);
+    return { reviewTitle: "Review & edit", seed };
+  }
+  if (mode === "text") {
+    const text = await readText(file);
+    const seed = await parseResumeText(text, { save: true });
+    return { reviewTitle: "Review & edit", seed };
+  }
+  if (mode === "ai") {
+    const seed = await extractResumeAi(file);
+    return { reviewTitle: "Review & edit", seed };
+  }
+  const ext = extOf(file?.name);
+  const err = new Error(
+    mode === "ai-unavailable" ? "AI key required" : unsupportedFileMessage(ext)
+  );
+  err.status = mode === "ai-unavailable" ? 501 : 400;
+  err.body = mode === "unsupported" ? { error: unsupportedFileMessage(ext) } : undefined;
+  throw err;
+}
+
+export function describeResumeUploadError(err, { mode = "unsupported", ext = "" } = {}) {
+  const body = err?.body && typeof err.body === "object" ? err.body : {};
+  if (mode === "docx" && (err?.status === 422 || body.code === "DOCX_TEXT_UNUSABLE")) {
+    return { message: DOCX_FALLBACK_COPY, showPaste: true };
+  }
+  if (mode === "ai-unavailable") {
+    return {
+      message:
+        "Add an AI key in the previous step to extract a PDF/image resume — or paste your resume text below.",
+      showPaste: true,
+    };
+  }
+  if (err?.status === 501) {
+    return {
+      message: "No AI key configured — paste your resume text below instead.",
+      showPaste: true,
+    };
+  }
+  if (err?.status === 422) {
+    return {
+      message:
+        "Couldn't extract a usable profile from that file after a retry — paste your resume text below instead.",
+      showPaste: true,
+    };
+  }
+  if (err?.status === 413) {
+    return {
+      message: "That file is larger than the 5MB cap — try a smaller file, or paste text below.",
+      showPaste: true,
+    };
+  }
+  if (err?.status === 400 && body.error) {
+    return { message: body.error, showPaste: true };
+  }
+  if (mode === "unsupported") {
+    return { message: unsupportedFileMessage(ext), showPaste: true };
+  }
+  return {
+    message: err instanceof Error ? err.message : "Resume upload failed",
+    showPaste: true,
+  };
+}
+
+export function documentFormatPreferenceText({ docxBoardRequired = false } = {}) {
+  return docxBoardRequired ? "PDF standard; DOCX when a board requires it." : "PDF standard.";
+}
+
+export function saveDocumentFormatPreferences({ docxBoardRequired = false } = {}) {
+  return saveCandidateFile("form-defaults", {
+    document_formats: {
+      default_packet_format: "pdf",
+      required_export_formats: docxBoardRequired ? ["docx"] : [],
+    },
+  });
+}
+
 // Step 3 — Resume drop. Collapses M1's separate "resume" + "profile" +
 // "evidence seed" screens into one review/edit step (the extraction already
 // returns evidenceSeed.claims alongside profileSeed — no reason to make
@@ -54,6 +169,11 @@ export function ResumeStep({ state, aiEnabled, setDraftSeeds, goNext, goBack, sh
   const [sections, setSections] = useState(null);
   const [showPaste, setShowPaste] = useState(false);
   const [pasteText, setPasteText] = useState("");
+  const initialDocumentFormats = documentFormatsFromState(state);
+  const [docxBoardRequired, setDocxBoardRequired] = useState(() =>
+    initialDocumentFormats.requiredExportFormats.includes("docx")
+  );
+  const [formatSaving, setFormatSaving] = useState(false);
 
   const [profileFields, setProfileFields] = useState(() => {
     const candidate = state?.data?.profile?.candidate ?? {};
@@ -65,7 +185,7 @@ export function ResumeStep({ state, aiEnabled, setDraftSeeds, goNext, goBack, sh
   const [saving, setSaving] = useState(false);
 
   function applySeed(result) {
-    setSource(result.source === "ai" ? "ai" : "text");
+    setSource(result.source === "ai" ? "ai" : result.source === "docx" ? "docx" : "text");
     setSections(result.sections ?? null);
     const seedCandidate = result.profileSeed?.candidate ?? {};
     setProfileFields((prev) => {
@@ -85,47 +205,16 @@ export function ResumeStep({ state, aiEnabled, setDraftSeeds, goNext, goBack, sh
   async function handleFile(file) {
     if (!file) return;
     const ext = extOf(file.name);
+    const mode = getResumeUploadMode(file.name, { aiEnabled });
     setError(null);
     setBusy(true);
     try {
-      if (TEXT_EXTENSIONS.has(ext)) {
-        const text = await readAsText(file);
-        const result = await parseResumeText(text, { save: true });
-        applySeed(result);
-        return;
-      }
-      if (BINARY_EXTENSIONS.has(ext)) {
-        if (!aiEnabled) {
-          setError(
-            "Add an AI key in the previous step to extract a PDF/image resume — or paste your resume text below."
-          );
-          return;
-        }
-        const result = await extractResumeAi(file);
-        applySeed(result);
-        return;
-      }
-      setError(
-        `Unsupported file type "${ext || file.name}" — use .pdf, .png, .jpg, .webp, .txt, or .md, or paste your resume text below.`
-      );
+      const { seed } = await parseResumeFileForReview(file, { aiEnabled });
+      applySeed(seed);
     } catch (err) {
-      const status = err?.status;
-      if (status === 501) {
-        setError("No AI key configured — paste your resume text below instead.");
-      } else if (status === 422) {
-        setError(
-          "Couldn't extract a usable profile from that file after a retry — paste your resume text below instead."
-        );
-      } else if (status === 413) {
-        setError("That file is larger than the 5MB cap — try a smaller file, or paste text below.");
-      } else if (status === 400) {
-        setError(
-          err.body?.error || "That file couldn't be read — paste your resume text below instead."
-        );
-      } else {
-        setError(err instanceof Error ? err.message : "Resume upload failed");
-      }
-      setShowPaste(true);
+      const described = describeResumeUploadError(err, { mode, ext });
+      setError(described.message);
+      if (described.showPaste) setShowPaste(true);
     } finally {
       setBusy(false);
     }
@@ -178,14 +267,26 @@ export function ResumeStep({ state, aiEnabled, setDraftSeeds, goNext, goBack, sh
     }
   }
 
-  const accept = aiEnabled ? ".pdf,.png,.jpg,.jpeg,.webp,.txt,.md,.markdown" : ".txt,.md,.markdown";
+  async function handleSaveDocumentFormats() {
+    setFormatSaving(true);
+    setError(null);
+    try {
+      await saveDocumentFormatPreferences({ docxBoardRequired });
+      showToast("Saved.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setFormatSaving(false);
+    }
+  }
+
+  const accept = aiEnabled ? `${LOCAL_ACCEPT},${AI_ACCEPT}` : LOCAL_ACCEPT;
+  const savedPreference = documentFormatPreferenceText({ docxBoardRequired });
 
   return (
     <Card title="Drop your resume">
       <p className="field__hint" style={{ margin: 0 }}>
-        {aiEnabled
-          ? "PDF, image, .txt, or .md — a PDF/image is read by your connected AI key; .txt/.md are parsed deterministically, no AI involved."
-          : "Only .txt/.md are supported without an AI key connected — go back a step to add one, or paste your resume text below."}
+        DOCX, TXT, and Markdown are parsed locally. PDF and images use your connected AI key.
       </p>
       {error ? <InlineAlert message={error} /> : null}
 
@@ -248,11 +349,44 @@ export function ResumeStep({ state, aiEnabled, setDraftSeeds, goNext, goBack, sh
         ) : null}
       </div>
 
+      <div style={{ display: "grid", gap: 8 }}>
+        <p className="field__label" style={{ margin: 0 }}>
+          Packet format
+        </p>
+        <p className="field__hint" style={{ margin: 0 }}>
+          PDF is the standard packet format.
+        </p>
+        <div className="chip-row">
+          <span className="chip">PDF standard</span>
+          <label className="chip" htmlFor="resume-docx-required">
+            <input
+              id="resume-docx-required"
+              type="checkbox"
+              checked={docxBoardRequired}
+              onChange={(event) => setDocxBoardRequired(event.target.checked)}
+            />
+            DOCX board-required
+          </label>
+        </div>
+        <p className="field__hint" style={{ margin: 0 }}>
+          Saved preference: {savedPreference}
+        </p>
+        <div>
+          <Button variant="secondary" onClick={handleSaveDocumentFormats} disabled={formatSaving}>
+            {formatSaving ? "Saving…" : "Save format preference"}
+          </Button>
+        </div>
+      </div>
+
       {source ? (
         <div>
           <h4 style={{ margin: "4px 0" }}>Review & edit</h4>
           <p className="field__hint" style={{ margin: "0 0 10px" }}>
-            {source === "ai" ? "Extracted by AI — " : "Parsed — "}
+            {source === "ai"
+              ? "Extracted by AI — "
+              : source === "docx"
+                ? "Parsed locally from DOCX — "
+                : "Parsed — "}
             {sections
               ? `${sections.experience ?? 0} experience, ${sections.education ?? 0} education, ` +
                 `${sections.skills ?? 0} skills, ${sections.projects ?? 0} project section(s) found.`

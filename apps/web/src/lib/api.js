@@ -114,6 +114,24 @@ export async function extractResumeAi(file) {
   return body;
 }
 
+export async function extractResumeDocx(file) {
+  const res = await fetch(`/api/onboard/resume-docx?name=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+  });
+  const text = await res.text();
+  let body = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { raw: text };
+    }
+  }
+  if (!res.ok) throw new ApiError(res.status, body);
+  return body;
+}
+
 export function saveEvidenceSeed(claims) {
   return apiFetch("/api/onboard/evidence-seed", {
     method: "POST",

@@ -167,6 +167,7 @@ describe("ResumeStep DOCX intake", () => {
 
     expect(
       describeResumeUploadError(new Error("unsupported"), { mode: "unsupported", ext: "zip" })
-    ).message.toContain(".docx");
+        .message
+    ).toContain(".docx");
   });
 });
