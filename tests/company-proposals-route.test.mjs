@@ -806,3 +806,7 @@ test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-p
   }
   assertNoCurrentCompLeak(body);
 });
+
+test("VER-02/VER-03 company proposal route negative regressions are implemented", () => {
+  assert.fail("RED: add no-AI, schema-invalid, no-chat, and no-write route tests");
+});
