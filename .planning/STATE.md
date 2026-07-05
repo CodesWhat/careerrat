@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
 status: In Progress
-stopped_at: Completed 07-03-PLAN.md
-last_updated: "2026-07-05T22:09:25.908Z"
+stopped_at: Completed 07-04-PLAN.md
+last_updated: "2026-07-05T22:23:40.254Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 31
-  percent: 86
+  completed_plans: 32
+  percent: 89
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T22:07:43.342Z
-**Stopped at:** Completed 07-03-PLAN.md
+**Last session:** 2026-07-05T22:23:40.246Z
+**Stopped at:** Completed 07-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -111,6 +111,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P01 | 6 min | 3 tasks | 2 files |
 | Phase 07 P02 | 5 min | 2 tasks | 4 files |
 | Phase 07 P03 | 4 min | 2 tasks | 4 files |
+| Phase 07 P04 | 8 min | 3 tasks | 10 files |
 
 ## Decisions
 
@@ -208,3 +209,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: Plan 07-03 remained test-only and intentionally RED; implementation is left to later Phase 7 plans. — The plan's purpose is to define failing contracts for subsequent implementation work.
 - [Phase 07]: Document format contracts use form-defaults.document_formats.default_packet_format and required_export_formats. — PDF remains the default packet format while board-required exports such as DOCX are explicitly modeled.
 - [Phase 07]: First-search UI contracts replace discovery-chat quick-start expectations with local sourcing-run expectations. — Phase 7 routes first search through deterministic sourcing run state instead of chat or retained skill runtime.
+- [Phase 07]: Use mammoth.extractRawText({ buffer }) only for DOCX intake; no DOCX HTML conversion or external file access. — This satisfies ONB-02 and T-07-03 while keeping DOCX uploads deterministic and local.
+- [Phase 07]: Save DOCX originals before parsing, but write source-resume only after usable text passes the quality gate. — This preserves recovery/fallback while preventing malformed DOCX files from unlocking search readiness.
+- [Phase 07]: Keep PDF as form-defaults.document_formats.default_packet_format and record DOCX only as a required_export_formats board need. — Packet export preferences should not route DOCX bytes or text through AI and should be available to later packet-generation plans.

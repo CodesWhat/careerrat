@@ -52,7 +52,7 @@
 ### Quick Onboarding and Auto Sourcing
 
 - **ONB-01**: Quick onboarding captures the minimum profile, resume, role, location, comp, and search posture needed to start searching.
-- **ONB-02**: Resume support treats PDF as the standard, keeps text/markdown fallback, and records board-required import/export formats such as DOCX where needed.
+- [x] **ONB-02**: Resume support treats PDF as the standard, keeps text/markdown fallback, and records board-required import/export formats such as DOCX where needed.
 - **RUN-01**: A DB-backed sourcing run starts automatically when candidate setup first reaches `search_ready`.
 - **RUN-02**: React surfaces durable sourcing run progress, errors, and results while returning the user to deeper onboarding.
 
@@ -125,7 +125,7 @@
 | APP-03 | Phase 6 | Complete |
 | APP-04 | Phase 6 | Complete |
 | ONB-01 | Phase 7 | Planned |
-| ONB-02 | Phase 7 | Planned |
+| ONB-02 | Phase 7 | Complete |
 | RUN-01 | Phase 7 | Planned |
 | RUN-02 | Phase 7 | Planned |
 | ING-01 | Phase 8 | Planned |
