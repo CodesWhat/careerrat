@@ -10,13 +10,29 @@ const dashboardMock = vi.hoisted(() => ({
   },
 }));
 
+const chatMock = vi.hoisted(() => ({
+  renders: [],
+}));
+
 vi.mock("../../app-shell/DashboardContext.jsx", () => ({
   useDashboardSnapshot: () => dashboardMock.snapshot,
+}));
+
+vi.mock("../ChatPanel.jsx", () => ({
+  ChatPanel: ({ skill, initialChatId }) => {
+    chatMock.renders.push({ skill, initialChatId });
+    return (
+      <div data-testid="chat-marker">
+        CHAT:{skill}:{initialChatId}
+      </div>
+    );
+  },
 }));
 
 import {
   buildQuickStartAction,
   buildReadinessRows,
+  DiscoveryChatPanel,
   extractDiscoveryGuidance,
   FinishStep,
   runNextDiscoveryHandoff,
@@ -281,6 +297,114 @@ describe("runNextDiscoveryHandoff", () => {
 });
 
 describe("FinishStep", () => {
+  it("hides discovery chat CTAs when runtime capability disables handoffs while keeping manual finish available", () => {
+    dashboardMock.snapshot = {
+      data: {
+        agentGuidance: {
+          nextSkill: "research-boards",
+          message: "Ask your agent to run research-boards next.",
+          ctaLabel: "Run research-boards",
+        },
+      },
+      noDatabase: false,
+      refetch: async () => {},
+    };
+    chatMock.renders = [];
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <FinishStep
+          state={SEARCH_READY_STATE}
+          aiEnabled={true}
+          runtimeCapabilities={{ discoveryChatHandoffs: false }}
+          reload={async () => {}}
+          goBack={() => {}}
+        />
+      </MemoryRouter>
+    );
+
+    expect(html).not.toContain(">Prepare sourcing<");
+    expect(html).not.toContain(">Run research-boards<");
+    expect(html).toContain("Discovery chat handoffs are unavailable in this runtime.");
+    expect(html).toContain(">Write config<");
+    expect(html).toContain("Go to Home");
+    expect(chatMock.renders).toEqual([]);
+  });
+
+  it("uses runtime capability handoffs ahead of legacy aiEnabled and keeps returned chats renderable", () => {
+    dashboardMock.snapshot = {
+      data: {
+        agentGuidance: {
+          nextSkill: "research-boards",
+          message: "Ask your agent to run research-boards next.",
+          ctaLabel: "Run research-boards",
+        },
+      },
+      noDatabase: false,
+      refetch: async () => {},
+    };
+    chatMock.renders = [];
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <FinishStep
+          state={SEARCH_READY_STATE}
+          aiEnabled={false}
+          runtimeCapabilities={{ discoveryChatHandoffs: true }}
+          reload={async () => {}}
+          goBack={() => {}}
+        />
+      </MemoryRouter>
+    );
+
+    expect(html).toContain(">Prepare sourcing<");
+    expect(html).toContain(">Run research-boards<");
+    expect(html).not.toContain("Add an AI key in the earlier step");
+
+    const chatHtml = renderToStaticMarkup(
+      <DiscoveryChatPanel
+        discoveryChat={{ chatId: "chat-1", skill: "research-boards" }}
+        discoveryGuidance={{
+          nextSkill: "research-boards",
+          message: "Ask your agent to run research-boards next.",
+        }}
+        quickStartResult={null}
+      />
+    );
+
+    expect(chatHtml).toContain("CHAT:research-boards:chat-1");
+    expect(chatMock.renders).toEqual([{ skill: "research-boards", initialChatId: "chat-1" }]);
+  });
+
+  it("ignores non-discovery guidance even when discovery handoffs are available", () => {
+    dashboardMock.snapshot = {
+      data: {
+        agentGuidance: {
+          nextSkill: "evaluate-job",
+          message: "Ask your agent to evaluate a sourced role.",
+          ctaLabel: "Run evaluate-job",
+        },
+      },
+      noDatabase: false,
+      refetch: async () => {},
+    };
+
+    const html = renderToStaticMarkup(
+      <MemoryRouter>
+        <FinishStep
+          state={SEARCH_READY_STATE}
+          aiEnabled={true}
+          runtimeCapabilities={{ discoveryChatHandoffs: true }}
+          reload={async () => {}}
+          goBack={() => {}}
+        />
+      </MemoryRouter>
+    );
+
+    expect(html).not.toContain(">Run evaluate-job<");
+    expect(html).toContain("No discovery handoff is ready yet.");
+  });
+
   it("hides discovery CTAs without an AI key while keeping the manual finish path available", () => {
     dashboardMock.snapshot = {
       data: {
