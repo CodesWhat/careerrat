@@ -164,5 +164,8 @@
     "fsevents@2.3.3": true,
     "lefthook@2.1.9": true,
     "sharp@0.34.5": true
+  },
+  "dependencies": {
+    "mammoth": "^1.12.0"
   }
 }

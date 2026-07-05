@@ -60,6 +60,11 @@ import {
   sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
+import {
+  extractDocxResumeText as defaultExtractDocxResumeText,
+  looksLikeUsableResumeText,
+  normalizeDocxResumeText,
+} from "../core/onboarding/resume-docx.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import {
   CANDIDATE_FILES,
@@ -93,6 +98,8 @@ const RESUME_MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — resume text can be lon
 // existing zero-AI POST /api/onboard/resume above.
 const RESUME_AI_MAX_BYTES = 5 * 1024 * 1024;
 const RESUME_AI_ALLOWED_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp"]);
+const RESUME_DOCX_MAX_BYTES = 5 * 1024 * 1024;
+const RESUME_DOCX_ALLOWED_EXTENSIONS = new Set([".docx"]);
 const RESUME_EXTRACT_SCHEMA_PATH = "config/resume-extract.schema.json";
 const RESUME_AI_LABELS = Object.freeze({
   skill: "resume-extract",
@@ -613,6 +620,7 @@ export function mountOnboardRoutes({
   // a hand-rolled MOCKED runtime (happy/retry-then-ok/422/413/501/502) without
   // touching the real @anthropic-ai/claude-agent-sdk devDependency.
   runSkillStream = defaultRunSkillStream,
+  extractDocxResumeText = defaultExtractDocxResumeText,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -761,6 +769,114 @@ export function mountOnboardRoutes({
     }
 
     sendJson(res, 200, { profileSeed, evidenceSeed, sections });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/resume-docx?name=<filename> — raw DOCX bytes.
+  //
+  // DOCX intake is deterministic: save the original upload, extract raw text
+  // locally, quality-gate the text, and only then write source-resume readiness.
+  // PDF/image resumes remain on the existing AI upload path.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/resume-docx", async (req, res) => {
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+    const name = (requestUrl.searchParams.get("name") || "").trim();
+    if (!name) {
+      sendJson(res, 400, { error: "?name=<filename> is required" });
+      return;
+    }
+
+    const ext = extname(name).toLowerCase();
+    if (!RESUME_DOCX_ALLOWED_EXTENSIONS.has(ext)) {
+      sendJson(res, 400, {
+        error: `unsupported file type "${ext || name}" — resume-docx accepts DOCX uploads only (.docx)`,
+      });
+      return;
+    }
+
+    let bytes;
+    try {
+      bytes = await readRawBodyCapped(req, RESUME_DOCX_MAX_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+    if (!bytes.length) {
+      sendJson(res, 400, { error: "request body is empty" });
+      return;
+    }
+
+    const savedRelPath = `workspace/intake/resume-uploads/${Date.now()}-${sanitizeUploadFilename(name)}`;
+    const savedPath = userPath(pathCtx, savedRelPath);
+    mkdirSync(dirname(savedPath), { recursive: true });
+    writeFileSync(savedPath, bytes);
+
+    let text = "";
+    let usable = false;
+    try {
+      const extracted = await extractDocxResumeText(bytes);
+      if (extracted && typeof extracted === "object" && !Buffer.isBuffer(extracted)) {
+        text = normalizeDocxResumeText(extracted.text || extracted.value || "");
+        usable = extracted.ok === false ? false : looksLikeUsableResumeText(text);
+      } else {
+        text = normalizeDocxResumeText(extracted);
+        usable = looksLikeUsableResumeText(text);
+      }
+    } catch {
+      usable = false;
+    }
+
+    if (!usable) {
+      sendJson(res, 422, {
+        ok: false,
+        code: "DOCX_TEXT_UNUSABLE",
+        error:
+          "We could not read usable text from that DOCX. The original file was saved; paste text or upload PDF, TXT, or Markdown.",
+        savedPath: savedRelPath,
+        guidance: "Paste text or upload PDF, TXT, or Markdown.",
+      });
+      return;
+    }
+
+    const parsed = parseResume(text);
+    const profileSeed = deriveProfileSeed(parsed);
+    const evidenceSeed = deriveEvidenceSeed(parsed);
+    const sections = {
+      experience: parsed.sections.experience.length,
+      education: parsed.sections.education.length,
+      skills: parsed.sections.skills.length,
+      projects: parsed.sections.projects.length,
+      other: parsed.sections.other.length,
+    };
+
+    if (dbExists(pathCtx)) {
+      candidateArtifactPut({
+        ...pathCtx,
+        id: "source-resume",
+        kind: "source-resume",
+        data: {
+          path: savedRelPath,
+          filename: sanitizeUploadFilename(name),
+          savedAt: new Date().toISOString(),
+          source: "docx",
+          text,
+        },
+      });
+    } else {
+      const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+      const dest = userPath(pathCtx, entry.candidatePath);
+      mkdirSync(dirname(dest), { recursive: true });
+      atomicWriteFile(dest, text);
+    }
+
+    sendJson(res, 200, {
+      ok: true,
+      profileSeed,
+      evidenceSeed,
+      sections,
+      source: "docx",
+      savedPath: savedRelPath,
+    });
   });
 
   // -------------------------------------------------------------------------
