@@ -44,7 +44,7 @@ import {
   sourceConfigPut,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
-import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -56,13 +56,15 @@ function tempRepo() {
 }
 
 function writeSourcedScanConfig(repoRoot, overrides = {}) {
+  const configPath = join(repoRoot, "config/sourced-scan.json");
   const doc = {
     title_filter: { positive: [], negative: [] },
     location_filter: null,
     tracked_companies: [{ name: "Acme", careers_url: "https://jobs.lever.co/acme" }],
     ...overrides,
   };
-  writeFileSync(join(repoRoot, "config/sourced-scan.json"), JSON.stringify(doc, null, 2));
+  writeFileSync(configPath, JSON.stringify(doc, null, 2));
+  return configPath;
 }
 
 function writeTargeting(repoRoot, keepSignals) {
@@ -142,10 +144,11 @@ function rssFetchStub() {
 test("runSourcedScan returns the documented summary shape from a stubbed fetch", async () => {
   const repoRoot = tempRepo();
   try {
-    writeSourcedScanConfig(repoRoot);
+    const configPath = writeSourcedScanConfig(repoRoot);
     const summary = await runSourcedScan({
       repoRoot,
       fetchImpl: leverFetchStub(),
+      configPath,
       write: false,
       intake: false,
     });
@@ -168,27 +171,27 @@ test("runSourcedScan returns the documented summary shape from a stubbed fetch",
   }
 });
 
-test("write:true persists workspace/scan-results/sourced-<date>.json; write:false does not", async () => {
+test("write:true captures JD artifacts without writing generated scan-result files", async () => {
   const repoRoot = tempRepo();
   try {
-    writeSourcedScanConfig(repoRoot);
+    const configPath = writeSourcedScanConfig(repoRoot);
     const summary = await runSourcedScan({
       repoRoot,
       fetchImpl: leverFetchStub(),
+      configPath,
       write: true,
       intake: false,
     });
-    const date = new Date().toISOString().slice(0, 10);
-    const outPath = userPath({ repoRoot }, `workspace/scan-results/sourced-${date}.json`);
-    assert.ok(existsSync(outPath), "expected a persisted scan-results file");
-    const written = JSON.parse(readFileSync(outPath, "utf8"));
-    assert.deepEqual(written, summary);
     assert.match(summary.offers[0].artifacts.jd, /^workspace\/jobs\/acme-director-of-it-/);
     const jdText = readFileSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd), "utf8");
     assert.match(jdText, /company: Acme/);
     assert.match(jdText, /role: Director of IT/);
     assert.match(jdText, /source: "?https:\/\/jobs\.lever\.co\/acme\/abc"?/);
     assert.match(jdText, /Own corporate IT, identity, endpoint, and automation\./);
+    assert.ok(
+      !existsSync(userPath({ repoRoot }, "workspace/scan-results")),
+      "product scans must not write generated scan-result files"
+    );
     assert.ok(
       !existsSync(userPath({ repoRoot }, "workspace/intake")),
       "intake:false must not write intake"
@@ -198,15 +201,18 @@ test("write:true persists workspace/scan-results/sourced-<date>.json; write:fals
   }
 });
 
-test("intake:true renders workspace/intake/sourced-<date>.md", async () => {
+test("intake:true does not write generated intake digests from the product scan path", async () => {
   const repoRoot = tempRepo();
   try {
-    writeSourcedScanConfig(repoRoot);
-    await runSourcedScan({ repoRoot, fetchImpl: leverFetchStub(), write: false, intake: true });
-    const date = new Date().toISOString().slice(0, 10);
-    const outPath = userPath({ repoRoot }, `workspace/intake/sourced-${date}.md`);
-    assert.ok(existsSync(outPath));
-    assert.match(readFileSync(outPath, "utf8"), /Sourced Intake/);
+    const configPath = writeSourcedScanConfig(repoRoot);
+    await runSourcedScan({
+      repoRoot,
+      fetchImpl: leverFetchStub(),
+      configPath,
+      write: false,
+      intake: true,
+    });
+    assert.equal(existsSync(userPath({ repoRoot }, "workspace/intake")), false);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -220,20 +226,22 @@ test("no cross-call state leakage: two repoRoots with different targeting score 
   const repoA = tempRepo();
   const repoB = tempRepo();
   try {
-    writeSourcedScanConfig(repoA);
-    writeSourcedScanConfig(repoB);
+    const configPathA = writeSourcedScanConfig(repoA);
+    const configPathB = writeSourcedScanConfig(repoB);
     writeTargeting(repoA, ["director of it"]);
     writeTargeting(repoB, ["something else entirely"]);
 
     const summaryA = await runSourcedScan({
       repoRoot: repoA,
       fetchImpl: leverFetchStub("Director of IT"),
+      configPath: configPathA,
       write: false,
       intake: false,
     });
     const summaryB = await runSourcedScan({
       repoRoot: repoB,
       fetchImpl: leverFetchStub("Director of IT"),
+      configPath: configPathB,
       write: false,
       intake: false,
     });
@@ -410,21 +418,23 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
   }
 });
 
-test("legacy write:true stamps search-source watermarks in search-sources.yml", async () => {
+test("explicit config scans without DB do not mutate legacy search-sources.yml", async () => {
   const repoRoot = tempRepo();
   try {
-    writeSourcedScanConfig(repoRoot, { tracked_companies: [] });
+    const configPath = writeSourcedScanConfig(repoRoot, { tracked_companies: [] });
     writeSearchSourcesConfig(repoRoot);
+    const before = readFileSync(join(repoRoot, "config/search-sources.yml"), "utf8");
 
     await runSourcedScan({
       repoRoot,
       fetchImpl: rssFetchStub(),
+      configPath,
       write: true,
       intake: false,
     });
 
-    const written = parseYaml(readFileSync(join(repoRoot, "config/search-sources.yml"), "utf8"));
-    assert.match(written.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+    const after = readFileSync(join(repoRoot, "config/search-sources.yml"), "utf8");
+    assert.equal(after, before);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

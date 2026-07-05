@@ -33,7 +33,7 @@
 //   --summary          Print a human-readable summary instead of raw JSON
 //   --limit <n>        Cap offers.length (0 = no cap)
 //   --timestamped      Use a full timestamp (not just the date) in written filenames
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
@@ -42,9 +42,7 @@ import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-co
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { loadCandidateConfig as loadStoredCandidateConfig } from "../src/core/profile/config-store.mjs";
-import { atomicWriteFile } from "../src/core/profile/gate-writer.mjs";
-import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
-import { renderSourcedIntake } from "../src/core/scoring/sourced-intake.mjs";
+import { parseYaml } from "../src/core/profile/yaml.mjs";
 import {
   captureAndPersistOffersIfDb,
   offersWithCapturedJobs,
@@ -59,7 +57,6 @@ import {
   scanSearchSources,
   scoreSourcedOffer,
 } from "../src/core/scoring/sourced-scanner.mjs";
-import { buildSeenSets } from "../src/core/tracker/tracker-data.mjs";
 
 const _scriptRoot = join(fileURLToPath(import.meta.url), "../..");
 
@@ -92,23 +89,21 @@ function toOutputOffer(offer) {
   };
 }
 
-function timestamp(date) {
-  return date.toISOString().replace(/[-:]/g, "").replace(/\..+$/, "").replace("T", "-");
-}
-
 function loadScannerConfigForRun({ pathCtx, configPath }) {
-  if (!configPath && dbExists(pathCtx))
-    return sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
-  return loadScannerConfig(configPath || userPath(pathCtx, "config/sourced-scan.json"));
+  if (configPath) return loadScannerConfig(configPath);
+  if (dbExists(pathCtx)) return sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  return {
+    title_filter: { positive: [], negative: [] },
+    location_filter: null,
+    tracked_companies: [],
+  };
 }
 
 function loadSearchSourcesForRun(pathCtx) {
   if (dbExists(pathCtx)) {
     return sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
   }
-  const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
-  if (!existsSync(searchSourcesPath)) return null;
-  return parseYaml(readFileSync(searchSourcesPath, "utf8"));
+  return null;
 }
 
 function searchListKey(config) {
@@ -141,10 +136,7 @@ function persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt }) {
   if (dbExists(pathCtx)) {
     return sourceConfigPut({ ...pathCtx, name: "search-sources", data: config });
   }
-  const searchSourcesPath = userPath(pathCtx, "config/search-sources.yml");
-  if (!existsSync(searchSourcesPath)) return null;
-  atomicWriteFile(searchSourcesPath, `${stringifyYaml(config)}\n`);
-  return { ok: true, stamped };
+  return null;
 }
 
 function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
@@ -163,7 +155,12 @@ function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
 
 export function buildSeenSetsForRun(pathCtx) {
   if (dbExists(pathCtx)) return buildDbSeenSets(pathCtx);
-  return buildSeenSets(pathCtx.repoRoot);
+  return {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    tracker: { apps: [], sourced: [] },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +191,8 @@ export async function runSourcedScan({
   limit = 0,
   timestamped = false,
 } = {}) {
+  void intake;
+  void timestamped;
   const pathCtx = { repoRoot, env };
   const config = loadScannerConfigForRun({ pathCtx, configPath });
   const candidateConfig = loadCandidateConfig(pathCtx);
@@ -275,27 +274,7 @@ export async function runSourcedScan({
     offers: outputOffers,
   };
 
-  if (write) {
-    const scanResultsDir = userPath(pathCtx, "workspace/scan-results");
-    mkdirSync(scanResultsDir, { recursive: true });
-    const stamp = timestamped ? timestamp(savedAt) : savedAt.toISOString().slice(0, 10);
-    const out = join(scanResultsDir, `sourced-${stamp}.json`);
-    writeFileSync(out, JSON.stringify(summary, null, 2));
-    console.error(`Wrote ${out}`);
-    persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt });
-  }
-
-  if (intake) {
-    const intakeDir = userPath(pathCtx, "workspace/intake");
-    mkdirSync(intakeDir, { recursive: true });
-    const date = new Date().toISOString().slice(0, 10);
-    const out = join(intakeDir, `sourced-${date}.md`);
-    writeFileSync(
-      out,
-      renderSourcedIntake({ date, offers: summary.offers, summary, config: candidateConfig })
-    );
-    console.error(`Wrote ${out}`);
-  }
+  if (write) persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt });
 
   return summary;
 }
