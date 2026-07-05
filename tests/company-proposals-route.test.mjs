@@ -840,6 +840,10 @@ test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-p
   assertNoCurrentCompLeak(body);
 });
 
+test("VER-04 duplicate, excluded, in-play, and unsupported proposal states fail closed before confirmed writes", async () => {
+  assert.fail("VER-04 proposal creation write-safety assertions are not implemented yet");
+});
+
 test("POST /api/discovery/company-proposals returns no-AI manual fallback without chat, full runtime, or writes", async () => {
   const repoRoot = tempRepo();
   candidateSetupInitialize({ repoRoot });
