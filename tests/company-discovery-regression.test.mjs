@@ -523,6 +523,7 @@ test("refresh force-revalidates, rescans, regates, versions state, preserves JD 
   assert.equal(calls.filter((call) => call.name === "resolveCompanyBoard").length, 1);
   assert.equal(calls.filter((call) => call.name === "scanCompanies").length, 1);
   assert.equal(calls.filter((call) => call.name === "gateProposal").length, 1);
+  assert.equal(server.chatRuntime.starts.length, 0);
   assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, []);
   assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
 
@@ -628,5 +629,63 @@ test("static ownership checks reject generated-file write seams and require supp
 });
 
 test("VER-01 deterministic discovery paths do not call AI, chat, or retained full skill runtime", () => {
-  assert.fail("VER-01 cost-boundary regression assertions are not implemented yet");
+  const directAISeams = /\b(?:callAI\s*\(|runBoundedAI\b)/;
+  const chatOrFullRuntimeSeams = /\b(?:runSkillStream|startSession)\b|\/api\/skill\/run/;
+  const deterministicDiscoveryFiles = [
+    "src/core/discovery/company-board-resolver.mjs",
+    "src/core/discovery/company-context.mjs",
+    "src/core/discovery/company-proposal-gate.mjs",
+    "src/core/discovery/company-proposals.mjs",
+    "src/core/discovery/company-proposal-decisions.mjs",
+  ];
+
+  for (const file of deterministicDiscoveryFiles) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(source, directAISeams, `${file} must not call direct AI seams`);
+    assert.doesNotMatch(
+      source,
+      chatOrFullRuntimeSeams,
+      `${file} must not start chat or retained skill runtime`
+    );
+  }
+
+  const seedSource = readFileSync("src/core/discovery/company-seeds.mjs", "utf8");
+  assert.match(seedSource, /runBoundedAI/, "company seed generation owns bounded AI usage");
+  assert.match(seedSource, /skill:\s*"discover-companies"/);
+  assert.match(seedSource, /action:\s*"seed-generate"/);
+  assert.doesNotMatch(seedSource, /\bcallAI\s*\(/, "seed generation must not bypass bounded AI");
+
+  const routeSource = readFileSync("src/cli/discovery-route.mjs", "utf8");
+  const routeSlices = [
+    {
+      label: "proposal create",
+      start: 'addRoute("POST", "/api/discovery/company-proposals"',
+      end: 'addRoute("GET", "/api/discovery/company-proposals"',
+    },
+    {
+      label: "proposal read",
+      start: 'addRoute("GET", "/api/discovery/company-proposals"',
+      end: 'addRoute("POST", "/api/discovery/company-proposal-decisions"',
+    },
+    {
+      label: "proposal decision and refresh",
+      start: 'addRoute("POST", "/api/discovery/company-proposal-decisions"',
+      end: 'addRoute("GET", "/api/discovery/state"',
+    },
+  ];
+
+  for (const { label, start, end } of routeSlices) {
+    const startIndex = routeSource.indexOf(start);
+    const endIndex = routeSource.indexOf(end);
+    assert.notEqual(startIndex, -1, `${label} route start marker exists`);
+    assert.notEqual(endIndex, -1, `${label} route end marker exists`);
+    assert.ok(endIndex > startIndex, `${label} route slice has a valid range`);
+    const slice = routeSource.slice(startIndex, endIndex);
+    assert.doesNotMatch(slice, directAISeams, `${label} route must not directly call AI`);
+    assert.doesNotMatch(
+      slice,
+      chatOrFullRuntimeSeams,
+      `${label} route must not start chat or retained skill runtime`
+    );
+  }
 });
