@@ -103,14 +103,14 @@ test("sourcingRunFail persists actionable error JSON", () => {
   assert.deepEqual(latest.run.error, failed.run.error);
 });
 
-test("duplicate first-search starts are idempotent after completion but reject concurrent running starts", () => {
+test("duplicate first-search starts are idempotent while running and after completion", () => {
   const repoRoot = tempRepo();
   const first = sourcingRunStart({ repoRoot, purpose: "first-search" });
 
-  assert.throws(
-    () => sourcingRunStart({ repoRoot, purpose: "first-search" }),
-    (error) => error?.code === "CONFLICT" && /already running/i.test(error.message)
-  );
+  const runningReuse = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  assert.equal(runningReuse.reused, true);
+  assert.equal(runningReuse.run.id, first.run.id);
+  assert.equal(runningReuse.run.status, "running");
 
   sourcingRunComplete({
     repoRoot,
@@ -127,4 +127,37 @@ test("duplicate first-search starts are idempotent after completion but reject c
   assert.equal(manual.reused, false);
   assert.equal(manual.run.purpose, "manual-search");
   assert.notEqual(manual.run.id, first.run.id);
+});
+
+test("failed first-search starts are displayable until retryFailed creates new retry work", () => {
+  const repoRoot = tempRepo();
+  const first = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  const failed = sourcingRunFail({
+    repoRoot,
+    id: first.run.id,
+    error: {
+      code: "NO_DETERMINISTIC_SOURCES",
+      message: "Add an RSS source or supported public ATS company before searching.",
+      action: "source_setup",
+    },
+  });
+
+  const display = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  assert.equal(display.reused, true);
+  assert.equal(display.run.id, failed.run.id);
+  assert.equal(display.run.status, "failed");
+
+  const retry = sourcingRunStart({
+    repoRoot,
+    purpose: "first-search",
+    retryFailed: true,
+  });
+  assert.equal(retry.reused, false);
+  assert.equal(retry.run.status, "running");
+  assert.notEqual(retry.run.id, failed.run.id);
+  assert.equal(retry.run.metadata.retryOf, failed.run.id);
+
+  const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
+  assert.equal(latest.run.id, retry.run.id);
+  assert.equal(latest.run.metadata.retryOf, failed.run.id);
 });

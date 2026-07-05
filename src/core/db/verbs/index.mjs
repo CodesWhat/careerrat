@@ -51,3 +51,10 @@ export {
   sourceConfigPut,
 } from "./source-config.mjs";
 export { sourcedPromote, sourcedUpsertBatch } from "./sourced.mjs";
+export {
+  SOURCING_RUN_STATUSES,
+  sourcingRunComplete,
+  sourcingRunFail,
+  sourcingRunLatest,
+  sourcingRunStart,
+} from "./sourcing-runs.mjs";
