@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
 status: In Progress
-stopped_at: Completed 07-06-PLAN.md
-last_updated: "2026-07-05T22:47:03.051Z"
+stopped_at: Completed 07-07-PLAN.md
+last_updated: "2026-07-05T22:59:13.492Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 45
-  completed_plans: 34
-  percent: 76
+  completed_plans: 35
+  percent: 78
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T22:47:03.044Z
-**Stopped at:** Completed 07-06-PLAN.md
+**Last session:** 2026-07-05T22:59:13.483Z
+**Stopped at:** Completed 07-07-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -114,6 +114,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P04 | 8 min | 3 tasks | 10 files |
 | Phase 07 P05 | 3 min | 2 tasks | 5 files |
 | Phase 07 P06 | 12 min | 2 tasks | 9 files |
+| Phase 07 P07 | 8 min | 2 tasks | 7 files |
 
 ## Decisions
 
@@ -220,3 +221,6 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: Keep stored run timestamps snake_case and return camelCase aliases for route consumers. — The DB payload remains canonical while later HTTP/React code can use route-facing field names without another transform.
 - [Phase 07]: Onboarding quick-start now starts local deterministic first-search work, while explicit discovery quick-start remains the chat handoff. — This keeps first search deterministic without removing the user-selected discovery path.
 - [Phase 07]: First-search retry is driven by latest durable failed run state and passes retryFailed:true server-side. — The client does not need to infer retry behavior from stale UI state.
+- [Phase 07]: Cadence is stored under targeting.search_preferences.cadence with a daily/default baseline and does not affect search_ready. — Search scheduling preference remains separate from quick-onboarding readiness.
+- [Phase 07]: First-search start/retry uses startFirstSearchRun() and /api/sourcing/first-run/start; no discovery/chat/skill route is used by the first-search task. — This preserves deterministic local first-search behavior.
+- [Phase 07]: The explicit deeper interview link remains separate from the first-search task. — This keeps deep onboarding available without treating it as first-search runtime escalation.
