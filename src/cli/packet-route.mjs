@@ -40,11 +40,11 @@
 // markdown body directly.
 //
 // Path safety: resolveArtifactPath() below is the same two-step
-// normalize-then-prefix-check traversal guard as storage-adapter.mjs's
+// normalize-then-prefix-check traversal guard used by scoped workspace reads
 // (unexported) resolveScoped() — reimplemented locally because this route
 // resolves a *stamped tracker value* (which may carry a leading "workspace/"
 // segment tailor-application writes literally into the path string) rather
-// than the already-workspace-relative relPath storage-adapter's readFile()
+// than an already-workspace-relative file read helper
 // expects. A traversal attempt (".." after stripping "workspace/", an
 // absolute path, a NUL byte) resolves to null, which every caller here
 // treats exactly like "artifact was never stamped" — no different error
@@ -52,10 +52,11 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, normalize, sep } from "node:path";
+import { requireDb } from "../core/db/connection.mjs";
+import { assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { markdownToHtml } from "../core/documents/export.mjs";
 import { lintArtifact } from "../core/documents/placeholder-lint.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
-import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import { classifyStage } from "../core/tracker/dashboard.mjs";
 import { sendJson } from "./skill-run-route.mjs";
 
@@ -98,7 +99,7 @@ function stripWorkspacePrefix(value) {
   return value.startsWith("workspace/") ? value.slice("workspace/".length) : value;
 }
 
-// Same normalize-then-prefix-check traversal guard as storage-adapter.mjs's
+// Same normalize-then-prefix-check traversal guard as scoped workspace reads.
 // resolveScoped() — see this file's header comment for why it's reimplemented
 // rather than imported.
 function resolveArtifactPath(workspaceDir, relPath) {
@@ -165,32 +166,44 @@ function countNeedsYou(workspaceDir, storedAnswersValue) {
   return needsYouFindings(resolved.markdown).length;
 }
 
-export function mountPacketRoutes({ addRoute, repoRoot, env: _env = process.env }) {
-  const pathCtx = { repoRoot };
-  const adapter = defaultAdapter(repoRoot);
+export function readPacketApplicationsFromDb({ repoRoot, env = process.env } = {}) {
+  const db = requireDb({ repoRoot, env });
+  const tracker = assembleTrackerObject(db);
+  return {
+    applications: Array.isArray(tracker.applications) ? tracker.applications : [],
+    stages: tracker.stages,
+  };
+}
 
-  function readTrackerOrRespondError(res) {
-    try {
-      return adapter.readTracker();
-    } catch (err) {
-      const status = /no tracker\.json/.test(err.message) ? 404 : 500;
-      sendJson(res, status, { error: err.message });
-      return null;
-    }
-  }
+function statusForError(err) {
+  if (err?.code === "NO_DATABASE") return 409;
+  return 500;
+}
+
+function respondError(res, err) {
+  sendJson(res, statusForError(err), { ok: false, error: err?.message || String(err) });
+}
+
+export function mountPacketRoutes({ addRoute, repoRoot, env = process.env }) {
+  const pathCtx = { repoRoot, env };
 
   // -------------------------------------------------------------------------
   // GET /api/packet/list
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/packet/list", (_req, res) => {
-    const tracker = readTrackerOrRespondError(res);
-    if (!tracker) return;
+    let packetRows;
+    try {
+      packetRows = readPacketApplicationsFromDb(pathCtx);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
 
     const workspaceDir = resolveUserPaths(pathCtx).workspaceDir;
-    const applications = Array.isArray(tracker.applications) ? tracker.applications : [];
+    const { applications, stages } = packetRows;
 
     const rows = applications
-      .filter((app) => isGatedIn(app, tracker.stages))
+      .filter((app) => isGatedIn(app, stages))
       .map((app) => {
         const artifacts = app.artifacts || {};
         return {
@@ -218,10 +231,15 @@ export function mountPacketRoutes({ addRoute, repoRoot, env: _env = process.env 
       return;
     }
 
-    const tracker = readTrackerOrRespondError(res);
-    if (!tracker) return;
+    let packetRows;
+    try {
+      packetRows = readPacketApplicationsFromDb(pathCtx);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
 
-    const applications = Array.isArray(tracker.applications) ? tracker.applications : [];
+    const { applications } = packetRows;
     const app = applications.find((a) => String(a?.id) === String(id));
     if (!app) {
       sendJson(res, 404, { error: `no application with id "${id}"` });
