@@ -88,6 +88,10 @@ function formDefaultsSchema() {
   return JSON.parse(readFileSync(join(REAL_ROOT, "config/form-defaults.schema.json"), "utf8"));
 }
 
+function targetingSchema() {
+  return JSON.parse(readFileSync(join(REAL_ROOT, "config/targeting.schema.json"), "utf8"));
+}
+
 after(() => {
   closeAll();
   for (const root of dbRoots.splice(0)) {
@@ -375,6 +379,13 @@ describe("candidate setup DB readiness and document formats", () => {
             titles: ["Applied AI Engineer", "Forward Deployed Engineer"],
           },
         ],
+        search_preferences: {
+          cadence: {
+            mode: "weekly",
+            recommended_from: "default",
+            saved_at: "2026-07-05T22:00:00Z",
+          },
+        },
       },
     });
     candidateConfigPatch({
@@ -397,12 +408,124 @@ describe("candidate setup DB readiness and document formats", () => {
 
     const config = candidateConfigGet({ repoRoot });
     assert.equal(config.profile.compensation.minimum_base, null);
+    assert.deepEqual(config.targeting.search_preferences.cadence, {
+      mode: "weekly",
+      recommended_from: "default",
+      saved_at: "2026-07-05T22:00:00Z",
+    });
     assert.equal(config.setup.readiness.search_ready, true);
     assert.equal(config.setup.readiness.gate_ready, false);
     assert.equal(config.setup.readiness.apply_ready, false);
     assert.deepEqual(config.setup.missing.search_ready, []);
     assert.match(config.setup.missing.gate_ready.join("\n"), /compensation floor/i);
     assert.match(config.setup.missing.apply_ready.join("\n"), /compensation floor/i);
+  });
+
+  it("defaults targeting.search_preferences cadence without changing search readiness gates", () => {
+    const repoRoot = buildDbRoot();
+    const config = candidateConfigGet({ repoRoot });
+
+    assert.deepEqual(config.targeting.search_preferences, {
+      posting_age: { mode: "since-last-run" },
+      cadence: { mode: "daily", recommended_from: "default" },
+    });
+    assert.equal(config.setup.readiness.search_ready, false);
+    assert.ok(config.setup.missing.search_ready.includes("source resume"));
+    assert.ok(!config.setup.missing.search_ready.includes("compensation floor"));
+  });
+
+  it("validates cadence search preferences and still rejects unknown search preference keys", () => {
+    const schema = targetingSchema();
+    const validCadence = validate(
+      {
+        role_buckets: [],
+        keep_signals: [],
+        cut_signals: [],
+        search_preferences: {
+          posting_age: { mode: "since-last-run" },
+          cadence: {
+            mode: "every-3-days",
+            recommended_from: "history",
+            saved_at: "2026-07-05T22:00:00Z",
+          },
+        },
+      },
+      schema
+    );
+    assert.equal(validCadence.valid, true, JSON.stringify(validCadence.errors));
+
+    const invalidMode = validate(
+      {
+        role_buckets: [],
+        keep_signals: [],
+        cut_signals: [],
+        search_preferences: {
+          cadence: { mode: "hourly", recommended_from: "default" },
+        },
+      },
+      schema
+    );
+    assert.equal(invalidMode.valid, false, "unknown cadence modes must be rejected");
+    assert.match(JSON.stringify(invalidMode.errors), /cadence|hourly|enum/i);
+
+    const unknownKey = validate(
+      {
+        role_buckets: [],
+        keep_signals: [],
+        cut_signals: [],
+        search_preferences: {
+          cadence: { mode: "daily", recommended_from: "default" },
+          scheduler: { enabled: true },
+        },
+      },
+      schema
+    );
+    assert.equal(unknownKey.valid, false, "unknown search_preferences keys must be rejected");
+    assert.match(JSON.stringify(unknownKey.errors), /search_preferences|scheduler|additional/i);
+  });
+
+  it("uses local sourcing API wrappers for durable first-search runs", async () => {
+    const api = await import(`../apps/web/src/lib/api.js?candidate-setup=${Date.now()}`);
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (path, options = {}) => {
+      calls.push({ path: String(path), options });
+      return {
+        ok: true,
+        status: 202,
+        text: async () => JSON.stringify({ ok: true, run: { id: "run-1", status: "running" } }),
+      };
+    };
+
+    try {
+      assert.equal(typeof api.getSourcingRun, "function");
+      assert.equal(typeof api.startFirstSearchRun, "function");
+      assert.equal(typeof api.startSearchRun, "function");
+
+      await api.getSourcingRun({ purpose: "first-search" });
+      await api.startFirstSearchRun({ retry: true });
+      await api.startSearchRun({ purpose: "manual-search" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.deepEqual(
+      calls.map((call) => call.path),
+      [
+        "/api/sourcing/runs/latest?purpose=first-search",
+        "/api/sourcing/first-run/start",
+        "/api/sourcing/search/start",
+      ]
+    );
+    assert.equal(calls[0].options.method, undefined);
+    assert.equal(calls[1].options.method, "POST");
+    assert.equal(calls[2].options.method, "POST");
+    assert.deepEqual(JSON.parse(calls[1].options.body), { retry: true });
+    assert.deepEqual(JSON.parse(calls[2].options.body), { purpose: "manual-search" });
+    assert.equal(
+      calls.some((call) => /\/api\/(?:discovery|chat|skill\/run)\b/.test(call.path)),
+      false
+    );
   });
 
   it("defaults form-defaults.document_formats to PDF packets with no board-required exports", () => {
