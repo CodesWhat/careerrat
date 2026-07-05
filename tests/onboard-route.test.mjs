@@ -165,6 +165,133 @@ async function postJson(server, path, payload) {
   return { status: res.status, body };
 }
 
+async function postResumeDocx(server, name, bytes) {
+  const res = await fetch(
+    `${baseUrl(server)}/api/onboard/resume-docx?name=${encodeURIComponent(name)}`,
+    { method: "POST", body: bytes }
+  );
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, body };
+}
+
+const CRC32_TABLE = Array.from({ length: 256 }, (_, n) => {
+  let crc = n;
+  for (let k = 0; k < 8; k += 1) {
+    crc = crc & 1 ? 0xedb88320 ^ (crc >>> 1) : crc >>> 1;
+  }
+  return crc >>> 0;
+});
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function xmlEscape(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;");
+}
+
+function makeZip(entries) {
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+
+  for (const [name, value] of entries) {
+    const nameBuf = Buffer.from(name);
+    const data = Buffer.isBuffer(value) ? value : Buffer.from(String(value));
+    const crc = crc32(data);
+
+    const local = Buffer.alloc(30 + nameBuf.length);
+    local.writeUInt32LE(0x04034b50, 0);
+    local.writeUInt16LE(20, 4);
+    local.writeUInt16LE(0, 6);
+    local.writeUInt16LE(0, 8);
+    local.writeUInt16LE(0, 10);
+    local.writeUInt16LE(0, 12);
+    local.writeUInt32LE(crc, 14);
+    local.writeUInt32LE(data.length, 18);
+    local.writeUInt32LE(data.length, 22);
+    local.writeUInt16LE(nameBuf.length, 26);
+    local.writeUInt16LE(0, 28);
+    nameBuf.copy(local, 30);
+
+    const central = Buffer.alloc(46 + nameBuf.length);
+    central.writeUInt32LE(0x02014b50, 0);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt16LE(0, 8);
+    central.writeUInt16LE(0, 10);
+    central.writeUInt16LE(0, 12);
+    central.writeUInt16LE(0, 14);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(data.length, 20);
+    central.writeUInt32LE(data.length, 24);
+    central.writeUInt16LE(nameBuf.length, 28);
+    central.writeUInt16LE(0, 30);
+    central.writeUInt16LE(0, 32);
+    central.writeUInt16LE(0, 34);
+    central.writeUInt16LE(0, 36);
+    central.writeUInt32LE(0, 38);
+    central.writeUInt32LE(offset, 42);
+    nameBuf.copy(central, 46);
+
+    locals.push(local, data);
+    centrals.push(central);
+    offset += local.length + data.length;
+  }
+
+  const centralSize = centrals.reduce((sum, part) => sum + part.length, 0);
+  const end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0);
+  end.writeUInt16LE(0, 4);
+  end.writeUInt16LE(0, 6);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(centralSize, 12);
+  end.writeUInt32LE(offset, 16);
+  end.writeUInt16LE(0, 20);
+
+  return Buffer.concat([...locals, ...centrals, end]);
+}
+
+function makeDocxResume(paragraphs) {
+  const body = paragraphs
+    .map((text) => `<w:p><w:r><w:t xml:space="preserve">${xmlEscape(text)}</w:t></w:r></w:p>`)
+    .join("");
+  return makeZip([
+    [
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`,
+    ],
+    [
+      "_rels/.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`,
+    ],
+    [
+      "word/document.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>${body}<w:sectPr/></w:body>
+</w:document>`,
+    ],
+  ]);
+}
+
 after(() => {
   closeAll();
   for (const root of cleanupRoots.splice(0)) {
@@ -541,6 +668,108 @@ describe("POST /api/onboard/resume", () => {
       const { status, body } = await postJson(server, "/api/onboard/resume", { save: true });
       assert.equal(status, 400);
       assert.match(body.error, /text is required/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/onboard/resume-docx — RED contract for Phase 7 DOCX intake.
+// ---------------------------------------------------------------------------
+
+describe("POST /api/onboard/resume-docx", () => {
+  const VALID_DOCX = makeDocxResume([
+    "Jane Doe",
+    "jane.doe@example.com",
+    "New York, NY",
+    "Experience",
+    "Built deterministic onboarding workflows for local-first job search.",
+    "Skills",
+    "JavaScript, SQLite, React",
+  ]);
+
+  it("accepts valid DOCX bytes without AI, saves the original, seeds data, and marks source-resume ready", async () => {
+    const repoRoot = buildTempRoot();
+    let runSkillStreamCalled = false;
+    const runSkillStream = async () => {
+      runSkillStreamCalled = true;
+      const err = new Error("DOCX must not use resume-ai");
+      err.code = "NO_AI_ROUTE";
+      throw err;
+    };
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      await postJson(server, "/api/onboard/init", {});
+
+      const { status, body } = await postResumeDocx(server, "../source resume.docx", VALID_DOCX);
+
+      assert.equal(status, 200);
+      assert.equal(body.source, "docx");
+      assert.equal(body.profileSeed.candidate.full_name, "Jane Doe");
+      assert.equal(body.profileSeed.candidate.email, "jane.doe@example.com");
+      assert.equal(body.sections.experience, 1);
+      assert.equal(body.sections.skills, 3);
+      assert.equal(body.evidenceSeed.claims.length, 1);
+      assert.equal(runSkillStreamCalled, false, "DOCX parsing must not call resume-ai");
+
+      const uploadDir = candidatePath(repoRoot, "workspace/intake/resume-uploads");
+      const saved = readdirSync(uploadDir);
+      assert.equal(saved.length, 1);
+      assert.match(saved[0], /^\d+-source_resume\.docx$/);
+      assert.ok(readFileSync(join(uploadDir, saved[0])).equals(VALID_DOCX));
+
+      const state = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(state.sourceResumePresent, true);
+      assert.equal(
+        state.data.setup.missing.search_ready.includes("source resume"),
+        false,
+        "usable DOCX extraction must satisfy source-resume readiness"
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("keeps an empty DOCX upload but returns 422 without writing source-resume readiness", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      await postJson(server, "/api/onboard/init", {});
+
+      const emptyDocx = makeDocxResume(["", "   "]);
+      const { status, body } = await postResumeDocx(server, "empty.docx", emptyDocx);
+
+      assert.equal(status, 422);
+      assert.equal(body.ok, false);
+      assert.match(body.error, /could not read usable text/i);
+      assert.match(body.savedPath, /^workspace\/intake\/resume-uploads\/\d+-empty\.docx$/);
+      assert.ok(readFileSync(candidatePath(repoRoot, body.savedPath)).equals(emptyDocx));
+
+      const state = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      assert.equal(state.sourceResumePresent, false);
+      assert.equal(state.data.setup.missing.search_ready.includes("source resume"), true);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("413s oversized DOCX uploads before extraction", async () => {
+    const repoRoot = buildTempRoot();
+    let extractorCalled = false;
+    const extractDocxResumeText = async () => {
+      extractorCalled = true;
+      return { ok: true, text: "Jane Doe\njane@example.com" };
+    };
+    const { server } = await bootServer(repoRoot, {}, { extractDocxResumeText });
+    try {
+      await postJson(server, "/api/onboard/init", {});
+
+      const oversized = Buffer.alloc(5 * 1024 * 1024 + 1, 1);
+      const { status } = await postResumeDocx(server, "too-big.docx", oversized);
+
+      assert.equal(status, 413);
+      assert.equal(extractorCalled, false, "oversized uploads must fail before DOCX parsing");
     } finally {
       await closeServer(server);
     }
