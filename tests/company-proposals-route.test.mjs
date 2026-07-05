@@ -5,7 +5,9 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
+import { BOUNDED_AI_CODES } from "../src/core/ai/bounded-ai.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
+import { companyProposalBatchLatest } from "../src/core/db/verbs/company-discovery.mjs";
 import {
   appUpsert,
   candidateConfigPatch,
@@ -67,6 +69,37 @@ function assertNoCurrentCompLeak(value) {
     false,
     "must not leak private current base value"
   );
+}
+
+function assertNoProposalFailureSideEffects({
+  repoRoot,
+  chatRuntime,
+  calls,
+  expectedTrackedCompanies = [],
+}) {
+  assert.equal(chatRuntime.starts.length, 0);
+  for (const name of [
+    "resolveCompanyBoard",
+    "scanCompanies",
+    "runSkillStream",
+    "companyAtsUpsert",
+    "sourcedUpsertBatch",
+    "captureAndPersistOffersIfDb",
+    "writeTracker",
+  ]) {
+    assert.equal(
+      calls.some((call) => call.name === name),
+      false,
+      `${name} must not be called`
+    );
+  }
+  assert.equal(companyProposalBatchLatest({ repoRoot }).batch, null);
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies,
+    expectedTrackedCompanies
+  );
+  assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
+  assert.equal(existsSync(userPath({ repoRoot }, "workspace/activity.jsonl")), false);
 }
 
 function seedCandidateForAICompanyDiscovery(repoRoot) {
@@ -807,6 +840,104 @@ test("POST /api/discovery/company-proposals hard-rejects tracked, excluded, in-p
   assertNoCurrentCompLeak(body);
 });
 
-test("VER-02/VER-03 company proposal route negative regressions are implemented", () => {
-  assert.fail("RED: add no-AI, schema-invalid, no-chat, and no-write route tests");
+test("POST /api/discovery/company-proposals returns no-AI manual fallback without chat, full runtime, or writes", async () => {
+  const repoRoot = tempRepo();
+  candidateSetupInitialize({ repoRoot });
+  const calls = [];
+  const chatRuntime = fakeChatRuntime();
+  const err = new Error("no AI route configured");
+  err.code = BOUNDED_AI_CODES.NO_AI_ROUTE;
+  const server = bootServer(repoRoot, {
+    chatRuntime,
+    seedCall: async () => {
+      throw err;
+    },
+    resolveCompanyBoard: forbidden("resolveCompanyBoard", calls),
+    scanCompaniesImpl: forbidden("scanCompanies", calls),
+    runSkillStream: forbidden("runSkillStream", calls),
+    companyAtsUpsert: forbidden("companyAtsUpsert", calls),
+    sourcedUpsertBatch: forbidden("sourcedUpsertBatch", calls),
+    captureAndPersistOffersIfDb: forbidden("captureAndPersistOffersIfDb", calls),
+    writeTracker: forbidden("writeTracker", calls),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    requestedCount: 1,
+  });
+
+  assert.equal(status, 501);
+  assert.equal(body.ok, false);
+  assert.equal(body.code, BOUNDED_AI_CODES.NO_AI_ROUTE);
+  assert.equal(body.manual.available, true);
+  assert.equal(body.ai.used, false);
+  assert.equal(body.data, undefined);
+  assertNoProposalFailureSideEffects({ repoRoot, chatRuntime, calls });
+});
+
+test("POST /api/discovery/company-proposals returns AI_SCHEMA_INVALID without proposal batches or writes", async () => {
+  const repoRoot = tempRepo();
+  seedCandidateForAICompanyDiscovery(repoRoot);
+  const trackedBefore = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies;
+  const calls = [];
+  const seedCalls = [];
+  const chatRuntime = fakeChatRuntime();
+  const server = bootServer(repoRoot, {
+    chatRuntime,
+    seedCall: async (options) => {
+      seedCalls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              companies: [
+                {
+                  name: "Trusted Field Route Co",
+                  domain_hint: "trusted-route.example",
+                  why: "Matches agentic workflows.",
+                  role_family_hint: "Applied AI",
+                  confidence: "high",
+                  source_hint: "bounded-ai",
+                  careers_url: "https://trusted-route.example/jobs",
+                },
+              ],
+            }),
+          },
+        ],
+        model: "claude-native-test",
+      };
+    },
+    resolveCompanyBoard: forbidden("resolveCompanyBoard", calls),
+    scanCompaniesImpl: forbidden("scanCompanies", calls),
+    runSkillStream: forbidden("runSkillStream", calls),
+    companyAtsUpsert: forbidden("companyAtsUpsert", calls),
+    sourcedUpsertBatch: forbidden("sourcedUpsertBatch", calls),
+    captureAndPersistOffersIfDb: forbidden("captureAndPersistOffersIfDb", calls),
+    writeTracker: forbidden("writeTracker", calls),
+  });
+
+  const { status, body } = await postJson(server, "/api/discovery/company-proposals", {
+    requestedCount: 1,
+  });
+
+  assert.equal(seedCalls.length, 2);
+  assert.match(seedCalls[1].messages.at(-1).content, /careers_url/);
+  assert.equal(status, 422);
+  assert.equal(body.ok, false);
+  assert.equal(body.code, BOUNDED_AI_CODES.AI_SCHEMA_INVALID);
+  assert.equal(body.manual.available, true);
+  assert.equal(body.ai.used, true);
+  assert.equal(body.ai.retried, true);
+  assert.equal(body.data, undefined);
+  assert.ok(
+    body.error.details.some((error) => error.path.includes("careers_url")),
+    "trusted URL field should be named in schema details"
+  );
+  assertNoCurrentCompLeak(body);
+  assertNoProposalFailureSideEffects({
+    repoRoot,
+    chatRuntime,
+    calls,
+    expectedTrackedCompanies: trackedBefore,
+  });
 });
