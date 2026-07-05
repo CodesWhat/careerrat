@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 current_phase: 04
 status: Ready to execute
-stopped_at: Completed 03-07-PLAN.md
-last_updated: "2026-07-05T01:52:55.785Z"
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-07-05T01:58:10.907Z"
 progress:
   total_phases: 5
   completed_phases: 3
   total_plans: 23
-  completed_plans: 18
+  completed_plans: 19
   percent: 60
 ---
 
@@ -57,8 +57,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 
 ## Session
 
-**Last session:** 2026-07-05T00:54:35.791Z
-**Stopped at:** Completed 03-07-PLAN.md
+**Last session:** 2026-07-05T01:58:04.655Z
+**Stopped at:** Completed 04-01-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -83,6 +83,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 | Phase 03-company-discovery-api P05 | 7min | 1 tasks | 3 files |
 | Phase 03-company-discovery-api P06 | 6 min | 1 tasks | 3 files |
 | Phase 03-company-discovery-api P07 | 4 min | 1 tasks | 2 files |
+| Phase 04-runtime-routing P01 | 3 min | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -132,3 +133,5 @@ See: `.planning/PROJECT.md` (updated 2026-07-04)
 - [Phase 03-company-discovery-api]: Only approve-supported-ats can call companyAtsUpsert() or sourcedUpsertBatch(); reject, suppress, escalate, and refresh patch proposal state only. — Preserves the DISC-05 confirmation boundary and prevents non-approval decisions from becoming write paths.
 - [Phase 03-company-discovery-api]: Refresh calls resolveCompanyBoard() with forceRefresh:true and refreshReason:"explicit-refresh", rescans supported ATS boards, reruns the gate, and returns refreshed proposal or rejection metadata. — Keeps refresh as resolver/scanner/gate behavior instead of metadata-only state patching.
 - [Phase 03-company-discovery-api]: Decision expectedVersion is checked against the proposal version while the DB patch uses the current batch version. — This keeps user-visible stale proposal checks and DB-level conflict-safe writes aligned.
+- [Phase 04-runtime-routing]: GET /api/runtime/config exposes only skill names, route type, and booleans; secrets and raw env values remain unreported.
+- [Phase 04-runtime-routing]: Discovery chat handoff availability is derived from chat runtime allowlist membership for research-boards, discover-companies, or search-jobs.

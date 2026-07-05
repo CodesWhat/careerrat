@@ -28,9 +28,9 @@
 
 ### Runtime Routing
 
-- [ ] **RUNT-01**: `POST /api/skill/run` remains allowlisted and documented as the path for tool-heavy or long-running skill workflows.
+- [x] **RUNT-01**: `POST /api/skill/run` remains allowlisted and documented as the path for tool-heavy or long-running skill workflows.
 - [ ] **RUNT-02**: App discovery controls call local API routes for deterministic or bounded-AI work instead of launching a whole skill session.
-- [ ] **RUNT-03**: Conversational agent handoffs still have a clear prompt/spec path for cases where the user wants the agent to drive the workflow.
+- [x] **RUNT-03**: Conversational agent handoffs still have a clear prompt/spec path for cases where the user wants the agent to drive the workflow.
 
 ### Verification
 
@@ -84,9 +84,9 @@
 | DISC-03 | Phase 3 | Complete |
 | DISC-04 | Phase 3 | Complete |
 | DISC-05 | Phase 3 | Complete |
-| RUNT-01 | Phase 4 | Pending |
+| RUNT-01 | Phase 4 | Complete |
 | RUNT-02 | Phase 4 | Pending |
-| RUNT-03 | Phase 4 | Pending |
+| RUNT-03 | Phase 4 | Complete |
 | VER-01 | Phase 5 | Pending |
 | VER-02 | Phase 5 | Pending |
 | VER-03 | Phase 5 | Pending |
