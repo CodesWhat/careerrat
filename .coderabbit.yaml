@@ -1,0 +1,63 @@
+# CodeRabbit configuration — rolester
+language: en-US
+
+reviews:
+  profile: chill
+  auto_review:
+    enabled: true
+  high_level_summary: true
+  collapse_walkthrough: false
+  review_status: true
+  poem: false
+  request_changes_workflow: false
+
+  path_filters:
+    - "!**/node_modules/**"
+    - "!**/dist/**"
+    - "!**/build/**"
+    - "!**/.next/**"
+    - "!**/coverage/**"
+    - "!**/*.min.js"
+    - "!**/*.min.css"
+    - "!**/package-lock.json"
+    - "!**/pnpm-lock.yaml"
+    - "!**/*.lock"
+    - "!.planning/**"
+    - "!examples/**"
+    - "!assets/**"
+    - "!fonts/**"
+    - "!CHANGELOG.md"
+
+  path_instructions:
+    - path: "src/core/**"
+      instructions: |
+        Core workspace engine. Data shapes must stay consistent with DATA_CONTRACT.md — flag changes that drift from it.
+    - path: "src/cli/**"
+      instructions: |
+        CLI layer. Keep commands thin — flag business logic that belongs in src/core.
+    - path: ".agents/skills/**"
+      instructions: |
+        Agent skill definitions (markdown instructions, not code). Review for clarity and correct tool references, not code style.
+    - path: ".claude/skills/**"
+      instructions: |
+        Agent skill definitions (markdown instructions, not code). Review for clarity and correct tool references, not code style.
+    - path: "**/*.test.*"
+      instructions: |
+        Test files. Don't suggest error handling or null checks in test code.
+
+knowledge_base:
+  opt_out: false
+  learnings:
+    scope: local
+  issues:
+    scope: local
+  # Default filePatterns already cover CLAUDE.md / AGENTS.md / .cursorrules
+  code_guidelines:
+    enabled: true
+  web_search:
+    enabled: true
+  pull_requests:
+    scope: local
+
+chat:
+  auto_reply: true
