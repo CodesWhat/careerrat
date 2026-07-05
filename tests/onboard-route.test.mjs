@@ -155,6 +155,23 @@ function assertNoSensitiveRouteEnvelope(body) {
   }
 }
 
+function assertNoRuntimeHandoff(body) {
+  const serialized = JSON.stringify(body);
+  for (const token of [
+    "chat",
+    "chatId",
+    "nextSkill",
+    "nextMessage",
+    "research-boards",
+    "discover-companies",
+    "search-jobs",
+    "/api/chat",
+    "/api/skill/run",
+  ]) {
+    assert.equal(serialized.includes(token), false, `route envelope leaked ${token}`);
+  }
+}
+
 async function postJson(server, path, payload) {
   const res = await fetch(`${baseUrl(server)}${path}`, {
     method: "POST",
@@ -163,6 +180,14 @@ async function postJson(server, path, payload) {
   });
   const body = await res.json().catch(() => ({}));
   return { status: res.status, body };
+}
+
+function firstSearchFetchStub() {
+  return async () =>
+    new Response(
+      `<?xml version="1.0"?><rss><channel><item><title>Applied AI Engineer</title><link>https://example.test/jobs/1</link><description>Build agent workflows.</description></item></channel></rss>`,
+      { status: 200 }
+    );
 }
 
 async function postResumeDocx(server, name, bytes) {
@@ -1520,9 +1545,9 @@ describe("POST /api/onboard/quick-start", () => {
     }
   });
 
-  it("writes search compatibility output and returns the discovery handoff once search-ready", async () => {
+  it("starts the durable first-search run without compatibility exports or discovery handoff", async () => {
     const repoRoot = buildTempRoot();
-    const { server } = await bootServer(repoRoot);
+    const { server } = await bootServer(repoRoot, {}, { fetchImpl: firstSearchFetchStub() });
     try {
       await postJson(server, "/api/onboard/init", {});
       await postJson(server, "/api/onboard/resume", {
@@ -1531,7 +1556,11 @@ describe("POST /api/onboard/quick-start", () => {
       });
       await postJson(server, "/api/onboard/candidate/profile", {
         data: {
-          candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+          candidate: {
+            full_name: "Ada Lovelace",
+            email: "ada@example.com",
+            domain: "software engineering",
+          },
           location: { home: "New York, NY", remote: true },
         },
       });
@@ -1544,27 +1573,24 @@ describe("POST /api/onboard/quick-start", () => {
       });
 
       const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
-      assert.equal(status, 200);
+      assert.equal(status, 202);
       assert.equal(body.ok, true);
       assert.equal(body.readiness.search_ready, true);
       assert.equal(body.readiness.gate_ready, false);
       assert.equal(body.readiness.apply_ready, false);
-      assert.equal(body.nextSkill, "research-boards");
-      assert.match(body.nextMessage, /discover-companies/i);
-      assert.ok(body.written.some((path) => path.endsWith("config/search-sources.yml")));
-      assert.ok(body.written.some((path) => path.endsWith("candidate/AGENTS.md")));
-      assert.equal(body.searches.count > 0, true);
-
-      const searchSources = parseYaml(
-        readFileSync(candidatePath(repoRoot, "config/search-sources.yml"), "utf8")
-      );
-      assert.ok(Array.isArray(searchSources.searches));
-      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), true);
-      assert.equal(existsSync(candidatePath(repoRoot, "candidate/targeting.yml")), true);
+      assert.equal(body.reused, false);
+      assert.equal(body.run.purpose, "first-search");
+      assert.equal(body.run.status, "running");
+      assert.equal(body.sources.deterministicSources.attempted > 0, true);
+      assertNoRuntimeHandoff(body);
+      assert.equal(existsSync(candidatePath(repoRoot, "config/search-sources.yml")), false);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), false);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/targeting.yml")), false);
+      assert.equal(existsSync(candidatePath(repoRoot, "candidate/AGENTS.md")), false);
       assert.equal(
         existsSync(candidatePath(repoRoot, "candidate/SOURCE_RESUME.md")),
         false,
-        "source resume remains DB artifact; quick-start only writes compatibility output"
+        "source resume remains DB artifact; quick-start does not export compatibility files"
       );
     } finally {
       await closeServer(server);
@@ -1573,7 +1599,7 @@ describe("POST /api/onboard/quick-start", () => {
 
   it("quick-start preserves existing DB source config entries and watermarks", async () => {
     const repoRoot = buildTempRoot();
-    const { server } = await bootServer(repoRoot);
+    const { server } = await bootServer(repoRoot, {}, { fetchImpl: firstSearchFetchStub() });
     try {
       await postJson(server, "/api/onboard/init", {});
       await postJson(server, "/api/onboard/resume", {
@@ -1582,7 +1608,11 @@ describe("POST /api/onboard/quick-start", () => {
       });
       await postJson(server, "/api/onboard/candidate/profile", {
         data: {
-          candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+          candidate: {
+            full_name: "Ada Lovelace",
+            email: "ada@example.com",
+            domain: "software engineering",
+          },
           location: { home: "New York, NY", remote: true },
         },
       });
@@ -1616,8 +1646,10 @@ describe("POST /api/onboard/quick-start", () => {
       });
 
       const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
-      assert.equal(status, 200);
+      assert.equal(status, 202);
       assert.equal(body.ok, true);
+      assert.equal(body.run.purpose, "first-search");
+      assertNoRuntimeHandoff(body);
 
       const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
       const existing = stored.searches.find((source) => source.label === "Existing board");
@@ -1630,6 +1662,7 @@ describe("POST /api/onboard/quick-start", () => {
         true,
         "quick-start still adds generated baseline sources"
       );
+      assert.equal(existsSync(candidatePath(repoRoot, "config/search-sources.yml")), false);
     } finally {
       await closeServer(server);
     }

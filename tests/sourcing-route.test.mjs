@@ -6,7 +6,11 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { mountSourcingRoutes } from "../src/cli/sourcing-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { sourcingRunComplete, sourcingRunStart } from "../src/core/db/verbs/sourcing-runs.mjs";
+import {
+  sourcingRunComplete,
+  sourcingRunFail,
+  sourcingRunStart,
+} from "../src/core/db/verbs/sourcing-runs.mjs";
 import {
   candidateArtifactPut,
   candidateConfigPatch,
@@ -232,6 +236,21 @@ test("GET /api/sourcing/runs/latest returns not_started for first-search before 
   }
 });
 
+test("POST /api/sourcing/first-run/start returns 409 when SQLite DB is missing", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-sourcing-route-no-db-"));
+  cleanupRoots.push(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/sourcing/first-run/start", {});
+    assert.equal(status, 409);
+    assert.equal(body.ok, false);
+    assert.match(body.error, /database/i);
+    assertNoRuntimeHandoff(body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/sourcing/first-run/start returns 202 for a new deterministic background run", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
@@ -313,6 +332,35 @@ test("first run with zero deterministic sources records failed run with actionab
     assert.equal(latest.body.run.error.code, "NO_DETERMINISTIC_SOURCES");
     assert.match(latest.body.run.error.message, /RSS source|supported public ATS/i);
     assertNoRuntimeHandoff(latest.body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/sourcing/first-run/start retries failed first-search runs with 202 after source setup is fixed", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  seedDeterministicSources(repoRoot);
+  const failed = sourcingRunStart({ repoRoot, purpose: "first-search" });
+  sourcingRunFail({
+    repoRoot,
+    id: failed.run.id,
+    error: {
+      code: "NO_DETERMINISTIC_SOURCES",
+      message: "No deterministic first-search sources are ready.",
+    },
+  });
+
+  const server = await bootServer(repoRoot, { fetchImpl: publicFetchStub() });
+  try {
+    const { status, body } = await postJson(server, "/api/sourcing/first-run/start", {});
+    assert.equal(status, 202);
+    assert.equal(body.ok, true);
+    assert.equal(body.reused, false);
+    assert.equal(body.run.status, "running");
+    assert.notEqual(body.run.id, failed.run.id);
+    assert.equal(body.run.metadata.retryOf, failed.run.id);
+    assertNoRuntimeHandoff(body);
   } finally {
     await closeServer(server);
   }
