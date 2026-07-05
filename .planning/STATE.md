@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 07
 status: In Progress
-stopped_at: Completed 07-04-PLAN.md
-last_updated: "2026-07-05T22:23:40.254Z"
+stopped_at: Completed 07-05-PLAN.md
+last_updated: "2026-07-05T22:31:52.571Z"
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 36
-  completed_plans: 32
-  percent: 89
+  completed_plans: 33
+  percent: 92
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-05T22:23:40.246Z
-**Stopped at:** Completed 07-04-PLAN.md
+**Last session:** 2026-07-05T22:31:52.538Z
+**Stopped at:** Completed 07-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -112,6 +112,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P02 | 5 min | 2 tasks | 4 files |
 | Phase 07 P03 | 4 min | 2 tasks | 4 files |
 | Phase 07 P04 | 8 min | 3 tasks | 10 files |
+| Phase 07 P05 | 3 min | 2 tasks | 5 files |
 
 ## Decisions
 
@@ -212,3 +213,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: Use mammoth.extractRawText({ buffer }) only for DOCX intake; no DOCX HTML conversion or external file access. — This satisfies ONB-02 and T-07-03 while keeping DOCX uploads deterministic and local.
 - [Phase 07]: Save DOCX originals before parsing, but write source-resume only after usable text passes the quality gate. — This preserves recovery/fallback while preventing malformed DOCX files from unlocking search readiness.
 - [Phase 07]: Keep PDF as form-defaults.document_formats.default_packet_format and record DOCX only as a required_export_formats board need. — Packet export preferences should not route DOCX bytes or text through AI and should be available to later packet-generation plans.
+- [Phase 07]: Store sourcing run payloads as JSON while exposing generated purpose/status/timestamp columns for reload-safe lookups. — This keeps later route/UI plans flexible while preserving efficient latest-purpose and running-status queries.
+- [Phase 07]: Return existing first-search rows for running, completed, and failed display states unless retryFailed:true is explicitly requested. — This preserves duplicate-run protection while keeping failed first-search rows visible and actionable.
+- [Phase 07]: Create failed first-search retry work as a fresh running row with metadata.retryOf pointing at the failed run. — This backs D-12 actionability with a durable transition instead of only changing UI copy.
+- [Phase 07]: Keep stored run timestamps snake_case and return camelCase aliases for route consumers. — The DB payload remains canonical while later HTTP/React code can use route-facing field names without another transform.

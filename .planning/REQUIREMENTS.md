@@ -53,8 +53,8 @@
 
 - **ONB-01**: Quick onboarding captures the minimum profile, resume, role, location, comp, and search posture needed to start searching.
 - [x] **ONB-02**: Resume support treats PDF as the standard, keeps text/markdown fallback, and records board-required import/export formats such as DOCX where needed.
-- **RUN-01**: A DB-backed sourcing run starts automatically when candidate setup first reaches `search_ready`.
-- **RUN-02**: React surfaces durable sourcing run progress, errors, and results while returning the user to deeper onboarding.
+- [x] **RUN-01**: A DB-backed sourcing run starts automatically when candidate setup first reaches `search_ready`.
+- [x] **RUN-02**: React surfaces durable sourcing run progress, errors, and results while returning the user to deeper onboarding.
 
 ### Deep Ingest
 
@@ -126,8 +126,8 @@
 | APP-04 | Phase 6 | Complete |
 | ONB-01 | Phase 7 | Planned |
 | ONB-02 | Phase 7 | Complete |
-| RUN-01 | Phase 7 | Planned |
-| RUN-02 | Phase 7 | Planned |
+| RUN-01 | Phase 7 | Complete |
+| RUN-02 | Phase 7 | Complete |
 | ING-01 | Phase 8 | Planned |
 | ING-02 | Phase 8 | Planned |
 | ING-03 | Phase 8 | Planned |
