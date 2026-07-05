@@ -154,6 +154,10 @@ export function getSourcingRun({ purpose } = {}) {
   return apiFetch(`/api/sourcing/runs/latest${query ? `?${query}` : ""}`);
 }
 
+export function getSearchSources() {
+  return apiFetch("/api/search/sources", { method: "GET" });
+}
+
 export function startFirstSearchRun(payload = {}) {
   return apiFetch("/api/sourcing/first-run/start", {
     method: "POST",
