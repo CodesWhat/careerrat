@@ -61,6 +61,7 @@ import {
   sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
+import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
 import {
   countDeterministicSources,
   latestSourcingRunForUi,
@@ -721,6 +722,7 @@ export function mountOnboardRoutes({
           purpose: "first-search",
         });
         const deterministicSources = dbDeterministicSourceCounts(pathCtx);
+        const deepIngest = buildDeepIngestViewModel({ repoRoot, env });
         sendJson(res, 200, {
           ok: true,
           files: dbCandidateFiles(repoRoot, pathCtx, config),
@@ -730,11 +732,13 @@ export function mountOnboardRoutes({
             "form-defaults": config["form-defaults"],
             modes: config.modes,
             setup: config.setup,
+            deepIngest,
             sourcing: {
               firstSearchRun,
               sourceSetup: { deterministicSources },
             },
           },
+          deepIngest,
           sourcing: { firstSearchRun },
           deterministicSources,
           sourceResumePresent:

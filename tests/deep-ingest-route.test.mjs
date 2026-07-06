@@ -1,15 +1,24 @@
 // Phase 08 Wave 0 RED contracts for the local Deep ingest API surface.
 // These tests intentionally fail until src/cli/deep-ingest-route.mjs exists.
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { candidateSetupInitialize } from "../src/core/db/verbs.mjs";
+import {
+  candidateConfigGet,
+  candidateSetupInitialize,
+  deepIngestLaneSetState,
+  deepIngestProposalPut,
+  deepIngestSourceCreate,
+} from "../src/core/db/verbs.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
+const PROJECT_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 const VISIBLE_OUTCOME_STATUSES = new Set([
   "proposal_ready",
@@ -35,6 +44,16 @@ const FORBIDDEN_RUNTIME_TOKENS = [
   "search-jobs",
   "discover-companies",
   "research-boards",
+];
+
+const REQUIRED_LANES = [
+  "source_coverage",
+  "evidence_claims",
+  "story_bank",
+  "honesty_boundaries",
+  "writing_voice",
+  "role_signals",
+  "open_gaps",
 ];
 
 function tempRepo() {
@@ -66,6 +85,43 @@ async function bootServer(repoRoot, opts = {}) {
     env: opts.env ?? {},
     fetchImpl: opts.fetchImpl,
     scanSource: opts.scanSource,
+    proposalBuilders: opts.proposalBuilders,
+  });
+
+  const server = createServer((req, res) => {
+    const path = (req.url || "/").split("?")[0];
+    const route = routes.get(`${req.method} ${path}`);
+    if (!route) {
+      res.writeHead(404).end();
+      return;
+    }
+    route(req, res);
+  });
+  return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
+}
+
+async function bootDeepAndOnboardServer(repoRoot, opts = {}) {
+  const [{ mountDeepIngestRoutes }, { mountOnboardRoutes }] = await Promise.all([
+    import("../src/cli/deep-ingest-route.mjs"),
+    import("../src/cli/onboard-route.mjs"),
+  ]);
+  const routes = new Map();
+  function addRoute(method, path, handler) {
+    routes.set(`${method} ${path}`, handler);
+  }
+  mountDeepIngestRoutes({
+    addRoute,
+    repoRoot,
+    env: opts.env ?? {},
+    fetchImpl: opts.fetchImpl,
+    scanSource: opts.scanSource,
+    proposalBuilders: opts.proposalBuilders,
+  });
+  mountOnboardRoutes({
+    addRoute,
+    repoRoot,
+    env: opts.env ?? {},
+    fetchImpl: opts.fetchImpl,
   });
 
   const server = createServer((req, res) => {
@@ -132,6 +188,23 @@ function assertVisibleOutcome(body) {
   assert.equal(flags.length, 1, "each submitted source must expose exactly one visible outcome");
 }
 
+function tempHomeEnv() {
+  return { ROLESTER_HOME: tempRepo() };
+}
+
+function setAllRequiredLanes(repoRoot, overrides = {}, env) {
+  for (const lane of REQUIRED_LANES) {
+    const next = overrides[lane] || { status: "completed" };
+    deepIngestLaneSetState({
+      repoRoot,
+      env,
+      lane,
+      status: next.status,
+      reason: next.reason,
+    });
+  }
+}
+
 test("GET /api/deep-ingest/state fails closed with 409 when SQLite is absent", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot);
@@ -169,6 +242,156 @@ test("GET /api/deep-ingest/state returns lane progress without requiring candida
       ]
     );
     assertNoRuntimeTokens(body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("Deep ingest readiness treats completed, deferred, and not-available lanes as terminal with visible todos and gaps", async () => {
+  const repoRoot = PROJECT_ROOT;
+  const env = tempHomeEnv();
+  openDb({ repoRoot, env });
+  candidateSetupInitialize({ repoRoot, env });
+  setAllRequiredLanes(
+    repoRoot,
+    {
+      role_signals: {
+        status: "deferred",
+        reason: "Role-specific signals can wait until the first target role is reviewed.",
+      },
+      open_gaps: {
+        status: "not_available",
+        reason: "No extra unanswered gaps are available yet.",
+      },
+    },
+    env
+  );
+  const server = await bootDeepAndOnboardServer(repoRoot, { env });
+  try {
+    const deep = await getJson(server, "/api/deep-ingest/state");
+    const onboard = await getJson(server, "/api/onboard/state");
+
+    assert.equal(deep.status, 200);
+    assert.equal(onboard.status, 200);
+    assert.equal(deep.body.data.readiness.ready, true);
+    assert.equal(deep.body.data.readiness.terminalCount, 7);
+    assert.equal(deep.body.data.readiness.requiredCount, 7);
+    assert.equal(deep.body.data.readiness.progressText, "7 of 7 lanes terminal");
+    assert.deepEqual(deep.body.data.readiness.missing, []);
+    assert.deepEqual(
+      deep.body.data.todos.map((todo) => [todo.lane, todo.reason]),
+      [["role_signals", "Role-specific signals can wait until the first target role is reviewed."]]
+    );
+    assert.deepEqual(
+      deep.body.data.gaps.map((gap) => [gap.lane, gap.reason]),
+      [["open_gaps", "No extra unanswered gaps are available yet."]]
+    );
+    assert.equal(onboard.body.data.setup.readiness.deep_ingest_complete, true);
+    assert.deepEqual(onboard.body.data.setup.missing.deep_ingest_complete, []);
+    assert.equal(onboard.body.data.deepIngest.readiness.ready, deep.body.data.readiness.ready);
+    assert.equal(
+      onboard.body.data.deepIngest.readiness.progressText,
+      deep.body.data.readiness.progressText
+    );
+    assert.deepEqual(onboard.body.data.deepIngest.todos, deep.body.data.todos);
+    assert.deepEqual(onboard.body.data.deepIngest.gaps, deep.body.data.gaps);
+    assertNoRuntimeTokens(deep.body);
+    assertNoRuntimeTokens(onboard.body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("Deep ingest readiness stays incomplete for each nonterminal lane status and reports progress text", async () => {
+  const nonterminalStatuses = [
+    ["not_started", null],
+    ["needs_source", null],
+    ["scanning", null],
+    ["review_needed", null],
+    ["gap", "Needs a supporting source."],
+    ["failed", "Scanner failed."],
+  ];
+
+  for (const [statusValue, reason] of nonterminalStatuses) {
+    const repoRoot = PROJECT_ROOT;
+    const env = tempHomeEnv();
+    openDb({ repoRoot, env });
+    candidateSetupInitialize({ repoRoot, env });
+    setAllRequiredLanes(
+      repoRoot,
+      {
+        evidence_claims: { status: statusValue, reason },
+      },
+      env
+    );
+    const server = await bootDeepAndOnboardServer(repoRoot, { env });
+    try {
+      const deep = await getJson(server, "/api/deep-ingest/state");
+      const onboard = await getJson(server, "/api/onboard/state");
+
+      assert.equal(deep.status, 200);
+      assert.equal(onboard.status, 200);
+      assert.equal(deep.body.data.readiness.ready, false, `${statusValue} must not be ready`);
+      assert.equal(deep.body.data.readiness.progressText, "6 of 7 lanes terminal");
+      assert.equal(
+        onboard.body.data.setup.readiness.deep_ingest_complete,
+        false,
+        `${statusValue} must keep setup readiness false`
+      );
+      assert.ok(
+        onboard.body.data.setup.missing.deep_ingest_complete.some((item) =>
+          String(item).includes("6 of 7 lanes terminal")
+        ),
+        "setup missing should expose terminal-lane progress"
+      );
+      assert.deepEqual(
+        onboard.body.data.deepIngest.readiness,
+        deep.body.data.readiness,
+        "onboard state should expose the same Deep ingest readiness object"
+      );
+    } finally {
+      await closeServer(server);
+    }
+  }
+});
+
+test("Deep ingest readiness rejects tampered terminal lanes that are missing required reasons", async () => {
+  const repoRoot = PROJECT_ROOT;
+  const env = tempHomeEnv();
+  const db = openDb({ repoRoot, env });
+  candidateSetupInitialize({ repoRoot, env });
+  setAllRequiredLanes(repoRoot, {}, env);
+  db.prepare("UPDATE deep_ingest_lane_states SET data = ? WHERE id = ?").run(
+    JSON.stringify({
+      id: "writing_voice",
+      lane: "writing_voice",
+      status: "deferred",
+      reason: "",
+      createdAt: "2030-01-01T00:00:00.000Z",
+      updatedAt: "2030-01-01T00:00:00.000Z",
+    }),
+    "writing_voice"
+  );
+  const server = await bootDeepAndOnboardServer(repoRoot, { env });
+  try {
+    const deep = await getJson(server, "/api/deep-ingest/state");
+    const onboard = await getJson(server, "/api/onboard/state");
+
+    assert.equal(deep.status, 200);
+    assert.equal(deep.body.data.readiness.ready, false);
+    assert.equal(deep.body.data.readiness.terminalCount, 6);
+    assert.equal(deep.body.data.readiness.progressText, "6 of 7 lanes terminal");
+    assert.ok(
+      deep.body.data.readiness.missing.some(
+        (lane) => lane.lane === "writing_voice" && lane.reasonRequired === true
+      )
+    );
+    assert.equal(onboard.body.data.setup.readiness.deep_ingest_complete, false);
+    assert.ok(
+      onboard.body.data.setup.missing.deep_ingest_complete.some((item) =>
+        /writing voice.*reason/i.test(String(item))
+      )
+    );
   } finally {
     await closeServer(server);
   }
@@ -324,6 +547,148 @@ test("POST /api/deep-ingest/proposal-decisions rejects stale expectedVersion and
     assert.equal(noReason.status, 400);
     assert.match(noReason.body.error, /reason/i);
     assertNoRuntimeTokens(noReason.body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/proposals persists builder output as review state only", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      text: "Built route-backed proposal review.",
+      chunks: [{ id: "chunk-route-1", text: "Built route-backed proposal review." }],
+    },
+  }).source;
+  const beforeClaims = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  const server = await bootServer(repoRoot, {
+    proposalBuilders: {
+      evidence: async ({ source: builderSource }) => ({
+        status: "proposal_ready",
+        proposals: [
+          {
+            id: "proposal-route-evidence-1",
+            lane: "evidence",
+            sourceId: builderSource.id,
+            chunkId: "chunk-route-1",
+            status: "review_needed",
+            confidence: 0.92,
+            supportingQuote: "Built route-backed proposal review",
+            payload: { claim: "Built route-backed proposal review." },
+            validation: { status: "passed", blockedReasons: [] },
+          },
+        ],
+        gaps: [],
+        manual: null,
+      }),
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/deep-ingest/proposals", {
+      sourceId: source.id,
+      targetShape: "evidence",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data.proposals.length, 1);
+    assert.equal(body.data.proposals[0].status, "review_needed");
+    assert.equal(body.data.state.reviewQueue.length, 1);
+    assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims);
+    assert.equal(existsSync(userPath({ repoRoot }, "candidate/evidence.yml")), false);
+    assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
+    assertNoRuntimeTokens(body);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/deep-ingest/proposal-decisions returns updated state after confirm and not_available", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      text: "Confirmed route decisions keep provenance.",
+      chunks: [
+        { id: "chunk-route-decision-1", text: "Confirmed route decisions keep provenance." },
+      ],
+    },
+  }).source;
+  const proposal = deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "evidence",
+    lane: "evidence_claims",
+    proposal: {
+      items: [
+        {
+          claim: "Confirmed route decisions keep provenance.",
+          sourceId: source.id,
+          chunkId: "chunk-route-decision-1",
+          supportingQuote: "Confirmed route decisions keep provenance",
+          validation: { status: "passed", blockedReasons: [] },
+        },
+      ],
+    },
+  });
+  const gapProposal = deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "gap",
+    lane: "open_gaps",
+    proposal: {
+      items: [{ prompt: "Missing voice sample.", sourceId: source.id }],
+    },
+  });
+  const server = await bootServer(repoRoot);
+
+  try {
+    const confirmed = await postJson(server, "/api/deep-ingest/proposal-decisions", {
+      proposalId: proposal.id,
+      expectedVersion: proposal.version,
+      decision: "confirm",
+      edits: {
+        items: [
+          {
+            id: "deep-evidence-route-confirmed",
+            claim: "Confirmed route decisions keep provenance.",
+            evidence: "Deep ingest route decision",
+            sourceId: source.id,
+            chunkId: "chunk-route-decision-1",
+            supportingQuote: "Confirmed route decisions keep provenance",
+          },
+        ],
+      },
+    });
+    assert.equal(confirmed.status, 200);
+    assert.equal(confirmed.body.data.proposal.status, "confirmed");
+    assert.equal(confirmed.body.data.state.confirmed.evidence.length, 1);
+    assert.equal(confirmed.body.data.state.confirmed.evidence[0].sourceProposalId, proposal.id);
+    assert.equal(confirmed.body.data.state.laneStates.evidence_claims.status, "completed");
+    assertNoRuntimeTokens(confirmed.body);
+
+    const notAvailable = await postJson(server, "/api/deep-ingest/proposal-decisions", {
+      proposalId: gapProposal.id,
+      expectedVersion: gapProposal.version,
+      decision: "mark_not_available",
+      reason: "No writing sample is available.",
+    });
+    assert.equal(notAvailable.status, 200);
+    assert.equal(notAvailable.body.data.proposal.status, "not_available");
+    assert.equal(
+      notAvailable.body.data.state.openGaps[0].reason,
+      "No writing sample is available."
+    );
+    assertNoRuntimeTokens(notAvailable.body);
   } finally {
     await closeServer(server);
   }

@@ -1,6 +1,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
+import { dbExists } from "../db/connection.mjs";
+import { buildDeepIngestViewModel } from "../deep-ingest/view-model.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { loadCandidateDoc } from "../profile/config-store.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
@@ -76,6 +78,22 @@ function tag(label, tone = "teal") {
   return { label: cleanText(label), tone };
 }
 
+function sourceReferenceFields(item = {}) {
+  const fields = {};
+  if (item.sourceId) fields.sourceId = String(item.sourceId);
+  if (item.sourceProposalId) fields.sourceProposalId = String(item.sourceProposalId);
+  if (item.artifactPath) fields.sourceArtifactId = String(item.artifactPath);
+  const refs = [fields.sourceId, fields.sourceProposalId, fields.sourceArtifactId].filter(Boolean);
+  if (refs.length) fields.sourceRef = refs.join(" / ");
+  return fields;
+}
+
+function sourceLinkedNote(note, item) {
+  const refs = sourceReferenceFields(item);
+  if (!refs.sourceRef) return note;
+  return compact(`${note} Source: ${refs.sourceRef}`, 180);
+}
+
 function signalTags(signals, metrics, offset = 0) {
   const tags = listOrEmpty(signals)
     .slice(0, 2)
@@ -97,19 +115,23 @@ function claimScore(claim) {
 function evidenceCards(claims) {
   return [...claims]
     .sort((a, b) => claimScore(b) - claimScore(a))
-    .map((claim, index) => ({
-      kind: "evidence",
-      label: "Evidence bank",
-      title: titleFromClaim(claim.claim),
-      summary: compact(
-        sentence(claim.claim, claim.allowed_wording?.[0] || "Reusable evidence."),
-        156
-      ),
-      tags: signalTags(claim.role_signals, claim.metrics, index),
-      note: claim.allowed_wording?.[0]
+    .map((claim, index) => {
+      const note = claim.allowed_wording?.[0]
         ? compact(claim.allowed_wording[0], 150)
-        : "Use only with the evidence wording already confirmed in the bank.",
-    }));
+        : "Use only with the evidence wording already confirmed in the bank.";
+      return {
+        kind: "evidence",
+        label: "Evidence bank",
+        title: titleFromClaim(claim.claim),
+        summary: compact(
+          sentence(claim.claim, claim.allowed_wording?.[0] || "Reusable evidence."),
+          156
+        ),
+        tags: signalTags(claim.role_signals, claim.metrics, index),
+        note: sourceLinkedNote(note, claim),
+        ...sourceReferenceFields(claim),
+      };
+    });
 }
 
 function storyRank(story) {
@@ -133,6 +155,11 @@ function storyCards(stories) {
       if (landed.length) tags.push(tag(`Landed: ${landed.join(", ")}`, "teal"));
       if (openQuestions.length) tags.push(tag("Needs context", "coral"));
       const lead = metrics[0] ? `${metrics[0]} — ` : "";
+      const note = openQuestions.length
+        ? compact(`Needs context: ${openQuestions[0]}`, 150)
+        : listOrEmpty(story.prompts)[0]
+          ? compact(`Best for: ${story.prompts[0]}`, 150)
+          : "Use for interview prep and behavioral screens.";
       return {
         kind: "story",
         label: "Story bank",
@@ -142,11 +169,19 @@ function storyCards(stories) {
           156
         ),
         tags: tags.slice(0, 5),
-        note: openQuestions.length
-          ? compact(`Needs context: ${openQuestions[0]}`, 150)
-          : listOrEmpty(story.prompts)[0]
-            ? compact(`Best for: ${story.prompts[0]}`, 150)
-            : "Use for interview prep and behavioral screens.",
+        note: sourceLinkedNote(note, story),
+        metadata: {
+          star: {
+            situation: story.situation || null,
+            task: story.task || null,
+            action: story.action || null,
+            result: story.result || null,
+            reflection: story.reflection || null,
+          },
+          evidenceIds: listOrEmpty(story.evidence_ids),
+          source: sourceReferenceFields(story),
+        },
+        ...sourceReferenceFields(story),
       };
     });
 }
@@ -189,6 +224,70 @@ function filterCounts(claims, stories) {
     .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
     .slice(0, 5)
     .map(([label, count]) => ({ label, count }));
+}
+
+function voiceCards(rows) {
+  return rows.map((row) => ({
+    kind: "voice",
+    label: "Writing voice",
+    title: compact(row.summary || row.voiceSummary || "Writing voice", 80),
+    summary: compact(row.summary || row.voiceSummary || "Reusable writing voice guidance.", 156),
+    tags: [tag("Concise", "plum"), tag("Technical", "sky"), tag("Confirmed", "teal")],
+    note: sourceLinkedNote(
+      row.doPhrases?.[0] || row.do_phrases?.[0] || "Use for profile, outreach, and packet copy.",
+      row
+    ),
+    metadata: {
+      doPhrases: listOrEmpty(row.doPhrases || row.do_phrases),
+      avoidPhrases: listOrEmpty(row.avoidPhrases || row.avoid_phrases),
+      source: sourceReferenceFields(row),
+    },
+    ...sourceReferenceFields(row),
+  }));
+}
+
+function honestyCards(rows) {
+  return rows.map((row) => ({
+    kind: "honesty",
+    label: "Honesty boundary",
+    title: compact(
+      row.text || row.forbiddenWording || row.allowedWording || "Honesty boundary",
+      80
+    ),
+    summary: compact(
+      row.allowedWording || row.reason || row.text || "Confirmed honesty boundary.",
+      156
+    ),
+    tags: [tag(labelizeSignal(row.boundaryType || "boundary"), "coral"), tag("Confirmed", "teal")],
+    note: sourceLinkedNote(row.text || "Use this boundary before outbound reuse.", row),
+    metadata: {
+      boundaryType: row.boundaryType || null,
+      allowedWording: row.allowedWording || null,
+      forbiddenWording: row.forbiddenWording || null,
+      source: sourceReferenceFields(row),
+    },
+    ...sourceReferenceFields(row),
+  }));
+}
+
+function roleSignalCards(rows) {
+  return rows.map((row) => ({
+    kind: "role_signal",
+    label: "Role signal",
+    title: compact(row.text || row.roleFamily || "Role signal", 80),
+    summary: compact(row.rationale || row.text || "Confirmed role signal.", 156),
+    tags: [
+      tag(labelizeSignal(row.roleFamily), "plum"),
+      tag(labelizeSignal(row.signalType), row.signalType === "cut" ? "coral" : "teal"),
+    ].filter((item) => item.label),
+    note: sourceLinkedNote(row.rationale || row.text || "Use for keep/cut role matching.", row),
+    metadata: {
+      roleFamily: row.roleFamily || null,
+      signalType: row.signalType || null,
+      source: sourceReferenceFields(row),
+    },
+    ...sourceReferenceFields(row),
+  }));
 }
 
 function buildGaps(claims) {
@@ -242,7 +341,88 @@ function storyLanes(stories) {
   return lanes;
 }
 
-export function buildLibrarySnapshot({ evidence = {}, stories = {}, writingStyleText = "" } = {}) {
+function buildDeepIngestGaps(model, claims) {
+  const gaps = [];
+  for (const proposal of Array.isArray(model?.openGaps) ? model.openGaps : []) {
+    const body = proposal.reason || proposal.proposal?.items?.[0]?.prompt || proposal.status;
+    if (!body) continue;
+    gaps.push({
+      tone: proposal.status === "not_available" ? "coral" : "gold",
+      title: proposal.status === "not_available" ? "Not available" : "Open gap",
+      body: compact(body, 150),
+      ...sourceReferenceFields(proposal),
+    });
+  }
+  for (const lane of Array.isArray(model?.lanes) ? model.lanes : []) {
+    if (!lane.todo) continue;
+    gaps.push({
+      tone: "gold",
+      title: "Deferred lane",
+      body: compact(lane.todo, 150),
+    });
+  }
+  return gaps.length ? gaps.slice(0, 4) : buildGaps(claims);
+}
+
+function buildSnapshotFromDeepIngest(model) {
+  const confirmed = model?.confirmed || {};
+  const claims = Array.isArray(confirmed.evidence) ? confirmed.evidence : [];
+  const storyBank = Array.isArray(confirmed.storyBank) ? confirmed.storyBank : [];
+  const writingVoice = Array.isArray(confirmed.writingVoice) ? confirmed.writingVoice : [];
+  const honestyBoundaries = Array.isArray(confirmed.honestyBoundaries)
+    ? confirmed.honestyBoundaries
+    : [];
+  const roleSignals = Array.isArray(confirmed.roleSignals) ? confirmed.roleSignals : [];
+  const gaps = buildDeepIngestGaps(model, claims);
+  const cards = [
+    ...storyCards(storyBank),
+    ...evidenceCards(claims),
+    ...voiceCards(writingVoice),
+    ...honestyCards(honestyBoundaries),
+    ...roleSignalCards(roleSignals),
+  ];
+
+  const metrics = {
+    claims: claims.length,
+    stories: storyBank.length,
+    voice: writingVoice.length,
+    honesty: honestyBoundaries.length,
+    roleSignals: roleSignals.length,
+    gaps: gaps.length && gaps[0].title !== "No urgent gaps" ? gaps.length : 0,
+  };
+
+  return {
+    metrics,
+    index: [
+      { label: "Evidence bank", value: String(metrics.claims) },
+      { label: "Story bank", value: String(metrics.stories) },
+      { label: "Writing voice", value: metrics.voice ? "Ready" : "Missing" },
+      { label: "Honesty", value: String(metrics.honesty) },
+      { label: "Role signals", value: String(metrics.roleSignals) },
+      { label: "Claim gaps", value: String(metrics.gaps) },
+    ],
+    filters: filterCounts(claims, storyBank),
+    cards,
+    readiness: {
+      proof: claims.filter((claim) => listOrEmpty(claim.allowed_wording).length).length,
+      stories: storyBank.length,
+      voice: writingVoice.length ? 1 : 0,
+      honesty: honestyBoundaries.length,
+      roleSignals: roleSignals.length,
+    },
+    gaps,
+    storyLanes: storyLanes(storyBank),
+  };
+}
+
+export function buildLibrarySnapshot({
+  evidence = {},
+  stories = {},
+  writingStyleText = "",
+  deepIngest = null,
+} = {}) {
+  if (deepIngest) return buildSnapshotFromDeepIngest(deepIngest);
+
   const claims = Array.isArray(evidence.claims) ? evidence.claims : [];
   const storyBank = Array.isArray(stories.stories) ? stories.stories : [];
   const gaps = buildGaps(claims);
@@ -279,7 +459,13 @@ export function buildLibrarySnapshot({ evidence = {}, stories = {}, writingStyle
   };
 }
 
-export function loadLibrarySnapshot({ root = DEFAULT_ROOT } = {}) {
+export function loadLibrarySnapshot({ root = DEFAULT_ROOT, env } = {}) {
+  if (dbExists({ repoRoot: root, env })) {
+    return buildLibrarySnapshot({
+      deepIngest: buildDeepIngestViewModel({ repoRoot: root, env }),
+    });
+  }
+
   return buildLibrarySnapshot({
     evidence: loadCandidateDoc("evidence", { repoRoot: root }) || {},
     stories: readYamlIfExists(root, "candidate/stories.yml") || {},

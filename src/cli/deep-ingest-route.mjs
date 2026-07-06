@@ -9,18 +9,39 @@ import {
   deepIngestSourceCreate,
   deepIngestStateGet,
 } from "../core/db/verbs.mjs";
+import { proposeEvidenceFromSource } from "../core/deep-ingest/proposals/evidence.mjs";
+import { proposeGapsFromSource } from "../core/deep-ingest/proposals/gaps.mjs";
+import { proposeHonestyFromSource } from "../core/deep-ingest/proposals/honesty.mjs";
+import { proposeRoleSignalsFromSource } from "../core/deep-ingest/proposals/role-signals.mjs";
+import { proposeStoriesFromSource } from "../core/deep-ingest/proposals/stories.mjs";
+import { proposeWritingVoiceFromSource } from "../core/deep-ingest/proposals/voice.mjs";
+import { evaluateDeepIngestReadiness } from "../core/deep-ingest/readiness.mjs";
 import {
   DEEP_INGEST_JSON_BODY_MAX_BYTES,
+  DEEP_INGEST_TARGET_SHAPES,
   DEEP_INGEST_UPLOAD_MAX_BYTES,
   laneForTargetShape,
   normalizeDeepIngestSource,
 } from "../core/deep-ingest/source-normalize.mjs";
 import { scanDeepIngestSource as defaultScanDeepIngestSource } from "../core/deep-ingest/source-scanner.mjs";
+import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
 import { sanitizeUploadFilename } from "./onboard-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 export { DEEP_INGEST_JSON_BODY_MAX_BYTES, DEEP_INGEST_UPLOAD_MAX_BYTES };
+
+const DEFAULT_PROPOSAL_BUILDERS = {
+  evidence: proposeEvidenceFromSource,
+  story: proposeStoriesFromSource,
+  honesty_boundary: proposeHonestyFromSource,
+  writing_voice: proposeWritingVoiceFromSource,
+  role_signal: proposeRoleSignalsFromSource,
+  gap: proposeGapsFromSource,
+  auto: proposeGapsFromSource,
+  paste: proposeGapsFromSource,
+  link: proposeGapsFromSource,
+};
 
 function queryParam(req, name) {
   const url = new URL(req.url, "http://127.0.0.1");
@@ -48,10 +69,11 @@ export function mountDeepIngestRoutes({
   env = process.env,
   fetchImpl = fetch,
   scanSource = defaultScanDeepIngestSource,
+  proposalBuilders = DEFAULT_PROPOSAL_BUILDERS,
 }) {
   addRoute("GET", "/api/deep-ingest/state", (_req, res) => {
     try {
-      const data = deepIngestStateGet({ repoRoot, env });
+      const data = withRouteReadiness(buildDeepIngestViewModel({ repoRoot, env }));
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
       respondError(res, err);
@@ -122,12 +144,35 @@ export function mountDeepIngestRoutes({
     }
   });
 
+  addRoute("POST", "/api/deep-ingest/proposals", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
+      ensureDb(repoRoot, env);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    try {
+      const data = await buildAndPersistProposals({
+        repoRoot,
+        env,
+        body,
+        proposalBuilders,
+      });
+      sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
   addRoute("POST", "/api/deep-ingest/proposal-decisions", async (req, res) => {
     let body;
     try {
       body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
       const decision = String(body?.decision || "").trim();
-      const result =
+      const proposal =
         decision === "confirm"
           ? deepIngestConfirmProposal({
               repoRoot,
@@ -143,8 +188,15 @@ export function mountDeepIngestRoutes({
               expectedVersion: body?.expectedVersion,
               decision,
               reason: body?.reason,
+              edits: body?.edits || {},
             });
-      sendJson(res, 200, { ok: true, data: result });
+      sendJson(res, 200, {
+        ok: true,
+        data: {
+          proposal,
+          state: buildDeepIngestViewModel({ repoRoot, env }),
+        },
+      });
     } catch (err) {
       respondError(res, err);
     }
@@ -166,6 +218,106 @@ export function mountDeepIngestRoutes({
       respondError(res, err);
     }
   });
+}
+
+function withRouteReadiness(data) {
+  const readiness = evaluateDeepIngestReadiness({
+    laneStates: data?.laneStates,
+    requiredLanes: Array.isArray(data?.lanes)
+      ? data.lanes.map((lane) => lane.key || lane.lane)
+      : undefined,
+  });
+  return {
+    ...data,
+    readiness,
+    todos: readiness.todos,
+    gaps: readiness.gaps,
+    requiredLaneCount: readiness.requiredCount,
+    terminalLaneCount: readiness.terminalCount,
+  };
+}
+
+async function buildAndPersistProposals({ repoRoot, env, body, proposalBuilders }) {
+  const sourceId = String(body?.sourceId || "").trim();
+  if (!sourceId) {
+    const err = new Error("sourceId is required");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+
+  const state = deepIngestStateGet({ repoRoot, env });
+  const source = state.sources.find((row) => row.id === sourceId);
+  if (!source) {
+    const err = new Error(`Deep ingest source not found: "${sourceId}"`);
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+
+  const targetShape = normalizeProposalTargetShape(body?.targetShape || source.targetShape);
+  const sourceWithChunks = {
+    ...source,
+    chunks: state.sourceChunks.filter((chunk) => chunk.sourceId === source.id),
+  };
+  const builder = proposalBuilders[targetShape] || DEFAULT_PROPOSAL_BUILDERS[targetShape];
+  if (typeof builder !== "function") {
+    const err = new Error(`no Deep ingest proposal builder for targetShape "${targetShape}"`);
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+
+  const built = await builder({ source: sourceWithChunks, targetShape, repoRoot, env });
+  const rows = [...proposalRowsFromBuilt(built?.proposals), ...proposalRowsFromBuilt(built?.gaps)];
+  if (!rows.length) {
+    const err = new Error("proposal builder returned no reviewable rows");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+
+  const proposals = rows.map((row) =>
+    deepIngestProposalPut({
+      repoRoot,
+      env,
+      sourceId: source.id,
+      targetShape,
+      lane: proposalLane(row, targetShape),
+      proposal: row,
+    })
+  );
+
+  return {
+    source,
+    proposals,
+    builder: {
+      status: built?.status || "proposal_ready",
+      manual: built?.manual || null,
+      ai: built?.ai || null,
+    },
+    state: buildDeepIngestViewModel({ repoRoot, env }),
+  };
+}
+
+function normalizeProposalTargetShape(value) {
+  const targetShape = String(value || "").trim();
+  if (!DEEP_INGEST_TARGET_SHAPES.includes(targetShape)) {
+    const err = new Error(`targetShape must be one of ${DEEP_INGEST_TARGET_SHAPES.join(", ")}`);
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  return targetShape;
+}
+
+function proposalRowsFromBuilt(value) {
+  return Array.isArray(value) ? value.filter((row) => row && typeof row === "object") : [];
+}
+
+function proposalLane(row, targetShape) {
+  const lane = String(row?.lane || "").trim();
+  return lane.endsWith("_claims") ||
+    ["story_bank", "honesty_boundaries", "writing_voice", "role_signals", "open_gaps"].includes(
+      lane
+    )
+    ? lane
+    : laneForTargetShape(targetShape);
 }
 
 function persistScannedSource({ repoRoot, env, scanned }) {

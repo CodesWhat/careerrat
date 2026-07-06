@@ -8,10 +8,13 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  DEFAULT_DEEP_INGEST_REQUIRED_LANES,
+  evaluateDeepIngestReadiness,
+} from "../../deep-ingest/readiness.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
-import { DEEP_INGEST_REQUIRED_LANES, DEEP_INGEST_TERMINAL_STATUSES } from "./deep-ingest.mjs";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -316,15 +319,39 @@ function tableExists(db, table) {
   );
 }
 
-function computeDeepIngestMissing(db) {
+function computeDeepIngestReadiness(db) {
   if (!tableExists(db, "deep_ingest_lane_states")) {
-    return DEEP_INGEST_REQUIRED_LANES.map((lane) => DEEP_INGEST_LANE_LABELS[lane] || lane);
+    return evaluateDeepIngestReadiness({
+      laneStates: [],
+      requiredLanes: DEFAULT_DEEP_INGEST_REQUIRED_LANES,
+    });
   }
-  const rows = db.prepare("SELECT lane, status FROM deep_ingest_lane_states").all();
-  const statusByLane = new Map(rows.map((row) => [row.lane, row.status]));
-  return DEEP_INGEST_REQUIRED_LANES.filter(
-    (lane) => !DEEP_INGEST_TERMINAL_STATUSES.includes(statusByLane.get(lane))
-  ).map((lane) => DEEP_INGEST_LANE_LABELS[lane] || lane.replaceAll("_", " "));
+  const rows = db
+    .prepare("SELECT data FROM deep_ingest_lane_states")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  return evaluateDeepIngestReadiness({
+    laneStates: rows,
+    requiredLanes: DEFAULT_DEEP_INGEST_REQUIRED_LANES,
+  });
+}
+
+function deepIngestSetupMissing(readiness) {
+  if (readiness.ready) return [];
+  return [
+    readiness.progressText,
+    ...readiness.missing.map((lane) => {
+      const label = DEEP_INGEST_LANE_LABELS[lane.lane] || lane.label || lane.lane;
+      if (lane.reasonRequired) {
+        return `${label} requires a reason for ${humanizeDeepIngestStatus(lane.status)}.`;
+      }
+      return `${label}: ${humanizeDeepIngestStatus(lane.status)}.`;
+    }),
+  ];
+}
+
+function humanizeDeepIngestStatus(status) {
+  return String(status || "not_started").replaceAll("_", " ");
 }
 
 function computeCandidateSetup(db) {
@@ -356,14 +383,15 @@ function computeCandidateSetup(db) {
   if (!String(profile.candidate?.email || "").trim()) applyMissing.push("candidate email");
   if (evidenceCount < 1) applyMissing.push("evidence claims");
 
-  const deepMissing = computeDeepIngestMissing(db);
+  const deepReadiness = computeDeepIngestReadiness(db);
+  const deepMissing = deepIngestSetupMissing(deepReadiness);
 
   return {
     readiness: {
       search_ready: searchMissing.length === 0,
       gate_ready: gateMissing.length === 0,
       apply_ready: applyMissing.length === 0,
-      deep_ingest_complete: deepMissing.length === 0,
+      deep_ingest_complete: deepReadiness.ready,
     },
     missing: {
       search_ready: searchMissing,

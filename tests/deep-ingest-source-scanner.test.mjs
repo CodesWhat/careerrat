@@ -49,6 +49,10 @@ async function loadScanner() {
   return import("../src/core/deep-ingest/source-scanner.mjs");
 }
 
+async function publicResolver() {
+  return [{ address: "93.184.216.34", family: 4 }];
+}
+
 function assertVisibleOutcome(result, { sourceKind } = {}) {
   assert.ok(result, "scanner must return a result");
   assert.ok(VISIBLE_OUTCOME_STATUSES.has(result.status), `unexpected status ${result.status}`);
@@ -125,11 +129,21 @@ test("scanDeepIngestSource rejects unsafe schemes and private network hosts befo
     const result = await scanDeepIngestSource({
       input: { targetShape: "auto", sourceKind: "url", url },
       fetchImpl,
+      resolveHost: publicResolver,
     });
     assertVisibleOutcome(result, { sourceKind: "url" });
     assert.equal(result.status, "not_available");
     assert.match(result.reason, /unsafe|private|unsupported/i);
   }
+
+  const resolvedPrivate = await scanDeepIngestSource({
+    input: { targetShape: "auto", sourceKind: "url", url: "https://profile.example.test/private" },
+    fetchImpl,
+    resolveHost: async () => [{ address: "10.0.0.8", family: 4 }],
+  });
+  assertVisibleOutcome(resolvedPrivate, { sourceKind: "url" });
+  assert.equal(resolvedPrivate.status, "not_available");
+  assert.match(resolvedPrivate.reason, /private|local/i);
 
   assert.equal(fetchCalls, 0);
 });
@@ -159,6 +173,7 @@ test("scanDeepIngestSource fetches bounded public URL text and marks login-gated
   const publicResult = await scanDeepIngestSource({
     input: { targetShape: "writing_voice", sourceKind: "url", url: "https://example.test/profile" },
     fetchImpl,
+    resolveHost: publicResolver,
     limits: { maxSourceChars: 800, maxFetchBytes: 1200 },
   });
   assertVisibleOutcome(publicResult, { sourceKind: "url" });
@@ -169,11 +184,52 @@ test("scanDeepIngestSource fetches bounded public URL text and marks login-gated
   const loginResult = await scanDeepIngestSource({
     input: { targetShape: "evidence", sourceKind: "url", url: "https://example.test/login" },
     fetchImpl,
+    resolveHost: publicResolver,
   });
   assertVisibleOutcome(loginResult, { sourceKind: "url" });
   assert.equal(loginResult.status, "deferred");
   assert.match(loginResult.reason, /login|sign in/i);
   assert.equal(calls.length, 2);
+});
+
+test("scanDeepIngestSource treats non-2xx URL responses as visible unavailable or gap states", async () => {
+  const { scanDeepIngestSource } = await loadScanner();
+  let bodyReads = 0;
+
+  const missing = await scanDeepIngestSource({
+    input: { targetShape: "auto", sourceKind: "url", url: "https://example.test/missing" },
+    resolveHost: publicResolver,
+    fetchImpl: async () => ({
+      status: 404,
+      url: "https://example.test/missing",
+      headers: new Headers({ "content-type": "text/html" }),
+      text: async () => {
+        bodyReads += 1;
+        return "not found";
+      },
+    }),
+  });
+  assertVisibleOutcome(missing, { sourceKind: "url" });
+  assert.equal(missing.status, "not_available");
+  assert.match(missing.reason, /HTTP 404/);
+
+  const errored = await scanDeepIngestSource({
+    input: { targetShape: "auto", sourceKind: "url", url: "https://example.test/error" },
+    resolveHost: publicResolver,
+    fetchImpl: async () => ({
+      status: 503,
+      url: "https://example.test/error",
+      headers: new Headers({ "content-type": "text/html" }),
+      text: async () => {
+        bodyReads += 1;
+        return "server error";
+      },
+    }),
+  });
+  assertVisibleOutcome(errored, { sourceKind: "url" });
+  assert.equal(errored.status, "gap");
+  assert.match(errored.reason, /HTTP 503/);
+  assert.equal(bodyReads, 0);
 });
 
 test("scanDeepIngestSource scans public repo README, docs, and package metadata within file-count and byte caps", async () => {
@@ -260,6 +316,7 @@ test("scanDeepIngestSource maps unsupported files and scanner failures to explic
 
   const failed = await scanDeepIngestSource({
     input: { targetShape: "auto", sourceKind: "url", url: "https://example.test/fail" },
+    resolveHost: publicResolver,
     fetchImpl: async () => {
       throw new Error("network down");
     },

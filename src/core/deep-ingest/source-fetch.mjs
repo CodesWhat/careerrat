@@ -1,3 +1,4 @@
+import { lookup as dnsLookup } from "node:dns/promises";
 import { isIP } from "node:net";
 import {
   DEEP_INGEST_FETCH_MAX_BYTES,
@@ -11,11 +12,12 @@ export async function fetchDeepIngestUrl(
   rawUrl,
   {
     fetchImpl = fetch,
+    resolveHost = resolvePublicHost,
     timeoutMs = DEEP_INGEST_FETCH_TIMEOUT_MS,
     maxBytes = DEEP_INGEST_FETCH_MAX_BYTES,
   } = {}
 ) {
-  const start = validatePublicHttpUrl(rawUrl);
+  const start = await validateFetchablePublicHttpUrl(rawUrl, { resolveHost });
   if (!start.ok) {
     return { ok: false, status: "not_available", reason: start.reason, url: rawUrl };
   }
@@ -35,7 +37,7 @@ export async function fetchDeepIngestUrl(
 
     const redirected = redirectTarget(response, current);
     if (redirected) {
-      const checked = validatePublicHttpUrl(redirected);
+      const checked = await validateFetchablePublicHttpUrl(redirected, { resolveHost });
       if (!checked.ok) {
         return {
           ok: false,
@@ -47,6 +49,17 @@ export async function fetchDeepIngestUrl(
       }
       current = checked.url;
       continue;
+    }
+
+    const status = Number(response?.status || 0);
+    if (status < 200 || status >= 300) {
+      return {
+        ok: false,
+        status: status === 404 ? "not_available" : "gap",
+        url: rawUrl,
+        finalUrl: response?.url || current,
+        reason: `HTTP ${status || "unknown"} from source`,
+      };
     }
 
     const contentLength = Number(response?.headers?.get?.("content-length"));
@@ -111,6 +124,34 @@ export function validatePublicHttpUrl(rawUrl) {
   return { ok: true, url: parsed.toString() };
 }
 
+async function validateFetchablePublicHttpUrl(rawUrl, { resolveHost } = {}) {
+  const checked = validatePublicHttpUrl(rawUrl);
+  if (!checked.ok) return checked;
+  if (typeof resolveHost !== "function") return checked;
+
+  const host = new URL(checked.url).hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (isIP(host)) return checked;
+
+  let addresses;
+  try {
+    addresses = await resolveHost(host);
+  } catch {
+    return { ok: false, reason: "host could not be resolved" };
+  }
+
+  const normalized = (Array.isArray(addresses) ? addresses : [addresses])
+    .map((entry) => (typeof entry === "string" ? entry : entry?.address))
+    .map((address) => String(address || "").trim())
+    .filter(Boolean);
+  if (!normalized.length) return { ok: false, reason: "host resolved to no addresses" };
+
+  if (normalized.some((address) => isPrivateIp(address))) {
+    return { ok: false, reason: "private or local network host is not fetchable" };
+  }
+
+  return checked;
+}
+
 function redirectTarget(response, currentUrl) {
   const status = Number(response?.status || 0);
   if (![301, 302, 303, 307, 308].includes(status)) return null;
@@ -123,8 +164,14 @@ function isPrivateIp(host) {
   const ipVersion = isIP(host);
   if (!ipVersion) return false;
   if (ipVersion === 6) {
+    const mapped = host.toLowerCase().match(/^::ffff:(\d+\.\d+\.\d+\.\d+)$/);
+    if (mapped) return isPrivateIp(mapped[1]);
     return (
-      host === "::1" || host.startsWith("fc") || host.startsWith("fd") || host.startsWith("fe80")
+      host === "::" ||
+      host === "::1" ||
+      host.startsWith("fc") ||
+      host.startsWith("fd") ||
+      host.startsWith("fe80")
     );
   }
   const parts = host.split(".").map((part) => Number.parseInt(part, 10));
@@ -137,4 +184,8 @@ function isPrivateIp(host) {
     (a === 172 && b >= 16 && b <= 31) ||
     (a === 192 && b === 168)
   );
+}
+
+function resolvePublicHost(host) {
+  return dnsLookup(host, { all: true, verbatim: true });
 }

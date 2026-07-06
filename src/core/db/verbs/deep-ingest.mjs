@@ -5,6 +5,14 @@
 // shared runVerb()/exportToTracker() side effects; only explicit confirmation
 // writes trusted candidate facts.
 import { randomUUID } from "node:crypto";
+import {
+  DEFAULT_DEEP_INGEST_REQUIRED_LANES,
+  evaluateDeepIngestReadiness,
+  DEEP_INGEST_TERMINAL_STATUSES as READINESS_TERMINAL_STATUSES,
+} from "../../deep-ingest/readiness.mjs";
+import { validateDeepIngestGrounding } from "../../deep-ingest/validators/grounding.mjs";
+import { validateDeepIngestLaneTransition } from "../../deep-ingest/validators/lane-state.mjs";
+import { validateDeepIngestPrivacy } from "../../deep-ingest/validators/privacy.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 
@@ -13,15 +21,7 @@ const CHUNK_TABLE = "deep_ingest_source_chunks";
 const PROPOSAL_TABLE = "deep_ingest_proposals";
 const LANE_TABLE = "deep_ingest_lane_states";
 
-export const DEEP_INGEST_REQUIRED_LANES = [
-  "source_coverage",
-  "evidence_claims",
-  "story_bank",
-  "honesty_boundaries",
-  "writing_voice",
-  "role_signals",
-  "open_gaps",
-];
+export const DEEP_INGEST_REQUIRED_LANES = DEFAULT_DEEP_INGEST_REQUIRED_LANES;
 
 export const DEEP_INGEST_LANE_STATUSES = [
   "not_started",
@@ -35,7 +35,7 @@ export const DEEP_INGEST_LANE_STATUSES = [
   "failed",
 ];
 
-export const DEEP_INGEST_TERMINAL_STATUSES = ["completed", "deferred", "not_available"];
+export const DEEP_INGEST_TERMINAL_STATUSES = READINESS_TERMINAL_STATUSES;
 
 const TARGET_SHAPES = new Set([
   "auto",
@@ -71,11 +71,13 @@ const SOURCE_KINDS = new Set([
 
 const PROPOSAL_DECISION_TO_STATUS = new Map([
   ["defer", "deferred"],
+  ["mark_not_available", "not_available"],
   ["reject", "rejected"],
   ["reopen", "review_needed"],
+  ["retry", "review_needed"],
+  ["save_edits", "review_needed"],
 ]);
 
-const REASON_REQUIRED_STATUSES = new Set(["gap", "deferred", "not_available", "failed"]);
 const PRIVATE_FIELD_NAMES = new Set([
   "current_base",
   "currentBase",
@@ -239,9 +241,13 @@ function chunkFromInput(source, raw, index) {
 
 function replaceSourceChunks(db, source, chunks) {
   db.prepare(`DELETE FROM ${CHUNK_TABLE} WHERE source_id = ?`).run(source.id);
-  const normalized = Array.isArray(chunks)
-    ? chunks.map((chunk, index) => chunkFromInput(source, chunk, index))
-    : [];
+  const rawChunks =
+    Array.isArray(chunks) && chunks.length
+      ? chunks
+      : source._sourceText
+        ? [{ id: `${source.id}_chunk_001`, text: source._sourceText }]
+        : [];
+  const normalized = rawChunks.map((chunk, index) => chunkFromInput(source, chunk, index));
   for (const chunk of normalized) {
     putRow(db, CHUNK_TABLE, chunk.id, chunk);
   }
@@ -281,6 +287,124 @@ function proposalFromInput({ source, sourceId, targetShape, lane, proposal }) {
   };
 }
 
+function proposalItems(proposalPayload = {}) {
+  if (Array.isArray(proposalPayload.items)) return proposalPayload.items;
+  if (Array.isArray(proposalPayload.proposals)) return proposalPayload.proposals;
+  if (Array.isArray(proposalPayload.gaps)) return proposalPayload.gaps;
+  if (proposalPayload.payload && typeof proposalPayload.payload === "object")
+    return [proposalPayload];
+  return [];
+}
+
+function sourceChunks(db, sourceId) {
+  return db
+    .prepare(
+      `SELECT data FROM ${CHUNK_TABLE} WHERE source_id = ? ORDER BY json_extract(data, '$.index') ASC`
+    )
+    .all(String(sourceId || ""))
+    .map((row) => JSON.parse(row.data));
+}
+
+function proposalBlockedReasons(value) {
+  const reasons = new Set();
+  const payload = value?.proposal || value || {};
+  if (payload?.validation?.status === "blocked") {
+    for (const reason of payload.validation.blockedReasons || []) reasons.add(String(reason));
+  }
+  for (const item of proposalItems(payload)) {
+    if (item?.status === "blocked" || item?.validation?.status === "blocked") {
+      reasons.add("blocked");
+      for (const reason of item?.validation?.blockedReasons || []) reasons.add(String(reason));
+    }
+  }
+  return [...reasons].filter(Boolean);
+}
+
+function validationPayload(item) {
+  if (item?.payload && typeof item.payload === "object") return item.payload;
+  const { validation: _validation, ...rest } = item || {};
+  return rest;
+}
+
+function normalizeEditedItems({ db, proposal, edits = {}, forConfirm = false }) {
+  const currentItems = proposalItems(proposal.proposal);
+  const editedItems = Array.isArray(edits.items) ? edits.items : [];
+  const rawItems = editedItems.length ? editedItems : currentItems;
+  const chunks = sourceChunks(db, proposal.sourceId);
+
+  return rawItems.map((raw, index) => {
+    const base = currentItems[index] && editedItems.length ? currentItems[index] : {};
+    const item = {
+      ...clone(base),
+      ...clone(raw || {}),
+      sourceId: String(raw?.sourceId || base?.sourceId || proposal.sourceId),
+    };
+    if (!item.chunkId && chunks.length === 1) item.chunkId = chunks[0].id;
+    const blockedReasons = new Set();
+    let status = "passed";
+
+    const currentValidation = item.validation || {};
+    if (item.status === "blocked" || currentValidation.status === "blocked") {
+      for (const reason of currentValidation.blockedReasons || [])
+        blockedReasons.add(String(reason));
+      if (!editedItems.length) status = "blocked";
+    }
+
+    const privacy = validateDeepIngestPrivacy({ proposal: { payload: validationPayload(item) } });
+    if (!privacy.ok) {
+      status = "blocked";
+      for (const reason of privacy.blockedFields) blockedReasons.add(reason);
+    }
+
+    if (proposal.lane !== "open_gaps") {
+      const grounding = validateDeepIngestGrounding({ proposal: item, chunks });
+      if (!grounding.ok) {
+        status = status === "blocked" ? "blocked" : "needs_quote";
+        for (const reason of grounding.errors?.length ? ["ungrounded"] : grounding.blockedFields) {
+          blockedReasons.add(reason);
+        }
+      }
+    }
+
+    if (forConfirm && status !== "passed") {
+      const err = makeError(
+        status === "needs_quote"
+          ? "Deep ingest proposal needs a supporting source quote before confirmation"
+          : "Deep ingest proposal is blocked and cannot be confirmed",
+        "PROPOSAL_BLOCKED"
+      );
+      err.validation = { status, blockedReasons: [...blockedReasons].sort() };
+      throw err;
+    }
+
+    return {
+      ...item,
+      validation: {
+        status,
+        blockedReasons: [...blockedReasons].sort(),
+      },
+    };
+  });
+}
+
+function mergedProposalPayload(current, edits, items) {
+  return {
+    ...clone(current.proposal || {}),
+    ...clone(edits || {}),
+    items,
+    validation: {
+      status: items.some((item) => item.validation?.status === "blocked")
+        ? "blocked"
+        : items.some((item) => item.validation?.status === "needs_quote")
+          ? "needs_quote"
+          : "passed",
+      blockedReasons: [
+        ...new Set(items.flatMap((item) => item.validation?.blockedReasons || [])),
+      ].sort(),
+    },
+  };
+}
+
 function assertProposalVersion(current, expectedVersion) {
   if (Number(current.version || 0) !== expectedVersion) {
     throw makeError(
@@ -290,7 +414,7 @@ function assertProposalVersion(current, expectedVersion) {
   }
 }
 
-function writeEvidenceClaims(db, items) {
+function writeEvidenceClaims(db, items, proposal, confirmedAt) {
   const rows = db
     .prepare("SELECT data FROM candidate_evidence_claims ORDER BY rowid ASC")
     .all()
@@ -304,9 +428,11 @@ function writeEvidenceClaims(db, items) {
      ON CONFLICT(id) DO UPDATE SET data=excluded.data, updated_at=excluded.updated_at`
   );
   let added = 0;
+  let accepted = 0;
   for (const raw of Array.isArray(items) ? items : []) {
-    const claim = String(raw?.claim || "").trim();
+    const claim = evidenceClaimFromItem(raw);
     if (!claim) continue;
+    accepted += 1;
     const requestedId = String(raw?.id || "").trim();
     const duplicateId = byClaim.get(claim);
     if (duplicateId && duplicateId !== requestedId) continue;
@@ -318,11 +444,19 @@ function writeEvidenceClaims(db, items) {
       id,
       claim,
       evidence: String(raw?.evidence || raw?.supportingQuote || ""),
+      sourceId: String(raw?.sourceId || proposal.sourceId),
+      sourceProposalId: proposal.id,
+      supportingQuote: raw?.supportingQuote ? String(raw.supportingQuote) : null,
+      confirmedAt,
     };
     stmt.run(id, JSON.stringify(data), nowIso());
     added += 1;
   }
-  return { added };
+  return { added, accepted };
+}
+
+function evidenceClaimFromItem(raw) {
+  return String(raw?.claim || raw?.payload?.claim || raw?.title || raw?.summary || "").trim();
 }
 
 function nextEvidenceId(usedIds) {
@@ -338,7 +472,11 @@ function nextEvidenceId(usedIds) {
 function writeConfirmedLaneOutput(db, proposal, edits, updatedAt) {
   const items = Array.isArray(edits?.items) ? edits.items : [];
   if (proposal.lane === "evidence_claims") {
-    return { evidence: writeEvidenceClaims(db, items) };
+    const evidence = writeEvidenceClaims(db, items, proposal, updatedAt);
+    if (evidence.accepted === 0) {
+      throw makeError("Deep ingest evidence confirmation requires a claim");
+    }
+    return { evidence };
   }
 
   const tableByLane = {
@@ -358,7 +496,10 @@ function writeConfirmedLaneOutput(db, proposal, edits, updatedAt) {
       ...clone(raw),
       id,
       status: raw.status || "confirmed",
+      sourceId: String(raw.sourceId || proposal.sourceId),
       sourceProposalId: proposal.id,
+      supportingQuote: raw.supportingQuote ? String(raw.supportingQuote) : null,
+      confirmedAt: updatedAt,
       updatedAt,
     });
     written += 1;
@@ -366,11 +507,27 @@ function writeConfirmedLaneOutput(db, proposal, edits, updatedAt) {
   return { written };
 }
 
+function markLaneCompleted(db, lane, updatedAt) {
+  const normalizedLane = normalizeLane(lane);
+  const existing = readRow(db, LANE_TABLE, normalizedLane);
+  putRow(db, LANE_TABLE, normalizedLane, {
+    id: normalizedLane,
+    lane: normalizedLane,
+    status: "completed",
+    reason: null,
+    createdAt: existing?.createdAt || updatedAt,
+    updatedAt,
+  });
+}
+
 export function deepIngestSourceCreate({ repoRoot, env, input } = {}) {
   return runDeepIngestVerb({ repoRoot, env }, (db) => {
     const source = sourceFromInput(input);
+    if (input?.text != null) source._sourceText = String(input.text || "");
     putRow(db, SOURCE_TABLE, source.id, source);
     const chunks = replaceSourceChunks(db, source, input?.chunks);
+    delete source._sourceText;
+    putRow(db, SOURCE_TABLE, source.id, source);
     return {
       ok: true,
       source: readRow(db, SOURCE_TABLE, source.id),
@@ -430,12 +587,16 @@ export function deepIngestProposalDecision({
   expectedVersion,
   decision,
   reason,
+  edits = {},
 } = {}) {
   const expected = normalizeExpectedVersion(expectedVersion, "deepIngestProposalDecision");
   const normalizedDecision = String(decision || "").trim();
   const status = PROPOSAL_DECISION_TO_STATUS.get(normalizedDecision);
   if (!status) throw makeError(`unsupported Deep ingest proposal decision "${normalizedDecision}"`);
-  if ((status === "deferred" || status === "rejected") && !String(reason || "").trim()) {
+  if (
+    (status === "deferred" || status === "rejected" || status === "not_available") &&
+    !String(reason || "").trim()
+  ) {
     throw makeError("Deep ingest proposal decision requires reason");
   }
 
@@ -443,6 +604,21 @@ export function deepIngestProposalDecision({
     const current = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
     assertProposalVersion(current, expected);
     const updatedAt = nowIso();
+    if (normalizedDecision === "save_edits") {
+      assertNoPrivateCompKeys(edits);
+      const items = normalizeEditedItems({ db, proposal: current, edits });
+      const next = {
+        ...current,
+        status: "review_needed",
+        version: expected + 1,
+        proposal: mergedProposalPayload(current, edits, items),
+        decision: normalizedDecision,
+        reason: null,
+        updatedAt,
+      };
+      putRow(db, PROPOSAL_TABLE, next.id, next);
+      return readRow(db, PROPOSAL_TABLE, next.id);
+    }
     const next = {
       ...current,
       status,
@@ -469,29 +645,42 @@ export function deepIngestConfirmProposal({
   return runDeepIngestVerb({ repoRoot, env }, (db) => {
     const current = requireRow(db, PROPOSAL_TABLE, proposalId, "Deep ingest proposal");
     assertProposalVersion(current, expected);
+    const hasEdits = Array.isArray(edits?.items) && edits.items.length > 0;
+    const currentBlocks = proposalBlockedReasons(current);
+    if (!hasEdits && currentBlocks.length) {
+      const err = makeError(
+        "Deep ingest proposal is blocked and cannot be confirmed",
+        "PROPOSAL_BLOCKED"
+      );
+      err.validation = { status: "blocked", blockedReasons: currentBlocks };
+      throw err;
+    }
     const updatedAt = nowIso();
-    const output = writeConfirmedLaneOutput(db, current, edits, updatedAt);
+    const items = normalizeEditedItems({ db, proposal: current, edits, forConfirm: true });
+    const confirmedOutput = { ...clone(edits), items };
+    const output = writeConfirmedLaneOutput(db, current, confirmedOutput, updatedAt);
     const next = {
       ...current,
       status: "confirmed",
       version: expected + 1,
       decision: "confirm",
       reason: null,
-      confirmedOutput: clone(edits),
+      proposal: mergedProposalPayload(current, confirmedOutput, items),
+      confirmedOutput,
       output,
       updatedAt,
     };
     putRow(db, PROPOSAL_TABLE, next.id, next);
+    markLaneCompleted(db, current.lane, updatedAt);
     return readRow(db, PROPOSAL_TABLE, next.id);
   });
 }
 
 export function deepIngestLaneSetState({ repoRoot, env, lane, status, reason } = {}) {
-  const normalizedLane = normalizeLane(lane);
-  const normalizedStatus = normalizeLaneStatus(status);
-  if (REASON_REQUIRED_STATUSES.has(normalizedStatus) && !String(reason || "").trim()) {
-    throw makeError(`Deep ingest lane status "${normalizedStatus}" requires reason`);
-  }
+  const transition = validateDeepIngestLaneTransition({ lane, status, reason });
+  if (!transition.ok) throw makeError(transition.error);
+  const normalizedLane = normalizeLane(transition.lane);
+  const normalizedStatus = normalizeLaneStatus(transition.status);
 
   return runDeepIngestVerb({ repoRoot, env }, (db) => {
     const existing = readRow(db, LANE_TABLE, normalizedLane);
@@ -532,21 +721,22 @@ export function deepIngestStateGet({ repoRoot, env } = {}) {
     if (row?.lane) laneStates[row.lane] = row;
   }
 
-  const terminalLanes = DEEP_INGEST_REQUIRED_LANES.filter((lane) =>
-    DEEP_INGEST_TERMINAL_STATUSES.includes(laneStates[lane]?.status)
-  );
-  const lanes = DEEP_INGEST_REQUIRED_LANES.map((lane) => ({
-    key: lane,
-    ...laneStates[lane],
-  }));
+  const readiness = evaluateDeepIngestReadiness({
+    laneStates,
+    requiredLanes: DEEP_INGEST_REQUIRED_LANES,
+  });
+  const terminalLanes = readiness.lanes.filter((lane) => lane.terminal).map((lane) => lane.key);
 
   return {
     ok: true,
     sources,
     sourceChunks,
     proposals,
-    lanes,
+    lanes: readiness.lanes,
     laneStates,
+    readiness,
+    todos: readiness.todos,
+    gaps: readiness.gaps,
     confirmed: {
       evidence: proposals.filter(
         (proposal) => proposal.lane === "evidence_claims" && proposal.status === "confirmed"
@@ -560,11 +750,11 @@ export function deepIngestStateGet({ repoRoot, env } = {}) {
       (proposal) => proposal.lane === "open_gaps" && proposal.status !== "confirmed"
     ),
     requiredLaneCount: DEEP_INGEST_REQUIRED_LANES.length,
-    terminalLaneCount: terminalLanes.length,
+    terminalLaneCount: readiness.terminalCount,
     terminalSummary: {
-      complete: terminalLanes.length === DEEP_INGEST_REQUIRED_LANES.length,
+      complete: readiness.ready,
       terminalLanes,
-      missingLanes: DEEP_INGEST_REQUIRED_LANES.filter((lane) => !terminalLanes.includes(lane)),
+      missingLanes: readiness.missing.map((lane) => lane.key),
     },
   };
 }

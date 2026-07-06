@@ -59,6 +59,8 @@ const APP_DEFAULT_FILES = [
   "src/cli/packet-route.mjs",
   "src/cli/search-route.mjs",
   "src/cli/sourcing-route.mjs",
+  "src/core/ai/answer-page.mjs",
+  "src/core/onboarding/packet-page.mjs",
   "apps/desktop/main.mjs",
 ];
 
@@ -155,16 +157,6 @@ const CLASSIFIED_LEGACY_STATIC_RUNTIME_FILES = [
     file: "src/core/ai/evaluate-page.mjs",
     classification: "legacy static evaluate page retained runtime client",
     patterns: [/fetch\("\/api\/skill\/run"/, /evaluate-job/],
-  },
-  {
-    file: "src/core/ai/answer-page.mjs",
-    classification: "legacy static answer page retained runtime client",
-    patterns: [/fetch\("\/api\/skill\/run"/, /answer-question/],
-  },
-  {
-    file: "src/core/onboarding/packet-page.mjs",
-    classification: "legacy static packet page retained runtime client",
-    patterns: [/fetch\("\/api\/skill\/run"/, /tailor-application/],
   },
   {
     file: "src/core/onboarding/chat-page.mjs",
@@ -384,6 +376,8 @@ test("SEC-01 app-default guard scans the named product/default file set", () => 
     "src/cli/packet-route.mjs",
     "src/cli/search-route.mjs",
     "src/cli/sourcing-route.mjs",
+    "src/core/ai/answer-page.mjs",
+    "src/core/onboarding/packet-page.mjs",
     "apps/desktop/main.mjs",
   ]);
 });

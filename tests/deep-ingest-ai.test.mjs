@@ -79,13 +79,26 @@ const SOURCE = {
   ],
 };
 
+const UNSUPPORTED_SOURCE = {
+  id: "src-unsupported-1",
+  targetShape: "auto",
+  kind: "binary",
+  status: "unsupported",
+  errorCode: "UNSUPPORTED_SOURCE_KIND",
+  chunks: [],
+};
+
 function assertNoSecretLeak(value) {
   const serialized = JSON.stringify(value);
   for (const token of SECRET_TOKENS) {
     assert.equal(serialized.includes(token), false, `Deep ingest envelope leaked ${token}`);
   }
   for (const field of ["raw", "rawModelText", "prompt", "sourceText", "bodyText", "current_base"]) {
-    assert.equal(serialized.includes(`"${field}"`), false, `Deep ingest envelope exposed ${field}`);
+    assert.equal(
+      new RegExp(`"${field}"\\s*:`).test(serialized),
+      false,
+      `Deep ingest envelope exposed ${field}`
+    );
   }
 }
 
@@ -239,6 +252,38 @@ test("schema-invalid AI output becomes safe fallback and never exposes raw model
   assertNoSecretLeak(result);
 });
 
+test("provider failure becomes a manual fallback without exposing source or provider text", async () => {
+  const builder = await importBuilder(LANE_BUILDERS[2]);
+
+  const result = await builder({
+    source: {
+      ...SOURCE,
+      chunks: [
+        {
+          ...SOURCE.chunks[0],
+          text: `${SOURCE.chunks[0].text}\n${SECRET_TOKENS[1]}`,
+        },
+      ],
+    },
+    targetShape: "honesty",
+    runBoundedAI: async () => ({
+      status: 502,
+      body: {
+        ok: false,
+        code: BOUNDED_AI_CODES.AI_PROVIDER_FAILED,
+        error: { message: `provider echoed ${SECRET_TOKENS[1]}` },
+        ai: { used: true },
+        manual: { available: true, action: "Enter manually" },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "manual_fallback");
+  assert.equal(result.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
+  assert.equal(result.manual.available, true);
+  assertNoSecretLeak(result);
+});
+
 test("grounding and privacy validators block unsupported or private proposal text", async () => {
   const { validateDeepIngestGrounding } = await import(
     "../src/core/deep-ingest/validators/grounding.mjs"
@@ -274,6 +319,77 @@ test("grounding and privacy validators block unsupported or private proposal tex
     "protected_trait",
   ]);
   assertNoSecretLeak(privateResult);
+});
+
+test("unsupported metrics and private/protected/local content are blocked proposal items", async () => {
+  const builder = await importBuilder(LANE_BUILDERS[0]);
+
+  const result = await builder({
+    source: SOURCE,
+    targetShape: "evidence",
+    runBoundedAI: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          proposals: [
+            proposalFor("evidence", {
+              id: "unsupported-metric",
+              supportingQuote: "cut manual triage from 45 minutes to 8",
+              payload: {
+                claim: "Drove ARR from $1M to $500M",
+                metrics: ["$500M ARR"],
+              },
+            }),
+            proposalFor("evidence", {
+              id: "private-path",
+              supportingQuote: "cut manual triage from 45 minutes to 8",
+              payload: {
+                claim: `Use local file ${SECRET_TOKENS[4]} and ${SECRET_TOKENS[6]}`,
+              },
+            }),
+          ],
+        },
+        ai: { used: true },
+        manual: { available: true, action: "Enter manually" },
+      },
+    }),
+  });
+
+  assert.equal(result.status, "proposal_ready");
+  assert.equal(result.proposals.length, 2);
+  assert.deepEqual(
+    result.proposals.map((proposal) => proposal.status),
+    ["blocked", "blocked"]
+  );
+  assert.deepEqual(
+    result.proposals.flatMap((proposal) => proposal.validation.blockedReasons).sort(),
+    ["local_path", "protected_trait", "unsupported_metric"].sort()
+  );
+  assertNoSecretLeak(result);
+});
+
+test("unsupported sources create visible gap payloads without invoking AI", async () => {
+  const builder = await importBuilder(LANE_BUILDERS[5]);
+  let invoked = false;
+
+  const result = await builder({
+    source: UNSUPPORTED_SOURCE,
+    targetShape: "gap",
+    runBoundedAI: async () => {
+      invoked = true;
+      throw new Error("AI should not run for unsupported sources");
+    },
+  });
+
+  assert.equal(invoked, false);
+  assert.equal(result.status, "gap");
+  assert.equal(result.gaps.length, 1);
+  assert.equal(result.gaps[0].lane, "gap");
+  assert.equal(result.gaps[0].sourceId, UNSUPPORTED_SOURCE.id);
+  assert.equal(result.gaps[0].status, "gap");
+  assert.equal(result.gaps[0].code, "UNSUPPORTED_SOURCE_KIND");
+  assertNoSecretLeak(result);
 });
 
 test("proposal modules do not expose chat, guided interview, or skill-runtime handoff strings", async () => {

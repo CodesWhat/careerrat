@@ -1,0 +1,55 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rolester.local/schemas/deep-ingest-proposal.schema.json",
+  "title": "Deep ingest proposal row",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["lane", "sourceId", "status", "confidence", "payload", "validation"],
+  "properties": {
+    "id": { "type": "string" },
+    "lane": {
+      "type": "string",
+      "enum": ["evidence", "story", "honesty", "writing_voice", "role_signal", "gap"]
+    },
+    "sourceId": { "type": "string" },
+    "chunkId": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": [
+        "review_needed",
+        "manual_fallback",
+        "gap",
+        "blocked",
+        "confirmed",
+        "rejected",
+        "deferred",
+        "not_available"
+      ]
+    },
+    "confidence": { "type": "number" },
+    "supportingQuote": { "type": "string" },
+    "span": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "chunkId": { "type": "string" },
+        "start": { "type": "integer" },
+        "end": { "type": "integer" }
+      }
+    },
+    "payload": { "type": "object" },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "blockedReasons"],
+      "properties": {
+        "status": { "type": "string", "enum": ["passed", "blocked", "fallback"] },
+        "blockedReasons": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+    "code": { "type": "string" }
+  }
+}

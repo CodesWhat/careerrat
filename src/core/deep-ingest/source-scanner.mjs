@@ -21,7 +21,12 @@ const TEXT_FILE_EXTENSIONS = new Set([
   ".csv",
 ]);
 
-export async function scanDeepIngestSource({ input, fetchImpl = fetch, limits = {} } = {}) {
+export async function scanDeepIngestSource({
+  input,
+  fetchImpl = fetch,
+  resolveHost,
+  limits = {},
+} = {}) {
   const normalized = normalizeDeepIngestSource(input);
   const normalizedLimits = normalizeLimits(limits);
 
@@ -41,7 +46,12 @@ export async function scanDeepIngestSource({ input, fetchImpl = fetch, limits = 
       case "linkedin":
       case "portfolio":
       case "project_link":
-        return scanUrlSource({ input: normalized, fetchImpl, limits: normalizedLimits });
+        return scanUrlSource({
+          input: normalized,
+          fetchImpl,
+          resolveHost,
+          limits: normalizedLimits,
+        });
       case "repo":
         return scanRepoSource({ input: normalized, limits: normalizedLimits });
       case "local_path":
@@ -64,11 +74,12 @@ export async function scanDeepIngestSource({ input, fetchImpl = fetch, limits = 
   }
 }
 
-async function scanUrlSource({ input, fetchImpl, limits }) {
+async function scanUrlSource({ input, fetchImpl, resolveHost, limits }) {
   let fetched;
   try {
     fetched = await fetchDeepIngestUrl(input.url, {
       fetchImpl,
+      resolveHost,
       timeoutMs: limits.fetchTimeoutMs,
       maxBytes: limits.maxFetchBytes,
     });

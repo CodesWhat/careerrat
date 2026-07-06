@@ -45,7 +45,7 @@ CREATE TABLE deep_ingest_proposals (
   source_id TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN json_extract(data,'$.sourceId') END) STORED,
   target_shape TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN json_extract(data,'$.targetShape') END) STORED,
   status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN json_extract(data,'$.status') END) STORED
-    CHECK (status IN ('review_needed','deferred','rejected','confirmed')),
+    CHECK (status IN ('review_needed','deferred','rejected','confirmed','not_available')),
   lane TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN json_extract(data,'$.lane') END) STORED,
   version INTEGER GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN coalesce(json_extract(data,'$.version'), 0) END) STORED,
   updated_at TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN coalesce(json_extract(data,'$.updatedAt'), json_extract(data,'$.updated_at')) END) STORED

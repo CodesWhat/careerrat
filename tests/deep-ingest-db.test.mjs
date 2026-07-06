@@ -250,6 +250,7 @@ test("proposal decisions enforce expected-version conflicts and keep unconfirmed
   seedSearchReadyCandidate(repoRoot);
   const {
     deepIngestConfirmProposal,
+    deepIngestStateGet,
     deepIngestProposalDecision,
     deepIngestProposalPut,
     deepIngestSourceCreate,
@@ -330,6 +331,78 @@ test("proposal decisions enforce expected-version conflicts and keep unconfirmed
   });
   assert.equal(confirmed.status, "confirmed");
   assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims + 1);
+  assert.equal(deepIngestStateGet({ repoRoot }).laneStates.evidence_claims.status, "completed");
+});
+
+test("confirmed generic evidence edits write trusted claims and complete the lane", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  seedSearchReadyCandidate(repoRoot);
+  const {
+    deepIngestConfirmProposal,
+    deepIngestProposalPut,
+    deepIngestSourceCreate,
+    deepIngestStateGet,
+  } = await loadDeepIngestVerbs();
+
+  const beforeClaims = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      label: "Manual evidence",
+      text: "Built source-grounded review workflows for local candidate setup.",
+      chunks: [
+        {
+          id: "chunk-generic-evidence-1",
+          text: "Built source-grounded review workflows for local candidate setup.",
+        },
+      ],
+    },
+  }).source;
+  const proposal = deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "evidence",
+    lane: "evidence_claims",
+    proposal: {
+      items: [
+        {
+          title: "Built source-grounded review workflows.",
+          summary: "Local candidate setup now uses proposal-first review.",
+          sourceId: source.id,
+          chunkId: "chunk-generic-evidence-1",
+          supportingQuote: "Built source-grounded review workflows",
+        },
+      ],
+    },
+  });
+
+  const confirmed = deepIngestConfirmProposal({
+    repoRoot,
+    proposalId: proposal.id,
+    expectedVersion: proposal.version,
+    edits: {
+      items: [
+        {
+          id: "generic-evidence-claim",
+          title: "Built source-grounded review workflows.",
+          summary: "Local candidate setup now uses proposal-first review.",
+          sourceId: source.id,
+          chunkId: "chunk-generic-evidence-1",
+          supportingQuote: "Built source-grounded review workflows",
+        },
+      ],
+    },
+  });
+
+  assert.equal(confirmed.status, "confirmed");
+  assert.equal(confirmed.output.evidence.accepted, 1);
+  const claims = candidateConfigGet({ repoRoot }).evidence.claims;
+  assert.equal(claims.length, beforeClaims + 1);
+  assert.equal(claims.at(-1).claim, "Built source-grounded review workflows.");
+  assert.equal(deepIngestStateGet({ repoRoot }).laneStates.evidence_claims.status, "completed");
 });
 
 test("lane state verbs accept the documented statuses and reject invalid lane state", async () => {
@@ -405,4 +478,459 @@ test("deep_ingest_complete is computed only from terminal lane states and stays 
   const state = deepIngestStateGet({ repoRoot });
   assert.equal(state.terminalLaneCount, REQUIRED_LANES.length);
   assert.equal(state.requiredLaneCount, REQUIRED_LANES.length);
+});
+
+test("proposal decisions require explicit actions, rerun validation, and keep unsafe edits out of trusted state", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  seedSearchReadyCandidate(repoRoot);
+  const {
+    deepIngestConfirmProposal,
+    deepIngestProposalDecision,
+    deepIngestProposalPut,
+    deepIngestSourceCreate,
+  } = await loadDeepIngestVerbs();
+
+  const beforeClaims = candidateConfigGet({ repoRoot }).evidence.claims.length;
+  const beforeRuns = db.prepare("SELECT COUNT(*) AS count FROM sourcing_runs").get().count;
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      label: "Evidence note",
+      text: "Built a source-grounded proposal review workflow.",
+      chunks: [
+        {
+          id: "chunk-evidence-1",
+          text: "Built a source-grounded proposal review workflow.",
+        },
+      ],
+    },
+  }).source;
+
+  const blocked = deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "evidence",
+    lane: "evidence_claims",
+    proposal: {
+      items: [
+        {
+          claim: "Current base is $200000.",
+          sourceId: source.id,
+          chunkId: "chunk-evidence-1",
+          supportingQuote: "Built a source-grounded proposal review workflow",
+          payload: { blocked: true },
+          validation: { status: "blocked", blockedReasons: ["current_base"] },
+        },
+      ],
+      validation: { status: "blocked", blockedReasons: ["current_base"] },
+    },
+  });
+
+  assert.throws(
+    () =>
+      deepIngestConfirmProposal({
+        repoRoot,
+        proposalId: blocked.id,
+        expectedVersion: blocked.version,
+        edits: {},
+      }),
+    (err) => err.code === "PROPOSAL_BLOCKED" && /blocked/i.test(err.message)
+  );
+  assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims);
+
+  const saved = deepIngestProposalDecision({
+    repoRoot,
+    proposalId: blocked.id,
+    expectedVersion: blocked.version,
+    decision: "save_edits",
+    edits: {
+      items: [
+        {
+          id: "deep-evidence-needs-quote",
+          claim: "Built a workflow with a different unsupported metric.",
+          evidence: "Deep ingest source",
+          sourceId: source.id,
+          chunkId: "chunk-evidence-1",
+          supportingQuote: "quote that is not in the source chunk",
+        },
+      ],
+    },
+  });
+  assert.equal(saved.status, "review_needed");
+  assert.equal(saved.version, blocked.version + 1);
+  assert.equal(saved.proposal.items[0].validation.status, "needs_quote");
+  assert.ok(saved.proposal.items[0].validation.blockedReasons.includes("ungrounded"));
+  assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims);
+
+  const confirmed = deepIngestConfirmProposal({
+    repoRoot,
+    proposalId: blocked.id,
+    expectedVersion: saved.version,
+    edits: {
+      items: [
+        {
+          id: "deep-evidence-confirmed",
+          claim: "Built a source-grounded proposal review workflow.",
+          evidence: "Deep ingest source",
+          sourceId: source.id,
+          chunkId: "chunk-evidence-1",
+          supportingQuote: "Built a source-grounded proposal review workflow",
+        },
+      ],
+    },
+  });
+  assert.equal(confirmed.status, "confirmed");
+  const claims = candidateConfigGet({ repoRoot }).evidence.claims;
+  assert.equal(claims.length, beforeClaims + 1);
+  assert.equal(claims.at(-1).sourceId, source.id);
+  assert.equal(claims.at(-1).sourceProposalId, blocked.id);
+  assert.equal(claims.at(-1).supportingQuote, "Built a source-grounded proposal review workflow");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sourcing_runs").get().count, beforeRuns);
+  assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
+});
+
+test("confirmed lane outputs and terminal todos are readable through the DB-backed view model", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  seedSearchReadyCandidate(repoRoot);
+  const {
+    deepIngestConfirmProposal,
+    deepIngestLaneSetState,
+    deepIngestProposalDecision,
+    deepIngestProposalPut,
+    deepIngestSourceCreate,
+  } = await loadDeepIngestVerbs();
+  const { buildDeepIngestViewModel } = await import("../src/core/deep-ingest/view-model.mjs");
+  const { validateDeepIngestLaneTransition } = await import(
+    "../src/core/deep-ingest/validators/lane-state.mjs"
+  );
+
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "story",
+      sourceKind: "paste",
+      text: "Led a rollout that cut review time by 30%.",
+      chunks: [{ id: "chunk-story-1", text: "Led a rollout that cut review time by 30%." }],
+    },
+  }).source;
+
+  for (const [lane, item] of [
+    [
+      "story_bank",
+      {
+        title: "Review workflow rollout",
+        situation: "Manual review queue",
+        result: "Cut review time by 30%",
+      },
+    ],
+    ["honesty_boundaries", { boundaryType: "do_not_claim", text: "Do not claim ML training." }],
+    ["writing_voice", { voiceStatus: "confirmed", summary: "Direct, concrete, technical." }],
+    [
+      "role_signals",
+      { roleFamily: "applied-ai", signalType: "keep", text: "Agent workflow builder" },
+    ],
+  ]) {
+    const proposal = deepIngestProposalPut({
+      repoRoot,
+      sourceId: source.id,
+      targetShape: "story",
+      lane,
+      proposal: {
+        items: [
+          {
+            ...item,
+            sourceId: source.id,
+            chunkId: "chunk-story-1",
+            supportingQuote: "Led a rollout that cut review time by 30%",
+            validation: { status: "passed", blockedReasons: [] },
+          },
+        ],
+      },
+    });
+    deepIngestConfirmProposal({
+      repoRoot,
+      proposalId: proposal.id,
+      expectedVersion: proposal.version,
+      edits: {
+        items: [
+          {
+            ...item,
+            sourceId: source.id,
+            chunkId: "chunk-story-1",
+            supportingQuote: "Led a rollout that cut review time by 30%",
+          },
+        ],
+      },
+    });
+  }
+
+  const gapProposal = deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "gap",
+    lane: "open_gaps",
+    proposal: {
+      items: [{ prompt: "Add a quantified leadership story.", sourceId: source.id }],
+    },
+  });
+  deepIngestProposalDecision({
+    repoRoot,
+    proposalId: gapProposal.id,
+    expectedVersion: gapProposal.version,
+    decision: "mark_not_available",
+    reason: "No public metric is available yet.",
+  });
+  deepIngestLaneSetState({
+    repoRoot,
+    lane: "open_gaps",
+    status: "deferred",
+    reason: "Review after first sourcing run.",
+  });
+
+  const invalid = validateDeepIngestLaneTransition({
+    lane: "writing_voice",
+    status: "not_available",
+  });
+  assert.equal(invalid.ok, false);
+  assert.match(invalid.error, /reason/i);
+
+  const model = buildDeepIngestViewModel({ repoRoot });
+  assert.equal(model.confirmed.storyBank.length, 1);
+  assert.equal(model.confirmed.honestyBoundaries.length, 1);
+  assert.equal(model.confirmed.writingVoice.length, 1);
+  assert.equal(model.confirmed.roleSignals.length, 1);
+  assert.equal(model.confirmed.storyBank[0].sourceId, source.id);
+  assert.match(model.confirmed.storyBank[0].sourceProposalId, /^deep_prop_/);
+  assert.equal(model.openGaps[0].reason, "No public metric is available yet.");
+  assert.equal(
+    model.lanes.find((lane) => lane.key === "open_gaps").todo,
+    "Review after first sourcing run."
+  );
+  assert.equal(model.terminalSummary.terminalLanes.includes("open_gaps"), true);
+  assert.ok(model.reviewQueue.every((row) => row.status === "review_needed"));
+});
+
+test("Library snapshot projects only confirmed Deep ingest rows from SQLite", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const {
+    deepIngestConfirmProposal,
+    deepIngestProposalDecision,
+    deepIngestProposalPut,
+    deepIngestSourceCreate,
+  } = await loadDeepIngestVerbs();
+  const { loadLibrarySnapshot } = await import("../src/core/tracker/library-snapshot.mjs");
+
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      label: "Deep profile note",
+      text: [
+        "Built source-grounded evidence review.",
+        "Led a STAR rollout that cut review time by 30%.",
+        "Write in direct, concrete language.",
+        "Do not claim model training.",
+        "Agent workflow builder signal.",
+      ].join("\n"),
+      chunks: [
+        {
+          id: "chunk-library-1",
+          text: [
+            "Built source-grounded evidence review.",
+            "Led a STAR rollout that cut review time by 30%.",
+            "Write in direct, concrete language.",
+            "Do not claim model training.",
+            "Agent workflow builder signal.",
+          ].join("\n"),
+        },
+      ],
+    },
+  }).source;
+
+  const confirm = (lane, targetShape, item) => {
+    const proposal = deepIngestProposalPut({
+      repoRoot,
+      sourceId: source.id,
+      targetShape,
+      lane,
+      proposal: {
+        items: [
+          {
+            ...item,
+            sourceId: source.id,
+            chunkId: "chunk-library-1",
+            supportingQuote: item.supportingQuote,
+            validation: { status: "passed", blockedReasons: [] },
+          },
+        ],
+      },
+    });
+    return deepIngestConfirmProposal({
+      repoRoot,
+      proposalId: proposal.id,
+      expectedVersion: proposal.version,
+      edits: {
+        items: [
+          {
+            ...item,
+            sourceId: source.id,
+            chunkId: "chunk-library-1",
+            supportingQuote: item.supportingQuote,
+          },
+        ],
+      },
+    });
+  };
+
+  const evidence = confirm("evidence_claims", "evidence", {
+    id: "deep-evidence-library",
+    claim: "Built source-grounded evidence review.",
+    evidence: "Deep profile note",
+    role_signals: ["agent workflow builder"],
+    metrics: ["source-grounded"],
+    allowed_wording: ["Built source-grounded evidence review."],
+    supportingQuote: "Built source-grounded evidence review",
+  });
+  const story = confirm("story_bank", "story", {
+    id: "story-library-rollout",
+    title: "Cut review time with STAR rollout",
+    situation: "Review was manual.",
+    task: "Make the workflow reusable.",
+    action: "Led a STAR rollout.",
+    result: "Cut review time by 30%.",
+    reflection: "Grounding keeps claims honest.",
+    role_signals: ["agent workflow builder"],
+    competencies: ["measurable-impact"],
+    metrics: ["30% review-time reduction"],
+    supportingQuote: "Led a STAR rollout that cut review time by 30%",
+  });
+  const voice = confirm("writing_voice", "writing_voice", {
+    id: "voice-library-direct",
+    voiceStatus: "confirmed",
+    summary: "Direct, concrete, evidence-backed writing.",
+    doPhrases: ["Lead with the concrete result."],
+    avoidPhrases: ["unsupported hype"],
+    supportingQuote: "Write in direct, concrete language",
+  });
+  const honesty = confirm("honesty_boundaries", "honesty_boundary", {
+    id: "honesty-library-training",
+    boundaryType: "do_not_claim",
+    text: "Do not claim model training.",
+    allowedWording: "Built model-adjacent workflow tooling.",
+    supportingQuote: "Do not claim model training",
+  });
+  const signal = confirm("role_signals", "role_signal", {
+    id: "signal-library-agent-builder",
+    roleFamily: "applied-ai",
+    signalType: "keep",
+    text: "Agent workflow builder signal.",
+    rationale: "Matches applied AI builder roles.",
+    supportingQuote: "Agent workflow builder signal",
+  });
+
+  const unconfirmedSource = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      label: "Unconfirmed note",
+      text: "Pending, rejected, deferred, failed, and not-available material stays untrusted.",
+    },
+  }).source;
+  const pending = deepIngestProposalPut({
+    repoRoot,
+    sourceId: unconfirmedSource.id,
+    targetShape: "evidence",
+    lane: "evidence_claims",
+    proposal: {
+      items: [{ claim: "Pending claim must not appear.", sourceId: unconfirmedSource.id }],
+    },
+  });
+  deepIngestProposalDecision({
+    repoRoot,
+    proposalId: pending.id,
+    expectedVersion: pending.version,
+    decision: "reject",
+    reason: "Rejected by reviewer.",
+  });
+  const deferred = deepIngestProposalPut({
+    repoRoot,
+    sourceId: unconfirmedSource.id,
+    targetShape: "story",
+    lane: "story_bank",
+    proposal: {
+      items: [{ title: "Deferred story must not appear.", sourceId: unconfirmedSource.id }],
+    },
+  });
+  deepIngestProposalDecision({
+    repoRoot,
+    proposalId: deferred.id,
+    expectedVersion: deferred.version,
+    decision: "defer",
+    reason: "Needs more context.",
+  });
+  const notAvailable = deepIngestProposalPut({
+    repoRoot,
+    sourceId: unconfirmedSource.id,
+    targetShape: "role_signal",
+    lane: "role_signals",
+    proposal: {
+      items: [{ text: "Not available signal must not appear.", sourceId: unconfirmedSource.id }],
+    },
+  });
+  deepIngestProposalDecision({
+    repoRoot,
+    proposalId: notAvailable.id,
+    expectedVersion: notAvailable.version,
+    decision: "mark_not_available",
+    reason: "No source support.",
+  });
+  deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      status: "failed",
+      label: "Failed source",
+      text: "Failed source must not appear.",
+    },
+  });
+
+  const snapshot = loadLibrarySnapshot({ root: repoRoot });
+  const byKind = new Map(snapshot.cards.map((card) => [card.kind, card]));
+  const body = JSON.stringify(snapshot);
+
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/stories.yml")), false);
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/writing-style.md")), false);
+  assert.equal(snapshot.metrics.claims, 1);
+  assert.equal(snapshot.metrics.stories, 1);
+  assert.equal(snapshot.metrics.voice, 1);
+  assert.equal(snapshot.metrics.honesty, 1);
+  assert.equal(snapshot.metrics.roleSignals, 1);
+  assert.equal(snapshot.readiness.proof, 1);
+  assert.equal(snapshot.readiness.stories, 1);
+  assert.equal(snapshot.readiness.voice, 1);
+  assert.equal(snapshot.readiness.honesty, 1);
+  assert.equal(snapshot.readiness.roleSignals, 1);
+
+  assert.equal(byKind.get("evidence")?.sourceId, source.id);
+  assert.equal(byKind.get("evidence")?.sourceProposalId, evidence.id);
+  assert.equal(byKind.get("story")?.sourceProposalId, story.id);
+  assert.equal(byKind.get("story")?.metadata?.star?.situation, "Review was manual.");
+  assert.equal(byKind.get("story")?.metadata?.star?.result, "Cut review time by 30%.");
+  assert.equal(byKind.get("voice")?.sourceProposalId, voice.id);
+  assert.equal(byKind.get("honesty")?.sourceProposalId, honesty.id);
+  assert.equal(byKind.get("role_signal")?.sourceProposalId, signal.id);
+  assert.ok(snapshot.filters.some((filter) => filter.label === "Agent Workflow Builder"));
+
+  assert.doesNotMatch(body, /Pending claim must not appear/);
+  assert.doesNotMatch(body, /Deferred story must not appear/);
+  assert.doesNotMatch(body, /Not available signal must not appear/);
+  assert.doesNotMatch(body, /Failed source must not appear/);
 });
