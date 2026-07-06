@@ -198,6 +198,136 @@ test("POST /api/packet/gate: malformed JSON is a local 400, not a skill-runtime 
   }
 });
 
+test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd before AI", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const seen = [];
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async ({ prompt }) => {
+      seen.push(prompt);
+      return [
+        "```json",
+        JSON.stringify({
+          gate: "keep",
+          fit: "strong match for applied AI workflow delivery",
+          comp: "review",
+          action: "generate-packet",
+          reasons: ["JD mentions agentic workflow prototypes"],
+          confidence: "high",
+        }),
+        "```",
+      ].join("\n");
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+      jobBody:
+        "Own agentic workflow prototypes with customers and ship deployed AI workflow tools.",
+      jobUrl: "https://example.test/jobs/app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.gate, "keep");
+    assert.equal(body.data?.manual?.required, false);
+    assert.equal(seen.length, 1, "readable supplied JD should allow one bounded AI call");
+
+    const app = readApp(repoRoot, "app-packet");
+    const jdPath = app?.artifacts?.jd;
+    assert.match(String(jdPath || ""), /^workspace\/jobs\/.+\.md$/);
+    assert.ok(
+      existsSync(join(repoRoot, jdPath.replace(/^workspace\//, "workspace/"))),
+      "captured JD artifact should exist locally"
+    );
+    assert.match(String(app?.artifacts?.jdGeneratedAt || ""), /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: reuses existing artifacts.jd when no body is supplied", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const prompts = [];
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async ({ prompt }) => {
+      prompts.push(prompt);
+      return '```json\n{"gate":"review","fit":"needs human review","comp":"review","action":"review","reasons":["saved body loaded"],"confidence":"medium"}\n```';
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.gate, "review");
+    assert.equal(prompts.length, 1);
+    assert.match(prompts[0], /Build agentic workflow prototypes/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: missing JD body returns review/manual state and skips AI", async () => {
+  const repoRoot = tempRepo();
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-no-jd",
+      company: "Acme AI",
+      role: "Applied AI Engineer",
+      status: "reviewed-hold",
+      artifacts: {},
+    },
+  ]);
+  let aiCalls = 0;
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => {
+      aiCalls += 1;
+      return "{}";
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-no-jd",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.gate, "review");
+    assert.equal(body.data?.manual?.required, true);
+    assert.equal(body.data?.manual?.code, "MISSING_JOB_BODY");
+    assert.equal(aiCalls, 0, "missing JD body must not call bounded AI");
+    assert.equal(readApp(repoRoot, "app-no-jd")?.artifacts?.jd ?? null, null);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: no AI route stays reviewable and does not fabricate KEEP", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => {
+      const err = new Error("no AI route configured");
+      err.code = "NO_AI_ROUTE";
+      throw err;
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.gate, "review");
+    assert.equal(body.data?.manual?.required, true);
+    assert.equal(body.data?.manual?.code, "NO_AI_ROUTE");
+    assert.notEqual(body.data?.gate, "keep");
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/packet/generate: stamps packet source/export artifacts through DB without tracker input", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);
