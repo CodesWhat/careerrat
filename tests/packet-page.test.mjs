@@ -137,10 +137,14 @@ test("packet-page.mjs's inline <script> never uses a template literal or backtic
   assert.ok(!match[1].includes("`"), "inline script must not contain a backtick");
 });
 
-test("the Generate packet run POSTs tailor-application and is gated by /api/runtime/config, same pattern as evaluate-page.mjs's decision buttons", () => {
-  assert.match(PACKET_PAGE_HTML, /runSkill\("tailor-application", input, function/);
-  assert.match(PACKET_PAGE_HTML, /fetch\("\/api\/runtime\/config"\)/);
-  assert.match(PACKET_PAGE_HTML, /tailorAllowed/);
+test("the Generate packet run POSTs the local packet generate API by default", () => {
+  const match = /<script>([\s\S]*?)<\/script>/.exec(PACKET_PAGE_HTML);
+  assert.ok(match);
+  const script = match[1];
+  assert.match(script, /fetch\("\/api\/packet\/generate"/);
+  assert.doesNotMatch(script, /\/api\/skill\/run/);
+  assert.doesNotMatch(script, /tailor-application/);
+  assert.doesNotMatch(script, /tailorAllowed|ROLESTER_RUNTIME_SKILLS/);
 });
 
 // ---------------------------------------------------------------------------

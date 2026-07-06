@@ -143,6 +143,16 @@ test("answer-page.mjs inline <script> parses as valid JavaScript (no syntax erro
   }, "answer-page.mjs's inline script has a JS syntax error — it would break the live page");
 });
 
+test("answer page drafts through the local packet answers API by default", () => {
+  const match = /<script>([\s\S]*?)<\/script>/.exec(ANSWER_PAGE_HTML);
+  assert.ok(match);
+  const script = match[1];
+  assert.match(script, /fetch\("\/api\/packet\/answers"/);
+  assert.doesNotMatch(script, /\/api\/skill\/run/);
+  assert.doesNotMatch(script, /answer-question/);
+  assert.doesNotMatch(script, /answerQuestionAllowed|ROLESTER_RUNTIME_SKILLS/);
+});
+
 // ---------------------------------------------------------------------------
 // Mounting /answer didn't disturb the existing routes
 // ---------------------------------------------------------------------------
