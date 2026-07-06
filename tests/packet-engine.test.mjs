@@ -75,9 +75,35 @@ const PACKET_CONTEXT = {
     body: "Build customer-facing agentic workflow prototypes and deploy them into production.",
     signals: ["agentic workflow", "customer deployment"],
   },
+  sourceResume: {
+    path: "workspace/profile/source-resume.md",
+    text: "Confirmed resume text about production AI workflows.",
+  },
+  resumeFacts: {
+    roles: ["Applied AI lead"],
+    tools: ["OpenAI API", "SQLite"],
+  },
+  storiesLearnings: [
+    {
+      id: "story-confirmed-1",
+      label: "Customer deployment",
+      note: "Turned prototype into a customer-used workflow.",
+      status: "confirmed",
+    },
+  ],
   publicCompanyIntel: {
     company: "Acme AI",
     product: "workflow automation for operations teams",
+    reviewed: true,
+  },
+  companyResearch: {
+    summary: "Acme AI sells operations workflow automation.",
+    reviewed: true,
+  },
+  publicCompanyJobBoardContext: {
+    provider: "greenhouse",
+    jobCount: 4,
+    reviewed: true,
   },
   deepIngest: {
     reviewed: [{ id: "story-1", summary: "Customer deployment story", status: "confirmed" }],
@@ -236,6 +262,58 @@ test("generatePacket carries captured questions into packetManifest.questions by
   );
 });
 
+test("packet source enumeration covers every D-08 source class without private current comp", async () => {
+  const { enumeratePacketSources } = await loadGenerateModule();
+
+  const sources = enumeratePacketSources(PACKET_CONTEXT);
+  assert.deepEqual(Object.keys(sources).sort(), [
+    "candidateProfile",
+    "capturedJobBody",
+    "capturedQuestions",
+    "companyIntelligence",
+    "companyResearch",
+    "confirmedEvidence",
+    "deepIngest",
+    "honestyBoundaries",
+    "publicCompanyJobBoardContext",
+    "resumeFacts",
+    "sourceResume",
+    "storiesLearnings",
+    "writingVoice",
+  ]);
+  assert.equal(sources.candidateProfile.candidate.full_name, "Alex Rivera");
+  assert.equal(sources.capturedJobBody.path, "workspace/jobs/acme-ai-applied-ai-engineer.md");
+  assert.equal(sources.capturedQuestions.path, "workspace/jobs/acme-ai-applied-ai-engineer.questions.json");
+  assert.deepEqual(
+    sources.confirmedEvidence.claims.map((claim) => claim.id),
+    ["ev-ai-001", "ev-iam-002"]
+  );
+  assert.doesNotMatch(JSON.stringify(sources), /PRIVATE_CURRENT_BASE_SENTINEL/);
+});
+
+test("source splitting keeps raw/proposed material out of claimable packet evidence", async () => {
+  const { enumeratePacketSources, splitConfirmedAndProposedPacketSources } = await loadGenerateModule();
+
+  const split = splitConfirmedAndProposedPacketSources(enumeratePacketSources(PACKET_CONTEXT));
+  assert.ok(
+    split.claimableEvidence.some((item) => item.id === "ev-ai-001"),
+    "confirmed evidence should be claimable"
+  );
+  assert.ok(
+    split.claimableContext.some((item) => item.source === "companyResearch"),
+    "reviewed company research should be usable context"
+  );
+  assert.ok(
+    split.gapContext.some((item) => item.id === "raw-1" && item.source === "deepIngest"),
+    "raw deep-ingest proposals should stay review/gap context"
+  );
+  assert.equal(
+    split.claimableEvidence.some((item) => /Kubernetes/i.test(JSON.stringify(item))),
+    false,
+    "raw/proposed Kubernetes material must not become claimable evidence"
+  );
+});
+
 test("unsupported claims become NEEDS YOU gaps and block upload-ready state", async () => {
   const { generatePacket, validatePacketEvidenceIds } = await loadGenerateModule();
 
@@ -279,4 +357,23 @@ test("unsupported claims become NEEDS YOU gaps and block upload-ready state", as
     result.sources.resume + result.sources.coverLetter + result.sources.answers,
     /Kubernetes administrator/
   );
+});
+
+test("private compensation and unconfirmed claims are rejected before upload-ready manifests", async () => {
+  const { validatePacketEvidenceIds } = await loadGenerateModule();
+
+  const result = validatePacketEvidenceIds({
+    context: PACKET_CONTEXT,
+    proposals: [
+      {
+        kind: "coverLetter",
+        text:
+          "I can use PRIVATE_CURRENT_BASE_SENTINEL and the unreviewed Kubernetes claim to justify fit.",
+        evidenceIds: ["ev-ai-001"],
+      },
+    ],
+  });
+
+  assert.equal(result.ok, false);
+  assert.match(result.gaps.map((gap) => gap.message).join("\n"), /private|current|unreviewed|Kubernetes/i);
 });
