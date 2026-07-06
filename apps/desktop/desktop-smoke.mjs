@@ -20,6 +20,8 @@ export async function verifySmokeHttpSurface({ baseUrl, route, getOk }) {
   for (const assetPath of assetPaths) {
     await getOk(new URL(assetPath, baseUrl).href);
   }
+
+  return { route, assetPaths };
 }
 
 function hasSpaRoot(html) {

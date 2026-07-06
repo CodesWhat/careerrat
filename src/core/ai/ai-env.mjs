@@ -83,7 +83,7 @@ function parseEnvLines(text) {
  *   never values.
  */
 export function loadLocalAiEnv({ repoRoot, env = process.env } = {}) {
-  const path = userPath({ repoRoot }, AI_ENV_RELPATH);
+  const path = userPath({ repoRoot, env }, AI_ENV_RELPATH);
   const loaded = [];
   if (!existsSync(path)) return { loaded, path };
 
@@ -125,7 +125,7 @@ export function writeLocalAiKey({ repoRoot, apiKey, env = process.env } = {}) {
     throw new Error("apiKey must be a non-empty string with no whitespace or newlines");
   }
 
-  const path = userPath({ repoRoot }, AI_ENV_RELPATH);
+  const path = userPath({ repoRoot, env }, AI_ENV_RELPATH);
   mkdirSync(dirname(path), { recursive: true });
 
   const existingText = existsSync(path) ? readFileSync(path, "utf8") : "";

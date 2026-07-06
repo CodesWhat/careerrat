@@ -25,6 +25,7 @@ import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
+import { decideExternalOpen, resolveDesktopRuntimePaths } from "./desktop-runtime.mjs";
 import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
 
 // --- Trap 1 -----------------------------------------------------------------
@@ -55,13 +56,16 @@ const isSmoke = process.argv.includes("--smoke");
 // workspace.mjs), so this must land before boot()'s dynamic imports below.
 // Dev keeps the legacy in-checkout layout (no ROLESTER_HOME) so it shares
 // data with `npm run tracker:dev` on the same checkout.
-let repoRoot;
-if (app.isPackaged) {
-  process.env.ROLESTER_HOME = join(app.getPath("userData"), "data");
-  repoRoot = join(process.resourcesPath, "rolester");
-} else {
-  repoRoot = join(__dirname, "../..");
+const runtimePaths = resolveDesktopRuntimePaths({
+  isPackaged: app.isPackaged,
+  appDir: __dirname,
+  userDataPath: app.isPackaged ? app.getPath("userData") : undefined,
+  resourcesPath: process.resourcesPath,
+});
+if (runtimePaths.rolesterHome) {
+  process.env.ROLESTER_HOME = runtimePaths.rolesterHome;
 }
+let repoRoot = runtimePaths.repoRoot;
 
 // --- Trap 4 -------------------------------------------------------------
 // One helper resolves both the dev and packaged import path. In dev,
@@ -186,6 +190,18 @@ async function shutdown() {
   await new Promise((resolve) => active.server.close(() => resolve()));
 }
 
+function openExternalIfAllowed(target, baseUrl) {
+  const decision = decideExternalOpen({ target, baseUrl });
+  if (decision.action === "open-external") {
+    shell.openExternal(decision.url).catch((err) => {
+      log(`external open failed: ${err.message}`);
+    });
+  } else if (decision.action === "deny") {
+    log(`external open denied: ${decision.reason}`);
+  }
+  return decision;
+}
+
 function createWindow(url, route, { load = true } = {}) {
   win = new BrowserWindow({
     width: 1280,
@@ -200,14 +216,15 @@ function createWindow(url, route, { load = true } = {}) {
   // External links (target=_blank) and any navigation away from our own
   // loopback origin open in the OS browser instead of inside the app window.
   win.webContents.setWindowOpenHandler(({ url: target }) => {
-    shell.openExternal(target);
+    openExternalIfAllowed(target, url);
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, target) => {
-    if (!target.startsWith(url)) {
-      event.preventDefault();
-      shell.openExternal(target);
-    }
+    const decision = decideExternalOpen({ target, baseUrl: url });
+    if (decision.action === "ignore") return;
+
+    event.preventDefault();
+    openExternalIfAllowed(target, url);
   });
 
   if (load) {
