@@ -15,7 +15,7 @@
 | 5 | Verification and Docs | Prove cost boundaries, no-AI degradation, discovery write safety, and documentation alignment. | VER-01, VER-02, VER-03, VER-04, VER-05 | Complete (5/5, 2026-07-05) |
 | 6 | Canonical DB App Shell | Make the Electron/React app DB-source-of-truth and remove compatibility surfaces from product paths. | APP-01, APP-02, APP-03, APP-04 | Complete (10/10, 2026-07-05) |
 | 7 | Quick Onboarding and Auto Sourcing | Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding. | ONB-01, ONB-02, RUN-01, RUN-02 | Complete (8/8, 2026-07-06) |
-| 8 | Deep Ingest Lane | 2/9 | In Progress|  |
+| 8 | Deep Ingest Lane | Build deep ingest as drop-all intake plus optional role/job-aware AI interview, with grounded/private proposal review and terminal-lane readiness. | DIG-01, DIG-02, DIG-03 | Complete (integrated onto combine-electron-release, 2026-07-06) |
 | 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Complete (6/6, 2026-07-06) |
 | 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Complete (7/7, 2026-07-06) |
 | 11 | Runtime Lockdown and Desktop Release | Remove broad skill-tool power from app defaults and harden the desktop product path for pilot use. | SEC-01, SEC-02, DESK-01, DESK-02 | Complete (7/7, 2026-07-06) |

@@ -3,18 +3,35 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 11
-status: In Progress
-stopped_at: Completed 11-07-PLAN.md
-last_updated: "2026-07-06T17:45:35.513Z"
+status: Combined
+stopped_at: All phases combined onto gsd/combine-electron-release
+last_updated: "2026-07-06T18:31:00.000Z"
 progress:
   total_phases: 11
-  completed_phases: 8
+  completed_phases: 11
   total_plans: 65
-  completed_plans: 52
-  percent: 80
+  completed_plans: 65
+  percent: 100
 ---
 
 # State: Rolester App-First Job Search Runtime
+
+## Combine (2026-07-06)
+
+The phase branches had diverged at two points and were reunited on
+`gsd/combine-electron-release` (branched from phase-11, the Electron/desktop
+target):
+
+- **phase-10 → phase-11**: phase-11 branched before the local packet engine
+  landed. Merged phase-10 (`src/core/packet/*`, `db/verbs/app.mjs`, packet
+  routes) onto the desktop line.
+- **phase-08 → phase-09**: phase-09 branched before phase-08's deep-ingest
+  completion (proposal builders, validators, view-model, readiness). Restored
+  that layer and wired the readiness evaluator into the deep-ingest and onboard
+  routes (this was the outstanding `deep-ingest-ai.test.mjs` blocker).
+
+Result: one branch carrying deep-ingest + packet engine + desktop packaging.
+Full suite green (1830 pass / 0 fail); release-safety green.
 
 ## Project Reference
 
