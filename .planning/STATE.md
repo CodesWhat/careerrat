@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
-current_phase: 09
-status: Ready to execute
-stopped_at: Completed 09-05-PLAN.md
-last_updated: "2026-07-06T13:50:52Z"
+current_phase: 10
+status: Ready to plan
+stopped_at: Completed Phase 09
+last_updated: "2026-07-06T13:55:44Z"
 progress:
   total_phases: 11
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 51
-  completed_plans: 43
-  percent: 59
+  completed_plans: 44
+  percent: 60
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 09 — public-company-intelligence-and-scanner-cascade
+**Current focus:** Phase 10 — local-packet-engine
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
-- **Current phase:** 09
-- **Current phase status:** In Progress
-- **Next command:** `$gsd-execute-phase 9`
+- **Current phase:** 10
+- **Current phase status:** Ready to plan
+- **Next command:** `$gsd-plan-phase 10`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Continue Phase 9 with Plan 09-06: final privacy/runtime guards, docs, and verification.
-2. Complete Phase 9 only after static guards and final test rollup pass.
+1. Start Phase 10 Local Packet Engine planning from the captured context.
+2. Before treating repo-wide `npm test` as green, resolve the existing Phase 08 `tests/deep-ingest-ai.test.mjs` gaps for missing proposal schema/modules and grounding/privacy validators.
 3. Preserve the public/private data boundary: public metadata only, no candidate profile, comp, fit, tracker, private notes, local paths, raw AI data, page bodies, or job postings.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T13:50:52Z
-**Stopped at:** Completed 09-05-PLAN.md
+**Last session:** 2026-07-06T13:55:44Z
+**Stopped at:** Completed Phase 09
 **Resume file:** None
 
 ## Performance Metrics
@@ -123,6 +123,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 09 P03 | 5 min | 3 tasks | 4 files |
 | Phase 09 P04 | 4 min | 3 tasks | 3 files |
 | Phase 09 P05 | 3 min | 3 tasks | 2 files |
+| Phase 09 P06 | 5 min | 3 tasks | 7 files |
 
 ## Decisions
 
@@ -248,7 +249,10 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 09]: Bounded AI fallback runs only for ambiguous reachable public text and uses native-preferred structured output with one retry. — This preserves the cost boundary while reducing manual review for genuinely ambiguous pages.
 - [Phase 09]: AI-suggested URLs/providers remain advisory until deterministic validation passes. — Model output cannot write source config or become final provider identity by itself.
 - [Phase 09]: Scanner review UI lives on the local search page and posts decisions to public-intel routes. — Ambiguous/conflicting items are visible without launching chat or the retained skill runtime.
+- [Phase 09]: Public-intel route and scanner module source are statically guarded against chat, retained skill runtime, and /api/skill/run seams. — Future scanner changes fail fast if they reintroduce hidden runtime escalation.
+- [Phase 09]: Public sync-preview scrub now blocks source config, search sources, sourced rows, job postings, page text, raw AI, local paths, and candidate-private fields. — This preserves the public-only sync-home boundary.
+- [Phase 09]: Public company intelligence documentation now defines public metadata scope, scanner branch order, no-AI no-result states, and explicit supported-ATS review approval. — Maintainers have a source-of-truth for the Phase 09 privacy and runtime contract.
 
 ### Blockers
 
-- None.
+- None for Phase 09 completion. Repo-wide `npm test` remains blocked by pre-existing Phase 08 Deep ingest AI gaps in `tests/deep-ingest-ai.test.mjs`: missing `config/deep-ingest-proposal.schema.json`, `src/core/deep-ingest/proposals/*`, and `src/core/deep-ingest/validators/{grounding,privacy}.mjs`.
