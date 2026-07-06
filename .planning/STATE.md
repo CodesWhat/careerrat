@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 11
 status: In Progress
-stopped_at: Completed 11-02-PLAN.md
-last_updated: "2026-07-06T15:22:51.276Z"
+stopped_at: Completed 11-04-PLAN.md
+last_updated: "2026-07-06T15:57:42.910Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 65
-  completed_plans: 47
-  percent: 72
+  completed_plans: 48
+  percent: 74
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T15:22:51.266Z
-**Stopped at:** Completed 11-02-PLAN.md
+**Last session:** 2026-07-06T15:57:42.901Z
+**Stopped at:** Completed 11-04-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -126,6 +126,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 09 P06 | 5 min | 3 tasks | 7 files |
 | Phase 11-runtime-lockdown-and-desktop-release P01 | 6m19s | 1 tasks | 1 files |
 | Phase 11-runtime-lockdown-and-desktop-release P02 | 2 min | 2 tasks | 3 files |
+| Phase 11-runtime-lockdown-and-desktop-release P04 | 4m 13s | 2 tasks | 7 files |
 
 ## Decisions
 
@@ -257,6 +258,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 11]: SEC-01 is enforced by a slice-aware static guard: app-default files and local route slices are scanned while explicit chat, retained runtime owners, legacy/static clients, and test files require named classifications.
 - [Phase 11]: The one-shot runtime's RUNTIME_TOOLS export is now app-safe and excludes Write, Edit, and Bash by default. — Tool-heavy execution must name a profile or pass explicit tools before SDK query under bypassPermissions.
 - [Phase 11]: Explicit tools arrays remain caller authority and are copied before SDK use. — This preserves resume-extract's Read-only pattern while preventing mutable caller arrays from becoming shared runtime profile state.
+- [Phase 11]: Desktop packaged path resolution is centralized in apps/desktop/desktop-runtime.mjs so ROLESTER_HOME is set before dynamic engine imports. — Keeps signed resources read-only and makes packaged runtime behavior directly testable.
+- [Phase 11]: Electron external opens are limited to https: and mailto: targets, with unsafe or malformed targets denied recoverably. — Mitigates T-11-09 without changing same-origin app routing.
+- [Phase 11]: BYOK path resolution now passes the active env into userPath(), so packaged ROLESTER_HOME controls both load and write paths. — Ensures desktop BYOK storage shares the same packaged data root as SQLite.
 
 ### Blockers
 
