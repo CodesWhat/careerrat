@@ -325,6 +325,28 @@ Plans:
 
 **Requirements:** SEC-01, SEC-02, DESK-01, DESK-02
 
+**Plans:** 7 plans
+
+Plans:
+**Wave 1**
+
+- [ ] 11-01-PLAN.md - Add the slice-aware app-default runtime guard.
+- [ ] 11-02-PLAN.md - Implement app-safe one-shot runtime tool profiles.
+- [ ] 11-04-PLAN.md - Harden desktop runtime paths, smoke, and external-link handling.
+
+**Wave 2** *(blocked on relevant Wave 1 completion)*
+
+- [ ] 11-03-PLAN.md - Make retained runtime and chat tool-heavy execution explicit.
+- [ ] 11-05-PLAN.md - Configure signed and notarized macOS pilot packaging.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 11-06-PLAN.md - Guard and update pilot-facing app-first docs.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 11-07-PLAN.md - Run final Phase 11 verification and release rollup.
+
 **Success Criteria**:
 
 1. App buttons call local APIs, DB verbs, bounded AI, or explicit chat; static checks fail on new app-default calls to `POST /api/skill/run`.
