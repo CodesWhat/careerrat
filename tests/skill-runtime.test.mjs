@@ -503,7 +503,55 @@ const SAMPLE_RUN = [
   },
 ];
 
-test("runSkillStream: tools param — an unset caller gets RUNTIME_TOOLS passed to query()", async () => {
+test("RUNTIME_TOOLS: app-safe default excludes mutation and shell tools", () => {
+  assert.deepEqual(RUNTIME_TOOLS, ["Read", "Glob", "Grep", "WebFetch", "Skill"]);
+  for (const broadTool of ["Write", "Edit", "Bash"]) {
+    assert.equal(RUNTIME_TOOLS.includes(broadTool), false, `${broadTool} must not be app-safe`);
+  }
+});
+
+test("runtime tool profiles: resolve app-safe, chat, and explicit tool-heavy tools", async () => {
+  const {
+    APP_SAFE_RUNTIME_TOOLS,
+    CHAT_RUNTIME_TOOLS,
+    DEFAULT_RUNTIME_TOOL_PROFILE,
+    TOOL_HEAVY_RUNTIME_TOOLS,
+    isToolHeavyProfile,
+    resolveRuntimeTools,
+  } = await import("../src/core/ai/runtime-tools.mjs");
+
+  assert.equal(DEFAULT_RUNTIME_TOOL_PROFILE, "app-safe");
+  assert.deepEqual(APP_SAFE_RUNTIME_TOOLS, ["Read", "Glob", "Grep", "WebFetch", "Skill"]);
+  assert.deepEqual(resolveRuntimeTools(), APP_SAFE_RUNTIME_TOOLS);
+  assert.deepEqual(resolveRuntimeTools({ toolProfile: "app-safe" }), APP_SAFE_RUNTIME_TOOLS);
+  assert.deepEqual(CHAT_RUNTIME_TOOLS, [...APP_SAFE_RUNTIME_TOOLS, "WebSearch"]);
+
+  for (const broadTool of ["Write", "Edit", "Bash"]) {
+    assert.equal(APP_SAFE_RUNTIME_TOOLS.includes(broadTool), false);
+    assert.equal(TOOL_HEAVY_RUNTIME_TOOLS.includes(broadTool), true);
+  }
+
+  assert.deepEqual(resolveRuntimeTools({ toolProfile: "tool-heavy" }), TOOL_HEAVY_RUNTIME_TOOLS);
+  assert.equal(isToolHeavyProfile("tool-heavy"), true);
+  assert.equal(isToolHeavyProfile("app-safe"), false);
+
+  const callerTools = ["Read"];
+  const resolvedOverride = resolveRuntimeTools({ tools: callerTools, toolProfile: "tool-heavy" });
+  assert.deepEqual(resolvedOverride, callerTools);
+  assert.notEqual(
+    resolvedOverride,
+    callerTools,
+    "explicit tools arrays must be copied before SDK use"
+  );
+
+  assert.throws(
+    () => resolveRuntimeTools({ toolProfile: "unclassified" }),
+    /unsupported runtime tool profile/
+  );
+});
+
+test("runSkillStream: default caller gets app-safe runtime tools passed to query()", async () => {
+  const { APP_SAFE_RUNTIME_TOOLS } = await import("../src/core/ai/runtime-tools.mjs");
   const repoRoot = tempRepoWithSkill("evaluate-job");
   try {
     let seenTools = null;
@@ -520,7 +568,14 @@ test("runSkillStream: tools param — an unset caller gets RUNTIME_TOOLS passed 
         },
       }),
     });
-    assert.deepEqual(seenTools, RUNTIME_TOOLS);
+    assert.deepEqual(seenTools, APP_SAFE_RUNTIME_TOOLS);
+    for (const broadTool of ["Write", "Edit", "Bash"]) {
+      assert.equal(
+        seenTools.includes(broadTool),
+        false,
+        `${broadTool} must require tool-heavy opt-in`
+      );
+    }
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -545,6 +600,38 @@ test("runSkillStream: an explicit tools override (M8's resume-extract: ['Read'])
       }),
     });
     assert.deepEqual(seenTools, ["Read"]);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream: toolProfile 'tool-heavy' opts into mutation and shell tools", async () => {
+  const { TOOL_HEAVY_RUNTIME_TOOLS } = await import("../src/core/ai/runtime-tools.mjs");
+  const repoRoot = tempRepoWithSkill("evaluate-job");
+  try {
+    let seenTools = null;
+    await runSkillStream({
+      skill: "evaluate-job",
+      input: "hi",
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      toolProfile: "tool-heavy",
+      onEvent: () => {},
+      loadSdk: async () => ({
+        query: ({ options }) => {
+          seenTools = options.tools;
+          return fakeSdk(SAMPLE_RUN).query({ options });
+        },
+      }),
+    });
+    assert.deepEqual(seenTools, TOOL_HEAVY_RUNTIME_TOOLS);
+    for (const broadTool of ["Write", "Edit", "Bash"]) {
+      assert.equal(
+        seenTools.includes(broadTool),
+        true,
+        `${broadTool} appears only by explicit profile`
+      );
+    }
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
