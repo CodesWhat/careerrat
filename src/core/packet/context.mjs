@@ -162,6 +162,7 @@ export function buildPacketContext({
       role: app.role ?? null,
       status: app.status ?? null,
       artifacts: { ...(app.artifacts || {}) },
+      packetManifest: app.packetManifest || null,
     },
     job: {
       body: jobBody,
@@ -194,4 +195,3 @@ export function packetPromptFromContext(context) {
     "Return a bounded packet gate JSON verdict.",
   ].join("\n");
 }
-

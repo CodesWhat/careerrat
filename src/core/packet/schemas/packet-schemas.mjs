@@ -182,6 +182,38 @@ export const packetAnswerProposalSchema = {
   },
 };
 
+export const packetCoverLetterProposalSchema = {
+  type: "object",
+  required: ["blocks"],
+  additionalProperties: false,
+  properties: {
+    blocks: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        required: ["text", "evidenceIds"],
+        additionalProperties: false,
+        properties: {
+          text: { type: "string" },
+          evidenceIds: { type: "array", items: { type: "string" } },
+        },
+      },
+    },
+  },
+};
+
+export const packetGenerateRequestSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    appId: { type: "string" },
+    applicationId: { type: "string" },
+    applyIntent: { type: "boolean" },
+    formats: { type: "array", items: { type: "string", enum: ["pdf", "docx"] } },
+  },
+};
+
 export function validatePacketGateRequest(input) {
   const result = validate(input, packetGateRequestSchema);
   if (!result.valid) {

@@ -58,6 +58,7 @@ import { markdownToHtml } from "../core/documents/export.mjs";
 import { lintArtifact } from "../core/documents/placeholder-lint.mjs";
 import { draftPacketAnswers } from "../core/packet/answers.mjs";
 import { evaluatePacketGate } from "../core/packet/gate.mjs";
+import { generatePacket } from "../core/packet/generate.mjs";
 import { capturePacketQuestions } from "../core/packet/questions.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { classifyStage } from "../core/tracker/dashboard.mjs";
@@ -223,6 +224,8 @@ export function readPacketApplicationsFromDb({ repoRoot, env = process.env } = {
 
 function statusForError(err) {
   if (err?.code === "NO_DATABASE") return 409;
+  if (err?.code === "NOT_FOUND") return 404;
+  if (err?.code === "BAD_REQUEST" || /^BAD_/.test(String(err?.code || ""))) return 400;
   return 500;
 }
 
@@ -236,6 +239,7 @@ export function mountPacketRoutes({
   env = process.env,
   packetGateInvoke,
   packetAnswersCall,
+  packetCoverLetterCall,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -303,6 +307,29 @@ export function mountPacketRoutes({
         ok: false,
         code: err?.code || "PACKET_ANSWERS_ERROR",
         error: { message: err?.message || "packet answer drafting failed" },
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/packet/generate
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/packet/generate", async (req, res) => {
+    const body = await readPacketBody(req, res);
+    if (body === null) return;
+    try {
+      const data = await generatePacket({
+        ...pathCtx,
+        ...body,
+        coverLetterCall: packetCoverLetterCall,
+        packetAnswersCall,
+      });
+      sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      sendJson(res, statusForError(err), {
+        ok: false,
+        code: err?.code || "PACKET_GENERATE_ERROR",
+        error: { message: err?.message || "packet generation failed" },
       });
     }
   });
