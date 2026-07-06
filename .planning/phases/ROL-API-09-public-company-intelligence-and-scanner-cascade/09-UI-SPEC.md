@@ -53,7 +53,7 @@ Declared values (must be multiples of 4):
 | 2xl | 48px | Wide layout side padding maximum via existing responsive shell |
 | 3xl | 64px | Reserved for page-level breaks only; not expected in this phase |
 
-Exceptions: reuse existing component internals instead of restyling them: `.btn` uses its existing 8px/14px padding, `.card` uses existing 18px/20px padding, `.toggle` uses the existing 36px by 20px track, and badges/chips inherit their current compact padding. New wrapper/layout spacing for this phase must use the declared scale above. Standalone icon buttons stay 32px minimum on desktop; touch-heavy mobile actions must preserve at least 44px tap height through row wrapping or button flex sizing.
+Exceptions: reuse existing component internals instead of restyling them: `.btn`, `.card`, `.toggle`, badges, and chips inherit their current legacy internal padding/sizing outside this Phase 09 spacing scale. Do not declare, override, or introduce new non-grid padding values in this phase. New wrapper/layout spacing for Phase 09 must use the declared scale above. Standalone icon buttons stay 32px minimum on desktop; touch-heavy mobile actions must preserve at least 44px tap height through row wrapping or button flex sizing.
 
 ---
 
@@ -88,6 +88,13 @@ Use CSS variables, not hardcoded one-off colors. The dark theme must continue to
 | Destructive | `var(--danger)` / `#ba2f20` | Destructive actions only; none are required by this phase |
 
 Accent reserved for: `Save sharing preference`, enabled sync-home toggle, active wizard rail/selected chip states, and a supported-ATS approval action. Do not use accent for every link, every badge, every scanner status, or decorative emphasis. Use existing `badge--warn` for ambiguous/conflict review states, `badge--ok` for scrubbed/ready states, `badge--muted` for inactive or no-review states, and `InlineAlert` error styling for blocked scrub/publish failures.
+
+---
+
+## Primary Visual Anchor
+
+- Onboarding consent: the enabled sync-home `Toggle` is the primary visual anchor, paired with the `Save sharing preference` CTA inside the consent card. Keep the toggle, label, and saved-state hint visually grouped.
+- Scanner review items: the review-reason badge plus the wrapped action row are the primary visual anchor. Place the badge with the required metadata and keep the decision actions immediately adjacent so the reason and available choices scan as one unit.
 
 ---
 
@@ -144,8 +151,8 @@ Required scanner review copy:
   - `Use supported ATS` - primary, enabled only when validation resolves a supported ATS.
   - `Keep public metadata` - secondary, for unsupported/custom metadata that should remain cache/review data only.
   - `Refresh scan` - secondary, reruns the cascade for that company/board.
-  - `Suppress` - secondary, hides this review item from normal prompts without deleting canonical private state.
-  - `Escalate` - secondary, routes to explicit chat/agent path only when runtime capability allows it.
+  - `Suppress review` - secondary, hides this review item from normal prompts without deleting canonical private state.
+  - `Escalate to agent` - secondary, routes to explicit chat/agent path only when runtime capability allows it.
 - Use `InlineAlert` for stale conflict and scrub failure messages. Do not open a modal for ordinary scanner ambiguity.
 - When a decision call returns stale/conflict, keep the row visible, show warning copy, refresh the data, and require the user to review the refreshed row before deciding.
 
