@@ -5,7 +5,7 @@ import { verifySmokeHttpSurface } from "../apps/desktop/desktop-smoke.mjs";
 describe("desktop smoke HTTP surface verification", () => {
   it("checks health, the selected SPA route, and referenced built assets", async () => {
     const requested = [];
-    await verifySmokeHttpSurface({
+    const report = await verifySmokeHttpSurface({
       baseUrl: "http://127.0.0.1:61234",
       route: "/app/onboarding",
       getOk: async (url) => {
@@ -24,6 +24,10 @@ describe("desktop smoke HTTP surface verification", () => {
       "http://127.0.0.1:61234/app/onboarding",
       "http://127.0.0.1:61234/app/assets/index-abc.js",
     ]);
+    assert.deepEqual(report, {
+      route: "/app/onboarding",
+      assetPaths: ["/app/assets/index-abc.js"],
+    });
   });
 
   it("rejects an error page that finished loading but is not the SPA", async () => {
@@ -39,5 +43,31 @@ describe("desktop smoke HTTP surface verification", () => {
       }),
       /did not return the SPA root/
     );
+  });
+
+  it("reports the selected existing-candidate app route and all unique built assets", async () => {
+    const report = await verifySmokeHttpSurface({
+      baseUrl: "http://127.0.0.1:61234",
+      route: "/app",
+      getOk: async (url) => {
+        if (url.endsWith("/api/health")) return '{"ok":true}';
+        if (url.endsWith("/app")) {
+          return [
+            '<div id="root"></div>',
+            '<link rel="stylesheet" href="/app/assets/index-def.css">',
+            '<script type="module" src="/app/assets/index-def.js"></script>',
+            '<script type="module" src="/app/assets/index-def.js"></script>',
+          ].join("");
+        }
+        if (url.endsWith("/app/assets/index-def.css")) return "body{}";
+        if (url.endsWith("/app/assets/index-def.js")) return "console.log('ok');";
+        throw new Error(`unexpected URL ${url}`);
+      },
+    });
+
+    assert.deepEqual(report, {
+      route: "/app",
+      assetPaths: ["/app/assets/index-def.css", "/app/assets/index-def.js"],
+    });
   });
 });

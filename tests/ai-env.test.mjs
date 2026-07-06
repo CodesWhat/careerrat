@@ -110,6 +110,25 @@ describe("ai-env", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("writeLocalAiKey — uses ROLESTER_HOME/internal/ai.env when packaged home is set", () => {
+    const root = buildTempRoot();
+    const repoRoot = join(root, "Resources", "rolester");
+    const rolesterHome = join(root, "Application Support", "Rolester", "data");
+    const env = { ROLESTER_HOME: rolesterHome };
+
+    const result = writeLocalAiKey({
+      repoRoot,
+      apiKey: "sk-ant-packaged-home",
+      env,
+    });
+
+    assert.equal(result.path, join(rolesterHome, "internal", "ai.env"));
+    assert.equal(statSync(result.path).mode & 0o777, 0o600);
+    assert.equal(existsSync(join(repoRoot, ".internal", "ai.env")), false);
+    assert.equal(JSON.stringify(result).includes("sk-ant-packaged-home"), false);
+    rmSync(root, { recursive: true, force: true });
+  });
+
   it("writeLocalAiKey — return value never contains the key VALUE", () => {
     const root = buildTempRoot();
     const result = writeLocalAiKey({
