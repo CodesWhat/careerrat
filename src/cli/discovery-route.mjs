@@ -6,9 +6,16 @@
 import { DISCOVERY_PIPELINE } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import { companyProposalBatchLatest } from "../core/db/verbs/company-discovery.mjs";
-import { candidateConfigGet } from "../core/db/verbs.mjs";
+import {
+  candidateConfigGet,
+  publicIntelReviewDecision,
+  publicIntelReviewList,
+  publicIntelStateGet,
+  publicIntelSyncPreview,
+} from "../core/db/verbs.mjs";
 import { applyCompanyProposalDecision } from "../core/discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
+import { scanPublicIntelSeeds } from "../core/discovery/scanner-cascade.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { prepareQuickStartSourcing } from "./onboard-route.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
@@ -25,6 +32,7 @@ const DISCOVERY_STEP_NOTES = {
 };
 
 const COMPANY_PROPOSAL_BODY_MAX_BYTES = 1024 * 1024;
+const PUBLIC_INTEL_BODY_MAX_BYTES = 1024 * 1024;
 
 function readReadinessLocks({ repoRoot, env }) {
   const pathCtx = { repoRoot, env };
@@ -167,6 +175,39 @@ function discoveryRouteError(res, err, fallbackCode) {
   });
 }
 
+function publicIntelError(res, err, fallbackCode = 500) {
+  const status = err.status || fallbackCode;
+  sendJson(res, status, {
+    ok: false,
+    code: err.code || (status === 400 ? "BAD_REQUEST" : "PUBLIC_INTEL_FAILED"),
+    error: { message: err.message },
+  });
+}
+
+function publicIntelData(result, fallback = {}) {
+  if (result?.data !== undefined) return result;
+  if (result?.items !== undefined)
+    return { ok: result.ok !== false, data: { items: result.items } };
+  if (result?.preference !== undefined) {
+    return { ok: result.ok !== false, data: { preference: result.preference } };
+  }
+  if (result?.item !== undefined) return { ok: result.ok !== false, data: { item: result.item } };
+  return { ok: result?.ok !== false, data: fallback };
+}
+
+function defaultPublicIntelReviewDecision({ repoRoot, env, body, companyAtsUpsertImpl, now }) {
+  return publicIntelReviewDecision({
+    repoRoot,
+    env,
+    itemId: body?.itemId,
+    expectedVersion: body?.expectedVersion,
+    action: body?.action,
+    patch: body?.patch || {},
+    companyAtsUpsertImpl,
+    now,
+  });
+}
+
 export function mountDiscoveryRoutes({
   addRoute,
   repoRoot,
@@ -182,7 +223,93 @@ export function mountDiscoveryRoutes({
   now,
   companyAtsUpsertImpl,
   sourcedUpsertBatchImpl,
+  publicIntelStateGetImpl = publicIntelStateGet,
+  publicIntelScanImpl = scanPublicIntelSeeds,
+  publicIntelReviewListImpl = publicIntelReviewList,
+  publicIntelReviewDecisionImpl = defaultPublicIntelReviewDecision,
+  publicIntelSyncPreviewImpl = publicIntelSyncPreview,
 }) {
+  addRoute("GET", "/api/discovery/public-intel/state", (_req, res) => {
+    try {
+      const result = publicIntelData(publicIntelStateGetImpl({ repoRoot, env }));
+      sendJson(res, 200, { ok: result.ok !== false, data: result.data });
+    } catch (err) {
+      publicIntelError(res, err, err.code === "NO_DATABASE" ? 409 : 500);
+    }
+  });
+
+  addRoute("POST", "/api/discovery/public-intel/scan", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, PUBLIC_INTEL_BODY_MAX_BYTES);
+    } catch (err) {
+      publicIntelError(res, err, err.status || 400);
+      return;
+    }
+
+    try {
+      const result = publicIntelData(
+        await publicIntelScanImpl({
+          repoRoot,
+          env,
+          body,
+          fetchImpl,
+          resolveCompanyBoard,
+          now,
+          companyAtsUpsertImpl,
+        })
+      );
+      sendJson(res, 200, { ok: result.ok !== false, data: result.data });
+    } catch (err) {
+      publicIntelError(res, err, err.status || 500);
+    }
+  });
+
+  addRoute("GET", "/api/discovery/public-intel/review", (req, res) => {
+    try {
+      const url = new URL(req.url || "/", "http://127.0.0.1");
+      const status = url.searchParams.get("status") || "pending";
+      const result = publicIntelData(publicIntelReviewListImpl({ repoRoot, env, status }));
+      sendJson(res, 200, { ok: result.ok !== false, data: result.data });
+    } catch (err) {
+      publicIntelError(res, err, err.code === "NO_DATABASE" ? 409 : 500);
+    }
+  });
+
+  addRoute("POST", "/api/discovery/public-intel/review-decisions", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, PUBLIC_INTEL_BODY_MAX_BYTES);
+    } catch (err) {
+      publicIntelError(res, err, err.status || 400);
+      return;
+    }
+
+    try {
+      const result = publicIntelData(
+        await publicIntelReviewDecisionImpl({
+          repoRoot,
+          env,
+          body,
+          companyAtsUpsertImpl,
+          now,
+        })
+      );
+      sendJson(res, 200, { ok: result.ok !== false, data: result.data });
+    } catch (err) {
+      publicIntelError(res, err, err.status || 500);
+    }
+  });
+
+  addRoute("GET", "/api/discovery/public-intel/sync-preview", (_req, res) => {
+    try {
+      const result = publicIntelData(publicIntelSyncPreviewImpl({ repoRoot, env }));
+      sendJson(res, 200, { ok: result.ok !== false, data: result.data });
+    } catch (err) {
+      publicIntelError(res, err, err.code === "NO_DATABASE" ? 409 : 500);
+    }
+  });
+
   addRoute("POST", "/api/discovery/company-proposals", async (req, res) => {
     let body;
     try {

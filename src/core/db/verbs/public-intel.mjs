@@ -238,7 +238,7 @@ export function publicIntelReviewDecision({
   expectedVersion,
   action,
   patch = {},
-  companyAtsUpsertImpl = companyAtsUpsert,
+  companyAtsUpsertImpl,
   now,
 } = {}) {
   if (!String(itemId || "").trim()) {
@@ -270,7 +270,9 @@ export function publicIntelReviewDecision({
       const board = current.proposedBoardId
         ? readRow(db, "public_board_intel", current.proposedBoardId)
         : null;
-      sourceConfigResult = companyAtsUpsertImpl(normalizeCompanyAtsEntry({ item: current, board }));
+      const writeCompanyAts =
+        companyAtsUpsertImpl || ((entry) => companyAtsUpsert({ repoRoot, env, entry }));
+      sourceConfigResult = writeCompanyAts(normalizeCompanyAtsEntry({ item: current, board }));
     }
 
     const nextStatus =
