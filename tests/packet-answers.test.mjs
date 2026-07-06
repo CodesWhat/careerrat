@@ -4,7 +4,8 @@
 // current failure is the missing src/core/packet owner, not fixture setup.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { after, test } from "node:test";
@@ -14,7 +15,9 @@ import {
   parseManualQuestions,
 } from "../src/core/apply/form-questions.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
+import { openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 
 const cleanupRoots = [];
 
@@ -64,6 +67,52 @@ function seedApp(repoRoot) {
     )
   );
   importFromTracker({ repoRoot, sourceDir });
+}
+
+function readApp(repoRoot, id) {
+  const db = openDb({ repoRoot, env: {} });
+  const row = db.prepare("SELECT data FROM applications WHERE id = ?").get(id);
+  return row ? JSON.parse(row.data) : null;
+}
+
+function bootServer(repoRoot, opts = {}) {
+  const routes = new Map();
+  function addRoute(method, path, handler) {
+    routes.set(`${method} ${path}`, handler);
+  }
+  mountPacketRoutes({ addRoute, repoRoot, env: {}, ...opts });
+
+  const server = createServer((req, res) => {
+    const url = (req.url || "/").split("?")[0];
+    const route = routes.get(`${req.method} ${url}`);
+    if (!route) {
+      res.writeHead(404).end();
+      return;
+    }
+    route(req, res);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+function baseUrl(server) {
+  const { port } = server.address();
+  return `http://127.0.0.1:${port}`;
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => server.close(resolve));
+}
+
+async function postJson(server, path, payload) {
+  const res = await fetch(`${baseUrl(server)}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, body };
 }
 
 async function loadQuestionsModule() {
@@ -301,4 +350,103 @@ test("draftPacketAnswers sends only non-EEO questions to bounded AI and preserve
   assert.equal(result.answers[1].uploadReady, false);
   assert.match(result.answers[1].answer, /^NEEDS YOU:/);
   assert.deepEqual(result.excludedQuestionIds, ["eeo-1"]);
+});
+
+test("POST /api/packet/questions persists capture before local answer drafting", async () => {
+  const repoRoot = tempRepo();
+  seedApp(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    const questionResult = await postJson(server, "/api/packet/questions", {
+      appId: "app-packet",
+      source: "paste",
+      manualText: [
+        "1. Why Acme AI?",
+        "2. Voluntary Self-Identification of Disability",
+        "3. What recent tools have you used?",
+      ].join("\n"),
+    });
+    assert.equal(questionResult.status, 200);
+    assert.equal(questionResult.body.ok, true);
+    assert.equal(questionResult.body.data?.questions?.length, 2);
+    assert.equal(questionResult.body.data?.excluded?.length, 1);
+
+    const app = readApp(repoRoot, "app-packet");
+    const artifacts = app?.artifacts || {};
+    assert.match(String(artifacts.packetQuestionsSource || ""), /^workspace\/jobs\/.+\.json$/);
+    assert.equal(artifacts.packetQuestionCount, 2);
+    assert.equal(artifacts.packetQuestionExcludedCount, 1);
+    assert.equal(app?.packetManifest?.questions?.answerableCount, 2);
+    assert.ok(
+      existsSync(
+        join(repoRoot, artifacts.packetQuestionsSource.replace(/^workspace\//, "workspace/"))
+      )
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/answers drafts only persisted non-EEO questions through local bounded AI", async () => {
+  const repoRoot = tempRepo();
+  seedApp(repoRoot);
+  const seen = [];
+  const server = await bootServer(repoRoot, {
+    packetAnswersCall: async (options) => {
+      seen.push(JSON.stringify(options));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              answers: [
+                {
+                  questionId: "q1",
+                  answer: "Acme AI maps to my confirmed production AI workflow experience.",
+                  evidenceIds: ["ev-ai-001"],
+                },
+                {
+                  questionId: "q3",
+                  answer: "NEEDS YOU: confirm which recent tools are fair to claim.",
+                  evidenceIds: [],
+                  gap: "unsupported-tool-claim",
+                },
+              ],
+            }),
+          },
+        ],
+        model: "claude-test",
+      };
+    },
+  });
+  try {
+    await postJson(server, "/api/packet/questions", {
+      appId: "app-packet",
+      source: "paste",
+      manualText: [
+        "1. Why Acme AI?",
+        "2. Voluntary Self-Identification of Disability",
+        "3. What recent tools have you used?",
+      ].join("\n"),
+    });
+    const answerResult = await postJson(server, "/api/packet/answers", {
+      appId: "app-packet",
+      context: PACKET_CONTEXT,
+    });
+    assert.equal(answerResult.status, 200);
+    assert.equal(answerResult.body.ok, true);
+    assert.deepEqual(
+      answerResult.body.data?.answers?.map((a) => a.questionId),
+      ["q1", "q3"]
+    );
+    assert.deepEqual(answerResult.body.data?.excludedQuestionIds, ["q2"]);
+    assert.equal(answerResult.body.data?.answers?.[1]?.uploadReady, false);
+    assert.equal(seen.length, 1);
+    assert.doesNotMatch(
+      JSON.stringify(answerResult.body),
+      /\/api\/skill\/run|answer-question|Voluntary Self-Identification|PRIVATE_CURRENT_BASE_SENTINEL/
+    );
+  } finally {
+    await closeServer(server);
+  }
 });
