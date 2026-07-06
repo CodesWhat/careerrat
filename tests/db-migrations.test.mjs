@@ -54,10 +54,17 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
-test("migration 007 is registered as sourcing-runs", () => {
+test("migration 008 is registered as deep-ingest after sourcing-runs", () => {
   const latest = ALL_MIGRATIONS.at(-1);
-  assert.equal(latest.id, 7);
-  assert.equal(latest.name, "sourcing-runs");
+  assert.equal(latest.id, 8);
+  assert.equal(latest.name, "deep-ingest");
+  assert.deepEqual(
+    ALL_MIGRATIONS.slice(-2).map((migration) => [migration.id, migration.name]),
+    [
+      [7, "sourcing-runs"],
+      [8, "deep-ingest"],
+    ]
+  );
 });
 
 test("migration 007 creates durable sourcing_runs state table and lookup indexes", () => {
@@ -86,6 +93,52 @@ test("migration 007 creates durable sourcing_runs state table and lookup indexes
     .map((row) => row.name);
   assert.ok(indexes.includes("idx_sourcing_runs_latest_purpose"));
   assert.ok(indexes.includes("idx_sourcing_runs_running_status"));
+});
+
+test("migration 008 creates Deep ingest source, proposal, lane, and confirmed-output tables", () => {
+  const db = freshDb();
+  runMigrations(db);
+
+  const expectedTables = [
+    "deep_ingest_sources",
+    "deep_ingest_source_chunks",
+    "deep_ingest_proposals",
+    "deep_ingest_lane_states",
+    "deep_ingest_story_bank",
+    "deep_ingest_writing_voice",
+    "deep_ingest_honesty_boundaries",
+    "deep_ingest_role_signals",
+  ];
+
+  for (const table of expectedTables) {
+    const sql = db
+      .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?")
+      .get(table)?.sql;
+    assert.ok(sql, `expected ${table} table`);
+    assert.match(sql, /json_valid\(data\)/);
+  }
+
+  const sourceColumns = new Map(
+    db
+      .prepare("PRAGMA table_xinfo('deep_ingest_sources')")
+      .all()
+      .map((column) => [column.name, column])
+  );
+  for (const generated of ["target_shape", "status", "source_kind"]) {
+    assert.ok(sourceColumns.has(generated), `expected generated column ${generated}`);
+    assert.notEqual(sourceColumns.get(generated).hidden, 0, `${generated} must be generated`);
+  }
+
+  const proposalColumns = new Map(
+    db
+      .prepare("PRAGMA table_xinfo('deep_ingest_proposals')")
+      .all()
+      .map((column) => [column.name, column])
+  );
+  for (const generated of ["source_id", "target_shape", "status", "lane"]) {
+    assert.ok(proposalColumns.has(generated), `expected generated column ${generated}`);
+    assert.notEqual(proposalColumns.get(generated).hidden, 0, `${generated} must be generated`);
+  }
 });
 
 test("a gap in the migration id sequence is rejected", () => {

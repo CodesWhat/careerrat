@@ -875,6 +875,78 @@ test("candidate setup recomputes quick-start readiness from SQLite setup facts",
   assert.match(config.setup.missing.deep_ingest_complete.join("\n"), /deeper evidence/i);
 });
 
+test("candidate setup computes deep_ingest_complete from terminal Deep ingest lanes, not candidate files", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+      location: { home: "New York, NY", remote: true },
+      compensation: { minimum_base: 190000 },
+      authorization: { work_authorized: true, requires_sponsorship: false },
+    },
+  });
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: {
+      role_buckets: [{ name: "Applied AI", titles: ["Applied AI Engineer"] }],
+      keep_signals: ["agent workflow builder"],
+      cut_signals: ["no hands-on build"],
+    },
+  });
+  candidateArtifactPut({
+    repoRoot,
+    id: "source-resume",
+    kind: "source-resume",
+    data: { path: "workspace/intake/source-resume.md" },
+  });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      { claim: "Built an agentic intake workflow", evidence: "Resume" },
+      { claim: "Led a SQLite app migration", evidence: "Resume" },
+      { claim: "Created bounded AI proposal tests", evidence: "Resume" },
+    ],
+  });
+
+  let config = candidateConfigGet({ repoRoot });
+  assert.equal(config.setup.readiness.search_ready, true);
+  assert.equal(
+    config.setup.readiness.deep_ingest_complete,
+    false,
+    "source/search readiness must not imply deep-ingest completion"
+  );
+
+  const { deepIngestLaneSetState } = await import("../src/core/db/verbs/deep-ingest.mjs");
+  for (const lane of [
+    "source_coverage",
+    "evidence_claims",
+    "story_bank",
+    "honesty_boundaries",
+    "writing_voice",
+    "role_signals",
+  ]) {
+    deepIngestLaneSetState({ repoRoot, lane, status: "completed" });
+  }
+  deepIngestLaneSetState({
+    repoRoot,
+    lane: "open_gaps",
+    status: "not_available",
+    reason: "No extra gaps are available yet.",
+  });
+
+  config = candidateConfigGet({ repoRoot });
+  assert.equal(config.setup.readiness.deep_ingest_complete, true);
+  assert.deepEqual(config.setup.missing.deep_ingest_complete, []);
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
+  assert.equal(existsSync(userPath({ repoRoot }, "candidate/stories.yml")), false);
+});
+
 test("candidate application limits are DB-backed and upsert by company plus scope", () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
