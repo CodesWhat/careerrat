@@ -1099,3 +1099,9 @@ test("reconcileOrphanedLaneCIntakeItems: a no-op pass (nothing running) returns 
   const result = reconcileOrphanedLaneCIntakeItems({ repoRoot });
   assert.deepEqual(result.reconciledIds, []);
 });
+
+test("Universal Intake stays separate from the Deep ingest local route owner", () => {
+  const source = readFileSync(join(REAL_ROOT, "src/cli/intake-route.mjs"), "utf8");
+  assert.equal(source.includes("/api/deep-ingest"), false);
+  assert.equal(source.includes("mountDeepIngestRoutes"), false);
+});
