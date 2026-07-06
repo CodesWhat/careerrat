@@ -276,8 +276,12 @@ export function appRegisterPacketArtifacts({
     const packetManifest = {
       ...existingManifest,
       ...(manifest || {}),
-      questions: manifest?.questions || existingManifest.questions,
     };
+    if (manifest?.questions || existingManifest.questions) {
+      packetManifest.questions = manifest?.questions || existingManifest.questions;
+    } else {
+      delete packetManifest.questions;
+    }
     validatePacketManifest(packetManifest);
 
     const updatedArtifacts = {

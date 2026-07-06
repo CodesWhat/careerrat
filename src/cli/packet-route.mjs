@@ -57,6 +57,7 @@ import { assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { markdownToHtml } from "../core/documents/export.mjs";
 import { lintArtifact } from "../core/documents/placeholder-lint.mjs";
 import { draftPacketAnswers } from "../core/packet/answers.mjs";
+import { exportPacketArtifacts } from "../core/packet/exports.mjs";
 import { evaluatePacketGate } from "../core/packet/gate.mjs";
 import { generatePacket } from "../core/packet/generate.mjs";
 import { capturePacketQuestions } from "../core/packet/questions.mjs";
@@ -240,6 +241,7 @@ export function mountPacketRoutes({
   packetGateInvoke,
   packetAnswersCall,
   packetCoverLetterCall,
+  packetExportArtifact,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -330,6 +332,28 @@ export function mountPacketRoutes({
         ok: false,
         code: err?.code || "PACKET_GENERATE_ERROR",
         error: { message: err?.message || "packet generation failed" },
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/packet/export
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/packet/export", async (req, res) => {
+    const body = await readPacketBody(req, res);
+    if (body === null) return;
+    try {
+      const data = await exportPacketArtifacts({
+        ...pathCtx,
+        ...body,
+        exportArtifact: packetExportArtifact,
+      });
+      sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      sendJson(res, statusForError(err), {
+        ok: false,
+        code: err?.code || "PACKET_EXPORT_ERROR",
+        error: { message: err?.message || "packet export failed" },
       });
     }
   });

@@ -80,6 +80,7 @@ export const packetManifestSchema = {
         answersPdf: workspacePath,
         resumeDocx: workspacePath,
         coverLetterDocx: workspacePath,
+        answersDocx: workspacePath,
         packetManifest: workspacePath,
       },
     },
@@ -210,6 +211,16 @@ export const packetGenerateRequestSchema = {
     appId: { type: "string" },
     applicationId: { type: "string" },
     applyIntent: { type: "boolean" },
+    formats: { type: "array", items: { type: "string", enum: ["pdf", "docx"] } },
+  },
+};
+
+export const packetExportRequestSchema = {
+  type: "object",
+  additionalProperties: true,
+  properties: {
+    appId: { type: "string" },
+    applicationId: { type: "string" },
     formats: { type: "array", items: { type: "string", enum: ["pdf", "docx"] } },
   },
 };
