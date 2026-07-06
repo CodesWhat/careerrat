@@ -56,15 +56,17 @@ import { requireDb } from "../core/db/connection.mjs";
 import { assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { markdownToHtml } from "../core/documents/export.mjs";
 import { lintArtifact } from "../core/documents/placeholder-lint.mjs";
+import { evaluatePacketGate } from "../core/packet/gate.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { classifyStage } from "../core/tracker/dashboard.mjs";
-import { sendJson } from "./skill-run-route.mjs";
+import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 // Mirrors dashboard.mjs's own (unexported) TERMINAL_STAGES set. Not imported
 // directly since dashboard.mjs doesn't export it — see AGENTS.md's stage-
 // taxonomy note: the canonical ladder is a small, deliberately-duplicated
 // contract across a few homes, not a single importable constant everywhere.
 const TERMINAL_STAGE_IDS = new Set(["rejected", "withdrawn"]);
+const MAX_BODY_BYTES = 1024 * 1024;
 const TEXT_ARTIFACT_RE = /\.(?:md|markdown|txt)$/i;
 const BINARY_ARTIFACT_RE = /\.(?:pdf|docx)$/i;
 const PACKET_ARTIFACT_KINDS = new Set(["resume", "coverLetter", "answers"]);
@@ -226,8 +228,32 @@ function respondError(res, err) {
   sendJson(res, statusForError(err), { ok: false, error: err?.message || String(err) });
 }
 
-export function mountPacketRoutes({ addRoute, repoRoot, env = process.env }) {
+export function mountPacketRoutes({ addRoute, repoRoot, env = process.env, packetGateInvoke }) {
   const pathCtx = { repoRoot, env };
+
+  // -------------------------------------------------------------------------
+  // POST /api/packet/gate
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/packet/gate", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, {
+        ok: false,
+        code: "BAD_REQUEST",
+        error: { message: err.message },
+      });
+      return;
+    }
+
+    const result = await evaluatePacketGate({
+      ...pathCtx,
+      body,
+      invoke: packetGateInvoke,
+    });
+    sendJson(res, result.status, result.body);
+  });
 
   // -------------------------------------------------------------------------
   // GET /api/packet/list
