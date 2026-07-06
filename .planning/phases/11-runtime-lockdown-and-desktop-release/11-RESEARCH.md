@@ -607,7 +607,7 @@ for (const file of releaseFacingFiles) {
 
 ### Primary (HIGH confidence)
 
-- `.planning/phases/ROL-API-11-runtime-lockdown-and-desktop-release/11-CONTEXT.md` - locked decisions, phase boundary, canonical refs. [VERIFIED: codebase grep]
+- `.planning/phases/11-runtime-lockdown-and-desktop-release/11-CONTEXT.md` - locked decisions, phase boundary, canonical refs. [VERIFIED: codebase grep]
 - `.planning/REQUIREMENTS.md` - SEC-01, SEC-02, DESK-01, DESK-02 descriptions and traceability. [VERIFIED: codebase grep]
 - `.planning/STATE.md` - app-first runtime decisions and current Phase 10/11 status. [VERIFIED: codebase grep]
 - `AGENTS.md` and `candidate/AGENTS.md` - runtime routing, DB write, privacy, automation, and skill contract constraints. [VERIFIED: codebase grep]

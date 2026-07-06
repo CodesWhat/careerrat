@@ -63,7 +63,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Last session:** 2026-07-06T14:04:45.180Z
 **Stopped at:** Phase 11 context gathered
-**Resume file:** .planning/phases/ROL-API-11-runtime-lockdown-and-desktop-release/11-CONTEXT.md
+**Resume file:** .planning/phases/11-runtime-lockdown-and-desktop-release/11-CONTEXT.md
 
 ## Performance Metrics
 
