@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
+import { DEEP_INGEST_REQUIRED_LANES, DEEP_INGEST_TERMINAL_STATUSES } from "./deep-ingest.mjs";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -137,6 +138,16 @@ const DEFAULT_SETUP = {
     apply_ready: [],
     deep_ingest_complete: [],
   },
+};
+
+const DEEP_INGEST_LANE_LABELS = {
+  source_coverage: "source coverage",
+  evidence_claims: "deeper evidence bank",
+  story_bank: "story bank",
+  honesty_boundaries: "honesty boundaries",
+  writing_voice: "writing voice",
+  role_signals: "role signals",
+  open_gaps: "open gaps",
 };
 
 function clone(value) {
@@ -299,6 +310,23 @@ function hasAuthorization(profile) {
   return auth.work_authorized === true || auth.requires_sponsorship === true;
 }
 
+function tableExists(db, table) {
+  return Boolean(
+    db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table)
+  );
+}
+
+function computeDeepIngestMissing(db) {
+  if (!tableExists(db, "deep_ingest_lane_states")) {
+    return DEEP_INGEST_REQUIRED_LANES.map((lane) => DEEP_INGEST_LANE_LABELS[lane] || lane);
+  }
+  const rows = db.prepare("SELECT lane, status FROM deep_ingest_lane_states").all();
+  const statusByLane = new Map(rows.map((row) => [row.lane, row.status]));
+  return DEEP_INGEST_REQUIRED_LANES.filter(
+    (lane) => !DEEP_INGEST_TERMINAL_STATUSES.includes(statusByLane.get(lane))
+  ).map((lane) => DEEP_INGEST_LANE_LABELS[lane] || lane.replaceAll("_", " "));
+}
+
 function computeCandidateSetup(db) {
   const config = readCandidateConfigFromDb(db);
   const { profile, targeting, evidence } = config;
@@ -328,12 +356,7 @@ function computeCandidateSetup(db) {
   if (!String(profile.candidate?.email || "").trim()) applyMissing.push("candidate email");
   if (evidenceCount < 1) applyMissing.push("evidence claims");
 
-  const deepMissing = [...applyMissing];
-  if (evidenceCount < 3) deepMissing.push("deeper evidence bank");
-  if (!(targeting.tracked_companies || []).length) deepMissing.push("target-company shortlist");
-  if (!(targeting.cut_signals || []).length && !(targeting.excluded_companies || []).length) {
-    deepMissing.push("hard cut signals");
-  }
+  const deepMissing = computeDeepIngestMissing(db);
 
   return {
     readiness: {

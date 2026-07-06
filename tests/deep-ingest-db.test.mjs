@@ -125,7 +125,7 @@ test("migration 008 creates Deep ingest JSON tables with generated query columns
 
   assert.equal(db.prepare("PRAGMA user_version").get().user_version, 8);
   const logged = db.prepare("SELECT id, name FROM _migrations WHERE id = 8").get();
-  assert.deepEqual(logged, { id: 8, name: "deep-ingest" });
+  assert.deepEqual([logged?.id, logged?.name], [8, "deep-ingest"]);
 
   assertJsonTableWithGeneratedColumns(db, "deep_ingest_sources", [
     "target_shape",

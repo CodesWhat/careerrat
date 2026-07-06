@@ -33,6 +33,19 @@ export {
   companyProposalBatchPut,
 } from "./company-discovery.mjs";
 export {
+  DEEP_INGEST_LANE_STATUSES,
+  DEEP_INGEST_REQUIRED_LANES,
+  DEEP_INGEST_TERMINAL_STATUSES,
+  deepIngestConfirmProposal,
+  deepIngestLaneSetState,
+  deepIngestProposalDecision,
+  deepIngestProposalPut,
+  deepIngestSourceCreate,
+  deepIngestSourceGet,
+  deepIngestSourceList,
+  deepIngestStateGet,
+} from "./deep-ingest.mjs";
+export {
   InvalidTransitionError,
   intakeCapture,
   intakeDecide,

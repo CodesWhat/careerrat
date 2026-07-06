@@ -39,6 +39,13 @@
 //   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
 //   node src/cli/data.mjs candidate evidence --data <json-array> | --data-file <path>
 //   node src/cli/data.mjs candidate limits upsert --data <json> | --data-file <path>
+//   node src/cli/data.mjs deep-ingest state
+//   node src/cli/data.mjs deep-ingest source create --target-shape <shape> [--source-kind <kind>] [--label <t>] [--text <t>] [--data <json>]
+//   node src/cli/data.mjs deep-ingest source list [--status <s>] [--target-shape <shape>] [--limit <n>]
+//   node src/cli/data.mjs deep-ingest source get <id>
+//   node src/cli/data.mjs deep-ingest proposal put --source-id <id> --target-shape <shape> --lane <lane> --data <json>
+//   node src/cli/data.mjs deep-ingest decide <proposal-id> <decision> --expected-version <n> [--reason <t>]
+//   node src/cli/data.mjs deep-ingest lane <lane> <status> [--reason <t>]
 //   node src/cli/data.mjs activity append --data <json> | --data-file <path>
 //   node src/cli/data.mjs intake capture --text <string> [--input-kind text|url]
 //   node src/cli/data.mjs intake update <id> --data <json> | --data-file <path>
@@ -74,6 +81,14 @@ import {
   commAppendMessage,
   commMarkSent,
   commUpsert,
+  deepIngestConfirmProposal,
+  deepIngestLaneSetState,
+  deepIngestProposalDecision,
+  deepIngestProposalPut,
+  deepIngestSourceCreate,
+  deepIngestSourceGet,
+  deepIngestSourceList,
+  deepIngestStateGet,
   intakeCapture,
   intakeDecide,
   intakeList,
@@ -111,6 +126,14 @@ function parseArgs(argv) {
     else if (a === "--path") opts.path = argv[++i];
     else if (a === "--summary") opts.summary = argv[++i];
     else if (a === "--status") opts.status = argv[++i];
+    else if (a === "--target-shape") opts.targetShape = argv[++i];
+    else if (a === "--source-kind") opts.sourceKind = argv[++i];
+    else if (a === "--label") opts.label = argv[++i];
+    else if (a === "--source-id") opts.sourceId = argv[++i];
+    else if (a === "--proposal-id") opts.proposalId = argv[++i];
+    else if (a === "--expected-version") opts.expectedVersion = Number.parseInt(argv[++i], 10);
+    else if (a === "--lane") opts.lane = argv[++i];
+    else if (a === "--reason") opts.reason = argv[++i];
     else if (a === "--limit") opts.limit = Number.parseInt(argv[++i], 10);
     else if (a === "--text") opts.text = argv[++i];
     else if (a === "--input-kind") opts.inputKind = argv[++i];
@@ -189,6 +212,9 @@ try {
       break;
     case "candidate":
       cmdCandidate(sub, rest);
+      break;
+    case "deep-ingest":
+      cmdDeepIngest(sub, rest);
       break;
     case "activity":
       cmdActivity(sub, rest);
@@ -515,6 +541,121 @@ function cmdCandidate(sub, rest) {
 }
 
 // ---------------------------------------------------------------------------
+// deep-ingest <sub> - SQLite-native source/proposal/lane state.
+// These verbs intentionally do not export tracker/activity files; confirmed
+// candidate facts are written only through explicit confirmation.
+// ---------------------------------------------------------------------------
+
+function cmdDeepIngest(sub, rest) {
+  switch (sub) {
+    case "state":
+      return printResult(deepIngestStateGet(pathCtx));
+    case "source":
+      return cmdDeepIngestSource(rest);
+    case "proposal":
+      return cmdDeepIngestProposal(rest);
+    case "decide": {
+      const [proposalId, decision] = rest;
+      if (!proposalId || !decision) {
+        fail("deep-ingest decide requires <proposal-id> <decision>");
+      }
+      return printResult(
+        deepIngestProposalDecision({
+          ...pathCtx,
+          proposalId,
+          expectedVersion: opts.expectedVersion,
+          decision,
+          reason: opts.reason || opts.note,
+        })
+      );
+    }
+    case "confirm": {
+      const [proposalId] = rest;
+      if (!proposalId) fail("deep-ingest confirm requires <proposal-id>");
+      return printResult(
+        deepIngestConfirmProposal({
+          ...pathCtx,
+          proposalId,
+          expectedVersion: opts.expectedVersion,
+          edits: readPayload("deep-ingest confirm"),
+        })
+      );
+    }
+    case "lane": {
+      const [lane, status] = rest;
+      if (!lane || !status) fail("deep-ingest lane requires <lane> <status>");
+      return printResult(
+        deepIngestLaneSetState({
+          ...pathCtx,
+          lane,
+          status,
+          reason: opts.reason || opts.note,
+        })
+      );
+    }
+    default:
+      return fail(`unknown "deep-ingest" command "${sub}". See --help.`);
+  }
+}
+
+function cmdDeepIngestSource(rest) {
+  const [action, id] = rest;
+  switch (action) {
+    case "create": {
+      const payload =
+        opts.data !== undefined || opts.dataFile ? readPayload("deep-ingest source create") : {};
+      return printResult(
+        deepIngestSourceCreate({
+          ...pathCtx,
+          input: {
+            ...payload,
+            targetShape: payload.targetShape || opts.targetShape,
+            sourceKind: payload.sourceKind || opts.sourceKind || opts.inputKind || "paste",
+            label: payload.label || opts.label,
+            text: payload.text || opts.text,
+            artifactPath: payload.artifactPath || opts.path,
+          },
+        })
+      );
+    }
+    case "list":
+      return printResult({
+        ok: true,
+        sources: deepIngestSourceList({
+          ...pathCtx,
+          status: opts.status,
+          targetShape: opts.targetShape,
+          limit: opts.limit,
+        }),
+      });
+    case "get": {
+      if (!id) fail("deep-ingest source get requires <id>");
+      return printResult(deepIngestSourceGet({ ...pathCtx, sourceId: id }));
+    }
+    default:
+      return fail(`unknown "deep-ingest source" command "${action}". See --help.`);
+  }
+}
+
+function cmdDeepIngestProposal(rest) {
+  const [action] = rest;
+  switch (action) {
+    case "put":
+      return printResult(
+        deepIngestProposalPut({
+          ...pathCtx,
+          sourceId: opts.sourceId,
+          targetShape: opts.targetShape,
+          lane: opts.lane,
+          proposal: readPayload("deep-ingest proposal put"),
+        })
+      );
+    default:
+      return fail(`unknown "deep-ingest proposal" command "${action}". See --help.`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // intake <sub> — M9 Universal Intake's queue-state verbs. Mirrors the exact
 // same lib functions src/cli/intake-route.mjs calls (one-write-path); unlike
 // every verb above, these do NOT bump meta.version/last_updated_at and do NOT
@@ -636,6 +777,15 @@ Usage:
   node src/cli/data.mjs candidate patch <profile|targeting|honesty|form-defaults|modes|automation|application-limits> --data <json> | --data-file <path>
   node src/cli/data.mjs candidate evidence --data <json-array> | --data-file <path>
   node src/cli/data.mjs candidate limits upsert --data <json> | --data-file <path>
+
+  node src/cli/data.mjs deep-ingest state
+  node src/cli/data.mjs deep-ingest source create --target-shape <shape> [--source-kind <kind>] [--label <t>] [--text <t>] [--data <json>]
+  node src/cli/data.mjs deep-ingest source list [--status <s>] [--target-shape <shape>] [--limit <n>]
+  node src/cli/data.mjs deep-ingest source get <id>
+  node src/cli/data.mjs deep-ingest proposal put --source-id <id> --target-shape <shape> --lane <lane> --data <json>
+  node src/cli/data.mjs deep-ingest decide <proposal-id> <decision> --expected-version <n> [--reason <t>]
+  node src/cli/data.mjs deep-ingest confirm <proposal-id> --expected-version <n> --data <json>
+  node src/cli/data.mjs deep-ingest lane <lane> <status> [--reason <t>]
 
   node src/cli/data.mjs activity append --data <json> | --data-file <path>
 

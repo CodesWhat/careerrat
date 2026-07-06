@@ -18,6 +18,7 @@ import { migration004 } from "./migrations/004-application-limits.mjs";
 import { migration005 } from "./migrations/005-source-config.mjs";
 import { migration006 } from "./migrations/006-company-discovery-cache.mjs";
 import { migration007 } from "./migrations/007-sourcing-runs.mjs";
+import { migration008 } from "./migrations/008-deep-ingest.mjs";
 
 // Add new migrations here, in ascending id order, as the schema evolves.
 export const ALL_MIGRATIONS = [
@@ -28,6 +29,7 @@ export const ALL_MIGRATIONS = [
   migration005,
   migration006,
   migration007,
+  migration008,
 ];
 
 function readUserVersion(db) {
