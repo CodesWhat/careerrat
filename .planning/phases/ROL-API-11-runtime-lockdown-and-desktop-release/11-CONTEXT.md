@@ -63,7 +63,7 @@ The user delegated the exact implementation mechanics for runtime lockdown and s
 - `.planning/phases/07-quick-onboarding-and-auto-sourcing/07-CONTEXT.md` - First search and repeat sourcing use deterministic local run state, not hidden chat or skill runtime.
 - `.planning/phases/08-deep-ingest-lane/08-CONTEXT.md` - Deep ingest uses SQLite-native proposal/review state and no hidden full-runtime dispatch.
 - `.planning/phases/09-public-company-intelligence-and-scanner-cascade/09-CONTEXT.md` - Public scanner paths are local-first, with bounded AI only for ambiguous reachable text and no hidden runtime escalation.
-- `.planning/phases/ROL-API-10-local-packet-engine/10-CONTEXT.md` - Evaluate/gate and packet generation move to local APIs with bounded AI, not default `evaluate-job`, `tailor-application`, or `answer-question` full-skill runs.
+- `.planning/phases/10-local-packet-engine/10-CONTEXT.md` - Evaluate/gate and packet generation move to local APIs with bounded AI, not default `evaluate-job`, `tailor-application`, or `answer-question` full-skill runs.
 - `.planning/phases/02-bounded-ai-foundation/02-CONTEXT.md` - Bounded AI envelopes, schema validation, no-AI/manual degradation, and metadata-only telemetry.
 - `.planning/phases/03-company-discovery-api/03-CONTEXT.md` - Thin local APIs, deterministic validation around AI output, confirm-first writes, and DB-owned proposal state.
 
