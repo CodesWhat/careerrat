@@ -77,6 +77,7 @@ test("GET /answer returns HTML with the expected structural hooks", async () => 
       'data-hook="source-line"',
       'data-hook="durable-line"',
       'data-hook="persisted-line"',
+      'data-hook="excluded-line"',
       'data-hook="meta-duration"',
       'data-hook="meta-usage"',
       'data-hook="meta-cost"',
@@ -148,6 +149,11 @@ test("answer page drafts through the local packet answers API by default", () =>
   assert.ok(match);
   const script = match[1];
   assert.match(script, /fetch\("\/api\/packet\/answers"/);
+  assert.match(script, /renderAnswer/);
+  assert.match(script, /excludedQuestionIds/);
+  assert.match(script, /sourceLineEl/);
+  assert.match(script, /durableLineEl/);
+  assert.match(script, /persistedLineEl/);
   assert.doesNotMatch(script, /\/api\/skill\/run/);
   assert.doesNotMatch(script, /answer-question/);
   assert.doesNotMatch(script, /answerQuestionAllowed|ROLESTER_RUNTIME_SKILLS/);
