@@ -19,7 +19,7 @@
 // comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
 // pass. The scripted verification path for `npx electron . --smoke`.
 
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, nativeImage, shell } from "electron";
 import { existsSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
@@ -338,6 +338,19 @@ async function waitForClientMount(wc, timeoutMs = 5000, intervalMs = 100) {
 }
 
 app.whenReady().then(async () => {
+  // Dev dock icon (macOS). The packaged app gets its icon from the baked
+  // .icns (electron-builder mac.icon), but an unpackaged `electron .` run shows
+  // the default Electron icon unless we set it here. build/ isn't bundled into
+  // the package, so this only ever fires in dev. Guarded so a missing file or a
+  // non-macOS platform never throws.
+  if (!app.isPackaged && process.platform === "darwin" && app.dock) {
+    const iconPath = join(__dirname, "build", "icon.png");
+    if (existsSync(iconPath)) {
+      const dockIcon = nativeImage.createFromPath(iconPath);
+      if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
+    }
+  }
+
   const { url, route } = await boot();
 
   if (isSmoke) {
