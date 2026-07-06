@@ -145,6 +145,31 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
     padding: 0.4rem 0.8rem;
   }
   .offer-actions a:hover { text-decoration: underline; }
+  .review-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1rem 1.15rem;
+    margin-bottom: 1.5rem;
+  }
+  .review-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .review-list { display: flex; flex-direction: column; gap: 0.75rem; }
+  .review-row {
+    border-top: 1px solid var(--border);
+    padding-top: 0.75rem;
+  }
+  .review-title { font-size: 0.95rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .review-meta { color: var(--muted); font-size: 0.8rem; line-height: 1.45; overflow-wrap: anywhere; }
+  .review-actions { display: flex; gap: 0.45rem; flex-wrap: wrap; margin-top: 0.65rem; }
+  .review-actions button { font-size: 0.78rem; padding: 0.38rem 0.65rem; }
+  .review-actions button.secondary { background: var(--bg); color: var(--text); }
+  .review-error { color: var(--bad); font-size: 0.82rem; margin-bottom: 0.6rem; }
   .empty-state { color: var(--muted); font-size: 0.9rem; }
   [hidden] { display: none !important; }
 </style>
@@ -164,6 +189,16 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
     </div>
   </section>
 
+  <section id="scanner-review-section" data-hook="scanner-review-section" class="review-panel">
+    <div class="review-head">
+      <h2>Scanner reviews</h2>
+      <span class="badge badge-gate-review">Review</span>
+    </div>
+    <div id="scanner-review-error" data-hook="scanner-review-error" class="review-error" hidden></div>
+    <div id="scanner-review-empty" data-hook="scanner-review-empty" class="empty-state">No scanner reviews. Rolester only asks when public board metadata is ambiguous or conflicting. Clean misses are recorded locally and do not interrupt you.</div>
+    <div id="scanner-review-list" data-hook="scanner-review-list" class="review-list"></div>
+  </section>
+
   <section id="results-section">
     <h2>Results</h2>
     <div id="results-summary" data-hook="results-summary" class="results-summary" hidden></div>
@@ -181,6 +216,16 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
   var scanStatus = document.getElementById("scan-status");
   var resultsSummary = document.getElementById("results-summary");
   var resultsList = document.getElementById("results-list");
+  var scannerReviewEmpty = document.getElementById("scanner-review-empty");
+  var scannerReviewError = document.getElementById("scanner-review-error");
+  var scannerReviewList = document.getElementById("scanner-review-list");
+  var reviewActions = [
+    { action: "use-supported-ats", label: "Use supported ATS", primary: true },
+    { action: "keep-public-metadata", label: "Keep public metadata" },
+    { action: "refresh-scan", label: "Refresh scan" },
+    { action: "suppress-review", label: "Suppress review" },
+    { action: "escalate-agent", label: "Escalate to agent" }
+  ];
 
   function fitBadgeClass(fit) {
     if (fit === "high") return "badge badge-fit-high";
@@ -273,6 +318,117 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
     return row;
   }
 
+  function reviewReason(item) {
+    if (item.reason === "provider_conflict") return "The provider appears to have changed since the last scan.";
+    if (item.reason === "ambiguous_public_page") return "Multiple board matches found. Choose the source Rolester should use locally.";
+    if (item.reason === "low_confidence_extraction") return "Rolester found public page text but could not confidently identify the careers board.";
+    return item.reason || "Review needed";
+  }
+
+  function reviewMeta(item) {
+    var parts = [];
+    parts.push(item.companyName || item.companyKey || "Unknown company");
+    if (item.companyDomain) parts.push(item.companyDomain);
+    if (item.careersUrl) parts.push(item.careersUrl);
+    if (item.proposedProvider || item.currentProvider) {
+      parts.push("provider " + (item.proposedProvider || item.currentProvider));
+    }
+    if (item.confidence) parts.push("confidence " + item.confidence);
+    if (item.updatedAt) parts.push("freshness " + item.updatedAt);
+    return parts.join(" \\u00b7 ");
+  }
+
+  function setReviewError(message) {
+    scannerReviewError.textContent = message || "";
+    scannerReviewError.hidden = !message;
+  }
+
+  function postReviewDecision(item, action, button) {
+    if (button) button.disabled = true;
+    setReviewError("");
+    fetch("/api/discovery/public-intel/review-decisions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        itemId: item.id,
+        expectedVersion: item.version,
+        action: action
+      })
+    })
+      .then(function (res) {
+        return res
+          .json()
+          .catch(function () {
+            return {};
+          })
+          .then(function (body) {
+            return { ok: res.ok, status: res.status, body: body };
+          });
+      })
+      .then(function (result) {
+        if (button) button.disabled = false;
+        if (!result.ok) {
+          setReviewError((result.body && result.body.error && result.body.error.message) || "Review decision failed.");
+          return;
+        }
+        loadScannerReviews();
+      })
+      .catch(function (err) {
+        if (button) button.disabled = false;
+        setReviewError(String(err && err.message ? err.message : err));
+      });
+  }
+
+  function buildReviewRow(item) {
+    var row = document.createElement("div");
+    row.className = "review-row";
+    row.setAttribute("data-hook", "scanner-review-row");
+
+    var badge = document.createElement("span");
+    badge.className = "badge badge-gate-review";
+    badge.setAttribute("data-hook", "scanner-review-reason");
+    badge.textContent = item.reason || "review";
+    row.appendChild(badge);
+
+    var title = document.createElement("div");
+    title.className = "review-title";
+    title.textContent = reviewReason(item);
+    row.appendChild(title);
+
+    var meta = document.createElement("div");
+    meta.className = "review-meta";
+    meta.textContent = reviewMeta(item);
+    row.appendChild(meta);
+
+    var actions = document.createElement("div");
+    actions.className = "review-actions";
+    actions.setAttribute("data-hook", "scanner-review-actions");
+    for (var i = 0; i < reviewActions.length; i++) {
+      (function (config) {
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.textContent = config.label;
+        btn.className = config.primary ? "" : "secondary";
+        btn.setAttribute("data-action", config.action);
+        btn.addEventListener("click", function () {
+          postReviewDecision(item, config.action, btn);
+        });
+        actions.appendChild(btn);
+      })(reviewActions[i]);
+    }
+    row.appendChild(actions);
+    return row;
+  }
+
+  function renderScannerReviews(items) {
+    scannerReviewList.textContent = "";
+    var list = items || [];
+    scannerReviewEmpty.hidden = list.length > 0;
+    for (var i = 0; i < list.length; i++) {
+      scannerReviewList.appendChild(buildReviewRow(list[i]));
+    }
+  }
+
   function renderSummaryLine(summary) {
     resultsSummary.hidden = false;
     var text = "Scanned " + (summary.scanned || 0) +
@@ -339,6 +495,23 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
       });
   }
 
+  function loadScannerReviews() {
+    fetch("/api/discovery/public-intel/review")
+      .then(function (res) {
+        return res.ok ? res.json() : null;
+      })
+      .then(function (data) {
+        if (!data || !data.data) {
+          renderScannerReviews([]);
+          return;
+        }
+        renderScannerReviews(data.data.items || []);
+      })
+      .catch(function () {
+        renderScannerReviews([]);
+      });
+  }
+
   scanBtn.addEventListener("click", function () {
     scanBtn.disabled = true;
     scanStatus.textContent = "Running sweep\\u2026";
@@ -380,6 +553,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
 
   loadSources();
   loadResults();
+  loadScannerReviews();
 })();
 </script>
 </body>

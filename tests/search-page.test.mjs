@@ -118,6 +118,32 @@ test("the offer-evaluate link is built against /evaluate?url=", () => {
   assert.match(SEARCH_PAGE_HTML, /setAttribute\("data-hook", "offer-evaluate"\)/);
 });
 
+test("scanner review panel exposes public-intel hooks, copy, and local decision wiring", () => {
+  for (const hook of [
+    'data-hook="scanner-review-section"',
+    'data-hook="scanner-review-list"',
+    'data-hook="scanner-review-empty"',
+    'data-hook="scanner-review-error"',
+  ]) {
+    assert.ok(SEARCH_PAGE_HTML.includes(hook), `expected ${hook}`);
+  }
+
+  assert.match(SEARCH_PAGE_HTML, /No scanner reviews/);
+  assert.match(SEARCH_PAGE_HTML, /Clean misses are recorded locally and do not interrupt you/);
+  for (const label of [
+    "Use supported ATS",
+    "Keep public metadata",
+    "Refresh scan",
+    "Suppress review",
+    "Escalate to agent",
+  ]) {
+    assert.ok(SEARCH_PAGE_HTML.includes(label), `expected ${label}`);
+  }
+
+  assert.match(SEARCH_PAGE_HTML, /\/api\/discovery\/public-intel\/review/);
+  assert.match(SEARCH_PAGE_HTML, /\/api\/discovery\/public-intel\/review-decisions/);
+});
+
 // ---------------------------------------------------------------------------
 // Mounting /search didn't disturb the existing routes
 // ---------------------------------------------------------------------------
