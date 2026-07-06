@@ -19,7 +19,7 @@
 // comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
 // pass. The scripted verification path for `npx electron . --smoke`.
 
-import { app, BrowserWindow, nativeImage, shell } from "electron";
+import { app, BrowserWindow, Menu, nativeImage, shell } from "electron";
 import { existsSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
@@ -47,6 +47,14 @@ import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
 // own env, which Chromium's helpers inherit from.
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const isSmoke = process.argv.includes("--smoke");
+
+// Name. An unpackaged `electron .` run shows the Electron binary's own name
+// ("Electron") in the macOS menu bar, dock, and Cmd-Tab. Packaged builds get
+// "Rolester" from the Info.plist (electron-builder productName); set it here so
+// dev matches. Must run before app is ready, i.e. before any default menu is
+// built.
+app.setName("Rolester");
+app.setAboutPanelOptions({ applicationName: "Rolester" });
 
 // --- Trap 3 -------------------------------------------------------------
 // Data root. A packaged app's Resources/ tree is read-only (code-signed) —
@@ -349,6 +357,20 @@ app.whenReady().then(async () => {
       const dockIcon = nativeImage.createFromPath(iconPath);
       if (!dockIcon.isEmpty()) app.dock.setIcon(dockIcon);
     }
+  }
+
+  // Rebuild the standard macOS menu so the bold app-menu label follows
+  // app.name ("Rolester") instead of "Electron" in dev; role-based items keep
+  // the expected copy/paste/quit/devtools/window behavior.
+  if (process.platform === "darwin") {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { role: "appMenu" },
+        { role: "editMenu" },
+        { role: "viewMenu" },
+        { role: "windowMenu" },
+      ]),
+    );
   }
 
   const { url, route } = await boot();
