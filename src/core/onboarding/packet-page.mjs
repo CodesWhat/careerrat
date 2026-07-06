@@ -3,18 +3,14 @@
 // GET /api/packet/list, review its tailored resume / cover letter / answers
 // (each rendered from markdown → HTML server-side via
 // src/core/documents/export.mjs's markdownToHtml, see src/cli/packet-route.mjs),
-// and — when any artifact is still missing — run tailor-application live via
-// POST /api/skill/run to generate it.
+// and - when any artifact is still missing - generate it through local packet
+// APIs.
 //
 // Cloned structurally from evaluate-page.mjs's exact pattern: a plain
 // template-literal export (no server-side interpolation) mounted verbatim by
 // tracker-dev.mjs at GET /packet, byte-static and cacheable. The "Generate
-// packet" button reuses the SAME SSE client pattern evaluate-page.mjs uses for
-// POST /api/skill/run (EventSource can't POST, so the client hand-parses the
-// `event: <type>\ndata: <json>\n\n` framing off a fetch() ReadableStream —
-// mirrors skill-run-route.mjs's own emit() framing exactly) and is gated on
-// GET /api/runtime/config the same way evaluate-page.mjs's decision buttons
-// are. Inline <script> avoids template literals, backticks, and
+// packet" button calls local JSON packet routes for question capture and packet
+// generation. Inline <script> avoids template literals, backticks, and
 // regex/backslash escapes entirely (string concatenation with + instead, and
 // single-quoted HTML attribute values in the one place raw HTML is injected —
 // see highlightNeedsYou() below), same as search-page.mjs/onboard-page.mjs, so
@@ -135,6 +131,51 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     justify-content: space-between;
     gap: 1rem;
     flex-wrap: wrap;
+  }
+  .question-panel {
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.9rem 1rem;
+    margin-top: 1rem;
+  }
+  .question-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: 0.75rem;
+  }
+  .question-field { display: flex; flex-direction: column; gap: 0.35rem; }
+  .question-field label { font-size: 0.82rem; color: var(--muted); }
+  .question-field input,
+  .question-field textarea {
+    width: 100%;
+    min-width: 0;
+    font: inherit;
+    font-size: 0.9rem;
+    color: var(--text);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.55rem 0.65rem;
+  }
+  .question-field textarea {
+    min-height: 5.5rem;
+    resize: vertical;
+  }
+  .question-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-top: 0.75rem;
+  }
+  .question-summary {
+    color: var(--muted);
+    font-size: 0.85rem;
+    margin-top: 0.5rem;
+  }
+  @media (max-width: 720px) {
+    .question-grid { grid-template-columns: 1fr; }
   }
   .feed {
     max-height: 14rem;
@@ -259,6 +300,24 @@ export const PACKET_PAGE_HTML = `<!doctype html>
       </div>
     </div>
 
+    <section class="question-panel" data-hook="question-panel">
+      <div class="question-grid">
+        <div class="question-field">
+          <label for="question-url">Application form URL</label>
+          <input id="question-url" data-hook="question-url" type="url" placeholder="https://...">
+        </div>
+        <div class="question-field">
+          <label for="question-text">Application questions</label>
+          <textarea id="question-text" data-hook="question-text" placeholder="Paste non-upload form questions here"></textarea>
+        </div>
+      </div>
+      <div class="question-actions">
+        <button id="capture-questions-btn" data-hook="capture-questions-btn" type="button">Capture questions</button>
+        <span id="question-status" data-hook="question-status" class="status"></span>
+      </div>
+      <div id="question-summary" data-hook="question-summary" class="question-summary" aria-live="polite"></div>
+    </section>
+
     <section id="feed-section" data-hook="feed-section" hidden>
       <h3>Live run</h3>
       <div id="generate-feed" data-hook="generate-feed" class="feed" aria-live="polite"></div>
@@ -293,6 +352,11 @@ export const PACKET_PAGE_HTML = `<!doctype html>
   var detailTitle = document.getElementById("detail-title");
   var generateBtn = document.getElementById("generate-btn");
   var runStatus = document.getElementById("run-status");
+  var questionUrlInput = document.getElementById("question-url");
+  var questionTextInput = document.getElementById("question-text");
+  var captureQuestionsBtn = document.getElementById("capture-questions-btn");
+  var questionStatus = document.getElementById("question-status");
+  var questionSummary = document.getElementById("question-summary");
   var feedSection = document.getElementById("feed-section");
   var feed = document.getElementById("generate-feed");
   var errorBox = document.getElementById("error-box");
@@ -307,11 +371,11 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     answers: document.getElementById("tab-btn-answers")
   };
 
-  var allowedSkills = [];
   var selectedId = null;
   var selectedRowEl = null;
   var currentPacket = null;
   var activeTab = "resume";
+  var questionCaptureState = null;
 
   function showError(message) {
     errorBox.hidden = false;
@@ -332,9 +396,35 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     feed.scrollTop = feed.scrollHeight;
   }
 
+  function setRunning(isRunning, label) {
+    generateBtn.disabled = !!isRunning;
+    captureQuestionsBtn.disabled = !!isRunning || !selectedId;
+    runStatus.textContent = isRunning ? label || "Working..." : "";
+  }
+
   function truncate(text, max) {
     var t = String(text || "").replace(/\\s+/g, " ").trim();
     return t.length > max ? t.slice(0, max - 1) + "…" : t;
+  }
+
+  function renderQuestionCaptureSummary(capture) {
+    var data = capture || questionCaptureState;
+    if (!data) {
+      questionSummary.textContent = "";
+      questionStatus.textContent = "";
+      return;
+    }
+    var artifacts = data.artifacts || {};
+    var answerable = Array.isArray(data.questions) ? data.questions.length : artifacts.packetQuestionCount || 0;
+    var skipped = Array.isArray(data.excluded) ? data.excluded.length : artifacts.packetQuestionExcludedCount || 0;
+    var excludedQuestionIds = Array.isArray(data.excluded)
+      ? data.excluded.map(function (q) { return String(q.id); })
+      : [];
+    questionStatus.textContent = answerable + " answerable, " + skipped + " skipped";
+    questionSummary.textContent = "Captured " + answerable + " answerable question" +
+      (answerable === 1 ? "" : "s") + "; skipped " + skipped + " self-identification question" +
+      (skipped === 1 ? "" : "s") +
+      (excludedQuestionIds.length ? " (" + excludedQuestionIds.join(", ") + ")" : "") + ".";
   }
 
   // -------------------------------------------------------------------
@@ -396,7 +486,7 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     if (!rows || !rows.length) {
       var empty = document.createElement("p");
       empty.className = "empty-state";
-      empty.textContent = "No gated applications yet — run evaluate-job first.";
+      empty.textContent = "No gated applications yet.";
       pickerEl.appendChild(empty);
       return;
     }
@@ -500,16 +590,6 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     return !a.resume || !a.coverLetter || !a.answers;
   }
 
-  function tailorAllowed() {
-    return allowedSkills.indexOf("tailor-application") !== -1;
-  }
-
-  function updateGenerateAvailability() {
-    var allowed = tailorAllowed();
-    generateBtn.disabled = !allowed;
-    generateBtn.title = allowed ? "" : "enable tailor-application in ROLESTER_RUNTIME_SKILLS";
-  }
-
   function renderDetail(data) {
     currentPacket = data;
     detailSection.hidden = false;
@@ -520,7 +600,9 @@ export const PACKET_PAGE_HTML = `<!doctype html>
     renderPane("answers", artifacts.answers);
     setActiveTab(activeTab);
     generateBtn.hidden = !needsGenerate(data);
-    updateGenerateAvailability();
+    generateBtn.disabled = false;
+    captureQuestionsBtn.disabled = !selectedId;
+    generateBtn.title = "";
   }
 
   function loadDetail(id) {
@@ -550,163 +632,137 @@ export const PACKET_PAGE_HTML = `<!doctype html>
   }
 
   // -------------------------------------------------------------------
-  // Generate packet — same SSE client pattern as evaluate-page.mjs
+  // Local packet APIs
   // -------------------------------------------------------------------
 
-  // Mirrors skill-run-route.mjs's emit(): "event: <type>\\ndata: <json>\\n\\n",
-  // plus bare ": heartbeat" comment lines every 15s — skipped here.
-  function parseSseBlock(raw) {
-    var lines = raw.split("\\n");
-    var type = null;
-    var dataLines = [];
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (!line || line.charAt(0) === ":") continue;
-      if (line.indexOf("event:") === 0) type = line.slice(6).trim();
-      else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
-    }
-    if (!type) return null;
-    var payload = dataLines.join("\\n");
-    var data;
-    try {
-      data = JSON.parse(payload);
-    } catch (e) {
-      data = payload;
-    }
-    return { type: type, data: data };
+  function messageFromBody(body, fallback) {
+    return (body && body.error && body.error.message) ||
+      (body && body.error) ||
+      (body && body.message) ||
+      fallback;
   }
 
-  function extractAssistantText(msg) {
-    var content = msg && msg.message && msg.message.content;
-    if (!Array.isArray(content)) return "";
-    var parts = [];
-    for (var i = 0; i < content.length; i++) {
-      if (content[i] && content[i].type === "text" && content[i].text) {
-        parts.push(content[i].text);
-      }
-    }
-    return parts.join("\\n");
-  }
-
-  function handleEvent(evt) {
-    switch (evt.type) {
-      case "system":
-        addFeedLine("system: " + (evt.data && evt.data.subtype ? evt.data.subtype : "event"), "system");
-        break;
-      case "assistant": {
-        var text = extractAssistantText(evt.data);
-        if (text) addFeedLine("assistant: " + truncate(text, 140), "assistant");
-        break;
-      }
-      case "tool_use":
-        addFeedLine("tool: " + (evt.data && evt.data.name ? evt.data.name : "unknown"), "tool");
-        break;
-      case "tool_result":
-        addFeedLine(
-          "result: " + (evt.data && evt.data.isError ? "error" : "ok"),
-          evt.data && evt.data.isError ? "error" : "tool-result"
-        );
-        break;
-      case "error": {
-        var message = (evt.data && evt.data.message) || "The run reported an error.";
-        addFeedLine("error: " + message, "error");
-        showError(message);
-        break;
-      }
-      case "result":
-        // Refetch — the run either produced new artifacts or failed; either
-        // way the server's tracker state is the source of truth now.
-        if (selectedId) loadDetail(selectedId);
-        loadList();
-        break;
-      default:
-        break;
-    }
-  }
-
-  function runSkill(skill, skillInput, onDone) {
-    return fetch("/api/skill/run", {
+  function requestOptions(payload) {
+    return {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: skill, input: skillInput })
-    }).then(function (res) {
-      if (!res.ok) {
-        return res
-          .json()
-          .catch(function () {
-            return { error: "Request failed with status " + res.status };
-          })
-          .then(function (body) {
-            var message = (body && body.error) || "Request failed with status " + res.status;
-            if (res.status === 501) {
-              message += " — install the @anthropic-ai/claude-agent-sdk devDependency to enable this.";
-            }
-            showError(message);
-            if (onDone) onDone();
-          });
-      }
-      clearError();
-      var reader = res.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = "";
+      body: JSON.stringify(payload || {})
+    };
+  }
 
-      function pump() {
-        return reader.read().then(function (step) {
-          if (step.done) {
-            if (onDone) onDone();
-            return undefined;
-          }
-          buffer += decoder.decode(step.value, { stream: true });
-          var idx;
-          while ((idx = buffer.indexOf("\\n\\n")) !== -1) {
-            var raw = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 2);
-            var evt = parseSseBlock(raw);
-            if (evt) handleEvent(evt);
-          }
-          return pump();
-        });
-      }
-      return pump();
-    }).catch(function (err) {
-      showError("Network error: " + (err && err.message ? err.message : String(err)));
-      if (onDone) onDone();
+  function readJsonResult(res) {
+    return res.json()
+      .catch(function () {
+        return {};
+      })
+      .then(function (body) {
+        if (!res.ok || body.ok === false) {
+          throw new Error(messageFromBody(body, "Request failed with status " + res.status));
+        }
+        return body.data || body;
+      });
+  }
+
+  function postPacketQuestions(payload) {
+    return fetch("/api/packet/questions", requestOptions(payload)).then(function (res) {
+      return readJsonResult(res);
     });
   }
 
-  generateBtn.addEventListener("click", function () {
-    if (!currentPacket || generateBtn.disabled) return;
-    var input = (currentPacket.company || "") + " — " + (currentPacket.role || "");
+  function postPacketGenerate(payload) {
+    return fetch("/api/packet/generate", requestOptions(payload)).then(function (res) {
+      return readJsonResult(res);
+    });
+  }
+
+  function hasQuestionInput() {
+    return Boolean(questionUrlInput.value.trim() || questionTextInput.value.trim());
+  }
+
+  function captureQuestions() {
+    if (!selectedId) return Promise.resolve(null);
+    var url = questionUrlInput.value.trim();
+    var manualText = questionTextInput.value.trim();
+    if (!url && !manualText) {
+      questionStatus.textContent = "No questions supplied";
+      return Promise.resolve(null);
+    }
+    setRunning(true, "Capturing...");
+    return postPacketQuestions({
+      appId: selectedId,
+      source: url ? "url" : "paste",
+      url: url,
+      manualText: manualText
+    }).then(function (data) {
+      questionCaptureState = data;
+      renderQuestionCaptureSummary(data);
+      addFeedLine("questions: captured " + data.questions.length + " answerable, " +
+        data.excluded.length + " skipped", "tool-result");
+      return data;
+    }).catch(function (err) {
+      showError("Could not capture questions: " + (err && err.message ? err.message : String(err)));
+      throw err;
+    }).then(function (data) {
+      setRunning(false);
+      return data;
+    }, function (err) {
+      setRunning(false);
+      throw err;
+    });
+  }
+
+  function generatePacketFromPage() {
+    if (!currentPacket || generateBtn.disabled) return Promise.resolve(null);
+    setRunning(true, "Generating...");
+    return postPacketGenerate({
+      appId: selectedId,
+      applyIntent: true,
+      formats: ["pdf"],
+      questionCapture: questionCaptureState
+    }).then(function (data) {
+      var manifest = data.manifest || {};
+      var gapCount = Array.isArray(data.gaps) ? data.gaps.length : manifest.gapCount || 0;
+      var excludedQuestionIds = manifest.answerLineage && Array.isArray(manifest.answerLineage.excludedQuestionIds)
+        ? manifest.answerLineage.excludedQuestionIds
+        : [];
+      addFeedLine("packet: " + (data.status || "generated") + ", " + gapCount + " gap" +
+        (gapCount === 1 ? "" : "s") + ", " + excludedQuestionIds.length + " skipped", "tool-result");
+      if (selectedId) loadDetail(selectedId);
+      loadList();
+      return data;
+    }).catch(function (err) {
+      showError("Could not generate packet: " + (err && err.message ? err.message : String(err)));
+      throw err;
+    }).then(function (data) {
+      setRunning(false);
+      return data;
+    }, function (err) {
+      setRunning(false);
+      throw err;
+    });
+  }
+
+  captureQuestionsBtn.addEventListener("click", function () {
     feed.textContent = "";
     feedSection.hidden = false;
     clearError();
-    generateBtn.disabled = true;
-    runStatus.textContent = "Running…";
-    runSkill("tailor-application", input, function () {
-      runStatus.textContent = "";
-      updateGenerateAvailability();
-    });
+    captureQuestions().catch(function () {});
+  });
+
+  generateBtn.addEventListener("click", function () {
+    if (!currentPacket || generateBtn.disabled) return;
+    feed.textContent = "";
+    feedSection.hidden = false;
+    clearError();
+    var first = hasQuestionInput() ? captureQuestions() : Promise.resolve(questionCaptureState);
+    first.then(function () {
+      return generatePacketFromPage();
+    }).catch(function () {});
   });
 
   // -------------------------------------------------------------------
   // Boot
   // -------------------------------------------------------------------
-
-  function applyAllowlist(skills) {
-    allowedSkills = skills || [];
-    updateGenerateAvailability();
-  }
-
-  fetch("/api/runtime/config")
-    .then(function (res) {
-      return res.ok ? res.json() : { skills: [] };
-    })
-    .then(function (config) {
-      applyAllowlist(config && config.skills);
-    })
-    .catch(function () {
-      applyAllowlist([]);
-    });
 
   loadList();
 })();

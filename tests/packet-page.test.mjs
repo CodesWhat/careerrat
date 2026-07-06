@@ -60,6 +60,11 @@ test("GET /packet returns HTML with the expected structural hooks", async () => 
       'data-hook="detail-title"',
       'data-hook="generate-btn"',
       'data-hook="run-status"',
+      'data-hook="question-url"',
+      'data-hook="question-text"',
+      'data-hook="capture-questions-btn"',
+      'data-hook="question-status"',
+      'data-hook="question-summary"',
       'data-hook="feed-section"',
       'data-hook="generate-feed"',
       'data-hook="error-box"',
@@ -137,10 +142,31 @@ test("packet-page.mjs's inline <script> never uses a template literal or backtic
   assert.ok(!match[1].includes("`"), "inline script must not contain a backtick");
 });
 
-test("the Generate packet run POSTs tailor-application and is gated by /api/runtime/config, same pattern as evaluate-page.mjs's decision buttons", () => {
-  assert.match(PACKET_PAGE_HTML, /runSkill\("tailor-application", input, function/);
-  assert.match(PACKET_PAGE_HTML, /fetch\("\/api\/runtime\/config"\)/);
-  assert.match(PACKET_PAGE_HTML, /tailorAllowed/);
+test("the Generate packet run POSTs the local packet generate API by default", () => {
+  const match = /<script>([\s\S]*?)<\/script>/.exec(PACKET_PAGE_HTML);
+  assert.ok(match);
+  const script = match[1];
+  assert.match(script, /fetch\("\/api\/packet\/generate"/);
+  assert.match(script, /fetch\("\/api\/packet\/questions"/);
+  assert.match(script, /questionCaptureState/);
+  assert.match(script, /questionCapture: questionCaptureState/);
+  assert.match(script, /packetQuestionExcludedCount/);
+  assert.match(script, /excludedQuestionIds/);
+  assert.doesNotMatch(script, /\/api\/skill\/run/);
+  assert.doesNotMatch(script, /tailor-application/);
+  assert.doesNotMatch(script, /tailorAllowed|ROLESTER_RUNTIME_SKILLS/);
+});
+
+test("packet page captures application questions before local generation", () => {
+  const match = /<script>([\s\S]*?)<\/script>/.exec(PACKET_PAGE_HTML);
+  assert.ok(match);
+  const script = match[1];
+  assert.match(script, /function captureQuestions\(\)/);
+  assert.match(script, /manualText: manualText/);
+  assert.match(script, /url: url/);
+  assert.match(script, /renderQuestionCaptureSummary/);
+  assert.match(script, /answerable/);
+  assert.match(script, /skipped/);
 });
 
 // ---------------------------------------------------------------------------

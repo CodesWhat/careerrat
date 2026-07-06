@@ -17,8 +17,8 @@
 | 7 | Quick Onboarding and Auto Sourcing | Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding. | ONB-01, ONB-02, RUN-01, RUN-02 | Complete (8/8, 2026-07-06) |
 | 8 | Deep Ingest Lane | 2/9 | In Progress|  |
 | 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Complete (6/6, 2026-07-06) |
-| 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Planned |
-| 11 | Runtime Lockdown and Desktop Release | 7/7 | Complete   | 2026-07-06 |
+| 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Complete (7/7, 2026-07-06) |
+| 11 | Runtime Lockdown and Desktop Release | Remove broad skill-tool power from app defaults and harden the desktop product path for pilot use. | SEC-01, SEC-02, DESK-01, DESK-02 | Complete (7/7, 2026-07-06) |
 
 ## Phase Details
 
@@ -280,36 +280,36 @@ Plans:
 
 **Requirements:** PKT-01, PKT-02, PKT-03, PKT-04
 
-**Plans:** 7 plans
+**Plans:** 7/7 plans complete
 
 Plans:
 **Wave 0**
 
-- [ ] 10-01-PLAN.md - Add RED packet route, engine, answer, export, page, and runtime-boundary contracts.
+- [x] 10-01-PLAN.md - Add RED packet route, engine, answer, export, page, and runtime-boundary contracts.
 
 **Wave 1** *(blocked on Wave 0 completion)*
 
-- [ ] 10-02-PLAN.md - Implement local packet gate context, schemas, bounded-AI service, and route.
+- [x] 10-02-PLAN.md - Implement local packet gate context, schemas, bounded-AI service, and route.
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 10-03-PLAN.md - Implement application-question capture, self-identification exclusion, answer drafting, and local routes.
+- [x] 10-03-PLAN.md - Implement application-question capture, self-identification exclusion, answer drafting, and local routes.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 10-04-PLAN.md - Implement packet generation and DB-owned source artifact stamping.
+- [x] 10-04-PLAN.md - Implement packet generation and DB-owned source artifact stamping.
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 10-05-PLAN.md - Implement PDF-default and conditional DOCX export generation and stamping.
+- [x] 10-05-PLAN.md - Implement PDF-default and conditional DOCX export generation and stamping.
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 10-06-PLAN.md - Replace packet and answer page defaults with local packet APIs.
+- [x] 10-06-PLAN.md - Replace packet and answer page defaults with local packet APIs.
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 10-07-PLAN.md - Update runtime docs and run final Phase 10 verification.
+- [x] 10-07-PLAN.md - Update runtime docs and run final Phase 10 verification. (completed 2026-07-06)
 
 **Success Criteria**:
 
