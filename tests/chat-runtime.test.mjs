@@ -9,7 +9,7 @@
 // write-back, abort/close/interrupt) without spawning a CLI subprocess.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
@@ -19,7 +19,7 @@ import {
   createChatRuntime,
   resolveAllowedChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
-import { RUNTIME_TOOLS } from "../src/core/ai/skill-runtime.mjs";
+import { CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 // ---------------------------------------------------------------------------
@@ -185,6 +185,10 @@ function parseSseFrame(chunk) {
     data = dataLines.join("\n");
   }
   return { type, data, id };
+}
+
+function stripJavaScriptComments(source) {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 }
 
 // ---------------------------------------------------------------------------
@@ -433,7 +437,14 @@ test("createChatRuntime.startSession: the session past maxSessions is rejected M
   }
 });
 
-test("createChatRuntime.startSession: query() gets CHAT_TOOLS (RUNTIME_TOOLS + WebSearch), not the bare one-shot RUNTIME_TOOLS — discovery skills need WebSearch", async () => {
+test("chat-runtime source imports the explicit chat runtime profile instead of deriving from one-shot tools", () => {
+  const source = stripJavaScriptComments(readFileSync("src/core/ai/chat-runtime.mjs", "utf8"));
+  assert.match(source, /CHAT_RUNTIME_TOOLS/);
+  assert.doesNotMatch(source, /RUNTIME_TOOLS/);
+  assert.doesNotMatch(source, /\[\s*\.\.\.RUNTIME_TOOLS\s*,\s*"WebSearch"\s*\]/);
+});
+
+test("createChatRuntime.startSession: query() gets CHAT_RUNTIME_TOOLS from the explicit chat profile — discovery skills need WebSearch", async () => {
   const repoRoot = tempRepoWithSkill(["ingest-profile", "research-boards", "discover-companies"]);
   try {
     const seenToolsBySkill = new Map();
@@ -453,8 +464,8 @@ test("createChatRuntime.startSession: query() gets CHAT_TOOLS (RUNTIME_TOOLS + W
     try {
       await chatRuntime.startSession({ skill: "research-boards" });
       await chatRuntime.startSession({ skill: "discover-companies" });
-      assert.deepEqual(seenToolsBySkill.get("research-boards"), [...RUNTIME_TOOLS, "WebSearch"]);
-      assert.deepEqual(seenToolsBySkill.get("discover-companies"), [...RUNTIME_TOOLS, "WebSearch"]);
+      assert.deepEqual(seenToolsBySkill.get("research-boards"), [...CHAT_RUNTIME_TOOLS]);
+      assert.deepEqual(seenToolsBySkill.get("discover-companies"), [...CHAT_RUNTIME_TOOLS]);
     } finally {
       chatRuntime.shutdown();
     }

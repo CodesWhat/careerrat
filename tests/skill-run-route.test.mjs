@@ -13,6 +13,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { mountSkillRunRoute } from "../src/cli/skill-run-route.mjs";
+import {
+  APP_SAFE_RUNTIME_TOOLS,
+  DEFAULT_RUNTIME_TOOL_PROFILE,
+} from "../src/core/ai/runtime-tools.mjs";
 
 // A minimal addRoute-based harness mirroring tracker-dev.mjs's own routing
 // table (method+path -> handler), without pulling in the whole dev server.
@@ -115,12 +119,21 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
       skills: ["evaluate-job", "answer-question"],
       chatSkills: ["ingest-profile", "research-boards", "discover-companies", "search-jobs"],
       ai: { available: true, route: "byok" },
+      runtime: {
+        defaultToolProfile: DEFAULT_RUNTIME_TOOL_PROFILE,
+        defaultTools: [...APP_SAFE_RUNTIME_TOOLS],
+        toolHeavy: {
+          available: false,
+          skills: [],
+        },
+      },
       discovery: {
         companyProposals: true,
         manualCompanySeeds: true,
         chatHandoffs: true,
       },
     });
+    assert.doesNotMatch(JSON.stringify(body), /sk-ant-test|ANTHROPIC_API_KEY|APPLE|PASSWORD/);
     assert.equal(called, false);
   } finally {
     await closeServer(server);
@@ -145,12 +158,49 @@ test("GET /api/runtime/config: reports no AI route and no discovery chat handoff
       skills: ["evaluate-job"],
       chatSkills: ["ingest-profile"],
       ai: { available: false, route: "none" },
+      runtime: {
+        defaultToolProfile: DEFAULT_RUNTIME_TOOL_PROFILE,
+        defaultTools: [...APP_SAFE_RUNTIME_TOOLS],
+        toolHeavy: {
+          available: false,
+          skills: [],
+        },
+      },
       discovery: {
         companyProposals: true,
         manualCompanySeeds: true,
         chatHandoffs: false,
       },
     });
+  } finally {
+    await closeServer(server);
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("GET /api/runtime/config: exposes classified tool-heavy runtime skills without exposing secrets", async () => {
+  const repoRoot = tempRepoWithSkills(["apply-job", "sync-status", "evaluate-job"]);
+  const server = await bootRouteServer(async () => {}, {
+    repoRoot,
+    env: {
+      ROLESTER_RUNTIME_SKILLS: "apply-job,sync-status,evaluate-job",
+      ANTHROPIC_API_KEY: "sk-ant-secret",
+      APPLE_ID_PASSWORD: "apple-secret",
+    },
+  });
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/runtime/config`);
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(body.runtime, {
+      defaultToolProfile: DEFAULT_RUNTIME_TOOL_PROFILE,
+      defaultTools: [...APP_SAFE_RUNTIME_TOOLS],
+      toolHeavy: {
+        available: true,
+        skills: ["apply-job", "sync-status"],
+      },
+    });
+    assert.doesNotMatch(JSON.stringify(body), /sk-ant-secret|apple-secret|ANTHROPIC_API_KEY/);
   } finally {
     await closeServer(server);
     rmSync(repoRoot, { recursive: true, force: true });
@@ -210,6 +260,63 @@ test("POST /api/skill/run: 413 when the body exceeds the 1MB cap", async () => {
     });
     assert.equal(res.status, 413);
     await res.json();
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/skill/run: rejects unclassified tool-heavy profile requests before streaming starts", async () => {
+  let called = false;
+  const server = await bootRouteServer(async ({ onEvent }) => {
+    called = true;
+    onEvent({ type: "result", data: { ok: false, unexpectedRun: true } });
+  });
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        skill: "evaluate-job",
+        input: "hi",
+        toolProfile: "tool-heavy",
+      }),
+    });
+    assert.equal(res.status, 400);
+    assert.match(res.headers.get("content-type") || "", /application\/json/);
+    assert.doesNotMatch(res.headers.get("content-type") || "", /text\/event-stream/);
+    const body = await res.json();
+    assert.match(body.error, /tool-heavy.*evaluate-job|evaluate-job.*tool-heavy/);
+    assert.equal(called, false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/skill/run: passes classified tool-heavy profile requests to runSkillStream", async () => {
+  let received = null;
+  const server = await bootRouteServer(async ({ skill, input, toolProfile, onEvent }) => {
+    received = { skill, input, toolProfile };
+    onEvent({ type: "result", data: { ok: true } });
+    return { ok: true };
+  });
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/skill/run`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        skill: "apply-job",
+        input: { appId: "app-1" },
+        toolProfile: "tool-heavy",
+      }),
+    });
+    assert.equal(res.status, 200);
+    const text = await readSseBody(res);
+    assert.match(text, /event: result/);
+    assert.deepEqual(received, {
+      skill: "apply-job",
+      input: { appId: "app-1" },
+      toolProfile: "tool-heavy",
+    });
   } finally {
     await closeServer(server);
   }
