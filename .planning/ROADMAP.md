@@ -16,7 +16,7 @@
 | 6 | Canonical DB App Shell | Make the Electron/React app DB-source-of-truth and remove compatibility surfaces from product paths. | APP-01, APP-02, APP-03, APP-04 | Complete (10/10, 2026-07-05) |
 | 7 | Quick Onboarding and Auto Sourcing | Start background sourcing as soon as minimum viable onboarding is complete, then return the user to deeper onboarding. | ONB-01, ONB-02, RUN-01, RUN-02 | Complete (8/8, 2026-07-06) |
 | 8 | Deep Ingest Lane | 2/9 | In Progress|  |
-| 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Planned |
+| 9 | Public Company Intelligence and Scanner Cascade | 1/6 | In Progress|  |
 | 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Planned |
 | 11 | Runtime Lockdown and Desktop Release | Remove broad skill-tool power from app defaults and harden the desktop product path for pilot use. | SEC-01, SEC-02, DESK-01, DESK-02 | Planned |
 

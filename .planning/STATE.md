@@ -2,15 +2,15 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
-current_phase: 08 — Deep Ingest Lane
+current_phase: 09
 status: Ready to execute
-stopped_at: Completed 08-deep-ingest-lane-02-PLAN.md
-last_updated: "2026-07-06T01:09:01.961Z"
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-07-06T13:34:46.135Z"
 progress:
   total_phases: 11
   completed_phases: 6
-  total_plans: 45
-  completed_plans: 38
+  total_plans: 51
+  completed_plans: 39
   percent: 55
 ---
 
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 08 — Deep Ingest Lane
+**Current focus:** Phase 09 — public-company-intelligence-and-scanner-cascade
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
-- **Current phase:** 08 — Deep Ingest Lane
+- **Current phase:** 09
 - **Current phase status:** In Progress
-- **Next command:** `$gsd-execute-phase 8`
+- **Next command:** `$gsd-execute-phase 9`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -48,21 +48,21 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Open Questions
 
-- None blocking for Phase 8 execution.
+- None blocking for Phase 9 execution.
 
 ## Next Steps
 
-1. Execute Phase 8 deep ingest lane.
-2. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
-3. Use the Phase 7 verification report as the handoff that quick onboarding can start durable first-search work before deep ingest continues.
+1. Continue Phase 9 with Plan 09-02: public-intel DB tables, scrub validator, sync preview, and onboarding preference.
+2. Keep Phase 9 execution in dependency order: storage/scrub before scanner cascade, AI fallback, review UI, then final guards.
+3. Preserve the public/private data boundary: public metadata only, no candidate profile, comp, fit, tracker, private notes, local paths, raw AI data, page bodies, or job postings.
 
 ---
 *State initialized: 2026-07-04*
 
 ## Session
 
-**Last session:** 2026-07-06T01:09:01.954Z
-**Stopped at:** Completed 08-deep-ingest-lane-02-PLAN.md
+**Last session:** 2026-07-06T13:34:46.126Z
+**Stopped at:** Completed 09-01-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -118,6 +118,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P08 | 7m44s | 3 tasks | 4 files |
 | Phase 08 P01 | 9 min | 3 tasks | 10 files |
 | Phase 08-deep-ingest-lane P02 | 7 min | 2 tasks | 7 files |
+| Phase 09 P01 | 10 min | 3 tasks | 7 files |
 
 ## Decisions
 
