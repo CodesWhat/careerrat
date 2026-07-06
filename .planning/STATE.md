@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
-current_phase: 07
-status: In Progress
-stopped_at: Completed 07-08-PLAN.md
-last_updated: "2026-07-05T23:13:23.941Z"
+current_phase: 08 — Deep Ingest Lane
+status: Ready to execute
+stopped_at: Completed Phase 7 verification
+last_updated: "2026-07-06T00:34:45Z"
 progress:
   total_phases: 11
-  completed_phases: 6
-  total_plans: 45
-  completed_plans: 36
-  percent: 55
+  completed_phases: 7
+  total_plans: 55
+  completed_plans: 46
+  percent: 84
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 07 — Quick Onboarding and Auto Sourcing
+**Current focus:** Phase 08 — Deep Ingest Lane
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
-- **Current phase:** 07
-- **Current phase status:** In Progress
-- **Next command:** `$gsd-execute-phase 7`
+- **Current phase:** 08 — Deep Ingest Lane
+- **Current phase status:** Planned
+- **Next command:** `$gsd-execute-phase 8`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -48,21 +48,21 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Open Questions
 
-- None blocking for Phase 7 execution.
+- None blocking for Phase 8 execution.
 
 ## Next Steps
 
-1. Execute Phase 7 quick onboarding and auto-sourcing.
+1. Execute Phase 8 deep ingest lane.
 2. Keep phases 7-11 in order unless implementation evidence shows a dependency needs to move.
-3. Use the Phase 6 verification report as the handoff that `/app` and DB source-of-truth migration are complete.
+3. Use the Phase 7 verification report as the handoff that quick onboarding can start durable first-search work before deep ingest continues.
 
 ---
 *State initialized: 2026-07-04*
 
 ## Session
 
-**Last session:** 2026-07-05T23:13:23.794Z
-**Stopped at:** Completed 07-08-PLAN.md
+**Last session:** 2026-07-06T00:34:45Z
+**Stopped at:** Completed Phase 7 verification
 **Resume file:** None
 
 ## Performance Metrics
