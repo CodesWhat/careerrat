@@ -27,7 +27,7 @@ const CANVAS = 1024;
 const BODY = 824; // Big Sur icon body
 const MARGIN = (CANVAS - BODY) / 2; // 100
 const RADIUS = 185; // ~22.5% of body
-const LOGO_BOX = 640; // mascot bounding box, centred (leaves ~92px inside the body)
+const LOGO_BOX = 720; // mascot bounding box, centred (fills the body with tasteful padding)
 
 // Cream brand ramp, from apps/web/src/styles/tokens.css (--paper-*): a whisper
 // of top-to-bottom gradient for depth without looking like a button.
