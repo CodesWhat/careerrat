@@ -28,6 +28,18 @@ const REQUIRED_LANES = [
   "open_gaps",
 ];
 
+const VALID_LANE_STATUSES = [
+  "not_started",
+  "needs_source",
+  "scanning",
+  "review_needed",
+  "gap",
+  "completed",
+  "deferred",
+  "not_available",
+  "failed",
+];
+
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-deep-ingest-db-"));
   cleanupRoots.push(repoRoot);
@@ -119,21 +131,38 @@ test("migration 008 creates Deep ingest JSON tables with generated query columns
     "target_shape",
     "status",
     "source_kind",
+    "updated_at",
   ]);
-  assertJsonTableWithGeneratedColumns(db, "deep_ingest_source_chunks", ["source_id", "chunk_kind"]);
+  assertJsonTableWithGeneratedColumns(db, "deep_ingest_source_chunks", [
+    "source_id",
+    "chunk_kind",
+    "updated_at",
+  ]);
   assertJsonTableWithGeneratedColumns(db, "deep_ingest_proposals", [
     "source_id",
     "target_shape",
     "status",
     "lane",
+    "updated_at",
   ]);
-  assertJsonTableWithGeneratedColumns(db, "deep_ingest_lane_states", ["lane", "status"]);
-  assertJsonTableWithGeneratedColumns(db, "deep_ingest_story_bank", ["story_status"]);
-  assertJsonTableWithGeneratedColumns(db, "deep_ingest_writing_voice", ["voice_status"]);
-  assertJsonTableWithGeneratedColumns(db, "deep_ingest_honesty_boundaries", ["boundary_type"]);
+  assertJsonTableWithGeneratedColumns(db, "deep_ingest_lane_states", [
+    "lane",
+    "status",
+    "updated_at",
+  ]);
+  assertJsonTableWithGeneratedColumns(db, "deep_ingest_story_bank", ["story_status", "updated_at"]);
+  assertJsonTableWithGeneratedColumns(db, "deep_ingest_writing_voice", [
+    "voice_status",
+    "updated_at",
+  ]);
+  assertJsonTableWithGeneratedColumns(db, "deep_ingest_honesty_boundaries", [
+    "boundary_type",
+    "updated_at",
+  ]);
   assertJsonTableWithGeneratedColumns(db, "deep_ingest_role_signals", [
     "role_family",
     "signal_type",
+    "updated_at",
   ]);
 
   const indexes = db
@@ -143,8 +172,16 @@ test("migration 008 creates Deep ingest JSON tables with generated query columns
     .all()
     .map((row) => row.name);
   assert.ok(indexes.includes("idx_deep_ingest_sources_status"));
+  assert.ok(indexes.includes("idx_deep_ingest_sources_updated_at"));
   assert.ok(indexes.includes("idx_deep_ingest_proposals_status_lane"));
+  assert.ok(indexes.includes("idx_deep_ingest_proposals_updated_at"));
   assert.ok(indexes.includes("idx_deep_ingest_lane_states_lane_status"));
+  assert.ok(indexes.includes("idx_deep_ingest_lane_states_updated_at"));
+
+  const laneSql = tableSql(db, "deep_ingest_lane_states") || "";
+  for (const status of VALID_LANE_STATUSES) {
+    assert.match(laneSql, new RegExp(`'${status}'`), `expected lane status ${status} in schema`);
+  }
 });
 
 test("source and proposal verbs persist reviewable state without requiring candidate compatibility files", async () => {
@@ -292,6 +329,41 @@ test("proposal decisions enforce expected-version conflicts and keep unconfirmed
   });
   assert.equal(confirmed.status, "confirmed");
   assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims + 1);
+});
+
+test("lane state verbs accept the documented statuses and reject invalid lane state", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  seedSearchReadyCandidate(repoRoot);
+  const { deepIngestLaneSetState, deepIngestStateGet } = await loadDeepIngestVerbs();
+
+  for (const status of VALID_LANE_STATUSES) {
+    const result = deepIngestLaneSetState({
+      repoRoot,
+      lane: "open_gaps",
+      status,
+      reason: ["gap", "deferred", "not_available", "failed"].includes(status)
+        ? `Reason for ${status}`
+        : undefined,
+    });
+    assert.equal(result.laneState.status, status);
+  }
+
+  const state = deepIngestStateGet({ repoRoot });
+  assert.equal(state.laneStates.open_gaps.status, "failed");
+
+  assert.throws(
+    () => deepIngestLaneSetState({ repoRoot, lane: "open_gaps", status: "bogus" }),
+    /status/i
+  );
+  assert.throws(
+    () => deepIngestLaneSetState({ repoRoot, lane: "not_a_lane", status: "completed" }),
+    /lane/i
+  );
+  assert.throws(
+    () => deepIngestLaneSetState({ repoRoot, lane: "open_gaps", status: "deferred" }),
+    /reason/i
+  );
 });
 
 test("deep_ingest_complete is computed only from terminal lane states and stays independent from search readiness", async () => {
