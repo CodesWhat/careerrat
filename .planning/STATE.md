@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 11
 status: In Progress
-stopped_at: Completed 11-06-PLAN.md
-last_updated: "2026-07-06T17:09:59.596Z"
+stopped_at: Completed 11-07-PLAN.md
+last_updated: "2026-07-06T17:45:35.513Z"
 progress:
   total_phases: 11
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 65
-  completed_plans: 51
-  percent: 78
+  completed_plans: 52
+  percent: 80
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T17:09:59.187Z
-**Stopped at:** Completed 11-06-PLAN.md
+**Last session:** 2026-07-06T17:45:35.020Z
+**Stopped at:** Completed 11-07-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -130,6 +130,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 11-runtime-lockdown-and-desktop-release P03 | 5 min | 2 tasks | 4 files |
 | Phase 11-runtime-lockdown-and-desktop-release P05 | 2 min continuation | 3 tasks | 4 files |
 | Phase 11-runtime-lockdown-and-desktop-release P06 | 4 min | 2 tasks | 4 files |
+| Phase 11-runtime-lockdown-and-desktop-release P07 | 15 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -273,6 +274,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 11-runtime-lockdown-and-desktop-release]: DESK-02 docs truthfulness is scoped to the desktop README, release checklist, and architecture runtime boundary rather than a broad documentation rewrite. — This preserves D-15 while making pilot-facing docs accurate enough for release.
 - [Phase 11-runtime-lockdown-and-desktop-release]: The desktop pilot docs name Electron /app and /app/onboarding as the normal product path; generated tracker/static pages are compatibility/debug/export support only. — This satisfies DESK-02 without changing retained debug/export surfaces.
 - [Phase 11-runtime-lockdown-and-desktop-release]: Auto-update wording is readiness-only: the package is signed/notarized for future updater work, but the desktop app does not install updates itself. — This preserves D-13 and avoids overclaiming update behavior.
+- [Phase 11-runtime-lockdown-and-desktop-release]: Final desktop pilot evidence requires both app-bundle and DMG notarization/stapling; generated release artifacts stay ignored and untracked. — Plan 11-07 found electron-builder stapled the app but not the DMG container, so the final release path signs/notarizes/staples the DMG explicitly.
 
 ### Blockers
 
