@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rolester.local/schemas/deep-ingest-source.schema.json",
+  "title": "Deep ingest source submission",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["targetShape", "sourceKind"],
+  "properties": {
+    "targetShape": {
+      "type": "string",
+      "enum": [
+        "auto",
+        "evidence",
+        "story",
+        "writing_voice",
+        "honesty_boundary",
+        "role_signal",
+        "paste",
+        "link"
+      ]
+    },
+    "sourceKind": {
+      "type": "string",
+      "enum": [
+        "paste",
+        "text",
+        "url",
+        "file",
+        "repo",
+        "local_path",
+        "linkedin",
+        "portfolio",
+        "note",
+        "recruiter_context",
+        "job_context",
+        "project_link"
+      ]
+    },
+    "text": { "type": "string" },
+    "url": { "type": "string" },
+    "path": { "type": "string" },
+    "repoPath": { "type": "string" },
+    "fileName": { "type": "string" },
+    "label": { "type": "string" },
+    "explicit": { "type": "boolean" },
+    "artifactPath": { "type": "string" },
+    "metadata": { "type": "object" }
+  }
+}

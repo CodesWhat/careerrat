@@ -5,6 +5,7 @@
     "PROGRAMFILES(X86)",
     "BOARD_BROWSER",
     "ROLESTER_DEV_PORT",
+    "ROLESTER_TRACKER_HOST",
     "PATHEXT"
   ],
   "tasks": {

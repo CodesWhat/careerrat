@@ -9,6 +9,7 @@ import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 
 const SOURCE_TABLE = "deep_ingest_sources";
+const CHUNK_TABLE = "deep_ingest_source_chunks";
 const PROPOSAL_TABLE = "deep_ingest_proposals";
 const LANE_TABLE = "deep_ingest_lane_states";
 
@@ -37,6 +38,7 @@ export const DEEP_INGEST_LANE_STATUSES = [
 export const DEEP_INGEST_TERMINAL_STATUSES = ["completed", "deferred", "not_available"];
 
 const TARGET_SHAPES = new Set([
+  "auto",
   "evidence",
   "story",
   "honesty_boundary",
@@ -112,7 +114,7 @@ function readRow(db, table, id) {
 
 function requireRow(db, table, id, label) {
   const row = readRow(db, table, id);
-  if (!row) throw makeError(`no ${label} with id "${id}"`, "NOT_FOUND");
+  if (!row) throw makeError(`${label} not found: "${id}"`, "NOT_FOUND");
   return row;
 }
 
@@ -216,6 +218,34 @@ function sourceFromInput(input = {}) {
     updatedAt: input.updatedAt || now,
   };
   return source;
+}
+
+function chunkFromInput(source, raw, index) {
+  const now = nowIso();
+  return {
+    id: raw?.id ? String(raw.id) : `${source.id}_chunk_${String(index + 1).padStart(3, "0")}`,
+    sourceId: source.id,
+    chunkKind: String(raw?.chunkKind || "text"),
+    index,
+    text: String(raw?.text || ""),
+    charStart: Number(raw?.charStart || 0),
+    charEnd: Number(raw?.charEnd || String(raw?.text || "").length),
+    byteStart: Number(raw?.byteStart || 0),
+    byteEnd: Number(raw?.byteEnd || Buffer.byteLength(String(raw?.text || ""), "utf8")),
+    createdAt: raw?.createdAt || source.createdAt || now,
+    updatedAt: raw?.updatedAt || source.updatedAt || now,
+  };
+}
+
+function replaceSourceChunks(db, source, chunks) {
+  db.prepare(`DELETE FROM ${CHUNK_TABLE} WHERE source_id = ?`).run(source.id);
+  const normalized = Array.isArray(chunks)
+    ? chunks.map((chunk, index) => chunkFromInput(source, chunk, index))
+    : [];
+  for (const chunk of normalized) {
+    putRow(db, CHUNK_TABLE, chunk.id, chunk);
+  }
+  return normalized;
 }
 
 function sourceOutcome(source) {
@@ -340,9 +370,11 @@ export function deepIngestSourceCreate({ repoRoot, env, input } = {}) {
   return runDeepIngestVerb({ repoRoot, env }, (db) => {
     const source = sourceFromInput(input);
     putRow(db, SOURCE_TABLE, source.id, source);
+    const chunks = replaceSourceChunks(db, source, input?.chunks);
     return {
       ok: true,
       source: readRow(db, SOURCE_TABLE, source.id),
+      chunks,
       outcome: sourceOutcome(source),
     };
   });
@@ -480,6 +512,7 @@ export function deepIngestLaneSetState({ repoRoot, env, lane, status, reason } =
 export function deepIngestStateGet({ repoRoot, env } = {}) {
   const db = requireDb({ repoRoot, env });
   const sources = readRows(db, SOURCE_TABLE);
+  const sourceChunks = readRows(db, CHUNK_TABLE);
   const proposals = readRows(db, PROPOSAL_TABLE);
   const laneRows = readRows(db, LANE_TABLE, "lane ASC");
   const laneStates = Object.fromEntries(
@@ -502,11 +535,17 @@ export function deepIngestStateGet({ repoRoot, env } = {}) {
   const terminalLanes = DEEP_INGEST_REQUIRED_LANES.filter((lane) =>
     DEEP_INGEST_TERMINAL_STATUSES.includes(laneStates[lane]?.status)
   );
+  const lanes = DEEP_INGEST_REQUIRED_LANES.map((lane) => ({
+    key: lane,
+    ...laneStates[lane],
+  }));
 
   return {
     ok: true,
     sources,
+    sourceChunks,
     proposals,
+    lanes,
     laneStates,
     confirmed: {
       evidence: proposals.filter(

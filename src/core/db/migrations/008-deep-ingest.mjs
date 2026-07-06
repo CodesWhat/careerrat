@@ -13,9 +13,9 @@ CREATE TABLE deep_ingest_sources (
   id TEXT PRIMARY KEY,
   data TEXT NOT NULL CHECK (json_valid(data)),
   target_shape TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN json_extract(data,'$.targetShape') END) STORED
-    CHECK (target_shape IN ('evidence','story','honesty_boundary','writing_voice','role_signal','gap','source','paste','link','profile','project','recruiter_context','job_context')),
+    CHECK (target_shape IN ('auto','evidence','story','honesty_boundary','writing_voice','role_signal','gap','source','paste','link','profile','project','recruiter_context','job_context')),
   status TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN json_extract(data,'$.status') END) STORED
-    CHECK (status IN ('captured','scanning','proposal_ready','review_needed','gap','saved','deferred','failed')),
+    CHECK (status IN ('captured','scanning','proposal_ready','review_needed','manual_fallback','gap','saved','deferred','not_available','failed')),
   source_kind TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN json_extract(data,'$.sourceKind') END) STORED
     CHECK (source_kind IN ('paste','text','url','file','repo','local_path','linkedin','portfolio','note','recruiter_context','job_context','project_link')),
   updated_at TEXT GENERATED ALWAYS AS (CASE WHEN json_valid(data) THEN coalesce(json_extract(data,'$.updatedAt'), json_extract(data,'$.updated_at')) END) STORED

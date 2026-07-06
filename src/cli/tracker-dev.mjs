@@ -60,6 +60,7 @@ import { mountBoardsRoutes } from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
+import { mountDeepIngestRoutes } from "./deep-ingest-route.mjs";
 import { mountDiscoveryRoutes } from "./discovery-route.mjs";
 import { mountIntakeRoutes } from "./intake-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
@@ -393,6 +394,7 @@ export function createDevServer({
   // yet" error until `rolester data init`/`import` creates one; there is no
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
   mountDataRoutes({ addRoute, repoRoot, env });
+  mountDeepIngestRoutes({ addRoute, repoRoot, env });
 
   // M10 — the server-derived dashboard view model (src/cli/dashboard-route.mjs):
   // one GET that reuses dashboard-data.js's buildDashboardViewModel UNMODIFIED
@@ -619,7 +621,7 @@ export function createDevServer({
       "/api/sourcing/runs/latest, /api/sourcing/first-run/start, " +
       "/api/sourcing/search/start, " +
       "/api/packet/list, /api/packet?id=:id, " +
-      "/api/data/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
+      "/api/data/*, /api/deep-ingest/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
     );
   }
 
