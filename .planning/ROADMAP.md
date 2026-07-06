@@ -18,7 +18,7 @@
 | 8 | Deep Ingest Lane | 2/9 | In Progress|  |
 | 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Complete (6/6, 2026-07-06) |
 | 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Planned |
-| 11 | Runtime Lockdown and Desktop Release | 4/7 | In Progress|  |
+| 11 | Runtime Lockdown and Desktop Release | 5/7 | In Progress|  |
 
 ## Phase Details
 
@@ -325,7 +325,7 @@ Plans:
 
 **Requirements:** SEC-01, SEC-02, DESK-01, DESK-02
 
-**Plans:** 4/7 plans executed
+**Plans:** 5/7 plans executed
 
 Plans:
 **Wave 1**
@@ -337,7 +337,7 @@ Plans:
 **Wave 2** *(blocked on relevant Wave 1 completion)*
 
 - [x] 11-03-PLAN.md - Make retained runtime and chat tool-heavy execution explicit.
-- [ ] 11-05-PLAN.md - Configure signed and notarized macOS pilot packaging.
+- [x] 11-05-PLAN.md - Configure signed and notarized macOS pilot packaging.
 
 **Wave 3** *(blocked on Wave 2 completion)*
 

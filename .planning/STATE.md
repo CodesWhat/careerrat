@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 11
 status: In Progress
-stopped_at: Completed 11-03-PLAN.md
-last_updated: "2026-07-06T16:40:44.813Z"
+stopped_at: Completed 11-05-PLAN.md
+last_updated: "2026-07-06T17:02:04.654Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 65
-  completed_plans: 49
-  percent: 75
+  completed_plans: 50
+  percent: 77
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T16:40:44.748Z
-**Stopped at:** Completed 11-03-PLAN.md
+**Last session:** 2026-07-06T17:01:24.916Z
+**Stopped at:** Completed 11-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -128,6 +128,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 11-runtime-lockdown-and-desktop-release P02 | 2 min | 2 tasks | 3 files |
 | Phase 11-runtime-lockdown-and-desktop-release P04 | 4m 13s | 2 tasks | 7 files |
 | Phase 11-runtime-lockdown-and-desktop-release P03 | 5 min | 2 tasks | 4 files |
+| Phase 11-runtime-lockdown-and-desktop-release P05 | 2 min continuation | 3 tasks | 4 files |
 
 ## Decisions
 
@@ -265,6 +266,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 11]: Runtime config exposes only non-secret app-safe tool profile metadata and the allowed tool-heavy skill names. — GET /api/runtime/config can inform app surfaces without leaking AI keys, Apple credentials, or credential paths.
 - [Phase 11]: Tool-heavy POST requests are rejected before SSE starts unless the requested skill is explicitly classified as a retained tool-heavy workflow. — Broad tool profile selection must be a route/profile decision, not an inherited default or in-band stream failure.
 - [Phase 11]: Chat runtime imports CHAT_RUNTIME_TOOLS directly from runtime-tools.mjs instead of deriving from the one-shot RUNTIME_TOOLS export. — Visible chat handoffs remain available but are classified separately from app-default one-shot runtime behavior.
+- [Phase 11-runtime-lockdown-and-desktop-release]: Pilot macOS packaging now requires forceCodeSigning, hardened runtime entitlements, and electron-builder notarization. — This satisfies DESK-01 and keeps unsigned development packaging out of the pilot success path.
+- [Phase 11-runtime-lockdown-and-desktop-release]: Apple credentials remain outside tracked source; the repo only records credential-neutral keychain and CI environment expectations. — This preserves the Phase 11 Apple credential disclosure boundary while allowing real notarization.
+- [Phase 11-runtime-lockdown-and-desktop-release]: The local notarization readiness gate uses the rolester-notary keychain profile and does not generate or commit release artifacts. — Plan 11-05 verifies credential readiness while Plan 11-07 owns final signed/notarized artifact evidence.
 
 ### Blockers
 
