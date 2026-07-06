@@ -54,6 +54,19 @@ export {
   intakeUpdate,
   reconcileOrphanedLaneCIntakeItems,
 } from "./intake.mjs";
+export {
+  PUBLIC_INTEL_REVIEW_ACTIONS,
+  publicBoardIntelUpsert,
+  publicCareersPageUpsert,
+  publicCompanyIntelUpsert,
+  publicIntelReviewDecision,
+  publicIntelReviewItemUpsert,
+  publicIntelReviewList,
+  publicIntelStateGet,
+  publicIntelSyncPreview,
+  publicSyncPreferenceGet,
+  publicSyncPreferenceSet,
+} from "./public-intel.mjs";
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
 export { NotFoundError } from "./shared.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";

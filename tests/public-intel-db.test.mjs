@@ -50,7 +50,7 @@ test("migration 009 creates separate public-intel tables with JSON constraints a
 
   assert.equal(ALL_MIGRATIONS.at(-1).id, 9);
   const migrationLog = db.prepare("SELECT id, name FROM _migrations WHERE id = ?").get(9);
-  assert.deepEqual(migrationLog, { id: 9, name: "public-intel" });
+  assert.deepEqual({ ...migrationLog }, { id: 9, name: "public-intel" });
 
   for (const table of [
     "public_company_intel",
