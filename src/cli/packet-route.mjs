@@ -56,7 +56,9 @@ import { requireDb } from "../core/db/connection.mjs";
 import { assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { markdownToHtml } from "../core/documents/export.mjs";
 import { lintArtifact } from "../core/documents/placeholder-lint.mjs";
+import { draftPacketAnswers } from "../core/packet/answers.mjs";
 import { evaluatePacketGate } from "../core/packet/gate.mjs";
+import { capturePacketQuestions } from "../core/packet/questions.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { classifyStage } from "../core/tracker/dashboard.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
@@ -228,24 +230,34 @@ function respondError(res, err) {
   sendJson(res, statusForError(err), { ok: false, error: err?.message || String(err) });
 }
 
-export function mountPacketRoutes({ addRoute, repoRoot, env = process.env, packetGateInvoke }) {
+export function mountPacketRoutes({
+  addRoute,
+  repoRoot,
+  env = process.env,
+  packetGateInvoke,
+  packetAnswersCall,
+}) {
   const pathCtx = { repoRoot, env };
 
-  // -------------------------------------------------------------------------
-  // POST /api/packet/gate
-  // -------------------------------------------------------------------------
-  addRoute("POST", "/api/packet/gate", async (req, res) => {
-    let body;
+  async function readPacketBody(req, res) {
     try {
-      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      return await readJsonBodyCapped(req, MAX_BODY_BYTES);
     } catch (err) {
       sendJson(res, err.status || 400, {
         ok: false,
         code: "BAD_REQUEST",
         error: { message: err.message },
       });
-      return;
+      return null;
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /api/packet/gate
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/packet/gate", async (req, res) => {
+    const body = await readPacketBody(req, res);
+    if (body === null) return;
 
     const result = await evaluatePacketGate({
       ...pathCtx,
@@ -253,6 +265,46 @@ export function mountPacketRoutes({ addRoute, repoRoot, env = process.env, packe
       invoke: packetGateInvoke,
     });
     sendJson(res, result.status, result.body);
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/packet/questions
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/packet/questions", async (req, res) => {
+    const body = await readPacketBody(req, res);
+    if (body === null) return;
+    try {
+      const data = await capturePacketQuestions({ ...pathCtx, ...body });
+      sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      sendJson(res, statusForError(err), {
+        ok: false,
+        code: err?.code || "PACKET_QUESTIONS_ERROR",
+        error: { message: err?.message || "packet question capture failed" },
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/packet/answers
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/packet/answers", async (req, res) => {
+    const body = await readPacketBody(req, res);
+    if (body === null) return;
+    try {
+      const data = await draftPacketAnswers({
+        ...pathCtx,
+        ...body,
+        call: packetAnswersCall,
+      });
+      sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      sendJson(res, statusForError(err), {
+        ok: false,
+        code: err?.code || "PACKET_ANSWERS_ERROR",
+        error: { message: err?.message || "packet answer drafting failed" },
+      });
+    }
   });
 
   // -------------------------------------------------------------------------
