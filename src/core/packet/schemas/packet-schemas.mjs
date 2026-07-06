@@ -53,6 +53,76 @@ const packetExcludedQuestionSchema = {
   },
 };
 
+const workspacePath = {
+  type: "string",
+  pattern: "^workspace/[^\\0]+$",
+};
+
+export const packetManifestSchema = {
+  type: "object",
+  required: ["applicationId", "generatedAt", "artifacts", "uploadReady"],
+  additionalProperties: true,
+  properties: {
+    applicationId: { type: "string" },
+    generatedAt: { type: "string" },
+    uploadReady: { type: "boolean" },
+    status: { type: "string" },
+    gapCount: { type: "integer", minimum: 0 },
+    artifacts: {
+      type: "object",
+      additionalProperties: false,
+      properties: {
+        resumeSource: workspacePath,
+        coverLetterSource: workspacePath,
+        answersSource: workspacePath,
+        resumePdf: workspacePath,
+        coverLetterPdf: workspacePath,
+        answersPdf: workspacePath,
+        resumeDocx: workspacePath,
+        coverLetterDocx: workspacePath,
+        packetManifest: workspacePath,
+      },
+    },
+    questions: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        source: workspacePath,
+        capturedAt: { type: "string" },
+        answerableCount: { type: "integer", minimum: 0 },
+        excludedCount: { type: "integer", minimum: 0 },
+        answerableIds: { type: "array", items: { type: "string" } },
+        excludedIds: { type: "array", items: { type: "string" } },
+        demographicSectionPresent: { type: "boolean" },
+      },
+    },
+    answerLineage: {
+      type: "object",
+      additionalProperties: true,
+      properties: {
+        answeredQuestionIds: { type: "array", items: { type: "string" } },
+        excludedQuestionIds: { type: "array", items: { type: "string" } },
+        source: workspacePath,
+      },
+    },
+    sources: {
+      type: "object",
+      additionalProperties: true,
+    },
+    gaps: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          kind: { type: "string" },
+          message: { type: "string" },
+        },
+      },
+    },
+  },
+};
+
 export const packetQuestionCaptureRequestSchema = {
   type: "object",
   additionalProperties: false,

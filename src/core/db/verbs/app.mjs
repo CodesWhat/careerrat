@@ -15,6 +15,8 @@
 // writes (like email-comms/schedule-meeting/tailor-application) and do not.
 import { classifyStage } from "../../tracker/dashboard.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
+import { validate } from "../../profile/schema-validator.mjs";
+import { packetManifestSchema } from "../../packet/schemas/packet-schemas.mjs";
 import {
   bumpMeta,
   getRow,
@@ -32,6 +34,25 @@ function requireApp(db, id) {
 
 function refreshAnalytics(db, now = new Date()) {
   return refreshAnalyticsInDb(db, { buildReevaluationAnalytics, now });
+}
+
+function validatePacketManifest(manifest) {
+  const result = validate(manifest, packetManifestSchema);
+  if (!result.valid) {
+    const err = new Error("packet manifest is invalid");
+    err.code = "BAD_PACKET_MANIFEST";
+    err.details = result.errors;
+    throw err;
+  }
+}
+
+function assertWorkspacePath(path, key) {
+  const value = String(path || "");
+  if (!value.startsWith("workspace/") || value.includes("\0") || value.includes("../")) {
+    const err = new Error(`packet artifact ${key} must be a workspace-relative path`);
+    err.code = "BAD_PACKET_ARTIFACT";
+    throw err;
+  }
 }
 
 // appUpsert({row}) — full-row insert/replace (capture-intake shape): a brand
@@ -229,5 +250,53 @@ export function appRegisterPacketQuestionCapture({
       refs: { applicationId: id, company: app.company, role: app.role },
     });
     return { id, meta, event, packetManifest: questionSummary };
+  });
+}
+
+export function appRegisterPacketArtifacts({
+  repoRoot,
+  env,
+  id,
+  artifacts = {},
+  manifest,
+  note,
+} = {}) {
+  if (!id) throw new Error("appRegisterPacketArtifacts: id is required");
+  if (!artifacts || typeof artifacts !== "object" || Array.isArray(artifacts)) {
+    throw new Error("appRegisterPacketArtifacts: artifacts object is required");
+  }
+
+  for (const [key, value] of Object.entries(artifacts)) {
+    if (value !== null && value !== undefined) assertWorkspacePath(value, key);
+  }
+
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const existingManifest = app.packetManifest || {};
+    const packetManifest = {
+      ...existingManifest,
+      ...(manifest || {}),
+      questions: manifest?.questions || existingManifest.questions,
+    };
+    validatePacketManifest(packetManifest);
+
+    const updatedArtifacts = {
+      ...(app.artifacts || {}),
+      ...Object.fromEntries(
+        Object.entries(artifacts).filter(([, value]) => value !== null && value !== undefined)
+      ),
+      packetGeneratedAt: nowIso(),
+    };
+    if (note) updatedArtifacts.packetNote = note;
+
+    const updated = { ...app, artifacts: updatedArtifacts, packetManifest };
+    putRow(db, "applications", id, updated);
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "tailored",
+      title: `${app.company || id} — packet artifacts registered`,
+      refs: { applicationId: id, company: app.company, role: app.role },
+    });
+    return { id, meta, event, artifacts: updatedArtifacts, packetManifest };
   });
 }
