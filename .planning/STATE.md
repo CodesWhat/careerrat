@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 11
 status: In Progress
-stopped_at: Completed 11-01-PLAN.md
-last_updated: "2026-07-06T15:16:17.953Z"
+stopped_at: Completed 11-02-PLAN.md
+last_updated: "2026-07-06T15:22:51.276Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 65
-  completed_plans: 46
-  percent: 71
+  completed_plans: 47
+  percent: 72
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T15:15:09.753Z
-**Stopped at:** Completed 11-01-PLAN.md
+**Last session:** 2026-07-06T15:22:51.266Z
+**Stopped at:** Completed 11-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -125,6 +125,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 09 P05 | 3 min | 3 tasks | 2 files |
 | Phase 09 P06 | 5 min | 3 tasks | 7 files |
 | Phase 11-runtime-lockdown-and-desktop-release P01 | 6m19s | 1 tasks | 1 files |
+| Phase 11-runtime-lockdown-and-desktop-release P02 | 2 min | 2 tasks | 3 files |
 
 ## Decisions
 
@@ -254,6 +255,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 09]: Public sync-preview scrub now blocks source config, search sources, sourced rows, job postings, page text, raw AI, local paths, and candidate-private fields. — This preserves the public-only sync-home boundary.
 - [Phase 09]: Public company intelligence documentation now defines public metadata scope, scanner branch order, no-AI no-result states, and explicit supported-ATS review approval. — Maintainers have a source-of-truth for the Phase 09 privacy and runtime contract.
 - [Phase 11]: SEC-01 is enforced by a slice-aware static guard: app-default files and local route slices are scanned while explicit chat, retained runtime owners, legacy/static clients, and test files require named classifications.
+- [Phase 11]: The one-shot runtime's RUNTIME_TOOLS export is now app-safe and excludes Write, Edit, and Bash by default. — Tool-heavy execution must name a profile or pass explicit tools before SDK query under bypassPermissions.
+- [Phase 11]: Explicit tools arrays remain caller authority and are copied before SDK use. — This preserves resume-extract's Read-only pattern while preventing mutable caller arrays from becoming shared runtime profile state.
 
 ### Blockers
 
