@@ -30,6 +30,12 @@
 
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { resolveAllowedChatSkills } from "../core/ai/chat-runtime.mjs";
+import {
+  APP_SAFE_RUNTIME_TOOLS,
+  DEFAULT_RUNTIME_TOOL_PROFILE,
+  isToolHeavyProfile,
+  RUNTIME_TOOL_PROFILES,
+} from "../core/ai/runtime-tools.mjs";
 import { resolveAllowedSkills } from "../core/ai/skill-runtime.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB cap per the P0-4 spec.
@@ -39,6 +45,19 @@ const DISCOVERY_CHAT_HANDOFF_SKILLS = new Set([
   "discover-companies",
   "search-jobs",
 ]);
+const TOOL_HEAVY_RUNTIME_SKILLS = new Set([
+  "apply-job",
+  "sync-status",
+  "interview-prep",
+  "ingest-mail",
+  "ingest-messages",
+  "relationship-sourcing",
+  "calendar-sync",
+]);
+
+function allowedToolHeavySkills(skills) {
+  return skills.filter((skill) => TOOL_HEAVY_RUNTIME_SKILLS.has(skill));
+}
 
 // Exported so other route mounters (src/cli/onboard-route.mjs) reuse the
 // exact same JSON-response and capped-body-read primitives instead of
@@ -132,8 +151,38 @@ export function readRawBodyCapped(req, maxBytes) {
 // unexpected internal failure, not a client mistake.
 function statusForRunError(err) {
   if (err?.code === "SDK_NOT_INSTALLED") return 501;
-  if (err?.code === "SKILL_NOT_ALLOWED" || err?.code === "NO_AI_ROUTE") return 400;
+  if (
+    err?.code === "SKILL_NOT_ALLOWED" ||
+    err?.code === "NO_AI_ROUTE" ||
+    err?.code === "RUNTIME_TOOL_PROFILE_INVALID"
+  ) {
+    return 400;
+  }
   return 500;
+}
+
+function validateToolProfileRequest({ skill, toolProfile }) {
+  if (toolProfile === undefined || toolProfile === null || toolProfile === "") {
+    return undefined;
+  }
+  const normalizedProfile = String(toolProfile).trim();
+  if (!Object.hasOwn(RUNTIME_TOOL_PROFILES, normalizedProfile)) {
+    const err = new Error(
+      `unsupported runtime tool profile "${normalizedProfile}" (expected: ${Object.keys(
+        RUNTIME_TOOL_PROFILES
+      ).join(", ")})`
+    );
+    err.status = 400;
+    throw err;
+  }
+  if (isToolHeavyProfile(normalizedProfile) && !TOOL_HEAVY_RUNTIME_SKILLS.has(skill)) {
+    const err = new Error(
+      `skill "${skill}" is not classified for tool-heavy runtime profile "${normalizedProfile}"`
+    );
+    err.status = 400;
+    throw err;
+  }
+  return normalizedProfile;
 }
 
 export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = process.env }) {
@@ -141,12 +190,21 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
     const skills = resolveAllowedSkills({ repoRoot, env });
     const chatSkills = resolveAllowedChatSkills({ repoRoot, env });
     const route = resolveAIRoute(env);
+    const toolHeavySkills = allowedToolHeavySkills(skills);
     sendJson(res, 200, {
       skills,
       chatSkills,
       ai: {
         available: route.type !== "none",
         route: route.type,
+      },
+      runtime: {
+        defaultToolProfile: DEFAULT_RUNTIME_TOOL_PROFILE,
+        defaultTools: [...APP_SAFE_RUNTIME_TOOLS],
+        toolHeavy: {
+          available: toolHeavySkills.length > 0,
+          skills: toolHeavySkills,
+        },
       },
       discovery: {
         companyProposals: true,
@@ -171,6 +229,13 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
       return;
     }
     const input = body?.input;
+    let toolProfile;
+    try {
+      toolProfile = validateToolProfileRequest({ skill, toolProfile: body?.toolProfile });
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
 
     // Client-disconnect -> abort. Deliberately `res.on("close")`, not
     // `req.on("close")`: for a request WITH a body, Node's IncomingMessage
@@ -222,6 +287,7 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
         repoRoot,
         onEvent: emit,
         signal: controller.signal,
+        toolProfile,
       });
     } catch (err) {
       if (!started) {

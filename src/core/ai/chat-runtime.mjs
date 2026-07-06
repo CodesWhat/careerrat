@@ -47,12 +47,12 @@
 
 import { randomUUID } from "node:crypto";
 import { resolveAIRoute } from "./call-ai.mjs";
+import { CHAT_RUNTIME_TOOLS } from "./runtime-tools.mjs";
 import {
   buildChildEnv,
   buildPrompt,
   loadClaudeAgentSdk,
   mapSdkMessage,
-  RUNTIME_TOOLS,
   resolveSkillAllowlist,
   writeByokUsage,
 } from "./skill-runtime.mjs";
@@ -69,16 +69,6 @@ import {
 // falls back to the default" semantics as ROLESTER_RUNTIME_SKILLS.
 const DEFAULT_CHAT_SKILLS =
   "ingest-profile,research-boards,discover-companies,search-jobs,email-comms,track-outcomes";
-
-// discover-companies does real WebSearch fan-out (its own STEP 1: "run at
-// least 4 distinct queries") — a capability RUNTIME_TOOLS deliberately
-// doesn't include, since none of the one-shot runtime's three skills
-// (evaluate-job/answer-question/tailor-application — see that constant's own
-// per-skill audit comment in skill-runtime.mjs) ever call it. Scoped to this
-// runtime only, not added to the shared RUNTIME_TOOLS constant itself, so
-// the one-shot skills' audited tool surface doesn't silently grow along with
-// it.
-const CHAT_TOOLS = [...RUNTIME_TOOLS, "WebSearch"];
 
 export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
@@ -503,7 +493,7 @@ export function createChatRuntime({
         abortController,
         settingSources: ["project"],
         skills: [trimmedSkill],
-        tools: CHAT_TOOLS,
+        tools: [...CHAT_RUNTIME_TOOLS],
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
         maxTurns,

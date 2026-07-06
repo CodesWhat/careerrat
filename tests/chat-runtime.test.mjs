@@ -440,7 +440,7 @@ test("createChatRuntime.startSession: the session past maxSessions is rejected M
 test("chat-runtime source imports the explicit chat runtime profile instead of deriving from one-shot tools", () => {
   const source = stripJavaScriptComments(readFileSync("src/core/ai/chat-runtime.mjs", "utf8"));
   assert.match(source, /CHAT_RUNTIME_TOOLS/);
-  assert.doesNotMatch(source, /RUNTIME_TOOLS/);
+  assert.doesNotMatch(source, /\bRUNTIME_TOOLS\b/);
   assert.doesNotMatch(source, /\[\s*\.\.\.RUNTIME_TOOLS\s*,\s*"WebSearch"\s*\]/);
 });
 
