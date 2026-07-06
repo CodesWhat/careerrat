@@ -225,9 +225,11 @@ export function deterministicSourceAttemptsFromState(state) {
 
 export function isSourceSetupReady({ state, firstSearchRun } = {}) {
   const attempted = deterministicSourceAttemptsFromState(state);
-  if (attempted != null) return attempted > 0;
-  if (state?.searchSourcesPresent === true) return true;
   const run = unwrapRun(firstSearchRun);
+  if (attempted != null) {
+    return attempted > 0 || run?.status === "running" || run?.status === "completed";
+  }
+  if (state?.searchSourcesPresent === true) return true;
   return run?.status === "running" || run?.status === "completed";
 }
 

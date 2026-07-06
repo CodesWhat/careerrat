@@ -291,6 +291,32 @@ describe("FinishStep first-search setup task", () => {
     expect(task.canDefer).toBe(true);
   });
 
+  it("keeps existing first-search runs visible even if current deterministic counts are zero", () => {
+    expect(
+      FinishStepModule.isSourceSetupReady({
+        state: stateWithFirstSearch(
+          { status: "running" },
+          {
+            deterministicSources: { attempted: 0, rss: 0, supportedAtsCompanies: 0, skipped: 1 },
+            data: {
+              sourcing: {
+                sourceSetup: {
+                  deterministicSources: {
+                    attempted: 0,
+                    rss: 0,
+                    supportedAtsCompanies: 0,
+                    skipped: 1,
+                  },
+                },
+              },
+            },
+          }
+        ),
+        firstSearchRun: { status: "running" },
+      })
+    ).toBe(true);
+  });
+
   it("persists a non-default cadence before starting the first search", async () => {
     expect(FinishStepModule.saveCadenceAndStartFirstSearch).toBeTypeOf("function");
     const calls = [];
