@@ -17,7 +17,7 @@ const PROFILE = {
     github: "github.com/alexrivera",
   },
   compensation: {
-    expected_base: 225000,
+    expected_base: 210000,
     current_base: "PRIVATE_CURRENT_BASE_SENTINEL",
   },
 };
@@ -283,7 +283,10 @@ test("packet source enumeration covers every D-08 source class without private c
   ]);
   assert.equal(sources.candidateProfile.candidate.full_name, "Alex Rivera");
   assert.equal(sources.capturedJobBody.path, "workspace/jobs/acme-ai-applied-ai-engineer.md");
-  assert.equal(sources.capturedQuestions.path, "workspace/jobs/acme-ai-applied-ai-engineer.questions.json");
+  assert.equal(
+    sources.capturedQuestions.path,
+    "workspace/jobs/acme-ai-applied-ai-engineer.questions.json"
+  );
   assert.deepEqual(
     sources.confirmedEvidence.claims.map((claim) => claim.id),
     ["ev-ai-001", "ev-iam-002"]
@@ -292,7 +295,8 @@ test("packet source enumeration covers every D-08 source class without private c
 });
 
 test("source splitting keeps raw/proposed material out of claimable packet evidence", async () => {
-  const { enumeratePacketSources, splitConfirmedAndProposedPacketSources } = await loadGenerateModule();
+  const { enumeratePacketSources, splitConfirmedAndProposedPacketSources } =
+    await loadGenerateModule();
 
   const split = splitConfirmedAndProposedPacketSources(enumeratePacketSources(PACKET_CONTEXT));
   assert.ok(
@@ -367,13 +371,15 @@ test("private compensation and unconfirmed claims are rejected before upload-rea
     proposals: [
       {
         kind: "coverLetter",
-        text:
-          "I can use PRIVATE_CURRENT_BASE_SENTINEL and the unreviewed Kubernetes claim to justify fit.",
+        text: "I can use PRIVATE_CURRENT_BASE_SENTINEL and the unreviewed Kubernetes claim to justify fit.",
         evidenceIds: ["ev-ai-001"],
       },
     ],
   });
 
   assert.equal(result.ok, false);
-  assert.match(result.gaps.map((gap) => gap.message).join("\n"), /private|current|unreviewed|Kubernetes/i);
+  assert.match(
+    result.gaps.map((gap) => gap.message).join("\n"),
+    /private|current|unreviewed|Kubernetes/i
+  );
 });
