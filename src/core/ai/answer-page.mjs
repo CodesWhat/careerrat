@@ -1,27 +1,13 @@
 // answer-page.mjs — POC apply-packet item 3: the Interactive Q&A slice's UI.
 // A single self-contained page: paste an application-form/screening question
-// (optionally with company/role context) → POST /api/skill/run drives
-// answer-question through the embedded runtime (P0-4) → the SSE stream
-// renders live as a compact event feed, then an answer card (drafted text,
-// SOURCE/DURABLE/PERSISTED markers, duration, usage, cost) once the `result`
-// event lands.
+// (optionally with company/role context) and draft through local packet APIs.
 //
 // Cloned from evaluate-page.mjs's exact pattern: a plain template-literal
 // export (no server-side interpolation) mounted verbatim by tracker-dev.mjs
-// at GET /answer, byte-static and cacheable. EventSource can't POST, so the
-// client hand-parses the `event: <type>\ndata: <json>\n\n` framing straight
-// off a fetch() ReadableStream — mirrors skill-run-route.mjs's own emit()
-// framing exactly (see MAX_BODY_BYTES/emit() there). Inline <script> is kept
+// at GET /answer, byte-static and cacheable. Inline <script> is kept
 // intentionally small and is syntax-checked (not executed) by
 // tests/answer-page.test.mjs, the same `new Function()` guard
 // client-script.test.mjs uses for DASHBOARD_SCRIPT.
-//
-// answer-question's SKILL.md "Output contract" fixes the assistant's final
-// text to end with exactly three trailing marker lines (SOURCE:/DURABLE:/
-// PERSISTED:) — this page's client pulls those off the tail of the
-// accumulated assistant text, strips them from the rendered answer body, and
-// shows them in a dedicated footer instead. See extractMarkers()/
-// stripMarkers() below.
 
 export const ANSWER_PAGE_HTML = `<!doctype html>
 <html lang="en">
@@ -179,7 +165,7 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
 <main>
   <header>
     <h1>Answer a question</h1>
-    <p class="lede">Paste an application-form or screening question — answer-question runs live and drafts a grounded, first-person answer.</p>
+    <p class="lede">Paste an application-form or screening question and draft a grounded, first-person answer.</p>
   </header>
 
   <section class="intake">
@@ -215,6 +201,7 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
       <p id="source-line" data-hook="source-line" hidden></p>
       <p id="durable-line" data-hook="durable-line" hidden></p>
       <p id="persisted-line" data-hook="persisted-line" hidden></p>
+      <p id="excluded-line" data-hook="excluded-line" hidden></p>
     </div>
   </section>
 </main>
@@ -237,14 +224,7 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
   var sourceLineEl = document.getElementById("source-line");
   var durableLineEl = document.getElementById("durable-line");
   var persistedLineEl = document.getElementById("persisted-line");
-
-  var allowedSkills = [];
-  var accumulatedText = "";
-
-  function truncate(text, max) {
-    var t = String(text || "").replace(/\\s+/g, " ").trim();
-    return t.length > max ? t.slice(0, max - 1) + "…" : t;
-  }
+  var excludedLineEl = document.getElementById("excluded-line");
 
   function addFeedLine(text, kind) {
     feedSection.hidden = false;
@@ -265,248 +245,157 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
     errorBox.textContent = "";
   }
 
-  // Mirrors skill-run-route.mjs's emit(): "event: <type>\\ndata: <json>\\n\\n",
-  // plus bare ": heartbeat" comment lines every 15s — skipped here.
-  function parseSseBlock(raw) {
-    var lines = raw.split("\\n");
-    var type = null;
-    var dataLines = [];
-    for (var i = 0; i < lines.length; i++) {
-      var line = lines[i];
-      if (!line || line.charAt(0) === ":") continue;
-      if (line.indexOf("event:") === 0) type = line.slice(6).trim();
-      else if (line.indexOf("data:") === 0) dataLines.push(line.slice(5).trim());
-    }
-    if (!type) return null;
-    var payload = dataLines.join("\\n");
-    var data;
-    try {
-      data = JSON.parse(payload);
-    } catch (e) {
-      data = payload;
-    }
-    return { type: type, data: data };
-  }
-
-  function extractAssistantText(msg) {
-    var content = msg && msg.message && msg.message.content;
-    if (!Array.isArray(content)) return "";
-    var parts = [];
-    for (var i = 0; i < content.length; i++) {
-      if (content[i] && content[i].type === "text" && content[i].text) {
-        parts.push(content[i].text);
-      }
-    }
-    return parts.join("\\n");
-  }
-
-  // Pulls the LAST occurrence of each trailing marker line out of the
-  // accumulated assistant text — answer-question's SKILL.md "Output contract"
-  // fixes SOURCE:/DURABLE:/PERSISTED: as the final lines of the reply, see
-  // .agents/skills/answer-question. Same last-occurrence technique
-  // evaluate-page.mjs's extractGateLines() uses, so a retried/streamed
-  // duplicate never confuses the extraction.
-  function extractMarkers(text) {
-    var patterns = {
-      source: /^SOURCE:.*$/gm,
-      durable: /^DURABLE:.*$/gm,
-      persisted: /^PERSISTED:.*$/gm
-    };
-    var out = {};
-    var keys = Object.keys(patterns);
-    for (var k = 0; k < keys.length; k++) {
-      var key = keys[k];
-      var re = patterns[key];
-      var m;
-      var last = null;
-      while ((m = re.exec(text))) last = m[0];
-      if (last) out[key] = last.trim();
-    }
-    return out;
-  }
-
-  // Strips every SOURCE:/DURABLE:/PERSISTED: line out of the body (they only
-  // ever appear once, at the tail, per the Output contract) and collapses the
-  // blank lines left behind so the rendered answer doesn't end in a gap.
-  function stripMarkers(text) {
-    var body = String(text || "");
-    body = body.replace(/^SOURCE:.*$/gm, "");
-    body = body.replace(/^DURABLE:.*$/gm, "");
-    body = body.replace(/^PERSISTED:.*$/gm, "");
-    return body.replace(/\\n{3,}/g, "\\n\\n").trim();
-  }
-
-  function formatUsd(costUsd) {
-    if (costUsd === null || costUsd === undefined) return "cost n/a";
-    return "$" + Number(costUsd).toFixed(4);
-  }
-
-  function formatDuration(ms) {
-    if (typeof ms !== "number") return "";
-    return (ms / 1000).toFixed(1) + "s";
-  }
-
   function setLine(el, text) {
     el.textContent = text || "";
     el.hidden = !text;
   }
 
-  function renderAnswer(result) {
-    var markers = extractMarkers(accumulatedText);
-    answerTextEl.textContent = stripMarkers(accumulatedText);
+  function messageFromBody(body, fallback) {
+    return (body && body.error && body.error.message) ||
+      (body && body.error) ||
+      (body && body.message) ||
+      fallback;
+  }
 
-    setLine(sourceLineEl, markers.source);
-    setLine(durableLineEl, markers.durable);
-    setLine(persistedLineEl, markers.persisted);
+  function requestOptions(payload) {
+    return {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload || {})
+    };
+  }
 
-    metaDurationEl.textContent = result && typeof result.durationMs === "number"
-      ? "duration: " + formatDuration(result.durationMs)
-      : "";
-    var usage = (result && result.usage) || {};
-    metaUsageEl.textContent = "tokens: " + (usage.tokensIn || 0) + " in / " + (usage.tokensOut || 0) + " out";
-    metaCostEl.textContent = formatUsd(result && result.costUsd);
+  function readJsonResult(res) {
+    return res.json()
+      .catch(function () {
+        return {};
+      })
+      .then(function (body) {
+        if (!res.ok || body.ok === false) {
+          throw new Error(messageFromBody(body, "Request failed with status " + res.status));
+        }
+        return body.data || body;
+      });
+  }
+
+  function captureQuestions(questionText) {
+    return fetch("/api/packet/questions", requestOptions({
+      source: "paste",
+      manualText: questionText
+    })).then(function (res) {
+      return readJsonResult(res);
+    });
+  }
+
+  function contextFromInput(value) {
+    var text = String(value || "").trim();
+    if (!text) return {};
+    var parts = text.split(" — ");
+    if (parts.length < 2) parts = text.split(" - ");
+    if (parts.length < 2) parts = text.split(" -- ");
+    return {
+      application: {
+        company: (parts[0] || text).trim(),
+        role: (parts.slice(1).join(" - ") || "").trim()
+      },
+      evidence: { claims: [] },
+      honesty: {}
+    };
+  }
+
+  function draftAnswers(capture, context) {
+    return fetch("/api/packet/answers", requestOptions({
+      context: context,
+      questions: capture
+    })).then(function (res) {
+      return readJsonResult(res);
+    });
+  }
+
+  function answerBody(answers) {
+    if (!answers.length) return "NEEDS YOU: add an answerable application question.";
+    if (answers.length === 1) return answers[0].answer || "";
+    var lines = [];
+    for (var i = 0; i < answers.length; i++) {
+      lines.push("Q: " + (answers[i].question || answers[i].questionId));
+      lines.push("A: " + (answers[i].answer || ""));
+      if (i < answers.length - 1) lines.push("");
+    }
+    return lines.join("\\n");
+  }
+
+  function renderAnswer(result, capture) {
+    var answers = Array.isArray(result && result.answers) ? result.answers : [];
+    var excludedQuestionIds = Array.isArray(result && result.excludedQuestionIds)
+      ? result.excludedQuestionIds
+      : [];
+    if (!excludedQuestionIds.length && capture && Array.isArray(capture.excluded)) {
+      excludedQuestionIds = capture.excluded.map(function (q) { return String(q.id); });
+    }
+    answerTextEl.textContent = answerBody(answers);
+
+    setLine(sourceLineEl, "SOURCE: local packet answers (" + answers.length + ")");
+    setLine(durableLineEl, result && result.manual && result.manual.required
+      ? "DURABLE: review required"
+      : "DURABLE: upload-ready");
+    setLine(persistedLineEl, "PERSISTED: one-off draft only");
+    setLine(excludedLineEl, excludedQuestionIds.length
+      ? "SKIPPED: " + excludedQuestionIds.length + " self-identification question" +
+        (excludedQuestionIds.length === 1 ? "" : "s") + " (" + excludedQuestionIds.join(", ") + ")"
+      : "");
+
+    var ai = (result && result.ai) || {};
+    metaDurationEl.textContent = "";
+    metaUsageEl.textContent = ai.used ? "ai: " + (ai.mode || "used") : "ai: not used";
+    metaCostEl.textContent = result && result.uploadReady ? "upload-ready" : "review";
 
     answerCard.hidden = false;
   }
 
-  function handleEvent(evt) {
-    switch (evt.type) {
-      case "system":
-        addFeedLine("system: " + (evt.data && evt.data.subtype ? evt.data.subtype : "event"), "system");
-        break;
-      case "assistant": {
-        var text = extractAssistantText(evt.data);
-        if (text) {
-          accumulatedText += (accumulatedText ? "\\n" : "") + text;
-          addFeedLine("assistant: " + truncate(text, 140), "assistant");
-        }
-        break;
-      }
-      case "tool_use":
-        addFeedLine("tool: " + (evt.data && evt.data.name ? evt.data.name : "unknown"), "tool");
-        break;
-      case "tool_result":
-        addFeedLine(
-          "result: " + (evt.data && evt.data.isError ? "error" : "ok"),
-          evt.data && evt.data.isError ? "error" : "tool-result"
-        );
-        break;
-      case "error": {
-        var message = (evt.data && evt.data.message) || "The run reported an error.";
-        addFeedLine("error: " + message, "error");
-        showError(message);
-        break;
-      }
-      case "result":
-        renderAnswer(evt.data);
-        break;
-      default:
-        break;
-    }
-  }
-
-  function runSkill(skill, skillInput, onDone) {
-    return fetch("/api/skill/run", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ skill: skill, input: skillInput })
-    }).then(function (res) {
-      if (!res.ok) {
-        return res
-          .json()
-          .catch(function () {
-            return { error: "Request failed with status " + res.status };
-          })
-          .then(function (body) {
-            var message = (body && body.error) || "Request failed with status " + res.status;
-            if (res.status === 501) {
-              message += " — install the @anthropic-ai/claude-agent-sdk devDependency to enable this.";
-            }
-            showError(message);
-            if (onDone) onDone();
-          });
-      }
-      clearError();
-      var reader = res.body.getReader();
-      var decoder = new TextDecoder();
-      var buffer = "";
-
-      function pump() {
-        return reader.read().then(function (step) {
-          if (step.done) {
-            if (onDone) onDone();
-            return undefined;
-          }
-          buffer += decoder.decode(step.value, { stream: true });
-          var idx;
-          while ((idx = buffer.indexOf("\\n\\n")) !== -1) {
-            var raw = buffer.slice(0, idx);
-            buffer = buffer.slice(idx + 2);
-            var evt = parseSseBlock(raw);
-            if (evt) handleEvent(evt);
-          }
-          return pump();
-        });
-      }
-      return pump();
-    }).catch(function (err) {
-      showError("Network error: " + (err && err.message ? err.message : String(err)));
-      if (onDone) onDone();
-    });
-  }
-
-  function answerQuestionAllowed() {
-    return allowedSkills.indexOf("answer-question") !== -1;
-  }
-
   function updateRunAvailability(isRunning) {
-    var allowed = answerQuestionAllowed();
-    runBtn.disabled = isRunning || !allowed;
-    runBtn.title = allowed ? "" : "enable answer-question in ROLESTER_RUNTIME_SKILLS";
-    runStatus.textContent = isRunning
-      ? "Running…"
-      : allowed
-        ? ""
-        : "answer-question is not enabled in ROLESTER_RUNTIME_SKILLS";
-  }
-
-  function composeInput(context, question) {
-    var parts = [];
-    if (context) parts.push("Company/Role context: " + context);
-    parts.push("Question(s):\\n" + question);
-    return parts.join("\\n\\n");
+    runBtn.disabled = !!isRunning;
+    runStatus.textContent = isRunning ? "Drafting..." : "";
   }
 
   runBtn.addEventListener("click", function () {
     var question = questionInput.value.trim();
     if (!question) return;
-    var context = contextInput.value.trim();
-    accumulatedText = "";
+    var context = contextFromInput(contextInput.value);
     feed.textContent = "";
     feedSection.hidden = false;
     answerCard.hidden = true;
     clearError();
     updateRunAvailability(true);
-    runSkill("answer-question", composeInput(context, question), function () {
+    addFeedLine("questions: capturing", "system");
+    captureQuestions(question).then(function (capture) {
+      var answerable = Array.isArray(capture.questions) ? capture.questions.length : 0;
+      var skipped = Array.isArray(capture.excluded) ? capture.excluded.length : 0;
+      addFeedLine("questions: " + answerable + " answerable, " + skipped + " skipped", "tool-result");
+      if (!answerable) {
+        return {
+          answers: [],
+          excludedQuestionIds: capture.excluded.map(function (q) { return String(q.id); }),
+          uploadReady: false,
+          manual: { required: true },
+          ai: { used: false },
+          capture: capture
+        };
+      }
+      addFeedLine("answers: drafting", "system");
+      return draftAnswers(capture, context).then(function (result) {
+        result.capture = capture;
+        return result;
+      });
+    }).catch(function (err) {
+      showError("Could not draft answer: " + (err && err.message ? err.message : String(err)));
+      throw err;
+    }).then(function (result) {
+      renderAnswer(result, result.capture);
+      updateRunAvailability(false);
+    }, function () {
       updateRunAvailability(false);
     });
   });
-
-  function applyAllowlist(skills) {
-    allowedSkills = skills || [];
-    updateRunAvailability(false);
-  }
-
-  fetch("/api/runtime/config")
-    .then(function (res) {
-      return res.ok ? res.json() : { skills: [] };
-    })
-    .then(function (config) {
-      applyAllowlist(config && config.skills);
-    })
-    .catch(function () {
-      applyAllowlist([]);
-    });
 })();
 </script>
 </body>
