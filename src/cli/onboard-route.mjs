@@ -56,6 +56,8 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateSetupInitialize,
+  publicSyncPreferenceGet,
+  publicSyncPreferenceSet,
   sourceConfigGet,
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
@@ -168,6 +170,11 @@ const CANDIDATE_ROUTE_ENTRIES = [
 // comment for why this extends the existing state read instead of adding a
 // new route.
 const SETTINGS_DATA_FILES = ["profile", "targeting", "form-defaults", "modes"];
+const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
+  enabled: true,
+  source: "default",
+  updatedAt: null,
+});
 
 // ---------------------------------------------------------------------------
 // Pure helpers
@@ -715,6 +722,7 @@ export function mountOnboardRoutes({
         });
         const deterministicSources = dbDeterministicSourceCounts(pathCtx);
         sendJson(res, 200, {
+          ok: true,
           files: dbCandidateFiles(repoRoot, pathCtx, config),
           data: {
             profile: config.profile,
@@ -736,6 +744,7 @@ export function mountOnboardRoutes({
           searchSourcesPresent: dbSearchSourcesPresent(pathCtx),
           logoImageTokenConfigured: !!(integrations.logo_dev_token || publishableToken),
           logoSearchTokenConfigured: !!(integrations.logo_dev_secret_key || secretKey),
+          publicSyncPreference: publicSyncPreferenceGet(pathCtx).preference,
         });
         return;
       } catch (err) {
@@ -785,6 +794,7 @@ export function mountOnboardRoutes({
     const { publishableToken, secretKey } = resolveLogoTokens(pathCtx, env);
 
     sendJson(res, 200, {
+      ok: true,
       files,
       data,
       sourceResumePresent: existsSync(userPath(pathCtx, sourceResumeEntry.candidatePath)),
@@ -792,7 +802,43 @@ export function mountOnboardRoutes({
       searchSourcesPresent: existsSync(userPath(pathCtx, "config/search-sources.yml")),
       logoImageTokenConfigured: !!publishableToken,
       logoSearchTokenConfigured: !!secretKey,
+      publicSyncPreference: DEFAULT_PUBLIC_SYNC_PREFERENCE,
     });
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/public-sync-preference — local opt-in/out for sharing
+  // public company and board metadata back to future Rolester users. The
+  // public-intel DB verbs are fail-closed scrubbed; this route only toggles
+  // whether the local workspace should participate.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/public-sync-preference", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { ok: false, error: { message: err.message } });
+      return;
+    }
+
+    if (typeof body?.enabled !== "boolean") {
+      sendJson(res, 400, {
+        ok: false,
+        error: { message: "public sync preference enabled must be a boolean" },
+      });
+      return;
+    }
+
+    try {
+      if (!dbExists(pathCtx)) candidateSetupInitialize(pathCtx);
+      const result = publicSyncPreferenceSet({ ...pathCtx, enabled: body.enabled });
+      sendJson(res, 200, { ok: true, publicSyncPreference: result.preference });
+    } catch (err) {
+      sendJson(res, err?.status || 400, {
+        ok: false,
+        error: { message: err?.message || String(err), code: err?.code || undefined },
+      });
+    }
   });
 
   // -------------------------------------------------------------------------

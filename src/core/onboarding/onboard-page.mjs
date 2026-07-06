@@ -144,6 +144,14 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
   .row:last-child { border-bottom: none; }
   .row input[type="checkbox"] { margin-top: 0.6rem; }
   .row .row-fields { flex: 1; display: flex; flex-direction: column; gap: 0.35rem; }
+  .check-label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.55rem;
+    color: var(--text);
+    font-size: 0.9rem;
+  }
+  .check-label input { margin-top: 0.2rem; }
   .links { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.75rem; }
   .links a {
     color: var(--accent);
@@ -268,6 +276,18 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
   <section id="step-8" data-hook="step-8" class="step" hidden>
     <h2>8. Finish</h2>
     <p class="hint">Generates config/search-sources.yml and candidate/AGENTS.md from your profile + targeting.</p>
+    <div class="field">
+      <label class="check-label" for="public-sync-toggle">
+        <input id="public-sync-toggle" data-hook="public-sync-toggle" type="checkbox" checked>
+        <span>Share public company and board metadata to improve Rolester for future searches.</span>
+      </label>
+      <p id="public-sync-copy" data-hook="public-sync-copy" class="hint">This can include company domains, career pages, ATS board links, providers, and scan confidence. It never sends resume text, profile data, applications, private notes, compensation, fit scores, or local files.</p>
+    </div>
+    <div class="actions">
+      <button id="public-sync-save" data-hook="public-sync-save" type="button" class="secondary">Save sharing preference</button>
+    </div>
+    <div id="public-sync-status" data-hook="public-sync-status" class="result">Public sync is on by default.</div>
+    <div id="public-sync-error" data-hook="public-sync-error" class="errors" hidden></div>
     <div class="actions">
       <button id="finish-btn" data-hook="finish-btn" type="button">Write config</button>
     </div>
@@ -298,6 +318,10 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
   var stateSummary = document.getElementById("state-summary");
   var backBtn = document.getElementById("back-btn");
   var nextBtn = document.getElementById("next-btn");
+  var publicSyncToggle = document.getElementById("public-sync-toggle");
+  var publicSyncStatus = document.getElementById("public-sync-status");
+  var publicSyncSave = document.getElementById("public-sync-save");
+  var publicSyncError = document.getElementById("public-sync-error");
 
   function showStep(n) {
     currentStep = n;
@@ -407,6 +431,19 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
       " | AI key: " + (state && state.keyConfigured ? "configured" : "not configured") +
       " | Search config: " + (state && state.searchSourcesPresent ? "written" : "not written");
     stateSummary.appendChild(otherLine);
+
+    var publicSync = state && state.publicSyncPreference;
+    var publicSyncLine = document.createElement("div");
+    publicSyncLine.textContent = "Public metadata sync: " + (publicSync && publicSync.enabled === false ? "off" : "on");
+    stateSummary.appendChild(publicSyncLine);
+  }
+
+  function renderPublicSyncPreference(preference) {
+    var enabled = !preference || preference.enabled !== false;
+    publicSyncToggle.checked = enabled;
+    publicSyncStatus.textContent = enabled
+      ? "Public sync is on for company and board metadata only."
+      : "Public sync is off for this workspace.";
   }
 
   function loadState() {
@@ -415,12 +452,34 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
         return res.ok ? res.json() : null;
       })
       .then(function (state) {
-        if (state) renderStateSummary(state);
+        if (state) {
+          renderStateSummary(state);
+          renderPublicSyncPreference(state.publicSyncPreference);
+        }
       })
       .catch(function () {
         // best effort — the state summary just stays empty
       });
   }
+
+  publicSyncSave.addEventListener("click", function () {
+    publicSyncSave.disabled = true;
+    clearErrors(publicSyncError);
+    postJson("/api/onboard/public-sync-preference", { enabled: publicSyncToggle.checked })
+      .then(function (result) {
+        publicSyncSave.disabled = false;
+        if (!result.ok || (result.body && result.body.ok === false)) {
+          renderErrors(publicSyncError, [{ path: "", message: (result.body && result.body.error && result.body.error.message) || "preference save failed" }]);
+          return;
+        }
+        renderPublicSyncPreference(result.body && result.body.publicSyncPreference);
+        loadState();
+      })
+      .catch(function (err) {
+        publicSyncSave.disabled = false;
+        renderErrors(publicSyncError, [{ path: "", message: String(err && err.message ? err.message : err) }]);
+      });
+  });
 
   // ---------------------------------------------------------------------
   // Step 1 — initialize workspace
