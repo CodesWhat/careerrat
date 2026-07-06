@@ -23,11 +23,18 @@ const VISIBLE_OUTCOME_STATUSES = new Set([
 const FORBIDDEN_RUNTIME_TOKENS = [
   "/api/skill/run",
   "/api/chat",
+  "POST /api/skill/run",
+  "runSkillStream",
   "skillRuntime",
   "chatId",
-  "runSkillStream",
   "chatRuntime",
   "handoff",
+  "ingest-profile",
+  "evaluate-job",
+  "apply-job",
+  "search-jobs",
+  "discover-companies",
+  "research-boards",
 ];
 
 function tempRepo() {

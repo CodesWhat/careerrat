@@ -18,6 +18,17 @@ const VISIBLE_OUTCOME_STATUSES = new Set([
   "failed",
 ]);
 
+const TARGET_SHAPES = [
+  "auto",
+  "evidence",
+  "story",
+  "writing_voice",
+  "honesty_boundary",
+  "role_signal",
+  "paste",
+  "link",
+];
+
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-deep-ingest-scanner-"));
   cleanupRoots.push(repoRoot);
@@ -73,6 +84,24 @@ test("scanDeepIngestSource reads pasted text directly and produces one visible p
   assert.equal(result.source.targetShape, "evidence");
   assert.match(result.chunks[0].text, /SQLite-backed/);
   assert.equal(result.truncated, false);
+});
+
+test("scanDeepIngestSource preserves every explicit Deep ingest target shape", async () => {
+  const { scanDeepIngestSource } = await loadScanner();
+
+  for (const targetShape of TARGET_SHAPES) {
+    const result = await scanDeepIngestSource({
+      input: {
+        targetShape,
+        sourceKind: "paste",
+        text: `Source material for ${targetShape}.`,
+      },
+    });
+
+    assertVisibleOutcome(result, { sourceKind: "paste" });
+    assert.equal(result.source.targetShape, targetShape);
+    assert.equal(result.outcome.targetShape, targetShape);
+  }
 });
 
 test("scanDeepIngestSource rejects unsafe schemes and private network hosts before fetch", async () => {
