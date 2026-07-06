@@ -18,7 +18,7 @@
 | 8 | Deep Ingest Lane | 2/9 | In Progress|  |
 | 9 | Public Company Intelligence and Scanner Cascade | Build privacy-scrubbed public company/job-board intelligence and deepen non-ATS discovery. | PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03 | Complete (6/6, 2026-07-06) |
 | 10 | Local Packet Engine | Generate ATS-ready resume, cover letter, and non-EEO answer packets through local APIs and bounded AI. | PKT-01, PKT-02, PKT-03, PKT-04 | Planned |
-| 11 | Runtime Lockdown and Desktop Release | Remove broad skill-tool power from app defaults and harden the desktop product path for pilot use. | SEC-01, SEC-02, DESK-01, DESK-02 | Planned |
+| 11 | Runtime Lockdown and Desktop Release | 1/7 | In Progress|  |
 
 ## Phase Details
 
@@ -325,12 +325,12 @@ Plans:
 
 **Requirements:** SEC-01, SEC-02, DESK-01, DESK-02
 
-**Plans:** 7 plans
+**Plans:** 1/7 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 11-01-PLAN.md - Add the slice-aware app-default runtime guard.
+- [x] 11-01-PLAN.md - Add the slice-aware app-default runtime guard.
 - [ ] 11-02-PLAN.md - Implement app-safe one-shot runtime tool profiles.
 - [ ] 11-04-PLAN.md - Harden desktop runtime paths, smoke, and external-link handling.
 

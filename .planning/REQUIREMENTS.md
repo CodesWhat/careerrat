@@ -142,7 +142,7 @@
 | PKT-02 | Phase 10 | Planned |
 | PKT-03 | Phase 10 | Planned |
 | PKT-04 | Phase 10 | Planned |
-| SEC-01 | Phase 11 | Planned |
+| SEC-01 | Phase 11 | Complete |
 | SEC-02 | Phase 11 | Planned |
 | DESK-01 | Phase 11 | Planned |
 | DESK-02 | Phase 11 | Planned |
