@@ -369,7 +369,22 @@ skills:
         owner_type: "db_verb"
         decisions:
           - "D-12"
-    bounded_ai: []
+      - step: "Run the product packet gate for a known application through the local packet API before packet generation."
+        owner: "src/core/packet/gate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Expose packet gate execution through POST /api/packet/gate for app-default packet flows."
+        owner: "src/cli/packet-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Use bounded schema-validated AI only for finite packet gate judgment when deterministic context is insufficient."
+        owner: "src/core/packet/gate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
     full_skill_runtime:
       - step: "Keep body-read judgment, ambiguous fit or comp decisions, browser JD capture escalation, and user-facing gate narration in the retained skill."
         owner: "src/core/ai/skill-runtime.mjs"
@@ -396,6 +411,7 @@ skills:
           - "D-12"
     notes:
       - "The deterministic gate module is a starting point, but the final body-read verdict still relies on the skill's evidence-bound judgment."
+      - "For ordinary packet generation, the local packet gate is the product default; retained evaluate-job remains an explicit handoff for broad body-read workflows."
   apply-job:
     source: ".agents/skills/apply-job/SKILL.md"
     requirements:
@@ -415,6 +431,16 @@ skills:
       - step: "Patch linked communications records when a submission satisfies a recruiter or portal CTA."
         owner: "src/core/db/verbs/comm.mjs"
         owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Capture application-page questions and exclude EEO, disability, veteran, and demographic prompts before answer generation."
+        owner: "src/core/packet/questions.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Generate packet materials for a gated application through local packet routes before supervised submit."
+        owner: "src/core/packet/generate.mjs"
+        owner_type: "existing_ts_module"
         decisions:
           - "D-12"
     bounded_ai: []
@@ -444,6 +470,118 @@ skills:
           - "D-07"
     notes:
       - "Application submission remains full skill and human-supervised for this phase."
+      - "Packet preparation is local product runtime; browser form fill and submit remain supervised apply-job behavior."
+  tailor-application:
+    source: ".agents/skills/tailor-application/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Assemble packet context from local application, profile, JD, evidence, captured questions, company research, and honesty boundaries."
+        owner: "src/core/packet/context.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Generate resume, cover-letter, answers, source markdown, and packet manifest artifacts for a gated application."
+        owner: "src/core/packet/generate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Register packet source, manifest, PDF, and conditional DOCX artifacts through application DB verbs."
+        owner: "src/core/db/verbs/app.mjs"
+        owner_type: "db_verb"
+        decisions:
+          - "D-12"
+      - step: "Expose ordinary packet generation and export through POST /api/packet/generate and POST /api/packet/export."
+        owner: "src/cli/packet-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-12"
+      - step: "Export user-facing packet files as PDF by default and DOCX only when selected or required by captured upload metadata."
+        owner: "src/core/packet/exports.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Draft finite cover-letter blocks with schema validation, evidence ids, no-AI fallback, and reviewable gaps."
+        owner: "src/core/packet/generate.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Draft non-EEO application answers with schema validation, evidence ids, and NEEDS YOU gaps."
+        owner: "src/core/packet/answers.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    full_skill_runtime:
+      - step: "Retain full tailoring workflow for broad evidence gathering, unusual application requirements, nuanced user review, or tool-heavy work explicitly requested by the user."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain honesty boundaries, evidence grounding, artifact expectations, and review language as the workflow contract."
+        owner: ".agents/skills/tailor-application/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Automatic application submission after packet generation."
+        owner: "planned:v2-auto-submit-policy"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+    notes:
+      - "Ordinary product packet generation does not call tailor-application through POST /api/skill/run."
+      - "Generated tracker and activity files are compatibility exports, not packet source of truth."
+  answer-question:
+    source: ".agents/skills/answer-question/SKILL.md"
+    requirements:
+      - "ARCH-01"
+      - "ARCH-02"
+    deterministic:
+      - step: "Normalize provider or pasted application questions and filter self-identification prompts before answer drafting."
+        owner: "src/core/packet/questions.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Reuse provider/manual question parsing for Greenhouse, Ashby, and pasted application text."
+        owner: "src/core/apply/form-questions.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+      - step: "Expose question capture and one-off local answer drafting through POST /api/packet/questions and POST /api/packet/answers."
+        owner: "src/cli/packet-route.mjs"
+        owner_type: "api_route"
+        decisions:
+          - "D-12"
+    bounded_ai:
+      - step: "Draft only answerable non-EEO questions with bounded schema-validated AI and evidence-id validation."
+        owner: "src/core/packet/answers.mjs"
+        owner_type: "existing_ts_module"
+        decisions:
+          - "D-12"
+    full_skill_runtime:
+      - step: "Retain full answer-question workflow for explicit agent-led review, unusual evidence gathering, or nuanced manually supervised answers outside the local packet path."
+        owner: "src/core/ai/skill-runtime.mjs"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    prompt_spec:
+      - step: "Retain the answer-question output contract and honesty guidance as the human/agent workflow contract."
+        owner: ".agents/skills/answer-question/SKILL.md"
+        owner_type: "retained_skill_runtime"
+        decisions:
+          - "D-12"
+    deferred:
+      - step: "Provider-specific browser form filling and submission of answers."
+        owner: "planned:v2-browser-surface"
+        owner_type: "planned_policy"
+        decisions:
+          - "D-07"
+    notes:
+      - "Ordinary one-off answer drafting in the app uses local packet answers, not answer-question through POST /api/skill/run."
+      - "EEO, disability, veteran, demographic, and voluntary self-identification prompts are skipped metadata, not generated answers."
   email-comms:
     source: ".agents/skills/email-comms/SKILL.md"
     requirements:

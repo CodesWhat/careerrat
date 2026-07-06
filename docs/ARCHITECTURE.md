@@ -128,6 +128,34 @@ Public-intel routes live under `/api/discovery/public-intel/*`. They return
 local API envelopes and do not start chat, call `POST /api/skill/run`, or write
 source config except through explicit supported-ATS review approval.
 
+The apply-packet engine is also local-first. Ordinary product packet work uses
+`src/cli/packet-route.mjs` and the `src/core/packet/*` services instead of
+launching retained skills:
+
+- `POST /api/packet/gate` runs the packet gate through
+  `src/core/packet/gate.mjs`, with bounded schema-validated AI only when finite
+  body-read judgment is needed.
+- `POST /api/packet/questions` captures supported provider or pasted
+  application questions through `src/core/packet/questions.mjs` and
+  `src/core/apply/form-questions.mjs`.
+- `POST /api/packet/answers` drafts non-EEO answers through
+  `src/core/packet/answers.mjs`.
+- `POST /api/packet/generate` builds the ATS-ready packet through
+  `src/core/packet/context.mjs`, `src/core/packet/generate.mjs`, document
+  tailoring helpers, and DB-owned artifact registration.
+- `POST /api/packet/export` creates user-facing packet exports through
+  `src/core/packet/exports.mjs` and `src/core/documents/export.mjs`.
+
+Packet APIs write canonical application artifacts through SQLite DB verbs. They
+do not treat generated `workspace/tracker.json` or `activity.jsonl` exports as
+product source of truth. Generated packet source markdown and manifests remain
+internal artifacts; user-facing exports default to PDF. DOCX is generated only
+when an upload requirement requests it or a user explicitly selects it. EEO,
+disability, veteran, demographic, and other voluntary self-identification
+questions are excluded before answer drafting; the UI may show skipped metadata
+but must not generate answers for those prompts. Packet generation prepares
+materials only and does not submit applications automatically.
+
 ### Bounded AI Layer
 
 Model calls are reserved for small schema-validated judgments:
@@ -146,6 +174,10 @@ For company discovery, bounded AI is limited to company seed judgment; the
 resolver, proposal gate, and confirmed writes stay deterministic. For public
 company intelligence, bounded AI is a last-resort extraction assist; it cannot
 approve a source-config write or become final provider identity by itself.
+For packet work, bounded AI is limited to finite schema-validated gate, cover
+letter block, and non-EEO answer proposals. Packet services validate evidence
+ids, preserve no-AI/manual review states, and mark unsupported material as
+reviewable rather than upload-ready.
 
 ### Conversational Chat Handoff Layer
 
@@ -161,6 +193,10 @@ handoff.
 need broad tools, long orchestration, streamed visibility, or retained
 `SKILL.md` execution. It is not the default route for deterministic scans,
 proposal decisions, source writes, or local app actions with existing owners.
+It is also not the ordinary route for packet generation or one-off packet answer
+drafting; `evaluate-job`, `tailor-application`, and `answer-question` remain
+explicit handoffs for agent-led workflows, broad browser work, nuanced judgment,
+and supervised submission flows.
 
 ### Skill Contract Layer
 

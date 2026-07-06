@@ -18,6 +18,14 @@ started.
 For app company discovery, bounded AI is limited to company seed judgment; seed
 output is advisory until deterministic validation, resolver/scanner/gate checks,
 and confirm-first source config or DB-owner writes approve it.
+Phase 10 makes the apply-packet path operational under the same boundary. The
+default packet controls call local packet routes mounted by
+`src/cli/packet-route.mjs`: `POST /api/packet/gate`,
+`POST /api/packet/questions`, `POST /api/packet/answers`,
+`POST /api/packet/generate`, and `POST /api/packet/export`. Those routes own
+gate judgment, provider or pasted question capture, non-EEO answer drafting,
+packet source generation, PDF/DOCX export, and DB artifact stamping before any
+retained skill workflow is started.
 
 The retained routing boundary is:
 
@@ -65,6 +73,7 @@ The retained routing boundary is:
 | deterministic local code | Inputs are already available locally and the work is scanning, filtering, scoring, dedupe, validation, file capture, rendering, proposal orchestration, or route orchestration. | `scripts/scan-sourced.mjs`, `src/core/scoring/sourced-scanner.mjs`, `src/core/scoring/sourced-persistence.mjs`, local route mounters such as `src/cli/search-route.mjs` and `src/cli/discovery-route.mjs`. | Open-ended research, ambiguous judgment, browser-authenticated tasks, or long user-led workflows. |
 | DB verb or CLI helper | The action mutates canonical state or source config and a DB verb or CLI already owns validation, idempotency, export, activity, or compatibility behavior. | `src/core/db/verbs/source-config.mjs`, `src/core/db/verbs/sourced.mjs`, `src/cli/data-route.mjs`, `src/cli/companies.mjs`, `src/cli/searches.mjs`. | Direct edits to generated workspace state, model-generated writes, or source updates that bypass existing validation. |
 | bounded structured AI | The caller needs a small finite model judgment, seed list, rewrite, classification, or normalization that can be expressed as schema-validated JSON. | `callAI()` in `src/core/ai/call-ai.mjs`, `runStructuredOneshot()` in `src/core/ai/structured-oneshot.mjs`, and route wrappers such as `src/cli/assist-route.mjs`. | Streaming tool loops, user interviews, confirmed writes, trusted final URLs, unrestricted web search, or anything that needs persistent agent state. |
+| packet local API | The caller is gating a known application, capturing application questions, drafting non-EEO answers, generating packet artifacts, or exporting packet files. | `src/cli/packet-route.mjs` with `src/core/packet/context.mjs`, `gate.mjs`, `questions.mjs`, `answers.mjs`, `generate.mjs`, and `exports.mjs`. | Auto-submit, broad browser-authenticated form filling, unsupported provider exploration, or open-ended evidence gathering. |
 | conversational skill handoff | The user wants an agent-led workflow, the flow is confirm-first, or the skill needs turn-by-turn questions while keeping the app in control. | `/api/chat/*` backed by `src/core/ai/chat-runtime.mjs`, with current discovery handoffs from `src/cli/discovery-route.mjs` for `/api/discovery/quick-start` and `/api/discovery/next`. | Cheap deterministic scans, DB writes with local verbs, or one-shot bounded assists that do not need a live skill session. |
 | full skill runtime | The workflow is tool-heavy, long-running, broad, hard to bound, watched by the user, or still intentionally retained as SKILL.md execution. Use `POST /api/skill/run` only through the allowlisted runtime surface. | `src/cli/skill-run-route.mjs` and `runSkillStream` in `src/core/ai/skill-runtime.mjs`. | Routine scan/search refreshes, source-config writes, deterministic validation, dedupe, schema-only model assists, or confirmed source writes with existing local owners. |
 
@@ -82,6 +91,11 @@ The retained routing boundary is:
 - Use `/api/data/*` routes from `src/cli/data-route.mjs` for state mutations that
   map to DB verbs. The UI should not hand-edit `workspace/tracker.json`,
   `workspace/activity.jsonl`, or compatibility source files.
+- Use `/api/packet/*` routes for ordinary packet work. Packet and answer page
+  defaults must call `POST /api/packet/questions`, `POST /api/packet/answers`,
+  `POST /api/packet/generate`, and `POST /api/packet/export` rather than
+  `POST /api/skill/run` with `evaluate-job`, `tailor-application`, or
+  `answer-question`.
 - Use bounded AI routes for small assistive suggestions, where missing AI config
   can return a clear no-AI response and the UI can offer manual input.
 - Use `/api/discovery/quick-start` and `/api/discovery/next` for explicit
@@ -152,6 +166,20 @@ The retained routing boundary is:
   `/api/discovery/next`; it also owns the local company proposal routes
   `/api/discovery/company-proposals` and
   `/api/discovery/company-proposal-decisions`.
+- `src/cli/packet-route.mjs` owns local packet routes:
+  `GET /api/packet/list`, `GET /api/packet`, `GET /api/packet/artifact`,
+  `POST /api/packet/gate`, `POST /api/packet/questions`,
+  `POST /api/packet/answers`, `POST /api/packet/generate`, and
+  `POST /api/packet/export`.
+- `src/core/packet/context.mjs` owns packet context assembly from local
+  candidate/application evidence; `gate.mjs` owns finite packet gate judgment;
+  `questions.mjs` owns question capture and self-identification exclusion;
+  `answers.mjs` owns non-EEO answer drafting; `generate.mjs` owns packet source
+  generation and manifest construction; `exports.mjs` owns PDF-default and
+  conditional-DOCX packet exports.
+- `src/core/db/verbs/app.mjs` owns DB artifact stamping for captured question
+  metadata, packet manifests, source markdown, and export paths. Generated
+  tracker/activity compatibility files are not packet source of truth.
 - `src/core/ai/chat-runtime.mjs` owns multi-turn conversational skill sessions
   behind `/api/chat/*`.
 - `src/cli/skill-run-route.mjs` owns `GET /api/runtime/config` and
@@ -226,6 +254,16 @@ The retained routing boundary is:
    - Incorrect route: using full skill runtime for routine deterministic scans,
      validation, dedupe, or DB writes.
 
+6. Prepare a packet for a gated application:
+   - Caller: UI or CLI surface with an application id.
+   - Correct route: capture questions with `POST /api/packet/questions`, draft
+     non-EEO answers with `POST /api/packet/answers`, generate with
+     `POST /api/packet/generate`, and export with `POST /api/packet/export`.
+   - Reason: local packet services own evidence boundaries, schema validation,
+     DB artifact stamping, PDF defaults, and conditional DOCX behavior.
+   - Incorrect route: hidden `POST /api/skill/run` calls to `tailor-application`
+     or `answer-question` for ordinary packet generation.
+
 ## Drift Checks
 
 - New UI actions must name their route class in design or plan notes:
@@ -242,6 +280,8 @@ The retained routing boundary is:
 - Any route that scans, validates, dedupes, writes confirmed sources, or persists
   sourced rows must prove it does not start `runSkillStream` or call
   `POST /api/skill/run` when a local owner exists.
+- Any app-default packet UI action must prove it does not start
+  `runSkillStream` or call `POST /api/skill/run` when local packet owners exist.
 - The decomposition validation test created by Plan 01-04 should include this
   policy's required route classes and owner paths so future edits cannot erase
   ARCH-03 coverage silently.
