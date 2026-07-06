@@ -40,6 +40,23 @@ test("desktop staging validates web dist and mirrors agent skills for Claude-sty
   );
 });
 
+test("electron-builder embeds every desktop main-process module imported by main", async () => {
+  const config = await readText("apps/desktop/electron-builder.yml");
+
+  for (const file of [
+    "main.mjs",
+    "desktop-runtime.mjs",
+    "desktop-routing.mjs",
+    "desktop-smoke.mjs",
+  ]) {
+    assert.match(
+      config,
+      new RegExp(`-\\s+${escapeRegExp(file)}\\b`),
+      `${file} must be included in the app bundle files list`
+    );
+  }
+});
+
 test("electron-builder embeds the full staged runtime, including hidden skill dirs and SDK node_modules", async () => {
   const config = await readText("apps/desktop/electron-builder.yml");
 
