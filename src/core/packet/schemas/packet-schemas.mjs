@@ -29,6 +29,89 @@ export const packetGateAiVerdictSchema = {
   },
 };
 
+const packetQuestionSchema = {
+  type: "object",
+  required: ["id", "label", "type", "required"],
+  additionalProperties: true,
+  properties: {
+    id: { type: "string" },
+    label: { type: "string" },
+    type: { type: "string" },
+    required: { type: "boolean" },
+    options: { type: ["array", "null"], items: { type: "string" } },
+  },
+};
+
+const packetExcludedQuestionSchema = {
+  type: "object",
+  required: ["id", "label", "reason"],
+  additionalProperties: true,
+  properties: {
+    id: { type: "string" },
+    label: { type: "string" },
+    reason: { type: "string" },
+  },
+};
+
+export const packetQuestionCaptureRequestSchema = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    appId: { type: "string" },
+    applicationId: { type: "string" },
+    source: { type: "string", enum: ["url", "paste", "manual", "greenhouse", "ashby"] },
+    url: stringOrNull,
+    manualText: { type: "string" },
+    text: { type: "string" },
+  },
+};
+
+export const packetQuestionCaptureArtifactSchema = {
+  type: "object",
+  required: [
+    "source",
+    "capturedAt",
+    "questions",
+    "excluded",
+    "answerableIds",
+    "excludedIds",
+    "demographicSectionPresent",
+  ],
+  additionalProperties: false,
+  properties: {
+    source: { type: "string" },
+    url: stringOrNull,
+    capturedAt: { type: "string" },
+    questions: { type: "array", items: packetQuestionSchema },
+    excluded: { type: "array", items: packetExcludedQuestionSchema },
+    answerableIds: { type: "array", items: { type: "string" } },
+    excludedIds: { type: "array", items: { type: "string" } },
+    demographicSectionPresent: { type: "boolean" },
+  },
+};
+
+export const packetAnswerProposalSchema = {
+  type: "object",
+  required: ["answers"],
+  additionalProperties: false,
+  properties: {
+    answers: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["questionId", "answer", "evidenceIds"],
+        additionalProperties: false,
+        properties: {
+          questionId: { type: "string" },
+          answer: { type: "string" },
+          evidenceIds: { type: "array", items: { type: "string" } },
+          gap: stringOrNull,
+        },
+      },
+    },
+  },
+};
+
 export function validatePacketGateRequest(input) {
   const result = validate(input, packetGateRequestSchema);
   if (!result.valid) {
@@ -49,4 +132,3 @@ export function validatePacketGateRequest(input) {
     jobUrl: String(input?.jobUrl || input?.sourceUrl || "").trim(),
   };
 }
-

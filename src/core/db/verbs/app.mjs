@@ -183,3 +183,51 @@ export function appRegisterArtifact({ repoRoot, env, id, kind, path, note } = {}
     return { id, meta, event };
   });
 }
+
+export function appRegisterPacketQuestionCapture({
+  repoRoot,
+  env,
+  id,
+  path,
+  capturedAt,
+  questions = [],
+  excluded = [],
+  demographicSectionPresent = false,
+} = {}) {
+  if (!id || !path) {
+    throw new Error("appRegisterPacketQuestionCapture: id and path are required");
+  }
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const artifacts = { ...(app.artifacts || {}) };
+    artifacts.packetQuestionsSource = path;
+    artifacts.packetQuestionsCapturedAt = capturedAt || nowIso();
+    artifacts.packetQuestionCount = questions.length;
+    artifacts.packetQuestionExcludedCount = excluded.length;
+
+    const questionSummary = {
+      source: path,
+      capturedAt: artifacts.packetQuestionsCapturedAt,
+      answerableCount: questions.length,
+      excludedCount: excluded.length,
+      answerableIds: questions.map((q) => String(q.id)),
+      excludedIds: excluded.map((q) => String(q.id)),
+      demographicSectionPresent: Boolean(demographicSectionPresent),
+    };
+
+    const packetManifest = {
+      ...(app.packetManifest || {}),
+      questions: questionSummary,
+    };
+
+    const updated = { ...app, artifacts, packetManifest };
+    putRow(db, "applications", id, updated);
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "tailored",
+      title: `${app.company || id} — packet questions captured`,
+      refs: { applicationId: id, company: app.company, role: app.role },
+    });
+    return { id, meta, event, packetManifest: questionSummary };
+  });
+}

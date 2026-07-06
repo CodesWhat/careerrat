@@ -6,6 +6,7 @@
 export { activityAppend } from "./activity.mjs";
 export { analyticsRefresh } from "./analytics.mjs";
 export {
+  appRegisterPacketQuestionCapture,
   appRegisterArtifact,
   appScheduleInterview,
   appSetFields,
