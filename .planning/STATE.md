@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 10
-status: Ready to plan
-stopped_at: Phase 11 context gathered
-last_updated: "2026-07-06T14:04:45.189Z"
+status: Human verification needed
+stopped_at: Phase 10 UAT pending
+last_updated: "2026-07-06T15:47:11Z"
 progress:
   total_phases: 11
-  completed_phases: 7
-  total_plans: 51
-  completed_plans: 44
-  percent: 64
+  completed_phases: 8
+  total_plans: 75
+  completed_plans: 61
+  percent: 81
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -21,14 +21,14 @@ progress:
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 **Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
-**Current focus:** Phase 10 — local-packet-engine
+**Current focus:** Phase 10 - local-packet-engine UAT
 
 ## Current Status
 
 - **Project initialized:** 2026-07-04
 - **Current phase:** 10
-- **Current phase status:** Ready to plan
-- **Next command:** `$gsd-plan-phase 10`
+- **Current phase status:** Human verification needed after automated Phase 10 execution.
+- **Next command:** `$gsd-verify-work 10`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
 - **Model profile:** inherit
@@ -48,22 +48,22 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Open Questions
 
-- None blocking for Phase 9 execution.
+- None blocking for Phase 10 UAT.
 
 ## Next Steps
 
-1. Start Phase 10 Local Packet Engine planning from the captured context.
-2. Before treating repo-wide `npm test` as green, resolve the existing Phase 08 `tests/deep-ingest-ai.test.mjs` gaps for missing proposal schema/modules and grounding/privacy validators.
-3. Preserve the public/private data boundary: public metadata only, no candidate profile, comp, fit, tracker, private notes, local paths, raw AI data, page bodies, or job postings.
+1. Run `$gsd-verify-work 10` against `.planning/phases/10-local-packet-engine/10-UAT.md`.
+2. If UAT passes, mark Phase 10 complete through the normal GSD verify-work transition.
+3. Before treating repo-wide `npm test` as green, resolve the existing Phase 08 `tests/deep-ingest-ai.test.mjs` gaps for missing proposal schema/modules and grounding/privacy validators.
 
 ---
 *State initialized: 2026-07-04*
 
 ## Session
 
-**Last session:** 2026-07-06T14:04:45.180Z
-**Stopped at:** Phase 11 context gathered
-**Resume file:** .planning/phases/11-runtime-lockdown-and-desktop-release/11-CONTEXT.md
+**Last session:** 2026-07-06T15:47:11Z
+**Stopped at:** Phase 10 UAT pending
+**Resume file:** .planning/phases/10-local-packet-engine/10-UAT.md
 
 ## Performance Metrics
 
@@ -252,7 +252,12 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 09]: Public-intel route and scanner module source are statically guarded against chat, retained skill runtime, and /api/skill/run seams. — Future scanner changes fail fast if they reintroduce hidden runtime escalation.
 - [Phase 09]: Public sync-preview scrub now blocks source config, search sources, sourced rows, job postings, page text, raw AI, local paths, and candidate-private fields. — This preserves the public-only sync-home boundary.
 - [Phase 09]: Public company intelligence documentation now defines public metadata scope, scanner branch order, no-AI no-result states, and explicit supported-ATS review approval. — Maintainers have a source-of-truth for the Phase 09 privacy and runtime contract.
+- [Phase 10]: Ordinary packet work now routes through local `/api/packet/*` APIs, while `evaluate-job`, `tailor-application`, and `answer-question` remain explicit retained skill handoffs. — This preserves the product default runtime boundary.
+- [Phase 10]: Application questions are captured durably and self-identification prompts are excluded before answer drafting. — This keeps EEO, disability, veteran, demographic, and similar prompts out of generated-answer automation.
+- [Phase 10]: PDF is the default surfaced export, DOCX is conditional on explicit selection or upload requirement, and markdown remains internal source storage. — This matches the packet UX and persistence decision from discussion.
+- [Phase 10]: Automated packet verification passed and Phase 10 is pending MVP UAT only. — Do not advance to Phase 11 until `.planning/phases/10-local-packet-engine/10-UAT.md` passes through verify-work.
 
 ### Blockers
 
-- None for Phase 09 completion. Repo-wide `npm test` remains blocked by pre-existing Phase 08 Deep ingest AI gaps in `tests/deep-ingest-ai.test.mjs`: missing `config/deep-ingest-proposal.schema.json`, `src/core/deep-ingest/proposals/*`, and `src/core/deep-ingest/validators/{grounding,privacy}.mjs`.
+- Phase 10 implementation has no known packet blocker; two UAT checks remain pending in `.planning/phases/10-local-packet-engine/10-UAT.md`.
+- Repo-wide `npm test` remains blocked by pre-existing Phase 08 Deep ingest AI gaps in `tests/deep-ingest-ai.test.mjs`: missing `config/deep-ingest-proposal.schema.json`, `src/core/deep-ingest/proposals/*`, and `src/core/deep-ingest/validators/{grounding,privacy}.mjs`.
