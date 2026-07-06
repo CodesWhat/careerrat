@@ -7,10 +7,10 @@
 # macOS certificate discovery. Local signing credentials belong in the
 # builder's keychain or CI signing environment, not in this tracked file.
 #
-# Notarization: explicitly disabled for local/offline builds. When enabling
-# it, store Apple credentials in a local/CI `notarytool` keychain profile
-# such as `rolester-notary`, and keep account/team identifiers outside this
-# config file.
+# Notarization: enabled for pilot builds. electron-builder reads Apple
+# notarization credentials from the local keychain or CI environment; this
+# tracked config intentionally carries no account, team, password, or profile
+# values.
 appId: com.codeswhat.rolester
 productName: Rolester
 directories:
@@ -43,5 +43,8 @@ mac:
         - arm64
   category: public.app-category.productivity
   hardenedRuntime: true
+  forceCodeSigning: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
   gatekeeperAssess: false
-  notarize: false
+  notarize: true

@@ -63,9 +63,11 @@ test("electron-builder embeds the full staged runtime, including hidden skill di
 });
 
 test("electron-builder macOS pilot config requires signing, entitlements, and notarization", async () => {
-  const [config, pkgText] = await Promise.all([
+  const [config, pkgText, appEntitlements, inheritedEntitlements] = await Promise.all([
     readText("apps/desktop/electron-builder.yml"),
     readText("apps/desktop/package.json"),
+    readText("apps/desktop/build/entitlements.mac.plist"),
+    readText("apps/desktop/build/entitlements.mac.inherit.plist"),
   ]);
   const macBlock = yamlTopLevelBlock(config, "mac");
 
@@ -99,7 +101,28 @@ test("electron-builder macOS pilot config requires signing, entitlements, and no
   assert.ok(stageAt >= 0, "desktop dist must stage before packaging");
   assert.ok(builderAt > stageAt, "electron-builder must run after staging completes");
 
-  const credentialSurfaces = { "electron-builder.yml": config, "package.json": pkgText };
+  for (const [label, text] of Object.entries({
+    "entitlements.mac.plist": appEntitlements,
+    "entitlements.mac.inherit.plist": inheritedEntitlements,
+  })) {
+    assert.match(
+      text,
+      /<key>com\.apple\.security\.cs\.allow-jit<\/key>\s*<true\/>/,
+      `${label} must allow JIT for hardened Electron runtime`
+    );
+    assert.doesNotMatch(
+      text,
+      /com\.apple\.security\.(?:device|personal-information)\./,
+      `${label} must not request device or personal-information entitlements`
+    );
+  }
+
+  const credentialSurfaces = {
+    "electron-builder.yml": config,
+    "package.json": pkgText,
+    "entitlements.mac.plist": appEntitlements,
+    "entitlements.mac.inherit.plist": inheritedEntitlements,
+  };
   for (const [label, text] of Object.entries(credentialSurfaces)) {
     assert.doesNotMatch(
       text,
