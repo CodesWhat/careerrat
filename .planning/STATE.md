@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 11
 status: In Progress
-stopped_at: Completed 11-04-PLAN.md
-last_updated: "2026-07-06T15:57:42.910Z"
+stopped_at: Completed 11-03-PLAN.md
+last_updated: "2026-07-06T16:40:44.813Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 65
-  completed_plans: 48
-  percent: 74
+  completed_plans: 49
+  percent: 75
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T15:57:42.901Z
-**Stopped at:** Completed 11-04-PLAN.md
+**Last session:** 2026-07-06T16:40:44.748Z
+**Stopped at:** Completed 11-03-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -127,6 +127,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 11-runtime-lockdown-and-desktop-release P01 | 6m19s | 1 tasks | 1 files |
 | Phase 11-runtime-lockdown-and-desktop-release P02 | 2 min | 2 tasks | 3 files |
 | Phase 11-runtime-lockdown-and-desktop-release P04 | 4m 13s | 2 tasks | 7 files |
+| Phase 11-runtime-lockdown-and-desktop-release P03 | 5 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -261,6 +262,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 11]: Desktop packaged path resolution is centralized in apps/desktop/desktop-runtime.mjs so ROLESTER_HOME is set before dynamic engine imports. — Keeps signed resources read-only and makes packaged runtime behavior directly testable.
 - [Phase 11]: Electron external opens are limited to https: and mailto: targets, with unsafe or malformed targets denied recoverably. — Mitigates T-11-09 without changing same-origin app routing.
 - [Phase 11]: BYOK path resolution now passes the active env into userPath(), so packaged ROLESTER_HOME controls both load and write paths. — Ensures desktop BYOK storage shares the same packaged data root as SQLite.
+- [Phase 11]: Runtime config exposes only non-secret app-safe tool profile metadata and the allowed tool-heavy skill names. — GET /api/runtime/config can inform app surfaces without leaking AI keys, Apple credentials, or credential paths.
+- [Phase 11]: Tool-heavy POST requests are rejected before SSE starts unless the requested skill is explicitly classified as a retained tool-heavy workflow. — Broad tool profile selection must be a route/profile decision, not an inherited default or in-band stream failure.
+- [Phase 11]: Chat runtime imports CHAT_RUNTIME_TOOLS directly from runtime-tools.mjs instead of deriving from the one-shot RUNTIME_TOOLS export. — Visible chat handoffs remain available but are classified separately from app-default one-shot runtime behavior.
 
 ### Blockers
 
