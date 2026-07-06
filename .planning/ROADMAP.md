@@ -280,6 +280,37 @@ Plans:
 
 **Requirements:** PKT-01, PKT-02, PKT-03, PKT-04
 
+**Plans:** 7 plans
+
+Plans:
+**Wave 0**
+
+- [ ] 10-01-PLAN.md - Add RED packet route, engine, answer, export, page, and runtime-boundary contracts.
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [ ] 10-02-PLAN.md - Implement local packet gate context, schemas, bounded-AI service, and route.
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 10-03-PLAN.md - Implement application-question capture, self-identification exclusion, answer drafting, and local routes.
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 10-04-PLAN.md - Implement packet generation and DB-owned source artifact stamping.
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 10-05-PLAN.md - Implement PDF-default and conditional DOCX export generation and stamping.
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 10-06-PLAN.md - Replace packet and answer page defaults with local packet APIs.
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 10-07-PLAN.md - Update runtime docs and run final Phase 10 verification.
+
 **Success Criteria**:
 
 1. Evaluate/gate, packet generation, and artifact stamping are app-local APIs using DB verbs; `tailor-application`, `answer-question`, and `evaluate-job` skill runtime are not the product default.
