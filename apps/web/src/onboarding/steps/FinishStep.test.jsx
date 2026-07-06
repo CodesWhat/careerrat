@@ -230,7 +230,9 @@ describe("FinishStep first-search setup task", () => {
     expect(html).toContain("Search jobs now");
     expect(html).toContain("Not now");
     expect(html).toContain("Not started");
-    expect(html).toContain('href="/chat"');
+    expect(html).toContain("Open Deep ingest");
+    expect(html).toContain('href="/deep-ingest"');
+    expect(html).not.toContain("Start the deeper interview");
     expectNoFirstSearchRuntimeTokens(html);
   });
 
@@ -529,5 +531,46 @@ describe("FinishStep first-search setup task", () => {
     expect(retryPayload).toEqual({ retry: true });
     expect(result.run.status).toBe("running");
     expect(displayedRun).toEqual({ id: "run-retry", status: "running" });
+  });
+});
+
+describe("FinishStep Deep ingest readiness", () => {
+  it("links incomplete Deep ingest readiness to the workbench without interview or chat copy", () => {
+    const html = renderFinish({
+      ...SEARCH_READY_STATE,
+      data: {
+        ...SEARCH_READY_STATE.data,
+        setup: {
+          readiness: {
+            ...SEARCH_READY_STATE.data.setup.readiness,
+            deep_ingest_complete: false,
+          },
+          missing: {
+            ...SEARCH_READY_STATE.data.setup.missing,
+            deep_ingest_complete: ["4 of 7 lanes terminal", "Role signal needs source"],
+          },
+        },
+        deepIngest: {
+          readiness: {
+            ready: false,
+            terminalCount: 4,
+            requiredCount: 7,
+            todos: [{ lane: "role_signals", reason: "Role signal needs source" }],
+            gaps: [{ lane: "story_bank", reason: "Login-gated source deferred" }],
+          },
+        },
+      },
+    });
+
+    expect(html).toContain("Deep ingest");
+    expect(html).toContain("4 of 7 lanes terminal");
+    expect(html).toContain("Open Deep ingest");
+    expect(html).toContain('href="/deep-ingest"');
+    expect(html).not.toContain("AI interview");
+    expect(html).not.toContain("guided interview");
+    expect(html).not.toContain("deeper interview");
+    expect(html).not.toContain('href="/chat"');
+    expect(html).not.toContain("/api/chat");
+    expect(html).not.toContain("/api/skill/run");
   });
 });

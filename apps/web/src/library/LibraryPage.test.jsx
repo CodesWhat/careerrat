@@ -128,4 +128,57 @@ describe("LibraryPage", () => {
     expect(html).toContain("capture evidence");
     expect((html.match(/data-library-card=/g) || []).length).toBe(0);
   });
+
+  it("renders a proposal-first Add material flow with all Deep ingest target shapes", () => {
+    const html = renderPage(
+      makeLibrary({
+        deepIngest: {
+          addPanelOpen: true,
+          lastOutcome: "manual_fallback",
+        },
+      })
+    );
+
+    expect(html).toContain("Add material");
+    for (const label of [
+      "Auto",
+      "Evidence",
+      "Story",
+      "Writing voice",
+      "Honesty",
+      "Role signal",
+      "Paste",
+      "Link",
+    ]) {
+      expect(html).toContain(label);
+    }
+    expect(html).toMatch(/<button[^>]*disabled[^>]*>Ingest source<\/button>/);
+    expect(html).toContain("Review proposals");
+    expect(html).toContain('href="/deep-ingest"');
+    expect(html).toContain("Enter manually");
+    expect(html).toContain("Retry ingest");
+    expect(html).toContain("Defer lane");
+    expect(html).toContain("Mark not available");
+    expect(html).not.toContain("/api/chat");
+    expect(html).not.toContain("/api/skill/run");
+  });
+
+  it("builds evidence-context source payloads for proposal review instead of direct trusted writes", async () => {
+    const module = await import("./LibraryPage.jsx");
+
+    expect(module.buildLibraryDeepIngestPayload).toBeTypeOf("function");
+    const payload = module.buildLibraryDeepIngestPayload({
+      context: "evidence",
+      sourceKind: "paste",
+      text: "Evidence source text",
+    });
+
+    expect(payload).toMatchObject({
+      targetShape: "evidence",
+      sourceKind: "paste",
+      text: "Evidence source text",
+    });
+    expect(JSON.stringify(payload)).not.toContain("trustedEvidenceWrite");
+    expect(JSON.stringify(payload)).not.toContain("candidatePatch");
+  });
 });
