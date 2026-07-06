@@ -28,8 +28,30 @@ Before tagging a release:
    list current. (The private working roadmap `ROADMAP.md` is gitignored.)
 6. `README.md` version badge / install snippet reflects new version (if any).
 7. `package.json` version bumped.
-8. Git tag created: `git tag -s v<version> -m "release: v<version>"` then pushed.
+8. Git tag created with the concrete release version, for example
+   `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
 9. GitHub release created from the tag with changelog notes.
+
+### Desktop Pilot Release
+
+For a desktop pilot release, add these checks before tagging:
+
+1. Build the desktop artifact with `npm run desktop:dist`.
+2. Confirm the output includes a signed and notarized macOS DMG.
+3. Verify signing and notarization evidence:
+   - `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/Rolester.app`
+   - `xcrun stapler validate apps/desktop/dist/*.dmg`
+   - `spctl --assess --type open --context context:primary-signature apps/desktop/dist/*.dmg`
+4. Run packaged smoke checks for a fresh workspace and an existing workspace.
+   Fresh workspace should open `/app/onboarding`; existing workspace should open
+   `/app`.
+5. Verify the packaged app runs without the source checkout and writes user data
+   under the packaged `ROLESTER_HOME` data root, not inside signed resources.
+6. Confirm no Apple credentials, candidate data, workspace files, private paths,
+   or local keychain-profile values are tracked or included in release notes.
+7. Record final rollup evidence for the signed/notarized artifact, stapling,
+   Gatekeeper assessment, fresh/existing workspace smoke, and checkout
+   independence.
 
 ## Schema Versioning
 
@@ -37,7 +59,7 @@ All JSON schemas live in `config/*.schema.json` and carry a `$id` URL of the
 form:
 
 ```
-https://rolester.local/schemas/<name>.schema.json
+https://rolester.local/schemas/{schema-name}.schema.json
 ```
 
 Schemas are versioned implicitly by the Rolester release that ships them. A

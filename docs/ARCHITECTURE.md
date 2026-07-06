@@ -162,6 +162,18 @@ need broad tools, long orchestration, streamed visibility, or retained
 `SKILL.md` execution. It is not the default route for deterministic scans,
 proposal decisions, source writes, or local app actions with existing owners.
 
+The one-shot runtime has an app-safe default tool profile: Read, Glob, Grep, WebFetch, and Skill.
+Write, Edit, and Bash are removed from that default even when the SDK runs
+headlessly. A tool-heavy retained runtime request must be explicitly classified
+at the route or skill boundary before it can use Write, Edit, and Bash.
+
+Visible chat handoffs are separate from app-default actions. They are explicit
+user-selected sessions, not hidden fallbacks from local API errors.
+
+Compatibility/static tracker pages are compatibility/debug/export aids. They
+are not normal product UX; the Electron and React product path is `/app`, with
+`/app/onboarding` for first-run workspaces.
+
 ### Skill Contract Layer
 
 Skills define workflow contracts and judgment gates:
