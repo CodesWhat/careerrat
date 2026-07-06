@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 09
 status: Ready to execute
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-07-06T13:34:46.135Z"
+stopped_at: Completed 09-02-PLAN.md
+last_updated: "2026-07-06T13:40:50Z"
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 51
-  completed_plans: 39
-  percent: 55
+  completed_plans: 40
+  percent: 56
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Continue Phase 9 with Plan 09-02: public-intel DB tables, scrub validator, sync preview, and onboarding preference.
-2. Keep Phase 9 execution in dependency order: storage/scrub before scanner cascade, AI fallback, review UI, then final guards.
+1. Continue Phase 9 with Plan 09-03: deterministic scanner cascade and local public-intel scan routes.
+2. Keep Phase 9 execution in dependency order: scanner cascade before AI fallback, review UI, then final guards.
 3. Preserve the public/private data boundary: public metadata only, no candidate profile, comp, fit, tracker, private notes, local paths, raw AI data, page bodies, or job postings.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T13:34:46.126Z
-**Stopped at:** Completed 09-01-PLAN.md
+**Last session:** 2026-07-06T13:40:50Z
+**Stopped at:** Completed 09-02-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -119,6 +119,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 08 P01 | 9 min | 3 tasks | 10 files |
 | Phase 08-deep-ingest-lane P02 | 7 min | 2 tasks | 7 files |
 | Phase 09 P01 | 10 min | 3 tasks | 7 files |
+| Phase 09 P02 | 16 min | 4 tasks | 9 files |
 
 ## Decisions
 
@@ -236,6 +237,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 08]: Finish and Library contracts route Deep ingest work to /deep-ingest, not the old deeper-interview chat handoff.
 - [Phase 08-deep-ingest-lane]: Deep ingest source/proposal/lane writes are SQLite product workflow state and intentionally do not export tracker/activity compatibility files. — Preserves the Phase 8 proposal/workflow boundary while later confirmation paths own trusted candidate fact writes.
 - [Phase 08-deep-ingest-lane]: Deep ingest completion is terminal-lane driven: completed, deferred, or not_available for every required lane. — Matches D-10 through D-12 and keeps deep ingest progress independent from search readiness.
+- [Phase 09]: Public-intel state lives in dedicated public_* SQLite tables and is scrubbed before write and preview. — This preserves the sync-home public/private boundary before scanner output starts writing metadata.
+- [Phase 09]: Public sync preference is default-on, local, and user-toggleable through onboarding. — Users can opt out before public metadata is prepared for future sync-home behavior.
+- [Phase 09]: Public preference API responses omit the internal row id and expose only enabled/source/updatedAt. — This keeps DB implementation details out of the onboarding contract.
 
 ### Blockers
 
