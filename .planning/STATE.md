@@ -4,13 +4,13 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 08 — Deep Ingest Lane
 status: Ready to execute
-stopped_at: Phase 9 context gathered
-last_updated: "2026-07-06T00:57:41.153Z"
+stopped_at: Completed 08-deep-ingest-lane-02-PLAN.md
+last_updated: "2026-07-06T01:09:01.961Z"
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 45
-  completed_plans: 37
+  completed_plans: 38
   percent: 55
 ---
 
@@ -61,9 +61,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T00:57:41.146Z
-**Stopped at:** Phase 9 context gathered
-**Resume file:** .planning/phases/ROL-API-09-public-company-intelligence-and-scanner-cascade/09-CONTEXT.md
+**Last session:** 2026-07-06T01:09:01.954Z
+**Stopped at:** Completed 08-deep-ingest-lane-02-PLAN.md
+**Resume file:** None
 
 ## Performance Metrics
 
@@ -117,6 +117,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P07 | 8 min | 2 tasks | 7 files |
 | Phase 07 P08 | 7m44s | 3 tasks | 4 files |
 | Phase 08 P01 | 9 min | 3 tasks | 10 files |
+| Phase 08-deep-ingest-lane P02 | 7 min | 2 tasks | 7 files |
 
 ## Decisions
 
@@ -232,6 +233,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 08]: Every source submission must resolve to exactly one visible outcome instead of silently invoking chat or the full skill runtime.
 - [Phase 08]: Proposal generation remains untrusted until schema validation, grounding/privacy checks, and explicit user confirmation.
 - [Phase 08]: Finish and Library contracts route Deep ingest work to /deep-ingest, not the old deeper-interview chat handoff.
+- [Phase 08-deep-ingest-lane]: Deep ingest source/proposal/lane writes are SQLite product workflow state and intentionally do not export tracker/activity compatibility files. — Preserves the Phase 8 proposal/workflow boundary while later confirmation paths own trusted candidate fact writes.
+- [Phase 08-deep-ingest-lane]: Deep ingest completion is terminal-lane driven: completed, deferred, or not_available for every required lane. — Matches D-10 through D-12 and keeps deep ingest progress independent from search readiness.
 
 ### Blockers
 
