@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 08 — Deep Ingest Lane
 status: Ready to execute
-stopped_at: Completed Phase 7 verification
-last_updated: "2026-07-06T00:34:45Z"
+stopped_at: Completed 08-01-PLAN.md
+last_updated: "2026-07-06T00:56:10.224Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 55
-  completed_plans: 46
-  percent: 84
+  completed_plans: 47
+  percent: 85
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -27,7 +27,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 - **Project initialized:** 2026-07-04
 - **Current phase:** 08 — Deep Ingest Lane
-- **Current phase status:** Planned
+- **Current phase status:** In Progress
 - **Next command:** `$gsd-execute-phase 8`
 - **Research mode:** Skipped during initialization; repo context and current roadmap are sufficient for the first pass.
 - **Execution mode:** YOLO with coarse vertical-MVP phases.
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T00:34:45Z
-**Stopped at:** Completed Phase 7 verification
+**Last session:** 2026-07-06T00:55:14.922Z
+**Stopped at:** Completed 08-01-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -116,6 +116,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 07 P06 | 12 min | 2 tasks | 9 files |
 | Phase 07 P07 | 8 min | 2 tasks | 7 files |
 | Phase 07 P08 | 7m44s | 3 tasks | 4 files |
+| Phase 08 P01 | 9 min | 3 tasks | 10 files |
 
 ## Decisions
 
@@ -226,6 +227,11 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 07]: First-search start/retry uses startFirstSearchRun() and /api/sourcing/first-run/start; no discovery/chat/skill route is used by the first-search task. — This preserves deterministic local first-search behavior.
 - [Phase 07]: The explicit deeper interview link remains separate from the first-search task. — This keeps deep onboarding available without treating it as first-search runtime escalation.
 - [Phase 07]: Jobs manual reruns use POST /api/sourcing/search/start and the no-hidden-runtime regression guard remains slice-scoped to first/manual search paths. — Keeps repeat sourcing deterministic while allowing explicit retained chat/deep-interview routes outside this slice.
+- [Phase 08]: Plan 08-01 is intentionally RED and test-only; production Deep ingest implementation remains in later Phase 8 plans.
+- [Phase 08]: Deep ingest contracts are SQLite-native and do not require candidate/ compatibility files for product readiness.
+- [Phase 08]: Every source submission must resolve to exactly one visible outcome instead of silently invoking chat or the full skill runtime.
+- [Phase 08]: Proposal generation remains untrusted until schema validation, grounding/privacy checks, and explicit user confirmation.
+- [Phase 08]: Finish and Library contracts route Deep ingest work to /deep-ingest, not the old deeper-interview chat handoff.
 
 ### Blockers
 
