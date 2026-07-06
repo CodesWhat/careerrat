@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 09
 status: Ready to execute
-stopped_at: Completed 09-04-PLAN.md
-last_updated: "2026-07-06T13:48:25Z"
+stopped_at: Completed 09-05-PLAN.md
+last_updated: "2026-07-06T13:50:52Z"
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 51
-  completed_plans: 42
-  percent: 58
+  completed_plans: 43
+  percent: 59
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -52,8 +52,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Next Steps
 
-1. Continue Phase 9 with Plan 09-05: public-intel review queue, decisions, and UI affordances.
-2. Keep Phase 9 execution in dependency order: review UI before final guards.
+1. Continue Phase 9 with Plan 09-06: final privacy/runtime guards, docs, and verification.
+2. Complete Phase 9 only after static guards and final test rollup pass.
 3. Preserve the public/private data boundary: public metadata only, no candidate profile, comp, fit, tracker, private notes, local paths, raw AI data, page bodies, or job postings.
 
 ---
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T13:48:25Z
-**Stopped at:** Completed 09-04-PLAN.md
+**Last session:** 2026-07-06T13:50:52Z
+**Stopped at:** Completed 09-05-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -122,6 +122,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 09 P02 | 16 min | 4 tasks | 9 files |
 | Phase 09 P03 | 5 min | 3 tasks | 4 files |
 | Phase 09 P04 | 4 min | 3 tasks | 3 files |
+| Phase 09 P05 | 3 min | 3 tasks | 2 files |
 
 ## Decisions
 
@@ -246,6 +247,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 09]: Ambiguous public pages create public review items instead of writing source config. — Supported ATS source-config writes remain explicit review/decision behavior.
 - [Phase 09]: Bounded AI fallback runs only for ambiguous reachable public text and uses native-preferred structured output with one retry. — This preserves the cost boundary while reducing manual review for genuinely ambiguous pages.
 - [Phase 09]: AI-suggested URLs/providers remain advisory until deterministic validation passes. — Model output cannot write source config or become final provider identity by itself.
+- [Phase 09]: Scanner review UI lives on the local search page and posts decisions to public-intel routes. — Ambiguous/conflicting items are visible without launching chat or the retained skill runtime.
 
 ### Blockers
 
