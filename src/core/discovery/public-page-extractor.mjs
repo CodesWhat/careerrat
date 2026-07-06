@@ -227,6 +227,7 @@ export async function extractPublicCareersPage({ url, fetchImpl = fetch, now = n
       extractionStatus: "ambiguous_public_page",
       reviewRequired: true,
       aiEligible: false,
+      usableText: text.slice(0, 8000),
       metadata: {
         url: parsedUrl.toString(),
         inputHash: hashText(html),
@@ -252,6 +253,7 @@ export async function extractPublicCareersPage({ url, fetchImpl = fetch, now = n
     extractionStatus: "ambiguous_public_page",
     reviewRequired: true,
     aiEligible: false,
+    usableText: text.slice(0, 8000),
     metadata: {
       url: parsedUrl.toString(),
       inputHash: hashText(html),

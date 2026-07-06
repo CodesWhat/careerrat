@@ -9,6 +9,7 @@ import {
 } from "../db/verbs/public-intel.mjs";
 import { normalizeCompanyKey, resolveCompanyBoard } from "./company-board-resolver.mjs";
 import { extractPublicCareersPage } from "./public-page-extractor.mjs";
+import { extractAmbiguousPublicCareersPage } from "./public-scanner-ai.mjs";
 
 function nowIso(now) {
   if (now instanceof Date) return now.toISOString();
@@ -209,12 +210,29 @@ function reviewItem({ seed, resolution, extraction, observedAt }) {
   };
 }
 
+function safeExtraction(extraction = {}) {
+  const { usableText: _usableText, ...safe } = extraction;
+  return safe;
+}
+
+async function defaultValidateAiCandidate({ candidate, extraction }) {
+  const candidateUrl = String(candidate?.url || "").trim();
+  if (!candidateUrl) return { ok: false, reason: "missing-url" };
+  const observed = new Set(
+    (extraction.metadata?.candidates || []).map((item) => String(item.url || ""))
+  );
+  if (!observed.has(candidateUrl)) return { ok: false, reason: "not-observed-in-public-page" };
+  return { ok: true, reason: "observed-in-public-page" };
+}
+
 export async function scanPublicIntelSeed({
   repoRoot,
   env,
   seed = {},
   fetchImpl = fetch,
   resolveCompanyBoard: resolveImpl = resolveCompanyBoard,
+  aiCall,
+  validateAiCandidate = defaultValidateAiCandidate,
   now = new Date(),
 } = {}) {
   const observedAt = nowIso(now);
@@ -259,21 +277,46 @@ export async function scanPublicIntelSeed({
       classification: "custom_public_metadata",
       ai: noAi(),
       reviewItem: null,
-      data: { resolution, extraction },
+      data: { resolution, extraction: safeExtraction(extraction) },
     };
   }
 
   await persistMetadataOnly({ repoRoot, env, seed, resolution, extraction, observedAt, now });
   if (extraction.reviewRequired) {
-    const item = reviewItem({ seed, resolution, extraction, observedAt });
+    const model = await extractAmbiguousPublicCareersPage({
+      pageUrl: extraction.metadata?.url || targetUrl,
+      pageText: extraction.usableText || "",
+      root: repoRoot,
+      env,
+      call: aiCall,
+      now,
+    });
+    let deterministicValidation = { ok: false, reason: "no-model-candidate" };
+    if (model.ok && model.data?.candidates?.length) {
+      deterministicValidation = await validateAiCandidate({
+        candidate: model.data.candidates[0],
+        extraction,
+        resolution,
+        seed,
+      });
+    }
+    const item = {
+      ...reviewItem({ seed, resolution, extraction, observedAt }),
+      modelAssisted: Boolean(model.ai?.used),
+      modelStatus: model.status || "review_needed",
+      modelReviewReason: model.data?.reviewReason || model.error?.message || undefined,
+      deterministicValidation,
+    };
     const written = publicIntelReviewItemUpsert({ repoRoot, env, item, now }).item;
     return {
       ok: true,
       status: "review_needed",
       classification: "ambiguous_public_page",
-      ai: noAi(),
+      ai: model.ai || noAi(),
+      deterministicValidation,
+      publicWriteApproved: false,
       reviewItem: written,
-      data: { resolution, extraction },
+      data: { resolution, extraction: safeExtraction(extraction), model: model.data || null },
     };
   }
 
@@ -283,7 +326,7 @@ export async function scanPublicIntelSeed({
     classification: extraction.extractionStatus,
     ai: noAi(),
     reviewItem: null,
-    data: { resolution, extraction },
+    data: { resolution, extraction: safeExtraction(extraction) },
   };
 }
 
@@ -312,6 +355,7 @@ export async function scanPublicIntelSeeds({
         seed,
         fetchImpl,
         resolveCompanyBoard: resolveImpl,
+        aiCall: body?.aiCall,
         now,
       })
     );
