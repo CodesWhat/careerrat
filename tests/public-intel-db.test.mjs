@@ -85,6 +85,22 @@ test("migration 009 creates separate public-intel tables with JSON constraints a
   );
 });
 
+test("public-intel verbs are exported through the canonical DB barrels", async () => {
+  const direct = await publicIntelVerbs();
+  const barrel = await import("../src/core/db/verbs.mjs");
+  for (const name of [
+    "publicBoardIntelUpsert",
+    "publicCareersPageUpsert",
+    "publicCompanyIntelUpsert",
+    "publicIntelSyncPreview",
+    "publicSyncPreferenceGet",
+    "publicSyncPreferenceSet",
+  ]) {
+    assert.equal(typeof direct[name], "function", `direct export ${name}`);
+    assert.equal(typeof barrel[name], "function", `barrel export ${name}`);
+  }
+});
+
 test("public-intel verbs round-trip public metadata and keep sync preview scoped to public tables", async () => {
   const { repoRoot } = setupRepo();
   candidateConfigPatch({
