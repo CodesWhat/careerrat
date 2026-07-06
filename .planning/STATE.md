@@ -4,14 +4,14 @@ milestone: v2.0
 milestone_name: app-product milestone
 current_phase: 11
 status: In Progress
-stopped_at: Completed 11-05-PLAN.md
-last_updated: "2026-07-06T17:02:04.654Z"
+stopped_at: Completed 11-06-PLAN.md
+last_updated: "2026-07-06T17:09:59.596Z"
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 65
-  completed_plans: 50
-  percent: 77
+  completed_plans: 51
+  percent: 78
 ---
 
 # State: Rolester App-First Job Search Runtime
@@ -61,8 +61,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Session
 
-**Last session:** 2026-07-06T17:01:24.916Z
-**Stopped at:** Completed 11-05-PLAN.md
+**Last session:** 2026-07-06T17:09:59.187Z
+**Stopped at:** Completed 11-06-PLAN.md
 **Resume file:** None
 
 ## Performance Metrics
@@ -129,6 +129,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 | Phase 11-runtime-lockdown-and-desktop-release P04 | 4m 13s | 2 tasks | 7 files |
 | Phase 11-runtime-lockdown-and-desktop-release P03 | 5 min | 2 tasks | 4 files |
 | Phase 11-runtime-lockdown-and-desktop-release P05 | 2 min continuation | 3 tasks | 4 files |
+| Phase 11-runtime-lockdown-and-desktop-release P06 | 4 min | 2 tasks | 4 files |
 
 ## Decisions
 
@@ -269,6 +270,9 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 11-runtime-lockdown-and-desktop-release]: Pilot macOS packaging now requires forceCodeSigning, hardened runtime entitlements, and electron-builder notarization. — This satisfies DESK-01 and keeps unsigned development packaging out of the pilot success path.
 - [Phase 11-runtime-lockdown-and-desktop-release]: Apple credentials remain outside tracked source; the repo only records credential-neutral keychain and CI environment expectations. — This preserves the Phase 11 Apple credential disclosure boundary while allowing real notarization.
 - [Phase 11-runtime-lockdown-and-desktop-release]: The local notarization readiness gate uses the rolester-notary keychain profile and does not generate or commit release artifacts. — Plan 11-05 verifies credential readiness while Plan 11-07 owns final signed/notarized artifact evidence.
+- [Phase 11-runtime-lockdown-and-desktop-release]: DESK-02 docs truthfulness is scoped to the desktop README, release checklist, and architecture runtime boundary rather than a broad documentation rewrite. — This preserves D-15 while making pilot-facing docs accurate enough for release.
+- [Phase 11-runtime-lockdown-and-desktop-release]: The desktop pilot docs name Electron /app and /app/onboarding as the normal product path; generated tracker/static pages are compatibility/debug/export support only. — This satisfies DESK-02 without changing retained debug/export surfaces.
+- [Phase 11-runtime-lockdown-and-desktop-release]: Auto-update wording is readiness-only: the package is signed/notarized for future updater work, but the desktop app does not install updates itself. — This preserves D-13 and avoids overclaiming update behavior.
 
 ### Blockers
 

@@ -145,7 +145,7 @@
 | SEC-01 | Phase 11 | Complete |
 | SEC-02 | Phase 11 | Complete |
 | DESK-01 | Phase 11 | Complete |
-| DESK-02 | Phase 11 | Planned |
+| DESK-02 | Phase 11 | Complete |
 
 **Coverage:**
 
