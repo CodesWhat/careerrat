@@ -496,26 +496,23 @@ for (const file of releaseFacingFiles) {
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | No new runtime or desktop package is necessary for Phase 11 if the planner treats auto-update as readiness/docs rather than implementation. [ASSUMED] | Standard Stack | If auto-update is pulled into scope, `electron-updater` and publishing metadata need separate package legitimacy, tests, and release tasks. |
-| A2 | The keychain profile name can be chosen during implementation, with `rolester-notary` as an example rather than a locked existing profile. [ASSUMED] | Open Questions / Environment Availability | If a specific CI/keychain profile already exists, docs and commands should use that exact name. |
-| A3 | Explicit conversational chat handoffs may retain broader tool behavior if they remain visible and human-watched. [ASSUMED] | Open Questions | If chat is expected to narrow too, Phase 11 should add chat tool-profile work and chat-runtime tests. |
+| A2 | The keychain profile name can be chosen during implementation, with `rolester-notary` as an example rather than a locked existing profile. [ASSUMED] | Resolved Open Questions / Environment Availability | If a specific CI/keychain profile already exists, docs and commands should use that exact name. |
+| A3 | Explicit conversational chat handoffs are retained only as visible, human-watched paths with named profile/classification checks. [ASSUMED] | Resolved Open Questions | If implementation finds a chat path that is not visible to the user, the Phase 11 guard should fail it as an app-default regression. |
 | A4 | `spctl` and `codesign` are expected to be available through local macOS command line tools but were not separately version-probed. [ASSUMED] | Environment Availability | If missing, release verification needs an Xcode command line tools setup task. |
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does a `notarytool` keychain profile already exist for this project?**
    - What we know: Developer ID Application identity is present locally, and `notarytool store-credentials` supports keychain-profile storage. [VERIFIED: local command]
-   - What's unclear: The exact keychain profile name and CI credential path were not verified. [ASSUMED]
-   - Recommendation: Planner should add a setup/verification task that runs `xcrun notarytool history --keychain-profile <profile>` or equivalent non-destructive credential check before release packaging.
+   - Resolution: Plan 11-05 remains non-autonomous and includes a blocking credential checkpoint that runs `xcrun notarytool history --keychain-profile rolester-notary --limit 1` or pauses for the exact keychain profile or CI secret path. Plan 11-07 repeats notarized-artifact evidence in the release rollup and does not allow unsigned or signed-only success for D-11/D-12. Credentials stay outside tracked source.
 
 2. **Will Phase 10 finish removing packet/evaluate app defaults before Phase 11 lands?**
    - What we know: Phase 11 context says Phase 10 moves evaluate/gate and packet generation to local APIs, and Phase 11 guards packet/evaluate/apply surfaces. [VERIFIED: 11-CONTEXT.md]
-   - What's unclear: `.planning/STATE.md` currently says Phase 10 is ready to plan, so Phase 11 static guards may initially expose pre-existing app-default runtime references. [VERIFIED: .planning/STATE.md]
-   - Recommendation: Planner should classify legacy/static pages explicitly and scope SEC-01 guards to product surfaces, while preserving compatibility surfaces only where named.
+   - Resolution: Plan 11-01 uses slice-aware guards that enforce local-owner/app-default paths and classify retained legacy/static/debug/chat/full-runtime paths by name. Phase 10 ordering is handled by local product slice ownership: packet/evaluate/apply app-default paths must be clean, while retained compatibility surfaces must be explicitly classified instead of silently broadening the app-default allowance.
 
 3. **Should chat runtime tools also narrow in Phase 11?**
    - What we know: `chat-runtime.mjs` inherits broad runtime tools and adds `WebSearch`, but context primarily targets shared one-shot embedded runtime and app-default paths. [VERIFIED: src/core/ai/chat-runtime.mjs] [VERIFIED: 11-CONTEXT.md]
-   - What's unclear: Whether the user expects explicit conversational chat handoffs to retain broader tool behavior. [ASSUMED]
-   - Recommendation: Planner should at least classify chat separately and avoid treating chat as app-default; narrowing chat tools is acceptable if it does not break explicitly human-watched workflows.
+   - Resolution: Plan 11-03 makes chat runtime scope explicit and human-watched. Chat uses named tool profiles or route/session classification from `runtime-tools.mjs`, and `/api/runtime/config` exposes non-secret capability metadata. Chat is allowed only as a visible handoff or classified retained workflow, not as a hidden broad default behind product buttons.
 
 ## Environment Availability
 
