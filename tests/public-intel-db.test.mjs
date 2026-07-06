@@ -108,7 +108,7 @@ test("public-intel verbs round-trip public metadata and keep sync preview scoped
     name: "profile",
     patch: {
       candidate: { full_name: "Private Candidate", domain: "identity automation" },
-      compensation: { current_base: 145000, minimum_base: 200000, target_base: 225000 },
+      compensation: { current_base: 171234, minimum_base: 206789, target_base: 231234 },
     },
   });
 

@@ -16,6 +16,44 @@ owns the body-read gate.
 - Manual/auth sources: support saved browser sessions, but mark them as
   interactive and do not require them for baseline setup.
 
+## Public Company Intelligence
+
+Public company intelligence helps Rolester learn public company and careers-board
+metadata without mixing it with candidate-specific search state. It is stored in
+dedicated `public_*` SQLite tables and can be prepared for sync-home only after
+scrub validation passes.
+
+Public records may include:
+
+- company key, name, and domain
+- careers URL and public board URL
+- ATS/provider hint
+- confidence, freshness, provenance, and conflicts
+- scanner status and review reason
+
+Public records must not include:
+
+- resumes, profile data, applications, sourced rows, tracker ids, or private notes
+- compensation floors, fit scores, gate output, or candidate targeting
+- local paths, raw prompts, model text, page bodies, or individual job postings
+- private source config such as search queries or tracked company rows
+
+The scanner cascade runs in this order:
+
+1. Supported ATS APIs and known provider links.
+2. Deterministic public-page extraction for visible careers/job-board links.
+3. Metadata-only no-result handling for empty, blocked, robots-disallowed,
+   login-gated, and useless pages.
+4. Bounded AI fallback only for ambiguous reachable public text.
+5. Review queue for ambiguous or conflicting metadata.
+
+The review queue is intentionally quiet. Clean misses are recorded locally and do
+not ask the user anything. `Use supported ATS` is the only review action that can
+cross into source config, and only after deterministic validation proves a
+supported provider. `Keep public metadata`, `Refresh scan`, `Suppress review`,
+and `Escalate to agent` change public-intel review state only; escalation is
+explicit metadata and does not silently start chat.
+
 ## HiringCafe
 
 HiringCafe keeps filters inside the `searchState` query parameter. Rolester

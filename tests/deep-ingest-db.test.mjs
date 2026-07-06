@@ -7,6 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import {
   candidateArtifactPut,
   candidateConfigGet,
@@ -123,7 +124,7 @@ test("migration 008 creates Deep ingest JSON tables with generated query columns
   const repoRoot = tempRepo();
   const db = openDb({ repoRoot });
 
-  assert.equal(db.prepare("PRAGMA user_version").get().user_version, 8);
+  assert.equal(db.prepare("PRAGMA user_version").get().user_version, ALL_MIGRATIONS.at(-1).id);
   const logged = db.prepare("SELECT id, name FROM _migrations WHERE id = 8").get();
   assert.deepEqual([logged?.id, logged?.name], [8, "deep-ingest"]);
 

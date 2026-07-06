@@ -1,9 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { Readable } from "node:stream";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 import { mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
 
 const NOW = new Date("2026-07-06T12:00:00.000Z");
+const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function fakeChatRuntime() {
   return {
@@ -91,6 +94,55 @@ function assertNoRuntimeFallback(body) {
     );
   }
 }
+
+function source(path) {
+  return readFileSync(`${REAL_ROOT}/${path}`, "utf8");
+}
+
+function sliceBetween(text, start, end) {
+  const from = text.indexOf(start);
+  assert.notEqual(from, -1, `missing start marker ${start}`);
+  const to = text.indexOf(end, from);
+  assert.notEqual(to, -1, `missing end marker ${end}`);
+  return text.slice(from, to);
+}
+
+test("public-intel local route slice has no hidden chat or retained skill runtime calls", () => {
+  const routeSource = source("src/cli/discovery-route.mjs");
+  const publicIntelSlice = sliceBetween(
+    routeSource,
+    'addRoute("GET", "/api/discovery/public-intel/state"',
+    'addRoute("POST", "/api/discovery/company-proposals"'
+  );
+
+  for (const forbidden of [
+    "startOrReuseDiscoveryChat",
+    "chatRuntime.startSession",
+    "chatRuntime.postMessage",
+    "runSkillStream",
+    "/api/chat",
+    "/api/skill/run",
+  ]) {
+    assert.equal(
+      publicIntelSlice.includes(forbidden),
+      false,
+      `public-intel route leaked ${forbidden}`
+    );
+  }
+});
+
+test("public scanner modules do not import retained skill runtime or chat seams", () => {
+  for (const path of [
+    "src/core/discovery/scanner-cascade.mjs",
+    "src/core/discovery/public-page-extractor.mjs",
+    "src/core/discovery/public-scanner-ai.mjs",
+  ]) {
+    const text = source(path);
+    for (const forbidden of ["skill-runtime", "runSkillStream", "chatRuntime", "/api/skill/run"]) {
+      assert.equal(text.includes(forbidden), false, `${path} leaked ${forbidden}`);
+    }
+  }
+});
 
 test("public-intel state, scan, review, and sync-preview routes are local and dependency-injected", async () => {
   const calls = [];

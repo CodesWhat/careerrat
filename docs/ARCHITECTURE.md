@@ -102,6 +102,32 @@ silently start chat or the full skill runtime.
 Confirmed company writes remain confirm-first source config or DB-owner work,
 not React state, generated tracker files, or model output.
 
+Public company intelligence is a separate local data lane. Migration 009 creates
+`public_*` SQLite tables for company metadata, board metadata, careers-page scan
+metadata, review items, and the public sync preference. These rows are public
+metadata only: company/domain, careers or board URLs, ATS/provider hints,
+confidence, freshness, provenance, conflicts, and scan status. Candidate profile
+data, resumes, applications, sourced rows, tracker ids, compensation, fit scores,
+private notes, local paths, raw prompts, model text, page bodies, and individual
+job postings are blocked by scrub validation before public writes or sync
+preview.
+
+The public-intel scanner path is local-first:
+
+1. Resolve supported ATS boards deterministically.
+2. Extract public careers-page links and metadata without AI.
+3. Record clean no-results, empty pages, blocked pages, robots-disallowed pages,
+   login-gated pages, and useless pages as metadata only.
+4. Use bounded AI only for ambiguous reachable public text, with schema
+   validation and one corrective retry.
+5. Treat model-suggested URLs/providers as advisory until deterministic
+   validation passes.
+6. Put only ambiguous or conflicting findings in the public-intel review queue.
+
+Public-intel routes live under `/api/discovery/public-intel/*`. They return
+local API envelopes and do not start chat, call `POST /api/skill/run`, or write
+source config except through explicit supported-ATS review approval.
+
 ### Bounded AI Layer
 
 Model calls are reserved for small schema-validated judgments:
@@ -110,12 +136,16 @@ Model calls are reserved for small schema-validated judgments:
 - classify finite pasted content
 - suggest bounded onboarding fields
 - normalize or rewrite a small artifact
+- extract structure from ambiguous public careers-page text after deterministic
+  scanner branches fail to identify a board
 
 Bounded AI flows call `callAI()` or `runStructuredOneshot()`, return explicit
 no-AI/manual fallbacks, and treat model output as advisory until deterministic
 validation passes.
 For company discovery, bounded AI is limited to company seed judgment; the
-resolver, scanner, proposal gate, and confirmed writes stay deterministic.
+resolver, proposal gate, and confirmed writes stay deterministic. For public
+company intelligence, bounded AI is a last-resort extraction assist; it cannot
+approve a source-config write or become final provider identity by itself.
 
 ### Conversational Chat Handoff Layer
 

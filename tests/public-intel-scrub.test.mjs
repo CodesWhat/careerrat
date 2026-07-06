@@ -39,8 +39,8 @@ test("public scrub fails closed on private candidate, tracker, comp, notes, and 
     ["candidate profile", { candidate: { full_name: "Private Person" } }],
     ["resume text", { resume: "private resume body" }],
     ["evidence", { evidence: [{ claim: "private fact" }] }],
-    ["current comp", { compensation: { current_base: 145000 } }],
-    ["comp floor", { minimum_base: 200000 }],
+    ["current comp", { compensation: { current_base: 171234 } }],
+    ["comp floor", { minimum_base: 206789 }],
     ["fit score", { roleFit: { score: 92, why: ["private fit"] } }],
     ["gate output", { gate: "KEEP" }],
     ["tracker id", { trackerId: "app-123" }],
@@ -82,6 +82,34 @@ test("public scrub blocks raw AI, prompt, page bodies, and individual job postin
       () => assertPublicIntelPayload(publicPayload(contamination), { context: name }),
       (err) => err?.code === "PUBLIC_INTEL_PRIVATE_FIELD",
       name
+    );
+  }
+});
+
+test("public scrub blocks sync-preview-shaped private source config and posting contamination", async () => {
+  const { assertPublicIntelPayload } = await scrubModule();
+  const preview = {
+    companies: [publicPayload()],
+    boards: [],
+    careersPages: [],
+  };
+
+  for (const contamination of [
+    {
+      sourceConfig: {
+        tracked_companies: [{ name: "Private Target", careers_url: "https://x.test" }],
+      },
+    },
+    { searchSources: { searches: [{ query: "private candidate targeting" }] } },
+    { sourcedRows: [{ id: "sourced-1", title: "Private sourced row" }] },
+    {
+      companies: [publicPayload({ jobPostings: [{ title: "Role", url: "https://jobs.test/1" }] })],
+    },
+    { careersPages: [{ ...publicPayload(), pageText: "Full public page body should not sync" }] },
+  ]) {
+    assert.throws(
+      () => assertPublicIntelPayload({ ...preview, ...contamination }, { context: "sync-preview" }),
+      (err) => err?.code === "PUBLIC_INTEL_PRIVATE_FIELD"
     );
   }
 });
