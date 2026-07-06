@@ -42,6 +42,8 @@ created: 2026-07-06
 | 10-01-02 | 01 | 0 | PKT-02 | T-10-03 | Packet content is evidence-grounded, ATS-safe, placeholder/forbidden-word clean, and cover-letter prose is generated before scaffold assembly. | unit/integration | `node --test tests/documents-tailor.test.mjs tests/packet-engine.test.mjs` | ❌ W0 | ⬜ pending |
 | 10-01-03 | 01 | 0 | PKT-03 | T-10-04 | Captured questions persist into packet generation, and EEO/disability/demographic prompts are excluded before AI answer generation. | unit/integration | `node --test tests/form-questions.test.mjs tests/packet-answers.test.mjs` | ❌ W0 | ⬜ pending |
 | 10-01-04 | 01 | 0 | PKT-04 | T-10-05 | PDF is default; DOCX is generated only when required or explicitly selected. | integration/smoke | `node --test tests/packet-export.test.mjs` | ❌ W0 | ⬜ pending |
+| 10-02-02 | 02 | 1 | PKT-01 | T-10-02-05 | D-02 JD/body capture is deterministic: available full body text persists to `workspace/jobs/`, stamps `artifacts.jd`, and missing body returns manual/review state without an AI call. | integration | `node --test tests/packet-generate-route.test.mjs tests/evaluate-gate.test.mjs` | ❌ W0 assertion | ⬜ pending |
+| 10-04-03 | 04 | 3 | PKT-02 / PKT-03 | T-10-04-08 | D-08 packet context enumerates profile, resume/resume facts, confirmed evidence, stories/learnings, writing voice, honesty, deep-ingest outputs, captured JD, captured questions, company intelligence, and public company/job-board context while blocking private data and unconfirmed claims from outbound artifacts. | unit/integration | `node --test tests/packet-engine.test.mjs tests/packet-generate-route.test.mjs tests/packet-answers.test.mjs` | ❌ W0 assertion | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -49,8 +51,8 @@ created: 2026-07-06
 
 ## Wave 0 Requirements
 
-- [ ] `tests/packet-generate-route.test.mjs` — covers PKT-01 local generate/gate route behavior and DB artifact stamping.
-- [ ] `tests/packet-engine.test.mjs` — covers PKT-02 packet orchestration over deterministic document builders, bounded AI envelopes, evidence-linked cover-letter prose blocks, and reviewable gaps.
+- [ ] `tests/packet-generate-route.test.mjs` — covers PKT-01 local generate/gate route behavior, full JD/body capture to `workspace/jobs/`, `artifacts.jd` DB stamping, and missing-body manual/review state with no bounded-AI call.
+- [ ] `tests/packet-engine.test.mjs` — covers PKT-02 packet orchestration over deterministic document builders, bounded AI envelopes, evidence-linked cover-letter prose blocks, D-08 source enumeration, confirmed/reviewed versus raw/proposed source separation, private-data leakage prevention, and reviewable gaps.
 - [ ] `tests/packet-answers.test.mjs` — covers PKT-03 durable question capture, non-EEO answer generation, and manual-paste exclusion.
 - [ ] `tests/packet-export.test.mjs` — covers PKT-04 PDF default and conditional DOCX.
 - [ ] Update `tests/packet-page.test.mjs` — old expected skill-runtime post becomes a regression that default packet generation calls local APIs.
