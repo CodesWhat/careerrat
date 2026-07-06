@@ -36,6 +36,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
+import { APP_SAFE_RUNTIME_TOOLS, resolveRuntimeTools } from "./runtime-tools.mjs";
 import { appendUsageEvent, computeCost } from "./usage-log.mjs";
 
 // ---------------------------------------------------------------------------
@@ -329,41 +330,10 @@ export async function loadClaudeAgentSdk() {
   }
 }
 
-// The tool surface this P0-4 spike restricts every run to — a union across
-// every skill currently in DEFAULT_RUNTIME_SKILLS. Per its own instruction
-// above ("needs revisiting per-skill"), here is that audit, redone each time
-// the allowlist grows, rather than re-derived from scratch:
-//   - evaluate-job needs Read/Glob/Grep/WebFetch to fetch and read a JD +
-//     candidate config, Write/Edit to save the JD body and patch
-//     tracker.json/frontmatter, Bash because its STEP 9/10 shell out to
-//     `rolester evaluate|tracker|activity|learnings|research` CLIs, and Skill
-//     so the model can invoke evaluate-job itself.
-//   - answer-question (see .agents/skills/answer-question) needs
-//     Read/Glob/Grep to read candidate config, evidence, and tailored
-//     artifacts as grounding context; Write/Edit to persist
-//     screening_answers, append to an answers artifact, and stamp the
-//     tracker row; Bash for the activity/tracker CLIs; and Skill. It never
-//     calls WebFetch — that's evaluate-job's alone.
-//   - tailor-application (see .agents/skills/tailor-application) needs
-//     Read/Glob/Grep to read the gate files, evidence, writing style, and
-//     prior tailored artifacts (STEP 1-4); Write/Edit to draft the resume/
-//     cover letter/answers artifacts and stamp the tracker row (STEP 5-7);
-//     Bash because its own STEPs shell out to `rolester export`,
-//     `rolester questions`, and `rolester tracker --verify` (the
-//     placeholder-lint + build + tracker-stamp CLIs); WebFetch only for a JD
-//     refetch if the saved posting needs re-reading; and Skill.
-//   - resume-extract (see .agents/skills/resume-extract) is in
-//     DEFAULT_RUNTIME_SKILLS above but is NEVER run with this shared
-//     RUNTIME_TOOLS default — its one caller, POST /api/onboard/resume-ai
-//     (onboard-route.mjs), always passes an explicit `tools: ["Read"]`
-//     override to runSkillStream (see the `tools` param below), since a
-//     headless PDF/image-reading call has no business touching Bash/Write/
-//     Edit/WebFetch. It doesn't enter the union this constant represents.
-// The list itself is already the union of the three skills that actually
-// run with it (evaluate-job, answer-question, tailor-application). If
-// ROLESTER_RUNTIME_SKILLS grows with a skill that also needs this shared
-// default (rather than its own explicit override), redo this audit per-skill.
-export const RUNTIME_TOOLS = ["Read", "Glob", "Grep", "WebFetch", "Write", "Edit", "Bash", "Skill"];
+// Backward-compatible public constant for callers/tests that import the
+// one-shot default. Broad mutation/shell tools now require an explicit
+// `toolProfile: "tool-heavy"` or a narrower per-call `tools` list.
+export const RUNTIME_TOOLS = APP_SAFE_RUNTIME_TOOLS;
 
 // Posture text injected into the run's opening instruction — the one place
 // the one-shot embedded runtime and the M2 conversational chat runtime
@@ -415,12 +385,11 @@ export async function runSkillStream({
   // hermetic, deterministic stand-in for a live CLI subprocess — without
   // touching the actual @anthropic-ai/claude-agent-sdk devDependency.
   loadSdk = loadClaudeAgentSdk,
-  // Optional per-call tool-surface override — defaults to RUNTIME_TOOLS so
-  // every existing caller (POST /api/skill/run) is byte-identical to before
-  // this param existed. M8's resume-extract is the first caller to narrow
-  // it (`tools: ["Read"]`) — see RUNTIME_TOOLS's own comment above for why
-  // that skill never uses this shared default.
-  tools = RUNTIME_TOOLS,
+  // Optional per-call tool-surface override. Explicit `tools` arrays are
+  // copied and take precedence over named profiles; otherwise app-safe is
+  // the default and tool-heavy execution must be named by the caller.
+  tools,
+  toolProfile,
 } = {}) {
   if (typeof onEvent !== "function") {
     throw new TypeError("runSkillStream: onEvent callback is required");
@@ -446,6 +415,8 @@ export async function runSkillStream({
     err.code = "NO_AI_ROUTE";
     throw err;
   }
+
+  const runtimeTools = resolveRuntimeTools({ tools, toolProfile });
 
   // Validate before touching the SDK so a missing devDependency is a clean
   // 501, not a crash mid-stream.
@@ -479,7 +450,7 @@ export async function runSkillStream({
       abortController: controller,
       settingSources: ["project"],
       skills: [skill],
-      tools,
+      tools: runtimeTools,
       // Headless posture: nobody is watching a permission prompt in a
       // server process, so a prompt would just hang the loop forever. The
       // real safety boundary is `tools` above (what CAN be invoked at all);
