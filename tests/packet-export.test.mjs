@@ -4,9 +4,11 @@
 
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join, relative } from "node:path";
 import { after, test } from "node:test";
+import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 
@@ -120,6 +122,46 @@ function fakeExporter(calls) {
     }
     return result;
   };
+}
+
+function bootPacketServer(repoRoot, opts = {}) {
+  const routes = new Map();
+  function addRoute(method, path, handler) {
+    routes.set(`${method} ${path}`, handler);
+  }
+  mountPacketRoutes({ addRoute, repoRoot, env: {}, ...opts });
+
+  const server = createServer((req, res) => {
+    const url = (req.url || "/").split("?")[0];
+    const route = routes.get(`${req.method} ${url}`);
+    if (!route) {
+      res.writeHead(404).end();
+      return;
+    }
+    route(req, res);
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => resolve(server));
+  });
+}
+
+function baseUrl(server) {
+  const { port } = server.address();
+  return `http://127.0.0.1:${port}`;
+}
+
+function closeServer(server) {
+  return new Promise((resolve) => server.close(resolve));
+}
+
+async function postJson(server, path, payload) {
+  const res = await fetch(`${baseUrl(server)}${path}`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, body };
 }
 
 async function importPacketExports() {
@@ -276,6 +318,35 @@ test("appRegisterPacketArtifacts stamps source and export fields through the DB-
       }),
     /workspace|artifact path/i
   );
+});
+
+test("POST /api/packet/export exports saved packet sources through the local route", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const calls = [];
+  const server = await bootPacketServer(repoRoot, {
+    packetExportArtifact: fakeExporter(calls),
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/export", {
+      appId: "app-export",
+      formats: ["docx"],
+    });
+
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.appId, "app-export");
+    assert.deepEqual(calls[0].formats, ["pdf", "docx"]);
+    assert.doesNotMatch(JSON.stringify(body), /\/api\/skill\/run|tailor-application/);
+
+    const artifacts = readApp(repoRoot).artifacts;
+    assert.match(artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+    assert.match(artifacts.resumeDocx, /^workspace\/tailored\/.+\.docx$/);
+  } finally {
+    await closeServer(server);
+  }
 });
 
 test("packet export owner delegates to existing document export helpers without install-time assumptions", () => {
