@@ -132,15 +132,26 @@ test("buildChildEnv: byok route sets ANTHROPIC_API_KEY/BASE_URL, no custom heade
   assert.equal(childEnv.SOME_OTHER, "kept");
 });
 
-test("buildChildEnv: proxy route sends the proxy TOKEN as ANTHROPIC_API_KEY and labels the skill", () => {
+test("buildChildEnv: proxy route sends the proxy TOKEN as ANTHROPIC_API_KEY and labels feature metadata", () => {
   const childEnv = buildChildEnv({
     route: { type: "proxy", token: "devtoken", baseUrl: "http://127.0.0.1:7788" },
+    feature: "job-evaluation",
     skill: "evaluate-job",
+    action: "gate",
+    operation: "job.gate",
     baseEnv: {},
   });
   assert.equal(childEnv.ANTHROPIC_API_KEY, "devtoken");
   assert.equal(childEnv.ANTHROPIC_BASE_URL, "http://127.0.0.1:7788");
-  assert.equal(childEnv.ANTHROPIC_CUSTOM_HEADERS, "x-rolester-skill: evaluate-job");
+  assert.equal(
+    childEnv.ANTHROPIC_CUSTOM_HEADERS,
+    [
+      "x-rolester-feature: job-evaluation",
+      "x-rolester-skill: evaluate-job",
+      "x-rolester-action: gate",
+      "x-rolester-operation: job.gate",
+    ].join("\n")
+  );
 });
 
 test("buildChildEnv: route.type 'none' returns null", () => {
@@ -557,6 +568,9 @@ test("runSkillStream: default caller gets app-safe runtime tools passed to query
     let seenTools = null;
     await runSkillStream({
       skill: "evaluate-job",
+      feature: "job-evaluation",
+      action: "gate",
+      operation: "job.gate",
       input: "hi",
       repoRoot,
       env: { ANTHROPIC_API_KEY: "sk-ant-test" },
@@ -612,6 +626,9 @@ test("runSkillStream: toolProfile 'tool-heavy' opts into mutation and shell tool
     let seenTools = null;
     await runSkillStream({
       skill: "evaluate-job",
+      feature: "job-evaluation",
+      action: "gate",
+      operation: "job.gate",
       input: "hi",
       repoRoot,
       env: { ANTHROPIC_API_KEY: "sk-ant-test" },
@@ -663,6 +680,9 @@ test("runSkillStream: BYOK route writes one usage_event per model used (proxy al
   try {
     await runSkillStream({
       skill: "evaluate-job",
+      feature: "job-evaluation",
+      action: "gate",
+      operation: "job.gate",
       input: "hi",
       repoRoot,
       env: { ANTHROPIC_API_KEY: "sk-ant-test" },
@@ -672,7 +692,10 @@ test("runSkillStream: BYOK route writes one usage_event per model used (proxy al
     const rows = readUsageEvents({ root: repoRoot });
     assert.equal(rows.length, 1);
     assert.equal(rows[0].source, "byok");
+    assert.equal(rows[0].feature, "job-evaluation");
     assert.equal(rows[0].skill, "evaluate-job");
+    assert.equal(rows[0].action, "gate");
+    assert.equal(rows[0].operation, "job.gate");
     assert.equal(rows[0].model, "claude-sonnet-5");
     assert.equal(rows[0].tokens_in, 400);
     assert.equal(rows[0].tokens_out, 200);

@@ -134,8 +134,10 @@ function buildRequest(
     messages,
     maxTokens,
     stream,
+    feature,
     skill,
     action,
+    operation,
     outputSchema,
     outputName,
     outputMode,
@@ -158,17 +160,21 @@ function buildRequest(
   } else {
     url = `${route.baseUrl}/v1/messages`;
     headers.authorization = `Bearer ${route.token}`;
+    if (feature) headers["x-rolester-feature"] = feature;
     if (skill) headers["x-rolester-skill"] = skill;
     if (action) headers["x-rolester-action"] = action;
+    if (operation) headers["x-rolester-operation"] = operation;
   }
   return { url, headers, body };
 }
 
-function usageRow({ source, skill, action, model, usage, upstream }) {
+function usageRow({ source, feature, skill, action, operation, model, usage, upstream }) {
   return {
     source,
+    feature,
     skill,
     action,
+    operation,
     model,
     upstream,
     tokens_in: usage?.input_tokens,
@@ -178,7 +184,7 @@ function usageRow({ source, skill, action, model, usage, upstream }) {
   };
 }
 
-async function* streamAI({ res, route, model, skill, action, root }) {
+async function* streamAI({ res, route, model, feature, skill, action, operation, root }) {
   let inputTokens = 0;
   let cacheRead = 0;
   let cacheCreation = 0;
@@ -208,8 +214,10 @@ async function* streamAI({ res, route, model, skill, action, root }) {
       appendUsageEvent(
         usageRow({
           source: "byok",
+          feature,
           skill,
           action,
+          operation,
           model: finalModel,
           upstream: hostOf(route.baseUrl),
           usage: {
@@ -231,8 +239,10 @@ export async function callAI({
   messages,
   maxTokens,
   stream = false,
+  feature = null,
   skill = null,
   action = null,
+  operation = null,
   signal,
   root,
   env = process.env,
@@ -254,8 +264,10 @@ export async function callAI({
     messages,
     maxTokens,
     stream,
+    feature,
     skill,
     action,
+    operation,
     outputSchema,
     outputName,
     outputMode,
@@ -270,7 +282,7 @@ export async function callAI({
   }
 
   if (stream) {
-    return streamAI({ res, route, model: resolvedModel, skill, action, root });
+    return streamAI({ res, route, model: resolvedModel, feature, skill, action, operation, root });
   }
 
   const data = await res.json();
@@ -279,8 +291,10 @@ export async function callAI({
     appendUsageEvent(
       usageRow({
         source: "byok",
+        feature,
         skill,
         action,
+        operation,
         model: data.model || resolvedModel,
         upstream: hostOf(route.baseUrl),
         usage: data.usage,

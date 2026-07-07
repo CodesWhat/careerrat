@@ -3075,11 +3075,6 @@ const AVATAR_CLASSES = [
   "bg-surface-container-highest text-on-surface-variant",
 ];
 
-// logo.dev company logos are entirely optional. The publishable token is PRIVATE
-// candidate config (never committed — see code-must-be-domain-neutral); absent →
-// every avatar stays an initials chip. Set during buildDashboardViewModel.
-let activeLogoToken = "";
-
 // The candidate's own name, normalized, so contact extraction can drop the
 // candidate themselves out of the network (a thread "from" them isn't a contact).
 // Derived from profile config, never hardcoded — see code-must-be-domain-neutral.
@@ -3130,35 +3125,23 @@ function companyDomainForLogo(domain) {
   return host;
 }
 
-// Shared logo.dev query params. fallback=404 makes a miss error out so our own
-// initials chip shows (via the img onerror), instead of logo.dev's generic monogram.
-const LOGO_QUERY = `&size=64&format=webp&retina=true&fallback=404`;
-
-// Resolve a logo URL with two strategies, in precision order:
+// Resolve a cached logo URL with two strategies, in precision order:
 //   1. Domain — when we have a CLEAN, real employer domain (apple.com), key on it.
 //      Most precise; immune to name collisions.
-//   2. Name search — otherwise fall back to logo.dev's /name/ lookup keyed on the
-//      company name. The company name is the one field we always have and is always
-//      correct, so this covers the ATS-hosted majority (jobs.ashbyhq.com rows whose
-//      stored domain is the portal, not the employer) with no manual data upkeep.
+//   2. Name search — include the company name so the server cache route can use
+//      logo.dev's /name/ lookup when there is no clean employer domain.
 // A clean domain auto-overrides name search as we capture real domains upstream.
 function buildLogoUrl(domain, name) {
-  if (!activeLogoToken) return "";
-  const token = encodeURIComponent(activeLogoToken);
   const host = companyDomainForLogo(domain);
-  if (host) {
-    return `https://img.logo.dev/${encodeURIComponent(host)}?token=${token}${LOGO_QUERY}`;
-  }
   const company = String(name || "").trim();
-  if (company) {
-    return `https://img.logo.dev/name/${encodeURIComponent(company)}?token=${token}${LOGO_QUERY}`;
-  }
-  return "";
+  const params = [];
+  if (host) params.push(`domain=${encodeURIComponent(host)}`);
+  if (company) params.push(`name=${encodeURIComponent(company)}`);
+  return params.length ? `/api/logos/img?${params.join("&")}` : "";
 }
 
-// logo.dev serves a dark-optimised variant via &theme=dark — it returns the
-// light/knockout version of monochrome marks so a black wordmark stays visible on
-// our dark avatar tile. We bake the suffix in at render and re-point every logo on
+// The /api/logos/img cache route forwards &theme=dark to logo.dev and stores a
+// separate dark image. We bake the suffix in at render and re-point every logo on
 // theme toggle (see syncLogoTheme in the shell). The base URL is kept on
 // data-logo-base so the toggle can rebuild the src either way.
 function logoThemeSuffix() {
@@ -4791,7 +4774,6 @@ export function buildDashboardViewModel(
     agentGuidance = null,
   } = {}
 ) {
-  activeLogoToken = settings?.logoToken || "";
   activeCandidateName = normalizeName(settings?.profile?.candidate || "");
   const allNextSteps = buildNextSteps(trackerData, now, { limit: null });
   const timeNextSteps = allNextSteps.slice(0, 3);

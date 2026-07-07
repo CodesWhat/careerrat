@@ -17,23 +17,24 @@ function renderNav() {
 }
 
 describe("NavList", () => {
-  it("renders the canonical product nav with the Inbox badge", () => {
+  it("renders the canonical product top nav", () => {
     const html = renderNav();
 
-    for (const label of [
-      "Home",
-      "Settings",
-      "Onboarding",
-      "Inbox",
-      "Jobs",
-      "Calendar",
-      "Network",
-      "Library",
-    ]) {
+    for (const label of ["Dashboard", "Dashboard V2", "Jobs", "Calendar", "Network", "Library"]) {
       expect(html).toContain(label);
     }
-    expect(html).toContain("nav-item__badge");
-    expect(html).toContain(">7<");
+    expect(html).not.toContain("Home");
+    expect(html).not.toContain("Settings");
+    expect(html).not.toContain("Onboarding");
+    expect(html).not.toContain("Inbox");
+    expect(html).not.toContain("nav-item__badge");
+  });
+
+  it("keeps Calendar immediately to the right of Dashboard", () => {
+    const html = renderNav();
+
+    expect(html.indexOf("Dashboard")).toBeLessThan(html.indexOf("Calendar"));
+    expect(html.indexOf("Calendar")).toBeLessThan(html.indexOf("Dashboard V2"));
   });
 
   it("does not advertise the legacy tracker route as normal product navigation", () => {

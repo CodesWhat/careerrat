@@ -9,10 +9,9 @@ import { logoImageUrl } from "../lib/api.js";
 // algorithm silently drifting between them (M10 design doc §4). Onboarding's
 // CompaniesStep now imports this instead of defining its own copy.
 //
-// Degrade path: GET /api/logos/img?domain= always 404s rather than erroring
-// on any failure (missing token, bad domain, upstream failure — see
-// logo-route.mjs) — the <img onError> below is the actual "no logo" branch,
-// by design, not a bug to fix here.
+// Degrade path: GET /api/logos/img?domain= or ?name= always 404s rather
+// than erroring on any miss (bad input, upstream failure — see logo-route.mjs)
+// — the <img onError> below is the actual "no logo" branch, by design.
 function initials(name) {
   return String(name || "")
     .trim()
@@ -27,21 +26,21 @@ export function CompanyAvatar({ name, domain, size }) {
 
   // A row recycled onto a different company (e.g. list virtualization, or a
   // drawer re-opened for a different id) must not keep showing the PREVIOUS
-  // company's broken-image state — reset whenever `domain` changes, even
+  // company's broken-image state — reset whenever the lookup changes, even
   // though the effect body itself doesn't read it.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: domain drives the reset, not the effect body
+  // biome-ignore lint/correctness/useExhaustiveDependencies: domain/name drive the reset, not the effect body
   useEffect(() => {
     setFailed(false);
-  }, [domain]);
+  }, [domain, name]);
 
   const style = size
     ? { width: size, height: size, fontSize: Math.max(10, Math.round(size * 0.38)) }
     : undefined;
 
-  if (domain && !failed) {
+  if ((domain || name) && !failed) {
     return (
       <span className="avatar" style={style}>
-        <img src={logoImageUrl(domain)} alt="" onError={() => setFailed(true)} />
+        <img src={logoImageUrl({ domain, name })} alt="" onError={() => setFailed(true)} />
       </span>
     );
   }

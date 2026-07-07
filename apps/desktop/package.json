@@ -7,7 +7,7 @@
   "author": "CodesWhat",
   "main": "main.mjs",
   "scripts": {
-    "dev": "electron .",
+    "dev": "node scripts/brand-dev-app.mjs && electron .",
     "stage": "node scripts/stage.mjs",
     "dist": "npm --prefix ../.. run app:build && npm run stage && electron-builder --mac dmg"
   },

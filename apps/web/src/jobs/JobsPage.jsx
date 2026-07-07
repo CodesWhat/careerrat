@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button } from "../components/Button.jsx";
-import { PageScaffold } from "../components/PageScaffold.jsx";
+import { ListIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { getSearchSources, startSearchRun } from "../lib/api.js";
 import { FunnelSankey } from "./FunnelSankey.jsx";
@@ -93,7 +93,8 @@ export function JobsPage() {
   const [manualSearchPending, setManualSearchPending] = useState(false);
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const rows = data?.jobs?.rows || [];
+  const jobs = data?.jobs || {};
+  const rows = jobs.rows || [];
   const filtered = useMemo(
     () => (tab === "all" ? rows : rows.filter((r) => r.source === tab)),
     [rows, tab]
@@ -163,65 +164,150 @@ export function JobsPage() {
 
   if (noDatabase) {
     return (
-      <PageScaffold title="Jobs">
+      <div className="dashboard-home jobs-page">
+        <JobsHero rows={[]} />
         <InlineAlert message="No database workspace detected — run `rolester data import` (or `rolester data init`) first, then reload." />
-      </PageScaffold>
+      </div>
     );
   }
 
   return (
-    <PageScaffold
-      title="Jobs"
-      subtitle="Every application and sourced role, one list — gate sourced roles from here before they enter the active pipeline."
-      actions={
-        sourceSetupReady ? (
-          <Button onClick={handleManualSearch} disabled={manualSearchRunning}>
-            {manualSearchRunning ? "Searching..." : "Search jobs"}
-          </Button>
-        ) : null
-      }
-      wide
-    >
+    <div className="dashboard-home jobs-page">
+      <JobsHero
+        rows={rows}
+        action={
+          sourceSetupReady ? (
+            <Button
+              className="jobs-page__search-button"
+              onClick={handleManualSearch}
+              disabled={manualSearchRunning}
+            >
+              {manualSearchRunning ? "Searching..." : "Search jobs"}
+            </Button>
+          ) : null
+        }
+      />
+
       {error ? <InlineAlert message={error} /> : null}
       {sourceSetupError ? <InlineAlert message={sourceSetupError} /> : null}
       {visibleManualSearchError ? <InlineAlert message={visibleManualSearchError} /> : null}
-      {loading ? <p>Loading…</p> : null}
+      {loading ? <p className="dashboard-home__loading jobs-page__loading">Loading…</p> : null}
       {data && !sourceSetupReady ? (
-        <p className="field__hint">Finish Search setup before running a job search.</p>
+        <p className="field__hint jobs-page__setup-hint">
+          Finish Search setup before running a job search.
+        </p>
       ) : null}
 
       {data ? (
         <>
-          <JobFunnel funnel={data.jobs.funnel} />
-
-          <div className="inbox-filters">
-            {TABS.map((t) => (
-              <button
-                key={t.key}
-                type="button"
-                className={`inbox-filter${tab === t.key ? " inbox-filter--active" : ""}`}
-                onClick={() => setTab(t.key)}
-              >
-                {t.label}
-              </button>
-            ))}
-          </div>
-
-          {filtered.length === 0 ? (
-            <p className="field__hint">Nothing here for this filter.</p>
-          ) : (
-            <div className="job-list">
-              {filtered.map((row) => (
-                <JobRow key={row.id} row={row} onOpen={openDrawer} />
-              ))}
+          <section className="dashboard-home__card jobs-page__funnel-card">
+            <JobsCardHeader icon={<ListIcon />} title="Pipeline buckets" meta="Status" />
+            <div className="jobs-page__funnel-body">
+              {Array.isArray(jobs.funnel) && jobs.funnel.length ? (
+                <JobFunnel funnel={jobs.funnel} />
+              ) : (
+                <div className="dashboard-home__empty-row jobs-page__empty-row">
+                  No bucket data yet.
+                </div>
+              )}
             </div>
-          )}
+          </section>
 
-          <FunnelSankey sankey={data.jobs.sankey} />
+          <section className="dashboard-home__card jobs-page__board-card">
+            <JobsCardHeader icon={<SearchIcon />} title="Jobs" meta={`${filtered.length} shown`} />
+            <div className="jobs-page__board-body">
+              <div className="jobs-page__list-toolbar">
+                <fieldset className="inbox-filters jobs-page__filters">
+                  <legend className="jobs-page__filters-label">Job filters</legend>
+                  {TABS.map((t) => (
+                    <button
+                      key={t.key}
+                      type="button"
+                      className={`inbox-filter${tab === t.key ? " inbox-filter--active" : ""}`}
+                      onClick={() => setTab(t.key)}
+                    >
+                      {t.label}
+                    </button>
+                  ))}
+                </fieldset>
+                <span className="jobs-page__list-count">{filtered.length} roles</span>
+              </div>
+
+              {filtered.length === 0 ? (
+                <div className="dashboard-home__empty-row jobs-page__empty-row">
+                  Nothing here for this filter.
+                </div>
+              ) : (
+                <div className="job-list jobs-page__job-list">
+                  {filtered.map((row) => (
+                    <JobRow key={row.id} row={row} onOpen={openDrawer} />
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+
+          <FunnelSankey sankey={jobs.sankey} />
         </>
       ) : null}
 
       {openRow ? <JobDrawer row={openRow} onClose={closeDrawer} /> : null}
-    </PageScaffold>
+    </div>
+  );
+}
+
+function JobsHero({ rows, action }) {
+  return (
+    <header className="dashboard-home__hero jobs-page__hero">
+      <div className="dashboard-home__title-block jobs-page__title-block">
+        <h1 className="dashboard-home__title jobs-page__title">Jobs</h1>
+        <p className="dashboard-home__subtitle jobs-page__subtitle">
+          Applications, sourced roles, and gate decisions.
+        </p>
+      </div>
+      <div className="jobs-page__hero-panel">
+        <JobsMetrics rows={rows} />
+        {action ? <div className="jobs-page__actions">{action}</div> : null}
+      </div>
+    </header>
+  );
+}
+
+function JobsMetrics({ rows }) {
+  const metrics = [
+    { key: "total", label: "Total", value: rows.length },
+    {
+      key: "applied",
+      label: "Applied",
+      value: rows.filter((row) => row.source === "application").length,
+    },
+    {
+      key: "sourced",
+      label: "Sourced",
+      value: rows.filter((row) => row.source === "sourced").length,
+    },
+  ];
+
+  return (
+    <div className="dashboard-home__metrics jobs-page__metrics">
+      {metrics.map((metric) => (
+        <div className="dashboard-home__metric jobs-page__metric" key={metric.key}>
+          <strong data-jobs-stat={metric.key}>{metric.value}</strong>
+          <span>{metric.label}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function JobsCardHeader({ icon, title, meta }) {
+  return (
+    <header className="dashboard-home__card-header jobs-page__card-header">
+      <h2>
+        <span className="dashboard-home__card-icon jobs-page__card-icon">{icon}</span>
+        <span>{title}</span>
+      </h2>
+      <span className="dashboard-home__card-meta jobs-page__card-meta">{meta}</span>
+    </header>
   );
 }

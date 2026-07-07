@@ -47,8 +47,10 @@ const ALLOWED_USAGE_KEYS = [
   "id",
   "at",
   "source",
+  "feature",
   "skill",
   "action",
+  "operation",
   "model",
   "upstream",
   "tokens_in",
@@ -339,8 +341,10 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
       headers: {
         authorization: "Bearer devtok",
         "content-type": "application/json",
+        "x-rolester-feature": "application-tailoring",
         "x-rolester-skill": "apply-job",
         "x-rolester-action": "tailor",
+        "x-rolester-operation": "packet.generate",
       },
       body: reqBody,
     });
@@ -354,8 +358,10 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
     assert.equal(upReq.headers["anthropic-version"], "2023-06-01");
     assert.equal(upReq.headers["x-portkey-config"], "cfg-1");
     assert.equal(upReq.headers.authorization, undefined);
+    assert.equal(upReq.headers["x-rolester-feature"], undefined);
     assert.equal(upReq.headers["x-rolester-skill"], undefined);
     assert.equal(upReq.headers["x-rolester-action"], undefined);
+    assert.equal(upReq.headers["x-rolester-operation"], undefined);
 
     const expected = computeCost("claude-sonnet-5", {
       tokens_in: 1000,
@@ -366,8 +372,10 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
     const events = readUsageEvents({ root });
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "proxy");
+    assert.equal(events[0].feature, "application-tailoring");
     assert.equal(events[0].skill, "apply-job");
     assert.equal(events[0].action, "tailor");
+    assert.equal(events[0].operation, "packet.generate");
     assert.equal(events[0].model, "claude-sonnet-5");
     assert.equal(events[0].tokens_in, 1000);
     assert.equal(events[0].tokens_out, 500);
@@ -422,8 +430,10 @@ test("proxy (non-stream): metered bounded calls write labels and allowed usage k
       headers: {
         authorization: "Bearer devtok",
         "content-type": "application/json",
+        "x-rolester-feature": "company-discovery",
         "x-rolester-skill": "discover-companies",
         "x-rolester-action": "seed-generate",
+        "x-rolester-operation": "company-seeds",
       },
       body: reqBody,
     });
@@ -433,8 +443,10 @@ test("proxy (non-stream): metered bounded calls write labels and allowed usage k
     const events = readUsageEvents({ root });
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "proxy");
+    assert.equal(events[0].feature, "company-discovery");
     assert.equal(events[0].skill, "discover-companies");
     assert.equal(events[0].action, "seed-generate");
+    assert.equal(events[0].operation, "company-seeds");
     assert.equal(events[0].model, "claude-sonnet-5");
     assertUsageEventIsMetadataOnly(events[0]);
   } finally {
@@ -464,8 +476,10 @@ test("proxy: ROLESTER_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, neve
       headers: {
         authorization: "Bearer devtok",
         "content-type": "application/json",
+        "x-rolester-feature": "job-evaluation",
         "x-rolester-skill": "evaluate-job",
         "x-rolester-action": "gate",
+        "x-rolester-operation": "job.gate",
       },
       body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
     });
@@ -476,7 +490,10 @@ test("proxy: ROLESTER_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, neve
     const [upReq] = upstream.requests;
     const expectedUserId = createHash("sha256").update("devtok", "utf8").digest("hex").slice(0, 12);
     assert.equal(upReq.headers["ai-reporting-user"], expectedUserId);
-    assert.equal(upReq.headers["ai-reporting-tags"], "skill:evaluate-job,action:gate");
+    assert.equal(
+      upReq.headers["ai-reporting-tags"],
+      "feature:job-evaluation,skill:evaluate-job,action:gate,operation:job.gate"
+    );
 
     // The raw proxy token must never appear as any outbound header value.
     for (const value of Object.values(upReq.headers)) {

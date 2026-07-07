@@ -145,10 +145,15 @@ function reportingUserId(token) {
 // present — never emit an empty ai-reporting-tags header.
 function buildReportingTags(inboundHeaders) {
   const tags = [];
+  const feature = inboundHeaders["x-rolester-feature"];
   const skill = inboundHeaders["x-rolester-skill"];
   const action = inboundHeaders["x-rolester-action"];
+  const operation = inboundHeaders["x-rolester-operation"];
+  if (feature) tags.push(`feature:${Array.isArray(feature) ? feature.join(",") : feature}`);
   if (skill) tags.push(`skill:${Array.isArray(skill) ? skill.join(",") : skill}`);
   if (action) tags.push(`action:${Array.isArray(action) ? action.join(",") : action}`);
+  if (operation)
+    tags.push(`operation:${Array.isArray(operation) ? operation.join(",") : operation}`);
   return tags.length ? tags.join(",") : null;
 }
 
@@ -223,11 +228,13 @@ export function createProxyServer({
     else counters.unpriced_requests += 1;
   }
 
-  function recordUsage({ model, skill, action, usage }) {
+  function recordUsage({ model, feature, skill, action, operation, usage }) {
     const row = {
       source: "proxy",
+      feature: feature || null,
       skill: skill || null,
       action: action || null,
+      operation: operation || null,
       model,
       upstream: upstreamHost,
       tokens_in: usage.input_tokens,
@@ -246,8 +253,10 @@ export function createProxyServer({
   async function proxyPass(req, res) {
     const url = new URL(req.url, "http://internal");
     const path = url.pathname;
+    const featureLabel = req.headers["x-rolester-feature"];
     const skillLabel = req.headers["x-rolester-skill"];
     const actionLabel = req.headers["x-rolester-action"];
+    const operationLabel = req.headers["x-rolester-operation"];
 
     let bodyBuffer = Buffer.alloc(0);
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -355,7 +364,16 @@ export function createProxyServer({
       }
     }
 
-    if (sawUsage) recordUsage({ model: modelSeen, skill: skillLabel, action: actionLabel, usage });
+    if (sawUsage) {
+      recordUsage({
+        model: modelSeen,
+        feature: featureLabel,
+        skill: skillLabel,
+        action: actionLabel,
+        operation: operationLabel,
+        usage,
+      });
+    }
   }
 
   function handleMeter(_req, res) {

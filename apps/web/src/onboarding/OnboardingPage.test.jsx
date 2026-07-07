@@ -3,7 +3,9 @@ import { getRuntimeConfig } from "../lib/api.js";
 import {
   deriveRuntimeCapabilities,
   loadOnboardingRuntimeState,
+  normalizeOnboardingDraft,
   refreshThenAdvance,
+  resolveInitialStep,
 } from "./OnboardingPage.jsx";
 
 describe("refreshThenAdvance", () => {
@@ -82,7 +84,7 @@ describe("deriveRuntimeCapabilities", () => {
 });
 
 describe("loadOnboardingRuntimeState", () => {
-  it("loads onboarding state and runtime config once each", async () => {
+  it("loads onboarding state, runtime config, and durable draft once each", async () => {
     const calls = [];
     const onboardState = { keyConfigured: false, files: [] };
     const runtimeConfig = {
@@ -105,11 +107,25 @@ describe("loadOnboardingRuntimeState", () => {
         calls.push("runtime");
         return runtimeConfig;
       },
+      getDraft: async () => {
+        calls.push("draft");
+        return {
+          draft: {
+            stepIndex: 3,
+            draftSeeds: { targeting: { role_buckets: [{ titles: ["Applied AI Engineer"] }] } },
+            updatedAt: "2026-07-06T20:30:00.000Z",
+          },
+        };
+      },
     });
 
-    expect(calls).toEqual(["state", "runtime"]);
+    expect(calls).toEqual(["state", "runtime", "draft"]);
     expect(result.state).toBe(onboardState);
     expect(result.runtimeConfig).toBe(runtimeConfig);
+    expect(result.onboardingDraft.stepIndex).toBe(3);
+    expect(result.onboardingDraft.draftSeeds.targeting.role_buckets[0].titles).toEqual([
+      "Applied AI Engineer",
+    ]);
     expect(result.runtimeCapabilities.aiAvailable).toBe(true);
     expect(result.runtimeCapabilities.companyProposals).toBe(true);
   });
@@ -120,6 +136,7 @@ describe("loadOnboardingRuntimeState", () => {
       getRuntime: async () => {
         throw new Error("runtime config unavailable");
       },
+      getDraft: async () => ({ draft: { stepIndex: 4, draftSeeds: {} } }),
     });
 
     expect(result.state).toEqual({ keyConfigured: true, files: [] });
@@ -133,6 +150,51 @@ describe("loadOnboardingRuntimeState", () => {
       fullSkillRun: false,
     });
     expect(result.runtimeError.message).toBe("runtime config unavailable");
+    expect(result.onboardingDraft.stepIndex).toBe(4);
+  });
+
+  it("keeps onboarding usable with a blank durable draft when draft loading fails", async () => {
+    const result = await loadOnboardingRuntimeState({
+      getState: async () => ({ keyConfigured: false, files: [] }),
+      getRuntime: async () => ({ ai: { available: false, route: "none" } }),
+      getDraft: async () => {
+        throw new Error("draft unavailable");
+      },
+    });
+
+    expect(result.onboardingDraft).toEqual({
+      stepIndex: 0,
+      completedIndexes: [],
+      draftSeeds: {},
+      updatedAt: null,
+    });
+  });
+});
+
+describe("onboarding draft normalization", () => {
+  it("resumes from a valid persisted step", () => {
+    const draft = normalizeOnboardingDraft({
+      stepIndex: 6,
+      completedIndexes: [1, 2, 3, 4, 99, -1, 3.8, "5"],
+      draftSeeds: { targeting: { role_buckets: [{ titles: ["Staff Engineer"] }] } },
+      updatedAt: "2026-07-06T20:30:00.000Z",
+    });
+
+    expect(resolveInitialStep({ draft, stepCount: 8 })).toBe(6);
+    expect(draft.completedIndexes).toEqual([1, 2, 3, 4, 5, 7]);
+    expect(draft.draftSeeds.targeting.role_buckets[0].titles).toEqual(["Staff Engineer"]);
+  });
+
+  it("clamps invalid persisted drafts to the safe welcome step", () => {
+    expect(
+      normalizeOnboardingDraft({ stepIndex: 200, draftSeeds: null }, { stepCount: 8 })
+    ).toEqual({
+      stepIndex: 7,
+      completedIndexes: [],
+      draftSeeds: {},
+      updatedAt: null,
+    });
+    expect(resolveInitialStep({ draft: { stepIndex: -1 }, stepCount: 8 })).toBe(0);
   });
 });
 

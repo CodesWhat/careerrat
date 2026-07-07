@@ -139,3 +139,24 @@ test("renderTrackerDashboard groups the Active Pipeline by stage and preserves r
   // The rejected app is excluded from the active pipeline groups but shown in Rejected.
   assert.match(html, /Rejected/, "rejected section present");
 });
+
+test("renderTrackerDashboard resolves company avatars through the cached logo route", () => {
+  const html = renderTrackerDashboard({
+    applications: [
+      {
+        id: "logo-cache",
+        company: "Reply Co",
+        domain: "reply.co",
+        role: "Applied AI Engineer",
+        status: "awaiting",
+        fitScore: 86,
+      },
+    ],
+    sourced: [],
+    communications: [],
+    sources: [],
+  });
+
+  assert.match(html, /src="\/api\/logos\/img\?domain=reply\.co&amp;name=Reply%20Co"/);
+  assert.doesNotMatch(html, /img\.logo\.dev/);
+});

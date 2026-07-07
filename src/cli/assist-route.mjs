@@ -110,7 +110,7 @@ export function buildAssistPrompt(kind, input = {}) {
 // "buffer, don't stream" rationale).
 // ---------------------------------------------------------------------------
 
-export async function runBareOneshot({ prompt, repoRoot, env, skillLabel, loadSdk }) {
+export async function runBareOneshot({ prompt, repoRoot, env, labels, skillLabel, loadSdk }) {
   const route = resolveAIRoute(env);
   if (route.type === "none") {
     const err = new Error(route.error);
@@ -119,7 +119,15 @@ export async function runBareOneshot({ prompt, repoRoot, env, skillLabel, loadSd
   }
 
   const { query } = await loadSdk();
-  const childEnv = buildChildEnv({ route, skill: skillLabel, baseEnv: env, repoRoot });
+  const usageLabels = labels || { skill: skillLabel };
+  const childEnv = buildChildEnv({
+    route,
+    skill: usageLabels.skill,
+    action: usageLabels.action,
+    operation: usageLabels.operation,
+    baseEnv: env,
+    repoRoot,
+  });
   const controller = new AbortController();
 
   const q = query({
@@ -149,7 +157,16 @@ export async function runBareOneshot({ prompt, repoRoot, env, skillLabel, loadSd
         }
       }
       if (msg.type === "result") {
-        if (route.type === "byok") writeByokUsage({ msg, skill: skillLabel, repoRoot, env });
+        if (route.type === "byok") {
+          writeByokUsage({
+            msg,
+            skill: usageLabels.skill,
+            action: usageLabels.action,
+            operation: usageLabels.operation,
+            repoRoot,
+            env,
+          });
+        }
         break;
       }
     }
@@ -204,7 +221,7 @@ export function mountAssistRoutes({
       const basePrompt = buildAssistPrompt(kind, input);
       const prompt = correction ? `${basePrompt}\n\n${correction}` : basePrompt;
       try {
-        return await runBareOneshot({ prompt, repoRoot, env, skillLabel, loadSdk });
+        return await runBareOneshot({ prompt, repoRoot, env, labels, skillLabel, loadSdk });
       } catch (err) {
         if (err?.code === "SDK_NOT_INSTALLED") {
           err.code = BOUNDED_AI_CODES.NO_AI_ROUTE;

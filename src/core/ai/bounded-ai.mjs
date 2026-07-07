@@ -224,6 +224,7 @@ async function runNativePreferred({
           messages: messagesForAttempt(messages, lastErrors),
           skill: labels.skill,
           action: labels.action,
+          operation: labels.operation,
           outputMode: "native",
           outputSchema: schema,
         },

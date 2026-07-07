@@ -1,42 +1,286 @@
 import { useState } from "react";
-import modesSchema from "../../../../../config/modes.schema.json";
-import { Button } from "../../components/Button.jsx";
-import { Card } from "../../components/Card.jsx";
-import { Field, NumberField, Select, TextField, Toggle } from "../../components/form.jsx";
+import { Field, TextField } from "../../components/form.jsx";
+import { GitHubIcon, GlobeIcon, LinkedInIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import { saveCandidateFile } from "../../lib/api.js";
+import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
-const USAGE_MODE_OPTIONS = modesSchema.properties.usage_mode.enum.map((v) => ({
-  value: v,
-  label: v,
-}));
-const APPLICATION_MODE_OPTIONS = modesSchema.properties.application_mode.enum.map((v) => ({
-  value: v,
-  label: v,
-}));
+const DEFAULT_MODES = {
+  usage_mode: "standard",
+  application_mode: "balanced",
+  agent_voice: "standard",
+};
 
-// Step 6 — Prefs / modes. Mirrors SettingsPage.jsx's Modes + Form Defaults
-// cards field-for-field (same schema-driven enums, same candidate setup docs) —
-// small, low-cognitive-load settings, not novel data entry, per the M8
-// design doc's own framing for why these two live together here.
-export function PrefsStep({ state, goNext, goBack, showToast }) {
+const LINK_FIELDS = ["linkedin", "github", "portfolio"];
+const ADDITIONAL_LINK_PREFIX = "https://";
+let additionalLinkDraftSequence = 0;
+export const LINK_PREFIXES = {
+  linkedin: "https://linkedin.com/in/",
+  github: "https://github.com/",
+  portfolio: "https://",
+};
+
+const LINK_PLACEHOLDERS = {
+  linkedin: "your-slug",
+  github: "username",
+  portfolio: "your-site.com",
+};
+
+const LINK_FIELD_META = [
+  {
+    field: "linkedin",
+    label: "LinkedIn",
+    iconClass: "linkedin",
+    Icon: LinkedInIcon,
+  },
+  {
+    field: "github",
+    label: "GitHub",
+    iconClass: "github",
+    Icon: GitHubIcon,
+  },
+  {
+    field: "portfolio",
+    label: "Website",
+    iconClass: "website",
+    Icon: GlobeIcon,
+  },
+];
+
+function cleanPrimaryLinkFields(values = {}) {
+  return Object.fromEntries(
+    LINK_FIELDS.map((field) => [field, String(values[field] ?? "").trim()])
+  );
+}
+
+export function cleanAdditionalLinks(values = []) {
+  return (Array.isArray(values) ? values : [])
+    .map((link) => ({
+      label: String(link?.label || "").trim() || "Link",
+      url: String(link?.url || "").trim(),
+    }))
+    .filter((link) => link.url);
+}
+
+function cleanLinkFields(values = {}) {
+  return {
+    ...cleanPrimaryLinkFields(values),
+    additional_links: cleanAdditionalLinks(values.additional_links),
+  };
+}
+
+function createAdditionalLinkDraft(link = {}) {
+  additionalLinkDraftSequence += 1;
+  return {
+    id: link.id || `quick-facts-extra-${additionalLinkDraftSequence}`,
+    label: String(link.label ?? ""),
+    url: String(link.url ?? ""),
+  };
+}
+
+function withAdditionalLinkDrafts(values = {}) {
+  return {
+    ...values,
+    additional_links: (Array.isArray(values.additional_links) ? values.additional_links : []).map(
+      createAdditionalLinkDraft
+    ),
+  };
+}
+
+export function prefixedLinkFocusValue(value, prefix) {
+  return String(value || "").trim() ? value : prefix;
+}
+
+export function prefixedLinkBackspaceValue({ value, prefix, selectionStart, selectionEnd } = {}) {
+  const text = String(value || "");
+  if (
+    text === prefix &&
+    selectionStart === selectionEnd &&
+    Number(selectionStart) <= prefix.length
+  ) {
+    return "";
+  }
+  return null;
+}
+
+export function prefixedLinkPasteValue(value, prefix) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(text)) return text;
+  if (text.toLowerCase().startsWith(prefix.toLowerCase())) return text;
+  return `${prefix}${text.replace(/^\/+/, "")}`;
+}
+
+export function seedQuickFactsLinks(data = {}) {
+  const candidate = data.profile?.candidate ?? {};
+  const formDefaults = data["form-defaults"] ?? {};
+  return cleanLinkFields({
+    linkedin: candidate.linkedin ?? formDefaults.linkedin,
+    github: candidate.github ?? formDefaults.github,
+    portfolio: candidate.portfolio ?? formDefaults.portfolio,
+    additional_links: candidate.additional_links ?? formDefaults.additional_links,
+  });
+}
+
+export function buildQuickFactsSavePayload({
+  links = {},
+  modesData = {},
+  formDefaultsData = {},
+} = {}) {
+  const cleanedLinks = cleanLinkFields(links);
+  return {
+    profile: {
+      candidate: cleanedLinks,
+    },
+    modes: {
+      usage_mode: modesData.usage_mode ?? DEFAULT_MODES.usage_mode,
+      application_mode: modesData.application_mode ?? DEFAULT_MODES.application_mode,
+      agent_voice: modesData.agent_voice ?? DEFAULT_MODES.agent_voice,
+    },
+    formDefaults: {
+      auto_submit: false,
+      eeo_default: String(formDefaultsData.eeo_default || "").trim() || "Prefer not to answer",
+      ...cleanedLinks,
+    },
+  };
+}
+
+function PrefixedLinkField({ id, value, onChange, prefix, placeholder }) {
+  function placeCaretAfterPrefix(input) {
+    const caret = prefix.length;
+    globalThis.setTimeout?.(() => {
+      try {
+        input.setSelectionRange(caret, caret);
+      } catch {
+        // Some input types/environments do not expose selection APIs.
+      }
+    }, 0);
+  }
+
+  return (
+    <TextField
+      id={id}
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      data-link-prefix={prefix}
+      onFocus={(event) => {
+        const next = prefixedLinkFocusValue(value, prefix);
+        if (next !== value) {
+          onChange(next);
+          placeCaretAfterPrefix(event.currentTarget);
+        } else if (next === prefix) {
+          placeCaretAfterPrefix(event.currentTarget);
+        }
+      }}
+      onBlur={(event) => {
+        if (event.currentTarget.value === prefix) onChange("");
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== "Backspace") return;
+        const next = prefixedLinkBackspaceValue({
+          value,
+          prefix,
+          selectionStart: event.currentTarget.selectionStart,
+          selectionEnd: event.currentTarget.selectionEnd,
+        });
+        if (next === null) return;
+        event.preventDefault();
+        onChange(next);
+      }}
+      onPaste={(event) => {
+        const pasted = event.clipboardData?.getData("text");
+        if (!pasted) return;
+        event.preventDefault();
+        onChange(prefixedLinkPasteValue(pasted, prefix));
+      }}
+    />
+  );
+}
+
+function ProfileLinkRow({ field, label, iconClass, Icon, value, onChange }) {
+  const id = `quick-facts-${field}`;
+
+  return (
+    <div className={`onboarding-quick-facts__link-row onboarding-quick-facts__link-row--${field}`}>
+      <span
+        className={`onboarding-quick-facts__link-icon onboarding-quick-facts__link-icon--${iconClass}`}
+        aria-hidden="true"
+      >
+        <Icon />
+      </span>
+      <Field label={label} htmlFor={id} className="onboarding-quick-facts__link-field">
+        <PrefixedLinkField
+          id={id}
+          value={value}
+          onChange={onChange}
+          prefix={LINK_PREFIXES[field]}
+          placeholder={LINK_PLACEHOLDERS[field]}
+        />
+      </Field>
+    </div>
+  );
+}
+
+function AdditionalLinkRow({ link, index, onChange, onRemove }) {
+  const label = String(link?.label ?? "");
+  const url = String(link?.url ?? "");
+  const labelId = `quick-facts-custom-${index}-label`;
+  const urlId = `quick-facts-custom-${index}-url`;
+  const removeLabel = `Remove ${label.trim() || "link"}`;
+
+  return (
+    <div className="onboarding-quick-facts__custom-link">
+      <span
+        className="onboarding-quick-facts__link-icon onboarding-quick-facts__link-icon--custom"
+        aria-hidden="true"
+      >
+        <GlobeIcon />
+      </span>
+      <div className="onboarding-quick-facts__custom-fields">
+        <Field label="Name" htmlFor={labelId} className="onboarding-quick-facts__custom-label">
+          <TextField
+            id={labelId}
+            value={label}
+            onChange={(value) => onChange({ ...link, label: value })}
+            placeholder="Label"
+          />
+        </Field>
+        <Field label="URL" htmlFor={urlId} className="onboarding-quick-facts__custom-url">
+          <PrefixedLinkField
+            id={urlId}
+            value={url}
+            onChange={(value) => onChange({ ...link, url: value })}
+            prefix={ADDITIONAL_LINK_PREFIX}
+            placeholder="https://example.com"
+          />
+        </Field>
+      </div>
+      <button
+        type="button"
+        className="onboarding-quick-facts__custom-remove"
+        aria-label={removeLabel}
+        title={removeLabel}
+        onClick={onRemove}
+      >
+        ×
+      </button>
+    </div>
+  );
+}
+
+// Step 6 — Quick facts. Keep onboarding focused on public profile links; app
+// modes, EEO defaults, current role, and compensation live outside this step.
+export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }) {
+  const profileData = state?.data?.profile ?? {};
   const modesData = state?.data?.modes ?? {};
   const formDefaultsData = state?.data?.["form-defaults"] ?? {};
 
-  const [modes, setModes] = useState({
-    usage_mode: modesData.usage_mode ?? "standard",
-    application_mode: modesData.application_mode ?? "balanced",
-  });
-  const [formDefaults, setFormDefaults] = useState({
-    auto_submit: !!formDefaultsData.auto_submit,
-    expected_base: formDefaultsData.expected_base ?? null,
-    current_employer: formDefaultsData.current_employer ?? "",
-    current_title: formDefaultsData.current_title ?? "",
-    eeo_default: formDefaultsData.eeo_default ?? "",
-    linkedin: formDefaultsData.linkedin ?? "",
-    github: formDefaultsData.github ?? "",
-    portfolio: formDefaultsData.portfolio ?? "",
-  });
+  const [links, setLinks] = useState(() =>
+    withAdditionalLinkDrafts(
+      seedQuickFactsLinks({ profile: profileData, "form-defaults": formDefaultsData })
+    )
+  );
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -45,8 +289,10 @@ export function PrefsStep({ state, goNext, goBack, showToast }) {
     setSaving(true);
     setError(null);
     try {
-      await saveCandidateFile("modes", modes);
-      await saveCandidateFile("form-defaults", formDefaults);
+      const payload = buildQuickFactsSavePayload({ links, modesData, formDefaultsData });
+      await saveCandidateFile("profile", payload.profile);
+      await saveCandidateFile("modes", payload.modes);
+      await saveCandidateFile("form-defaults", payload.formDefaults);
       showToast("Saved.");
       goNext();
     } catch (err) {
@@ -56,105 +302,114 @@ export function PrefsStep({ state, goNext, goBack, showToast }) {
     }
   }
 
+  const additionalLinks = Array.isArray(links.additional_links) ? links.additional_links : [];
+
+  function updateAdditionalLink(index, nextLink) {
+    setLinks((current) => {
+      const currentLinks = Array.isArray(current.additional_links) ? current.additional_links : [];
+      return {
+        ...current,
+        additional_links: currentLinks.map((link, linkIndex) =>
+          linkIndex === index ? nextLink : link
+        ),
+      };
+    });
+  }
+
+  function removeAdditionalLink(index) {
+    setLinks((current) => {
+      const currentLinks = Array.isArray(current.additional_links) ? current.additional_links : [];
+      return {
+        ...current,
+        additional_links: currentLinks.filter((_, linkIndex) => linkIndex !== index),
+      };
+    });
+  }
+
+  function addAdditionalLink() {
+    setLinks((current) => {
+      const currentLinks = Array.isArray(current.additional_links) ? current.additional_links : [];
+      return {
+        ...current,
+        additional_links: [...currentLinks, createAdditionalLinkDraft()],
+      };
+    });
+  }
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {error ? <InlineAlert message={error} /> : null}
-
-      <Card title="Modes">
-        <div className="field-row">
-          <Field label="Usage mode" htmlFor="prefs-usage_mode">
-            <Select
-              id="prefs-usage_mode"
-              value={modes.usage_mode}
-              onChange={(v) => setModes((f) => ({ ...f, usage_mode: v }))}
-              options={USAGE_MODE_OPTIONS}
-            />
-          </Field>
-          <Field label="Application mode" htmlFor="prefs-application_mode">
-            <Select
-              id="prefs-application_mode"
-              value={modes.application_mode}
-              onChange={(v) => setModes((f) => ({ ...f, application_mode: v }))}
-              options={APPLICATION_MODE_OPTIONS}
-            />
-          </Field>
-        </div>
-      </Card>
-
-      <Card title="Form defaults">
-        <Field label="Auto-submit" htmlFor="prefs-auto_submit">
-          <Toggle
-            id="prefs-auto_submit"
-            checked={formDefaults.auto_submit}
-            onChange={(v) => setFormDefaults((f) => ({ ...f, auto_submit: v }))}
-            label={
-              formDefaults.auto_submit ? "Submit automatically" : "Confirm before every submit"
-            }
+    <OnboardingShell
+      activeIndex={6}
+      className="onboarding-shell--targeting"
+      onProgressSelect={onProgressSelect}
+      actions={
+        <>
+          <OnboardingNavButton direction="back" label="Back" onClick={goBack} />
+          <OnboardingNavButton
+            direction="next"
+            label="Continue"
+            onClick={handleSaveAndNext}
+            disabled={saving}
           />
-        </Field>
-        <div className="field-row">
-          <Field label="Expected base" htmlFor="prefs-expected_base">
-            <NumberField
-              id="prefs-expected_base"
-              value={formDefaults.expected_base}
-              onChange={(v) => setFormDefaults((f) => ({ ...f, expected_base: v }))}
-            />
-          </Field>
-          <Field label="Current employer" htmlFor="prefs-current_employer">
-            <TextField
-              id="prefs-current_employer"
-              value={formDefaults.current_employer}
-              onChange={(v) => setFormDefaults((f) => ({ ...f, current_employer: v }))}
-            />
-          </Field>
-          <Field label="Current title" htmlFor="prefs-current_title">
-            <TextField
-              id="prefs-current_title"
-              value={formDefaults.current_title}
-              onChange={(v) => setFormDefaults((f) => ({ ...f, current_title: v }))}
-            />
-          </Field>
-        </div>
-        <div className="field-row">
-          <Field label="EEO default" htmlFor="prefs-eeo_default">
-            <TextField
-              id="prefs-eeo_default"
-              value={formDefaults.eeo_default}
-              onChange={(v) => setFormDefaults((f) => ({ ...f, eeo_default: v }))}
-            />
-          </Field>
-          <Field label="LinkedIn" htmlFor="prefs-linkedin">
-            <TextField
-              id="prefs-linkedin"
-              value={formDefaults.linkedin}
-              onChange={(v) => setFormDefaults((f) => ({ ...f, linkedin: v }))}
-            />
-          </Field>
-          <Field label="GitHub" htmlFor="prefs-github">
-            <TextField
-              id="prefs-github"
-              value={formDefaults.github}
-              onChange={(v) => setFormDefaults((f) => ({ ...f, github: v }))}
-            />
-          </Field>
-          <Field label="Portfolio" htmlFor="prefs-portfolio">
-            <TextField
-              id="prefs-portfolio"
-              value={formDefaults.portfolio}
-              onChange={(v) => setFormDefaults((f) => ({ ...f, portfolio: v }))}
-            />
-          </Field>
-        </div>
-      </Card>
+        </>
+      }
+    >
+      <div className="onboarding-step-stack onboarding-step-stack--targeting">
+        <div className="onboarding-step-label">Step 6</div>
+        <section
+          className="onboarding-step-card onboarding-targeting onboarding-quick-facts"
+          aria-labelledby="quick-facts-title"
+        >
+          <section
+            className="onboarding-step-card__media onboarding-targeting__media"
+            aria-label="Quick facts"
+          >
+            <div className="onboarding-targeting__mark" aria-hidden="true">
+              🪪
+            </div>
+            <div className="onboarding-targeting__media-copy">
+              <h1 id="quick-facts-title">Quick facts</h1>
+              <p>Confirm the public links Roland can reuse in packets and forms.</p>
+            </div>
+          </section>
 
-      <div className="wizard-actions">
-        <Button variant="secondary" onClick={goBack}>
-          Back
-        </Button>
-        <Button onClick={handleSaveAndNext} disabled={saving}>
-          {saving ? "Saving…" : "Save & continue"}
-        </Button>
+          <div className="onboarding-step-card__content onboarding-step-card__content--dense onboarding-targeting__content onboarding-quick-facts__content">
+            {error ? <InlineAlert message={error} /> : null}
+
+            <section className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-quick-facts__panel">
+              {LINK_FIELD_META.map(({ field, label, iconClass, Icon }) => (
+                <ProfileLinkRow
+                  key={field}
+                  field={field}
+                  label={label}
+                  iconClass={iconClass}
+                  Icon={Icon}
+                  value={links[field]}
+                  onChange={(value) => setLinks((current) => ({ ...current, [field]: value }))}
+                />
+              ))}
+              <div className="onboarding-quick-facts__add-area">
+                {additionalLinks.map((link, index) => (
+                  <AdditionalLinkRow
+                    key={link.id}
+                    link={link}
+                    index={index}
+                    onChange={(nextLink) => updateAdditionalLink(index, nextLink)}
+                    onRemove={() => removeAdditionalLink(index)}
+                  />
+                ))}
+                <button
+                  type="button"
+                  className="onboarding-quick-facts__add-button"
+                  onClick={addAdditionalLink}
+                >
+                  <span aria-hidden="true">+</span>
+                  Add more
+                </button>
+              </div>
+            </section>
+          </div>
+        </section>
       </div>
-    </div>
+    </OnboardingShell>
   );
 }

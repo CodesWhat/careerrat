@@ -58,6 +58,36 @@ describe("desktop runtime path resolution", () => {
     assert.equal(runtime.rolesterHome, null);
     assert.equal(runtime.repoRoot, join(appDir, "../.."));
   });
+
+  it("keeps branded node_modules Electron launches in dev mode when appDir is the checkout", () => {
+    const root = tempRoot("rolester-desktop-branded-dev-");
+    try {
+      const appDir = join(root, "checkout", "apps", "desktop");
+      const resourcesPath = join(
+        root,
+        "checkout",
+        "node_modules",
+        "electron",
+        "dist",
+        "Electron.app",
+        "Contents",
+        "Resources"
+      );
+
+      const runtime = resolveDesktopRuntimePaths({
+        isPackaged: true,
+        appDir,
+        userDataPath: join(root, "Application Support", "Rolester"),
+        resourcesPath,
+      });
+
+      assert.equal(runtime.isPackaged, false);
+      assert.equal(runtime.rolesterHome, null);
+      assert.equal(runtime.repoRoot, join(appDir, "../.."));
+    } finally {
+      cleanup(root);
+    }
+  });
 });
 
 describe("desktop packaged ROLESTER_HOME storage", () => {

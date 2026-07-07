@@ -234,6 +234,15 @@ test("POST /api/assist/suggest: happy path — 200 with suggestions + rationale,
     assert.equal(body.manual.available, true);
     assert.deepEqual(seenOptions.tools, []);
     assert.equal(seenOptions.maxTurns, 1);
+    assert.equal(
+      seenOptions.env.ANTHROPIC_CUSTOM_HEADERS,
+      [
+        "x-rolester-feature: onboarding.targeting-assist",
+        "x-rolester-skill: assist",
+        "x-rolester-action: suggest-titles",
+        "x-rolester-operation: assist.suggest.titles",
+      ].join("\n")
+    );
     assert.ok(
       !("skills" in seenOptions),
       "must not pass a skills option — this is not a skill run"

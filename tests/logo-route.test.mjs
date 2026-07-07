@@ -12,7 +12,11 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
-import { mountLogoRoutes, sanitizeDomainForCache } from "../src/cli/logo-route.mjs";
+import {
+  mountLogoRoutes,
+  resolveLogoTokens,
+  sanitizeDomainForCache,
+} from "../src/cli/logo-route.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 
@@ -89,6 +93,11 @@ test("sanitizeDomainForCache: strips disallowed characters, rejects a leading do
   assert.equal(sanitizeDomainForCache("acme corp!.com"), "acmecorp.com");
   assert.equal(sanitizeDomainForCache(""), null);
   assert.equal(sanitizeDomainForCache("   "), null);
+});
+
+test("resolveLogoTokens: image logo lookup has a built-in publishable logo.dev key", () => {
+  const repoRoot = tempRepo();
+  assert.equal(resolveLogoTokens({ repoRoot }, {}).publishableToken, "pk_SgppRPhNTWqQdH-WZX5BWA");
 });
 
 // ---------------------------------------------------------------------------
@@ -288,19 +297,25 @@ test("GET /api/logos/img: a traversal attempt in ?domain= 404s and never calls f
   assert.ok(!existsSync(join(repoRoot, "etc", "passwd")));
 });
 
-test("GET /api/logos/img: no publishable token configured -> 404, never calls fetchImpl", async () => {
+test("GET /api/logos/img: without user config, domain lookup uses the built-in publishable key", async () => {
   const repoRoot = tempRepo();
-  let fetchCalled = false;
+  const pngBytes = Buffer.from([5, 6, 7, 8]);
+  let receivedUrl = null;
   const server = await bootServer(repoRoot, {
-    fetchImpl: async () => {
-      fetchCalled = true;
-      throw new Error("should never be called");
+    fetchImpl: async (url) => {
+      receivedUrl = String(url);
+      return new Response(pngBytes, { status: 200 });
     },
   });
   try {
     const res = await fetch(`${baseUrl(server)}/api/logos/img?domain=acme.com`);
-    assert.equal(res.status, 404);
-    assert.equal(fetchCalled, false);
+    assert.equal(res.status, 200);
+    const body = Buffer.from(await res.arrayBuffer());
+    assert.ok(body.equals(pngBytes));
+    assert.match(
+      receivedUrl,
+      /^https:\/\/img\.logo\.dev\/acme\.com\?token=pk_SgppRPhNTWqQdH-WZX5BWA/
+    );
   } finally {
     await closeServer(server);
   }
@@ -332,6 +347,65 @@ test("GET /api/logos/img: cache miss fetches from img.logo.dev, serves bytes, an
 
   const cachePath = userPath({ repoRoot }, "workspace/logos/acme.com.webp");
   assert.ok(existsSync(cachePath), "the fetched image must be cached to workspace/logos/");
+  assert.ok(readFileSync(cachePath).equals(pngBytes));
+});
+
+test("GET /api/logos/img: a company name uses logo.dev name lookup and caches the image", async () => {
+  const repoRoot = tempRepo();
+
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  let receivedUrl = null;
+  const server = await bootServer(repoRoot, {
+    fetchImpl: async (url) => {
+      receivedUrl = String(url);
+      return new Response(pngBytes, { status: 200 });
+    },
+  });
+  try {
+    const res = await fetch(
+      `${baseUrl(server)}/api/logos/img?name=${encodeURIComponent("Sweet Green")}`
+    );
+    assert.equal(res.status, 200);
+    const body = Buffer.from(await res.arrayBuffer());
+    assert.ok(body.equals(pngBytes));
+
+    assert.match(
+      receivedUrl,
+      /^https:\/\/img\.logo\.dev\/name\/Sweet%20Green\?token=pk_SgppRPhNTWqQdH-WZX5BWA/
+    );
+  } finally {
+    await closeServer(server);
+  }
+
+  const cachePath = userPath({ repoRoot }, "workspace/logos/name-sweet-green.webp");
+  assert.ok(existsSync(cachePath), "the name lookup image must be cached to workspace/logos/");
+  assert.ok(readFileSync(cachePath).equals(pngBytes));
+});
+
+test("GET /api/logos/img: dark theme forwards to logo.dev and uses its own cached image", async () => {
+  const repoRoot = tempRepo();
+
+  const pngBytes = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x44]);
+  let receivedUrl = null;
+  const server = await bootServer(repoRoot, {
+    fetchImpl: async (url) => {
+      receivedUrl = String(url);
+      return new Response(pngBytes, { status: 200 });
+    },
+  });
+  try {
+    const res = await fetch(`${baseUrl(server)}/api/logos/img?domain=Acme.com&theme=dark`);
+    assert.equal(res.status, 200);
+    const body = Buffer.from(await res.arrayBuffer());
+    assert.ok(body.equals(pngBytes));
+
+    assert.match(receivedUrl, /[?&]theme=dark(?:&|$)/);
+  } finally {
+    await closeServer(server);
+  }
+
+  const cachePath = userPath({ repoRoot }, "workspace/logos/acme.com-dark.webp");
+  assert.ok(existsSync(cachePath), "the dark-theme image must use a separate cache entry");
   assert.ok(readFileSync(cachePath).equals(pngBytes));
 });
 

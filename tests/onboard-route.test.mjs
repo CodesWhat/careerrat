@@ -24,6 +24,7 @@ import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
 import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
+import { appendUsageEvent } from "../src/core/ai/usage-log.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import {
@@ -187,6 +188,12 @@ async function postJson(server, path, payload) {
   return { status: res.status, body };
 }
 
+async function getJson(server, path) {
+  const res = await fetch(`${baseUrl(server)}${path}`);
+  const body = await res.json().catch(() => ({}));
+  return { status: res.status, body };
+}
+
 function firstSearchFetchStub() {
   return async () =>
     new Response(
@@ -337,6 +344,56 @@ after(() => {
 // GET /api/onboard/state
 // ---------------------------------------------------------------------------
 
+describe("GET /api/settings/usage", () => {
+  it("returns token spend totals grouped by product feature", async () => {
+    const root = buildTempRoot();
+    const { server } = await bootServer(root);
+    try {
+      appendUsageEvent(
+        {
+          source: "byok",
+          skill: "resume-extract",
+          action: "resume-ai",
+          operation: "onboard.resume-ai",
+          model: "claude-sonnet-5",
+          tokens_in: 1000,
+          tokens_out: 100,
+        },
+        { root, autoPrune: false }
+      );
+      appendUsageEvent(
+        {
+          source: "proxy",
+          feature: "company-discovery",
+          skill: "discover-companies",
+          action: "seed-generate",
+          operation: "company-seeds",
+          model: "claude-sonnet-5",
+          tokens_in: 2000,
+          tokens_out: 200,
+        },
+        { root, autoPrune: false }
+      );
+
+      const { status, body } = await getJson(server, "/api/settings/usage");
+
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.summary.totals.requests, 2);
+      assert.equal(body.summary.totals.tokens_in, 3000);
+      assert.equal(body.summary.totals.tokens_out, 300);
+      assert.deepEqual(
+        body.summary.byFeature.map((entry) => entry.feature),
+        ["company-discovery", "onboarding.resume-ingestion"]
+      );
+      assert.equal(body.summary.byFeature[0].breakdown[0].operation, "company-seeds");
+      assertNoSensitiveRouteEnvelope(body);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
 describe("GET /api/onboard/state", () => {
   it("reports every candidate file missing before init, and no key/config", async () => {
     const repoRoot = buildTempRoot();
@@ -473,16 +530,15 @@ describe("GET /api/onboard/state", () => {
     }
   });
 
-  // M8 additive (Builder B): logo.dev credential PRESENCE, never echoed —
-  // reused from logo-route.mjs's resolveLogoTokens() (see that route's own
-  // two-credential header comment: publishable image token vs. secret
-  // Brand Search key).
-  it("logoImageTokenConfigured / logoSearchTokenConfigured reflect candidate/automation.yml#integrations", async () => {
+  // M8 additive (Builder B): logo capability presence, never echoed — reused
+  // from logo-route.mjs's resolveLogoTokens(). Image lookup has a built-in
+  // publishable default; Brand Search still requires a separate secret key.
+  it("logoImageTokenConfigured defaults on while logoSearchTokenConfigured reflects candidate/automation.yml#integrations", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
       const before = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
-      assert.equal(before.logoImageTokenConfigured, false);
+      assert.equal(before.logoImageTokenConfigured, true);
       assert.equal(before.logoSearchTokenConfigured, false);
 
       await postJson(server, "/api/onboard/init", {});
@@ -723,6 +779,87 @@ describe("POST /api/onboard/init", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// GET/POST /api/onboard/draft
+// ---------------------------------------------------------------------------
+
+describe("GET/POST /api/onboard/draft", () => {
+  it("persists resumable wizard step and draft seeds in the private internal data root", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      const before = await (await fetch(`${baseUrl(server)}/api/onboard/draft`)).json();
+      assert.equal(before.ok, true);
+      assert.deepEqual(before.draft, {
+        stepIndex: 0,
+        completedIndexes: [],
+        draftSeeds: {},
+        updatedAt: null,
+      });
+
+      const saved = await postJson(server, "/api/onboard/draft", {
+        stepIndex: 3,
+        completedIndexes: [1, 2, 99, -1, "3"],
+        draftSeeds: {
+          targeting: {
+            role_buckets: [
+              {
+                name: "Primary",
+                priority: "primary",
+                titles: ["Applied AI Engineer"],
+                fit_signals: ["agent workflows"],
+              },
+            ],
+          },
+        },
+      });
+      assert.equal(saved.status, 200);
+      assert.equal(saved.body.draft.stepIndex, 3);
+      assert.deepEqual(saved.body.draft.completedIndexes, [1, 2, 3, 7]);
+      assert.equal(
+        saved.body.draft.draftSeeds.targeting.role_buckets[0].titles[0],
+        "Applied AI Engineer"
+      );
+      assert.match(saved.body.draft.updatedAt, /^\d{4}-\d{2}-\d{2}T/);
+
+      const draftPath = candidatePath(repoRoot, ".internal/onboarding-draft.json");
+      assert.equal(existsSync(draftPath), true, "draft should be file-backed");
+      assert.equal(
+        existsSync(candidatePath(repoRoot, "workspace/setup-state.json")),
+        false,
+        "wizard draft must not claim the ingest-profile setup-state file"
+      );
+
+      const after = await (await fetch(`${baseUrl(server)}/api/onboard/draft`)).json();
+      assert.equal(after.draft.stepIndex, 3);
+      assert.deepEqual(after.draft.completedIndexes, [1, 2, 3, 7]);
+      assert.equal(
+        after.draft.draftSeeds.targeting.role_buckets[0].titles[0],
+        "Applied AI Engineer"
+      );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("clamps invalid draft payloads instead of returning unsafe wizard state", async () => {
+    const repoRoot = buildTempRoot();
+    const { server } = await bootServer(repoRoot);
+    try {
+      const saved = await postJson(server, "/api/onboard/draft", {
+        stepIndex: 99,
+        draftSeeds: "not an object",
+      });
+      assert.equal(saved.status, 200);
+      assert.deepEqual(saved.body.draft.draftSeeds, {});
+      assert.equal(saved.body.draft.stepIndex, 7);
+      assert.deepEqual(saved.body.draft.completedIndexes, []);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
 describe("POST /api/onboard/init", () => {
   it("initializes the local DB for app-first desktop use", async () => {
     const repoRoot = buildTempRoot();
@@ -773,6 +910,11 @@ describe("POST /api/onboard/resume", () => {
       assert.equal(body.sections.experience, 1);
       assert.equal(body.sections.skills, 3);
       assert.equal(body.evidenceSeed.claims.length, 2);
+      assert.equal(body.resumeDocument.contact.email, "jane.doe@example.com");
+      assert.equal(body.resumeDocument.summary, null);
+      assert.equal(body.resumeDocument.experience.length, 1);
+      assert.match(body.resumeDocument.experience[0].raw_text, /Built production AI workflows/);
+      assert.deepEqual(body.resumeDocument.skills[0].items, ["Python", "JavaScript", "SQL"]);
       assert.ok(
         !existsSync(candidatePath(repoRoot, "candidate/SOURCE_RESUME.md")),
         "save:false must not write SOURCE_RESUME.md"
@@ -976,7 +1118,47 @@ describe("POST /api/onboard/resume-docx", () => {
 
 describe("POST /api/onboard/resume-ai", () => {
   const FAKE_PDF_BYTES = Buffer.from("%PDF-1.4 fake pdf bytes for a route test\n");
+  const VALID_FULL_TEXT = [
+    "Jane Doe",
+    "jane.doe@example.com",
+    "",
+    "Experience",
+    "Led a team of 5 engineers.",
+    "",
+    "Skills",
+    "JavaScript, SQLite",
+  ].join("\n");
   const VALID_REPLY = JSON.stringify({
+    full_text: VALID_FULL_TEXT,
+    resume_document: {
+      contact: {
+        full_name: "Jane Doe",
+        email: "jane.doe@example.com",
+        phone: null,
+        location: null,
+        linkedin: null,
+        github: null,
+        portfolio: null,
+      },
+      headline: "Engineering leader",
+      summary: "Engineering leader focused on platform teams.",
+      experience: [
+        {
+          company: "Acme",
+          title: "Engineering Manager",
+          location: null,
+          start_date: "2021",
+          end_date: "Present",
+          bullets: ["Led a team of 5 engineers."],
+          raw_text: "Engineering Manager — Acme\n2021 - Present\nLed a team of 5 engineers.",
+        },
+      ],
+      education: [],
+      skills: [{ category: null, items: ["JavaScript", "SQLite"] }],
+      projects: [],
+      certifications: [],
+      other_sections: [],
+    },
     candidate: { full_name: "Jane Doe", email: "jane.doe@example.com" },
     claims: [{ claim: "Led a team of 5 engineers.", evidence: "Resume, Experience section." }],
     sections: { experience: 1, education: 0, skills: 2, projects: 0, other: 0 },
@@ -1020,6 +1202,14 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(body.ok, true);
       assert.equal(body.profileSeed, undefined);
       assert.equal(body.data.source, "ai");
+      assert.equal(body.data.fullText, VALID_FULL_TEXT);
+      assert.equal(body.data.resumeDocument.headline, "Engineering leader");
+      assert.equal(body.data.resumeDocument.experience[0].company, "Acme");
+      assert.equal(body.data.resumeDocument.experience[0].title, "Engineering Manager");
+      assert.deepEqual(body.data.resumeDocument.experience[0].bullets, [
+        "Led a team of 5 engineers.",
+      ]);
+      assert.match(body.data.savedPath, /^workspace\/intake\/resume-uploads\/\d+-resume\.pdf$/);
       assert.equal(body.data.profileSeed.candidate.full_name, "Jane Doe");
       assert.equal(body.data.profileSeed.candidate.email, "jane.doe@example.com");
       assert.equal(body.data.evidenceSeed.claims.length, 1);
@@ -1068,6 +1258,43 @@ describe("POST /api/onboard/resume-ai", () => {
         false,
         "PDF/image upload must satisfy the source-resume readiness input"
       );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("legacy mode: writes AI-transcribed text to candidate/SOURCE_RESUME.md while preserving the raw upload", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 200);
+      assert.equal(body.data.fullText, VALID_FULL_TEXT);
+
+      const sourceResumePath = candidatePath(repoRoot, "candidate/SOURCE_RESUME.md");
+      assert.equal(readFileSync(sourceResumePath, "utf8"), VALID_FULL_TEXT);
+
+      const uploadPath = candidatePath(repoRoot, body.data.savedPath);
+      assert.ok(readFileSync(uploadPath).equals(FAKE_PDF_BYTES));
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("falls back to composing readable source text from resume_document when full_text is blank", async () => {
+    const repoRoot = buildTempRoot();
+    const sparseReply = JSON.stringify({ ...JSON.parse(VALID_REPLY), full_text: "   " });
+    const runSkillStream = fakeRunSkillStream([
+      `Ignored prose\n\`\`\`json\n${sparseReply}\n\`\`\``,
+    ]);
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 200);
+      assert.match(body.data.fullText, /Jane Doe/);
+      assert.match(body.data.fullText, /Engineering Manager — Acme/);
+      assert.match(body.data.fullText, /Led a team of 5 engineers/);
     } finally {
       await closeServer(server);
     }

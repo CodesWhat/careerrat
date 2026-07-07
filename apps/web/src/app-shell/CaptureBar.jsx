@@ -6,12 +6,10 @@ import { kindLabel } from "../inbox/intake-labels.js";
 import { ApiError, createIntake, uploadIntakeFile } from "../lib/api.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 
-// CaptureBar — the M9 "docked capture bar": a persistent paste/drop/type
-// surface mounted in AppShell.jsx alongside <main>, visible on every route
-// (including the still-stubbed M10 ones). This is the INPUT surface only —
-// per the M9 design memo it never renders a growing transcript of its own;
-// on submit it shows what POST /api/intake's already-classified response
-// says, then the item lives on in the /inbox queue.
+// CaptureBar — the M9 capture surface, now presented as Roland's floating
+// assistant instead of a docked paste bar. It is still the INPUT surface only:
+// on submit it shows what POST /api/intake's already-classified response says,
+// then the item lives on in the /inbox queue.
 //
 // Paste-capture rule (M9 build brief DoD item, grep-checked): the paste
 // handler below is `onPaste` on this component's own <textarea> element,
@@ -25,7 +23,13 @@ import { emitIntakeChanged } from "../lib/intake-events.js";
 // link) is still handled client-side by reading it into the textarea, so the
 // user can inspect/edit before submitting the normal text intake path.
 export function CaptureBar() {
+  return <CaptureBarView />;
+}
+
+export function CaptureBarView({ initiallyOpen = false } = {}) {
   const textareaRef = useRef(null);
+  const fileInputRef = useRef(null);
+  const [open, setOpen] = useState(initiallyOpen);
   const [text, setText] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [dragActive, setDragActive] = useState(false);
@@ -54,6 +58,7 @@ export function CaptureBar() {
   async function submit(value) {
     const trimmed = value.trim();
     if (!trimmed || submitting) return;
+    setOpen(true);
     setSubmitting(true);
     setError(null);
     setDegradeNote(null);
@@ -71,6 +76,7 @@ export function CaptureBar() {
 
   async function uploadFile(file) {
     if (!file || submitting) return;
+    setOpen(true);
     setSubmitting(true);
     setError(null);
     setDegradeNote(null);
@@ -86,10 +92,16 @@ export function CaptureBar() {
   }
 
   function handleKeyDown(e) {
-    if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+    if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       submit(text);
     }
+  }
+
+  async function handleFileSelection(e) {
+    const file = e.target.files?.[0];
+    if (file) await uploadFile(file);
+    e.target.value = "";
   }
 
   // Scoped to this textarea only — see the file header comment. Plain text
@@ -117,6 +129,7 @@ export function CaptureBar() {
 
   async function handleDrop(e) {
     e.preventDefault();
+    setOpen(true);
     setDragActive(false);
     setDegradeNote(null);
 
@@ -145,43 +158,108 @@ export function CaptureBar() {
   // as ResumeStep's own dropzone pattern.
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: drag/drop wrapper, see comment above
-    <div
-      className={`capture-bar${dragActive ? " capture-bar--drag-active" : ""}`}
+    <section
+      className={`capture-assistant${open ? " capture-assistant--open" : ""}${dragActive ? " capture-assistant--drag-active" : ""}`}
       onDragOver={(e) => {
         e.preventDefault();
+        setOpen(true);
         setDragActive(true);
       }}
       onDragLeave={() => setDragActive(false)}
       onDrop={handleDrop}
     >
-      {result ? (
-        <CaptureResult item={result} onDismiss={() => setResult(null)} />
-      ) : (
-        <div className="capture-bar__row">
-          <span className="capture-bar__icon" aria-hidden="true">
-            <UploadIcon />
-          </span>
-          <textarea
-            ref={textareaRef}
-            className="capture-bar__input"
-            rows={1}
-            placeholder="Paste a job posting, recruiter email, status update, or drop a link… (⌘/Ctrl+Enter to send)"
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onPaste={handlePaste}
-            onKeyDown={handleKeyDown}
-            disabled={submitting}
-          />
-          <Button onClick={() => submit(text)} disabled={submitting || !text.trim()}>
-            {submitting ? "Capturing…" : "Capture"}
-          </Button>
+      {open ? (
+        <div className="capture-assistant__panel" role="dialog" aria-label="Talk to Roland">
+          <header className="capture-assistant__header">
+            <span className="capture-assistant__mini-headshot" aria-hidden="true">
+              <img src="/assets/logo.png" alt="" />
+            </span>
+            <span className="capture-assistant__intro">
+              <strong>Roland</strong>
+              <small>Drop jobs, emails, updates, docs, or links.</small>
+            </span>
+            <button
+              type="button"
+              className="capture-assistant__close"
+              onClick={() => setOpen(false)}
+              aria-label="Close Roland intake"
+            >
+              ×
+            </button>
+          </header>
+
+          {result ? (
+            <CaptureResult item={result} onDismiss={() => setResult(null)} />
+          ) : (
+            <div className="capture-assistant__composer">
+              <div className="capture-assistant__input-row">
+                <textarea
+                  ref={textareaRef}
+                  className="capture-assistant__input"
+                  rows={4}
+                  placeholder="Add a job posting, recruiter email, status update, or drop a file/link..."
+                  value={text}
+                  onChange={(e) => setText(e.target.value)}
+                  onPaste={handlePaste}
+                  onKeyDown={handleKeyDown}
+                  disabled={submitting}
+                />
+              </div>
+              <div className="capture-assistant__footer">
+                <div className="capture-assistant__footer-left">
+                  <input
+                    ref={fileInputRef}
+                    className="capture-assistant__file-input"
+                    type="file"
+                    onChange={handleFileSelection}
+                    aria-label="Upload a file to Roland"
+                  />
+                  <button
+                    type="button"
+                    className="capture-assistant__upload"
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={submitting}
+                  >
+                    <UploadIcon />
+                    <span>Upload</span>
+                  </button>
+                  <span>Enter sends · Shift+Enter adds a line</span>
+                </div>
+                <Button onClick={() => submit(text)} disabled={submitting || !text.trim()}>
+                  {submitting ? "Capturing…" : "Send to Roland"}
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {error ? (
+            <div className="capture-assistant__note capture-assistant__note--error">{error}</div>
+          ) : null}
+          {degradeNote && !result ? (
+            <div className="capture-assistant__note capture-assistant__note--warn">
+              {degradeNote}
+            </div>
+          ) : null}
         </div>
-      )}
-      {error ? <div className="capture-bar__note capture-bar__note--error">{error}</div> : null}
-      {degradeNote && !result ? (
-        <div className="capture-bar__note capture-bar__note--warn">{degradeNote}</div>
       ) : null}
-    </div>
+
+      <button
+        type="button"
+        className="capture-assistant__launcher"
+        aria-label="Open Roland intake"
+        aria-expanded={open}
+        aria-haspopup="dialog"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="capture-assistant__headshot" aria-hidden="true">
+          <img src="/assets/logo.png" alt="" />
+        </span>
+        <span className="capture-assistant__launcher-copy">
+          <strong>Talk to Roland</strong>
+          <small>Drop jobs, emails, docs</small>
+        </span>
+      </button>
+    </section>
   );
 }
 
@@ -206,7 +284,7 @@ function CaptureResult({ item, onDismiss }) {
         </Link>
         <button
           type="button"
-          className="capture-bar__dismiss"
+          className="capture-assistant__dismiss"
           onClick={onDismiss}
           aria-label="Dismiss"
         >

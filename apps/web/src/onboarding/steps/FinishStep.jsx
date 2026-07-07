@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useDashboardSnapshot } from "../../app-shell/DashboardContext.jsx";
 import { Button } from "../../components/Button.jsx";
-import { Card } from "../../components/Card.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import {
   addBoard,
@@ -11,6 +10,7 @@ import {
   previewBoards,
   writeConfig,
 } from "../../lib/api.js";
+import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
 const READINESS_ROWS = [
   {
@@ -391,7 +391,7 @@ export async function continueDeepOnboardingAction({
 // is not overwritten by a later compatibility export. Ends with the explicit
 // deeper-onboarding handoff: the wizard and richer evidence intake are separate
 // entry points into the same candidate setup state, not one linear flow.
-export function FinishStep({ state, reload, goBack }) {
+export function FinishStep({ state, reload, goBack, onProgressSelect }) {
   const navigate = useNavigate();
   const dashboard = useDashboardSnapshot();
   const [writing, setWriting] = useState(false);
@@ -510,7 +510,7 @@ export function FinishStep({ state, reload, goBack }) {
       startFirstSearch: handleStartFirstSearch,
       deferFirstSearch: handleDeferFirstSearch,
     });
-    if (result !== "blocked") navigate("/chat");
+    if (result !== "blocked") navigate("/deep-ingest");
   }
 
   // Recompute once after DB source setup exists; compatibility exports are
@@ -547,214 +547,260 @@ export function FinishStep({ state, reload, goBack }) {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-      {error ? <InlineAlert message={error} /> : null}
-
-      <Card title="Setup readiness">
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: 10,
-          }}
+    <OnboardingShell
+      activeIndex={7}
+      className="onboarding-shell--wide"
+      onProgressSelect={onProgressSelect}
+      actions={
+        <>
+          <OnboardingNavButton direction="back" label="Back" onClick={goBack} />
+          <OnboardingNavButton direction="next" label="Finish" onClick={() => navigate("/")} />
+        </>
+      }
+    >
+      <div className="onboarding-step-stack onboarding-step-stack--wide">
+        <div className="onboarding-step-label">Step 7</div>
+        <section
+          className="onboarding-step-card onboarding-step-card--single onboarding-step-card--wide onboarding-step-card--compact"
+          aria-labelledby="finish-title"
         >
-          {readinessRows.map((row) => (
-            <div
-              key={row.key}
-              style={{
-                border: "1px solid var(--border)",
-                borderRadius: 8,
-                padding: 12,
-                minHeight: 96,
-              }}
-            >
-              <div className="field__hint" style={{ margin: 0 }}>
-                {row.label}
-              </div>
-              <strong>{row.status}</strong>
-              <p className="field__hint" style={{ margin: "6px 0 0" }}>
-                {row.detail}
-              </p>
+          <div className="onboarding-step-card__content onboarding-step-card__content--dense onboarding-step-card__content--scroll">
+            <div className="onboarding-step-card__title-row">
+              <h1 id="finish-title">Finish setup</h1>
             </div>
-          ))}
-        </div>
-        <p className="field__hint" style={{ marginBottom: 0 }}>
-          {searchReady && (!gateReady || !applyReady)
-            ? "Search-ready: Rolester can source roles now while you finish setup for gating and applying."
-            : "Complete the search row to start sourcing; gate and apply unlock when their rows are ready."}
-        </p>
-      </Card>
+            {error ? <InlineAlert message={error} /> : null}
 
-      <Card
-        title="First search"
-        actions={
-          <span className={`badge ${firstSearchTask.badgeClass}`}>{firstSearchTask.label}</span>
-        }
-      >
-        <p>{quickStartAction.detail}</p>
-        <div className="chip-row" role="radiogroup" aria-label="Cadence">
-          {CADENCE_OPTIONS.map((option) => {
-            const active = selectedCadence === option.mode;
-            return (
-              <label
-                className={`chip ${active ? "badge--ok" : ""}`}
-                key={option.mode}
-                style={{ cursor: firstSearchTask.status === "running" ? "default" : "pointer" }}
+            <section
+              className="onboarding-step-card__section"
+              aria-labelledby="finish-readiness-title"
+            >
+              <h2 id="finish-readiness-title" className="field__label" style={{ margin: 0 }}>
+                Setup readiness
+              </h2>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                  gap: 10,
+                }}
               >
-                <input
-                  type="radio"
-                  name="first-search-cadence"
-                  checked={active}
-                  disabled={firstSearchTask.status === "running"}
-                  onChange={() => setSelectedCadence(option.mode)}
-                />{" "}
-                {option.label}
-              </label>
-            );
-          })}
-        </div>
-        <p className="field__hint" style={{ margin: "8px 0 0" }}>
-          {cadenceRecommendationLabel}
-        </p>
-        <p className="field__hint" style={{ margin: "4px 0 0" }}>
-          Cadence: {CADENCE_LABELS[selectedCadence]}
-        </p>
-        <div className="chip-row" role="radiogroup" aria-label="Search now?">
-          <label className={`chip ${searchChoice === "now" ? "badge--ok" : ""}`}>
-            <input
-              type="radio"
-              name="first-search-choice"
-              checked={searchChoice === "now"}
-              disabled={!firstSearchTask.canStart || firstSearchTask.status === "running"}
-              onChange={() => setSearchChoice("now")}
-            />{" "}
-            Search now?
-          </label>
-          <label className={`chip ${searchChoice === "later" ? "badge--muted" : ""}`}>
-            <input
-              type="radio"
-              name="first-search-choice"
-              checked={searchChoice === "later"}
-              disabled={!firstSearchTask.canDefer || firstSearchTask.status === "running"}
-              onChange={() => setSearchChoice("later")}
-            />{" "}
-            Not now
-          </label>
-        </div>
-        <p className="field__hint" style={{ marginBottom: 0 }}>
-          {firstSearchTask.detail}
-        </p>
-        {firstSearchTask.status === "completed" ? (
-          <p className="field__hint">
-            {firstSearchTask.counts.sourcesAttempted} sources attempted ·{" "}
-            {firstSearchTask.counts.rolesFound} roles found
-          </p>
-        ) : null}
-        {firstSearchTask.error ? <InlineAlert message={firstSearchTask.error} /> : null}
-        <div className="links" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          {firstSearchTask.canRetry ? (
-            <Button onClick={handleRetryFirstSearch} disabled={quickStarting}>
-              {quickStarting ? "Retrying…" : "Retry search"}
-            </Button>
-          ) : firstSearchTask.canStart ? (
-            <>
-              <Button
-                onClick={searchChoice === "later" ? handleDeferFirstSearch : handleStartFirstSearch}
-                disabled={quickStarting || savingCadence}
-              >
-                {quickStarting || savingCadence
-                  ? "Saving…"
-                  : searchChoice === "later"
-                    ? "Not now"
-                    : "Search jobs now"}
-              </Button>
-              {searchChoice === "later" ? (
-                <Button
-                  variant="secondary"
-                  onClick={handleStartFirstSearch}
-                  disabled={quickStarting}
-                >
-                  Search jobs now
-                </Button>
+                {readinessRows.map((row) => (
+                  <div
+                    key={row.key}
+                    style={{
+                      border: "1px solid var(--border)",
+                      borderRadius: 8,
+                      padding: 12,
+                      minHeight: 96,
+                    }}
+                  >
+                    <div className="field__hint" style={{ margin: 0 }}>
+                      {row.label}
+                    </div>
+                    <strong>{row.status}</strong>
+                    <p className="field__hint" style={{ margin: "6px 0 0" }}>
+                      {row.detail}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <p className="field__hint" style={{ marginBottom: 0 }}>
+                {searchReady && (!gateReady || !applyReady)
+                  ? "Search-ready: Rolester can source roles now while you finish setup for gating and applying."
+                  : "Complete the search row to start sourcing; gate and apply unlock when their rows are ready."}
+              </p>
+            </section>
+
+            <section
+              className="onboarding-step-card__section"
+              aria-labelledby="finish-first-search-title"
+            >
+              <div className="onboarding-step-card__title-row">
+                <h2 id="finish-first-search-title" className="field__label" style={{ margin: 0 }}>
+                  First search
+                </h2>
+                <span className={`badge ${firstSearchTask.badgeClass}`}>
+                  {firstSearchTask.label}
+                </span>
+              </div>
+              <p>{quickStartAction.detail}</p>
+              <div className="chip-row" role="radiogroup" aria-label="Cadence">
+                {CADENCE_OPTIONS.map((option) => {
+                  const active = selectedCadence === option.mode;
+                  return (
+                    <label
+                      className={`chip ${active ? "badge--ok" : ""}`}
+                      key={option.mode}
+                      style={{
+                        cursor: firstSearchTask.status === "running" ? "default" : "pointer",
+                      }}
+                    >
+                      <input
+                        type="radio"
+                        name="first-search-cadence"
+                        checked={active}
+                        disabled={firstSearchTask.status === "running"}
+                        onChange={() => setSelectedCadence(option.mode)}
+                      />{" "}
+                      {option.label}
+                    </label>
+                  );
+                })}
+              </div>
+              <p className="field__hint" style={{ margin: "8px 0 0" }}>
+                {cadenceRecommendationLabel}
+              </p>
+              <p className="field__hint" style={{ margin: "4px 0 0" }}>
+                Cadence: {CADENCE_LABELS[selectedCadence]}
+              </p>
+              <div className="chip-row" role="radiogroup" aria-label="Search now?">
+                <label className={`chip ${searchChoice === "now" ? "badge--ok" : ""}`}>
+                  <input
+                    type="radio"
+                    name="first-search-choice"
+                    checked={searchChoice === "now"}
+                    disabled={!firstSearchTask.canStart || firstSearchTask.status === "running"}
+                    onChange={() => setSearchChoice("now")}
+                  />{" "}
+                  Search now?
+                </label>
+                <label className={`chip ${searchChoice === "later" ? "badge--muted" : ""}`}>
+                  <input
+                    type="radio"
+                    name="first-search-choice"
+                    checked={searchChoice === "later"}
+                    disabled={!firstSearchTask.canDefer || firstSearchTask.status === "running"}
+                    onChange={() => setSearchChoice("later")}
+                  />{" "}
+                  Not now
+                </label>
+              </div>
+              <p className="field__hint" style={{ marginBottom: 0 }}>
+                {firstSearchTask.detail}
+              </p>
+              {firstSearchTask.status === "completed" ? (
+                <p className="field__hint">
+                  {firstSearchTask.counts.sourcesAttempted} sources attempted ·{" "}
+                  {firstSearchTask.counts.rolesFound} roles found
+                </p>
               ) : null}
-            </>
-          ) : null}
-          {firstSearchTask.showSourcedLink ? <Link to="/jobs">View sourced roles</Link> : null}
-          {firstSearchTask.canStart ? (
-            <Button
-              variant="secondary"
-              onClick={handleContinueDeepOnboarding}
-              disabled={quickStarting || savingCadence}
-            >
-              Continue deep onboarding
-            </Button>
-          ) : (
-            <Button variant="secondary" onClick={() => navigate("/chat")}>
-              Continue deep onboarding
-            </Button>
-          )}
-        </div>
-      </Card>
+              {firstSearchTask.error ? <InlineAlert message={firstSearchTask.error} /> : null}
+              <div className="links" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {firstSearchTask.canRetry ? (
+                  <Button onClick={handleRetryFirstSearch} disabled={quickStarting}>
+                    {quickStarting ? "Retrying…" : "Retry search"}
+                  </Button>
+                ) : firstSearchTask.canStart ? (
+                  <>
+                    <Button
+                      onClick={
+                        searchChoice === "later" ? handleDeferFirstSearch : handleStartFirstSearch
+                      }
+                      disabled={quickStarting || savingCadence}
+                    >
+                      {quickStarting || savingCadence
+                        ? "Saving…"
+                        : searchChoice === "later"
+                          ? "Not now"
+                          : "Search jobs now"}
+                    </Button>
+                    {searchChoice === "later" ? (
+                      <Button
+                        variant="secondary"
+                        onClick={handleStartFirstSearch}
+                        disabled={quickStarting}
+                      >
+                        Search jobs now
+                      </Button>
+                    ) : null}
+                  </>
+                ) : null}
+                {firstSearchTask.showSourcedLink ? (
+                  <Link to="/jobs">View sourced roles</Link>
+                ) : null}
+                {firstSearchTask.canStart ? (
+                  <Button
+                    variant="secondary"
+                    onClick={handleContinueDeepOnboarding}
+                    disabled={quickStarting || savingCadence}
+                  >
+                    Continue deep onboarding
+                  </Button>
+                ) : (
+                  <Button variant="secondary" onClick={() => navigate("/deep-ingest")}>
+                    Continue deep onboarding
+                  </Button>
+                )}
+              </div>
+            </section>
 
-      <Card title="Finish setup">
-        <p>
-          Your app source setup is saved in SQLite. Export compatibility files only for CLI/debug
-          support.
-        </p>
-        <Button onClick={handleWriteConfig} disabled={writing}>
-          {writing ? "Exporting…" : "Export compatibility files"}
-        </Button>
-        {compatibilityExported ? (
-          <p className="field__hint">Exported compatibility files: {written.join(", ")}</p>
-        ) : sourceSetupReady ? (
-          <p className="field__hint">SQLite source setup is ready.</p>
-        ) : null}
-      </Card>
-
-      {sourceSetupReady && preview?.linkedin?.url ? (
-        <Card title="Add your LinkedIn saved search">
-          <p className="field__hint" style={{ margin: 0 }}>
-            Enabling this still requires the usual authenticated-search consent (
-            <code>rolester automation consent linkedin --write</code>) before it can run.
-          </p>
-          <div className="board-preview">
-            <a
-              className="board-preview__url"
-              href={preview.linkedin.url}
-              target="_blank"
-              rel="noreferrer"
+            <section
+              className="onboarding-step-card__section"
+              aria-labelledby="finish-export-title"
             >
-              {preview.linkedin.url}
-            </a>
+              <h2 id="finish-export-title" className="field__label" style={{ margin: 0 }}>
+                Compatibility export
+              </h2>
+              <p>
+                Your app source setup is saved in SQLite. Export compatibility files only for
+                CLI/debug support.
+              </p>
+              <Button onClick={handleWriteConfig} disabled={writing}>
+                {writing ? "Exporting…" : "Export compatibility files"}
+              </Button>
+              {compatibilityExported ? (
+                <p className="field__hint">Exported compatibility files: {written.join(", ")}</p>
+              ) : sourceSetupReady ? (
+                <p className="field__hint">SQLite source setup is ready.</p>
+              ) : null}
+            </section>
+
+            {sourceSetupReady && preview?.linkedin?.url ? (
+              <section
+                className="onboarding-step-card__section"
+                aria-labelledby="finish-linkedin-title"
+              >
+                <h2 id="finish-linkedin-title" className="field__label" style={{ margin: 0 }}>
+                  Add your LinkedIn saved search
+                </h2>
+                <p className="field__hint" style={{ margin: 0 }}>
+                  Enabling this still requires the usual authenticated-search consent (
+                  <code>rolester automation consent linkedin --write</code>) before it can run.
+                </p>
+                <div className="board-preview">
+                  <a
+                    className="board-preview__url"
+                    href={preview.linkedin.url}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    {preview.linkedin.url}
+                  </a>
+                </div>
+                {added ? (
+                  <p className="field__hint">Added to DB source setup (disabled by default).</p>
+                ) : (
+                  <Button variant="secondary" onClick={handleAddLinkedIn} disabled={adding}>
+                    {adding ? "Adding…" : "Add to my search sources"}
+                  </Button>
+                )}
+              </section>
+            ) : null}
+
+            <section className="onboarding-step-card__section" aria-labelledby="finish-next-title">
+              <h2 id="finish-next-title" className="field__label" style={{ margin: 0 }}>
+                What's next
+              </h2>
+              <p>Your workspace is live. Continue setup in Deep ingest, or go to the dashboard.</p>
+              <div className="links" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <Link to="/deep-ingest">Open Deep ingest</Link>
+                <Link to="/">Go to Home</Link>
+                <Link to="/settings">Go to Settings</Link>
+              </div>
+            </section>
           </div>
-          {added ? (
-            <p className="field__hint">Added to DB source setup (disabled by default).</p>
-          ) : (
-            <Button variant="secondary" onClick={handleAddLinkedIn} disabled={adding}>
-              {adding ? "Adding…" : "Add to my search sources"}
-            </Button>
-          )}
-        </Card>
-      ) : null}
-
-      <Card title="What's next">
-        <p>
-          Your workspace is live. For a deeper interview — evidence bank, honesty boundaries,
-          writing samples — continue through the richer onboarding path when ready.
-        </p>
-        <div className="links" style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-          <a href="/chat">Start the deeper interview</a>
-          <Link to="/">Go to Home</Link>
-          <Link to="/settings">Go to Settings</Link>
-        </div>
-      </Card>
-
-      <div className="wizard-actions">
-        <Button variant="secondary" onClick={goBack}>
-          Back
-        </Button>
-        <span />
+        </section>
       </div>
-    </div>
+    </OnboardingShell>
   );
 }

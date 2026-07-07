@@ -50,8 +50,10 @@ const ALLOWED_USAGE_KEYS = [
   "id",
   "at",
   "source",
+  "feature",
   "skill",
   "action",
+  "operation",
   "model",
   "upstream",
   "tokens_in",
@@ -296,8 +298,10 @@ test("callAI (BYOK, native output): usage rows preserve labels and metadata-only
       outputMode: "native",
       outputName: "classification",
       outputSchema: OUTPUT_SCHEMA,
+      feature: "company-discovery",
       skill: "discover-companies",
       action: "seed-generate",
+      operation: "company-seeds",
       root,
       env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
     });
@@ -305,8 +309,10 @@ test("callAI (BYOK, native output): usage rows preserve labels and metadata-only
     const events = readUsageEvents({ root });
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "byok");
+    assert.equal(events[0].feature, "company-discovery");
     assert.equal(events[0].skill, "discover-companies");
     assert.equal(events[0].action, "seed-generate");
+    assert.equal(events[0].operation, "company-seeds");
     assert.equal(events[0].model, "claude-haiku-4-5");
     assertUsageEventIsMetadataOnly(events[0]);
   } finally {
@@ -341,16 +347,20 @@ test("callAI (BYOK, non-stream): appends a usage_event when root is given", asyn
       model: "claude-haiku-4-5",
       messages: [{ role: "user", content: "hi" }],
       maxTokens: 16,
+      feature: "application-tailoring",
       skill: "apply-job",
       action: "tailor",
+      operation: "packet.generate",
       root,
       env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
     });
     const events = readUsageEvents({ root });
     assert.equal(events.length, 1);
     assert.equal(events[0].source, "byok");
+    assert.equal(events[0].feature, "application-tailoring");
     assert.equal(events[0].skill, "apply-job");
     assert.equal(events[0].action, "tailor");
+    assert.equal(events[0].operation, "packet.generate");
     assert.equal(events[0].tokens_in, 25);
     assert.equal(events[0].tokens_out, 12);
     assert.equal(events[0].cache_read_tokens, 10);
@@ -453,16 +463,20 @@ test("callAI (proxy path): sends Bearer token + x-rolester-* labels, never appen
       model: "claude-haiku-4-5",
       messages: [{ role: "user", content: "hi" }],
       maxTokens: 16,
+      feature: "application-tailoring",
       skill: "apply-job",
       action: "tailor",
+      operation: "packet.generate",
       root,
       env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "proxy-tok" },
     });
     assert.equal(upstream.requests.length, 1);
     const [req] = upstream.requests;
     assert.equal(req.headers.authorization, "Bearer proxy-tok");
+    assert.equal(req.headers["x-rolester-feature"], "application-tailoring");
     assert.equal(req.headers["x-rolester-skill"], "apply-job");
     assert.equal(req.headers["x-rolester-action"], "tailor");
+    assert.equal(req.headers["x-rolester-operation"], "packet.generate");
     assert.equal(req.headers["x-api-key"], undefined);
 
     // The proxy is the one that meters — callAI must not also write client-side.
@@ -485,8 +499,10 @@ test("callAI (proxy path, native output): forwards json_schema body plus auth an
       outputMode: "native",
       outputName: "classification",
       outputSchema: OUTPUT_SCHEMA,
+      feature: "company-discovery",
       skill: "discover-companies",
       action: "seed-generate",
+      operation: "company-seeds",
       root,
       env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "proxy-tok" },
     });
@@ -494,8 +510,10 @@ test("callAI (proxy path, native output): forwards json_schema body plus auth an
     assert.equal(upstream.requests.length, 1);
     const [req] = upstream.requests;
     assert.equal(req.headers.authorization, "Bearer proxy-tok");
+    assert.equal(req.headers["x-rolester-feature"], "company-discovery");
     assert.equal(req.headers["x-rolester-skill"], "discover-companies");
     assert.equal(req.headers["x-rolester-action"], "seed-generate");
+    assert.equal(req.headers["x-rolester-operation"], "company-seeds");
     assert.equal(req.body.output_config.format.type, "json_schema");
     assert.equal(req.body.output_config.format.name, "classification");
     assert.deepEqual(req.body.output_config.format.schema, OUTPUT_SCHEMA);

@@ -9,9 +9,11 @@
 import { useState } from "react";
 import { Chip } from "./Chip.jsx";
 
-export function Field({ label, htmlFor, error, hint, children }) {
+export function Field({ label, htmlFor, error, hint, children, className = "" }) {
+  const classes = className ? `field ${className}` : "field";
+
   return (
-    <div className="field">
+    <div className={classes}>
       <label className="field__label" htmlFor={htmlFor}>
         {label}
       </label>
@@ -87,11 +89,56 @@ export function Select({ id, value, onChange, options, ...rest }) {
 // never edits one in place. Enter or "," commits the current draft as a new
 // chip; duplicates (case-insensitive) are silently ignored rather than
 // erroring, matching how a casual re-type of an existing title should feel.
-export function ChipInput({ id, values, onChange, placeholder }) {
-  const [draft, setDraft] = useState("");
+function normalizeChipSuggestion(suggestion) {
+  if (typeof suggestion === "string") {
+    return {
+      label: suggestion,
+      value: suggestion,
+      emoji: "",
+      aliases: [],
+    };
+  }
+  return {
+    label: String(suggestion?.label || suggestion?.value || "").trim(),
+    value: String(suggestion?.value || suggestion?.label || "").trim(),
+    emoji: String(suggestion?.emoji || "").trim(),
+    aliases: Array.isArray(suggestion?.aliases)
+      ? suggestion.aliases.map((alias) => String(alias || "").trim()).filter(Boolean)
+      : [],
+  };
+}
 
-  function commit() {
-    const trimmed = draft.trim();
+export function filterChipSuggestions({ draft, values = [], suggestions = [], limit = 6 } = {}) {
+  const needle = String(draft || "")
+    .trim()
+    .toLowerCase();
+  if (!needle) return [];
+
+  const selected = new Set(
+    values.map((value) =>
+      String(value || "")
+        .trim()
+        .toLowerCase()
+    )
+  );
+  return suggestions
+    .map(normalizeChipSuggestion)
+    .filter((suggestion) => {
+      if (!suggestion.value || selected.has(suggestion.value.toLowerCase())) return false;
+      const haystack = [suggestion.label, suggestion.value, ...suggestion.aliases]
+        .join(" ")
+        .toLowerCase();
+      return haystack.includes(needle);
+    })
+    .slice(0, limit);
+}
+
+export function ChipInput({ id, values = [], onChange, placeholder, suggestions = [] }) {
+  const [draft, setDraft] = useState("");
+  const filteredSuggestions = filterChipSuggestions({ draft, values, suggestions });
+
+  function commit(explicitValue = draft) {
+    const trimmed = String(explicitValue || "").trim();
     setDraft("");
     if (!trimmed) return;
     const exists = values.some((v) => v.toLowerCase() === trimmed.toLowerCase());
@@ -130,6 +177,22 @@ export function ChipInput({ id, values, onChange, placeholder }) {
         onBlur={commit}
         placeholder={placeholder}
       />
+      {filteredSuggestions.length ? (
+        <div className="chip-suggestion-list" role="listbox" aria-label="Suggestions">
+          {filteredSuggestions.map((suggestion) => (
+            <button
+              key={suggestion.value}
+              type="button"
+              className="chip-suggestion"
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={() => commit(suggestion.value)}
+            >
+              {suggestion.emoji ? <span aria-hidden="true">{suggestion.emoji}</span> : null}
+              {suggestion.label}
+            </button>
+          ))}
+        </div>
+      ) : null}
     </div>
   );
 }

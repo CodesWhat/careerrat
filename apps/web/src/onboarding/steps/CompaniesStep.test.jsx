@@ -7,7 +7,13 @@ const apiMocks = vi.hoisted(() => ({
   decideCompanyProposal: vi.fn(),
   saveCandidateFile: vi.fn(),
   searchLogos: vi.fn(async () => ({ ok: true, results: [] })),
-  logoImageUrl: vi.fn((domain) => `/api/logos/img?domain=${encodeURIComponent(domain)}`),
+  logoImageUrl: vi.fn((input) => {
+    const source = input && typeof input === "object" ? input : { domain: input };
+    const parts = [];
+    if (source.domain) parts.push(`domain=${encodeURIComponent(source.domain)}`);
+    if (source.name) parts.push(`name=${encodeURIComponent(source.name)}`);
+    return `/api/logos/img?${parts.join("&")}`;
+  }),
 }));
 
 const chatMock = vi.hoisted(() => ({
@@ -26,6 +32,7 @@ vi.mock("../ChatPanel.jsx", () => ({
 import * as CompaniesStepModule from "./CompaniesStep.jsx";
 import {
   CompaniesStep,
+  companySeedErrorMessage,
   proposalSeedsFromCompanies,
   runCompanyProposalCreate,
   runCompanyProposalRead,
@@ -98,10 +105,6 @@ function renderCompaniesStep(props = {}) {
   );
 }
 
-function buttonFor(section, action) {
-  return section.match(new RegExp(`<button[^>]*data-action="${action}"[^>]*>`))?.[0] || "";
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   chatMock.renders = [];
@@ -121,6 +124,26 @@ describe("proposalSeedsFromCompanies", () => {
         null,
       ])
     ).toEqual([{ name: "Acme AI", domain_hint: "acme.example" }, { name: "No Domain Co" }]);
+  });
+});
+
+describe("CompaniesStep logo UX", () => {
+  it("does not ask for logo.dev image credentials during onboarding", () => {
+    const html = renderCompaniesStep();
+
+    expect(html).not.toContain("logo.dev credentials");
+    expect(html).not.toContain("Image token");
+    expect(html).not.toContain("Search key");
+    expect(html).not.toContain("No logo.dev search key configured");
+  });
+
+  it("describes unavailable AI company picks without asking for an AI key", () => {
+    expect(companySeedErrorMessage({ status: 501 })).toBe(
+      "AI company picks are unavailable right now. Add companies manually for now."
+    );
+    expect(companySeedErrorMessage({ body: { code: "NO_AI_ROUTE" } })).toBe(
+      "AI company picks are unavailable right now. Add companies manually for now."
+    );
   });
 });
 
@@ -380,7 +403,21 @@ describe("runCompanyProposalDecision", () => {
 });
 
 describe("CompaniesStep", () => {
-  it("renders the local proposal control before the explicit secondary chat handoff", () => {
+  it("renders inside the same two-panel onboarding card as the surrounding steps", () => {
+    const html = renderCompaniesStep();
+
+    expect(html).toContain("onboarding-shell");
+    expect(html).toContain("onboarding-shell--targeting");
+    expect(html).toContain("onboarding-step-stack onboarding-step-stack--targeting");
+    expect(html).toContain("onboarding-step-label");
+    expect(html).toContain(">Step 4<");
+    expect(html).toContain("onboarding-step-card onboarding-targeting onboarding-companies");
+    expect(html).toContain("onboarding-step-card__media onboarding-targeting__media");
+    expect(html).toContain("onboarding-targeting__content onboarding-companies__content");
+    expect(html).toContain("onboarding-shell__actions");
+  });
+
+  it("does not render proposal admin controls, chat handoffs, or logo.dev setup UI", () => {
     const html = renderCompaniesStep({
       runtimeCapabilities: {
         ...LOCAL_CAPABILITIES,
@@ -392,39 +429,44 @@ describe("CompaniesStep", () => {
       aiEnabled: true,
     });
 
-    const localIndex = html.indexOf("Company proposals");
-    const chatIndex = html.indexOf("CHAT:discover-companies");
-
-    expect(localIndex).toBeGreaterThanOrEqual(0);
-    expect(chatIndex).toBeGreaterThan(localIndex);
-    expect(html).toContain(">Find boards from shortlist<");
-    expect(chatMock.renders).toEqual(["discover-companies"]);
-  });
-
-  it("keeps local proposal controls visible when chat and AI are unavailable", () => {
-    const html = renderCompaniesStep();
-
-    expect(html).toContain("Company proposals");
-    expect(html).toContain(">Find boards from shortlist<");
+    expect(html).not.toContain("Company proposals");
+    expect(html).not.toContain("Load pending proposals");
+    expect(html).not.toContain("Find boards from shortlist");
+    expect(html).not.toContain("Ask Roland");
     expect(html).not.toContain("CHAT:discover-companies");
+    expect(html).not.toContain("logo.dev");
     expect(chatMock.renders).toEqual([]);
   });
 
-  it("renders all local proposal decision actions and gates approval to supported ATS proposals", () => {
+  it("shows AI proposal companies as editable scan targets without decision buttons", () => {
     const html = renderCompaniesStep({ initialProposalBatch: ACTION_BATCH });
-    const supportedSection = html.slice(
-      html.indexOf('data-proposal-id="proposal-supported"'),
-      html.indexOf('data-proposal-id="proposal-review"')
-    );
-    const reviewSection = html.slice(html.indexOf('data-proposal-id="proposal-review"'));
 
+    expect(html).toContain("Acme AI");
+    expect(html).toContain("Review Co");
+    expect(html).toContain("onboarding-companies__company-list");
     for (const action of ["approve-supported-ats", "reject", "suppress", "escalate", "refresh"]) {
-      expect(supportedSection).toContain(`data-action="${action}"`);
-      expect(reviewSection).toContain(`data-action="${action}"`);
+      expect(html).not.toContain(`data-action="${action}"`);
     }
-
-    expect(buttonFor(supportedSection, "approve-supported-ats")).not.toContain("disabled");
-    expect(buttonFor(reviewSection, "approve-supported-ats")).toContain("disabled");
     expect(html).not.toContain("CHAT:discover-companies");
+  });
+
+  it("renders selected companies as compact removable pills", () => {
+    const html = renderCompaniesStep({ initialProposalBatch: ACTION_BATCH });
+
+    expect(html).toContain("onboarding-companies__company-pill");
+    expect(html).not.toContain("onboarding-companies__company-card");
+    expect(html).toContain('aria-label="Remove Acme AI"');
+    expect(html).toContain('aria-label="Remove Saved Co"');
+  });
+
+  it("keeps the action card free of explanatory company-board copy", () => {
+    const html = renderCompaniesStep({ initialProposalBatch: ACTION_BATCH });
+
+    expect(html).not.toContain("Company boards to scan");
+    expect(html).not.toContain("AI mixes your resume signals");
+    expect(html).not.toContain("these make sure selected company boards are checked directly");
+    expect(html).toContain("Selected company scan targets");
+    expect(html).toContain('class="field onboarding-custom-entry onboarding-companies__add-field"');
+    expect(html).toContain("Add a company");
   });
 });

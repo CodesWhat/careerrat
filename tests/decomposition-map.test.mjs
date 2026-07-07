@@ -483,7 +483,7 @@ test("VER-05 docs and app wrappers keep discovery routing split aligned", () => 
   const localProposalStep = requiredSlice(
     companiesStepText,
     "export async function runCompanyProposalCreate",
-    "// Step 5",
+    "// Step 6",
     "CompaniesStep local proposal helpers"
   );
   assert.doesNotMatch(localProposalStep, /ChatPanel|startChat|\/api\/chat|\/api\/skill\/run/);

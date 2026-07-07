@@ -168,6 +168,30 @@ test("runBoundedAI returns a success envelope with route data and non-sensitive 
   assertNoSensitiveFields(result.body);
 });
 
+test("runBoundedAI native-preferred passes operation labels into callAI for usage attribution", async () => {
+  let seen = null;
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    structuredMode: "native-preferred",
+    call: async (options) => {
+      seen = options;
+      return {
+        content: [{ type: "text", text: '{"seeds":[]}' }],
+        model: "claude-sonnet-5",
+      };
+    },
+    messages: [{ role: "user", content: "Suggest company seeds." }],
+    root: ROOT,
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(seen.skill, "discover-companies");
+  assert.equal(seen.action, "seed-generate");
+  assert.equal(seen.operation, "company-seeds");
+});
+
 test("runBoundedAI native-preferred mode calls callAI with native output options and validates locally", async () => {
   const calls = [];
   const result = await runBoundedAI({
@@ -203,6 +227,7 @@ test("runBoundedAI native-preferred mode calls callAI with native output options
     maxTokens: 512,
     skill: LABELS.skill,
     action: LABELS.action,
+    operation: LABELS.operation,
     root: ROOT,
     outputMode: "native",
     outputSchema: SEED_SCHEMA,

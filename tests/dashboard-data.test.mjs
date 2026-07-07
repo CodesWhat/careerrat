@@ -1337,6 +1337,43 @@ test("Dashboard renderer exposes Jobs actionability hooks and drawer detail cont
   globalThis.rolesterJobDetails = previousDetails;
 });
 
+test("Dashboard renderer resolves company avatars through the cached logo route without a saved logo token", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "logo-cache",
+        company: "Reply Co",
+        domain: "reply.co",
+        role: "Applied AI Engineer",
+        status: "awaiting",
+        fitScore: 86,
+        appliedAt: "2026-06-10",
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-18T13:30:00.000Z"),
+  });
+  const table = { innerHTML: "" };
+  const root = {
+    querySelector(selector) {
+      if (selector === "#jobs-explorer-tbody") return table;
+      return null;
+    },
+    querySelectorAll() {
+      return [];
+    },
+  };
+
+  renderDashboardViewModel(vm, root);
+
+  assert.match(table.innerHTML, /src="\/api\/logos\/img\?domain=reply\.co&amp;name=Reply%20Co"/);
+  assert.doesNotMatch(table.innerHTML, /img\.logo\.dev/);
+});
+
 test("Dashboard shell exposes actionable Jobs filters and drawer next-action section", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
 

@@ -53,7 +53,11 @@ export function ActivityBell() {
 
   return (
     <div className="activity-bell" ref={rootRef}>
-      <IconButton label="Activity" onClick={() => setOpen((v) => !v)}>
+      <IconButton
+        label="Activity"
+        className="app-shell__utility"
+        onClick={() => setOpen((v) => !v)}
+      >
         <BellIcon />
       </IconButton>
       {open ? (

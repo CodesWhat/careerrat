@@ -1,90 +1,161 @@
-import { useEffect, useState } from "react";
-import { Button } from "../../components/Button.jsx";
-import { Card } from "../../components/Card.jsx";
-import { Field, TextField } from "../../components/form.jsx";
-import { InlineAlert } from "../../components/Toast.jsx";
-import { getAiSettings, saveAiKey } from "../../lib/api.js";
+import {
+  RolesterSignInButton,
+  RolesterSignUpButton,
+  RolesterUserButton,
+  useRolesterUser,
+} from "../../auth/clerkControls.jsx";
+import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
-const AI_ROUTE_LABEL = {
-  byok: "Connected (BYOK)",
-  proxy: "Connected (managed proxy)",
-  none: "Not connected",
+const ACCOUNT_AVATAR_SIZE = "96px";
+const ACCOUNT_USER_BUTTON_APPEARANCE = {
+  elements: {
+    userButtonTrigger: {
+      width: ACCOUNT_AVATAR_SIZE,
+      height: ACCOUNT_AVATAR_SIZE,
+      minWidth: ACCOUNT_AVATAR_SIZE,
+      minHeight: ACCOUNT_AVATAR_SIZE,
+      padding: "0",
+      borderRadius: "999px",
+      overflow: "hidden",
+      boxShadow: "none",
+    },
+    userButtonAvatarBox: {
+      width: ACCOUNT_AVATAR_SIZE,
+      height: ACCOUNT_AVATAR_SIZE,
+      borderRadius: "999px",
+      overflow: "hidden",
+    },
+    avatarBox: {
+      width: ACCOUNT_AVATAR_SIZE,
+      height: ACCOUNT_AVATAR_SIZE,
+      borderRadius: "999px",
+      overflow: "hidden",
+    },
+    avatarImage: {
+      width: "100%",
+      height: "100%",
+      objectFit: "cover",
+    },
+  },
 };
 
-// Step 2 — BYOK key. Mirrors SettingsPage.jsx's "AI connection" card exactly
-// (same TextField/Button, same "never echoed back" copy). Continue is never
-// disabled here — every AI assist later in the wizard (resume extraction,
-// title/keyword suggestions, Roland's company search) is optional and
-// degrades to a manual path without a key; this step is skippable by design.
-export function KeyStep({ reload, goNext, goBack, showToast }) {
-  const [status, setStatus] = useState({ route: "none", keyPresent: false });
-  const [keyInput, setKeyInput] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
+function accountLabel(user) {
+  return (
+    user?.fullName ||
+    [user?.firstName, user?.lastName].filter(Boolean).join(" ") ||
+    user?.username ||
+    user?.primaryEmailAddress?.emailAddress ||
+    "your Rolester account"
+  );
+}
 
-  useEffect(() => {
-    getAiSettings()
-      .then(setStatus)
-      .catch(() => {
-        /* best-effort — the badge just stays "Not connected" */
-      });
-  }, []);
+function accountEmail(user) {
+  const email = user?.primaryEmailAddress?.emailAddress;
+  return email && email !== accountLabel(user) ? email : null;
+}
 
-  async function handleSave() {
-    if (!keyInput.trim()) return;
-    setSaving(true);
-    setError(null);
-    try {
-      await saveAiKey(keyInput.trim());
-      setKeyInput("");
-      showToast("AI key saved.");
-      setStatus(await getAiSettings());
-      await reload();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
-    } finally {
-      setSaving(false);
-    }
-  }
+function AccountFinePrint() {
+  return (
+    <p className="onboarding-account__fine-print">
+      <span className="onboarding-account__fine-print-marker" aria-hidden="true">
+        *
+      </span>
+      <span>Signing in keeps usage tied to you.</span>
+    </p>
+  );
+}
 
-  const badgeLabel = AI_ROUTE_LABEL[status.route] ?? "Unknown";
-  const badgeTone = status.keyPresent || status.route !== "none" ? "badge--ok" : "badge--muted";
+// Step 1 — Account. Clerk identifies the user for durable free-tier tracking,
+// billing, and future hosted usage metering. AI credentials are no longer part
+// of v1 onboarding; inference is routed through the product backend.
+export function KeyStep({ goNext, goBack, onProgressSelect }) {
+  const { isLoaded, isSignedIn, user } = useRolesterUser();
+  const canContinue = isLoaded && isSignedIn;
 
   return (
-    <Card
-      title="Connect an AI key (optional)"
-      actions={<span className={`badge ${badgeTone}`}>{badgeLabel}</span>}
-    >
-      <p className="field__hint" style={{ margin: 0 }}>
-        Unlocks resume extraction from a PDF/image, title and keyword suggestion chips, and Roland's
-        company search later in this wizard. The key is stored locally and never echoed back after
-        saving. With ROLESTER_HOME it lives under internal/ai.env; legacy repo-root workspaces use
-        .internal/ai.env.
-      </p>
-      {error ? <InlineAlert message={error} /> : null}
-      <div className="field-row">
-        <Field label="Anthropic API key" htmlFor="onboarding-ai-key">
-          <TextField
-            id="onboarding-ai-key"
-            type="password"
-            value={keyInput}
-            onChange={setKeyInput}
-            placeholder="sk-ant-…"
-            autoComplete="off"
+    <OnboardingShell
+      activeIndex={1}
+      className="onboarding-shell--key"
+      onProgressSelect={onProgressSelect}
+      actions={
+        <>
+          <OnboardingNavButton direction="back" label="Back" onClick={goBack} />
+          <OnboardingNavButton
+            direction="next"
+            label="Continue"
+            onClick={goNext}
+            disabled={!canContinue}
           />
-        </Field>
+        </>
+      }
+    >
+      <div className="onboarding-step-stack">
+        <div className="onboarding-step-label">Step 1</div>
+        <section
+          className="onboarding-step-card onboarding-key onboarding-account"
+          aria-labelledby="onboarding-account-title"
+        >
+          <div className="onboarding-step-card__media onboarding-key__title-side">
+            <div className="onboarding-targeting__mark" aria-hidden="true">
+              👤
+            </div>
+            <div className="onboarding-targeting__media-copy">
+              <h1 id="onboarding-account-title">Your Rolester account.</h1>
+              <p className="onboarding-account__intro">
+                Free tier forever.
+                <br />
+                No 💳 required!
+              </p>
+            </div>
+          </div>
+          <div className="onboarding-step-card__content onboarding-key__action-side onboarding-account__action-side">
+            {!isSignedIn ? (
+              <div className="onboarding-account__panel">
+                <div className="onboarding-account__actions">
+                  <RolesterSignUpButton mode="modal">
+                    <button type="button" className="btn btn--primary onboarding-account__cta">
+                      Create account
+                    </button>
+                  </RolesterSignUpButton>
+                  <RolesterSignInButton mode="modal">
+                    <button type="button" className="btn btn--secondary onboarding-account__cta">
+                      Log in
+                    </button>
+                  </RolesterSignInButton>
+                </div>
+                <AccountFinePrint />
+              </div>
+            ) : null}
+
+            {isSignedIn ? (
+              <div className="onboarding-account__panel onboarding-account__panel--signed-in">
+                <span className="onboarding-account__signed-in-label">Signed in as</span>
+                <div className="onboarding-account__signed-in-main">
+                  <div className="onboarding-account__identity">
+                    <div className="onboarding-account__avatar">
+                      <RolesterUserButton
+                        afterSignOutUrl="/app/onboarding"
+                        appearance={ACCOUNT_USER_BUTTON_APPEARANCE}
+                      />
+                    </div>
+                    <div className="onboarding-account__identity-copy">
+                      <strong>{accountLabel(user)}</strong>
+                      {accountEmail(user) ? <span>{accountEmail(user)}</span> : null}
+                    </div>
+                  </div>
+                  <div className="onboarding-key__confirmation onboarding-account__confirmation">
+                    <span className="onboarding-key__check" aria-hidden="true">
+                      ✓
+                    </span>
+                    <span>Account ready</span>
+                  </div>
+                </div>
+                <AccountFinePrint />
+              </div>
+            ) : null}
+          </div>
+        </section>
       </div>
-      <div className="wizard-actions">
-        <Button variant="secondary" onClick={goBack}>
-          Back
-        </Button>
-        <div style={{ display: "flex", gap: 8 }}>
-          <Button variant="secondary" onClick={handleSave} disabled={saving || !keyInput.trim()}>
-            {saving ? "Saving…" : "Save key"}
-          </Button>
-          <Button onClick={goNext}>Continue</Button>
-        </div>
-      </div>
-    </Card>
+    </OnboardingShell>
   );
 }

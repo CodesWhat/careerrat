@@ -38,6 +38,31 @@ export const USAGE_LOG_SUBPATH = "workspace/usage-events.jsonl";
 
 export const USAGE_SOURCES = ["proxy", "byok"];
 
+const FEATURE_BY_OPERATION_PREFIX = [
+  ["onboard.resume-ai", "onboarding.resume-ingestion"],
+  ["assist.suggest.", "onboarding.targeting-assist"],
+  ["company-seeds", "company-discovery"],
+  ["public-scanner", "company-discovery"],
+  ["onboard.", "onboarding"],
+];
+
+const FEATURE_BY_SKILL = {
+  assist: "onboarding.targeting-assist",
+  "resume-extract": "onboarding.resume-ingestion",
+  "discover-companies": "company-discovery",
+  "research-boards": "source-discovery",
+  "setup-searches": "source-discovery",
+  "search-jobs": "job-search",
+  "evaluate-job": "job-evaluation",
+  "apply-job": "application-workflow",
+  "tailor-application": "application-tailoring",
+  "answer-question": "application-tailoring",
+  "interview-prep": "interview-prep",
+  "email-comms": "communications",
+  "schedule-meeting": "communications",
+  intake: "intake-triage",
+};
+
 export function usageLogAbsPath(root = DEFAULT_ROOT) {
   return userPath({ repoRoot: root }, USAGE_LOG_SUBPATH);
 }
@@ -117,9 +142,50 @@ function trimOrNull(v) {
   return s === "" ? null : s;
 }
 
+function slugLabel(v) {
+  return String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function normalizeFeatureId(v) {
+  const text = String(v || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "-")
+    .replace(/[^a-z0-9._:-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return text || null;
+}
+
 function nonNegInt(v) {
   const n = Number(v);
   return Number.isFinite(n) && n > 0 ? Math.round(n) : 0;
+}
+
+export function deriveUsageFeature({ feature, skill, action, operation } = {}) {
+  const explicit = normalizeFeatureId(feature);
+  if (explicit) return explicit;
+
+  const op = trimOrNull(operation);
+  if (op) {
+    for (const [prefix, featureId] of FEATURE_BY_OPERATION_PREFIX) {
+      if (op.startsWith(prefix)) return featureId;
+    }
+  }
+
+  const skillId = trimOrNull(skill);
+  if (skillId && FEATURE_BY_SKILL[skillId]) return FEATURE_BY_SKILL[skillId];
+
+  const skillSlug = slugLabel(skillId);
+  if (skillSlug) return `skill.${skillSlug}`;
+
+  const actionSlug = slugLabel(action);
+  if (actionSlug) return `action.${actionSlug}`;
+
+  return "unlabeled";
 }
 
 // Fill defaults, normalize token fields, compute cost — the single row shape
@@ -132,6 +198,10 @@ export function canonicalizeUsageEvent(input = {}, { now = new Date(), env = pro
   const cache_read_tokens = nonNegInt(input.cache_read_tokens);
   const cache_creation_tokens = nonNegInt(input.cache_creation_tokens);
   const web_searches = nonNegInt(input.web_searches);
+  const skill = trimOrNull(input.skill);
+  const action = trimOrNull(input.action);
+  const operation = trimOrNull(input.operation);
+  const feature = deriveUsageFeature({ feature: input.feature, skill, action, operation });
   const { cost_usd, priced } = computeCost(
     model,
     { tokens_in, tokens_out, cache_read_tokens, cache_creation_tokens },
@@ -142,8 +212,10 @@ export function canonicalizeUsageEvent(input = {}, { now = new Date(), env = pro
     id: trimOrNull(input.id) || `use_${randomUUID()}`,
     at: trimOrNull(input.at) || now.toISOString(),
     source: USAGE_SOURCES.includes(input.source) ? input.source : "byok",
-    skill: trimOrNull(input.skill),
-    action: trimOrNull(input.action),
+    feature,
+    skill,
+    action,
+    operation,
     model,
     // Upstream provider host (e.g. "ai-gateway.vercel.sh" / "api.anthropic.com")
     // — cost-drift visibility across providers. Optional; older rows written
@@ -158,6 +230,100 @@ export function canonicalizeUsageEvent(input = {}, { now = new Date(), env = pro
     shared_cache_hit: cache_read_tokens > 0,
     cost_usd,
     priced,
+  };
+}
+
+function emptyUsageBucket(extra = {}) {
+  return {
+    ...extra,
+    requests: 0,
+    tokens_in: 0,
+    tokens_out: 0,
+    total_tokens: 0,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    web_searches: 0,
+    cost_usd: 0,
+    unpriced_requests: 0,
+  };
+}
+
+function addUsageToBucket(bucket, event) {
+  bucket.requests += 1;
+  bucket.tokens_in += nonNegInt(event.tokens_in);
+  bucket.tokens_out += nonNegInt(event.tokens_out);
+  bucket.total_tokens += nonNegInt(event.tokens_in) + nonNegInt(event.tokens_out);
+  bucket.cache_read_tokens += nonNegInt(event.cache_read_tokens);
+  bucket.cache_creation_tokens += nonNegInt(event.cache_creation_tokens);
+  bucket.web_searches += nonNegInt(event.web_searches);
+  if (event.priced && Number.isFinite(Number(event.cost_usd))) {
+    bucket.cost_usd += Number(event.cost_usd);
+  } else {
+    bucket.unpriced_requests += 1;
+  }
+}
+
+function usageSummaryEvent(raw = {}) {
+  const skill = trimOrNull(raw.skill);
+  const action = trimOrNull(raw.action);
+  const operation = trimOrNull(raw.operation);
+  return {
+    ...raw,
+    feature: deriveUsageFeature({ feature: raw.feature, skill, action, operation }),
+    skill,
+    action,
+    operation,
+  };
+}
+
+function sortUsageBuckets(a, b) {
+  return (
+    b.cost_usd - a.cost_usd ||
+    b.tokens_in + b.tokens_out - (a.tokens_in + a.tokens_out) ||
+    b.requests - a.requests ||
+    String(a.feature || a.skill || "").localeCompare(String(b.feature || b.skill || ""))
+  );
+}
+
+export function summarizeUsageEvents(events = []) {
+  const totals = emptyUsageBucket();
+  const byFeature = new Map();
+
+  for (const raw of Array.isArray(events) ? events : []) {
+    const event = usageSummaryEvent(raw);
+    addUsageToBucket(totals, event);
+
+    if (!byFeature.has(event.feature)) {
+      byFeature.set(event.feature, {
+        ...emptyUsageBucket({ feature: event.feature }),
+        breakdown: new Map(),
+      });
+    }
+    const featureBucket = byFeature.get(event.feature);
+    addUsageToBucket(featureBucket, event);
+
+    const detailKey = JSON.stringify([event.skill, event.action, event.operation]);
+    if (!featureBucket.breakdown.has(detailKey)) {
+      featureBucket.breakdown.set(
+        detailKey,
+        emptyUsageBucket({
+          skill: event.skill,
+          action: event.action,
+          operation: event.operation,
+        })
+      );
+    }
+    addUsageToBucket(featureBucket.breakdown.get(detailKey), event);
+  }
+
+  return {
+    totals,
+    byFeature: Array.from(byFeature.values())
+      .map((bucket) => ({
+        ...bucket,
+        breakdown: Array.from(bucket.breakdown.values()).sort(sortUsageBuckets),
+      }))
+      .sort(sortUsageBuckets),
   };
 }
 

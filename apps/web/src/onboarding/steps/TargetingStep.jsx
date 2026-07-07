@@ -1,21 +1,29 @@
-import { useEffect, useState } from "react";
-import { Button } from "../../components/Button.jsx";
-import { Card } from "../../components/Card.jsx";
+import { useState } from "react";
+import { Button, IconButton } from "../../components/Button.jsx";
 import { SuggestionChip } from "../../components/Chip.jsx";
-import { ChipInput, Field, Select, TextField } from "../../components/form.jsx";
+import { ChipInput, Field, TextField } from "../../components/form.jsx";
+import { MagicWandIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
-import { previewBoards, saveCandidateFile, suggestAssist } from "../../lib/api.js";
+import { saveCandidateFile, suggestAssist } from "../../lib/api.js";
+import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
-const PREVIEW_DEBOUNCE_MS = 400;
 const PRIORITY_OPTIONS = [
-  { value: "primary", label: "primary" },
-  { value: "secondary", label: "secondary" },
-  { value: "stretch", label: "stretch" },
-  { value: "oe", label: "oe" },
+  { value: "primary", label: "Primary" },
+  { value: "secondary", label: "Secondary" },
+  { value: "stretch", label: "Stretch" },
+  { value: "oe", label: "OE" },
 ];
 
-function assistErrorMessage(err) {
-  if (err?.status === 501) return "No AI key configured — add one in the AI key step.";
+function normalizePriority(priority, index) {
+  if (priority === "adjacent") return "stretch";
+  if (["primary", "secondary", "stretch", "oe"].includes(priority)) return priority;
+  return index === 0 ? "primary" : "secondary";
+}
+
+export function assistErrorMessage(err) {
+  if (err?.status === 501) {
+    return "Roland suggestions are unavailable right now — add or edit roles manually.";
+  }
   if (err?.status === 422) return "Roland couldn't produce a suggestion this time — try again.";
   return err instanceof Error ? err.message : "Suggestion failed";
 }
@@ -24,83 +32,139 @@ function normalizeBuckets(buckets) {
   return (Array.isArray(buckets) ? buckets : [])
     .map((bucket, index) => ({
       name: bucket?.name || (index === 0 ? "Primary" : "Secondary"),
-      priority: ["primary", "secondary", "stretch", "oe"].includes(bucket?.priority)
-        ? bucket.priority
-        : index === 0
-          ? "primary"
-          : "secondary",
+      priority: normalizePriority(bucket?.priority, index),
       titles: Array.isArray(bucket?.titles) ? bucket.titles.filter(Boolean) : [],
       notes: bucket?.notes || "",
+      fit_signals: normalizeSignals(bucket?.fit_signals),
+      down_signals: normalizeSignals(bucket?.down_signals),
     }))
     .filter((bucket) => bucket.name || bucket.titles.length || bucket.notes);
 }
 
-function firstPreviewTitle(buckets) {
-  for (const bucket of buckets) {
-    const title = bucket.titles?.find(Boolean);
-    if (title) return title;
-  }
-  return "";
+function normalizeSignals(values) {
+  return Array.isArray(values)
+    ? values.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
 }
 
-// Step 4 — Targeting. Roland-suggest chips are staged, never auto-committed
-// (SuggestionChip's accept/dismiss) — the actual persistence still goes
-// through the same Save & continue button every other field uses, matching
-// SettingsPage.jsx's handleSectionSave convention. The board-URL preview
-// calls the additive POST /api/boards/preview (src/cli/boards-route.mjs) —
-// read-only here on purpose; "add to my search sources" is deferred to the
-// Finish step so it isn't silently wiped by write-config's wholesale
-// search-sources.yml regen (see that route's own header comment).
-export function TargetingStep({ state, draftSeeds, aiEnabled, goNext, goBack, showToast }) {
+function uniqueSignals(values) {
+  const out = [];
+  const seen = new Set();
+  for (const value of values) {
+    const text = String(value || "").trim();
+    const key = text.toLowerCase();
+    if (!text || seen.has(key)) continue;
+    seen.add(key);
+    out.push(text);
+  }
+  return out;
+}
+
+function seedRoleBuckets({ savedTargeting, draftTargeting }) {
+  const savedBuckets = normalizeBuckets(savedTargeting.role_buckets);
+  const rolandBuckets = normalizeBuckets(draftTargeting.role_buckets);
+  const buckets = savedBuckets.length ? savedBuckets : rolandBuckets;
+  const topFitSignals = savedTargeting.keep_signals?.length
+    ? normalizeSignals(savedTargeting.keep_signals)
+    : normalizeSignals(draftTargeting.keep_signals);
+
+  return buckets.map((bucket, index) => ({
+    ...bucket,
+    fit_signals: bucket.fit_signals.length ? bucket.fit_signals : index === 0 ? topFitSignals : [],
+  }));
+}
+
+function countTitles(buckets) {
+  return buckets.reduce((count, bucket) => count + (bucket.titles?.length ?? 0), 0);
+}
+
+function fallbackBuckets() {
+  return [
+    {
+      name: "Primary",
+      priority: "primary",
+      titles: [],
+      notes: "",
+      fit_signals: [],
+      down_signals: [],
+    },
+  ];
+}
+
+function priorityLabel(priority) {
+  return PRIORITY_OPTIONS.find((option) => option.value === priority)?.label ?? "Primary";
+}
+
+function SummarySignalRow({ tone, symbol, label, signals, emptyLabel, onRemove }) {
+  return (
+    <div
+      className={`onboarding-targeting__tag-box onboarding-targeting__tag-box--${tone} onboarding-targeting__summary-signal-row`}
+    >
+      <span className="onboarding-targeting__tag-symbol">{symbol}</span>
+      <div className="onboarding-targeting__tag-copy">
+        <strong>{label}</strong>
+        {signals.length ? (
+          <div className="onboarding-targeting__summary-pill-list">
+            {signals.map((signal) => (
+              <span className="onboarding-targeting__signal-pill" key={signal}>
+                <span className="onboarding-targeting__signal-pill-label">{signal}</span>
+                <button
+                  type="button"
+                  className="onboarding-targeting__signal-pill-remove"
+                  onClick={() => onRemove(signal)}
+                  aria-label={`Remove ${signal} from ${label}`}
+                >
+                  ×
+                </button>
+              </span>
+            ))}
+          </div>
+        ) : (
+          <small>{emptyLabel}</small>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Step 3 — Targeting. This is a review step for the role lanes Roland inferred
+// from the resume, not a raw targeting.yml editor. Save still writes the same
+// candidate targeting fields the rest of Rolester consumes.
+export function TargetingStep({
+  state,
+  draftSeeds,
+  aiEnabled,
+  goNext,
+  goBack,
+  onProgressSelect,
+  showToast,
+  initialEditingBucket = null,
+}) {
   const savedTargeting = state?.data?.targeting ?? {};
   const draftTargeting = draftSeeds?.targeting ?? {};
-  const savedBuckets = normalizeBuckets(savedTargeting.role_buckets);
-  const seededBuckets = savedBuckets.length
-    ? savedBuckets
-    : normalizeBuckets(draftTargeting.role_buckets);
+  const seededBuckets = seedRoleBuckets({ savedTargeting, draftTargeting });
+  const compatibilityCutSignals = savedTargeting.cut_signals?.length
+    ? normalizeSignals(savedTargeting.cut_signals)
+    : normalizeSignals(draftTargeting.cut_signals);
+
   const [roleBuckets, setRoleBuckets] = useState(
-    seededBuckets.length
-      ? seededBuckets
-      : [{ name: "Primary", priority: "primary", titles: [], notes: "" }]
+    seededBuckets.length ? seededBuckets : fallbackBuckets()
   );
-  const [keepSignals, setKeepSignals] = useState(
-    savedTargeting.keep_signals?.length
-      ? savedTargeting.keep_signals
-      : (draftTargeting.keep_signals ?? [])
-  );
-  const [cutSignals, setCutSignals] = useState(savedTargeting.cut_signals ?? []);
 
   const [titleSuggestions, setTitleSuggestions] = useState([]);
-  const [keywordSuggestions, setKeywordSuggestions] = useState([]);
   const [suggestingTitles, setSuggestingTitles] = useState(false);
-  const [suggestingKeywords, setSuggestingKeywords] = useState(false);
   const [assistError, setAssistError] = useState(null);
+  const [editingBucket, setEditingBucket] = useState(initialEditingBucket);
 
-  const [preview, setPreview] = useState(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
   const profile = state?.data?.profile ?? {};
   const summary = profile.candidate?.headline || profile.candidate?.domain || "";
-  const location = profile.location?.home ?? "";
-  const remote = !!profile.location?.remote;
-  const minimumBase = profile.compensation?.minimum_base ?? null;
-  const previewTitle = firstPreviewTitle(roleBuckets);
-
-  // Debounced, deterministic board-URL preview — no AI cost, safe to refetch
-  // on every keystroke's settle.
-  useEffect(() => {
-    if (!previewTitle) {
-      setPreview(null);
-      return undefined;
-    }
-    const timer = setTimeout(() => {
-      previewBoards({ keywords: previewTitle, location, remote, minimumBase, windowHours: 24 })
-        .then(setPreview)
-        .catch(() => setPreview(null));
-    }, PREVIEW_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [previewTitle, location, remote, minimumBase]);
+  const selectedTitleCount = countTitles(roleBuckets);
+  const activeEditIndex =
+    editingBucket !== null && roleBuckets[editingBucket] ? editingBucket : null;
+  const activeEditBucket = activeEditIndex === null ? null : roleBuckets[activeEditIndex];
 
   function updateBucket(index, patch) {
     setRoleBuckets((buckets) =>
@@ -111,19 +175,37 @@ export function TargetingStep({ state, draftSeeds, aiEnabled, goNext, goBack, sh
   function addBucket() {
     setRoleBuckets((buckets) => [
       ...buckets,
-      { name: "Secondary", priority: "secondary", titles: [], notes: "" },
+      {
+        name: "Another lane",
+        priority: "secondary",
+        titles: [],
+        notes: "",
+        fit_signals: [],
+        down_signals: [],
+      },
     ]);
+    setEditingBucket(roleBuckets.length);
   }
 
   function removeBucket(index) {
-    setRoleBuckets((buckets) => buckets.filter((_, i) => i !== index));
+    setRoleBuckets((buckets) => {
+      const next = buckets.filter((_, i) => i !== index);
+      return next.length ? next : fallbackBuckets();
+    });
+    setEditingBucket(null);
+  }
+
+  function removeBucketSignal(index, field, signal) {
+    const bucket = roleBuckets[index];
+    if (!bucket) return;
+    updateBucket(index, {
+      [field]: normalizeSignals(bucket[field]).filter((value) => value !== signal),
+    });
   }
 
   function addTitleToFirstBucket(title) {
     setRoleBuckets((buckets) => {
-      const next = buckets.length
-        ? buckets
-        : [{ name: "Primary", priority: "primary", titles: [], notes: "" }];
+      const next = buckets.length ? buckets : fallbackBuckets();
       return next.map((bucket, index) =>
         index === 0 && !bucket.titles.some((t) => t.toLowerCase() === title.toLowerCase())
           ? { ...bucket, titles: [...bucket.titles, title] }
@@ -153,40 +235,27 @@ export function TargetingStep({ state, draftSeeds, aiEnabled, goNext, goBack, sh
     }
   }
 
-  async function handleSuggestKeywords() {
-    setSuggestingKeywords(true);
-    setAssistError(null);
-    try {
-      const res = await suggestAssist("keywords", {
-        profileSummary: summary,
-        currentKeywords: keepSignals,
-      });
-      setKeywordSuggestions(
-        (res.suggestions || []).filter(
-          (s) => !keepSignals.some((k) => k.toLowerCase() === s.toLowerCase())
-        )
-      );
-    } catch (err) {
-      setAssistError(assistErrorMessage(err));
-    } finally {
-      setSuggestingKeywords(false);
-    }
-  }
-
   async function handleSaveAndNext() {
+    const cleanedBuckets = normalizeBuckets(roleBuckets).filter((bucket) => bucket.titles.length);
+    if (!cleanedBuckets.length) {
+      setError("Add at least one role title so Roland knows what to search.");
+      return;
+    }
+
     setSaving(true);
     setError(null);
     try {
-      const cleanedBuckets = normalizeBuckets(roleBuckets).filter((bucket) => bucket.titles.length);
       await saveCandidateFile("targeting", {
         role_buckets: cleanedBuckets.map((bucket) => ({
           name: bucket.name,
           priority: bucket.priority,
           titles: bucket.titles,
           ...(bucket.notes ? { notes: bucket.notes } : {}),
+          ...(bucket.fit_signals?.length ? { fit_signals: bucket.fit_signals } : {}),
+          ...(bucket.down_signals?.length ? { down_signals: bucket.down_signals } : {}),
         })),
-        keep_signals: keepSignals,
-        cut_signals: cutSignals,
+        keep_signals: uniqueSignals(cleanedBuckets.flatMap((bucket) => bucket.fit_signals)),
+        cut_signals: compatibilityCutSignals,
       });
       showToast("Saved.");
       goNext();
@@ -198,167 +267,286 @@ export function TargetingStep({ state, draftSeeds, aiEnabled, goNext, goBack, sh
   }
 
   return (
-    <Card title="Targeting">
-      {error ? <InlineAlert message={error} /> : null}
-      {assistError ? <InlineAlert message={assistError} /> : null}
-
-      <div>
-        <p className="field__label" style={{ margin: "0 0 8px" }}>
-          Search tracks
-        </p>
-        {roleBuckets.map((bucket, index) => (
-          <div
-            // Draft buckets have no stable id until saved.
-            // biome-ignore lint/suspicious/noArrayIndexKey: editable draft rows
-            key={index}
-            style={{ borderTop: index ? "1px solid var(--border)" : 0, paddingTop: index ? 12 : 0 }}
+    <OnboardingShell
+      activeIndex={3}
+      className="onboarding-shell--targeting"
+      onProgressSelect={onProgressSelect}
+      actions={
+        <>
+          <OnboardingNavButton direction="back" label="Back" onClick={goBack} />
+          <OnboardingNavButton
+            direction="next"
+            label="Continue"
+            onClick={handleSaveAndNext}
+            disabled={saving || selectedTitleCount === 0}
+          />
+        </>
+      }
+    >
+      <div className="onboarding-step-stack onboarding-step-stack--targeting">
+        <div className="onboarding-step-label">Step 3</div>
+        <section
+          className="onboarding-step-card onboarding-targeting"
+          aria-labelledby="onboarding-targeting-title"
+        >
+          <section
+            className="onboarding-step-card__media onboarding-targeting__media"
+            aria-label="Roland role picks"
           >
-            <div className="field-row">
-              <Field label="Track name" htmlFor={`targeting-bucket-name-${index}`}>
-                <TextField
-                  id={`targeting-bucket-name-${index}`}
-                  value={bucket.name}
-                  onChange={(value) => updateBucket(index, { name: value })}
-                />
-              </Field>
-              <Field label="Priority" htmlFor={`targeting-bucket-priority-${index}`}>
-                <Select
-                  id={`targeting-bucket-priority-${index}`}
-                  value={bucket.priority}
-                  onChange={(value) => updateBucket(index, { priority: value })}
-                  options={PRIORITY_OPTIONS}
-                />
-              </Field>
+            <div className="onboarding-targeting__mark" aria-hidden="true">
+              🎯
             </div>
-            <Field
-              label="Titles"
-              htmlFor={`targeting-bucket-titles-${index}`}
-              hint="Press Enter or , to add a title"
-            >
-              <ChipInput
-                id={`targeting-bucket-titles-${index}`}
-                values={bucket.titles}
-                onChange={(titles) => updateBucket(index, { titles })}
-                placeholder="e.g. Forward Deployed Engineer"
-              />
-            </Field>
-            <Field label="Notes" htmlFor={`targeting-bucket-notes-${index}`}>
-              <TextField
-                id={`targeting-bucket-notes-${index}`}
-                value={bucket.notes}
-                onChange={(value) => updateBucket(index, { notes: value })}
-              />
-            </Field>
-            {roleBuckets.length > 1 ? (
-              <Button variant="secondary" onClick={() => removeBucket(index)}>
-                Remove track
-              </Button>
+            <div className="onboarding-targeting__media-copy">
+              <h1 id="onboarding-targeting-title">Choose your roles</h1>
+              <p>Keep the lanes that feel right. Add the job titles you already know you want.</p>
+            </div>
+          </section>
+
+          <div
+            className={
+              "onboarding-step-card__content onboarding-step-card__content--dense onboarding-step-card__content--scroll onboarding-targeting__content" +
+              (activeEditBucket
+                ? " onboarding-targeting__content--editing"
+                : " onboarding-targeting__content--lanes")
+            }
+          >
+            {error ? <InlineAlert message={error} /> : null}
+            {assistError ? <InlineAlert message={assistError} /> : null}
+
+            {activeEditBucket ? (
+              <section
+                className="onboarding-targeting__edit-panel"
+                aria-label={`Edit ${activeEditBucket.name}`}
+              >
+                <div className="onboarding-targeting__lane-header">
+                  <div>
+                    <span className="onboarding-targeting__priority-pill">
+                      {priorityLabel(activeEditBucket.priority)}
+                    </span>
+                    <h2>Edit {activeEditBucket.name}</h2>
+                  </div>
+                  <div className="onboarding-local-actions">
+                    <Button variant="secondary" onClick={() => setEditingBucket(null)}>
+                      Done
+                    </Button>
+                    {roleBuckets.length > 1 ? (
+                      <button
+                        type="button"
+                        className="onboarding-targeting__remove"
+                        onClick={() => removeBucket(activeEditIndex)}
+                      >
+                        Remove
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="onboarding-targeting__edit-fields">
+                  <Field label="Lane name" htmlFor={`targeting-bucket-name-${activeEditIndex}`}>
+                    <TextField
+                      id={`targeting-bucket-name-${activeEditIndex}`}
+                      value={activeEditBucket.name}
+                      onChange={(value) => updateBucket(activeEditIndex, { name: value })}
+                    />
+                  </Field>
+                  <div className="field">
+                    <span className="field__label">Priority</span>
+                    <fieldset
+                      className="onboarding-targeting__priority-row"
+                      aria-label={`Priority for ${activeEditBucket.name}`}
+                    >
+                      {PRIORITY_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={
+                            option.value === activeEditBucket.priority
+                              ? "onboarding-targeting__priority-choice onboarding-targeting__priority-choice--active"
+                              : "onboarding-targeting__priority-choice"
+                          }
+                          onClick={() => updateBucket(activeEditIndex, { priority: option.value })}
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </fieldset>
+                  </div>
+                  <div className="field onboarding-targeting__titles-field">
+                    <div className="onboarding-targeting__field-heading">
+                      <label
+                        className="field__label"
+                        htmlFor={`targeting-bucket-titles-${activeEditIndex}`}
+                      >
+                        Job titles
+                      </label>
+                      {aiEnabled ? (
+                        <span className="onboarding-targeting__tool-wrap">
+                          <IconButton
+                            label={suggestingTitles ? "Finding more titles" : "Find more titles"}
+                            className="onboarding-targeting__field-tool"
+                            onClick={handleSuggestTitles}
+                            disabled={suggestingTitles}
+                          >
+                            <MagicWandIcon />
+                          </IconButton>
+                          <span className="onboarding-targeting__tool-tip" role="tooltip">
+                            {suggestingTitles ? "Finding titles..." : "Find more titles"}
+                          </span>
+                        </span>
+                      ) : null}
+                    </div>
+                    <ChipInput
+                      id={`targeting-bucket-titles-${activeEditIndex}`}
+                      values={activeEditBucket.titles}
+                      onChange={(titles) => updateBucket(activeEditIndex, { titles })}
+                      placeholder="e.g. Staff Platform Engineer"
+                    />
+                    <span className="field__hint">Press Enter or comma to add another</span>
+                  </div>
+                  <Field
+                    label="Why this lane"
+                    htmlFor={`targeting-bucket-notes-${activeEditIndex}`}
+                  >
+                    <TextField
+                      id={`targeting-bucket-notes-${activeEditIndex}`}
+                      value={activeEditBucket.notes}
+                      onChange={(value) => updateBucket(activeEditIndex, { notes: value })}
+                      placeholder="Optional"
+                    />
+                  </Field>
+                  <div className="onboarding-targeting__edit-signals">
+                    <div className="onboarding-targeting__tag-box onboarding-targeting__tag-box--good">
+                      <span className="onboarding-targeting__tag-symbol">+</span>
+                      <Field
+                        label="Good fit"
+                        htmlFor={`targeting-bucket-fit-${activeEditIndex}`}
+                        hint="Specific to this lane"
+                      >
+                        <ChipInput
+                          id={`targeting-bucket-fit-${activeEditIndex}`}
+                          values={activeEditBucket.fit_signals}
+                          onChange={(fit_signals) => updateBucket(activeEditIndex, { fit_signals })}
+                          placeholder="e.g. developer tools"
+                        />
+                      </Field>
+                    </div>
+                    <div className="onboarding-targeting__tag-box onboarding-targeting__tag-box--bad">
+                      <span className="onboarding-targeting__tag-symbol">−</span>
+                      <Field
+                        label="Bad fit"
+                        htmlFor={`targeting-bucket-down-${activeEditIndex}`}
+                        hint="Specific to this lane"
+                      >
+                        <ChipInput
+                          id={`targeting-bucket-down-${activeEditIndex}`}
+                          values={activeEditBucket.down_signals}
+                          onChange={(down_signals) =>
+                            updateBucket(activeEditIndex, { down_signals })
+                          }
+                          placeholder="e.g. frontend-only"
+                        />
+                      </Field>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            ) : (
+              <section
+                className="onboarding-targeting__lanes onboarding-targeting__lanes--anchored"
+                aria-label="Selected role lanes"
+              >
+                {roleBuckets.map((bucket, index) => (
+                  <article
+                    // Draft buckets have no stable id until saved.
+                    // biome-ignore lint/suspicious/noArrayIndexKey: editable draft rows
+                    key={index}
+                    className="onboarding-targeting__summary-card onboarding-targeting__summary-card--role"
+                  >
+                    <div className="onboarding-targeting__summary-main">
+                      <div className="onboarding-targeting__lane-header">
+                        <div>
+                          <span className="onboarding-targeting__priority-pill onboarding-targeting__priority-pill--corner">
+                            {priorityLabel(bucket.priority)}
+                          </span>
+                          <h2>{bucket.name}</h2>
+                        </div>
+                        <IconButton
+                          label={`Edit ${bucket.name}`}
+                          className="onboarding-targeting__edit"
+                          onClick={() => setEditingBucket(index)}
+                        >
+                          <span className="onboarding-targeting__edit-emoji" aria-hidden="true">
+                            ✏️
+                          </span>
+                        </IconButton>
+                      </div>
+                      <ul
+                        className="onboarding-targeting__title-list"
+                        aria-label={`${bucket.name} titles`}
+                      >
+                        {bucket.titles.map((title) => (
+                          <li key={title} className="chip">
+                            <span className="chip__label">{title}</span>
+                          </li>
+                        ))}
+                      </ul>
+                      {bucket.notes ? (
+                        <p className="onboarding-targeting__lane-note">{bucket.notes}</p>
+                      ) : null}
+                      <div className="onboarding-targeting__summary-signals onboarding-targeting__signal-grid">
+                        <SummarySignalRow
+                          tone="good"
+                          symbol="+"
+                          label="Good fit"
+                          signals={bucket.fit_signals}
+                          emptyLabel="Add good fits"
+                          onRemove={(signal) => removeBucketSignal(index, "fit_signals", signal)}
+                        />
+                        <SummarySignalRow
+                          tone="bad"
+                          symbol="−"
+                          label="Bad fit"
+                          signals={bucket.down_signals}
+                          emptyLabel="Add bad fits"
+                          onRemove={(signal) => removeBucketSignal(index, "down_signals", signal)}
+                        />
+                      </div>
+                    </div>
+                  </article>
+                ))}
+                <div className="onboarding-targeting__lane-actions onboarding-targeting__lane-actions--bottom">
+                  <Button
+                    variant="secondary"
+                    className="onboarding-targeting__add-lane"
+                    onClick={addBucket}
+                  >
+                    <span className="onboarding-targeting__add-icon" aria-hidden="true">
+                      +
+                    </span>
+                    Add another lane
+                  </Button>
+                </div>
+              </section>
+            )}
+
+            {titleSuggestions.length ? (
+              <div className="chip-row">
+                {titleSuggestions.map((s) => (
+                  <SuggestionChip
+                    key={s}
+                    onAccept={() => {
+                      addTitleToFirstBucket(s);
+                      setTitleSuggestions((list) => list.filter((x) => x !== s));
+                    }}
+                    onDismiss={() => setTitleSuggestions((list) => list.filter((x) => x !== s))}
+                  >
+                    {s}
+                  </SuggestionChip>
+                ))}
+              </div>
             ) : null}
           </div>
-        ))}
-        <div style={{ marginTop: 10 }}>
-          <Button variant="secondary" onClick={addBucket}>
-            Add track
-          </Button>
-        </div>
+        </section>
       </div>
-      {aiEnabled ? (
-        <div>
-          <Button variant="secondary" onClick={handleSuggestTitles} disabled={suggestingTitles}>
-            {suggestingTitles ? "Asking Roland…" : "Ask Roland for title suggestions"}
-          </Button>
-          {titleSuggestions.length ? (
-            <div className="chip-row" style={{ marginTop: 8 }}>
-              {titleSuggestions.map((s) => (
-                <SuggestionChip
-                  key={s}
-                  onAccept={() => {
-                    addTitleToFirstBucket(s);
-                    setTitleSuggestions((list) => list.filter((x) => x !== s));
-                  }}
-                  onDismiss={() => setTitleSuggestions((list) => list.filter((x) => x !== s))}
-                >
-                  {s}
-                </SuggestionChip>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <Field label="Keep signals" htmlFor="targeting-keep" hint="Press Enter or , to add">
-        <ChipInput id="targeting-keep" values={keepSignals} onChange={setKeepSignals} />
-      </Field>
-      {aiEnabled ? (
-        <div>
-          <Button variant="secondary" onClick={handleSuggestKeywords} disabled={suggestingKeywords}>
-            {suggestingKeywords ? "Asking Roland…" : "Ask Roland for keyword suggestions"}
-          </Button>
-          {keywordSuggestions.length ? (
-            <div className="chip-row" style={{ marginTop: 8 }}>
-              {keywordSuggestions.map((s) => (
-                <SuggestionChip
-                  key={s}
-                  onAccept={() => {
-                    setKeepSignals((k) => (k.includes(s) ? k : [...k, s]));
-                    setKeywordSuggestions((list) => list.filter((x) => x !== s));
-                  }}
-                  onDismiss={() => setKeywordSuggestions((list) => list.filter((x) => x !== s))}
-                >
-                  {s}
-                </SuggestionChip>
-              ))}
-            </div>
-          ) : null}
-        </div>
-      ) : null}
-
-      <Field label="Cut signals" htmlFor="targeting-cut" hint="Press Enter or , to add">
-        <ChipInput id="targeting-cut" values={cutSignals} onChange={setCutSignals} />
-      </Field>
-
-      {previewTitle ? (
-        <div>
-          <p className="field__label" style={{ margin: "0 0 6px" }}>
-            Saved-search preview (based on "{previewTitle}")
-          </p>
-          <div className="board-preview">
-            {preview?.hiringCafe ? (
-              <a
-                className="board-preview__url"
-                href={preview.hiringCafe.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                hiring.cafe — {preview.hiringCafe.url}
-              </a>
-            ) : null}
-            {preview?.linkedin ? (
-              <a
-                className="board-preview__url"
-                href={preview.linkedin.url}
-                target="_blank"
-                rel="noreferrer"
-              >
-                LinkedIn — {preview.linkedin.url}
-              </a>
-            ) : null}
-          </div>
-          <p className="field__hint">
-            You can add the LinkedIn saved search to your sources on the Finish step (it needs the
-            authenticated-search consent gate either way).
-          </p>
-        </div>
-      ) : null}
-
-      <div className="wizard-actions">
-        <Button variant="secondary" onClick={goBack}>
-          Back
-        </Button>
-        <Button onClick={handleSaveAndNext} disabled={saving}>
-          {saving ? "Saving…" : "Save & continue"}
-        </Button>
-      </div>
-    </Card>
+    </OnboardingShell>
   );
 }

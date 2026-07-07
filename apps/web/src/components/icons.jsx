@@ -26,6 +26,22 @@ function Svg({ children, ...rest }) {
   );
 }
 
+function FilledSvg({ children, ...rest }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="1em"
+      height="1em"
+      fill="currentColor"
+      aria-hidden="true"
+      focusable="false"
+      {...rest}
+    >
+      {children}
+    </svg>
+  );
+}
+
 export function HomeIcon(props) {
   return (
     <Svg {...props}>
@@ -37,9 +53,9 @@ export function HomeIcon(props) {
 
 export function SettingsIcon(props) {
   return (
-    <Svg {...props}>
-      <circle cx="12" cy="12" r="3.2" />
-      <path d="M12 3.5v2M12 18.5v2M4.8 6.3l1.4 1.4M17.8 16.3l1.4 1.4M3.5 12h2M18.5 12h2M4.8 17.7l1.4-1.4M17.8 7.7l1.4-1.4" />
+    <Svg data-icon="settings" {...props}>
+      <circle cx="12" cy="12" r="3" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 1.56V21a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1-1.55 1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-1.56-1H3a2 2 0 1 1 0-4h.08a1.7 1.7 0 0 0 1.55-1 1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.56V3a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1 1.55 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.7 1.7 0 0 0 19.4 9c.38.62.98 1 1.56 1H21a2 2 0 1 1 0 4h-.08a1.7 1.7 0 0 0-1.52 1Z" />
     </Svg>
   );
 }
@@ -84,6 +100,33 @@ export function NetworkIcon(props) {
   );
 }
 
+export function LinkedInIcon(props) {
+  return (
+    <FilledSvg {...props}>
+      <path d="M6.7 8.6H3.8v10.7h2.9V8.6ZM5.2 7.1a1.7 1.7 0 1 0 0-3.4 1.7 1.7 0 0 0 0 3.4ZM9 8.6h2.8v1.5h.04c.4-.8 1.4-1.8 2.9-1.8 3.1 0 3.7 2 3.7 4.7v6.3h-2.9v-5.6c0-1.4 0-3.1-1.9-3.1s-2.2 1.5-2.2 3v5.7H9V8.6Z" />
+    </FilledSvg>
+  );
+}
+
+export function GitHubIcon(props) {
+  return (
+    <FilledSvg {...props}>
+      <path d="M12 2.4A9.7 9.7 0 0 0 8.9 21c.48.09.66-.2.66-.46v-1.7c-2.69.58-3.26-1.14-3.26-1.14-.44-1.12-1.07-1.42-1.07-1.42-.88-.6.07-.59.07-.59.97.07 1.48 1 1.48 1 .86 1.48 2.27 1.05 2.82.8.09-.63.34-1.05.61-1.3-2.14-.24-4.4-1.07-4.4-4.78 0-1.05.38-1.92 1-2.6-.1-.24-.43-1.23.1-2.56 0 0 .81-.26 2.67.99a9.1 9.1 0 0 1 4.86 0c1.85-1.25 2.66-.99 2.66-.99.53 1.33.2 2.32.1 2.56.62.68 1 1.55 1 2.6 0 3.72-2.26 4.54-4.41 4.78.35.3.66.89.66 1.8v2.55c0 .26.18.55.67.46A9.7 9.7 0 0 0 12 2.4Z" />
+    </FilledSvg>
+  );
+}
+
+export function GlobeIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M3.8 12h16.4" />
+      <path d="M12 3.5c2.2 2.3 3.3 5.1 3.3 8.5s-1.1 6.2-3.3 8.5" />
+      <path d="M12 3.5C9.8 5.8 8.7 8.6 8.7 12s1.1 6.2 3.3 8.5" />
+    </Svg>
+  );
+}
+
 export function CalendarIcon(props) {
   return (
     <Svg {...props}>
@@ -120,6 +163,14 @@ export function MoonIcon(props) {
   );
 }
 
+export function PulseIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M3.5 12h3l2-5.5 4.5 12 2.4-6.5h5.1" />
+    </Svg>
+  );
+}
+
 // M8 onboarding wizard additions — same inline-stroke-SVG convention as
 // every icon above (never a ligature-font glyph).
 
@@ -136,6 +187,58 @@ export function UploadIcon(props) {
     <Svg {...props}>
       <path d="M12 15.5V4.5M7.5 9 12 4.5 16.5 9" />
       <path d="M4.5 15.5v3a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-3" />
+    </Svg>
+  );
+}
+
+export function PencilIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M4.5 19.5 8 18.7 18.7 8a2.1 2.1 0 0 0-3-3L5 15.7Z" />
+      <path d="m14.5 6.2 3.3 3.3" />
+    </Svg>
+  );
+}
+
+export function MagicWandIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="m5 19 9.5-9.5" />
+      <path d="m12.8 7.8 3.4 3.4" />
+      <path d="M18.5 4.5v2.2" />
+      <path d="M17.4 5.6h2.2" />
+      <path d="M8.2 4.2v1.8" />
+      <path d="M7.3 5.1h1.8" />
+      <path d="M19.4 14.2v1.8" />
+      <path d="M18.5 15.1h1.8" />
+    </Svg>
+  );
+}
+
+export function InfoIcon(props) {
+  return (
+    <Svg {...props}>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 10.8v5.2" />
+      <path d="M12 8h.01" />
+    </Svg>
+  );
+}
+
+export function ArrowLeftIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M19 12H5" />
+      <path d="m11 6-6 6 6 6" />
+    </Svg>
+  );
+}
+
+export function ArrowRightIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M5 12h14" />
+      <path d="m13 6 6 6-6 6" />
     </Svg>
   );
 }

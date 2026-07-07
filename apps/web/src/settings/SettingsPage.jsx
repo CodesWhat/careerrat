@@ -10,10 +10,17 @@ import {
   ApiError,
   getAiSettings,
   getOnboardState,
+  getUsageSummary,
   saveAiKey,
   saveCandidateFile,
 } from "../lib/api.js";
 import { mapErrors } from "./error-map.js";
+import {
+  formatTokenCount,
+  formatUsd,
+  topUsageFeatures,
+  usageFeatureLabel,
+} from "./usage-summary.js";
 
 // Schema-driven enums — read at build time from the shipped JSON Schemas
 // (config/*.schema.json, already in package.json#files) rather than
@@ -38,6 +45,16 @@ const AI_ROUTE_LABEL = {
   byok: "Connected (BYOK)",
   proxy: "Connected (managed proxy)",
   none: "Not connected",
+};
+const EMPTY_USAGE_SUMMARY = {
+  totals: {
+    requests: 0,
+    tokens_in: 0,
+    tokens_out: 0,
+    total_tokens: 0,
+    cost_usd: 0,
+  },
+  byFeature: [],
 };
 
 // One fieldMap per candidate file — schema path (dot notation, see
@@ -87,6 +104,7 @@ export function SettingsPage() {
 
   const [aiStatus, setAiStatus] = useState({ route: "none", keyPresent: false });
   const [aiKeyInput, setAiKeyInput] = useState("");
+  const [usageSummary, setUsageSummary] = useState(EMPTY_USAGE_SUMMARY);
 
   const [modesForm, setModesForm] = useState({
     usage_mode: "standard",
@@ -125,8 +143,13 @@ export function SettingsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [state, ai] = await Promise.all([getOnboardState(), getAiSettings()]);
+      const [state, ai, usage] = await Promise.all([
+        getOnboardState(),
+        getAiSettings(),
+        getUsageSummary(),
+      ]);
       setAiStatus(ai);
+      setUsageSummary(usage?.summary ?? EMPTY_USAGE_SUMMARY);
 
       const modes = state.data?.modes ?? {};
       setModesForm({
@@ -233,6 +256,11 @@ export function SettingsPage() {
   const aiBadgeLabel = useMemo(() => AI_ROUTE_LABEL[aiStatus.route] ?? "Unknown", [aiStatus.route]);
   const aiBadgeTone =
     aiStatus.keyPresent || aiStatus.route !== "none" ? "badge--ok" : "badge--muted";
+  const topFeatures = useMemo(
+    () => topUsageFeatures(usageSummary.byFeature ?? [], 5),
+    [usageSummary.byFeature]
+  );
+  const usageTotals = usageSummary.totals ?? EMPTY_USAGE_SUMMARY.totals;
 
   if (loading) {
     return (
@@ -281,6 +309,52 @@ export function SettingsPage() {
             {saving.ai ? "Saving…" : "Save key"}
           </Button>
         </div>
+      </Card>
+
+      {/* AI spend ------------------------------------------------- */}
+      <Card title="AI spend">
+        <p className="field__hint" style={{ margin: 0 }}>
+          Token and cost telemetry from the local usage ledger. Prompts, resumes, and job
+          descriptions are not stored in these rows.
+        </p>
+        <div className="settings-usage-grid">
+          <div className="settings-usage-stat">
+            <span>Estimated cost</span>
+            <strong>{formatUsd(usageTotals.cost_usd)}</strong>
+          </div>
+          <div className="settings-usage-stat">
+            <span>AI calls</span>
+            <strong>{formatTokenCount(usageTotals.requests)}</strong>
+          </div>
+          <div className="settings-usage-stat">
+            <span>Total tokens</span>
+            <strong>{formatTokenCount(usageTotals.total_tokens)}</strong>
+          </div>
+        </div>
+        {topFeatures.length ? (
+          <ul className="settings-usage-list" aria-label="AI spend by feature">
+            {topFeatures.map((feature) => {
+              const tokens =
+                Number(feature.total_tokens) ||
+                (Number(feature.tokens_in) || 0) + (Number(feature.tokens_out) || 0);
+              return (
+                <li className="settings-usage-row" key={feature.feature}>
+                  <div>
+                    <strong>{usageFeatureLabel(feature.feature)}</strong>
+                    <span className="settings-usage-row__meta">
+                      {formatTokenCount(feature.requests)} calls · {formatTokenCount(tokens)} tokens
+                    </span>
+                  </div>
+                  <span className="settings-usage-row__cost">{formatUsd(feature.cost_usd)}</span>
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="field__hint" style={{ margin: 0 }}>
+            No metered AI calls yet.
+          </p>
+        )}
       </Card>
 
       {/* Modes ----------------------------------------------------------- */}

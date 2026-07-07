@@ -37,7 +37,7 @@ import { join } from "node:path";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, resolveRuntimeTools } from "./runtime-tools.mjs";
-import { appendUsageEvent, computeCost } from "./usage-log.mjs";
+import { appendUsageEvent, computeCost, deriveUsageFeature } from "./usage-log.mjs";
 
 // ---------------------------------------------------------------------------
 // Skill allowlist
@@ -129,7 +129,25 @@ const MODEL_SELECTION_ENV_VARS = [
 // that case (see runSkillStream). `repoRoot` locates config/ai.json (the
 // no-code model-swap file) — optional; ai-config.mjs falls back to its own
 // repo-root default when omitted (unit tests exercise it that way).
-export function buildChildEnv({ route, skill, baseEnv = process.env, repoRoot } = {}) {
+function customHeaderLines({ feature, skill, action, operation } = {}) {
+  const resolvedFeature = feature || deriveUsageFeature({ skill, action, operation });
+  return [
+    resolvedFeature ? `x-rolester-feature: ${resolvedFeature}` : null,
+    skill ? `x-rolester-skill: ${skill}` : null,
+    action ? `x-rolester-action: ${action}` : null,
+    operation ? `x-rolester-operation: ${operation}` : null,
+  ].filter(Boolean);
+}
+
+export function buildChildEnv({
+  route,
+  feature,
+  skill,
+  action,
+  operation,
+  baseEnv = process.env,
+  repoRoot,
+} = {}) {
   if (!route || route.type === "none") return null;
 
   const shared = { ...baseEnv };
@@ -190,7 +208,7 @@ export function buildChildEnv({ route, skill, baseEnv = process.env, repoRoot } 
     ...electronGuard,
     ANTHROPIC_API_KEY: route.token,
     ANTHROPIC_BASE_URL: route.baseUrl,
-    ANTHROPIC_CUSTOM_HEADERS: `x-rolester-skill: ${skill}`,
+    ANTHROPIC_CUSTOM_HEADERS: customHeaderLines({ feature, skill, action, operation }).join("\n"),
   };
 }
 
@@ -375,6 +393,9 @@ export function buildPrompt({ skill, input, mode = "oneshot" }) {
 // query when triggered (client-disconnect passthrough).
 export async function runSkillStream({
   skill,
+  feature,
+  action = "skill-run",
+  operation,
   input,
   repoRoot,
   env = process.env,
@@ -422,7 +443,15 @@ export async function runSkillStream({
   // 501, not a crash mid-stream.
   const { query } = await loadSdk();
 
-  const childEnv = buildChildEnv({ route, skill, baseEnv: env, repoRoot });
+  const childEnv = buildChildEnv({
+    route,
+    feature,
+    skill,
+    action,
+    operation,
+    baseEnv: env,
+    repoRoot,
+  });
 
   const controller = new AbortController();
   let externallyAborted = false;
@@ -469,7 +498,9 @@ export async function runSkillStream({
 
       if (msg.type === "result") {
         resultData = events.find((e) => e.type === "result")?.data ?? null;
-        if (route.type === "byok") writeByokUsage({ msg, skill, repoRoot, env });
+        if (route.type === "byok") {
+          writeByokUsage({ msg, feature, skill, action, operation, repoRoot, env });
+        }
         break;
       }
     }
@@ -496,13 +527,23 @@ export async function runSkillStream({
 // appendUsageEvent call on every /v1/messages it forwards) — so only the BYOK
 // path needs a write here, exactly mirroring call-ai.mjs's own "nothing else
 // is watching on BYOK" comment. One row per model actually used.
-export function writeByokUsage({ msg, skill, repoRoot, env }) {
+export function writeByokUsage({
+  msg,
+  feature,
+  skill,
+  action = "skill-run",
+  operation,
+  repoRoot,
+  env,
+}) {
   for (const [model, mu] of Object.entries(msg.modelUsage || {})) {
     appendUsageEvent(
       {
         source: "byok",
+        feature,
         skill,
-        action: "skill-run",
+        action,
+        operation,
         model,
         tokens_in: mu?.inputTokens,
         tokens_out: mu?.outputTokens,

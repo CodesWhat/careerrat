@@ -18,23 +18,24 @@
 //                                      the wizard falls back to manual entry
 //                                      + initials).
 //   GET /api/logos/img?domain=<host>   Image CDN proxy. Serves
+//   GET /api/logos/img?name=<company>
 //                                      workspace/logos/<sanitized>.webp from
 //                                      disk if already cached; otherwise
 //                                      fetches img.logo.dev, caches, serves.
-//                                      404 on a miss OR no publishable token
-//                                      (the client's existing <img onerror>
-//                                      → initials-chip fallback fires either
-//                                      way, unchanged).
+//                                      404 on a miss (the client's existing
+//                                      <img onerror> → initials-chip fallback
+//                                      fires either way, unchanged).
 //
 // TWO DIFFERENT LOGO.DEV CREDENTIALS — verified live against logo.dev's own
 // docs during implementation (the M8 design doc had flagged this auth shape
 // as unverified/assumed; it turned out to differ from the assumption, so
 // this is a real, load-bearing correction, not a stylistic choice):
 //   - img.logo.dev (the image CDN) takes a PUBLISHABLE key as a `?token=`
-//     query param — this is the exact field already read today at
-//     `candidate/automation.yml#integrations.logo_dev_token`
-//     (settings-snapshot.mjs:91, dashboard-data.js's buildLogoUrl) and is
-//     what /api/logos/img below reuses verbatim, per the frozen contract.
+//     query param. /api/logos/img prefers an explicit
+//     `candidate/automation.yml#integrations.logo_dev_token` or
+//     ROLESTER_LOGO_DEV_TOKEN override, then falls back to Rolester's built-in
+//     publishable key so image lookup works out of the box and still caches
+//     locally.
 //   - api.logo.dev/search (Brand Search) instead requires a SEPARATE SECRET
 //     key via an `Authorization: Bearer <secret>` header — logo.dev's own
 //     docs are explicit that publishable keys "only work with img.logo.dev"
@@ -66,6 +67,7 @@ const SEARCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // ~7 days, per the frozen 
 const SEARCH_API_ORIGIN = "https://api.logo.dev/search";
 const IMAGE_CDN_ORIGIN = "https://img.logo.dev";
 const IMAGE_CACHE_EXT = "webp";
+export const DEFAULT_LOGO_DEV_PUBLIC_KEY = "pk_SgppRPhNTWqQdH-WZX5BWA";
 
 function queryParam(req, name) {
   const url = new URL(req.url, "http://127.0.0.1");
@@ -89,7 +91,10 @@ function readAutomationDoc(pathCtx) {
 export function resolveLogoTokens(pathCtx, env = process.env) {
   const automation = readAutomationDoc(pathCtx);
   const publishableToken =
-    automation?.integrations?.logo_dev_token || automation?.logo_dev_token || "";
+    String(env.ROLESTER_LOGO_DEV_TOKEN || "").trim() ||
+    automation?.integrations?.logo_dev_token ||
+    automation?.logo_dev_token ||
+    DEFAULT_LOGO_DEV_PUBLIC_KEY;
   const secretKey =
     String(env.ROLESTER_LOGO_DEV_SECRET_KEY || "").trim() ||
     automation?.integrations?.logo_dev_secret_key ||
@@ -116,6 +121,48 @@ export function sanitizeDomainForCache(domain) {
   const cleaned = trimmed.replace(/[^a-z0-9.-]/g, "");
   if (!cleaned || cleaned.startsWith(".") || cleaned.startsWith("-")) return null;
   return cleaned;
+}
+
+export function sanitizeNameForCache(name) {
+  const trimmed = String(name || "")
+    .trim()
+    .toLowerCase();
+  if (!trimmed) return null;
+  if (trimmed.includes("/") || trimmed.includes("\\") || trimmed.includes("..")) return null;
+  const cleaned = trimmed
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return cleaned || null;
+}
+
+function imageLookupFromRequest(req) {
+  const theme = queryParam(req, "theme") === "dark" ? "dark" : "";
+  const rawDomain = queryParam(req, "domain");
+  if (rawDomain?.trim()) {
+    const sanitized = sanitizeDomainForCache(rawDomain);
+    if (!sanitized) return { ok: false, status: 404, error: "no logo for this domain" };
+    return {
+      ok: true,
+      cacheName: sanitized,
+      upstreamPath: encodeURIComponent(sanitized),
+      theme,
+    };
+  }
+
+  const rawName = queryParam(req, "name");
+  if (rawName?.trim()) {
+    const sanitized = sanitizeNameForCache(rawName);
+    if (!sanitized) return { ok: false, status: 404, error: "no logo for this company" };
+    return {
+      ok: true,
+      cacheName: `name-${sanitized}`,
+      upstreamPath: `name/${encodeURIComponent(rawName.trim())}`,
+      theme,
+    };
+  }
+
+  return { ok: false, status: 400, error: "?domain= or ?name= is required" };
 }
 
 // ---------------------------------------------------------------------------
@@ -239,21 +286,17 @@ export function mountLogoRoutes({ addRoute, repoRoot, env = process.env, fetchIm
 
   // -------------------------------------------------------------------------
   // GET /api/logos/img?domain=<host>
+  // GET /api/logos/img?name=<company>
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/logos/img", async (req, res) => {
-    const rawDomain = queryParam(req, "domain");
-    if (!rawDomain?.trim()) {
-      sendJson(res, 400, { error: "?domain= is required" });
+    const lookup = imageLookupFromRequest(req);
+    if (!lookup.ok) {
+      sendJson(res, lookup.status, { error: lookup.error });
       return;
     }
 
-    const sanitized = sanitizeDomainForCache(rawDomain);
-    if (!sanitized) {
-      sendJson(res, 404, { error: "no logo for this domain" });
-      return;
-    }
-
-    const cachePath = userPath(pathCtx, `workspace/logos/${sanitized}.${IMAGE_CACHE_EXT}`);
+    const themedCacheName = lookup.theme ? `${lookup.cacheName}-${lookup.theme}` : lookup.cacheName;
+    const cachePath = userPath(pathCtx, `workspace/logos/${themedCacheName}.${IMAGE_CACHE_EXT}`);
     if (existsSync(cachePath)) {
       let bytes;
       try {
@@ -271,14 +314,10 @@ export function mountLogoRoutes({ addRoute, repoRoot, env = process.env, fetchIm
     }
 
     const { publishableToken } = resolveLogoTokens(pathCtx, env);
-    if (!publishableToken) {
-      sendJson(res, 404, { error: "no logo.dev token configured" });
-      return;
-    }
-
     const upstreamUrl =
-      `${IMAGE_CDN_ORIGIN}/${encodeURIComponent(sanitized)}` +
-      `?token=${encodeURIComponent(publishableToken)}&format=${IMAGE_CACHE_EXT}&fallback=404`;
+      `${IMAGE_CDN_ORIGIN}/${lookup.upstreamPath}` +
+      `?token=${encodeURIComponent(publishableToken)}&format=${IMAGE_CACHE_EXT}&fallback=404` +
+      (lookup.theme ? `&theme=${encodeURIComponent(lookup.theme)}` : "");
 
     let upstream;
     try {

@@ -11,6 +11,7 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
+import * as UsageLog from "../src/core/ai/usage-log.mjs";
 import {
   appendUsageEvent,
   canonicalizeUsageEvent,
@@ -165,6 +166,121 @@ test("canonicalizeUsageEvent: carries the upstream host, defaults to null when a
     { now: NOW }
   );
   assert.equal(withoutUpstream.upstream, null);
+});
+
+test("canonicalizeUsageEvent: derives feature and keeps operation for product cost attribution", () => {
+  const event = canonicalizeUsageEvent(
+    {
+      source: "byok",
+      skill: "resume-extract",
+      action: "resume-ai",
+      operation: "onboard.resume-ai",
+      model: "claude-sonnet-5",
+      tokens_in: 100,
+      tokens_out: 50,
+    },
+    { now: NOW }
+  );
+
+  assert.equal(event.feature, "onboarding.resume-ingestion");
+  assert.equal(event.operation, "onboard.resume-ai");
+});
+
+test("canonicalizeUsageEvent: explicit feature label wins over inferred labels", () => {
+  const event = canonicalizeUsageEvent(
+    {
+      feature: "pricing-lab.custom-experiment",
+      skill: "discover-companies",
+      action: "seed-generate",
+      operation: "company-seeds",
+      model: "claude-sonnet-5",
+    },
+    { now: NOW }
+  );
+
+  assert.equal(event.feature, "pricing-lab.custom-experiment");
+});
+
+test("summarizeUsageEvents: rolls spend up by product feature and preserves detail rows", () => {
+  const events = [
+    canonicalizeUsageEvent(
+      {
+        source: "byok",
+        skill: "resume-extract",
+        action: "resume-ai",
+        operation: "onboard.resume-ai",
+        model: "claude-sonnet-5",
+        tokens_in: 1000,
+        tokens_out: 200,
+      },
+      { now: NOW }
+    ),
+    canonicalizeUsageEvent(
+      {
+        source: "proxy",
+        skill: "discover-companies",
+        action: "seed-generate",
+        operation: "company-seeds",
+        model: "claude-sonnet-5",
+        tokens_in: 2000,
+        tokens_out: 300,
+      },
+      { now: NOW }
+    ),
+    canonicalizeUsageEvent(
+      {
+        source: "proxy",
+        feature: "company-discovery",
+        skill: "discover-companies",
+        action: "scanner-cascade",
+        operation: "public-scanner",
+        model: "claude-sonnet-5",
+        tokens_in: 500,
+        tokens_out: 100,
+      },
+      { now: NOW }
+    ),
+    canonicalizeUsageEvent(
+      {
+        source: "byok",
+        skill: "mystery",
+        action: "experiment",
+        model: "unknown-model",
+        tokens_in: 300,
+        tokens_out: 30,
+      },
+      { now: NOW }
+    ),
+  ];
+
+  const summary = UsageLog.summarizeUsageEvents(events);
+
+  assert.equal(summary.totals.requests, 4);
+  assert.equal(summary.totals.tokens_in, 3800);
+  assert.equal(summary.totals.tokens_out, 630);
+  assert.equal(summary.totals.total_tokens, 4430);
+  assert.equal(summary.totals.unpriced_requests, 1);
+  assert.equal(summary.byFeature[0].feature, "company-discovery");
+  assert.equal(summary.byFeature[0].requests, 2);
+  assert.equal(summary.byFeature[0].tokens_in, 2500);
+  assert.equal(summary.byFeature[0].tokens_out, 400);
+  assert.equal(summary.byFeature[0].total_tokens, 2900);
+  assert.equal(summary.byFeature[1].feature, "onboarding.resume-ingestion");
+  assert.equal(summary.byFeature[2].feature, "skill.mystery");
+  assert.deepEqual(summary.byFeature[0].breakdown[0], {
+    skill: "discover-companies",
+    action: "seed-generate",
+    operation: "company-seeds",
+    requests: 1,
+    tokens_in: 2000,
+    tokens_out: 300,
+    total_tokens: 2300,
+    cache_read_tokens: 0,
+    cache_creation_tokens: 0,
+    web_searches: 0,
+    cost_usd: computeCost("claude-sonnet-5", { tokens_in: 2000, tokens_out: 300 }).cost_usd,
+    unpriced_requests: 0,
+  });
 });
 
 // ---------------------------------------------------------------------------

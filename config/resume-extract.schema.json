@@ -3,9 +3,169 @@
   "$id": "https://rolester.local/schemas/resume-extract.schema.json",
   "title": "Rolester resume-extract skill output",
   "type": "object",
-  "required": ["candidate", "claims", "sections", "targeting_suggestions"],
+  "required": [
+    "full_text",
+    "resume_document",
+    "candidate",
+    "claims",
+    "sections",
+    "targeting_suggestions"
+  ],
   "additionalProperties": false,
   "properties": {
+    "full_text": {
+      "type": "string"
+    },
+    "resume_document": {
+      "type": "object",
+      "required": [
+        "contact",
+        "headline",
+        "summary",
+        "experience",
+        "education",
+        "skills",
+        "projects",
+        "certifications",
+        "other_sections"
+      ],
+      "additionalProperties": false,
+      "properties": {
+        "contact": {
+          "type": "object",
+          "required": [
+            "full_name",
+            "email",
+            "phone",
+            "location",
+            "linkedin",
+            "github",
+            "portfolio"
+          ],
+          "additionalProperties": false,
+          "properties": {
+            "full_name": { "type": ["string", "null"] },
+            "email": { "type": ["string", "null"] },
+            "phone": { "type": ["string", "null"] },
+            "location": { "type": ["string", "null"] },
+            "linkedin": { "type": ["string", "null"] },
+            "github": { "type": ["string", "null"] },
+            "portfolio": { "type": ["string", "null"] }
+          }
+        },
+        "headline": { "type": ["string", "null"] },
+        "summary": { "type": ["string", "null"] },
+        "experience": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "company",
+              "title",
+              "location",
+              "start_date",
+              "end_date",
+              "bullets",
+              "raw_text"
+            ],
+            "additionalProperties": false,
+            "properties": {
+              "company": { "type": ["string", "null"] },
+              "title": { "type": ["string", "null"] },
+              "location": { "type": ["string", "null"] },
+              "start_date": { "type": ["string", "null"] },
+              "end_date": { "type": ["string", "null"] },
+              "bullets": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "raw_text": { "type": "string" }
+            }
+          }
+        },
+        "education": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["institution", "degree", "location", "dates", "raw_text"],
+            "additionalProperties": false,
+            "properties": {
+              "institution": { "type": ["string", "null"] },
+              "degree": { "type": ["string", "null"] },
+              "location": { "type": ["string", "null"] },
+              "dates": { "type": ["string", "null"] },
+              "raw_text": { "type": "string" }
+            }
+          }
+        },
+        "skills": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["category", "items"],
+            "additionalProperties": false,
+            "properties": {
+              "category": { "type": ["string", "null"] },
+              "items": {
+                "type": "array",
+                "items": { "type": "string" }
+              }
+            }
+          }
+        },
+        "projects": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "description", "bullets", "technologies", "raw_text"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": ["string", "null"] },
+              "description": { "type": ["string", "null"] },
+              "bullets": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "technologies": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "raw_text": { "type": "string" }
+            }
+          }
+        },
+        "certifications": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["name", "issuer", "date", "raw_text"],
+            "additionalProperties": false,
+            "properties": {
+              "name": { "type": ["string", "null"] },
+              "issuer": { "type": ["string", "null"] },
+              "date": { "type": ["string", "null"] },
+              "raw_text": { "type": "string" }
+            }
+          }
+        },
+        "other_sections": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["heading", "items", "raw_text"],
+            "additionalProperties": false,
+            "properties": {
+              "heading": { "type": ["string", "null"] },
+              "items": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "raw_text": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
     "candidate": {
       "type": "object",
       "additionalProperties": false,
@@ -67,7 +227,17 @@
                 "maxItems": 8,
                 "items": { "type": "string" }
               },
-              "notes": { "type": ["string", "null"] }
+              "notes": { "type": ["string", "null"] },
+              "fit_signals": {
+                "type": "array",
+                "maxItems": 12,
+                "items": { "type": "string" }
+              },
+              "down_signals": {
+                "type": "array",
+                "maxItems": 12,
+                "items": { "type": "string" }
+              }
             }
           }
         },

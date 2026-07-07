@@ -68,24 +68,33 @@ export function companyMonogram(name) {
   return { initials, slot: h % AVATAR_SLOTS };
 }
 
-/** Build a logo.dev image URL for a company domain. */
-function logoUrl(domain, token, size) {
-  const d = encodeURIComponent(String(domain).trim().toLowerCase());
-  return `https://img.logo.dev/${d}?token=${encodeURIComponent(token)}&size=${size || 64}&format=png&retina=true`;
+/** Build a local cached logo route for a company domain/name. */
+function logoUrl(domain, name) {
+  const cleanedDomain = String(domain || "")
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, "")
+    .replace(/\/.*$/, "")
+    .replace(/^www\./, "");
+  const company = String(name || "").trim();
+  const params = [];
+  if (cleanedDomain) params.push(`domain=${encodeURIComponent(cleanedDomain)}`);
+  if (company) params.push(`name=${encodeURIComponent(company)}`);
+  return params.length ? `/api/logos/img?${params.join("&")}` : "";
 }
 
 /**
  * Render the avatar span for a company. Defaults to a deterministic, offline
- * monogram. When a logo.dev token AND a company domain are both provided, a real
- * logo image is layered on top, with the monogram initials underneath as the
- * automatic fallback (the <img> removes itself on error → initials show through).
+ * monogram. A real logo image is layered on top via the local cache route, with
+ * the monogram initials underneath as the automatic fallback (the <img> removes
+ * itself on error → initials show through).
  *
  * @param {string} name
  * @param {string} [domain]  Company domain, e.g. "stripe.com"
- * @param {{ token: string, size?: number }|null} [logo]  logo.dev config (opt-in)
+ * @param {unknown} [_logo]  Legacy logo.dev option, ignored now that the route caches.
  * @returns {string}
  */
-function avatarHtml(name, domain, logo, logoSrc) {
+function avatarHtml(name, domain, _logo, logoSrc) {
   const { initials, slot } = companyMonogram(name);
   if (!initials) return "";
   const open = `<span class="avatar" style="--avatar: var(--c-${slot})">`;
@@ -100,8 +109,8 @@ function avatarHtml(name, domain, logo, logoSrc) {
   if (logoSrc?.src) {
     return `${chipOpen}<img class="logo-img" src="${esc(logoSrc.src)}" alt="" loading="lazy" onerror="${onErr}">${esc(initials)}</span>`;
   }
-  if (logo?.token && domain) {
-    const url = esc(logoUrl(domain, logo.token, logo.size));
+  const url = esc(logoUrl(domain, name));
+  if (url) {
     return `${chipOpen}<img class="logo-img" src="${url}" alt="" loading="lazy" onerror="${onErr}">${esc(initials)}</span>`;
   }
   return `${open}${esc(initials)}</span>`;
@@ -1199,14 +1208,14 @@ function renderTodayBar(queue) {
  */
 export function renderTrackerDashboard(
   trackerData,
-  { now, title, logoToken, logos, identity, eyebrow, heading, followUpRules } = {}
+  { now, title, logoToken: _logoToken, logos, identity, eyebrow, heading, followUpRules } = {}
 ) {
   // Strip demo rows once real pipeline data exists
   const cleanedData = stripDemo(trackerData || {});
 
-  // Opt-in company logos via logo.dev (publishable token). Off by default →
-  // the dashboard stays fully offline/self-contained with monogram avatars.
-  const logo = logoToken ? { token: logoToken, size: 64 } : null;
+  // Legacy call sites may still pass logoToken, but avatars now go through the
+  // local /api/logos/img cache route with its built-in publishable key.
+  const logo = null;
 
   // Explicit bundled logos keyed by lowercased company name (e.g. demo corps).
   const logoFor = (co) => logos?.[String(co == null ? "" : co).toLowerCase()] || null;

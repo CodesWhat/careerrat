@@ -8,6 +8,21 @@ export function resolveDesktopRuntimePaths({
   userDataPath,
   resourcesPath,
 } = {}) {
+  const isBrandedDevLaunch =
+    isPackaged && appDir && isNodeModulesElectronResourcesPath(resourcesPath);
+
+  if (!isPackaged || isBrandedDevLaunch) {
+    if (!appDir) {
+      throw new TypeError("resolveDesktopRuntimePaths: appDir is required in dev mode");
+    }
+
+    return {
+      isPackaged: false,
+      rolesterHome: null,
+      repoRoot: join(appDir, "../.."),
+    };
+  }
+
   if (isPackaged) {
     if (!userDataPath) {
       throw new TypeError("resolveDesktopRuntimePaths: userDataPath is required in packaged mode");
@@ -22,16 +37,12 @@ export function resolveDesktopRuntimePaths({
       repoRoot: join(resourcesPath, "rolester"),
     };
   }
+}
 
-  if (!appDir) {
-    throw new TypeError("resolveDesktopRuntimePaths: appDir is required in dev mode");
-  }
-
-  return {
-    isPackaged: false,
-    rolesterHome: null,
-    repoRoot: join(appDir, "../.."),
-  };
+function isNodeModulesElectronResourcesPath(resourcesPath) {
+  return String(resourcesPath || "")
+    .replaceAll("\\", "/")
+    .includes("/node_modules/electron/dist/Electron.app/Contents/Resources");
 }
 
 export function isAllowedExternalUrl(target, { allowedProtocols = SAFE_EXTERNAL_PROTOCOLS } = {}) {

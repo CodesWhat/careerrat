@@ -762,6 +762,8 @@ test("candidate setup patches profile, search tracks, companies, and evidence in
           priority: "primary",
           titles: ["Applied AI Engineer", "Forward Deployed Engineer"],
           notes: "Best overlap.",
+          fit_signals: ["agentic workflows"],
+          down_signals: ["pure ML research"],
         },
         {
           name: "Platform",
@@ -788,6 +790,8 @@ test("candidate setup patches profile, search tracks, companies, and evidence in
   assert.equal(config.profile.compensation.minimum_base, 181234);
   assert.equal(config.targeting.role_buckets.length, 2);
   assert.equal(config.targeting.role_buckets[0].titles[1], "Forward Deployed Engineer");
+  assert.deepEqual(config.targeting.role_buckets[0].fit_signals, ["agentic workflows"]);
+  assert.deepEqual(config.targeting.role_buckets[0].down_signals, ["pure ML research"]);
   assert.deepEqual(config.targeting.tracked_companies, ["OpenAI", "Anthropic"]);
   assert.deepEqual(config.targeting.excluded_companies, ["Evil Corp"]);
   assert.equal(config.evidence.claims.length, 2);

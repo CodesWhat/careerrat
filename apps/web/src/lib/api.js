@@ -41,14 +41,43 @@ export function getOnboardState() {
   return apiFetch("/api/onboard/state");
 }
 
+export function getOnboardingDraft() {
+  return apiFetch("/api/onboard/draft");
+}
+
+export function saveOnboardingDraft(draft) {
+  return apiFetch("/api/onboard/draft", {
+    method: "POST",
+    body: JSON.stringify(draft || {}),
+  });
+}
+
 export function getAiSettings() {
   return apiFetch("/api/settings/ai");
+}
+
+export function getUsageSummary() {
+  return apiFetch("/api/settings/usage");
 }
 
 export function saveAiKey(apiKey) {
   return apiFetch("/api/settings/ai-key", {
     method: "POST",
     body: JSON.stringify({ apiKey }),
+  });
+}
+
+export function validateAndSaveAiKey(apiKey, { provider = "anthropic" } = {}) {
+  return apiFetch("/api/settings/ai-key/validate", {
+    method: "POST",
+    body: JSON.stringify({ apiKey, provider }),
+  });
+}
+
+export function checkAiKey({ provider = "anthropic" } = {}) {
+  return apiFetch("/api/settings/ai-key/check", {
+    method: "POST",
+    body: JSON.stringify({ provider }),
   });
 }
 
@@ -239,8 +268,14 @@ export async function searchLogos(query) {
 // directly as an <img src>, so the caller gets a URL string to hand to the
 // DOM (which does its own onerror-based fallback to an initials chip on a
 // 404/miss), not a fetch()+JSON round trip.
-export function logoImageUrl(domain) {
-  return `/api/logos/img?domain=${encodeURIComponent(domain)}`;
+export function logoImageUrl(input) {
+  const source = input && typeof input === "object" ? input : { domain: input };
+  const parts = [];
+  const domain = String(source.domain || "").trim();
+  const name = String(source.name || "").trim();
+  if (domain) parts.push(`domain=${encodeURIComponent(domain)}`);
+  if (name) parts.push(`name=${encodeURIComponent(name)}`);
+  return `/api/logos/img?${parts.join("&")}`;
 }
 
 // POST /api/boards/preview — deterministic, no persistence; both builders

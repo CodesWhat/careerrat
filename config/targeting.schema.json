@@ -16,7 +16,9 @@
           "name": { "type": "string" },
           "priority": { "type": "string", "enum": ["primary", "secondary", "stretch", "oe"] },
           "titles": { "type": "array", "items": { "type": "string" } },
-          "notes": { "type": "string" }
+          "notes": { "type": "string" },
+          "fit_signals": { "type": "array", "items": { "type": "string" } },
+          "down_signals": { "type": "array", "items": { "type": "string" } }
         }
       }
     },

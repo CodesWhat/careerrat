@@ -31,8 +31,8 @@ import { useEventSource } from "../lib/sse.js";
 // server-side and handed the resulting chatId back on the confirmed intake
 // item), the panel skips its own "Start"-button/startChat() call entirely
 // and subscribes straight to that session's SSE stream. Every existing
-// caller (CompaniesStep's "Ask Roland to find companies") omits this prop
-// and keeps its original start-from-scratch behavior unchanged.
+// callers that omit this prop keep the original start-from-scratch behavior
+// unchanged.
 export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
   const [chatId, setChatId] = useState(initialChatId);
   const [chatState, setChatState] = useState(initialChatId ? "running" : null);

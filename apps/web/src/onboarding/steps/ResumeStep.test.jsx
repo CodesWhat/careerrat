@@ -13,7 +13,7 @@ vi.mock("../../lib/api.js", () => apiMocks);
 
 import * as ResumeStepModule from "./ResumeStep.jsx";
 
-const { ResumeStep } = ResumeStepModule;
+const { EXAMPLE_FILE_ITEM, ResumeDocumentViewer, ResumeStep } = ResumeStepModule;
 
 const BASE_STATE = {
   data: {
@@ -45,50 +45,102 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
-describe("ResumeStep document format preferences", () => {
-  it("renders compact packet-format controls with PDF as the standard and DOCX as board-required", () => {
+describe("ResumeStep shell layout", () => {
+  it("renders in the onboarding shell with the Step 2 label and shell action bar", () => {
     const html = renderResumeStep();
 
-    expect(html).toContain("Packet format");
-    expect(html).toContain("PDF is the standard packet format.");
-    expect(html).toContain("PDF standard");
-    expect(html).toContain("DOCX board-required");
+    expect(html).toContain('class="onboarding-shell onboarding-shell--resume"');
+    expect(html).toContain('class="onboarding-step-label">Step 2');
+    expect(html).toContain("onboarding-step-stack--resume");
+    expect(html).toContain("onboarding-resume");
+    expect(html).toContain("onboarding-resume__title-side");
+    expect(html).toContain("onboarding-resume__action-side");
+    expect(html.indexOf("onboarding-resume__title-side")).toBeLessThan(
+      html.indexOf("onboarding-resume__action-side")
+    );
+    expect(html.indexOf("onboarding-resume__action-side")).toBeLessThan(
+      html.indexOf("onboarding-resume__dropzone")
+    );
+    expect(html).toContain('class="onboarding-shell__actions"');
+    expect(html).toContain('aria-label="Back"');
+    expect(html).toContain('aria-label="Continue"');
+    expect(html).toContain("onboarding-nav-button--back");
+    expect(html).toContain("onboarding-nav-button--next");
+    expect(html).not.toContain(">Back<");
+    expect(html).not.toContain("Save &amp; continue");
+    expect(html).not.toContain("wizard-actions");
+    expect(html).not.toContain("Packet format");
+    expect(html).not.toContain("DOCX board-required");
   });
 
-  it("shows saved PDF/DOCX preference text from form-defaults", () => {
-    const html = renderResumeStep({
-      state: {
-        data: {
-          profile: { candidate: {} },
-          "form-defaults": {
-            document_formats: {
-              default_packet_format: "pdf",
-              required_export_formats: ["docx"],
-            },
-          },
-        },
-      },
-    });
+  it("puts upload, files, and paste into a top-middle-bottom card layout", () => {
+    const html = renderResumeStep({ aiEnabled: true });
 
-    expect(html).toContain("Saved preference");
-    expect(html).toContain("PDF standard; DOCX when a board requires it.");
+    expect(html).toContain("onboarding-resume__upload-panel");
+    expect(html).toContain("onboarding-resume__dropzone");
+    expect(html).toContain("Click to select");
+    expect(html).toContain("Drop files here");
+    expect(html).toContain("onboarding-resume__formats");
+    expect(html).toContain("DOCX");
+    expect(html).toContain("TXT");
+    expect(html).toContain("MD");
+    expect(html).toContain("PDF");
+    expect(html).toContain("PNG/JPG");
+    expect(html).toContain("onboarding-resume__files-panel");
+    expect(html).toContain("Files");
+    expect(html).toContain("hopes-and-dreams.pdf");
+    expect(html).toContain("PDF");
+    expect(html).toContain("Example file");
+    expect(html).toContain('aria-label="Open document preview for hopes-and-dreams.pdf"');
+    expect(html).toContain('aria-label="Remove hopes-and-dreams.pdf"');
+    expect(html).toContain("onboarding-resume__file-preview");
+    expect(html).toContain("onboarding-resume__file-remove");
+    expect(html).not.toContain("onboarding-resume__preview-panel");
+    expect(html).not.toContain("Files will show here after upload.");
+    expect(html).toContain("onboarding-resume__paste-section");
+    expect(html).toContain("Add resume text");
+    expect(html).not.toContain("Analyze text");
+    expect(html).not.toContain("Hide paste box");
+    expect(html).not.toContain("AI reads it and autofills the rest");
+    expect(html.indexOf("onboarding-resume__upload-panel")).toBeLessThan(
+      html.indexOf("onboarding-resume__files-panel")
+    );
+    expect(html.indexOf("onboarding-resume__files-panel")).toBeLessThan(
+      html.indexOf("onboarding-resume__paste-section")
+    );
   });
 
-  it("persists output-format preferences without invoking resume input parsers", async () => {
-    const saveDocumentFormatPreferences = ResumeStepModule.saveDocumentFormatPreferences;
-    expect(saveDocumentFormatPreferences).toBeTypeOf("function");
+  it("opens files in a real document viewer surface instead of an inline file-row dropdown", () => {
+    const html = renderToStaticMarkup(
+      <ResumeDocumentViewer item={EXAMPLE_FILE_ITEM} onClose={() => {}} />
+    );
 
-    await saveDocumentFormatPreferences({ docxBoardRequired: true });
+    expect(html).toContain("onboarding-resume__document-viewer");
+    expect(html).toContain("Resume document viewer");
+    expect(html).toContain("PDF preview");
+    expect(html).toContain("hopes-and-dreams.pdf");
+    expect(html).toContain("onboarding-resume__document-object");
+    expect(html).toContain("application/pdf");
+    expect(html).toContain("data:application/pdf;base64");
+    expect(html).not.toContain("onboarding-resume__preview-panel");
+  });
 
-    expect(apiMocks.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
-      document_formats: {
-        default_packet_format: "pdf",
-        required_export_formats: ["docx"],
-      },
-    });
-    expect(apiMocks.extractResumeDocx).not.toHaveBeenCalled();
-    expect(apiMocks.extractResumeAi).not.toHaveBeenCalled();
-    expect(apiMocks.parseResumeText).not.toHaveBeenCalled();
+  it("renders pasted text as an alternate top entry mode instead of expanding over files", () => {
+    const html = renderResumeStep({ initialTextMode: true });
+
+    expect(html).toContain("onboarding-resume__text-entry");
+    expect(html).toContain("Paste resume text");
+    expect(html).toContain("Use file upload");
+    expect(html).toContain("Add text as file");
+    expect(html).not.toContain("onboarding-resume__dropzone");
+    expect(html).not.toContain("Analyze text");
+    expect(html).not.toContain("Hide paste box");
+    expect(html.indexOf("onboarding-resume__upload-panel")).toBeLessThan(
+      html.indexOf("onboarding-resume__files-panel")
+    );
+    expect(html.indexOf("onboarding-resume__files-panel")).toBeLessThan(
+      html.indexOf("onboarding-resume__paste-section")
+    );
   });
 });
 
@@ -99,12 +151,8 @@ describe("ResumeStep DOCX intake", () => {
 
     expect(noAiHtml).toContain(".docx");
     expect(aiHtml).toContain(".docx");
-    expect(noAiHtml).toContain(
-      "DOCX, TXT, and Markdown are parsed locally. PDF and images use your connected AI key."
-    );
-    expect(aiHtml).toContain(
-      "DOCX, TXT, and Markdown are parsed locally. PDF and images use your connected AI key."
-    );
+    expect(noAiHtml).toContain("AI reads it in the black box and autofills* the rest");
+    expect(aiHtml).toContain("AI reads it in the black box and autofills* the rest");
   });
 
   it("routes extensions to deterministic DOCX/text paths before AI-only formats", () => {
@@ -116,6 +164,25 @@ describe("ResumeStep DOCX intake", () => {
     expect(getResumeUploadMode("resume.md", { aiEnabled: false })).toBe("text");
     expect(getResumeUploadMode("resume.pdf", { aiEnabled: true })).toBe("ai");
     expect(getResumeUploadMode("resume.pdf", { aiEnabled: false })).toBe("ai-unavailable");
+  });
+
+  it("describes unavailable managed AI without asking for a user API key", async () => {
+    const parseResumeFileForReview = ResumeStepModule.parseResumeFileForReview;
+    const describeResumeUploadError = ResumeStepModule.describeResumeUploadError;
+
+    await expect(
+      parseResumeFileForReview({ name: "resume.pdf" }, { aiEnabled: false })
+    ).rejects.toThrow("Managed AI required");
+
+    expect(describeResumeUploadError(new Error("missing"), { mode: "ai-unavailable" })).toEqual({
+      message:
+        "Managed AI is needed to extract PDF/image resumes. Paste your resume text below for now.",
+      showPaste: true,
+    });
+    expect(describeResumeUploadError({ status: 501 })).toEqual({
+      message: "Managed AI is unavailable right now — paste your resume text below instead.",
+      showPaste: true,
+    });
   });
 
   it("uses extractResumeDocx and normalizes successful DOCX extraction into the review panel model", async () => {

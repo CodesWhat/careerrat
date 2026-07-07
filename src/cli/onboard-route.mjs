@@ -20,6 +20,8 @@
 // mountOnboardRoutes({ addRoute, repoRoot, env }) registers:
 //
 //   GET  /api/onboard/state              candidate-file + key + config status
+//   GET  /api/onboard/draft              resumable wizard step + unsaved UI seeds
+//   POST /api/onboard/draft              persist resumable wizard step + unsaved UI seeds
 //   POST /api/onboard/init               ensureCandidateFiles() (never overwrites)
 //   POST /api/onboard/resume             parse a pasted/loaded resume (2MB cap)
 //   POST /api/onboard/resume-ai          M8 — AI-extract a PDF/image resume (5MB
@@ -31,7 +33,10 @@
 //   POST /api/onboard/write-config       export compatibility candidate/source files
 //   POST /api/onboard/quick-start        search-ready DB setup -> durable local first search
 //   POST /api/settings/ai-key            store a BYOK Anthropic key locally
+//   POST /api/settings/ai-key/validate   validate then store a BYOK Anthropic key
+//   POST /api/settings/ai-key/check      validate the currently configured AI route
 //   GET  /api/settings/ai                report the resolved AI route (no key value)
+//   GET  /api/settings/usage             summarize local AI token spend by feature
 //
 // WRITE-SCOPE NOTE: normal onboarding writes go through src/core/db/verbs/
 // candidate.mjs. Legacy YAML writes in this file are compatibility fallback
@@ -47,7 +52,9 @@ import { dirname, extname, join } from "node:path";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
 import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { validateAiProviderKey } from "../core/ai/provider-validation.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
+import { readUsageEvents, summarizeUsageEvents } from "../core/ai/usage-log.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import {
   candidateArtifactExists,
@@ -92,14 +99,16 @@ import { validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../core/profile/yaml.mjs";
 // M8 additive (Builder B, wizard UI): resolveLogoTokens is already exported
 // by logo-route.mjs for exactly this reuse — see its own header comment.
-// Reused here (not re-derived) so GET /api/onboard/state can report whether
-// logo.dev credentials are configured WITHOUT ever echoing their values back
-// (same "never echoed" convention as keyConfigured/the AI key below).
+// Reused here (not re-derived) so GET /api/onboard/state can report logo.dev
+// image/search capability WITHOUT ever echoing credential values back (same
+// "never echoed" convention as keyConfigured/the AI key below).
 import { resolveLogoTokens } from "./logo-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap skill-run-route.mjs uses.
 const RESUME_MAX_BODY_BYTES = 2 * 1024 * 1024; // 2MB — resume text can be long.
+const ONBOARDING_DRAFT_PATH = ".internal/onboarding-draft.json";
+const ONBOARDING_DRAFT_MAX_STEP = 7;
 
 // POST /api/onboard/resume-ai's binary-upload cap (frozen M8 contract: 5MB)
 // and the extensions it accepts — PDF/image only; .txt/.md keep using the
@@ -133,12 +142,11 @@ const TARGETING_PRIORITY_ALIASES = new Map([
 // method+path Map (see tracker-dev.mjs), not a param router, so ":name" is
 // realized as one concrete route per known name rather than a wildcard — any
 // other name simply 404s via the server's existing fallback.
-// M8 additive (Builder B, wizard UI): a write route for
+// M8 additive (Builder B, wizard UI): a legacy write route for
 // candidate/automation.yml#integrations.{logo_dev_token,logo_dev_secret_key}
-// — the Companies step's ONLY way to configure logo.dev credentials. No write
-// path for this existed anywhere: `rolester automation` (src/cli/automation.mjs)
-// only edits consent/capabilities, never token fields. Deliberately NOT added
-// to candidate-setup.mjs's OPTIONAL_CANDIDATE_FILES/ensureCandidateFiles():
+// — image lookup now has a built-in publishable default, while the secret key
+// remains optional for logo.dev Brand Search autocomplete. Deliberately NOT
+// added to candidate-setup.mjs's OPTIONAL_CANDIDATE_FILES/ensureCandidateFiles():
 // automation.yml's absence is load-bearing ("nothing automated" — see the
 // template's own header), and POST /api/onboard/init must keep not
 // scaffolding it. This entry exists ONLY so the one extra
@@ -211,6 +219,200 @@ export function looksBinary(text) {
   return replacementCount / text.length > 0.01;
 }
 
+const RESUME_CONTACT_FIELDS = [
+  "full_name",
+  "email",
+  "phone",
+  "location",
+  "linkedin",
+  "github",
+  "portfolio",
+];
+
+function nullableText(value) {
+  const text = String(value ?? "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return text || null;
+}
+
+function normalizeLineItems(value) {
+  return normalizeDocxResumeText(value)
+    .split("\n")
+    .map((line) => line.replace(/^[\s\-*•]+/, "").trim())
+    .filter(Boolean);
+}
+
+function normalizeContact(contact = {}) {
+  const out = {};
+  for (const field of RESUME_CONTACT_FIELDS) out[field] = nullableText(contact[field]);
+  return out;
+}
+
+function buildResumeDocumentFromParsed(parsed) {
+  return {
+    contact: normalizeContact(parsed.contact || {}),
+    headline: null,
+    summary: nullableText(parsed.summary),
+    experience: (parsed.sections?.experience || []).map((block) => {
+      const rawText = normalizeDocxResumeText(block);
+      return {
+        company: null,
+        title: null,
+        location: null,
+        start_date: null,
+        end_date: null,
+        bullets: normalizeLineItems(block),
+        raw_text: rawText,
+      };
+    }),
+    education: (parsed.sections?.education || []).map((block) => ({
+      institution: null,
+      degree: null,
+      location: null,
+      dates: null,
+      raw_text: normalizeDocxResumeText(block),
+    })),
+    skills: (parsed.sections?.skills || []).length
+      ? [
+          {
+            category: null,
+            items: (parsed.sections.skills || [])
+              .map((item) => String(item).trim())
+              .filter(Boolean),
+          },
+        ]
+      : [],
+    projects: (parsed.sections?.projects || []).map((block) => {
+      const rawText = normalizeDocxResumeText(block);
+      const items = normalizeLineItems(block);
+      return {
+        name: items[0] || null,
+        description: null,
+        bullets: items,
+        technologies: [],
+        raw_text: rawText,
+      };
+    }),
+    certifications: [],
+    other_sections: (parsed.sections?.other || []).map((block) => ({
+      heading: null,
+      items: normalizeLineItems(block),
+      raw_text: normalizeDocxResumeText(block),
+    })),
+  };
+}
+
+function pushResumeBlock(lines, heading, blocks, renderBlock) {
+  if (!Array.isArray(blocks) || !blocks.length) return;
+  lines.push("", heading);
+  for (const block of blocks) {
+    const rendered = normalizeDocxResumeText(renderBlock(block));
+    if (rendered) lines.push(rendered);
+  }
+}
+
+function joinCompact(parts, separator = " | ") {
+  return parts
+    .map((part) => nullableText(part))
+    .filter(Boolean)
+    .join(separator);
+}
+
+function resumeDocumentToPlainText(document) {
+  if (!document || typeof document !== "object") return "";
+  const lines = [];
+  const contact = document.contact || {};
+  if (contact.full_name) lines.push(contact.full_name);
+  const contactLine = joinCompact([
+    contact.email,
+    contact.phone,
+    contact.location,
+    contact.linkedin,
+    contact.github,
+    contact.portfolio,
+  ]);
+  if (contactLine) lines.push(contactLine);
+  if (document.headline) lines.push("", document.headline);
+  if (document.summary) lines.push("", "Summary", document.summary);
+
+  pushResumeBlock(lines, "Experience", document.experience, (entry) => {
+    const header = joinCompact([entry.title, entry.company], " — ");
+    const meta = joinCompact([
+      entry.location,
+      joinCompact([entry.start_date, entry.end_date], " - "),
+    ]);
+    const bullets = Array.isArray(entry.bullets)
+      ? entry.bullets
+          .map((bullet) => `- ${String(bullet).trim()}`)
+          .filter((bullet) => bullet !== "- ")
+      : [];
+    return [header, meta, ...bullets, entry.raw_text && !bullets.length ? entry.raw_text : ""]
+      .filter(Boolean)
+      .join("\n");
+  });
+
+  pushResumeBlock(lines, "Education", document.education, (entry) =>
+    [
+      joinCompact([entry.degree, entry.institution], " — "),
+      entry.location,
+      entry.dates,
+      entry.raw_text,
+    ]
+      .filter(Boolean)
+      .join("\n")
+  );
+
+  if (Array.isArray(document.skills) && document.skills.length) {
+    lines.push("", "Skills");
+    for (const group of document.skills) {
+      const items = Array.isArray(group.items)
+        ? group.items.map((item) => String(item).trim()).filter(Boolean)
+        : [];
+      if (!items.length) continue;
+      lines.push(group.category ? `${group.category}: ${items.join(", ")}` : items.join(", "));
+    }
+  }
+
+  pushResumeBlock(lines, "Projects", document.projects, (entry) => {
+    const tech =
+      Array.isArray(entry.technologies) && entry.technologies.length
+        ? `Technologies: ${entry.technologies.join(", ")}`
+        : "";
+    const bullets = Array.isArray(entry.bullets)
+      ? entry.bullets
+          .map((bullet) => `- ${String(bullet).trim()}`)
+          .filter((bullet) => bullet !== "- ")
+      : [];
+    return [
+      entry.name,
+      entry.description,
+      ...bullets,
+      tech,
+      entry.raw_text && !bullets.length ? entry.raw_text : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  });
+
+  pushResumeBlock(lines, "Certifications", document.certifications, (entry) =>
+    [joinCompact([entry.name, entry.issuer], " — "), entry.date, entry.raw_text]
+      .filter(Boolean)
+      .join("\n")
+  );
+
+  pushResumeBlock(lines, "Additional", document.other_sections, (section) => {
+    const items = Array.isArray(section.items)
+      ? section.items.map((item) => `- ${String(item).trim()}`).filter((item) => item !== "- ")
+      : [];
+    return [section.heading, ...items, section.raw_text && !items.length ? section.raw_text : ""]
+      .filter(Boolean)
+      .join("\n");
+  });
+
+  return normalizeDocxResumeText(lines.join("\n"));
+}
+
 // Deep-merge `patch` onto `base`: object keys merge recursively: an array in
 // `patch` REPLACES the corresponding array in `base` wholesale (never
 // element-wise merged); any other `patch` value (scalar, or an object where
@@ -241,6 +443,49 @@ export function deepMerge(base, patch) {
 
 function isPlainObject(value) {
   return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+export function normalizeOnboardingDraft(raw = {}) {
+  const numericStep = Number(raw?.stepIndex);
+  const stepIndex = Number.isFinite(numericStep)
+    ? Math.max(0, Math.min(ONBOARDING_DRAFT_MAX_STEP, Math.trunc(numericStep)))
+    : 0;
+  const draftSeeds = isPlainObject(raw?.draftSeeds) ? raw.draftSeeds : {};
+  return {
+    stepIndex,
+    completedIndexes: normalizeOnboardingCompletedIndexes(raw?.completedIndexes),
+    draftSeeds,
+    updatedAt: typeof raw?.updatedAt === "string" && raw.updatedAt.trim() ? raw.updatedAt : null,
+  };
+}
+
+function normalizeOnboardingCompletedIndexes(values = []) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value >= 0)
+        .map((value) => Math.min(ONBOARDING_DRAFT_MAX_STEP, Math.trunc(value)))
+    )
+  ).sort((a, b) => a - b);
+}
+
+function readOnboardingDraft(pathCtx) {
+  const draftPath = userPath(pathCtx, ONBOARDING_DRAFT_PATH);
+  if (!existsSync(draftPath)) return normalizeOnboardingDraft();
+  try {
+    return normalizeOnboardingDraft(JSON.parse(readFileSync(draftPath, "utf8")));
+  } catch {
+    return normalizeOnboardingDraft();
+  }
+}
+
+function writeOnboardingDraft(pathCtx, draft) {
+  const next = normalizeOnboardingDraft({ ...draft, updatedAt: new Date().toISOString() });
+  const draftPath = userPath(pathCtx, ONBOARDING_DRAFT_PATH);
+  mkdirSync(dirname(draftPath), { recursive: true });
+  atomicWriteFile(draftPath, `${JSON.stringify(next, null, 2)}\n`);
+  return next;
 }
 
 // Assign the next unused claim id. Prefers the caller's own id (from a
@@ -298,6 +543,8 @@ export function normalizeTargetingSeed(raw = {}) {
     if (!titles.length) continue;
     const priority =
       TARGETING_PRIORITY_ALIASES.get(String(bucket?.priority || "").toLowerCase()) || "secondary";
+    const fitSignals = compactStrings(bucket?.fit_signals, 12);
+    const downSignals = compactStrings(bucket?.down_signals, 12);
     roleBuckets.push({
       name: String(bucket?.name || (roleBuckets.length ? "Secondary" : "Primary")).trim(),
       priority,
@@ -305,6 +552,8 @@ export function normalizeTargetingSeed(raw = {}) {
       ...(String(bucket?.notes || "").trim()
         ? { notes: String(bucket.notes).trim().slice(0, 240) }
         : {}),
+      ...(fitSignals.length ? { fit_signals: fitSignals } : {}),
+      ...(downSignals.length ? { down_signals: downSignals } : {}),
     });
     if (roleBuckets.length >= 4) break;
   }
@@ -811,6 +1060,36 @@ export function mountOnboardRoutes({
   });
 
   // -------------------------------------------------------------------------
+  // GET/POST /api/onboard/draft — durable UI-only wizard state. This is the
+  // app's resumability layer for focused step + unsaved mock/AI seeds; it
+  // deliberately lives under internal/ and never touches workspace/setup-state.json
+  // (that file remains owned by ingest-profile).
+  // -------------------------------------------------------------------------
+  addRoute("GET", "/api/onboard/draft", (_req, res) => {
+    sendJson(res, 200, { ok: true, draft: readOnboardingDraft(pathCtx) });
+  });
+
+  addRoute("POST", "/api/onboard/draft", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { ok: false, error: { message: err.message } });
+      return;
+    }
+
+    try {
+      const draft = writeOnboardingDraft(pathCtx, body || {});
+      sendJson(res, 200, { ok: true, draft });
+    } catch (err) {
+      sendJson(res, 500, {
+        ok: false,
+        error: { message: err instanceof Error ? err.message : String(err) },
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
   // POST /api/onboard/public-sync-preference — local opt-in/out for sharing
   // public company and board metadata back to future Rolester users. The
   // public-intel DB verbs are fail-closed scrubbed; this route only toggles
@@ -880,6 +1159,7 @@ export function mountOnboardRoutes({
     const parsed = parseResume(text);
     const profileSeed = deriveProfileSeed(parsed);
     const evidenceSeed = deriveEvidenceSeed(parsed);
+    const resumeDocument = buildResumeDocumentFromParsed(parsed);
     const sections = {
       experience: parsed.sections.experience.length,
       education: parsed.sections.education.length,
@@ -894,7 +1174,12 @@ export function mountOnboardRoutes({
           ...pathCtx,
           id: "source-resume",
           kind: "source-resume",
-          data: { text, savedAt: new Date().toISOString(), source: "resume-text" },
+          data: {
+            text,
+            resumeDocument,
+            savedAt: new Date().toISOString(),
+            source: "resume-text",
+          },
         });
       } else {
         const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
@@ -904,7 +1189,7 @@ export function mountOnboardRoutes({
       }
     }
 
-    sendJson(res, 200, { profileSeed, evidenceSeed, sections });
+    sendJson(res, 200, { profileSeed, evidenceSeed, sections, resumeDocument });
   });
 
   // -------------------------------------------------------------------------
@@ -977,6 +1262,7 @@ export function mountOnboardRoutes({
     const parsed = parseResume(text);
     const profileSeed = deriveProfileSeed(parsed);
     const evidenceSeed = deriveEvidenceSeed(parsed);
+    const resumeDocument = buildResumeDocumentFromParsed(parsed);
     const sections = {
       experience: parsed.sections.experience.length,
       education: parsed.sections.education.length,
@@ -996,6 +1282,7 @@ export function mountOnboardRoutes({
           savedAt: new Date().toISOString(),
           source: "docx",
           text,
+          resumeDocument,
         },
       });
     } else {
@@ -1010,6 +1297,7 @@ export function mountOnboardRoutes({
       profileSeed,
       evidenceSeed,
       sections,
+      resumeDocument,
       source: "docx",
       savedPath: savedRelPath,
     });
@@ -1078,6 +1366,8 @@ export function mountOnboardRoutes({
       let rawText = "";
       await runSkillStream({
         skill: "resume-extract",
+        action: RESUME_AI_LABELS.action,
+        operation: RESUME_AI_LABELS.operation,
         input: correction
           ? `Read the file at this exact path: ${savedPath}\n\n${correction}`
           : { path: savedPath },
@@ -1111,6 +1401,10 @@ export function mountOnboardRoutes({
     }
 
     const extracted = outcome.body.data || {};
+    const resumeDocument = extracted.resume_document;
+    const fullText =
+      normalizeDocxResumeText(extracted.full_text || "") ||
+      resumeDocumentToPlainText(resumeDocument);
     const claims = (extracted.claims || []).map((c, i) => ({
       id: `resume-${String(i + 1).padStart(3, "0")}`,
       claim: String(c?.claim ?? ""),
@@ -1127,18 +1421,28 @@ export function mountOnboardRoutes({
           filename: sanitizeUploadFilename(name),
           savedAt: new Date().toISOString(),
           source: "resume-ai",
+          text: fullText,
+          resumeDocument,
         },
       });
+    } else {
+      const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+      const dest = userPath(pathCtx, entry.candidatePath);
+      mkdirSync(dirname(dest), { recursive: true });
+      atomicWriteFile(dest, fullText);
     }
 
     sendJson(res, outcome.status, {
       ...outcome.body,
       data: {
+        fullText,
+        resumeDocument,
         profileSeed: { candidate: extracted.candidate || {} },
         evidenceSeed: { claims },
         sections: extracted.sections || {},
         targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
         source: "ai",
+        savedPath: savedRelPath,
       },
     });
   });
@@ -1356,10 +1660,93 @@ export function mountOnboardRoutes({
     sendJson(res, 200, { ok: true, route: "byok" });
   });
 
+  addRoute("POST", "/api/settings/ai-key/validate", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+
+    const validation = await validateAiProviderKey({
+      provider: body?.provider || "anthropic",
+      apiKey: body?.apiKey,
+      env,
+      fetchImpl,
+    });
+    if (!validation.ok) {
+      sendJson(res, validation.status || 400, {
+        ok: false,
+        provider: validation.provider,
+        code: validation.code,
+        error: validation.message,
+      });
+      return;
+    }
+
+    try {
+      writeLocalAiKey({ repoRoot, apiKey: body?.apiKey, env });
+    } catch (err) {
+      sendJson(res, 400, { error: err.message });
+      return;
+    }
+    sendJson(res, 200, { ok: true, route: "byok", provider: validation.provider });
+  });
+
+  addRoute("POST", "/api/settings/ai-key/check", async (req, res) => {
+    let body = {};
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+
+    const route = resolveAIRoute(env);
+    if (route.type === "proxy") {
+      sendJson(res, 200, { ok: true, route: "proxy", provider: "managed-proxy" });
+      return;
+    }
+    if (route.type !== "byok") {
+      sendJson(res, 409, {
+        ok: false,
+        provider: body?.provider || "anthropic",
+        code: "missing_key",
+        error: "No AI key is configured yet.",
+      });
+      return;
+    }
+
+    const validation = await validateAiProviderKey({
+      provider: body?.provider || "anthropic",
+      apiKey: route.apiKey,
+      env,
+      fetchImpl,
+    });
+    if (!validation.ok) {
+      sendJson(res, validation.status || 400, {
+        ok: false,
+        provider: validation.provider,
+        code: validation.code,
+        error: validation.message,
+      });
+      return;
+    }
+    sendJson(res, 200, { ok: true, route: "byok", provider: validation.provider });
+  });
+
   addRoute("GET", "/api/settings/ai", (_req, res) => {
     sendJson(res, 200, {
       route: resolveAIRoute(env).type,
       keyPresent: !!env.ANTHROPIC_API_KEY,
+    });
+  });
+
+  addRoute("GET", "/api/settings/usage", (_req, res) => {
+    sendJson(res, 200, {
+      ok: true,
+      summary: summarizeUsageEvents(readUsageEvents({ root: repoRoot })),
     });
   });
 }

@@ -430,12 +430,16 @@ function normalizeSearchTracks(buckets) {
   for (const bucket of Array.isArray(buckets) ? buckets : []) {
     const titles = compactStrings(bucket?.titles);
     if (!titles.length) continue;
+    const fitSignals = compactStrings(bucket?.fit_signals);
+    const downSignals = compactStrings(bucket?.down_signals);
     const order = out.length + 1;
     out.push({
       name: String(bucket?.name || (order === 1 ? "Primary" : "Secondary")).trim(),
       priority: normalizePriority(bucket?.priority, order),
       titles,
       ...(String(bucket?.notes || "").trim() ? { notes: String(bucket.notes).trim() } : {}),
+      ...(fitSignals.length ? { fit_signals: fitSignals } : {}),
+      ...(downSignals.length ? { down_signals: downSignals } : {}),
     });
   }
   return out;

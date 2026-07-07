@@ -111,6 +111,10 @@ function renderFinish(state = SEARCH_READY_STATE) {
   );
 }
 
+function countOccurrences(value, token) {
+  return (value.match(new RegExp(token, "g")) || []).length;
+}
+
 function expectNoFirstSearchRuntimeTokens(markup) {
   const lowerMarkup = markup.toLowerCase();
   const start = lowerMarkup.indexOf("first search");
@@ -194,6 +198,31 @@ describe("buildQuickStartAction", () => {
       label: "Complete Search setup",
       detail: "Needs source resume and role titles.",
     });
+  });
+});
+
+describe("FinishStep shell layout", () => {
+  it("renders in the onboarding shell with the Step 7 wide card and shell action bar", () => {
+    const html = renderFinish();
+
+    expect(html).toContain('class="onboarding-shell onboarding-shell--wide"');
+    expect(countOccurrences(html, "onboarding-progress__case--filled")).toBe(8);
+    expect(html).toContain('class="onboarding-step-stack onboarding-step-stack--wide"');
+    expect(html).toContain('class="onboarding-step-label">Step 7');
+    expect(html).toContain(
+      'class="onboarding-step-card onboarding-step-card--single onboarding-step-card--wide onboarding-step-card--compact"'
+    );
+    expect(html).toContain(
+      'class="onboarding-step-card__content onboarding-step-card__content--dense onboarding-step-card__content--scroll"'
+    );
+    expect(html).toContain('class="onboarding-shell__actions"');
+    expect(html).toContain('aria-label="Back"');
+    expect(html).toContain('aria-label="Finish"');
+    expect(html).toContain("onboarding-nav-button--back");
+    expect(html).toContain("onboarding-nav-button--next");
+    expect(html).not.toContain(">Back<");
+    expect(html).not.toContain(">Finish<");
+    expect(html).not.toContain("wizard-actions");
   });
 });
 

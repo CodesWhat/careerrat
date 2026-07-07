@@ -27,6 +27,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
 import { decideExternalOpen, resolveDesktopRuntimePaths } from "./desktop-runtime.mjs";
 import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
+import { buildBrowserWindowOptions } from "./window-options.mjs";
 
 // --- Trap 1 -----------------------------------------------------------------
 // Inside Electron, `process.execPath` is the Electron binary, not a plain
@@ -48,11 +49,10 @@ import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
 const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const isSmoke = process.argv.includes("--smoke");
 
-// Name. An unpackaged `electron .` run shows the Electron binary's own name
-// ("Electron") in the macOS menu bar, dock, and Cmd-Tab. Packaged builds get
-// "Rolester" from the Info.plist (electron-builder productName); set it here so
-// dev matches. Must run before app is ready, i.e. before any default menu is
-// built.
+// Runtime name. The dev launcher brands Electron.app's Info.plist so the macOS
+// dock/Cmd-Tab identity is Rolester; this keeps Electron's own runtime app name
+// aligned for menus, about panel, notifications, and window metadata. Must run
+// before app is ready, i.e. before any default menu is built.
 app.setName("Rolester");
 app.setAboutPanelOptions({ applicationName: "Rolester" });
 
@@ -164,6 +164,8 @@ async function boot() {
   const pathCtx = { repoRoot };
   resolveUserPaths(pathCtx);
   const route = chooseDesktopRoute({
+    routeOverride: process.env.ROLESTER_DESKTOP_ROUTE,
+    forceOnboarding: !app.isPackaged,
     hasCandidateSetup:
       existsSync(userPath(pathCtx, "candidate/profile.yml")) ||
       hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }),
@@ -212,9 +214,7 @@ function openExternalIfAllowed(target, baseUrl) {
 
 function createWindow(url, route, { load = true } = {}) {
   win = new BrowserWindow({
-    width: 1280,
-    height: 860,
-    title: "Rolester",
+    ...buildBrowserWindowOptions(),
     // No preload, no explicit webPreferences overrides — the UI is
     // server-rendered HTML loaded over loopback HTTP, so Electron's secure
     // remote-page defaults (nodeIntegration off, contextIsolation on) are
