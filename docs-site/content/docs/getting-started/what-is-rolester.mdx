@@ -33,8 +33,10 @@ The agent does.
    dedupe, liveness-check, and produce a coarse-triage intake queue.
 3. **Gate** — `evaluate-job` reads the full posting and returns a verdict: keep or
    cut the job, how well it fits, whether the pay clears your floor, and what to
-   do next. Printed as a `GATE / FIT / COMP / ACTION` block. Nothing gets
-   tailored before a `KEEP`.
+   do next. Those four print as a `GATE / FIT / COMP / ACTION` block, joined by
+   extra lines when they apply — a comp anchor to negotiate against, a comp
+   estimate when no band was posted, a legitimacy warning on a suspect listing.
+   Nothing gets tailored before a `KEEP`.
 4. **Tailor** — `tailor-application` builds honest résumé, cover letter, and
    short-answer artifacts from your evidence bank only.
 5. **Communicate** — `email-comms` drafts and tracks recruiter threads, follow-ups,

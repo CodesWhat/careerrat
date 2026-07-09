@@ -12,7 +12,10 @@ ones are worth your time, writes applications from things you've genuinely done,
 drafts your recruiter replies, preps you for interviews, and keeps track of where
 everything stands.
 
-Nothing you put in leaves your laptop. No account, no server, no telemetry.
+No account, no server, no telemetry. Rolester never phones home, and your files
+stay on your machine. The one thing that goes out is whatever your AI CLI sends
+to its own provider to do the work — same as any other task you'd give it. See
+[privacy](https://rolester.codeswhat.com/docs/advanced/privacy) for the details.
 
 ## Why it's different
 
