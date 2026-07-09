@@ -31,8 +31,10 @@ The agent does.
    honesty boundaries, writing-style calibration.
 2. **Source** — `setup-searches` + `search-jobs` build searches from your targets,
    dedupe, liveness-check, and produce a coarse-triage intake queue.
-3. **Gate** — `evaluate-job` reads the full posting and emits a `GATE / FIT / COMP
-   / ACTION` verdict. No tailoring before a KEEP.
+3. **Gate** — `evaluate-job` reads the full posting and returns a verdict: keep or
+   cut the job, how well it fits, whether the pay clears your floor, and what to
+   do next. Printed as a `GATE / FIT / COMP / ACTION` block. Nothing gets
+   tailored before a `KEEP`.
 4. **Tailor** — `tailor-application` builds honest résumé, cover letter, and
    short-answer artifacts from your evidence bank only.
 5. **Communicate** — `email-comms` drafts and tracks recruiter threads, follow-ups,
