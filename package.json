@@ -81,7 +81,7 @@
     "README.md"
   ],
   "scripts": {
-    "postinstall": "node scripts/install-skills.mjs --soft || true",
+    "postinstall": "node -e \"const f='scripts/install-skills.mjs'; if (require('fs').existsSync(f)) require('child_process').spawnSync(process.execPath,[f,'--soft'],{stdio:'inherit'})\"",
     "prepare": "lefthook install || true",
     "dev": "turbo dev",
     "build": "turbo build",
