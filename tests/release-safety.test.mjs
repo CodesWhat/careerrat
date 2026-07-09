@@ -32,7 +32,18 @@ test("local user data roots are excluded from git, docker, and Vercel surfaces",
   assert.match(dockerignore, /^tracker-\*\.png$/m);
 
   for (const pattern of [".rolester", ".internal", "candidate", "workspace", ".agents", "config"]) {
-    assert.match(vercelignore, new RegExp(`^${escapeRegExp(pattern)}$`, "m"));
+    assert.match(vercelignore, new RegExp(`^/${escapeRegExp(pattern)}$`, "m"));
+  }
+
+  // .vercelignore uses .gitignore semantics: an unanchored pattern matches at
+  // every depth. A bare `src` also matched website/src and docs-site/src, so
+  // the git build deleted both Next apps and production served a 404.
+  for (const pattern of ["src", "bin", "scripts", "tests", "examples", "templates", "config", "mockups"]) {
+    assert.doesNotMatch(
+      vercelignore,
+      new RegExp(`^${escapeRegExp(pattern)}$`, "m"),
+      `.vercelignore must anchor "${pattern}" as "/${pattern}" — unanchored it also deletes website/${pattern} and docs-site/${pattern} from the Vercel upload`,
+    );
   }
 });
 
