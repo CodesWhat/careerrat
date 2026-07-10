@@ -36,10 +36,7 @@ export function DashboardV2Page() {
     <div className="dashboard-v2">
       <header className="dashboard-v2__hero">
         <div className="dashboard-v2__title-block">
-          <span className="dashboard-v2__eyebrow">
-            Dashboard V2{model.preview ? " · Preview Data" : ""}
-          </span>
-          <h1 className="dashboard-v2__title">Today</h1>
+          <h1 className="dashboard-v2__title">Dashboard</h1>
         </div>
         <DashboardV2Scoreboard metrics={model.metrics} />
       </header>
@@ -154,7 +151,6 @@ function PipelinePanel({ model }) {
           <div className="dashboard-v2__pipeline-row" key={item.key}>
             <span className="dashboard-v2__pipeline-label">
               <strong>{item.label}</strong>
-              <small>{item.supporting}</small>
             </span>
             <span className="dashboard-v2__pipeline-meter" aria-hidden="true">
               <span style={{ width: `${item.width}%` }} />
@@ -299,6 +295,7 @@ function hasDashboardV2Content(data) {
 }
 
 function buildDashboardV2Model(data) {
+  const allSteps = dashboardAllSteps(data);
   const actions = dashboardQueueSteps(data);
   const todayEvents = dashboardTodayEvents(data);
   const reviewRoles = dashboardReviewRoles(data);
@@ -307,8 +304,10 @@ function buildDashboardV2Model(data) {
   const pipeline = dashboardPipeline(data);
   const highFitCount = highFitRoleCount(data, highFitRoles);
   const decisionCount = decisionRoleCount(data, reviewRoles);
-  const needsYou = actions.length;
-  const dueNow = actions.filter(
+  // Counts every step that needs the user, including the one promoted to the
+  // focus card — `actions` excludes it and is capped, so it undercounts.
+  const needsYou = allSteps.length;
+  const dueNow = allSteps.filter(
     (step) => step?.tone === "error" || /\b(overdue|today)\b/i.test(step?.dueText || "")
   ).length;
   const activeJobs = Number(data?.jobs?.visibleCount);
@@ -321,7 +320,6 @@ function buildDashboardV2Model(data) {
     freshRoles,
     pipeline,
     nextDecision: dashboardNextDecision(data, decisionCount),
-    preview: data === V2_PREVIEW_DASHBOARD,
     metrics: [
       {
         key: "needsYou",
@@ -345,13 +343,31 @@ function buildDashboardV2Model(data) {
   };
 }
 
+function dashboardAllSteps(data) {
+  if (Array.isArray(data?.allNextSteps)) return data.allNextSteps;
+  if (Array.isArray(data?.nextSteps)) return data.nextSteps;
+  return [];
+}
+
+// The focus card already renders the top step as the hero. Repeating it as the
+// first queue row says the same thing twice and buries what comes next.
 function dashboardQueueSteps(data) {
-  const steps = Array.isArray(data?.allNextSteps)
-    ? data.allNextSteps
-    : Array.isArray(data?.nextSteps)
-      ? data.nextSteps
-      : [];
-  return steps.slice(0, 4);
+  return dashboardAllSteps(data)
+    .filter((step) => !stepIsFocus(step, data?.focus))
+    .slice(0, 4);
+}
+
+function stepIsFocus(step, focus) {
+  if (!step || !focus) return false;
+  if (step.detailId && focus.detailId) return step.detailId === focus.detailId;
+  const stepTitle = normalizeTitle(step.title);
+  return Boolean(stepTitle) && stepTitle === normalizeTitle(focus.title);
+}
+
+function normalizeTitle(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase();
 }
 
 function dashboardReviewRoles(data) {
@@ -410,30 +426,10 @@ function dashboardPipeline(data) {
   const rail = data?.jobs?.rail || {};
   const visibleCount = Number(data?.jobs?.visibleCount || data?.stats?.inPlay || 0);
   const items = [
-    {
-      key: "manualReview",
-      label: "Decision Load",
-      supporting: "Resolve before sourcing more",
-      value: rail.manualReview,
-    },
-    {
-      key: "screenPlus",
-      label: "Interview Momentum",
-      supporting: "Screen+ conversations",
-      value: rail.screenPlus,
-    },
-    {
-      key: "fresh",
-      label: "Fresh Supply",
-      supporting: "New roles to skim",
-      value: rail.fresh,
-    },
-    {
-      key: "active",
-      label: "Active Pipeline",
-      supporting: "Live roles in play",
-      value: visibleCount,
-    },
+    { key: "manualReview", label: "To decide", value: rail.manualReview },
+    { key: "screenPlus", label: "Interviewing", value: rail.screenPlus },
+    { key: "fresh", label: "New roles", value: rail.fresh },
+    { key: "active", label: "Active", value: visibleCount },
   ].map((item) => ({ ...item, value: Number(item.value) || 0 }));
   const max = Math.max(1, ...items.map((item) => item.value));
   return items.map((item) => ({ ...item, width: Math.max(6, (item.value / max) * 100) }));
