@@ -23,8 +23,6 @@ describe("NavList", () => {
     for (const label of [
       "Dashboard",
       "Calendar",
-      "Calendar V2",
-      "Calendar V3",
       "Jobs",
       "Jobs V2",
       "Jobs V3",
@@ -43,6 +41,8 @@ describe("NavList", () => {
     expect(html).not.toContain("Inbox");
     expect(html).not.toContain("Dashboard V2");
     expect(html).not.toContain("Dashboard V3");
+    expect(html).not.toContain("Calendar V2");
+    expect(html).not.toContain("Calendar V3");
     expect(html).not.toContain("nav-item__badge");
   });
 
@@ -50,9 +50,6 @@ describe("NavList", () => {
     const html = renderNav();
 
     expect(html.indexOf("Dashboard")).toBeLessThan(html.indexOf("Calendar"));
-    expect(html.indexOf("Calendar")).toBeLessThan(html.indexOf("Calendar V2"));
-    expect(html.indexOf("Calendar V2")).toBeLessThan(html.indexOf("Calendar V3"));
-    expect(html.indexOf("Calendar V3")).toBeLessThan(html.indexOf("Jobs"));
     expect(html.indexOf("Calendar")).toBeLessThan(html.indexOf("Jobs"));
     expect(html.indexOf("Jobs")).toBeLessThan(html.indexOf("Jobs V2"));
     expect(html.indexOf("Jobs V2")).toBeLessThan(html.indexOf("Jobs V3"));
