@@ -170,8 +170,8 @@ describe("DashboardV2Page", () => {
     expect(html).not.toContain("Resolve before sourcing more");
 
     expect(html).toContain("Decide");
-    expect(html).toContain("You have 3 high-fit roles");
-    expect(html).toContain("Decide what to do with them now: promote, skip, or park.");
+    expect(html).not.toContain("You have 3 high-fit roles");
+    expect(html).not.toContain("promote, skip, or park");
     expect(html).toContain("Ramp");
     expect(html).toContain("82");
     expect(html).toContain("Fresh Finds");
@@ -206,7 +206,6 @@ describe("DashboardV2Page", () => {
     expect(html).toContain("Prep Juniper Square technical screen");
     expect(html).not.toContain("Send Ramp follow-up");
     expect(html).toContain("Due by today");
-    expect(html).toContain("You have 3 high-fit roles");
     expect(html).toContain("Hightouch");
     expect(html).toContain("Anthropic");
     expect(html).toContain("Juniper Square technical screen");

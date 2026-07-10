@@ -12,6 +12,10 @@ import {
 import { InlineAlert } from "../components/Toast.jsx";
 import { V2_PREVIEW_DASHBOARD } from "../v2/v2MockData.js";
 
+// The lower-grid panels show three rows and scroll the rest inside the card, so
+// they carry a real queue rather than a truncated top-N with nothing behind it.
+const PANEL_ROW_LIMIT = 12;
+
 const FOCUS_TONE_CLASS = {
   error: "dashboard-v2__pill--danger",
   warning: "dashboard-v2__pill--warning",
@@ -52,7 +56,7 @@ export function DashboardV2Page() {
           </section>
 
           <section className="dashboard-v2__lower-grid" aria-label="Dashboard V2 work queues">
-            <DecisionPanel decision={model.nextDecision} roles={model.reviewRoles} />
+            <DecisionPanel hasWork={model.decisionHasWork} roles={model.reviewRoles} />
             <FreshFindsPanel roles={model.freshRoles} />
             <TodayPanel events={model.todayEvents} />
           </section>
@@ -139,22 +143,14 @@ function PipelinePanel({ model }) {
   );
 }
 
-function DecisionPanel({ decision, roles }) {
+function DecisionPanel({ hasWork, roles }) {
   return (
     <article className="dashboard-v2__panel">
       <PanelHeader icon={<CheckIcon />} title="Decide" to="/jobs" actionLabel="Open Roles" />
-      <div
-        className={`dashboard-v2__nudge${decision.hasWork ? " dashboard-v2__nudge--active" : ""}`}
-      >
-        <strong>{decision.title}</strong>
-        <p>{decision.summary}</p>
-      </div>
       <RoleList
         roles={roles}
         emptyText={
-          decision.hasWork
-            ? "Open Jobs to review the waiting roles."
-            : "No high-fit roles need a decision."
+          hasWork ? "Open Jobs to review the waiting roles." : "No high-fit roles need a decision."
         }
       />
     </article>
@@ -292,7 +288,7 @@ function buildDashboardV2Model(data) {
     highFitRoles,
     freshRoles,
     pipeline,
-    nextDecision: dashboardNextDecision(data, decisionCount),
+    decisionHasWork: decisionCount > 0 || Boolean(data?.jobs?.rail?.nextDecision?.hasWork),
     metrics: [
       {
         key: "needsYou",
@@ -323,7 +319,10 @@ function dashboardAllSteps(data) {
 }
 
 function dashboardReviewRoles(data) {
-  return (Array.isArray(data?.reviewHoldRoles) ? data.reviewHoldRoles : []).slice(0, 4);
+  return (Array.isArray(data?.reviewHoldRoles) ? data.reviewHoldRoles : []).slice(
+    0,
+    PANEL_ROW_LIMIT
+  );
 }
 
 function dashboardHighFitRoles(data) {
@@ -338,7 +337,7 @@ function dashboardHighFitRoles(data) {
       seen.add(key);
       return true;
     })
-    .slice(0, 4);
+    .slice(0, PANEL_ROW_LIMIT);
 }
 
 function dashboardFreshRoles(data, reviewRoles = []) {
@@ -355,7 +354,7 @@ function dashboardFreshRoles(data, reviewRoles = []) {
       seen.add(key);
       return true;
     })
-    .slice(0, 4);
+    .slice(0, PANEL_ROW_LIMIT);
 }
 
 function dashboardTodayEvents(data) {
@@ -371,7 +370,7 @@ function dashboardTodayEvents(data) {
     ? todayEvents
     : upcomingEvents.filter((event) => event?.iso === todayIso);
 
-  return rows.filter(isTimedCalendarReminder).slice(0, 4);
+  return rows.filter(isTimedCalendarReminder).slice(0, PANEL_ROW_LIMIT);
 }
 
 function dashboardPipeline(data) {
@@ -385,34 +384,6 @@ function dashboardPipeline(data) {
   ].map((item) => ({ ...item, value: Number(item.value) || 0 }));
   const max = Math.max(1, ...items.map((item) => item.value));
   return items.map((item) => ({ ...item, width: Math.max(6, (item.value / max) * 100) }));
-}
-
-function dashboardNextDecision(data, decisionCount) {
-  const raw = data?.jobs?.rail?.nextDecision || {};
-  if (decisionCount > 0 || raw.hasWork) {
-    const count = decisionCount > 0 ? decisionCount : Number(data?.jobs?.rail?.manualReview || 0);
-    if (count > 0) {
-      const noun = count === 1 ? "role" : "roles";
-      const pronoun = count === 1 ? "it" : "them";
-      return {
-        ...raw,
-        title: `You have ${formatNumber(count)} high-fit ${noun}`,
-        summary: `Decide what to do with ${pronoun} now: promote, skip, or park.`,
-        hasWork: true,
-      };
-    }
-    return {
-      ...raw,
-      title: raw.title || "Decide the next roles",
-      summary: raw.summary || "Pick what to promote, skip, or park before adding more work.",
-      hasWork: true,
-    };
-  }
-  return {
-    title: "No role decisions waiting",
-    summary: "Keep the priority queue clear or run the next sourcing sweep.",
-    hasWork: false,
-  };
 }
 
 function highFitRoleCount(data, roles = []) {
