@@ -1051,6 +1051,12 @@ button {
 }
 
 .dashboard-v2 {
+  /* One gutter, one header-to-body gap, applied to every panel. Panels used to
+     each pick their own (18px / 14px / 0), which is what made the card headers
+     read as misaligned. */
+  --dash-gutter: 18px;
+  --dash-body-gap: 14px;
+
   display: flex;
   min-width: 0;
   flex-direction: column;
@@ -1073,7 +1079,6 @@ button {
 
 .dashboard-v2__score span,
 .dashboard-v2__panel-link,
-.dashboard-v2__row-action,
 .dashboard-v2__pill {
   color: var(--ink-soft);
   font-size: 11px;
@@ -1163,7 +1168,8 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 14px;
-  padding: 16px 18px 0;
+  min-height: 20px;
+  padding: 16px var(--dash-gutter) 0;
 }
 
 .dashboard-v2__panel-header h2 {
@@ -1175,20 +1181,21 @@ button {
   color: var(--ink);
   font-size: 15px;
   font-weight: 900;
-  line-height: 1.2;
+  line-height: 1;
 }
 
 .dashboard-v2__panel-icon {
   display: inline-grid;
+  flex: none;
   place-items: center;
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   color: var(--coral);
 }
 
 .dashboard-v2__panel-icon svg {
-  width: 19px;
-  height: 19px;
+  width: 18px;
+  height: 18px;
 }
 
 .dashboard-v2__panel-link {
@@ -1213,7 +1220,7 @@ button {
   align-items: flex-start;
   justify-content: flex-end;
   gap: 12px;
-  margin: 18px;
+  margin: var(--dash-body-gap) var(--dash-gutter) var(--dash-gutter);
   padding: 22px;
   border-radius: var(--card-radius);
   background:
@@ -1290,17 +1297,15 @@ button {
   text-decoration: none;
 }
 
-.dashboard-v2__action-stack,
 .dashboard-v2__role-list,
 .dashboard-v2__event-list,
 .dashboard-v2__pipeline-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 0 18px 18px;
+  padding: var(--dash-body-gap) var(--dash-gutter) var(--dash-gutter);
 }
 
-.dashboard-v2__action-row,
 .dashboard-v2__role-row,
 .dashboard-v2__event-row {
   display: grid;
@@ -1316,11 +1321,6 @@ button {
     transform 0.16s ease;
 }
 
-.dashboard-v2__action-row {
-  grid-template-columns: minmax(0, 1fr) auto;
-  padding: 14px 16px;
-}
-
 .dashboard-v2__role-row {
   grid-template-columns: auto minmax(0, 1fr) auto;
   padding: 13px 14px;
@@ -1331,7 +1331,6 @@ button {
   padding: 13px 14px;
 }
 
-.dashboard-v2__action-row:hover,
 .dashboard-v2__role-row:hover,
 .dashboard-v2__event-row:hover,
 .dashboard-v2__panel-link:hover,
@@ -1339,7 +1338,6 @@ button {
   transform: translateY(-1px);
 }
 
-.dashboard-v2__action-row:hover,
 .dashboard-v2__role-row:hover,
 .dashboard-v2__event-row:hover {
   background: rgba(var(--rgb-line), 0.06);
@@ -1353,7 +1351,6 @@ button {
   background: var(--coral);
 }
 
-.dashboard-v2__action-row:focus-visible,
 .dashboard-v2__role-row:focus-visible,
 .dashboard-v2__event-row:focus-visible,
 .dashboard-v2__panel-link:focus-visible,
@@ -1394,10 +1391,6 @@ button {
   white-space: nowrap;
 }
 
-.dashboard-v2__row-action {
-  color: var(--coral);
-}
-
 .dashboard-v2__fit,
 .dashboard-v2__pipeline-value {
   color: var(--teal);
@@ -1434,15 +1427,11 @@ button {
 }
 
 .dashboard-v2__nudge {
-  margin: 0 18px 18px;
+  margin: var(--dash-body-gap) var(--dash-gutter) 0;
   padding: 14px;
   border: 1px solid rgba(var(--rgb-line), 0.08);
   border-radius: var(--row-radius);
   background: var(--paper-band);
-}
-
-.dashboard-v2__decision-nudge {
-  margin-top: 14px;
 }
 
 .dashboard-v2__nudge--active {
@@ -1497,6 +1486,9 @@ button {
 
 @media (max-width: 760px) {
   .dashboard-v2 {
+    /* Tighten the gutter once; every panel header and body follows it. */
+    --dash-gutter: 14px;
+
     gap: 18px;
   }
 
@@ -1511,18 +1503,9 @@ button {
 
   .dashboard-v2__focus {
     min-height: 0;
-    margin: 14px;
     padding: 18px;
   }
 
-  .dashboard-v2__action-stack,
-  .dashboard-v2__role-list,
-  .dashboard-v2__event-list,
-  .dashboard-v2__pipeline-list {
-    padding: 0 14px 14px;
-  }
-
-  .dashboard-v2__action-row,
   .dashboard-v2__role-row,
   .dashboard-v2__event-row {
     grid-template-columns: minmax(0, 1fr);
@@ -1542,7 +1525,6 @@ button {
     grid-row: 1;
   }
 
-  .dashboard-v2__row-action,
   .dashboard-v2__fit {
     width: fit-content;
   }
@@ -1941,7 +1923,8 @@ button {
   -webkit-app-region: drag;
 }
 
-.onboarding-shell__header :is(a, button, input, select, textarea, [role="button"], .cl-userButtonTrigger) {
+.onboarding-shell__header
+  :is(a, button, input, select, textarea, [role="button"], .cl-userButtonTrigger) {
   -webkit-app-region: no-drag;
 }
 

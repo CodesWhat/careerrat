@@ -157,9 +157,10 @@ describe("DashboardV2Page", () => {
     expect(html).toContain("Priority");
     expect(html).toContain("Prepare for the PwC Teams interview");
     expect(html).toContain("Handle next action");
-    expect(html).toContain("Send Ramp follow-up");
 
-    // The focus card is the hero; the queue below it must not repeat that step.
+    // The Priority panel is the focus card and nothing else. The rest of
+    // allNextSteps stays behind the Needs You count, not stacked under the hero.
+    expect(html).not.toContain("Send Ramp follow-up");
     expect(html.match(/Prepare for the PwC Teams interview/g)).toHaveLength(1);
 
     expect(html).toContain("Momentum");
@@ -203,14 +204,13 @@ describe("DashboardV2Page", () => {
 
     expect(html).toContain(">Dashboard</h1>");
     expect(html).toContain("Prep Juniper Square technical screen");
-    expect(html).toContain("Send Ramp follow-up");
+    expect(html).not.toContain("Send Ramp follow-up");
     expect(html).toContain("Due by today");
     expect(html).toContain("You have 3 high-fit roles");
     expect(html).toContain("Hightouch");
     expect(html).toContain("Anthropic");
     expect(html).toContain("Juniper Square technical screen");
     expect(html).not.toContain("Glean packet deadline");
-    expect(html).not.toContain("Queue clear");
     expect(html).not.toContain("No interviews or calls today");
   });
 });

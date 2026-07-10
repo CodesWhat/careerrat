@@ -47,7 +47,7 @@ export function DashboardV2Page() {
       {dashboard ? (
         <>
           <section className="dashboard-v2__workbench">
-            <PriorityPanel focus={dashboard.focus} actions={model.actions} />
+            <PriorityPanel focus={dashboard.focus} />
             <PipelinePanel model={model} />
           </section>
 
@@ -75,12 +75,13 @@ function DashboardV2Scoreboard({ metrics }) {
   );
 }
 
-function PriorityPanel({ focus, actions }) {
+// One card, one decision. `focus` is recomputed server-side on every poll, so
+// the hero advances to whatever is most important now — no queue beneath it.
+function PriorityPanel({ focus }) {
   return (
     <article className="dashboard-v2__panel dashboard-v2__panel--priority">
       <PanelHeader icon={<StarIcon />} title="Priority" to="/jobs" actionLabel="Open Jobs" />
       <PriorityFocus focus={focus} />
-      <ActionStack actions={actions} />
     </article>
   );
 }
@@ -117,31 +118,6 @@ function PriorityFocus({ focus }) {
   );
 }
 
-function ActionStack({ actions }) {
-  const rows = Array.isArray(actions) ? actions : [];
-  return (
-    <div className="dashboard-v2__action-stack">
-      {rows.length ? (
-        rows.map((action) => (
-          <Link
-            className="dashboard-v2__action-row"
-            key={nextStepKey(action)}
-            to={action.detailId ? `/jobs?open=${encodeURIComponent(action.detailId)}` : "/jobs"}
-          >
-            <span className="dashboard-v2__row-copy">
-              <strong>{action.title}</strong>
-              <small>{action.supportingText || action.company || action.dueText || "Review"}</small>
-            </span>
-            <span className="dashboard-v2__row-action">{action.actionLabel || "Review"}</span>
-          </Link>
-        ))
-      ) : (
-        <div className="dashboard-v2__empty">Queue clear.</div>
-      )}
-    </div>
-  );
-}
-
 function PipelinePanel({ model }) {
   return (
     <aside className="dashboard-v2__panel">
@@ -168,9 +144,7 @@ function DecisionPanel({ decision, roles }) {
     <article className="dashboard-v2__panel">
       <PanelHeader icon={<CheckIcon />} title="Decide" to="/jobs" actionLabel="Open Roles" />
       <div
-        className={`dashboard-v2__nudge dashboard-v2__decision-nudge${
-          decision.hasWork ? " dashboard-v2__nudge--active" : ""
-        }`}
+        className={`dashboard-v2__nudge${decision.hasWork ? " dashboard-v2__nudge--active" : ""}`}
       >
         <strong>{decision.title}</strong>
         <p>{decision.summary}</p>
@@ -296,7 +270,6 @@ function hasDashboardV2Content(data) {
 
 function buildDashboardV2Model(data) {
   const allSteps = dashboardAllSteps(data);
-  const actions = dashboardQueueSteps(data);
   const todayEvents = dashboardTodayEvents(data);
   const reviewRoles = dashboardReviewRoles(data);
   const highFitRoles = dashboardHighFitRoles(data);
@@ -305,7 +278,8 @@ function buildDashboardV2Model(data) {
   const highFitCount = highFitRoleCount(data, highFitRoles);
   const decisionCount = decisionRoleCount(data, reviewRoles);
   // Counts every step that needs the user, including the one promoted to the
-  // focus card — `actions` excludes it and is capped, so it undercounts.
+  // focus card. Only the hero renders, so this tile is the sole signal of how
+  // much work is queued behind it.
   const needsYou = allSteps.length;
   const dueNow = allSteps.filter(
     (step) => step?.tone === "error" || /\b(overdue|today)\b/i.test(step?.dueText || "")
@@ -313,7 +287,6 @@ function buildDashboardV2Model(data) {
   const activeJobs = Number(data?.jobs?.visibleCount);
 
   return {
-    actions,
     todayEvents,
     reviewRoles,
     highFitRoles,
@@ -347,27 +320,6 @@ function dashboardAllSteps(data) {
   if (Array.isArray(data?.allNextSteps)) return data.allNextSteps;
   if (Array.isArray(data?.nextSteps)) return data.nextSteps;
   return [];
-}
-
-// The focus card already renders the top step as the hero. Repeating it as the
-// first queue row says the same thing twice and buries what comes next.
-function dashboardQueueSteps(data) {
-  return dashboardAllSteps(data)
-    .filter((step) => !stepIsFocus(step, data?.focus))
-    .slice(0, 4);
-}
-
-function stepIsFocus(step, focus) {
-  if (!step || !focus) return false;
-  if (step.detailId && focus.detailId) return step.detailId === focus.detailId;
-  const stepTitle = normalizeTitle(step.title);
-  return Boolean(stepTitle) && stepTitle === normalizeTitle(focus.title);
-}
-
-function normalizeTitle(value) {
-  return String(value || "")
-    .trim()
-    .toLowerCase();
 }
 
 function dashboardReviewRoles(data) {
@@ -513,12 +465,6 @@ function calendarKindLabel(kind) {
   return String(kind)
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
-}
-
-function nextStepKey(step) {
-  return [step.detailId, step.title, step.company, step.dueText, step.actionLabel]
-    .filter(Boolean)
-    .join("::");
 }
 
 function calendarEventKey(event) {
