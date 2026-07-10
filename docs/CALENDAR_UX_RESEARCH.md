@@ -2,25 +2,26 @@
 
 Researched July 10, 2026. Companion to `DASHBOARD_UX_RESEARCH.md`.
 
-**Decision (July 10, 2026):** Calendar V2 is the current `/calendar`. The original and V3 are deleted and
-recoverable at git tag `archive/calendar-v3`. This doc holds the research and the shape the next version
-should take.
+**Decision (July 10, 2026):** `CalendarNextPage.jsx` — the agenda-first shape below — is `/calendar`. The
+original server-rendered calendar, V2, and V3 are all deleted. All three are recoverable at git tag
+`archive/calendar-v3`.
 
-## The problem with what we have
+## The problem this replaced
 
 Rolester's calendar is a **sparse work-queue calendar**, not a personal calendar. Its events are interviews,
 recruiter calls, follow-ups, and deadlines. Volume is 0-4 events a day, most days empty, often a whole week
 with two events. The question a user brings to it is "what's coming up and what do I have to prepare for,"
 never "how does my month compare."
 
-V2 answers a question nobody asked. It renders the same handful of events **four times**: a Today panel, a
+V2 answered a question nobody asked. It rendered the same handful of events **four times**: a Today panel, a
 Month Snapshot with dot indicators, a week grid, and a full month grid behind a Week/Month toggle. The
-dashboard already has a Today panel, so that's a fifth. Meanwhile a month grid of a sparse calendar is
+dashboard already has a Today panel, so that was a fifth. Meanwhile a month grid of a sparse calendar is
 roughly 35 empty cells, and empty cells that say nothing read as broken rather than calm (NN/g, empty
 states).
 
 The original server-rendered calendar was week + month, plus a Next-up rail and an Open-loops rail. It had
-less redundancy and more capability. See `PORT_PARITY_AUDIT.md` for what it did that V2 dropped.
+less redundancy and more capability. See `PORT_PARITY_AUDIT.md` for what it did that V2 dropped, and which
+of those the current page restored.
 
 ## Verdict
 
@@ -97,15 +98,17 @@ follow-up that's still open). Collapsed by default. Not dimmed.
 
 ### 5. Per-event export
 `.ics`, Google, Outlook. The view model already attaches `export` to every calendar event
-(`dashboard-data.js:1869`) and V2 throws it away. This is the one thing a job-search calendar uniquely owes
-the user: getting the interview onto their real calendar. It's render-only work.
+(`dashboard-data.js:1869`) and V2 threw it away. This is the one thing a job-search calendar uniquely owes
+the user: getting the interview onto their real calendar. It was render-only work.
 
-## What V2 loses in the move
+## What V2 lost in the move
 
 - Today panel — the dashboard has one, and the agenda's first bucket *is* today.
 - Month Snapshot panel — replaced by the date strip.
 - Month grid + Week/Month toggle — replaced by the date strip.
 - Week grid of day cards with `Open` filler — the agenda has no empty days to fill.
+- Week paging — the agenda collects all three weeks the server sends, so next week is a bucket you scroll
+  to, not a page you navigate to.
 
 ## Visual rules
 
@@ -122,13 +125,12 @@ Inherit the language. Do not invent one.
 ## Data
 
 The page renders fields; it does not derive them. `dashboard-data.js` owns the calendar rules server-side.
-Fields it already emits that V2 ignores: `event.export` (`.ics` + Google + Outlook), `event.done`,
-`event.cta`, `week.nextUp`, `week.loops`.
+Fields V2 ignored that the current page now renders: `event.export` (`.ics` + Google + Outlook) and
+`event.done`. Still unread by anything: `event.cta`, `week.nextUp`, `week.loops`.
 
-Fields the target shape needs that the view model does **not** yet emit:
-- `event.prepped` — whether the interview has a prep packet. Needed for the one status signal on the chip.
-- `event.bucket` — which time-relative bucket a row belongs to, so the client doesn't recompute date math the
-  server already knows how to do.
+Fields the shape needs that the view model does **not** yet emit:
+- `event.prepped` — whether the interview has a prep packet. Drives the one status signal on the row. The
+  page already renders it, gated on a strict `=== false`, so it stays dark until the server emits it.
 - `event.source` / `event.why` — for agent-populated events.
 
 ## Sources

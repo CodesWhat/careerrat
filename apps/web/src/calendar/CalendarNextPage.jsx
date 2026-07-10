@@ -1,12 +1,10 @@
 // apps/web/src/calendar/CalendarNextPage.jsx — the agenda-first calendar from
-// docs/CALENDAR_UX_RESEARCH.md ("The target shape"). Ships alongside
-// CalendarV2Page.jsx (untouched) so the two can be compared at /calendar and
-// /calendar-next. Renders fields the way DashboardContext.jsx's data
-// contract requires: `data.calendar` is the unmodified output of
-// buildCalendar() (src/core/tracker/dashboard-data.js) — every event's
-// `done`, `cta`, `label`, and `kind` are rendered as-is, never re-derived.
-// Bucket placement and the 14-day strip window ARE client-side date math
-// (permitted — CalendarV2Page.jsx's calendarMonthForV2 already does this).
+// docs/CALENDAR_UX_RESEARCH.md ("The target shape"). Renders fields the way
+// DashboardContext.jsx's data contract requires: `data.calendar` is the
+// unmodified output of buildCalendar() (src/core/tracker/dashboard-data.js) —
+// every event's `done`, `cta`, `label`, and `kind` is rendered as-is, never
+// re-derived. Bucket placement and the 14-day strip window are the only
+// client-side date math, and they derive nothing the server owns.
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
@@ -327,9 +325,8 @@ function buildCalendarNextModel(calendar) {
   };
 }
 
-// Mirrors collectCalendarEvents() in CalendarV2Page.jsx exactly, including
-// the top-level week.events source (V2 reads it too, even though it's easy
-// to miss reading the function signature alone).
+// buildCalendar() scatters events across five places. Miss one (week.events and
+// week.nextUp are the easy ones to miss) and rows silently vanish from the agenda.
 function collectCalendarEvents(calendar) {
   const events = [];
   if (Array.isArray(calendar?.today?.events)) events.push(...calendar.today.events);

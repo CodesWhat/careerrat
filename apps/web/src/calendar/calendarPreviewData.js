@@ -1,10 +1,9 @@
 // apps/web/src/calendar/calendarPreviewData.js — dev-only fallback data for
 // CalendarNextPage.jsx, shown when the live dashboard snapshot carries no
-// calendar content (same hasCalendarContent() + import.meta.env.DEV fallback
-// contract CalendarV2Page.jsx uses; see calendarForNext() there). Shaped like
-// buildCalendar()'s real output (src/core/tracker/dashboard-data.js) so every
-// agenda bucket the page renders has an example — except Tomorrow, which is
-// left empty on purpose so the empty-bucket state is visible in dev.
+// calendar content (see hasCalendarContent() + calendarForNext() there).
+// Shaped like buildCalendar()'s real output (src/core/tracker/dashboard-data.js)
+// so every agenda bucket the page renders has an example — except Tomorrow,
+// which is left empty on purpose so the empty-bucket state is visible in dev.
 
 function pad2(value) {
   return String(value).padStart(2, "0");

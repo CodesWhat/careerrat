@@ -23,7 +23,6 @@ describe("NavList", () => {
     for (const label of [
       "Dashboard",
       "Calendar",
-      "Calendar Next",
       "Jobs",
       "Jobs V2",
       "Jobs V3",
@@ -44,6 +43,7 @@ describe("NavList", () => {
     expect(html).not.toContain("Dashboard V3");
     expect(html).not.toContain("Calendar V2");
     expect(html).not.toContain("Calendar V3");
+    expect(html).not.toContain("Calendar Next");
     expect(html).not.toContain("nav-item__badge");
   });
 

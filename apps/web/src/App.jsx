@@ -2,7 +2,6 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./app-shell/AppShell.jsx";
 import { DashboardProvider } from "./app-shell/DashboardContext.jsx";
 import { CalendarNextPage } from "./calendar/CalendarNextPage.jsx";
-import { CalendarV2Page } from "./calendar/CalendarV2Page.jsx";
 import { InboxPage } from "./inbox/InboxPage.jsx";
 import { JobsPage } from "./jobs/JobsPage.jsx";
 import { JobsV2Page } from "./jobs/JobsV2Page.jsx";
@@ -41,8 +40,7 @@ export function App() {
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/jobs-v2" element={<JobsV2Page />} />
         <Route path="/jobs-v3" element={<JobsV3Page />} />
-        <Route path="/calendar" element={<CalendarV2Page />} />
-        <Route path="/calendar-next" element={<CalendarNextPage />} />
+        <Route path="/calendar" element={<CalendarNextPage />} />
         <Route path="/network" element={<NetworkPage />} />
         <Route path="/network-v2" element={<NetworkV2Page />} />
         <Route path="/network-v3" element={<NetworkV3Page />} />

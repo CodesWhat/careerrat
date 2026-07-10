@@ -5,7 +5,6 @@ import { NavLink } from "react-router-dom";
 export const PRIMARY_NAV_ITEMS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/calendar", label: "Calendar" },
-  { to: "/calendar-next", label: "Calendar Next" },
   { to: "/jobs", label: "Jobs" },
   { to: "/jobs-v2", label: "Jobs V2" },
   { to: "/jobs-v3", label: "Jobs V3" },
