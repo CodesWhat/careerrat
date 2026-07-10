@@ -23,6 +23,7 @@ describe("NavList", () => {
     for (const label of [
       "Dashboard",
       "Calendar",
+      "Calendar Next",
       "Jobs",
       "Jobs V2",
       "Jobs V3",
