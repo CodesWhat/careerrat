@@ -5,162 +5,24 @@ import {
   ArrowRightIcon,
   CalendarIcon,
   CheckIcon,
-  ClockIcon,
   ListIcon,
   SearchIcon,
+  StarIcon,
 } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
+import { V2_PREVIEW_DASHBOARD } from "../v2/v2MockData.js";
 
-const PREVIEW_FOLLOW_UPS = [
-  {
-    id: "preview-icapital",
-    company: "iCapital",
-    role: "AI Operations Lead — VP/SVP",
-    dateLabel: "applied 2026-06-05",
-    domain: "icapital.com",
-  },
-  {
-    id: "preview-langchain",
-    company: "LangChain",
-    role: "Deployed Engineer (NYC)",
-    dateLabel: "applied 2026-06-15",
-    domain: "langchain.com",
-  },
-  {
-    id: "preview-parachute",
-    company: "Parachute Health",
-    role: "Staff Software Engineer, Applied AI",
-    dateLabel: "applied 2026-06-15",
-    domain: "parachutehealth.com",
-  },
-  {
-    id: "preview-anthropic-1",
-    company: "Anthropic",
-    role: "Applied AI Architect, Enterprise Tech",
-    dateLabel: "applied 2026-06-15",
-    domain: "anthropic.com",
-  },
-  {
-    id: "preview-anthropic-2",
-    company: "Anthropic",
-    role: "Manager of Applied AI Architecture",
-    dateLabel: "applied 2026-06-15",
-    domain: "anthropic.com",
-  },
-  {
-    id: "preview-figma",
-    company: "Figma",
-    role: "Support AI Engineer",
-    dateLabel: "applied 2026-06-15",
-    domain: "figma.com",
-  },
-];
-
-const PREVIEW_DECISIONS = [
-  {
-    id: "preview-ramp",
-    company: "Ramp",
-    role: "Applied AI Engineer, Fullstack",
-    fit: "4.10/5",
-    tone: "warn",
-    domain: "ramp.com",
-  },
-  {
-    id: "preview-finite-state",
-    company: "Finite State",
-    role: "AI Software Engineer",
-    fit: "4.10/5",
-    tone: "warn",
-    domain: "finitestate.io",
-  },
-  {
-    id: "preview-ro",
-    company: "Ro",
-    role: "Senior AI Engineer",
-    fit: "4.55/5",
-    tone: "good",
-    domain: "ro.co",
-  },
-  {
-    id: "preview-avalara",
-    company: "Avalara",
-    role: "Principal Automation Engineer",
-    fit: "4.40/5",
-    tone: "good",
-    domain: "avalara.com",
-  },
-];
-
-const PREVIEW_MATCHES = [
-  {
-    id: "preview-aledade",
-    company: "Aledade",
-    role: "Senior Software Engineer II",
-    location: "Remote (US)",
-    domain: "aledade.com",
-    source: "ai-search",
-  },
-  {
-    id: "preview-agiloft",
-    company: "Agiloft",
-    role: "Forward Deployed Engineer - AI",
-    location: "Remote (US)",
-    domain: "agiloft.com",
-    source: "ai-search",
-  },
-  {
-    id: "preview-bolt",
-    company: "Bolt.new (StackBlitz)",
-    role: "Senior Applied AI Engineer",
-    location: "Remote",
-    domain: "stackblitz.com",
-    source: "ai-search",
-  },
-  {
-    id: "preview-assetwatch",
-    company: "AssetWatch",
-    role: "Sr. Applied AI Engineer",
-    location: "Remote (US)",
-    domain: "assetwatch.com",
-    source: "ai-search",
-  },
-  {
-    id: "preview-homeward",
-    company: "Homeward",
-    role: "Applied AI Engineer",
-    location: "Remote (US)",
-    domain: "homewardhealth.com",
-    source: "ai-search",
-  },
-  {
-    id: "preview-human-agency",
-    company: "Human Agency",
-    role: "Applied AI Engineer",
-    location: "Remote",
-    domain: "humanagency.com",
-    source: "ai-search",
-  },
-];
-
-const PREVIEW_EVENTS = [
-  {
-    id: "preview-interview",
-    title: "Juniper Square interview",
-    dateLabel: "Today",
-    time: "2:00 PM",
-    label: "Interview",
-  },
-  {
-    id: "preview-followup",
-    title: "Send NICE thank-you",
-    dateLabel: "Tomorrow",
-    time: "9:00 AM",
-    label: "Follow-up",
-  },
-];
+const FOCUS_TONE_CLASS = {
+  error: "dashboard-v2__pill--danger",
+  warning: "dashboard-v2__pill--warning",
+  success: "dashboard-v2__pill--success",
+  secondary: "dashboard-v2__pill--muted",
+};
 
 export function DashboardV2Page() {
   const { data, loading, error, noDatabase } = useDashboardSnapshot();
+  const dashboard = data ? dashboardForV2(data) : null;
+  const model = buildDashboardV2Model(dashboard);
 
   if (noDatabase) {
     return (
@@ -170,278 +32,477 @@ export function DashboardV2Page() {
     );
   }
 
-  const followUps = normalizeFollowUps(data);
-  const decisions = normalizeDecisions(data);
-  const matches = normalizeMatches(data);
-  const scheduled = normalizeScheduled(data);
-  const usingPreview =
-    !followUps.realCount && !decisions.realCount && !matches.realCount && !scheduled.realCount;
-
   return (
     <div className="dashboard-v2">
-      <header className="dashboard-v2__masthead">
-        <p className="dashboard-v2__date-line">Today · {formatTodayLabel()}</p>
-        <h1 className="dashboard-v2__hero-title">What needs you today.</h1>
-        <p className="dashboard-v2__hero-copy">
-          Follow-ups, decisions, interviews, and fresh roles in one Rolester queue.
-        </p>
-        <div className="dashboard-v2__hero-actions">
-          <Link className="dashboard-v2__primary-link" to="/jobs">
-            Find roles <ArrowRightIcon />
-          </Link>
-          <Link className="dashboard-v2__secondary-link" to="/jobs">
-            Open jobs
-          </Link>
+      <header className="dashboard-v2__hero">
+        <div className="dashboard-v2__title-block">
+          <span className="dashboard-v2__eyebrow">
+            Dashboard V2{model.preview ? " · Preview Data" : ""}
+          </span>
+          <h1 className="dashboard-v2__title">Today</h1>
         </div>
-        {usingPreview ? <span className="dashboard-v2__preview-pill">Mock data</span> : null}
+        <DashboardV2Scoreboard metrics={model.metrics} />
       </header>
 
       {error ? <InlineAlert message={error} /> : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
-      <section className="dashboard-v2__section dashboard-v2__section--queue">
-        <SectionHeading icon={<ListIcon />} title="Start here" detail="Highest-priority action" />
-        <div className="dashboard-v2__queue-card">
-          <QueueHero item={followUps.items[0]} />
-          <div className="dashboard-v2__queue-list">
-            {followUps.items.slice(1, 5).map((item) => (
-              <FollowUpRow key={item.id} item={item} compact />
-            ))}
-          </div>
-        </div>
-      </section>
+      {dashboard ? (
+        <>
+          <section className="dashboard-v2__workbench">
+            <PriorityPanel focus={dashboard.focus} actions={model.actions} />
+            <PipelinePanel model={model} />
+          </section>
 
-      <section className="dashboard-v2__section">
-        <SectionHeading icon={<ClockIcon />} title="Keep warm" detail="People waiting on a nudge" />
-        <div className="dashboard-v2__followup-list">
-          {followUps.items.map((item) => (
-            <FollowUpRow key={item.id} item={item} />
-          ))}
-        </div>
-      </section>
-
-      <section className="dashboard-v2__section">
-        <SectionHeading icon={<CheckIcon />} title="Decide" detail="Apply, skip, or park" />
-        <div className="dashboard-v2__decision-grid">
-          {decisions.items.map((item) => (
-            <DecisionCard key={item.id} item={item} />
-          ))}
-        </div>
-      </section>
-
-      <section className="dashboard-v2__section">
-        <SectionHeading icon={<SearchIcon />} title="Fresh finds" detail="Saved by your scans" />
-        <div className="dashboard-v2__match-grid">
-          {matches.items.map((item) => (
-            <MatchCard key={item.id} item={item} />
-          ))}
-        </div>
-      </section>
-
-      <section className="dashboard-v2__section dashboard-v2__section--scheduled">
-        <SectionHeading icon={<CalendarIcon />} title="On deck" detail="Interviews and deadlines" />
-        <div className="dashboard-v2__scheduled-list">
-          {scheduled.items.map((item) => (
-            <ScheduledRow key={item.id} item={item} />
-          ))}
-        </div>
-      </section>
+          <section className="dashboard-v2__lower-grid" aria-label="Dashboard V2 work queues">
+            <DecisionPanel decision={model.nextDecision} roles={model.reviewRoles} />
+            <FreshFindsPanel roles={model.freshRoles} />
+            <TodayPanel events={model.todayEvents} />
+          </section>
+        </>
+      ) : null}
     </div>
   );
 }
 
-function SectionHeading({ icon, title, detail }) {
+function DashboardV2Scoreboard({ metrics }) {
   return (
-    <header className="dashboard-v2__section-heading">
-      <span className="dashboard-v2__section-icon">{icon}</span>
-      <h2>{title}</h2>
-      {detail ? <p>{detail}</p> : null}
+    <section className="dashboard-v2__scoreboard" aria-label="Dashboard status">
+      {metrics.map((metric) => (
+        <div className={`dashboard-v2__score dashboard-v2__score--${metric.tone}`} key={metric.key}>
+          <strong data-dashboard-v2-stat={metric.key}>{formatNumber(metric.value)}</strong>
+          <span>{metric.label}</span>
+        </div>
+      ))}
+    </section>
+  );
+}
+
+function PriorityPanel({ focus, actions }) {
+  return (
+    <article className="dashboard-v2__panel dashboard-v2__panel--priority">
+      <PanelHeader icon={<StarIcon />} title="Priority" to="/jobs" actionLabel="Open Jobs" />
+      <PriorityFocus focus={focus} />
+      <ActionStack actions={actions} />
+    </article>
+  );
+}
+
+function PriorityFocus({ focus }) {
+  if (!focus) {
+    return (
+      <div className="dashboard-v2__focus">
+        <span className="dashboard-v2__pill dashboard-v2__pill--success">Clear</span>
+        <h2>Nothing blocking</h2>
+        <p>No tracked action needs attention right now.</p>
+      </div>
+    );
+  }
+
+  const ctaTo = focus.detailId ? `/jobs?open=${encodeURIComponent(focus.detailId)}` : "/jobs";
+  const toneClass = FOCUS_TONE_CLASS[focus.tone] || FOCUS_TONE_CLASS.secondary;
+
+  return (
+    <div className="dashboard-v2__focus">
+      {focus.dueText ? (
+        <span className={`dashboard-v2__pill ${toneClass}`}>{duePillLabel(focus.dueText)}</span>
+      ) : null}
+      <h2>{focus.title}</h2>
+      <p>
+        {focus.company}
+        {focus.role ? ` · ${focus.role}` : ""}
+      </p>
+      <Link className="dashboard-v2__primary-link" to={ctaTo}>
+        <span>{focus.cta || "Review"}</span>
+        <ArrowRightIcon />
+      </Link>
+    </div>
+  );
+}
+
+function ActionStack({ actions }) {
+  const rows = Array.isArray(actions) ? actions : [];
+  return (
+    <div className="dashboard-v2__action-stack">
+      {rows.length ? (
+        rows.map((action) => (
+          <Link
+            className="dashboard-v2__action-row"
+            key={nextStepKey(action)}
+            to={action.detailId ? `/jobs?open=${encodeURIComponent(action.detailId)}` : "/jobs"}
+          >
+            <span className="dashboard-v2__row-copy">
+              <strong>{action.title}</strong>
+              <small>{action.supportingText || action.company || action.dueText || "Review"}</small>
+            </span>
+            <span className="dashboard-v2__row-action">{action.actionLabel || "Review"}</span>
+          </Link>
+        ))
+      ) : (
+        <div className="dashboard-v2__empty">Queue clear.</div>
+      )}
+    </div>
+  );
+}
+
+function PipelinePanel({ model }) {
+  return (
+    <aside className="dashboard-v2__panel">
+      <PanelHeader icon={<ListIcon />} title="Momentum" to="/jobs" actionLabel="Open Jobs" />
+      <div className="dashboard-v2__pipeline-list">
+        {model.pipeline.map((item) => (
+          <div className="dashboard-v2__pipeline-row" key={item.key}>
+            <span className="dashboard-v2__pipeline-label">
+              <strong>{item.label}</strong>
+              <small>{item.supporting}</small>
+            </span>
+            <span className="dashboard-v2__pipeline-meter" aria-hidden="true">
+              <span style={{ width: `${item.width}%` }} />
+            </span>
+            <span className="dashboard-v2__pipeline-value">{formatNumber(item.value)}</span>
+          </div>
+        ))}
+      </div>
+    </aside>
+  );
+}
+
+function DecisionPanel({ decision, roles }) {
+  return (
+    <article className="dashboard-v2__panel">
+      <PanelHeader icon={<CheckIcon />} title="Decide" to="/jobs" actionLabel="Open Roles" />
+      <div
+        className={`dashboard-v2__nudge dashboard-v2__decision-nudge${
+          decision.hasWork ? " dashboard-v2__nudge--active" : ""
+        }`}
+      >
+        <strong>{decision.title}</strong>
+        <p>{decision.summary}</p>
+      </div>
+      <RoleList
+        roles={roles}
+        emptyText={
+          decision.hasWork
+            ? "Open Jobs to review the waiting roles."
+            : "No high-fit roles need a decision."
+        }
+      />
+    </article>
+  );
+}
+
+function FreshFindsPanel({ roles }) {
+  return (
+    <article className="dashboard-v2__panel">
+      <PanelHeader icon={<SearchIcon />} title="Fresh Finds" to="/jobs" actionLabel="Search" />
+      <RoleList roles={roles} emptyText="No fresh roles from the last sweep." />
+    </article>
+  );
+}
+
+function TodayPanel({ events }) {
+  const rows = Array.isArray(events) ? events : [];
+  return (
+    <article className="dashboard-v2__panel">
+      <PanelHeader icon={<CalendarIcon />} title="Today" to="/calendar" actionLabel="Calendar" />
+      <div className="dashboard-v2__event-list">
+        {rows.length ? (
+          rows.map((event) => (
+            <Link
+              className="dashboard-v2__event-row"
+              key={calendarEventKey(event)}
+              to={event.detailId ? `/jobs?open=${encodeURIComponent(event.detailId)}` : "/calendar"}
+            >
+              <span className="dashboard-v2__date-cell">
+                <strong>{event.time || formatDateShort(event.iso)}</strong>
+                {event.time ? <small>Today</small> : null}
+              </span>
+              <span className="dashboard-v2__row-copy">
+                <strong>{event.title}</strong>
+                <small>{event.label || calendarKindLabel(event.kind)}</small>
+              </span>
+            </Link>
+          ))
+        ) : (
+          <div className="dashboard-v2__empty">No interviews or calls today.</div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function RoleList({ roles, emptyText }) {
+  const rows = Array.isArray(roles) ? roles : [];
+  return (
+    <div className="dashboard-v2__role-list">
+      {rows.length ? (
+        rows.map((role) => (
+          <Link
+            className="dashboard-v2__role-row"
+            key={latestRoleKey(role)}
+            to={role.detailId ? `/jobs?open=${encodeURIComponent(role.detailId)}` : "/jobs"}
+          >
+            <CompanyAvatar name={role.company} domain={role.domain} size={32} />
+            <span className="dashboard-v2__row-copy">
+              <strong>{role.company}</strong>
+              <small>{role.role || "Open Role"}</small>
+            </span>
+            {fitLabel(role.fit) ? (
+              <span className="dashboard-v2__fit">{fitLabel(role.fit)}</span>
+            ) : null}
+          </Link>
+        ))
+      ) : (
+        <div className="dashboard-v2__empty">{emptyText}</div>
+      )}
+    </div>
+  );
+}
+
+function PanelHeader({ icon, title, to, actionLabel }) {
+  return (
+    <header className="dashboard-v2__panel-header">
+      <h2>
+        <span className="dashboard-v2__panel-icon">{icon}</span>
+        <span>{title}</span>
+      </h2>
+      {to ? (
+        <Link className="dashboard-v2__panel-link" to={to}>
+          <span>{actionLabel}</span>
+          <ArrowRightIcon />
+        </Link>
+      ) : null}
     </header>
   );
 }
 
-function QueueHero({ item }) {
-  if (!item) return null;
-  return (
-    <article className="dashboard-v2__queue-hero">
-      <CompanyAvatar name={item.company} domain={item.domain} size={44} />
-      <div>
-        <span className="dashboard-v2__eyebrow">First up</span>
-        <h3>{item.title || `${item.company} · ${item.role}`}</h3>
-        <p>{item.supportingText || item.dateLabel || `${item.company} · ${item.role}`}</p>
-      </div>
-      <button className="dashboard-v2__row-button" type="button">
-        Mark done
-      </button>
-    </article>
+function dashboardForV2(data) {
+  if (hasDashboardV2Content(data)) return data;
+  return import.meta.env.DEV ? V2_PREVIEW_DASHBOARD : data;
+}
+
+function hasDashboardV2Content(data) {
+  if (!data) return false;
+  if (data.focus && data.focus.kind !== "clear") return true;
+  if ((data.allNextSteps || []).length > 0) return true;
+  if ((data.nextSteps || []).length > 0) return true;
+  if ((data.reviewHoldRoles || []).length > 0) return true;
+  if ((data.latestRoles || []).length > 0) return true;
+  if ((data.sourcedRoles || []).length > 0) return true;
+  if ((data.calendar?.today?.events || []).length > 0) return true;
+  if ((data.calendar?.upcoming?.events || []).length > 0) return true;
+  if (Number(data.jobs?.visibleCount || 0) > 0) return true;
+  const rail = data.jobs?.rail || {};
+  return ["manualReview", "highFit", "screenPlus", "fresh", "terminal"].some(
+    (key) => Number(rail[key] || 0) > 0
   );
 }
 
-function FollowUpRow({ item, compact = false }) {
-  return (
-    <article
-      className={`dashboard-v2__followup-row${compact ? " dashboard-v2__followup-row--compact" : ""}`}
-    >
-      <CompanyAvatar name={item.company} domain={item.domain} size={34} />
-      <div className="dashboard-v2__row-copy">
-        <h3>
-          {item.company} · <span>{item.role}</span>
-        </h3>
-        <p>{item.dateLabel || item.supportingText || "Follow-up due"}</p>
-      </div>
-      <div className="dashboard-v2__row-actions">
-        <button className="dashboard-v2__row-button" type="button">
-          <CheckIcon /> Done
-        </button>
-        <button className="dashboard-v2__text-button" type="button">
-          Later
-        </button>
-      </div>
-    </article>
-  );
+function buildDashboardV2Model(data) {
+  const actions = dashboardQueueSteps(data);
+  const todayEvents = dashboardTodayEvents(data);
+  const reviewRoles = dashboardReviewRoles(data);
+  const highFitRoles = dashboardHighFitRoles(data);
+  const freshRoles = dashboardFreshRoles(data, reviewRoles);
+  const pipeline = dashboardPipeline(data);
+  const highFitCount = highFitRoleCount(data, highFitRoles);
+  const decisionCount = decisionRoleCount(data, reviewRoles);
+  const needsYou = actions.length;
+  const dueNow = actions.filter(
+    (step) => step?.tone === "error" || /\b(overdue|today)\b/i.test(step?.dueText || "")
+  ).length;
+  const activeJobs = Number(data?.jobs?.visibleCount);
+
+  return {
+    actions,
+    todayEvents,
+    reviewRoles,
+    highFitRoles,
+    freshRoles,
+    pipeline,
+    nextDecision: dashboardNextDecision(data, decisionCount),
+    preview: data === V2_PREVIEW_DASHBOARD,
+    metrics: [
+      {
+        key: "needsYou",
+        label: "Needs You",
+        tone: dueNow ? "danger" : "neutral",
+        value: needsYou,
+      },
+      {
+        key: "highFit",
+        label: "High Fit",
+        tone: "teal",
+        value: highFitCount,
+      },
+      {
+        key: "activeJobs",
+        label: "Active",
+        tone: "sky",
+        value: Number.isFinite(activeJobs) ? activeJobs : Number(data?.stats?.inPlay || 0),
+      },
+    ],
+  };
 }
 
-function DecisionCard({ item }) {
-  return (
-    <article className="dashboard-v2__decision-card">
-      <div className="dashboard-v2__decision-head">
-        <CompanyAvatar name={item.company} domain={item.domain} size={34} />
-        <span className={`dashboard-v2__score dashboard-v2__score--${item.tone || "warn"}`}>
-          {item.fit}
-        </span>
-      </div>
-      <h3>{item.company}</h3>
-      <p>{item.role}</p>
-      <div className="dashboard-v2__decision-actions">
-        <button className="dashboard-v2__mark-button" type="button">
-          <CheckIcon /> Applied
-        </button>
-        <button className="dashboard-v2__skip-button" type="button">
-          Skip
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function MatchCard({ item }) {
-  return (
-    <article className="dashboard-v2__match-card">
-      <div className="dashboard-v2__match-head">
-        <CompanyAvatar name={item.company} domain={item.domain} size={34} />
-        <Link className="dashboard-v2__external" to="/jobs" aria-label={`Open ${item.company}`}>
-          <ArrowRightIcon />
-        </Link>
-      </div>
-      <h3>{item.role}</h3>
-      <p>
-        {item.company} · {item.location || "Remote"}
-      </p>
-      <div className="dashboard-v2__match-meta">
-        <span>{item.source || "ai-search"}</span>
-        <span>{item.age || "1d ago"}</span>
-      </div>
-      <div className="dashboard-v2__match-actions">
-        <button className="dashboard-v2__pipeline-button" type="button">
-          <CheckIcon /> Save
-        </button>
-        <button className="dashboard-v2__evaluate-button" type="button">
-          Evaluate
-        </button>
-      </div>
-    </article>
-  );
-}
-
-function ScheduledRow({ item }) {
-  return (
-    <article className="dashboard-v2__scheduled-row">
-      <span className="dashboard-v2__scheduled-date">
-        <strong>{item.dateLabel}</strong>
-        {item.time ? <small>{item.time}</small> : null}
-      </span>
-      <div>
-        <h3>{item.title}</h3>
-        <p>{item.label || "Scheduled"}</p>
-      </div>
-    </article>
-  );
-}
-
-function normalizeFollowUps(data) {
+function dashboardQueueSteps(data) {
   const steps = Array.isArray(data?.allNextSteps)
     ? data.allNextSteps
     : Array.isArray(data?.nextSteps)
       ? data.nextSteps
       : [];
-  const items = steps.slice(0, 8).map((step, index) => ({
-    id: step.detailId || `step-${index}`,
-    company: step.company || "Rolester",
-    title: step.title || "",
-    role: step.detail || step.title || "Next action",
-    dateLabel: step.dueText || step.supportingText || "Due",
-    supportingText: step.supportingText,
-  }));
-  return { items: items.length ? items : PREVIEW_FOLLOW_UPS, realCount: items.length };
+  return steps.slice(0, 4);
 }
 
-function normalizeDecisions(data) {
-  const rows = Array.isArray(data?.reviewHoldRoles) ? data.reviewHoldRoles : [];
-  const items = rows.slice(0, 4).map((role, index) => ({
-    id: role.detailId || role.id || `decision-${index}`,
-    company: role.company || "Unknown company",
-    role: role.role || "Open role",
-    fit: formatFit(role.fit),
-    tone: Number(role.fit) >= 4.3 || Number(role.fit) >= 86 ? "good" : "warn",
-    domain: role.domain,
-  }));
-  return { items: items.length ? items : PREVIEW_DECISIONS, realCount: items.length };
+function dashboardReviewRoles(data) {
+  return (Array.isArray(data?.reviewHoldRoles) ? data.reviewHoldRoles : []).slice(0, 4);
 }
 
-function normalizeMatches(data) {
+function dashboardHighFitRoles(data) {
   const latest = Array.isArray(data?.latestRoles) ? data.latestRoles : [];
   const sourced = Array.isArray(data?.sourcedRoles) ? data.sourcedRoles : [];
-  const source = latest.length ? latest : sourced;
-  const items = source.slice(0, 6).map((role, index) => ({
-    id: role.detailId || role.id || `match-${index}`,
-    company: role.company || "Unknown company",
-    role: role.role || "Open role",
-    fit: role.fit,
-    location: role.location,
-    domain: role.domain,
-    source: role.source || "ai-search",
-    age: role.age || "new",
-  }));
-  return { items: items.length ? items : PREVIEW_MATCHES, realCount: items.length };
+  const seen = new Set();
+  return [...latest, ...sourced]
+    .filter((role) => Number(role?.fit) >= 80)
+    .filter((role) => {
+      const key = latestRoleKey(role);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 4);
 }
 
-function normalizeScheduled(data) {
-  const events = Array.isArray(data?.calendar?.upcoming?.events)
-    ? data.calendar.upcoming.events
-    : [];
-  const items = events.slice(0, 4).map((event, index) => ({
-    id: event.id || event.detailId || `scheduled-${index}`,
-    title: event.title || "Scheduled item",
-    dateLabel: formatDateShort(event.iso) || "Soon",
-    time: event.time,
-    label: event.label || calendarKindLabel(event.kind),
-  }));
-  return { items: items.length ? items : PREVIEW_EVENTS, realCount: items.length };
+function dashboardFreshRoles(data, reviewRoles = []) {
+  const latest = Array.isArray(data?.latestRoles) ? data.latestRoles : [];
+  const sourced = Array.isArray(data?.sourcedRoles) ? data.sourcedRoles : [];
+  const reviewKeys = new Set(reviewRoles.map(roleDedupKey));
+  const seen = new Set();
+
+  return [...latest, ...sourced]
+    .filter((role) => !reviewKeys.has(roleDedupKey(role)))
+    .filter((role) => {
+      const key = roleDedupKey(role);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, 4);
 }
 
-function formatFit(value) {
-  if (!Number.isFinite(Number(value))) return "4.10/5";
+function dashboardTodayEvents(data) {
+  const calendar = data?.calendar || {};
+  const todayEvents = Array.isArray(calendar.today?.events) ? calendar.today.events : [];
+  const upcomingEvents = Array.isArray(calendar.upcoming?.events) ? calendar.upcoming.events : [];
+  const todayIso =
+    calendar.todayIso ||
+    calendar.today?.iso ||
+    todayEvents.find((event) => event?.iso)?.iso ||
+    new Date().toISOString().slice(0, 10);
+  const rows = todayEvents.length
+    ? todayEvents
+    : upcomingEvents.filter((event) => event?.iso === todayIso);
+
+  return rows.filter(isTimedCalendarReminder).slice(0, 4);
+}
+
+function dashboardPipeline(data) {
+  const rail = data?.jobs?.rail || {};
+  const visibleCount = Number(data?.jobs?.visibleCount || data?.stats?.inPlay || 0);
+  const items = [
+    {
+      key: "manualReview",
+      label: "Decision Load",
+      supporting: "Resolve before sourcing more",
+      value: rail.manualReview,
+    },
+    {
+      key: "screenPlus",
+      label: "Interview Momentum",
+      supporting: "Screen+ conversations",
+      value: rail.screenPlus,
+    },
+    {
+      key: "fresh",
+      label: "Fresh Supply",
+      supporting: "New roles to skim",
+      value: rail.fresh,
+    },
+    {
+      key: "active",
+      label: "Active Pipeline",
+      supporting: "Live roles in play",
+      value: visibleCount,
+    },
+  ].map((item) => ({ ...item, value: Number(item.value) || 0 }));
+  const max = Math.max(1, ...items.map((item) => item.value));
+  return items.map((item) => ({ ...item, width: Math.max(6, (item.value / max) * 100) }));
+}
+
+function dashboardNextDecision(data, decisionCount) {
+  const raw = data?.jobs?.rail?.nextDecision || {};
+  if (decisionCount > 0 || raw.hasWork) {
+    const count = decisionCount > 0 ? decisionCount : Number(data?.jobs?.rail?.manualReview || 0);
+    if (count > 0) {
+      const noun = count === 1 ? "role" : "roles";
+      const pronoun = count === 1 ? "it" : "them";
+      return {
+        ...raw,
+        title: `You have ${formatNumber(count)} high-fit ${noun}`,
+        summary: `Decide what to do with ${pronoun} now: promote, skip, or park.`,
+        hasWork: true,
+      };
+    }
+    return {
+      ...raw,
+      title: raw.title || "Decide the next roles",
+      summary: raw.summary || "Pick what to promote, skip, or park before adding more work.",
+      hasWork: true,
+    };
+  }
+  return {
+    title: "No role decisions waiting",
+    summary: "Keep the priority queue clear or run the next sourcing sweep.",
+    hasWork: false,
+  };
+}
+
+function highFitRoleCount(data, roles = []) {
+  const railHighFit = Number(data?.jobs?.rail?.highFit);
+  if (Number.isFinite(railHighFit)) return railHighFit;
+  return roles.length;
+}
+
+function decisionRoleCount(data, roles = []) {
+  const railManualReview = Number(data?.jobs?.rail?.manualReview);
+  if (Number.isFinite(railManualReview)) return railManualReview;
+  return roles.length;
+}
+
+function duePillLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  if (/^(due|by)\b/i.test(text) || /\boverdue\b/i.test(text)) return text;
+  return `Due by ${text}`;
+}
+
+function isTimedCalendarReminder(event) {
+  const text = [event?.kind, event?.label, event?.title].filter(Boolean).join(" ").toLowerCase();
+  const isLiveEvent =
+    /\b(interview|screen|call|meeting|onsite|technical|hiring manager|recruiter)\b/.test(text);
+  return Boolean(isLiveEvent);
+}
+
+function formatNumber(value) {
+  if (!Number.isFinite(Number(value))) return "0";
+  return Intl.NumberFormat("en-US").format(Number(value));
+}
+
+function fitLabel(value) {
   const numeric = Number(value);
-  if (numeric > 5) return `${(numeric / 20).toFixed(2)}/5`;
-  return `${numeric.toFixed(2)}/5`;
-}
-
-function formatTodayLabel() {
-  return new Date().toLocaleDateString("en-US", {
-    weekday: "long",
-    month: "short",
-    day: "numeric",
-  });
+  if (!Number.isFinite(numeric)) return "";
+  if (numeric > 5) return `${Math.round(numeric)}`;
+  return numeric.toFixed(2);
 }
 
 function formatDateShort(iso) {
@@ -452,8 +513,29 @@ function formatDateShort(iso) {
 }
 
 function calendarKindLabel(kind) {
-  if (!kind) return "Scheduled";
+  if (!kind) return "Due";
   return String(kind)
     .replace(/[-_]/g, " ")
     .replace(/\b\w/g, (char) => char.toUpperCase());
+}
+
+function nextStepKey(step) {
+  return [step.detailId, step.title, step.company, step.dueText, step.actionLabel]
+    .filter(Boolean)
+    .join("::");
+}
+
+function calendarEventKey(event) {
+  return [event.id, event.detailId, event.iso, event.time, event.title, event.kind]
+    .filter(Boolean)
+    .join("::");
+}
+
+function latestRoleKey(role) {
+  return [role.detailId, role.company, role.role, role.fit, role.status].filter(Boolean).join("::");
+}
+
+function roleDedupKey(role) {
+  const companyRole = [role?.company, role?.role].filter(Boolean).join("::");
+  return (companyRole || role?.detailId || "").toLowerCase();
 }

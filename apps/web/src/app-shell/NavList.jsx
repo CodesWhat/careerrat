@@ -5,10 +5,17 @@ import { NavLink } from "react-router-dom";
 export const PRIMARY_NAV_ITEMS = [
   { to: "/", label: "Dashboard", end: true },
   { to: "/calendar", label: "Calendar" },
-  { to: "/dashboard-v2", label: "Dashboard V2" },
+  { to: "/calendar-v2", label: "Calendar V2" },
+  { to: "/calendar-v3", label: "Calendar V3" },
   { to: "/jobs", label: "Jobs" },
+  { to: "/jobs-v2", label: "Jobs V2" },
+  { to: "/jobs-v3", label: "Jobs V3" },
   { to: "/network", label: "Network" },
+  { to: "/network-v2", label: "Network V2" },
+  { to: "/network-v3", label: "Network V3" },
   { to: "/library", label: "Library" },
+  { to: "/library-v2", label: "Library V2" },
+  { to: "/library-v3", label: "Library V3" },
 ];
 
 export function NavList() {

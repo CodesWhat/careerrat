@@ -15,14 +15,54 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { ApiError, getDashboard } from "../lib/api.js";
 import { subscribeDashboardChanged } from "../lib/dashboard-events.js";
 import { subscribeIntakeChanged } from "../lib/intake-events.js";
+import { V2_PREVIEW_DASHBOARD } from "../v2/v2MockData.js";
+import { V3_MOCK_DATA } from "../v3/v3MockData.js";
 
 // Matches InboxPage's own POLL_MS convention (8-15s band per the M10 design
 // doc §2 point 4).
 const POLL_MS = 10000;
 
 const DashboardCtx = createContext(null);
+const STATIC_PREVIEW_VIEW_MODEL =
+  import.meta.env.VITE_STATIC_PREVIEW === "true"
+    ? {
+        ...V2_PREVIEW_DASHBOARD,
+        activity: V3_MOCK_DATA.dashboard.activity.map((item, index) => ({
+          id: `preview-activity-${index}`,
+          relTime: item.time,
+          summary: item.source,
+          title: item.event,
+          type: "update",
+        })),
+        v3: V3_MOCK_DATA,
+      }
+    : null;
 
 export function DashboardProvider({ children }) {
+  if (STATIC_PREVIEW_VIEW_MODEL) {
+    return <StaticDashboardProvider>{children}</StaticDashboardProvider>;
+  }
+
+  return <LiveDashboardProvider>{children}</LiveDashboardProvider>;
+}
+
+function StaticDashboardProvider({ children }) {
+  return (
+    <DashboardCtx.Provider
+      value={{
+        data: STATIC_PREVIEW_VIEW_MODEL,
+        error: null,
+        loading: false,
+        noDatabase: false,
+        refetch: () => Promise.resolve(STATIC_PREVIEW_VIEW_MODEL),
+      }}
+    >
+      {children}
+    </DashboardCtx.Provider>
+  );
+}
+
+function LiveDashboardProvider({ children }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
