@@ -1057,8 +1057,11 @@ button {
   --dash-gutter: 18px;
   --dash-body-gap: 14px;
 
-  /* Fixed row metrics so a list can be sized to exactly three rows. */
-  --dash-row-h: 58px;
+  /* Fixed row metrics so a list can be sized to exactly three rows. This must
+     be at least the tallest natural row (two-line copy: 13px padding + 17.5px
+     title + 4px gap + 15.6px subtitle + 13px padding ≈ 63px) or the third row
+     overruns the list and swallows its bottom padding. */
+  --dash-row-h: 66px;
   --dash-row-gap: 8px;
 
   display: flex;
