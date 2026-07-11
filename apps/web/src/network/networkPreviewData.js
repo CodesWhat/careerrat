@@ -45,14 +45,14 @@ const northstarAi = {
 };
 
 const veridianDynamics = {
-  company: "Veridian Dynamics",
-  domain: "veridiandynamics.com",
+  company: "Rekall",
+  domain: "rekall.com",
   contacts: [
     {
       type: "Decision maker",
       name: "Veronica Palmer",
       note: "Strong adjacent-team context for AI productivity work.",
-      email: "veronica.palmer@veridiandynamics.com",
+      email: "veronica.palmer@rekall.com",
       title: "Engineering Manager, Data Platform",
       platform: "linkedin",
     },
@@ -60,7 +60,7 @@ const veridianDynamics = {
       type: "Recruiter",
       name: "Linda Zwordling",
       note: "Can clarify the team split before application copy is tailored.",
-      email: "linda.zwordling@veridiandynamics.com",
+      email: "linda.zwordling@rekall.com",
       title: "Technical Recruiter",
       platform: "email",
     },
@@ -128,7 +128,7 @@ export const PREVIEW_NETWORK = {
         id: "preview-lead-carla",
         label: "Review lead",
         name: "Carla Walton",
-        company: "Pied Piper",
+        company: "Globex",
         title: "AI Search Engineering",
         platform: "linkedin",
         note: "Potential peer path for search infra scope.",
@@ -147,7 +147,7 @@ export const PREVIEW_NETWORK = {
       {
         id: "preview-target-piedpiper",
         label: "Search contact path",
-        company: "Pied Piper",
+        company: "Globex",
         role: "AI Search Engineer",
         fit: 78,
         summary: "No recruiter, hiring-team member, referral, or warm contact is tracked yet.",

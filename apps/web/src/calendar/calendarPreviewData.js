@@ -157,7 +157,7 @@ const nakatomiFollowUp = withExport({
 const veridianAssessment = withExport({
   id: "preview-assessment-veridian",
   iso: "2026-07-07",
-  title: "Veridian Dynamics take-home due",
+  title: "Rekall take-home due",
   meta: "Staff Engineer, AI Productivity",
   kind: "assessment",
   label: "Assessment",
@@ -218,7 +218,7 @@ const abstergoFollowUp = withExport({
 const piedPiperDeadline = withExport({
   id: "preview-deadline-piedpiper",
   iso: "2026-07-10",
-  title: "Pied Piper packet deadline",
+  title: "Globex packet deadline",
   meta: "AI Search Engineer",
   kind: "deadline",
   label: "Deadline",

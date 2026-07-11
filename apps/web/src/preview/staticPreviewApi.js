@@ -5,10 +5,10 @@ const PREVIEW_COMPANIES = [
   { name: "Tyrell Corporation", domain: "tyrellcorp.com" },
   { name: "Abstergo Industries", domain: "abstergo.com" },
   { name: "Massive Dynamic", domain: "massivedynamic.com" },
-  { name: "Pied Piper", domain: "piedpiper.com" },
+  { name: "Globex", domain: "globex.com" },
   { name: "Encom", domain: "encom.com" },
   { name: "Cyberdyne Systems", domain: "cyberdyne.com" },
-  { name: "Veridian Dynamics", domain: "veridiandynamics.com" },
+  { name: "Rekall", domain: "rekall.com" },
   { name: "Hooli", domain: "hooli.com" },
 ];
 
@@ -59,7 +59,7 @@ const DEFAULT_ONBOARD_STATE = {
         "Tyrell Corporation",
         "Abstergo Industries",
         "Massive Dynamic",
-        "Pied Piper",
+        "Globex",
         "Buy n Large",
       ],
       search_preferences: { cadence: { mode: "daily", recommended_from: "default" } },

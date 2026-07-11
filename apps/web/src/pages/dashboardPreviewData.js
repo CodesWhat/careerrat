@@ -34,8 +34,8 @@ export const DASHBOARD_PREVIEW = {
       detailId: "preview-abstergo",
     },
     {
-      title: "Finish Pied Piper packet",
-      company: "Pied Piper",
+      title: "Finish Globex packet",
+      company: "Globex",
       supportingText: "AI Search Engineer",
       actionLabel: "Deadline",
       dueText: "Fri",
@@ -44,10 +44,10 @@ export const DASHBOARD_PREVIEW = {
   ],
   reviewHoldRoles: [
     {
-      company: "Veridian Dynamics",
+      company: "Rekall",
       role: "Staff Engineer, AI Productivity",
       fit: 96,
-      domain: "veridiandynamics.com",
+      domain: "rekall.com",
       detailId: "preview-veridian",
     },
     {
@@ -58,10 +58,10 @@ export const DASHBOARD_PREVIEW = {
       detailId: "preview-encom",
     },
     {
-      company: "Pied Piper",
+      company: "Globex",
       role: "AI Search Engineer",
       fit: 86,
-      domain: "piedpiper.com",
+      domain: "globex.com",
       detailId: "preview-piedpiper",
     },
   ],
@@ -156,7 +156,7 @@ export const DASHBOARD_PREVIEW = {
         {
           id: "preview-deadline-piedpiper",
           iso: "2026-07-10",
-          title: "Pied Piper packet deadline",
+          title: "Globex packet deadline",
           kind: "deadline",
           label: "Deadline",
           detailId: "preview-piedpiper",

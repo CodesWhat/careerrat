@@ -83,7 +83,7 @@ const DASHBOARD_DATA = {
   },
   latestRoles: [
     {
-      company: "Veridian Dynamics",
+      company: "Rekall",
       role: "Staff Engineer, AI Productivity",
       status: "high",
       fit: 96,
@@ -175,7 +175,7 @@ describe("DashboardPage", () => {
     expect(html).toContain("Abstergo Industries");
     expect(html).toContain("82");
     expect(html).toContain("Fresh Finds");
-    expect(html).toContain("Veridian Dynamics");
+    expect(html).toContain("Rekall");
     expect(html).toContain("96");
     expect(html).toContain("Cyberdyne Systems interview");
     expect(html).toContain("2:00 PM");
@@ -206,10 +206,10 @@ describe("DashboardPage", () => {
     expect(html).toContain("Prep Cyberdyne Systems technical screen");
     expect(html).not.toContain("Send Abstergo Industries follow-up");
     expect(html).toContain("Due by today");
-    expect(html).toContain("Veridian Dynamics");
+    expect(html).toContain("Rekall");
     expect(html).toContain("Tyrell Corporation");
     expect(html).toContain("Cyberdyne Systems technical screen");
-    expect(html).not.toContain("Pied Piper packet deadline");
+    expect(html).not.toContain("Globex packet deadline");
     expect(html).not.toContain("No interviews or calls today");
   });
 });

@@ -11,7 +11,7 @@ export const PREVIEW_MOCK_DATA = {
         id: "need-review-veridian",
         type: "Decision",
         title: "Decide what to do with 3 high-fit roles",
-        meta: "Veridian Dynamics, Encom, Pied Piper",
+        meta: "Rekall, Encom, Globex",
         due: "Due now",
         action: "Review roles",
         tone: "danger",
@@ -48,7 +48,7 @@ export const PREVIEW_MOCK_DATA = {
         title: "Abstergo Industries recruiter follow-up",
         action: "Draft reply",
       },
-      { time: "EOD", type: "Deadline", title: "Pied Piper packet review", action: "Open packet" },
+      { time: "EOD", type: "Deadline", title: "Globex packet review", action: "Open packet" },
     ],
     activity: [
       { time: "9 min ago", event: "Sourced 7 roles from company boards", source: "search-jobs" },
@@ -90,7 +90,7 @@ export const PREVIEW_MOCK_DATA = {
             id: "cal-overdue-piedpiper",
             type: "Deadline",
             time: "Yesterday",
-            title: "Pied Piper packet deadline",
+            title: "Globex packet deadline",
             meta: "AI Search Engineer",
             action: "Open packet",
           },
@@ -148,7 +148,7 @@ export const PREVIEW_MOCK_DATA = {
       {
         day: "Tue",
         date: "Jul 7",
-        items: [{ type: "Deadline", time: "EOD", title: "Pied Piper packet" }],
+        items: [{ type: "Deadline", time: "EOD", title: "Globex packet" }],
       },
       {
         day: "Wed",
@@ -240,7 +240,7 @@ export const PREVIEW_MOCK_DATA = {
       results: [
         {
           id: "find-veridian",
-          company: "Veridian Dynamics",
+          company: "Rekall",
           role: "Staff Engineer, AI Productivity",
           source: "Company board",
           freshness: "Fresh",
@@ -264,7 +264,7 @@ export const PREVIEW_MOCK_DATA = {
         },
         {
           id: "find-piedpiper",
-          company: "Pied Piper",
+          company: "Globex",
           role: "AI Search Engineer",
           source: "Company board",
           freshness: "2d old",
@@ -290,7 +290,7 @@ export const PREVIEW_MOCK_DATA = {
       {
         id: "net-leads",
         title: "Review 4 relationship leads",
-        meta: "Tyrell Corporation, Massive Dynamic, Veridian Dynamics",
+        meta: "Tyrell Corporation, Massive Dynamic, Rekall",
         due: "Due now",
         action: "Review leads",
       },
@@ -329,7 +329,7 @@ export const PREVIEW_MOCK_DATA = {
       },
       {
         name: "Phil Myman",
-        company: "Veridian Dynamics",
+        company: "Rekall",
         role: "Staff engineer",
         basis: "Role family peer",
         source: "Company page",
@@ -351,7 +351,7 @@ export const PREVIEW_MOCK_DATA = {
         action: "Export PDF",
       },
       {
-        title: "Pied Piper packet has unanswered screening item",
+        title: "Globex packet has unanswered screening item",
         meta: "Evidence gap",
         action: "Review gap",
       },
@@ -392,7 +392,7 @@ export const PREVIEW_MOCK_DATA = {
       {
         id: "asset-piedpiper-jd",
         type: "Asset",
-        title: "Pied Piper JD capture",
+        title: "Globex JD capture",
         link: "AI Search Engineer",
         status: "Partial JD",
         updated: "Jul 7",

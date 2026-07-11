@@ -282,7 +282,7 @@ describe("CalendarPage", () => {
     expect(html).toContain("Cyberdyne Systems technical screen");
     expect(html).toContain("Prep Tyrell Corporation enterprise AI stories");
     expect(html).toContain("Send Abstergo Industries follow-up");
-    expect(html).toContain("Pied Piper packet deadline");
+    expect(html).toContain("Globex packet deadline");
     expect(html).toContain("Massive Dynamic hiring manager screen");
     expect(html).toContain("Cloudscale onsite decision deadline");
 
