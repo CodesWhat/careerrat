@@ -682,7 +682,7 @@ function networkRecord(records, company) {
 // used both to reject junk names in cleanContactName() and to skip the
 // email-derived display-name fallback in addNetworkContact() below.
 const SYSTEM_SENDER_RE =
-  /\b(no reply|noreply|notification|candidate portal|portal|workday|ashby|greenhouse)\b/i;
+  /\b(no[\s._-]?reply|do[\s._-]?not[\s._-]?reply|notification|candidate portal|portal|workday|ashby|greenhouse)\b/i;
 
 // Loose but reliable email-shape check — reused everywhere dashboard-data.js
 // needs to tell an address apart from a plain name string, instead of each
@@ -1043,10 +1043,15 @@ function buildNetworkCompany(record, now) {
 }
 
 function relationshipRecordHasSignal(record) {
-  if (record.contactMap.size > 0) return true;
-  return record.comms.some(
-    (comm) => comm.channel && comm.channel !== "portal" && comm.status !== "closed"
-  );
+  // The Network page is a people map, not an application log: a company belongs
+  // here only once an actual human is captured (a named conversation participant
+  // or a real recruiter/hiring-team email thread). Threads whose only sender is
+  // an automated no-reply/portal address contribute zero contacts (see
+  // SYSTEM_SENDER_RE) — they must NOT surface a relationship. The previous
+  // fallback passed on any non-portal, non-closed comm channel, which let
+  // no-reply@ auto-confirmations masquerade as warm relationships and crowd the
+  // real ones out of the top-6 slice.
+  return record.contactMap.size > 0;
 }
 
 function buildNetwork(trackerData, { now = new Date() } = {}) {
