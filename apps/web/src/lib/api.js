@@ -67,13 +67,6 @@ export function getUsageSummary() {
   return apiFetch("/api/settings/usage");
 }
 
-export function saveAiKey(apiKey) {
-  return apiFetch("/api/settings/ai-key", {
-    method: "POST",
-    body: JSON.stringify({ apiKey }),
-  });
-}
-
 export function validateAndSaveAiKey(apiKey, { provider = "anthropic" } = {}) {
   return apiFetch("/api/settings/ai-key/validate", {
     method: "POST",

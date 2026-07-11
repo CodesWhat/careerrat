@@ -36,6 +36,15 @@ export function App() {
         <Route path="/network" element={<NetworkPage />} />
         <Route path="/library" element={<LibraryPage />} />
         <Route
+          path="/deep-ingest"
+          element={
+            <ComingSoonPage
+              title="Deep ingest"
+              description="Deep ingest is on its way — check back soon."
+            />
+          }
+        />
+        <Route
           path="*"
           element={<ComingSoonPage title="Not found" description="This page doesn't exist yet." />}
         />

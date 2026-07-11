@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useRolesterUser } from "../auth/clerkControls.jsx";
 import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
 import {
@@ -39,12 +40,12 @@ function findFile(state, name) {
   return state?.files?.find((f) => f.name === name) ?? null;
 }
 
-function deriveDoneFlags(state) {
+function deriveDoneFlags(state, { isSignedIn = false } = {}) {
   if (!state) return STEPS.map(() => false);
   const targeting = state.data?.targeting ?? {};
   return [
     (state.files ?? []).some((f) => f.exists),
-    !!state.keyConfigured,
+    !!isSignedIn,
     !!state.sourceResumePresent,
     (targeting.role_buckets ?? []).some((b) => (b.titles ?? []).length > 0),
     (targeting.tracked_companies ?? []).length > 0,
@@ -172,6 +173,7 @@ export async function loadOnboardingRuntimeState({
 }
 
 export function OnboardingPage() {
+  const { isSignedIn } = useRolesterUser();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [state, setState] = useState(null);
@@ -188,7 +190,7 @@ export function OnboardingPage() {
       setState(next.state);
       setRuntimeCapabilities(next.runtimeCapabilities);
       setLoadError(next.runtimeError?.message || null);
-      const stateDoneIndexes = doneFlagIndexes(deriveDoneFlags(next.state), {
+      const stateDoneIndexes = doneFlagIndexes(deriveDoneFlags(next.state, { isSignedIn }), {
         stepCount: STEPS.length,
       });
       if (!hasPositioned) {
@@ -219,7 +221,7 @@ export function OnboardingPage() {
       setLoadError(err instanceof Error ? err.message : "Failed to load onboarding state");
       return null;
     }
-  }, [hasPositioned]);
+  }, [hasPositioned, isSignedIn]);
 
   // Mount-only initial load — `load` itself is stable via useCallback and
   // re-runs are triggered explicitly by step components calling `reload()`.
@@ -265,7 +267,10 @@ export function OnboardingPage() {
   const { Component, fullBleed } = STEPS[stepIndex];
   const aiEnabled = runtimeCapabilities.aiAvailable;
   const completionIndexesForShell = normalizeCompletedIndexes(
-    [...completedIndexes, ...doneFlagIndexes(deriveDoneFlags(state), { stepCount: STEPS.length })],
+    [
+      ...completedIndexes,
+      ...doneFlagIndexes(deriveDoneFlags(state, { isSignedIn }), { stepCount: STEPS.length }),
+    ],
     { stepCount: STEPS.length }
   );
   const stepProps = {
@@ -289,7 +294,7 @@ export function OnboardingPage() {
     );
   }
 
-  const doneFlags = deriveDoneFlags(state);
+  const doneFlags = deriveDoneFlags(state, { isSignedIn });
 
   return (
     <PageScaffold

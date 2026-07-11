@@ -11,8 +11,8 @@ import {
   getAiSettings,
   getOnboardState,
   getUsageSummary,
-  saveAiKey,
   saveCandidateFile,
+  validateAndSaveAiKey,
 } from "../lib/api.js";
 import { mapErrors } from "./error-map.js";
 import {
@@ -239,13 +239,17 @@ export function SettingsPage() {
     setSaving((s) => ({ ...s, ai: true }));
     setSectionBanner((b) => ({ ...b, ai: null }));
     try {
-      await saveAiKey(aiKeyInput.trim());
+      await validateAndSaveAiKey(aiKeyInput.trim());
       setAiKeyInput("");
       showToast("AI key saved.");
       const ai = await getAiSettings();
       setAiStatus(ai);
     } catch (err) {
-      setSectionBanner((b) => ({ ...b, ai: err instanceof Error ? err.message : "Save failed" }));
+      if (err instanceof ApiError && err.body?.error) {
+        setSectionBanner((b) => ({ ...b, ai: err.body.error }));
+      } else {
+        setSectionBanner((b) => ({ ...b, ai: err instanceof Error ? err.message : "Save failed" }));
+      }
     } finally {
       setSaving((s) => ({ ...s, ai: false }));
     }
