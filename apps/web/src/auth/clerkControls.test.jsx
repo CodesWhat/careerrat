@@ -28,8 +28,8 @@ describe("RolesterClerkProvider", () => {
 
     expect(clerkProps.provider.publishableKey).toBe("pk_test_rolester");
     expect(clerkProps.provider.appearance).toBe(ROLESTER_CLERK_APPEARANCE);
-    expect(clerkProps.provider.appearance.variables.colorPrimary).toBe("#e8553d");
-    expect(clerkProps.provider.appearance.variables.borderRadius).toBe("8px");
+    expect(clerkProps.provider.appearance.variables.colorPrimary).toBe("var(--coral)");
+    expect(clerkProps.provider.appearance.variables.borderRadius).toBe("var(--card-radius)");
     expect(clerkProps.provider.appearance.elements.rootBox).toMatchObject({
       width: "100%",
       minHeight: "100%",
@@ -41,8 +41,8 @@ describe("RolesterClerkProvider", () => {
       width: "min(430px, calc(100vw - 48px))",
     });
     expect(clerkProps.provider.appearance.elements.formButtonPrimary).toMatchObject({
-      backgroundColor: "#e8553d",
-      color: "#fffaf2",
+      backgroundColor: "var(--coral)",
+      color: "var(--paper-surface)",
     });
   });
 });
