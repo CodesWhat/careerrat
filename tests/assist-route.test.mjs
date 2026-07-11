@@ -1,11 +1,12 @@
 // tests/assist-route.test.mjs
 // node:test suite for M8's POST /api/assist/suggest (src/cli/assist-route.mjs)
-// — the bare no-tool, no-skill, maxTurns:1 one-shot the onboarding wizard's
-// Targeting step uses for titles/keywords chip suggestions. Mirrors
-// tests/skill-runtime.test.mjs's fakeSdk()/SAMPLE_RUN convention (an
-// AsyncGenerator<SDKMessage> stub honoring options.abortController.signal) at
-// this route's own `loadSdk` DI seam — no real @anthropic-ai/claude-agent-sdk
-// devDependency or network call anywhere in this suite.
+// — the bare no-tool, no-skill, native-preferred bounded AI one-shot the
+// onboarding wizard's Targeting step uses for titles/keywords chip
+// suggestions. Mocks the route's own `call` DI seam (the same
+// call(options) => {content, model} convention bounded-ai.test.mjs and
+// packet-engine.test.mjs use) rather than the Agent SDK — no real
+// @anthropic-ai/claude-agent-sdk devDependency or network call anywhere in
+// this suite.
 
 import assert from "node:assert/strict";
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -50,63 +51,19 @@ const FORBIDDEN_CONTENT = [
 ];
 const FORBIDDEN_TEXT = FORBIDDEN_CONTENT.join(" ");
 
-// Same fakeSdk() shape as tests/skill-runtime.test.mjs: an AsyncGenerator
-// that checks the abortController's signal every step. `onQuery` lets a test
-// inspect exactly what `options` runBareOneshot() actually passed.
-function fakeSdk(messages, { onQuery } = {}) {
-  return {
-    query: ({ options }) => {
-      onQuery?.(options);
-      const { signal } = options.abortController;
-      async function* gen() {
-        for (const m of messages) {
-          if (signal.aborted) {
-            const err = new Error("aborted");
-            err.name = "AbortError";
-            throw err;
-          }
-          yield m;
-        }
-      }
-      const it = gen();
-      it.return = async () => ({ value: undefined, done: true });
-      return it;
-    },
-  };
+// A `call` DI double matching runBoundedAI's native-preferred nativeCall
+// shape: call(options) => { content: [{type:"text", text}], model }. Same
+// convention tests/bounded-ai.test.mjs and tests/packet-engine.test.mjs use.
+function textReply(text, model = "claude-native-test") {
+  return { content: [{ type: "text", text }], model };
 }
 
-function assistantTextRun(text) {
-  return [
-    {
-      type: "assistant",
-      session_id: "s1",
-      parent_tool_use_id: null,
-      message: { content: [{ type: "text", text }] },
-    },
-    {
-      type: "result",
-      subtype: "success",
-      is_error: false,
-      duration_ms: 500,
-      num_turns: 1,
-      session_id: "s1",
-      usage: {
-        input_tokens: 100,
-        output_tokens: 50,
-        cache_read_input_tokens: 0,
-        cache_creation_input_tokens: 0,
-      },
-      modelUsage: {},
-    },
-  ];
-}
-
-function bootServer(repoRoot, { env = PROXY_ENV, loadSdk } = {}) {
+function bootServer(repoRoot, { env = PROXY_ENV, call } = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
     routes.set(`${method} ${path}`, handler);
   }
-  mountAssistRoutes({ addRoute, repoRoot, env, ...(loadSdk ? { loadSdk } : {}) });
+  mountAssistRoutes({ addRoute, repoRoot, env, ...(call ? { call } : {}) });
 
   const server = createServer((req, res) => {
     const url = (req.url || "/").split("?")[0];
@@ -152,7 +109,7 @@ function assertAssistLabels(body, kind, { used = true, retried = false } = {}) {
   assert.equal(body.ai.action, `suggest-${kind}`);
   assert.equal(body.ai.operation, `assist.suggest.${kind}`);
   assert.equal(body.ai.label, `assist:suggest-${kind}:assist.suggest.${kind}`);
-  assert.equal(body.ai.mode, "fallback");
+  assert.equal(body.ai.mode, "native");
   assert.equal(body.ai.retried, retried);
 }
 
@@ -210,13 +167,16 @@ test("buildAssistPrompt: omits the summary/existing lines entirely when absent",
 // POST /api/assist/suggest
 // ---------------------------------------------------------------------------
 
-test("POST /api/assist/suggest: happy path — 200 with suggestions + rationale, query() called with tools:[]/maxTurns:1/no skills option", async () => {
+test("POST /api/assist/suggest: happy path — 200 with suggestions + rationale, call() driven on the smallFast tier with no tools/skills", async () => {
   const repoRoot = tempRepo();
   let seenOptions = null;
   const reply =
     '```json\n{"suggestions": ["Staff Engineer", "Principal Engineer"], "rationale": "same level, broader scope"}\n```';
   const server = await bootServer(repoRoot, {
-    loadSdk: async () => fakeSdk(assistantTextRun(reply), { onQuery: (o) => (seenOptions = o) }),
+    call: async (options) => {
+      seenOptions = options;
+      return textReply(reply);
+    },
   });
   try {
     const { status, body } = await postJson(server, "/api/assist/suggest", {
@@ -232,22 +192,17 @@ test("POST /api/assist/suggest: happy path — 200 with suggestions + rationale,
     assertNoLegacySuggestionFields(body);
     assertAssistLabels(body, "titles");
     assert.equal(body.manual.available, true);
-    assert.deepEqual(seenOptions.tools, []);
-    assert.equal(seenOptions.maxTurns, 1);
-    assert.equal(
-      seenOptions.env.ANTHROPIC_CUSTOM_HEADERS,
-      [
-        "x-rolester-feature: onboarding.targeting-assist",
-        "x-rolester-skill: assist",
-        "x-rolester-action: suggest-titles",
-        "x-rolester-operation: assist.suggest.titles",
-      ].join("\n")
-    );
-    assert.ok(
-      !("skills" in seenOptions),
-      "must not pass a skills option — this is not a skill run"
-    );
-    assert.ok(!("settingSources" in seenOptions));
+    assert.equal(seenOptions.tier, "smallFast");
+    assert.equal(seenOptions.skill, "assist");
+    assert.equal(seenOptions.action, "suggest-titles");
+    assert.equal(seenOptions.operation, "assist.suggest.titles");
+    assert.equal(seenOptions.root, repoRoot);
+    assert.deepEqual(seenOptions.messages, [
+      {
+        role: "user",
+        content: buildAssistPrompt("titles", { titles: ["Senior Software Engineer"] }),
+      },
+    ]);
   } finally {
     await closeServer(server);
   }
@@ -257,7 +212,7 @@ test("POST /api/assist/suggest: omits rationale entirely when the model didn't r
   const repoRoot = tempRepo();
   const reply = '```json\n{"suggestions": ["Python", "Go"]}\n```';
   const server = await bootServer(repoRoot, {
-    loadSdk: async () => fakeSdk(assistantTextRun(reply)),
+    call: async () => textReply(reply),
   });
   try {
     const { status, body } = await postJson(server, "/api/assist/suggest", {
@@ -280,10 +235,10 @@ test("POST /api/assist/suggest: retry-then-ok — first reply malformed, second 
   const repoRoot = tempRepo();
   let callCount = 0;
   const server = await bootServer(repoRoot, {
-    loadSdk: async () => {
+    call: async () => {
       callCount++;
-      if (callCount === 1) return fakeSdk(assistantTextRun("not json at all"));
-      return fakeSdk(assistantTextRun('```json\n{"suggestions": ["fixed"]}\n```'));
+      if (callCount === 1) return textReply("not json at all");
+      return textReply('```json\n{"suggestions": ["fixed"]}\n```');
     },
   });
   try {
@@ -295,7 +250,11 @@ test("POST /api/assist/suggest: retry-then-ok — first reply malformed, second 
     assert.deepEqual(body.data.suggestions, ["fixed"]);
     assertNoLegacySuggestionFields(body);
     assertAssistLabels(body, "titles", { retried: true });
-    assert.equal(callCount, 2, "loadSdk (and therefore invoke) must be called exactly twice");
+    assert.equal(
+      callCount,
+      2,
+      "call() must be invoked exactly twice — once, then the corrective retry"
+    );
   } finally {
     await closeServer(server);
   }
@@ -304,7 +263,7 @@ test("POST /api/assist/suggest: retry-then-ok — first reply malformed, second 
 test("POST /api/assist/suggest: 422s when the model never produces valid output, even after the retry", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot, {
-    loadSdk: async () => fakeSdk(assistantTextRun(`still not json ${FORBIDDEN_TEXT}`)),
+    call: async () => textReply(`still not json ${FORBIDDEN_TEXT}`),
   });
   try {
     const { status, body } = await postJson(server, "/api/assist/suggest", {
@@ -328,7 +287,7 @@ test("POST /api/assist/suggest: 422s when the model never produces valid output,
 test("POST /api/assist/suggest: provider failures return safe envelopes without raw content", async () => {
   const repoRoot = tempRepo();
   const server = await bootServer(repoRoot, {
-    loadSdk: async () => {
+    call: async () => {
       throw new Error(`provider echoed ${FORBIDDEN_TEXT}`);
     },
   });

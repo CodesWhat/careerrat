@@ -9,40 +9,40 @@
 // runSkillStream): titles/keywords suggestions need nothing a tool would
 // fetch — the wizard already has the candidate's current titles/keywords/
 // summary client-side (loaded via GET /api/onboard/state) — so this bypasses
-// runSkillStream's skill-allowlist/tools machinery entirely and drives the
-// Agent SDK's query() directly with a bare string prompt, `tools: []`, no
-// `skills` option, no `settingSources`: the smallest, cheapest possible call.
-// Reuses resolveAIRoute/buildChildEnv/loadClaudeAgentSdk/mapSdkMessage/
-// writeByokUsage (already pure/exported by call-ai.mjs and skill-runtime.mjs)
-// rather than re-deriving the routing/event-mapping/usage-accounting logic.
+// runSkillStream's skill-allowlist/tools machinery, and skips the Agent SDK
+// subprocess entirely: the route drives bounded-ai.mjs's native-preferred
+// mode straight through callAI() (a plain fetch) on the `smallFast` model
+// tier — the smallest, cheapest possible call. BYOK usage logging is
+// callAI()'s own job (it writes the usage_event whenever `root` is given),
+// so this route never calls writeByokUsage() itself.
+//
+// runBareOneshot() below still drives the Agent SDK subprocess directly —
+// it's kept exported because src/core/intake/classify.mjs calls it for its
+// own bare one-shot classification; this route no longer uses it.
 //
 // Buffer→parse→validate→retry-once via the same shared
-// src/core/ai/structured-oneshot.mjs helper POST /api/onboard/resume-ai uses
-// — both are small, bounded, structured-output-only calls where a live token
-// stream adds UX complexity for no benefit (see that route's own comment).
+// src/core/ai/structured-oneshot.mjs helper (through bounded-ai.mjs's
+// native-preferred mode) POST /api/onboard/resume-ai uses — both are small,
+// bounded, structured-output-only calls where a live token stream adds UX
+// complexity for no benefit (see that route's own comment).
 //
-// mountAssistRoutes({addRoute, repoRoot, env, loadSdk}) registers:
+// mountAssistRoutes({addRoute, repoRoot, env, call}) registers:
 //
 //   POST /api/assist/suggest   { kind: "titles"|"keywords", input: {...} }
 //                              → shared bounded AI envelope with
 //                              { ok, data: { suggestions, rationale? }, ai, manual }
 //                              501 NO_AI_ROUTE when no AI route is configured
-//                              (or the SDK devDependency is missing) — the standing
-//                              "no key → assists degrade, never hard-block"
-//                              rule. 400 bad kind. 422 AI_SCHEMA_INVALID if
-//                              the model never produces valid structured
-//                              output after one retry.
+//                              — the standing "no key → assists degrade,
+//                              never hard-block" rule. 400 bad kind.
+//                              422 AI_SCHEMA_INVALID if the model never
+//                              produces valid structured output after one
+//                              retry.
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { BOUNDED_AI_CODES, runBoundedAI } from "../core/ai/bounded-ai.mjs";
+import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
-import {
-  buildChildEnv,
-  loadClaudeAgentSdk,
-  mapSdkMessage,
-  writeByokUsage,
-} from "../core/ai/skill-runtime.mjs";
+import { buildChildEnv, mapSdkMessage, writeByokUsage } from "../core/ai/skill-runtime.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other route modules use.
@@ -185,12 +185,7 @@ export async function runBareOneshot({ prompt, repoRoot, env, labels, skillLabel
 // mountAssistRoutes
 // ---------------------------------------------------------------------------
 
-export function mountAssistRoutes({
-  addRoute,
-  repoRoot,
-  env = process.env,
-  loadSdk = loadClaudeAgentSdk,
-}) {
+export function mountAssistRoutes({ addRoute, repoRoot, env = process.env, call }) {
   addRoute("POST", "/api/assist/suggest", async (req, res) => {
     let body;
     try {
@@ -214,28 +209,22 @@ export function mountAssistRoutes({
     const schema = JSON.parse(readFileSync(join(repoRoot, ASSIST_SCHEMA_PATH), "utf8"));
 
     const input = body?.input && typeof body.input === "object" ? body.input : {};
-    const skillLabel = `assist-${kind}`;
     const labels = assistLabels(kind);
-
-    async function invoke({ correction }) {
-      const basePrompt = buildAssistPrompt(kind, input);
-      const prompt = correction ? `${basePrompt}\n\n${correction}` : basePrompt;
-      try {
-        return await runBareOneshot({ prompt, repoRoot, env, labels, skillLabel, loadSdk });
-      } catch (err) {
-        if (err?.code === "SDK_NOT_INSTALLED") {
-          err.code = BOUNDED_AI_CODES.NO_AI_ROUTE;
-        }
-        throw err;
-      }
-    }
 
     const result = await runBoundedAI({
       labels,
       schema,
       manual: ASSIST_MANUAL,
       maxRetries: 1,
-      invoke,
+      structuredMode: "native-preferred",
+      call,
+      messages: [{ role: "user", content: buildAssistPrompt(kind, input) }],
+      system: "Return only JSON matching the requested schema. No prose outside the JSON.",
+      tier: "smallFast",
+      maxTokens: 300,
+      outputName: `assist_${kind}_suggestions`,
+      root: repoRoot,
+      env,
     });
     sendJson(res, result.status, result.body);
   });

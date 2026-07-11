@@ -1,5 +1,6 @@
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
 import { buildShortAnswer, forbiddenWordingFor } from "../documents/tailor.mjs";
+import { buildPromptVisibleSources } from "./generate.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
 import { packetAnswerProposalSchema } from "./schemas/packet-schemas.mjs";
 
@@ -48,7 +49,7 @@ function forbiddenForContext(context) {
 }
 
 function promptFor({ context, questions }) {
-  const safeContext = withoutPrivateFields(context || {});
+  const safeContext = withoutPrivateFields(buildPromptVisibleSources(context));
   return [
     "Draft application form answers using only confirmed local evidence.",
     "Return JSON matching packetAnswerProposalSchema.",
@@ -148,6 +149,7 @@ export async function draftPacketAnswers({
     system:
       "Draft short application answers. Use NEEDS YOU when evidence is missing. Do not answer demographic or EEO prompts.",
     outputName: "packet_answer_proposals",
+    maxTokens: 1600,
     root: repoRoot,
     env,
   });

@@ -441,7 +441,10 @@ test("malformed company seed JSON gets exactly one corrective retry before succe
 
   assert.equal(calls.length, 2);
   assert.equal(calls[0].messages.length, 1);
-  assert.equal(calls[1].messages.length, 2);
+  assert.equal(calls[1].messages.length, 3);
+  assert.equal(calls[1].messages[1].role, "assistant");
+  assert.equal(calls[1].messages[1].content, "not json for company seeds");
+  assert.equal(calls[1].messages[2].role, "user");
   assert.match(calls[1].messages.at(-1).content, /invalid JSON/);
   assert.equal(result.status, 200);
   assert.equal(result.body.ok, true);

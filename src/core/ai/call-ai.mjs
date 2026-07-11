@@ -235,6 +235,7 @@ async function* streamAI({ res, route, model, feature, skill, action, operation,
 
 export async function callAI({
   model,
+  tier,
   system,
   messages,
   maxTokens,
@@ -255,8 +256,13 @@ export async function callAI({
 
   // No-code model-swap seam (ai-config.mjs): a caller that doesn't pass a
   // model falls back to config/ai.json#model (itself already env-overridable
-  // via ANTHROPIC_MODEL there) rather than sending `model: undefined`.
-  const resolvedModel = model || resolveModelConfig({ root, env }).model;
+  // via ANTHROPIC_MODEL there) rather than sending `model: undefined`. A
+  // caller may instead ask for the cheap tier via `tier: "smallFast"`, which
+  // resolves to config/ai.json#smallFastModel (or its env override) before
+  // falling back to the same default.
+  const modelConfig = resolveModelConfig({ root, env });
+  const resolvedModel =
+    model || (tier === "smallFast" ? modelConfig.smallFastModel : null) || modelConfig.model;
 
   const { url, headers, body } = buildRequest(route, {
     model: resolvedModel,

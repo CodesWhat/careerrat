@@ -166,6 +166,7 @@ export async function runTrackOutcome({
     structuredMode: "native-preferred",
     outputName: "track_outcome_decision",
     maxRetries: 1,
+    tier: "smallFast",
     maxTokens: 400,
     root,
     env,

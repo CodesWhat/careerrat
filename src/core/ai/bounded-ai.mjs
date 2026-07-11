@@ -191,12 +191,6 @@ function withDefined(base, fields) {
   return output;
 }
 
-function messagesForAttempt(messages, errors) {
-  const base = Array.isArray(messages) ? messages : [];
-  if (!errors) return base;
-  return [...base, { role: "user", content: buildCorrectiveAddendum(errors) }];
-}
-
 async function runNativePreferred({
   labels,
   schema,
@@ -206,6 +200,7 @@ async function runNativePreferred({
   messages,
   system,
   model: requestedModel,
+  tier,
   maxTokens,
   outputName,
   root,
@@ -216,19 +211,24 @@ async function runNativePreferred({
   let attempt = 0;
   let lastErrors = null;
   let responseModel = null;
+  // Grows one {assistant, user} turn pair per retry so roles strictly
+  // alternate (the Messages API rejects two consecutive "user" turns) — the
+  // model's own prior (invalid) reply becomes the assistant turn the
+  // corrective addendum replies to.
+  let conversation = Array.isArray(messages) ? [...messages] : [];
 
   while (attempt <= maxRetries) {
     const response = await nativeCall(
       withDefined(
         {
-          messages: messagesForAttempt(messages, lastErrors),
+          messages: conversation,
           skill: labels.skill,
           action: labels.action,
           operation: labels.operation,
           outputMode: "native",
           outputSchema: schema,
         },
-        { system, model: requestedModel, maxTokens, outputName, root, env, signal }
+        { system, model: requestedModel, tier, maxTokens, outputName, root, env, signal }
       )
     );
     const unwrapped = unwrapInvocationResult(response);
@@ -250,6 +250,11 @@ async function runNativePreferred({
       });
     }
     lastErrors = parsed.errors;
+    conversation = [
+      ...conversation,
+      { role: "assistant", content: unwrapped.text },
+      { role: "user", content: buildCorrectiveAddendum(parsed.errors) },
+    ];
     attempt++;
   }
 
@@ -284,6 +289,7 @@ export async function runBoundedAI({
   messages,
   system,
   model,
+  tier,
   maxTokens,
   outputName,
   root,
@@ -313,6 +319,7 @@ export async function runBoundedAI({
         messages,
         system,
         model,
+        tier,
         maxTokens,
         outputName,
         root,

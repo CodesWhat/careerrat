@@ -7,7 +7,11 @@ import {
   publicIntelReviewItemUpsert,
   publicIntelStateGet,
 } from "../db/verbs/public-intel.mjs";
-import { normalizeCompanyKey, resolveCompanyBoard } from "./company-board-resolver.mjs";
+import {
+  COMPANY_DISCOVERY_BATCH_MAX,
+  normalizeCompanyKey,
+  resolveCompanyBoard,
+} from "./company-board-resolver.mjs";
 import { extractPublicCareersPage } from "./public-page-extractor.mjs";
 import { extractAmbiguousPublicCareersPage } from "./public-scanner-ai.mjs";
 
@@ -341,6 +345,14 @@ export async function scanPublicIntelSeeds({
   const seeds = Array.isArray(body?.seeds) ? body.seeds : [];
   if (!seeds.length) {
     const err = new Error("public-intel scan requires at least one seed");
+    err.code = "BAD_REQUEST";
+    err.status = 400;
+    throw err;
+  }
+  if (seeds.length > COMPANY_DISCOVERY_BATCH_MAX) {
+    const err = new Error(
+      `public-intel scan accepts at most ${COMPANY_DISCOVERY_BATCH_MAX} seeds per request`
+    );
     err.code = "BAD_REQUEST";
     err.status = 400;
     throw err;

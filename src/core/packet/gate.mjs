@@ -5,10 +5,7 @@ import {
   hasReadableJobBody,
   packetPromptFromContext,
 } from "./context.mjs";
-import {
-  packetGateAiVerdictSchema,
-  validatePacketGateRequest,
-} from "./schemas/packet-schemas.mjs";
+import { packetGateAiVerdictSchema, validatePacketGateRequest } from "./schemas/packet-schemas.mjs";
 
 const LABELS = Object.freeze({
   skill: "packet-engine",
@@ -143,6 +140,7 @@ export async function evaluatePacketGate({
             system:
               "Return only JSON for a local application packet gate. Do not include raw prompt text.",
             outputName: "packet_gate_verdict",
+            maxTokens: 700,
             root: repoRoot,
             env,
           }),
@@ -192,4 +190,3 @@ export async function evaluatePacketGate({
     };
   }
 }
-

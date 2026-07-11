@@ -84,7 +84,7 @@ const MANUAL_FALLBACK = Object.freeze({
 
 const DEFAULT_MAX_SOURCE_CHARS = 8000;
 
-export function createDeepIngestProposalBuilder({ lane, operation, maxTokens = 1200 }) {
+export function createDeepIngestProposalBuilder({ lane, operation, maxTokens = 1200, tier }) {
   return async function proposeFromSource({
     source = {},
     targetShape = lane,
@@ -111,6 +111,7 @@ export function createDeepIngestProposalBuilder({ lane, operation, maxTokens = 1
       outputName: `deep_ingest_${lane}_proposal`,
       maxRetries: 1,
       maxTokens,
+      tier,
       root,
       env,
       call,

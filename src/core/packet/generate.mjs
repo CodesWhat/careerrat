@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
 import { appRegisterPacketArtifacts } from "../db/verbs.mjs";
+import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import {
   buildCoverLetterScaffold,
   buildResumeMarkdown,
@@ -9,10 +10,9 @@ import {
   forbiddenWordingFor,
   validateAtsSafe,
 } from "../documents/tailor.mjs";
-import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
-import { buildPacketContext } from "./context.mjs";
 import { draftPacketAnswers as draftPacketAnswersCore } from "./answers.mjs";
+import { buildPacketContext } from "./context.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
 import { packetCoverLetterProposalSchema } from "./schemas/packet-schemas.mjs";
 
@@ -140,7 +140,9 @@ export function enumeratePacketSources(context = {}, questionCapture = null) {
     companyIntelligence: withoutPrivateFields(
       context.companyIntelligence || context.publicCompanyIntel || null
     ),
-    publicCompanyJobBoardContext: withoutPrivateFields(context.publicCompanyJobBoardContext || null),
+    publicCompanyJobBoardContext: withoutPrivateFields(
+      context.publicCompanyJobBoardContext || null
+    ),
   };
 
   if (app.company && !sources.companyIntelligence) {
@@ -195,12 +197,36 @@ export function splitConfirmedAndProposedPacketSources(sources = {}) {
   return { claimableEvidence, claimableContext, gapContext };
 }
 
+// The AI-prompt-visible projection of enumeratePacketSources(): confirmed
+// evidence and reviewed context stay claimable, but raw/proposed deep-ingest
+// material and unreviewed research (gapContext) never reach the model — only
+// the source categories they came from do, as a gap listing (10-04-PLAN.md:
+// raw/proposed material is gap context only, never prompt-visible prose).
+export function buildPromptVisibleSources(context = {}, questionCapture = null) {
+  const sources = enumeratePacketSources(context, questionCapture);
+  const split = splitConfirmedAndProposedPacketSources(sources);
+  return {
+    candidateProfile: sources.candidateProfile,
+    sourceResume: sources.sourceResume,
+    resumeFacts: sources.resumeFacts,
+    writingVoice: sources.writingVoice,
+    honestyBoundaries: sources.honestyBoundaries,
+    capturedJobBody: sources.capturedJobBody,
+    capturedQuestions: sources.capturedQuestions,
+    confirmedEvidence: { ...sources.confirmedEvidence, claims: split.claimableEvidence },
+    confirmedContext: split.claimableContext,
+    unconfirmedAreas: [...new Set(split.gapContext.map((item) => item.source))].sort(),
+  };
+}
+
 function forbiddenFor(context = {}) {
   return forbiddenWordingFor(evidenceFromContext(context).claims, honestyFromContext(context));
 }
 
 function privateLeakMessage(text) {
-  if (/PRIVATE_CURRENT|current[_ -]?base|current compensation|current salary|current pay/i.test(text)) {
+  if (
+    /PRIVATE_CURRENT|current[_ -]?base|current compensation|current salary|current pay/i.test(text)
+  ) {
     return "private current compensation appears in packet proposal";
   }
   if (/\bunreviewed\b|\braw\b|\bproposed\b/i.test(text)) {
@@ -244,7 +270,7 @@ function promptForCoverLetter(context = {}) {
     "Draft concise cover-letter prose blocks using only confirmed local evidence.",
     "Return JSON matching packetCoverLetterProposalSchema.",
     "",
-    JSON.stringify(enumeratePacketSources(context), null, 2),
+    JSON.stringify(buildPromptVisibleSources(context), null, 2),
   ].join("\n");
 }
 
@@ -258,6 +284,8 @@ function needsYouBlock(reason) {
 }
 
 export async function draftCoverLetterBlocks({
+  repoRoot,
+  env = process.env,
   context = {},
   call,
   runAI = runBoundedAI,
@@ -276,6 +304,9 @@ export async function draftCoverLetterBlocks({
     system:
       "Draft cover letter blocks. Use only confirmed evidence IDs. Do not include private compensation or unconfirmed claims.",
     outputName: "packet_cover_letter_blocks",
+    maxTokens: 1800,
+    root: repoRoot,
+    env,
   });
 
   if (!aiResult.body?.ok) {
@@ -354,13 +385,7 @@ function assertAtsSafe(name, markdown, { allowNeedsYou = false } = {}) {
   }
 }
 
-function buildSourceArtifacts({
-  context,
-  questionCapture,
-  coverLetter,
-  answers,
-  services = {},
-}) {
+function buildSourceArtifacts({ context, questionCapture, coverLetter, answers, services = {} }) {
   const profile = profileFromContext(context);
   const evidence = evidenceFromContext(context);
   const honesty = honestyFromContext(context);
@@ -383,7 +408,8 @@ function buildSourceArtifacts({
   const coverLetterMarkdown = coverHasNeedsYou
     ? renderManualCoverLetter({
         context: { ...context, job },
-        reason: coverBlocks.find((block) => /^NEEDS YOU:/i.test(block.text || ""))?.gap ||
+        reason:
+          coverBlocks.find((block) => /^NEEDS YOU:/i.test(block.text || ""))?.gap ||
           "confirm the cover-letter proof points.",
       })
     : (services.buildCoverLetterScaffold || buildCoverLetterScaffold)({
@@ -406,7 +432,15 @@ function sourceBase({ context, appId }) {
   return `${slugPart(app.company)}-${slugPart(app.role)}-${slugPart(appId)}`;
 }
 
-function writeWorkspaceArtifacts({ repoRoot, env, appId, context, sources, manifest, formats = [] }) {
+function writeWorkspaceArtifacts({
+  repoRoot,
+  env,
+  appId,
+  context,
+  sources,
+  manifest,
+  formats = [],
+}) {
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
   const tailoredDir = join(workspaceDir, "tailored");
   mkdirSync(tailoredDir, { recursive: true });
@@ -433,8 +467,7 @@ function writeWorkspaceArtifacts({ repoRoot, env, appId, context, sources, manif
           ? `coverLetter${format === "pdf" ? "Pdf" : "Docx"}`
           : `${key}${format === "pdf" ? "Pdf" : "Docx"}`;
       const full = join(tailoredDir, `${base}-${key}.${format}`);
-      const content =
-        format === "pdf" ? `%PDF-1.4\n% Rolester packet artifact\n${body}\n` : body;
+      const content = format === "pdf" ? `%PDF-1.4\n% Rolester packet artifact\n${body}\n` : body;
       writeFileSync(full, content, format === "pdf" ? "utf8" : "utf8");
       artifacts[artifactKey] = workspaceDisplayPath(relative(workspaceDir, full));
     }
@@ -446,7 +479,10 @@ async function loadCaptureForGeneration({ repoRoot, env, appId, context, questio
   if (questionCapture) return normalizeQuestionCapture(questionCapture, context);
   if (repoRoot && appId) {
     try {
-      return normalizeQuestionCapture(await loadPacketQuestionCapture({ repoRoot, env, appId }), context);
+      return normalizeQuestionCapture(
+        await loadPacketQuestionCapture({ repoRoot, env, appId }),
+        context
+      );
     } catch {
       return normalizeQuestionCapture(null, context);
     }
@@ -454,7 +490,16 @@ async function loadCaptureForGeneration({ repoRoot, env, appId, context, questio
   return normalizeQuestionCapture(null, context);
 }
 
-function manifestFor({ appId, context, questionCapture, answers, sources, sourceSplit, gaps, uploadReady }) {
+function manifestFor({
+  appId,
+  context,
+  questionCapture,
+  answers,
+  sources,
+  sourceSplit,
+  gaps,
+  uploadReady,
+}) {
   const generatedAt = new Date().toISOString();
   const artifacts = {};
   const answerIds = (answers.answers || []).map((answer) => String(answer.questionId));
@@ -510,7 +555,10 @@ function gapObjects(...lists) {
     .map((gap) =>
       typeof gap === "string"
         ? { kind: "review", message: gap }
-        : { kind: gap.kind || gap.reason || "review", message: gap.message || gap.reason || "review" }
+        : {
+            kind: gap.kind || gap.reason || "review",
+            message: gap.message || gap.reason || "review",
+          }
     );
 }
 
@@ -530,7 +578,9 @@ export async function generatePacket({
   coverLetterCall,
   packetAnswersCall,
 } = {}) {
-  const id = cleanText(applicationId || appId || context?.applicationId || appFromContext(context).id);
+  const id = cleanText(
+    applicationId || appId || context?.applicationId || appFromContext(context).id
+  );
   if (!id) {
     const err = new Error("generatePacket: applicationId is required");
     err.code = "BAD_REQUEST";
@@ -552,7 +602,12 @@ export async function generatePacket({
   });
   const sourceMap = enumeratePacketSources(packetContext, capture);
   const sourceSplit = splitConfirmedAndProposedPacketSources(sourceMap);
-  const coverLetter = await coverDraft({ context: packetContext, call: coverLetterCall });
+  const coverLetter = await coverDraft({
+    repoRoot,
+    env,
+    context: packetContext,
+    call: coverLetterCall,
+  });
   const answers = await draftPacketAnswers({
     repoRoot,
     env,

@@ -131,6 +131,7 @@ export async function extractAmbiguousPublicCareersPage({
     call,
     messages: buildMessages({ pageUrl, pageText: sanitizedText, inputHash }),
     system: "Return only structured JSON for public careers-page extraction.",
+    tier: "smallFast",
     maxTokens: 512,
     outputName: "public_careers_extract_response",
     root,
