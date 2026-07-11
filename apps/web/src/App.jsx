@@ -2,6 +2,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./app-shell/AppShell.jsx";
 import { DashboardProvider } from "./app-shell/DashboardContext.jsx";
 import { CalendarPage } from "./calendar/CalendarPage.jsx";
+import { AccentLab } from "./dev/AccentLab.jsx";
 import { InboxPage } from "./inbox/InboxPage.jsx";
 import { JobsPage } from "./jobs/JobsPage.jsx";
 import { LibraryPage } from "./library/LibraryPage.jsx";
@@ -19,36 +20,44 @@ export function App() {
 
   if (location.pathname === "/onboarding") {
     return (
-      <DashboardProvider>
-        <OnboardingPage />
-      </DashboardProvider>
+      <>
+        <DashboardProvider>
+          <OnboardingPage />
+        </DashboardProvider>
+        {import.meta.env.DEV ? <AccentLab /> : null}
+      </>
     );
   }
 
   return (
-    <AppShell>
-      <Routes>
-        <Route path="/" element={<DashboardPage />} />
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/inbox" element={<InboxPage />} />
-        <Route path="/jobs" element={<JobsPage />} />
-        <Route path="/calendar" element={<CalendarPage />} />
-        <Route path="/network" element={<NetworkPage />} />
-        <Route path="/library" element={<LibraryPage />} />
-        <Route
-          path="/deep-ingest"
-          element={
-            <ComingSoonPage
-              title="Deep ingest"
-              description="Deep ingest is on its way — check back soon."
-            />
-          }
-        />
-        <Route
-          path="*"
-          element={<ComingSoonPage title="Not found" description="This page doesn't exist yet." />}
-        />
-      </Routes>
-    </AppShell>
+    <>
+      <AppShell>
+        <Routes>
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="/inbox" element={<InboxPage />} />
+          <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/calendar" element={<CalendarPage />} />
+          <Route path="/network" element={<NetworkPage />} />
+          <Route path="/library" element={<LibraryPage />} />
+          <Route
+            path="/deep-ingest"
+            element={
+              <ComingSoonPage
+                title="Deep ingest"
+                description="Deep ingest is on its way — check back soon."
+              />
+            }
+          />
+          <Route
+            path="*"
+            element={
+              <ComingSoonPage title="Not found" description="This page doesn't exist yet." />
+            }
+          />
+        </Routes>
+      </AppShell>
+      {import.meta.env.DEV ? <AccentLab /> : null}
+    </>
   );
 }
