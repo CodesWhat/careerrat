@@ -4865,7 +4865,7 @@ button {
   background:
     radial-gradient(ellipse 60% 44% at 34% 44%, rgba(47, 111, 159, 0.14), transparent 68%),
     radial-gradient(ellipse 44% 36% at 60% 72%, rgba(232, 85, 61, 0.1), transparent 72%),
-    linear-gradient(180deg, #181610 0%, #201d16 56%, #181610 100%);
+    linear-gradient(180deg, #0a0906 0%, #15130e 56%, #0a0906 100%);
 }
 
 [data-theme="dark"] .onboarding-shell__header {
@@ -4911,14 +4911,14 @@ button {
   background:
     radial-gradient(circle at 58% 35%, rgba(47, 111, 159, 0.24), transparent 34%),
     radial-gradient(circle at 38% 74%, rgba(232, 85, 61, 0.16), transparent 30%),
-    linear-gradient(180deg, rgba(31, 35, 37, 0.98), rgba(22, 20, 15, 0.98));
+    linear-gradient(180deg, rgba(20, 22, 24, 0.98), rgba(0, 0, 0, 0.98));
 }
 
 [data-theme="dark"] .onboarding-targeting__media {
   background:
     radial-gradient(circle at 58% 35%, rgba(47, 111, 159, 0.24), transparent 34%),
     radial-gradient(circle at 38% 74%, rgba(232, 85, 61, 0.16), transparent 30%),
-    linear-gradient(180deg, rgba(31, 35, 37, 0.98), rgba(22, 20, 15, 0.98));
+    linear-gradient(180deg, rgba(20, 22, 24, 0.98), rgba(0, 0, 0, 0.98));
 }
 
 [data-theme="dark"] .onboarding-targeting__mark {
@@ -5279,7 +5279,7 @@ button {
 }
 
 .cl-modalBackdrop {
-  background: rgba(22, 20, 15, 0.74);
+  background: rgba(0, 0, 0, 0.74);
   backdrop-filter: blur(8px);
 }
 
@@ -6147,7 +6147,7 @@ button {
 
 [data-theme="dark"] .capture-assistant__input {
   border-color: rgba(239, 233, 221, 0.18);
-  background: rgba(22, 20, 15, 0.74);
+  background: rgba(0, 0, 0, 0.74);
   color: var(--ink);
 }
 

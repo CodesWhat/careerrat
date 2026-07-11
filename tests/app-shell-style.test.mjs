@@ -96,11 +96,11 @@ describe("app shell styles", () => {
     assert.doesNotMatch(header, /background:\s*rgba\(255,\s*250,\s*242/);
   });
 
-  it("keeps dark header tokens warm instead of slate gray", () => {
+  it("keeps dark header tokens true-black instead of slate gray", () => {
     const tokens = tokensText();
     const darkTheme = tokens.match(/\[data-theme="dark"\]\s*\{([^}]*)\}/)?.[1] ?? "";
 
-    assert.match(darkTheme, /--header-bar-bg:\s*rgba\(22,\s*20,\s*15,\s*0\.82\)/);
+    assert.match(darkTheme, /--header-bar-bg:\s*rgba\(0,\s*0,\s*0,\s*0\.82\)/);
     assert.match(darkTheme, /--header-pill-bg:\s*rgba\(255,\s*250,\s*242,\s*0\.08\)/);
     assert.doesNotMatch(darkTheme, /--header-bar-bg:\s*rgba\(33,\s*37,\s*43/);
   });

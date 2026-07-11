@@ -167,7 +167,7 @@ describe("onboarding shell styles", () => {
   it("has deliberate dark-mode onboarding surfaces instead of translucent cream", () => {
     assert.match(
       cssRule('[data-theme="dark"] .onboarding-shell__header'),
-      /background:\s*rgba\(22,\s*20,\s*15,\s*0\.72\)/
+      /background:\s*var\(--header-bar-bg\)/
     );
     assert.match(
       cssRule('[data-theme="dark"] .onboarding-step-card'),
@@ -175,7 +175,7 @@ describe("onboarding shell styles", () => {
     );
     assert.match(
       cssRule('[data-theme="dark"] .onboarding-targeting__media'),
-      /linear-gradient\(180deg,\s*rgba\(31,\s*35,\s*37,\s*0\.98\),\s*rgba\(22,\s*20,\s*15,\s*0\.98\)\)/
+      /linear-gradient\(180deg,\s*rgba\(20,\s*22,\s*24,\s*0\.98\),\s*rgba\(0,\s*0,\s*0,\s*0\.98\)\)/
     );
     assert.match(
       cssRule('[data-theme="dark"] .onboarding-targeting__tag-box--good'),
@@ -315,7 +315,7 @@ describe("onboarding shell styles", () => {
     const modalBackdrop = cssRule(".cl-modalBackdrop");
     const modalContent = cssRule(".cl-modalContent");
 
-    assert.match(modalBackdrop, /background:\s*rgba\(22,\s*20,\s*15,\s*0\.74\)/);
+    assert.match(modalBackdrop, /background:\s*rgba\(0,\s*0,\s*0,\s*0\.74\)/);
     assert.match(modalContent, /display:\s*grid/);
     assert.match(modalContent, /place-items:\s*center/);
     assert.match(modalContent, /padding:\s*24px/);

@@ -29,7 +29,7 @@ export const ROLESTER_CLERK_APPEARANCE = {
     colorInputForeground: "var(--ink)",
     colorBorder: "color-mix(in srgb, var(--ink-soft) 20%, transparent)",
     colorRing: "color-mix(in srgb, var(--coral) 24%, transparent)",
-    colorModalBackdrop: "rgba(22, 20, 15, 0.74)",
+    colorModalBackdrop: "rgba(0, 0, 0, 0.74)",
     colorShadow: "rgba(0, 0, 0, 0.22)",
     fontFamily: '"Geist Sans", Inter, ui-sans-serif, system-ui, sans-serif',
     fontFamilyButtons: '"Geist Sans", Inter, ui-sans-serif, system-ui, sans-serif',

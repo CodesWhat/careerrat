@@ -19,7 +19,7 @@
 // comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
 // pass. The scripted verification path for `npx electron . --smoke`.
 
-import { app, BrowserWindow, Menu, nativeImage, shell } from "electron";
+import { app, BrowserWindow, Menu, nativeImage, nativeTheme, shell } from "electron";
 import { existsSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
@@ -214,7 +214,7 @@ function openExternalIfAllowed(target, baseUrl) {
 
 function createWindow(url, route, { load = true } = {}) {
   win = new BrowserWindow({
-    ...buildBrowserWindowOptions(),
+    ...buildBrowserWindowOptions({ dark: nativeTheme.shouldUseDarkColors }),
     // No preload, no explicit webPreferences overrides — the UI is
     // server-rendered HTML loaded over loopback HTTP, so Electron's secure
     // remote-page defaults (nodeIntegration off, contextIsolation on) are
