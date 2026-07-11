@@ -29,41 +29,41 @@ const DASHBOARD_DATA = {
   },
   focus: {
     kind: "action",
-    title: "Prepare for the PwC Teams interview",
-    company: "PwC",
+    title: "Prepare for the Weyland-Yutani Teams interview",
+    company: "Weyland-Yutani",
     role: "Director Solution Architect",
-    note: "PwC confirmed the application and requested availability.",
+    note: "Weyland-Yutani confirmed the application and requested availability.",
     dueText: "19d overdue",
     tone: "error",
-    detailId: "app-pwc",
+    detailId: "app-weyland",
     cta: "Handle next action",
   },
   allNextSteps: [
     {
-      title: "Prepare for the PwC Teams interview",
-      company: "PwC",
-      supportingText: "PwC",
+      title: "Prepare for the Weyland-Yutani Teams interview",
+      company: "Weyland-Yutani",
+      supportingText: "Weyland-Yutani",
       actionLabel: "Interview",
       dueText: "19d overdue",
       tone: "error",
-      detailId: "app-pwc",
+      detailId: "app-weyland",
     },
     {
-      title: "Send Ramp follow-up",
-      company: "Ramp",
-      supportingText: "Ramp",
+      title: "Send Abstergo Industries follow-up",
+      company: "Abstergo Industries",
+      supportingText: "Abstergo Industries",
       actionLabel: "Follow Up",
       dueText: "today",
-      detailId: "app-ramp",
+      detailId: "app-abstergo",
     },
   ],
   reviewHoldRoles: [
     {
-      company: "Ramp",
+      company: "Abstergo Industries",
       role: "Applied AI Engineer",
       fit: 82,
-      domain: "ramp.com",
-      detailId: "role-ramp",
+      domain: "abstergo.com",
+      detailId: "role-abstergo",
     },
   ],
   calendar: {
@@ -75,34 +75,34 @@ const DASHBOARD_DATA = {
           label: "Interview",
           iso: "2026-07-07",
           time: "2:00 PM",
-          title: "Juniper Square interview",
-          detailId: "app-juniper",
+          title: "Cyberdyne Systems interview",
+          detailId: "app-cyberdyne",
         },
       ],
     },
   },
   latestRoles: [
     {
-      company: "Hightouch",
+      company: "Veridian Dynamics",
       role: "Staff Engineer, AI Productivity",
       status: "high",
       fit: 96,
-      detailId: "role-hightouch",
+      detailId: "role-veridian",
     },
     {
-      company: "Zoom",
+      company: "Umbrella Corporation",
       role: "Applied AI Engineers",
       status: "high",
       fit: 95,
-      detailId: "role-zoom",
+      detailId: "role-umbrella",
     },
   ],
   sourcedRoles: [
     {
-      company: "Anthropic",
+      company: "Tyrell Corporation",
       role: "Product Engineer",
       fit: 88,
-      detailId: "role-anthropic",
+      detailId: "role-tyrell",
     },
   ],
   jobs: {
@@ -155,13 +155,13 @@ describe("DashboardPage", () => {
     expect(html).toContain("Active");
 
     expect(html).toContain("Priority");
-    expect(html).toContain("Prepare for the PwC Teams interview");
+    expect(html).toContain("Prepare for the Weyland-Yutani Teams interview");
     expect(html).toContain("Handle next action");
 
     // The Priority panel is the focus card and nothing else. The rest of
     // allNextSteps stays behind the Needs You count, not stacked under the hero.
-    expect(html).not.toContain("Send Ramp follow-up");
-    expect(html.match(/Prepare for the PwC Teams interview/g)).toHaveLength(1);
+    expect(html).not.toContain("Send Abstergo Industries follow-up");
+    expect(html.match(/Prepare for the Weyland-Yutani Teams interview/g)).toHaveLength(1);
 
     expect(html).toContain("Momentum");
     expect(html).toContain("To decide");
@@ -172,12 +172,12 @@ describe("DashboardPage", () => {
     expect(html).toContain("Decide");
     expect(html).not.toContain("You have 3 high-fit roles");
     expect(html).not.toContain("promote, skip, or park");
-    expect(html).toContain("Ramp");
+    expect(html).toContain("Abstergo Industries");
     expect(html).toContain("82");
     expect(html).toContain("Fresh Finds");
-    expect(html).toContain("Hightouch");
+    expect(html).toContain("Veridian Dynamics");
     expect(html).toContain("96");
-    expect(html).toContain("Juniper Square interview");
+    expect(html).toContain("Cyberdyne Systems interview");
     expect(html).toContain("2:00 PM");
     expect(html).not.toContain("Closed");
     expect(html).not.toContain("Archived");
@@ -203,13 +203,13 @@ describe("DashboardPage", () => {
     });
 
     expect(html).toContain(">Dashboard</h1>");
-    expect(html).toContain("Prep Juniper Square technical screen");
-    expect(html).not.toContain("Send Ramp follow-up");
+    expect(html).toContain("Prep Cyberdyne Systems technical screen");
+    expect(html).not.toContain("Send Abstergo Industries follow-up");
     expect(html).toContain("Due by today");
-    expect(html).toContain("Hightouch");
-    expect(html).toContain("Anthropic");
-    expect(html).toContain("Juniper Square technical screen");
-    expect(html).not.toContain("Glean packet deadline");
+    expect(html).toContain("Veridian Dynamics");
+    expect(html).toContain("Tyrell Corporation");
+    expect(html).toContain("Cyberdyne Systems technical screen");
+    expect(html).not.toContain("Pied Piper packet deadline");
     expect(html).not.toContain("No interviews or calls today");
   });
 });

@@ -130,38 +130,38 @@ function withExport(event) {
   };
 }
 
-const notionInterview = withExport({
-  id: "preview-interview-notion",
+const blackMesaInterview = withExport({
+  id: "preview-interview-blackmesa",
   iso: "2026-07-02",
   time: "10:00 AM",
-  title: "Notion phone screen",
+  title: "Black Mesa phone screen",
   meta: "Applied AI Engineer",
   kind: "interview",
   label: "Interview",
-  detailId: "preview-notion",
+  detailId: "preview-blackmesa",
   done: true,
 });
 
-const greenhouseFollowUp = withExport({
-  id: "preview-follow-greenhouse",
+const nakatomiFollowUp = withExport({
+  id: "preview-follow-nakatomi",
   iso: "2026-07-06",
   time: "10:00 AM",
-  title: "Follow up with Greenhouse recruiter",
+  title: "Follow up with Nakatomi Corporation recruiter",
   meta: "Senior AI Platform Engineer",
   kind: "follow-up",
   label: "Follow-up",
-  detailId: "preview-greenhouse",
+  detailId: "preview-nakatomi",
   done: false,
 });
 
-const hightouchAssessment = withExport({
-  id: "preview-assessment-hightouch",
+const veridianAssessment = withExport({
+  id: "preview-assessment-veridian",
   iso: "2026-07-07",
-  title: "Hightouch take-home due",
+  title: "Veridian Dynamics take-home due",
   meta: "Staff Engineer, AI Productivity",
   kind: "assessment",
   label: "Assessment",
-  detailId: "preview-hightouch",
+  detailId: "preview-veridian",
   done: false,
 });
 
@@ -175,78 +175,78 @@ const focusBlock = withExport({
   label: "Busy",
 });
 
-const prepAnthropic = withExport({
-  id: "preview-prep-anthropic",
+const prepTyrell = withExport({
+  id: "preview-prep-tyrell",
   iso: "2026-07-08",
   time: "9:30 AM",
-  title: "Prep Anthropic enterprise AI stories",
+  title: "Prep Tyrell Corporation enterprise AI stories",
   meta: "Applied AI Architect",
   kind: "prep",
   label: "Prep",
-  detailId: "preview-anthropic",
+  detailId: "preview-tyrell",
   done: false,
 });
 
 // The one interview in this preview set without a prep packet yet — the only
 // event that should ever set prepped:false. Every other event leaves the
 // field off entirely, since real data doesn't emit it yet either.
-const juniperInterview = withExport({
-  id: "preview-interview-juniper",
+const cyberdyneInterview = withExport({
+  id: "preview-interview-cyberdyne",
   iso: "2026-07-08",
   time: "2:00 PM",
-  title: "Juniper Square technical screen",
+  title: "Cyberdyne Systems technical screen",
   meta: "Senior Applied AI Engineer",
   kind: "interview",
   label: "Interview",
-  detailId: "preview-juniper",
+  detailId: "preview-cyberdyne",
   done: false,
   prepped: false,
 });
 
-const rampFollowUp = withExport({
-  id: "preview-follow-ramp",
+const abstergoFollowUp = withExport({
+  id: "preview-follow-abstergo",
   iso: "2026-07-08",
   time: "4:30 PM",
-  title: "Send Ramp follow-up",
+  title: "Send Abstergo Industries follow-up",
   meta: "Applied AI Engineer",
   kind: "follow-up",
   label: "Follow-up",
-  detailId: "preview-ramp",
+  detailId: "preview-abstergo",
   done: false,
 });
 
-const gleanDeadline = withExport({
-  id: "preview-deadline-glean",
+const piedPiperDeadline = withExport({
+  id: "preview-deadline-piedpiper",
   iso: "2026-07-10",
-  title: "Glean packet deadline",
+  title: "Pied Piper packet deadline",
   meta: "AI Search Engineer",
   kind: "deadline",
   label: "Deadline",
-  detailId: "preview-glean",
+  detailId: "preview-piedpiper",
   done: false,
 });
 
-const langchainReply = withExport({
-  id: "preview-reply-langchain",
+const encomReply = withExport({
+  id: "preview-reply-encom",
   iso: "2026-07-10",
   time: "3:00 PM",
-  title: "Reply to LangChain recruiter",
+  title: "Reply to Encom recruiter",
   meta: "Deployed Engineer",
   kind: "reply",
   label: "Reply",
-  detailId: "preview-langchain",
+  detailId: "preview-encom",
   done: false,
 });
 
-const stripeInterview = withExport({
-  id: "preview-interview-stripe",
+const massiveDynamicInterview = withExport({
+  id: "preview-interview-massivedynamic",
   iso: "2026-07-14",
   time: "11:00 AM",
-  title: "Stripe hiring manager screen",
+  title: "Massive Dynamic hiring manager screen",
   meta: "AI Product Engineer",
   kind: "interview",
   label: "Interview",
-  detailId: "preview-stripe",
+  detailId: "preview-massivedynamic",
   done: false,
 });
 
@@ -273,20 +273,20 @@ export const PREVIEW_CALENDAR = {
     {
       label: "Jul 6-10",
       days: [
-        { dow: "Mon", date: "6", iso: "2026-07-06", state: "past", events: [greenhouseFollowUp] },
+        { dow: "Mon", date: "6", iso: "2026-07-06", state: "past", events: [nakatomiFollowUp] },
         {
           dow: "Tue",
           date: "7",
           iso: "2026-07-07",
           state: "past",
-          events: [hightouchAssessment, focusBlock],
+          events: [veridianAssessment, focusBlock],
         },
         {
           dow: "Wed",
           date: "8",
           iso: "2026-07-08",
           state: "today",
-          events: [prepAnthropic, juniperInterview, rampFollowUp],
+          events: [prepTyrell, cyberdyneInterview, abstergoFollowUp],
         },
         // Tomorrow is deliberately empty so the empty-bucket state is visible.
         { dow: "Thu", date: "9", iso: "2026-07-09", state: "", events: [] },
@@ -295,28 +295,28 @@ export const PREVIEW_CALENDAR = {
           date: "10",
           iso: "2026-07-10",
           state: "",
-          events: [gleanDeadline, langchainReply],
+          events: [piedPiperDeadline, encomReply],
         },
       ],
       events: [
-        greenhouseFollowUp,
-        hightouchAssessment,
-        prepAnthropic,
-        juniperInterview,
-        rampFollowUp,
-        gleanDeadline,
-        langchainReply,
+        nakatomiFollowUp,
+        veridianAssessment,
+        prepTyrell,
+        cyberdyneInterview,
+        abstergoFollowUp,
+        piedPiperDeadline,
+        encomReply,
       ],
-      loops: [notionInterview],
-      nextUp: prepAnthropic,
+      loops: [blackMesaInterview],
+      nextUp: prepTyrell,
       stats: { interviews: 1, replies: 1, deadlines: 2 },
     },
   ],
   today: {
     label: "Today",
-    events: [prepAnthropic, juniperInterview, rampFollowUp],
+    events: [prepTyrell, cyberdyneInterview, abstergoFollowUp],
   },
   upcoming: {
-    events: [stripeInterview, cloudscaleDeadline],
+    events: [massiveDynamicInterview, cloudscaleDeadline],
   },
 };

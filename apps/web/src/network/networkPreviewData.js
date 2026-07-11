@@ -14,9 +14,9 @@ const northstarAi = {
   contacts: [
     {
       type: "Recruiter",
-      name: "Maya Chen",
+      name: "Dana Whitfield",
       note: "Good screen energy; keep the next ask tied to platform scope.",
-      email: "maya.chen@northstar.example",
+      email: "dana.whitfield@northstar.example",
       title: "Senior Technical Recruiter",
       platform: "email",
     },
@@ -44,23 +44,23 @@ const northstarAi = {
   ],
 };
 
-const hightouch = {
-  company: "Hightouch",
-  domain: "hightouch.com",
+const veridianDynamics = {
+  company: "Veridian Dynamics",
+  domain: "veridiandynamics.com",
   contacts: [
     {
       type: "Decision maker",
-      name: "Priya Shah",
+      name: "Veronica Palmer",
       note: "Strong adjacent-team context for AI productivity work.",
-      email: "priya.shah@hightouch.com",
+      email: "veronica.palmer@veridiandynamics.com",
       title: "Engineering Manager, Data Platform",
       platform: "linkedin",
     },
     {
       type: "Recruiter",
-      name: "Leo Grant",
+      name: "Linda Zwordling",
       note: "Can clarify the team split before application copy is tailored.",
-      email: "leo.grant@hightouch.com",
+      email: "linda.zwordling@veridiandynamics.com",
       title: "Technical Recruiter",
       platform: "email",
     },
@@ -77,15 +77,15 @@ const hightouch = {
   notes: ["Relationship is specific enough for one low-pressure context ask."],
 };
 
-const ramp = {
-  company: "Ramp",
-  domain: "ramp.com",
+const abstergoIndustries = {
+  company: "Abstergo Industries",
+  domain: "abstergo.com",
   contacts: [
     {
       type: "Recruiter",
-      name: "Elena Torres",
+      name: "Lucy Stillman",
       note: "Follow-up is due; keep it short and tied to applied AI scope.",
-      email: "elena.torres@ramp.com",
+      email: "lucy.stillman@abstergo.com",
       title: "Recruiting Lead",
       platform: "email",
     },
@@ -121,23 +121,23 @@ const archiveLabs = {
 };
 
 export const PREVIEW_NETWORK = {
-  companies: [northstarAi, hightouch, ramp, archiveLabs],
+  companies: [northstarAi, veridianDynamics, abstergoIndustries, archiveLabs],
   sourcing: {
     reviewLeads: [
       {
-        id: "preview-lead-alicia",
+        id: "preview-lead-carla",
         label: "Review lead",
-        name: "Alicia Romero",
-        company: "Glean",
+        name: "Carla Walton",
+        company: "Pied Piper",
         title: "AI Search Engineering",
         platform: "linkedin",
         note: "Potential peer path for search infra scope.",
       },
       {
-        id: "preview-lead-noah",
+        id: "preview-lead-alan",
         label: "Review lead",
-        name: "Noah Kim",
-        company: "LangChain",
+        name: "Alan Bradley",
+        company: "Encom",
         title: "Deployed engineering",
         platform: "wellfound",
         note: "Check fit before drafting outreach.",
@@ -145,9 +145,9 @@ export const PREVIEW_NETWORK = {
     ],
     targets: [
       {
-        id: "preview-target-glean",
+        id: "preview-target-piedpiper",
         label: "Search contact path",
-        company: "Glean",
+        company: "Pied Piper",
         role: "AI Search Engineer",
         fit: 78,
         summary: "No recruiter, hiring-team member, referral, or warm contact is tracked yet.",

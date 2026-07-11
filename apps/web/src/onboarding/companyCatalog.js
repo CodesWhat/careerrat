@@ -22,7 +22,6 @@ const RAW_COMPANY_CATALOG = [
   ["Workday", "workday.com"],
   ["Intuit", "intuit.com"],
   ["Atlassian", "atlassian.com"],
-  ["Shopify", "shopify.com"],
   ["Stripe", "stripe.com"],
   ["Block", "block.xyz", ["square"]],
   ["PayPal", "paypal.com"],

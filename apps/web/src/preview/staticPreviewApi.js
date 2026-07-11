@@ -1,15 +1,15 @@
 const STATIC_PREVIEW = import.meta.env.VITE_STATIC_PREVIEW === "true";
 
 const PREVIEW_COMPANIES = [
-  { name: "Sweetgreen", domain: "sweetgreen.com" },
-  { name: "Anthropic", domain: "anthropic.com" },
-  { name: "Ramp", domain: "ramp.com" },
-  { name: "Stripe", domain: "stripe.com" },
-  { name: "Glean", domain: "glean.com" },
-  { name: "LangChain", domain: "langchain.com" },
-  { name: "Juniper Square", domain: "junipersquare.com" },
-  { name: "Hightouch", domain: "hightouch.com" },
-  { name: "Perplexity", domain: "perplexity.ai" },
+  { name: "Buy n Large", domain: "buynlarge.com" },
+  { name: "Tyrell Corporation", domain: "tyrellcorp.com" },
+  { name: "Abstergo Industries", domain: "abstergo.com" },
+  { name: "Massive Dynamic", domain: "massivedynamic.com" },
+  { name: "Pied Piper", domain: "piedpiper.com" },
+  { name: "Encom", domain: "encom.com" },
+  { name: "Cyberdyne Systems", domain: "cyberdyne.com" },
+  { name: "Veridian Dynamics", domain: "veridiandynamics.com" },
+  { name: "Hooli", domain: "hooli.com" },
 ];
 
 const DEFAULT_ONBOARD_STATE = {
@@ -25,13 +25,13 @@ const DEFAULT_ONBOARD_STATE = {
   data: {
     profile: {
       candidate: {
-        full_name: "Sam Preview",
-        email: "sam.preview@example.com",
+        full_name: "Riley Chen",
+        email: "riley.chen@rolester.dev",
         phone: "(555) 010-2048",
         location: "New York, NY",
-        linkedin: "https://linkedin.com/in/sam-preview",
-        github: "https://github.com/sampreview",
-        portfolio: "https://sam-preview.example.com",
+        linkedin: "https://linkedin.com/in/riley-chen",
+        github: "https://github.com/rileychen",
+        portfolio: "https://riley-chen.example.com",
         headline: "Senior AI product engineer building production systems",
         domain: "Applied AI, developer tools, and product engineering",
       },
@@ -55,7 +55,13 @@ const DEFAULT_ONBOARD_STATE = {
       ],
       keep_signals: ["production AI systems", "developer tools", "measurable business outcomes"],
       cut_signals: ["Heavy travel", "Onsite-only", "Below comp floor"],
-      tracked_companies: ["Anthropic", "Ramp", "Stripe", "Glean", "Sweetgreen"],
+      tracked_companies: [
+        "Tyrell Corporation",
+        "Abstergo Industries",
+        "Massive Dynamic",
+        "Pied Piper",
+        "Buy n Large",
+      ],
       search_preferences: { cadence: { mode: "daily", recommended_from: "default" } },
     },
     modes: {
@@ -66,10 +72,10 @@ const DEFAULT_ONBOARD_STATE = {
     "form-defaults": {
       auto_submit: false,
       eeo_default: "Prefer not to answer",
-      linkedin: "https://linkedin.com/in/sam-preview",
-      github: "https://github.com/sampreview",
-      portfolio: "https://sam-preview.example.com",
-      additional_links: [{ label: "Writing", url: "https://sam-preview.example.com/writing" }],
+      linkedin: "https://linkedin.com/in/riley-chen",
+      github: "https://github.com/rileychen",
+      portfolio: "https://riley-chen.example.com",
+      additional_links: [{ label: "Writing", url: "https://riley-chen.example.com/writing" }],
     },
     setup: {
       readiness: {
@@ -109,10 +115,10 @@ export function getStaticPreviewAuthState() {
     isLoaded: true,
     isSignedIn: true,
     user: {
-      firstName: "Sam",
-      fullName: "Sam Preview",
+      firstName: "Riley",
+      fullName: "Riley Chen",
       id: "preview-user",
-      primaryEmailAddress: { emailAddress: "sam.preview@example.com" },
+      primaryEmailAddress: { emailAddress: "riley.chen@rolester.dev" },
     },
   };
 }
@@ -273,13 +279,13 @@ function resumeSeedFromText(_text) {
     sections: { education: 1, experience: 4, other: 1, projects: 2, skills: 12 },
     profileSeed: {
       candidate: {
-        full_name: "Sam Preview",
-        email: "sam.preview@example.com",
+        full_name: "Riley Chen",
+        email: "riley.chen@rolester.dev",
         phone: "(555) 010-2048",
         location: "New York, NY",
-        linkedin: "https://linkedin.com/in/sam-preview",
-        github: "https://github.com/sampreview",
-        portfolio: "https://sam-preview.example.com",
+        linkedin: "https://linkedin.com/in/riley-chen",
+        github: "https://github.com/rileychen",
+        portfolio: "https://riley-chen.example.com",
       },
     },
     evidenceSeed: {

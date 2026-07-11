@@ -37,20 +37,22 @@ const ACME_DEADLINE_EXPORT = {
     "https://outlook.live.com/calendar/0/deeplink/compose?subject=Acme+offer+decision+deadline",
 };
 
-const STRIPE_ONSITE_EXPORT = {
-  filename: "stripe-onsite-loop-2026-07-15.ics",
-  ics: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nSUMMARY:Stripe onsite loop\r\nDTSTART:20260715T160000Z\r\nDTEND:20260715T164500Z\r\nEND:VEVENT\r\nEND:VCALENDAR",
-  googleUrl: "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Stripe+onsite+loop",
-  outlookUrl: "https://outlook.live.com/calendar/0/deeplink/compose?subject=Stripe+onsite+loop",
+const MASSIVE_DYNAMIC_ONSITE_EXPORT = {
+  filename: "massive-dynamic-onsite-loop-2026-07-15.ics",
+  ics: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nSUMMARY:Massive Dynamic onsite loop\r\nDTSTART:20260715T160000Z\r\nDTEND:20260715T164500Z\r\nEND:VEVENT\r\nEND:VCALENDAR",
+  googleUrl:
+    "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Massive+Dynamic+onsite+loop",
+  outlookUrl:
+    "https://outlook.live.com/calendar/0/deeplink/compose?subject=Massive+Dynamic+onsite+loop",
 };
 
-const NOTION_DEADLINE_EXPORT = {
-  filename: "notion-sign-by-deadline-2026-08-01.ics",
-  ics: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nSUMMARY:Notion sign-by deadline\r\nDTSTART;VALUE=DATE:20260801\r\nDTEND;VALUE=DATE:20260802\r\nEND:VEVENT\r\nEND:VCALENDAR",
+const BLACK_MESA_DEADLINE_EXPORT = {
+  filename: "black-mesa-sign-by-deadline-2026-08-01.ics",
+  ics: "BEGIN:VCALENDAR\r\nVERSION:2.0\r\nBEGIN:VEVENT\r\nSUMMARY:Black Mesa sign-by deadline\r\nDTSTART;VALUE=DATE:20260801\r\nDTEND;VALUE=DATE:20260802\r\nEND:VEVENT\r\nEND:VCALENDAR",
   googleUrl:
-    "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Notion+sign-by+deadline",
+    "https://calendar.google.com/calendar/render?action=TEMPLATE&text=Black+Mesa+sign-by+deadline",
   outlookUrl:
-    "https://outlook.live.com/calendar/0/deeplink/compose?subject=Notion+sign-by+deadline",
+    "https://outlook.live.com/calendar/0/deeplink/compose?subject=Black+Mesa+sign-by+deadline",
 };
 
 const pastFollowUp = {
@@ -130,28 +132,28 @@ const fridayDeadline = {
 };
 
 const nextWeekInterview = {
-  id: "event-stripe-onsite",
+  id: "event-massivedynamic-onsite",
   iso: "2026-07-15",
   time: "9:00 AM",
-  title: "Stripe onsite loop",
+  title: "Massive Dynamic onsite loop",
   meta: "AI Product Engineer",
   kind: "interview",
   label: "Interview",
-  detailId: "app-stripe",
+  detailId: "app-massivedynamic",
   done: false,
-  export: STRIPE_ONSITE_EXPORT,
+  export: MASSIVE_DYNAMIC_ONSITE_EXPORT,
 };
 
 const laterDeadline = {
-  id: "event-notion-deadline",
+  id: "event-blackmesa-deadline",
   iso: "2026-08-01",
-  title: "Notion sign-by deadline",
+  title: "Black Mesa sign-by deadline",
   meta: "Deployed Engineer",
   kind: "deadline",
   label: "Deadline",
-  detailId: "app-notion",
+  detailId: "app-blackmesa",
   done: false,
-  export: NOTION_DEADLINE_EXPORT,
+  export: BLACK_MESA_DEADLINE_EXPORT,
 };
 
 const CALENDAR_DATA = {
@@ -228,8 +230,8 @@ describe("CalendarPage", () => {
     expect(html).toContain("Reply to Hooli recruiter");
     expect(html).toContain("Globex technical screen");
     expect(html).toContain("Acme offer decision deadline");
-    expect(html).toContain("Stripe onsite loop");
-    expect(html).toContain("Notion sign-by deadline");
+    expect(html).toContain("Massive Dynamic onsite loop");
+    expect(html).toContain("Black Mesa sign-by deadline");
 
     // Not-prepped signal only on the one flagged interview.
     expect(html).toContain("Not prepped");
@@ -277,11 +279,11 @@ describe("CalendarPage", () => {
     });
 
     expect(html).not.toContain("Preview Data");
-    expect(html).toContain("Juniper Square technical screen");
-    expect(html).toContain("Prep Anthropic enterprise AI stories");
-    expect(html).toContain("Send Ramp follow-up");
-    expect(html).toContain("Glean packet deadline");
-    expect(html).toContain("Stripe hiring manager screen");
+    expect(html).toContain("Cyberdyne Systems technical screen");
+    expect(html).toContain("Prep Tyrell Corporation enterprise AI stories");
+    expect(html).toContain("Send Abstergo Industries follow-up");
+    expect(html).toContain("Pied Piper packet deadline");
+    expect(html).toContain("Massive Dynamic hiring manager screen");
     expect(html).toContain("Cloudscale onsite decision deadline");
 
     // Tomorrow is deliberately empty in the preview fixture.
@@ -294,9 +296,9 @@ describe("CalendarPage", () => {
     // past-due assessment, and the past busy block (4 events with iso before
     // todayIso).
     expect(html).toContain("Recent · 4");
-    expect(html).toContain("Notion phone screen");
+    expect(html).toContain("Black Mesa phone screen");
     expect(html).toContain(">Done<");
-    expect(html).toContain("Follow up with Greenhouse recruiter");
+    expect(html).toContain("Follow up with Nakatomi Corporation recruiter");
   });
 
   it("moves a round the server marked done out of Today and into Recent", () => {
