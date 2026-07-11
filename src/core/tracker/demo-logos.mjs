@@ -10,6 +10,9 @@
 // logos — disappear automatically. See dashboard.mjs.
 //
 // Companies without a file here fall back to a monogram avatar.
+
+import { basename, dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 export const DEMO_LOGOS = {
   // accepted / offers / finals
   "e corp": { src: "../assets/logos/e-corp.png" },
@@ -46,3 +49,22 @@ export const DEMO_LOGOS = {
   cobra: { src: "../assets/logos/cobra.png" },
   "monsters inc": { src: "../assets/logos/monsters-inc.png" },
 };
+
+// Absolute filesystem path to the bundled logo PNG for a demo company name, or
+// null when the company isn't a known fictional-corp fixture. The logo route
+// serves this ahead of logo.dev so the seeded roster shows its franchise mark
+// instead of a wrong real-company guess (e.g. "Buy n Large" → Disney). The map's
+// `src` is a web path relative to the rendered page; the real files live in
+// <repoRoot>/assets/logos/, so we resolve by basename off this module's location.
+const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
+
+export function demoLogoFilePath(company) {
+  const entry =
+    DEMO_LOGOS[
+      String(company || "")
+        .trim()
+        .toLowerCase()
+    ];
+  if (!entry) return null;
+  return join(REPO_ROOT, "assets", "logos", basename(entry.src));
+}

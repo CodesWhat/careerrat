@@ -61,6 +61,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
+import { demoLogoFilePath } from "../core/tracker/demo-logos.mjs";
 import { sendJson } from "./skill-run-route.mjs";
 
 const SEARCH_CACHE_TTL_MS = 7 * 24 * 60 * 60 * 1000; // ~7 days, per the frozen contract.
@@ -289,6 +290,26 @@ export function mountLogoRoutes({ addRoute, repoRoot, env = process.env, fetchIm
   // GET /api/logos/img?name=<company>
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/logos/img", async (req, res) => {
+    // Bundled franchise logos win over logo.dev. The SPA sends ?name= alongside
+    // ?domain= (see logoImageUrl), so a seeded fictional company resolves to its
+    // local mark here instead of logo.dev's wrong real-company guess (e.g.
+    // "Buy n Large" → Disney) or an initials fallback. Unknown names fall through
+    // to the normal domain/name → logo.dev resolution untouched.
+    const demoPath = demoLogoFilePath(queryParam(req, "name"));
+    if (demoPath && existsSync(demoPath)) {
+      try {
+        const bytes = readFileSync(demoPath);
+        res.writeHead(200, {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=604800, immutable",
+        });
+        res.end(bytes);
+        return;
+      } catch {
+        // Unreadable bundled asset — fall through to normal resolution.
+      }
+    }
+
     const lookup = imageLookupFromRequest(req);
     if (!lookup.ok) {
       sendJson(res, lookup.status, { error: lookup.error });
