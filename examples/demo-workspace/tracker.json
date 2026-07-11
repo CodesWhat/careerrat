@@ -193,44 +193,65 @@
         "url": "https://aperturescience.com/careers/forward-deployed-engineer"
       },
       "artifacts": {
-        "jd": "Forward deployed engineer role embedding with enterprise launch customers, building agent workflows, and owning production adoption end to end.\n\nArtifact: workspace/jds/demo/aperture-forward-deployed-engineer.md"
+        "jd": "Forward deployed engineer role embedding with enterprise launch customers, building agent workflows, and owning production adoption end to end.\n\nArtifact: workspace/jds/demo/aperture-forward-deployed-engineer.md",
+        "resume": "Forward-deployed engineer summary leads with Pulsar's 3-concurrent enterprise go-lives (zero P1s, 14→9wk time-to-value) and the Meridian agentic procurement agent's human-in-the-loop write safety.",
+        "resumeNote": "Reordered to open with deployment ownership; added the agentic-workflow bullet since the Enrichment Center wants builders, not just support.",
+        "coverLetter": "Connects Riley's Pulsar FDE deployment ownership (3 concurrent go-lives, zero P1s) to Aperture's Enrichment Center launch, and cites the Meridian agentic procurement agent as evidence of building agent workflows firsthand.",
+        "coverLetterNote": "Leads with deployment ownership since Aperture wants an FDE who owns adoption end-to-end, not a support role.",
+        "interviewDossier": {
+          "title": "Aperture Science — Forward Deployed Engineer | Interview Dossier",
+          "round": "final",
+          "markdown": "## Aperture Science — Forward Deployed Engineer\n**Role in one line:** FDE embedding with Enrichment Center launch customers, owning agent-workflow adoption end to end.\n\n**Outcome:** Reached a written offer ($182K base); withdrew after the counter landed at $185K, below the $190K floor.\n\n**Q: Walk through an enterprise deployment you owned end-to-end.**\n> Pulsar scheduling AI — 3 concurrent go-lives in one quarter (Salesforce/Greenhouse/Workday integrations), zero P1 incidents, time-to-value cut 14→9 weeks.\n\n**Q: How do you keep an agent's write actions safe in production?**\n> Meridian procurement agent: parses vendor quotes, looks up ERP budget codes, drafts approvals — human-in-the-loop confirmation gates every write, ~87% admin-time cut.\n\n**Questions I asked:**\n1. What does day-one look like for an FDE joining the Enrichment Center launch?\n2. Who owns the escalation path when a customer's integration breaks mid-rollout?"
+        }
       },
       "conversations": [
         {
           "date": "2026-05-12",
           "kind": "Recruiter screen",
           "who": "Caroline, Talent Acquisition Lead",
-          "notes": "Confirmed remote US, FDE scope, and base range $155–190K. Riley flagged $190K floor upfront. Recruiter said flexibility depends on context; loop starting."
-        },
-        {
-          "date": "2026-05-24",
-          "kind": "Hiring-manager screen",
-          "who": "GLaDOS, Director of Facility Operations & Testing",
-          "notes": "HM focused on customer adoption ownership and integration breadth. Strong alignment on deploy-and-adopt model. Technical loop scheduled."
+          "notes": "Confirmed remote US, FDE scope, and base range $155–190K. Riley flagged the $190K floor upfront. Recruiter said flexibility depends on context; loop starting.",
+          "learnings": [
+            {
+              "label": "Comp floor stated upfront",
+              "note": "Riley named the $190K floor at screen — didn't stop the loop from advancing."
+            }
+          ]
         },
         {
           "date": "2026-06-04",
           "kind": "Technical screen",
           "who": "Doug Rattmann, Senior Research Scientist",
-          "notes": "75-min deep dive: RAG eval in field contexts, agentic tool-use safety, human-in-the-loop write gates. Wheatley (Junior AI Coordination Specialist) co-shadowed the session. Strong signal both directions. Take-home next."
-        },
-        {
-          "date": "2026-06-10",
-          "kind": "Take-home review",
-          "who": "Doug Rattmann, Senior Research Scientist",
-          "notes": "Integration scoping exercise reviewed live. Positive feedback on the Greenhouse schema-drift story and evaluation instrumentation approach."
+          "notes": "75-min deep dive: RAG eval in field contexts, agentic tool-use safety, human-in-the-loop write gates. Wheatley co-shadowed the session. Strong signal both directions.",
+          "learnings": [
+            {
+              "label": "Agent-safety depth resonated",
+              "note": "Human-in-the-loop write-gate story was the strongest signal of the session."
+            }
+          ]
         },
         {
           "date": "2026-06-14",
           "kind": "Offer received",
           "who": "Caroline, Talent Acquisition Lead",
-          "notes": "Written offer: $182K base, below the $190K floor. Riley reviewing."
+          "notes": "Written offer: $182K base, below the $190K floor. Riley reviewing before responding.",
+          "learnings": [
+            {
+              "label": "Offer landed below floor",
+              "note": "Written offer at $182K base — $8K under the stated $190K floor."
+            }
+          ]
         },
         {
           "date": "2026-06-17",
           "kind": "Negotiation / Withdrawal",
           "who": "Caroline, Talent Acquisition Lead",
-          "notes": "Countered to $190K; Aperture's best was $185K — below hard floor. Withdrew, amicably."
+          "notes": "Countered to $190K; Aperture's best was $185K — below the hard floor. Riley withdrew, amicably.",
+          "learnings": [
+            {
+              "label": "Hard floor held",
+              "note": "Aperture's best counter was $185K — walked rather than concede the floor."
+            }
+          ]
         }
       ],
       "warn": "Final base ($185K after counter) sat below the $190K hard floor — the deciding factor.",
@@ -253,7 +274,18 @@
         "bonus",
         "mental_health"
       ],
-      "logo": "../assets/logos/aperture-science.png"
+      "logo": "../assets/logos/aperture-science.png",
+      "roleFit": {
+        "why": [
+          "Pulsar FDE work matches directly: owns deploy lifecycle, zero P1s across 3 go-lives.",
+          "Meridian agentic agent shows Riley builds agent workflows, not just adopts them.",
+          "Salesforce/Greenhouse/Workday breadth maps onto the Enrichment Center rollout."
+        ],
+        "risks": [
+          "Comp floor is firm at $190K base; Aperture's posted range tops out below that.",
+          "Testing-lab customers may run more adversarial than Pulsar's enterprise accounts."
+        ]
+      }
     },
     {
       "id": "demo-app-3",
@@ -276,7 +308,11 @@
         "url": "https://hooli.com/careers/principal-engineer"
       },
       "artifacts": {
-        "jd": "Principal Engineer, AI Platform — Hooli. Own architecture + roadmap of multi-tenant LLM orchestration layer; lead 4–6 engineers. Hybrid SF 2 days/week. $250–290K base.\n\nArtifact: workspace/jds/demo/hooli-principal-engineer.md"
+        "jd": "Principal Engineer, AI Platform — Hooli. Own architecture + roadmap of multi-tenant LLM orchestration layer; lead 4–6 engineers. Hybrid SF 2 days/week. $250–290K base.\n\nArtifact: workspace/jds/demo/hooli-principal-engineer.md",
+        "resume": "Foregrounds the Meridian production RAG pipeline alongside Riley's informal tech-lead track record mentoring three engineers to senior, both directly relevant to Hooli's multi-tenant LLM orchestration and team-leadership scope.",
+        "resumeNote": "Tailored to Hooli's Principal Engineer posting: leads with production RAG architecture, backs with tech-lead mentorship.",
+        "coverLetter": "Riley's production retrieval-augmented generation pipeline and track record informally leading engineers to senior promotions map directly onto Hooli's multi-tenant LLM orchestration architecture and team scope.",
+        "coverLetterNote": "Connects RAG architecture + mentorship claims to Hooli's Principal Engineer leadership scope."
       },
       "conversations": [
         {
@@ -316,7 +352,16 @@
         "bonus",
         "wellness"
       ],
-      "logo": "../assets/logos/hooli.png"
+      "logo": "../assets/logos/hooli.png",
+      "roleFit": {
+        "why": [
+          "Riley's production RAG pipeline is a direct precedent for Hooli's LLM orchestration layer.",
+          "Mentoring three engineers to senior fits leading a 4-6 engineer platform team."
+        ],
+        "risks": [
+          "Hybrid SF 2 days/week is a stretch against a remote-leaning search."
+        ]
+      }
     },
     {
       "id": "demo-app-4",
@@ -339,7 +384,11 @@
         "url": "https://weylandyutani.com/careers/staff-engineer-spaceframe"
       },
       "artifacts": {
-        "jd": "Staff engineering role for distributed systems, telemetry, and mission-critical automation across remote operations. Base $215-255K, TC ~$320-380K, remote-first.\n\nArtifact: workspace/jds/demo/weyland-yutani-staff-spaceframe.md"
+        "jd": "Staff engineering role for distributed systems, telemetry, and mission-critical automation across remote operations. Base $215-255K, TC ~$320-380K, remote-first.\n\nArtifact: workspace/jds/demo/weyland-yutani-staff-spaceframe.md",
+        "resume": "Foregrounds Riley's forward-deployed work running three enterprise go-lives with zero P1s, alongside the Meridian tool-use agent's human-in-the-loop write-approval pattern, relevant to mission-critical automation.",
+        "resumeNote": "Tailored to Weyland-Yutani's Staff Spaceframe posting: leads with zero-P1 record, backs with HITL agent design.",
+        "coverLetter": "Riley's record running enterprise deployments with zero P1 incidents, plus designing a human-in-the-loop approval before any automated write, speaks directly to Weyland-Yutani's mission-critical, safety-first automation needs.",
+        "coverLetterNote": "Connects deployment reliability + HITL agent design claims to Weyland-Yutani's safety-critical scope."
       },
       "conversations": [
         {
@@ -391,7 +440,16 @@
         "parental",
         "bonus"
       ],
-      "logo": "../assets/logos/weyland-yutani.png"
+      "logo": "../assets/logos/weyland-yutani.png",
+      "roleFit": {
+        "why": [
+          "Riley's zero-P1 deployment record fits mission-critical spaceframe operations.",
+          "The tool-use agent's human-in-the-loop pattern maps onto safety-escalation approvals."
+        ],
+        "risks": [
+          "On-call and safety-escalation ownership scope needed clearer definition pre-panel."
+        ]
+      }
     },
     {
       "id": "demo-app-5",
@@ -416,45 +474,63 @@
       "artifacts": {
         "jd": "Staff ML role for model-serving infrastructure, evaluation pipelines, and safety reviews for autonomous systems. Hybrid SF, 2 days/week. $215–255K base / $320–380K TC.\n\nArtifact: workspace/jds/demo/cyberdyne-staff-ml-engineer.md",
         "interviewDossier": {
-          "title": "Cyberdyne Systems — Staff ML Engineer · Onsite Prep",
-          "round": null,
-          "path": null,
-          "generatedAt": "2026-06-24T13:12:00.000Z",
-          "markdown": "## Cyberdyne Systems — Staff ML Engineer · Onsite Prep\n**The role in one line:** Own model-serving reliability and evaluation pipelines for autonomous systems — production ML conscience of the neural-net division.\n\n---\n\n### Likely questions + grounded answers\n\n**Q: Walk me through a production ML system you owned end-to-end.**\nPulsar scheduling AI — owned the full deployment lifecycle across 3 concurrent enterprise accounts in one quarter. Discovery, integration (Salesforce, Greenhouse, Workday), config, go-live, hypercare. Zero P1 incidents. Cut avg time-to-value 14→9 weeks. The metric was reliability, not model novelty.\n\n**Q: How do you design an eval pipeline for high-stakes model outputs?**\nMeridian RAG pipeline over 4M pages: eval was recall + citation precision, human-review gate on any excerpt driving downstream action. Offline eval gives coverage; online sampling tells you if the model is still behaving in prod. For autonomous systems I'd add shadow scoring + confidence gating before any write action.\n\n**Q: Tell me about a time you stopped or delayed a deployment.**\nPulsar, mid-quarter: customer pushed an undocumented schema change. Model eval on new format untested — pulled go-live by one week, ran evals, re-confirmed with customer. Pre-agreed readiness criteria gave me cover to hold without a political fight.\n\n**Q: How do you handle safety vs. product disagreement on a release?**\nSet stop criteria before the model is done, not during launch review. At Pulsar I brought readiness criteria into the project kickoff; a hold becomes 'enforcing what we agreed,' not 'engineer slowing things down.' Safety veto should be structural.\n\n**Q: What's your read on agentic systems in production?**\nShipped one at Meridian: Claude API + custom tools parsing vendor quotes, ERP budget lookups, drafting approval emails with human-in-the-loop confirmation before writes. ~87% reduction in procurement admin. Confidence gate on every tool call; full audit log; human step non-negotiable until 3 months of prod data.\n\n---\n\n### Comp anchor\nBand $215–255K base / $320–380K TC (posted). Ask $240K+ — hybrid SF is a real concession for an Austin-remote candidate; price it in.\n\n### Questions to ask\n1. Who has stop-deploy authority — engineering, safety, or product — and what happens when they disagree?\n2. What does the eval pipeline look like today, and what's the biggest coverage gap?\n\n---\n\n### Study layer\n- **Model-serving:** batching (dynamic, request coalescing), canary deploys, P50/P99 latency budgets, rollback automation\n- **Eval patterns:** offline evals, shadow scoring, confidence-gate thresholds, outcome feedback loops, human-in-the-loop review\n- **Safety context:** Cyberdyne's layered review process for models touching physical/operational systems; understand OKR cycle overlap between safety and infra"
-        }
+          "title": "Cyberdyne Systems — Staff ML Engineer | Interview Dossier",
+          "round": "Final onsite (awaiting decision)",
+          "markdown": "## Cyberdyne Systems — Staff ML Engineer\n**Role in one line:** Own model-serving reliability and eval pipelines for autonomous systems — the neural-net division's production conscience.\n\n**Outcome:** Full onsite loop complete (coding, HM debrief, system-design debrief, safety panel). Awaiting decision.\n\n**Q: How do you design an eval pipeline for high-stakes model outputs?**\n> Meridian RAG over 4M pages: eval was recall + citation precision, human-review gate on any excerpt driving downstream action. Offline eval for coverage; online sampling to confirm prod behavior holds.\n\n**Q: How do you handle safety vs. product disagreement on a release?**\n> Meridian agentic procurement agent: confidence gate on every tool call, full audit log, human-in-the-loop confirmation before any write — non-negotiable until months of clean prod data.\n\n**Questions I asked:**\n1. Who holds stop-deploy authority — engineering, safety, or product — when they disagree?\n2. What's the biggest coverage gap in today's eval pipeline?"
+        },
+        "resume": "Staff ML resume leads with the Meridian RAG eval harness (recall + citation precision, human-review gate) and the agentic procurement agent's confidence-gated write safety — reframed for serving reliability over model novelty.",
+        "resumeNote": "Reordered to open with eval-pipeline depth and human-in-the-loop safety since Cyberdyne screens hard on stop-deploy governance.",
+        "coverLetter": "Connects Riley's Meridian RAG eval discipline (recall + citation precision, human-review gate) and the agentic agent's confirm-before-write pattern to Cyberdyne's autonomous-systems safety reviews.",
+        "coverLetterNote": "Leads with eval rigor and human-in-the-loop gating since Cyberdyne's panel reads safety-first, not benchmark-first."
       },
       "conversations": [
         {
           "date": "2026-05-19",
           "kind": "Recruiter screen",
-          "stage": "screen",
-          "outcome": "advanced",
           "who": "T-800, Initial Candidate Screening Unit",
-          "notes": "30-min intro. Role is hybrid SF, 2 fixed days/week. Band $215–255K confirmed. Riley flagged $230K+ ask; T-800 said within range. Advancing to technical screen."
+          "notes": "30-min intro. Role is hybrid SF, 2 fixed days/week. Band $215–255K confirmed. Riley's $230K+ ask confirmed within range. Advancing to technical screen.",
+          "learnings": [
+            {
+              "label": "Comp ask confirmed in range",
+              "note": "Riley's $230K+ ask confirmed within the $215–255K band at screen."
+            }
+          ]
         },
         {
           "date": "2026-05-26",
           "kind": "Technical screen",
-          "stage": "technical",
-          "outcome": "advanced",
           "who": "T-1000, Adaptive Assessment Specialist",
-          "notes": "60-min deep dive on model-serving latency, batching, and observability. Walked through Pulsar deploy reliability work. Strong signal; advancing to system design."
+          "notes": "60-min deep dive on model-serving latency, batching, and observability. Walked through the Pulsar deploy-reliability record. Strong signal; advancing to system design.",
+          "learnings": [
+            {
+              "label": "Reliability story landed",
+              "note": "Pulsar's zero-P1 deploy record was the strongest signal of the session."
+            }
+          ]
         },
         {
           "date": "2026-06-02",
           "kind": "System design",
-          "stage": "technical",
-          "outcome": "advanced",
           "who": "Miles Bennett Dyson, Director, Neural Net Systems Division",
-          "notes": "Designed an online eval + shadow-scoring pipeline for an autonomous scheduling system. Dyson probed cold-start handling. Advancing to onsite loop."
+          "notes": "Designed an online eval + shadow-scoring pipeline for an autonomous scheduling system. Dyson probed cold-start handling. Advancing to onsite loop.",
+          "learnings": [
+            {
+              "label": "Eval-pipeline depth foregrounded",
+              "note": "Led with Meridian's recall+citation eval harness when Dyson probed cold-start handling."
+            }
+          ]
         },
         {
           "date": "2026-06-28",
           "kind": "Final onsite",
-          "stage": "onsite",
-          "outcome": "pending",
           "who": "Miles Bennett Dyson, Director, Neural Net Systems Division",
-          "notes": "Full onsite loop completed — coding, HM, system design debrief, and safety panel. Panel breakdown: T-800 ran the coding session, Miles Bennett Dyson led the HM debrief, T-1000 covered the system design debrief, and Skynet handled the safety review. Awaiting decision."
+          "notes": "Full onsite loop: coding (T-800), HM debrief (Dyson), system-design debrief (T-1000), safety panel (Skynet). Panel pressed on stop-deploy ownership. Awaiting decision.",
+          "learnings": [
+            {
+              "label": "Stop-deploy question open",
+              "note": "Safety panel pressed on governance ownership — still unresolved heading into decision."
+            }
+          ]
         }
       ],
       "warn": "Hybrid SF (2 days/week) conflicts with Austin-remote. Stop-deploy authority still unresolved — needs clarity before any offer.",
@@ -532,11 +608,22 @@
             "url": "https://glassdoor.com"
           }
         ]
+      },
+      "roleFit": {
+        "why": [
+          "Meridian RAG eval harness (recall, citation precision, human review) maps onto this need.",
+          "Agentic agent's human-in-the-loop write gates speak to the panel's stop-deploy focus.",
+          "Pulsar's zero-P1 deploy record signals production reliability, not model novelty."
+        ],
+        "risks": [
+          "Hybrid SF (2 days/week) is a real ask against Riley's Austin-remote base.",
+          "Stop-deploy authority is still unresolved heading into the decision."
+        ]
       }
     },
     {
       "id": "demo-app-6",
-      "company": "Pied Piper",
+      "company": "Globex",
       "role": "Senior Software Engineer",
       "status": "rejected",
       "channel": "referral",
@@ -546,16 +633,20 @@
       "mode": "hybrid",
       "base": "$180–215K",
       "tc": "~$250–310K",
-      "note": "Form rejection — never advanced past intake. Middle-out compression, allegedly real this time.",
-      "domain": "piedpiper.com",
-      "link": "https://piedpiper.com/careers",
+      "note": "Form rejection — never advanced past intake. Hank Scorpio was cheerful about it, at least.",
+      "domain": "globex.com",
+      "link": "https://globex.com/careers",
       "source": {
         "type": "referral",
         "name": "Demo founder intro",
-        "url": "https://piedpiper.com/careers/senior-software-engineer"
+        "url": "https://globex.com/careers/senior-software-engineer"
       },
       "artifacts": {
-        "jd": "Senior SWE on PP's enterprise AI product team — build AI-powered features on compression infrastructure, own integrations with customer data systems (Salesforce, Workday, custom ERP), drive reliability and adoption on the enterprise tier.\n\nArtifact: workspace/jds/demo/pied-piper-senior-swe.md"
+        "jd": "Senior SWE on PP's enterprise AI product team — build AI-powered features on compression infrastructure, own integrations with customer data systems (Salesforce, Workday, custom ERP), drive reliability and adoption on the enterprise tier.\n\nArtifact: workspace/jds/demo/globex-senior-swe.md",
+        "resume": "Foregrounds the Meridian production RAG pipeline alongside Pulsar's enterprise integration work with Salesforce and Workday, both directly relevant to Globex's AI-powered enterprise features and customer-system integrations.",
+        "resumeNote": "Tailored to Globex's enterprise AI posting: leads with production RAG pipeline, backs with enterprise integrations.",
+        "coverLetter": "Riley's production retrieval-augmented generation work and experience integrating enterprise customer systems as a forward-deployed engineer map directly onto Globex's enterprise AI product and integration roadmap.",
+        "coverLetterNote": "Connects RAG pipeline + enterprise integration claims to Globex's AI product scope."
       },
       "conversations": [],
       "warn": "Base floor $180K is $10K below Riley's hard floor; must come in at top of band or negotiate up.",
@@ -574,7 +665,16 @@
         "pto",
         "learning"
       ],
-      "logo": "../assets/logos/pied-piper.png"
+      "logo": "../assets/logos/globex.png",
+      "roleFit": {
+        "why": [
+          "Riley's production RAG pipeline matches Globex's push into AI-powered platform features.",
+          "Pulsar's Salesforce/Workday integrations mirror Globex's customer-system needs."
+        ],
+        "risks": [
+          "Base floor sits $10K below Riley's hard floor; needs top-of-band or negotiation."
+        ]
+      }
     },
     {
       "id": "demo-app-7",
@@ -597,7 +697,11 @@
         "url": "https://tyrellcorp.com/careers/senior-platform-engineer"
       },
       "artifacts": {
-        "jd": "Senior Platform Engineer — own enterprise integration layer (SAP, Salesforce, Veeva, HL7) and AI workflow engine. Remote-US. $180–215K base / $250–310K TC.\n\nArtifact: workspace/jds/demo/tyrell-senior-platform-engineer.md"
+        "jd": "Senior Platform Engineer — own enterprise integration layer (SAP, Salesforce, Veeva, HL7) and AI workflow engine. Remote-US. $180–215K base / $250–310K TC.\n\nArtifact: workspace/jds/demo/tyrell-senior-platform-engineer.md",
+        "resume": "Forward-deployed engineer who owns enterprise integration lifecycles end-to-end — 3 concurrent Salesforce/Greenhouse/Workday go-lives, zero P1s — plus a production RAG pipeline for AI-assisted workflows.",
+        "resumeNote": "Led with Pulsar FDE integration work to mirror Tyrell's SAP/Salesforce/Veeva/HL7 layer; RAG claim ties to their AI workflow engine.",
+        "coverLetter": "Riley's forward-deployed enterprise deployments (3 go-lives, zero P1s) map onto Tyrell's integration and hypercare model, backed by production RAG pipeline experience for the AI workflow engine.",
+        "coverLetterNote": "Anchored on the FDE customer-facing deployment pattern; RAG claim signals fit for the AI workflow engine line."
       },
       "conversations": [],
       "demo": true,
@@ -617,7 +721,18 @@
         "parental",
         "bonus"
       ],
-      "logo": "../assets/logos/tyrell.png"
+      "logo": "../assets/logos/tyrell.png",
+      "roleFit": {
+        "why": [
+          "FDE background matches Tyrell's customer-facing integration + hypercare model.",
+          "Salesforce/Workday integration experience transfers to SAP/Veeva/HL7 connectors.",
+          "Production RAG pipeline is a direct fit for the AI-assisted workflow engine."
+        ],
+        "risks": [
+          "No direct SAP, Veeva, or HL7 experience — connector specifics would ramp.",
+          "Biotech/pharma domain is new; the forward-deployed pattern transfers though."
+        ]
+      }
     },
     {
       "id": "demo-app-8",
@@ -640,7 +755,11 @@
         "url": "https://blackmesa.com/careers/research-engineer"
       },
       "artifacts": {
-        "jd": "Research engineering role translating experimental systems into reliable internal tooling and data collection workflows. Base $195-235K + bonus + equity.\n\nArtifact: workspace/jds/demo/black-mesa-research-engineer.md"
+        "jd": "Research engineering role translating experimental systems into reliable internal tooling and data collection workflows. Base $195-235K + bonus + equity.\n\nArtifact: workspace/jds/demo/black-mesa-research-engineer.md",
+        "resume": "Shipped a production RAG pipeline over a 4M-page corpus, prototype to production in 8 weeks, serving 200+ daily non-engineer users — direct precedent for Black Mesa's research-tooling lifecycle.",
+        "resumeNote": "Foregrounded the Meridian RAG pipeline's prototype-to-production arc and non-engineer user base to match Black Mesa's research-ops mandate.",
+        "coverLetter": "Riley turned a messy 4M-page corpus into a sub-60-second cited query system for 200+ analysts — the same prototype-to-production arc Black Mesa needs for research tooling.",
+        "coverLetterNote": "Leaned on the RAG pipeline's non-engineer-facing production story to match Black Mesa's research-lead partnership model."
       },
       "conversations": [],
       "demo": true,
@@ -658,7 +777,18 @@
         "learning",
         "pto"
       ],
-      "logo": "../assets/logos/black-mesa.png"
+      "logo": "../assets/logos/black-mesa.png",
+      "roleFit": {
+        "why": [
+          "Shipped a production RAG pipeline from prototype to production in 8 weeks.",
+          "Built for 200+ non-engineer daily users — mirrors serving research leads directly.",
+          "Agentic tool-use experience covers Black Mesa's AI-assisted tooling interest."
+        ],
+        "risks": [
+          "No lab or field-research environment experience specifically.",
+          "Event-streaming (Kafka/Kinesis) exposure isn't evidenced in current claims."
+        ]
+      }
     },
     {
       "id": "demo-app-9",
@@ -683,25 +813,51 @@
       "artifacts": {
         "jd": "Staff Engineer on the AI Platform team. Owns the LLM integration layer (retrieval infra, prompt SDK, context assembly). Staff scope with team-lead duties and enterprise customer touchpoints. Base $215–255K, TC $320–380K.\n\nArtifact: workspace/jds/demo/massive-dynamic-staff-engineer.md",
         "interviewDossier": {
-          "title": "Massive Dynamic — Staff Engineer",
-          "round": null,
-          "path": null,
-          "generatedAt": "2026-06-24T09:00:00.000Z",
-          "markdown": "## Massive Dynamic — Staff Engineer\n**Panel Interview | 2026-07-01 | Remote (Zoom) | 10 AM–1 PM CT**\n\n---\n\n### Live cue card\n\n**Role in one line:** Staff Engineer on the AI Platform team — own the LLM integration layer; team-lead duties; cross-functional with data science and enterprise customers.\n\n**Q: Walk us through the most complex distributed system you've designed.**\n> Meridian RAG pipeline over 4M pages. Key decisions: 512-token chunks + 64-token overlap, hybrid BM25+dense retrieval, cross-encoder reranker top-20→top-5. Built eval harness (LLM-as-judge + human spot-check) before shipping. Prototype→prod in 8 weeks; 200+ daily users; ~60% research-cycle-time reduction.\n\n**Q: How do you handle multi-tenant data isolation in a shared LLM platform?**\n> Namespace-level corpus separation per tenant. Metadata filtering applied *before* retrieval (not post-filter — that risks internal leakage). Audit log every retrieval: tenant_id, query hash, retrieved doc_ids. Rate-limit at API gateway, not inside the model call.\n\n**Q: Describe leading a cross-functional initiative without formal authority.**\n> Pulsar Q1 2026: 3 concurrent enterprise deployments, 4 customer eng teams + internal infra. Shared status board, weekly 15-min standups, escalation ladder documented upfront. All 3 live on schedule; 0 P1 incidents. Time-to-value 14→9 weeks.\n\n**Q: How do you evaluate retrieval quality continuously?**\n> Three layers: (1) offline eval on 500+ labeled query/doc pairs (Recall@5, MRR@5); (2) online A/B on live traffic (click-through, session length); (3) LLM-as-judge sampling 50 queries/day. Regression gate in CI: PR that drops Recall@5 by >2 points blocks deploy.\n\n**Q: Where do you want to be in 3 years?**\n> Staff or Principal, still hands-on, owning architecture of a platform multiple product teams build on. Player-coach, not full EM. The best version has me in customer conversations once a quarter and writing production code the rest of the time.\n\n**Comp anchor:** Floor $215K base. Ask $240K. Posted band $215–255K — targeting mid-range; use TC ($320–380K) as the headline number with the panel.\n\n**2 questions to ask:**\n1. \"What's the biggest gap between where the LLM integration layer is today and where the roadmap needs it in 12 months?\"\n2. \"How does Staff Eng interface with enterprise customers — do you join discovery or onboarding calls?\"\n\n---\n\n### Study layer\n\n**What Riley brings:** Meridian RAG (production, 200+ users, 8-week build) + Pulsar FDE (enterprise deployment lifecycle, 3 concurrent) gives a rare combo of platform depth + customer-facing instinct.\n\n**Gap to address proactively:** Nina probed platform-side depth in the HM screen — lean into the Meridian pipeline architecture when the panel pushes on infra depth. If asked about ACL change handling: \"I'd tighten the async cache TTL to synchronous invalidation on write for compliance-critical changes — the 60-second window is a tradeoff worth closing given the firm's compliance posture.\"\n\n**Watch for:** Role is more inward-facing than Riley's FDE targets. Acknowledge honestly — the quarterly enterprise BRs are the feedback loop Riley would lean on.\n\n**Artifact:** workspace/interview-packets/demo/massive-dynamic-panel.md"
-        }
+          "title": "Massive Dynamic — Staff Engineer | Interview Dossier",
+          "round": "Panel interview (awaiting decision)",
+          "markdown": "## Massive Dynamic — Staff Engineer\n**Role in one line:** Staff Eng on the AI Platform team — owns the LLM integration layer (retrieval infra, prompt SDK, context assembly), team-lead duties, enterprise touchpoints.\n\n**Outcome:** Panel complete (platform architecture, cross-functional leadership, customer scope). Awaiting decision.\n\n**Q: Walk through the most complex distributed system you've designed.**\n> Meridian RAG over 4M pages: 512-token chunks + 64-token overlap, hybrid BM25+dense retrieval, cross-encoder reranker top-20→top-5. Eval harness (LLM-as-judge + human spot-check) before shipping. 8-week build, 200+ daily users, ~60% research-cycle-time cut.\n\n**Q: Describe leading a cross-functional initiative without formal authority.**\n> Pulsar Q1 2026: 3 concurrent enterprise deployments, 4 customer eng teams + internal infra. Shared status board, weekly standups, escalation ladder set upfront. All 3 live on schedule, zero P1s.\n\n**Questions I asked:**\n1. What's the biggest gap between the LLM integration layer today and the 12-month roadmap?\n2. Does Staff Eng join customer discovery or onboarding calls, or stay platform-side?"
+        },
+        "resume": "Staff Engineer resume leads with the Meridian RAG retrieval architecture (hybrid search, reranker, eval harness) and Pulsar's 3-concurrent deployment coordination — reframed as platform ownership with a customer-facing edge.",
+        "resumeNote": "Pulled retrieval-architecture detail forward and reframed Pulsar FDE work as cross-functional platform leadership for the Staff scope.",
+        "coverLetter": "Connects Riley's Meridian RAG retrieval-infra work to Massive Dynamic's LLM integration layer, and points to Pulsar's 3-concurrent deployment coordination as evidence of leading without formal authority.",
+        "coverLetterNote": "Leads with platform/infra depth first since the JD skews platform over customer-facing FDE work."
       },
       "conversations": [
         {
           "date": "2026-06-16",
           "kind": "Recruiter screen",
           "who": "William Bell, Founder & Chief Executive Officer",
-          "notes": "30-min call. Role owns LLM integration layer, some enterprise customer touchpoints. Confirmed fully remote. Comp band $215–255K base / $320–380K TC. Advanced to HM screen."
+          "notes": "30-min call. Role owns the LLM integration layer, some enterprise customer touchpoints. Confirmed fully remote. Comp band $215–255K base / $320–380K TC. Advanced to HM screen.",
+          "learnings": [
+            {
+              "label": "Comp band confirmed",
+              "note": "$215–255K base / $320–380K TC confirmed fully remote at first call."
+            }
+          ]
         },
         {
           "date": "2026-06-23",
           "kind": "Hiring-manager screen",
           "who": "Nina Sharp, Chief Operating Officer",
-          "notes": "45-min. Covered RAG pipeline at Meridian + 3 concurrent deployments at Pulsar. Nina liked the FDE angle; probed platform-side depth. Advanced to panel interview."
+          "notes": "45-min. Covered the Meridian RAG pipeline and the 3 concurrent Pulsar deployments. Nina liked the FDE angle; probed platform-side depth. Advanced to panel interview.",
+          "learnings": [
+            {
+              "label": "Platform depth probed",
+              "note": "Nina liked the FDE angle but pushed on platform-side depth — flagged for panel prep."
+            }
+          ]
+        },
+        {
+          "date": "2026-07-01",
+          "kind": "Onsite / panel",
+          "who": "Walter Bishop, Chief Science Officer",
+          "notes": "3-hour panel: platform architecture (Walter Bishop), cross-functional leadership (Nina Sharp), customer-facing scope. Walked through the Meridian retrieval architecture and Pulsar's multi-account coordination model. Awaiting decision.",
+          "learnings": [
+            {
+              "label": "Retrieval architecture held up",
+              "note": "Chunking/hybrid-search/reranker walkthrough satisfied the platform-depth question."
+            }
+          ]
         }
       ],
       "demo": true,
@@ -774,6 +930,17 @@
             "url": "https://glassdoor.com"
           }
         ]
+      },
+      "roleFit": {
+        "why": [
+          "Meridian RAG's retrieval choices (hybrid search, reranking) map onto the LLM layer.",
+          "Pulsar's 3-concurrent-deployment coordination answers the team-lead-without-EM scope.",
+          "Enterprise touchpoints from Pulsar back the quarterly customer-BR expectation."
+        ],
+        "risks": [
+          "Staff scope skews platform/infra — thinner on the FDE/customer-facing angle Riley targets.",
+          "HM screen pressed hard on platform depth; infra internals need to hold up at panel."
+        ]
       }
     },
     {
@@ -797,7 +964,11 @@
         "url": "https://abstergo.com/careers/senior-software-engineer"
       },
       "artifacts": {
-        "jd": "Senior Software Engineer on Abstergo's AI Tooling team — production RAG and agentic workflows for internal ops (procurement, research, legal).\n\nArtifact: workspace/jds/demo/abstergo-senior-software-engineer.md"
+        "jd": "Senior Software Engineer on Abstergo's AI Tooling team — production RAG and agentic workflows for internal ops (procurement, research, legal).\n\nArtifact: workspace/jds/demo/abstergo-senior-software-engineer.md",
+        "resume": "Built a multi-step tool-use agent (Claude API) that cut procurement admin ~87%, with human-in-the-loop write gating, plus a production RAG pipeline — matches Abstergo's agentic and RAG AI Tooling stack.",
+        "resumeNote": "Foregrounded the agentic procurement workflow (human-in-the-loop) as the closest analog to Abstergo's operational AI tooling.",
+        "coverLetter": "Riley's agentic procurement workflow — parsing quotes, ERP lookups, human-in-the-loop approval drafts — is close precedent for the operational AI tooling Abstergo's team ships across procurement and ops.",
+        "coverLetterNote": "Tied the procurement agent's human-in-the-loop pattern directly to Abstergo's stated operational-AI use cases."
       },
       "conversations": [],
       "demo": true,
@@ -814,7 +985,18 @@
         "vision",
         "pto"
       ],
-      "logo": "../assets/logos/abstergo.png"
+      "logo": "../assets/logos/abstergo.png",
+      "roleFit": {
+        "why": [
+          "Built an agentic procurement workflow with human-in-the-loop write gating.",
+          "Production RAG pipeline experience matches the AI Tooling team's core stack.",
+          "Direct precedent integrating LLM workflows into ERP-adjacent enterprise systems."
+        ],
+        "risks": [
+          "No direct legal or HR-ops tooling experience — procurement is the closest analog.",
+          "Vector-database/embedding depth beyond the RAG pipeline isn't evidenced."
+        ]
+      }
     },
     {
       "id": "demo-app-11",
@@ -837,7 +1019,11 @@
         "url": "https://ocp.com/careers/principal-engineer"
       },
       "artifacts": {
-        "jd": "Principal engineer role modernizing public-sector automation platforms with reliability and governance constraints.\n\nArtifact: workspace/jds/demo/ocp-principal-engineer.md"
+        "jd": "Principal engineer role modernizing public-sector automation platforms with reliability and governance constraints.\n\nArtifact: workspace/jds/demo/ocp-principal-engineer.md",
+        "resume": "Player-coach who mentored three engineers to senior in 18 months while running enterprise deployments with zero P1 incidents — direct fit for OCP's high-ownership, reliability-driven Principal IC role.",
+        "resumeNote": "Foregrounded the mentorship/player-coach claim plus zero-P1 deployment discipline to match OCP's Principal-level reliability and leadership bar.",
+        "coverLetter": "Riley's player-coach record — three engineers to senior while running zero-P1 enterprise go-lives — mirrors the leadership and reliability bar OCP needs for its automation platform.",
+        "coverLetterNote": "Anchored on player-coach mentorship and zero-P1 deployment discipline to match OCP's principal-level scope."
       },
       "conversations": [],
       "demo": true,
@@ -854,7 +1040,18 @@
         "bonus",
         "pto"
       ],
-      "logo": "../assets/logos/ocp.png"
+      "logo": "../assets/logos/ocp.png",
+      "roleFit": {
+        "why": [
+          "Player-coach mentorship record (3 engineers to senior) fits the IC5 model.",
+          "Zero-P1 enterprise deployment discipline matches OCP's public-sector reliability bar.",
+          "Forward-deployed customer work translates to cross-functional stakeholder trust."
+        ],
+        "risks": [
+          "No prior public-sector or regulated-industry governance experience.",
+          "Gap from senior IC to leading 4 teams (40+ engineers) is a real stretch."
+        ]
+      }
     },
     {
       "id": "demo-app-12",
@@ -877,7 +1074,11 @@
         "url": "https://umbrellacorp.com/careers/senior-infrastructure-engineer"
       },
       "artifacts": {
-        "jd": "Senior Infrastructure Engineer focused on hybrid cloud/on-prem platform reliability and automation at Umbrella Corporation.\n\nArtifact: workspace/jds/demo/umbrella-senior-infra-engineer.md"
+        "jd": "Senior Infrastructure Engineer focused on hybrid cloud/on-prem platform reliability and automation at Umbrella Corporation.\n\nArtifact: workspace/jds/demo/umbrella-senior-infra-engineer.md",
+        "resume": "Foregrounds Riley's forward-deployed work delivering three enterprise go-lives with zero P1s, alongside a widely-used open-source evaluation tool, both relevant to Umbrella's platform-reliability and automation focus.",
+        "resumeNote": "Tailored to Umbrella's infra posting: leads with zero-P1 deployment record, backs with OSS maintainer rigor.",
+        "coverLetter": "Riley's record of zero-P1 enterprise deployments, plus maintaining an open-source tool used by multiple teams, speaks to the reliability and automation discipline Umbrella Corporation's infrastructure team needs.",
+        "coverLetterNote": "Connects deployment reliability + OSS maintainer claims to Umbrella's infra-reliability scope."
       },
       "conversations": [],
       "warn": "Base band low end below target floor ($180K vs $190K floor)",
@@ -894,7 +1095,16 @@
         "retirement",
         "equity"
       ],
-      "logo": "../assets/logos/umbrella.png"
+      "logo": "../assets/logos/umbrella.png",
+      "roleFit": {
+        "why": [
+          "Riley's zero-P1 deployment record fits Umbrella's platform-reliability focus.",
+          "OSS maintainer background signals rigor for automating hybrid cloud/on-prem operations."
+        ],
+        "risks": [
+          "Base band low end sits below Riley's target floor."
+        ]
+      }
     },
     {
       "id": "demo-app-13",
@@ -917,7 +1127,11 @@
         "url": "https://buynlarge.com/careers/staff-engineer"
       },
       "artifacts": {
-        "jd": "Staff Engineer role on Buy n Large's developer-platform team, owning internal tooling and AI-assisted workflow automation at scale.\n\nArtifact: workspace/jds/demo/buy-n-large-staff-engineer.md"
+        "jd": "Staff Engineer role on Buy n Large's developer-platform team, owning internal tooling and AI-assisted workflow automation at scale.\n\nArtifact: workspace/jds/demo/buy-n-large-staff-engineer.md",
+        "resume": "Built an agentic tool-use workflow that cut procurement admin ~87%, and maintains an open-source LLM eval library (1.2k stars) — matches Buy n Large's developer-platform AI tooling scope.",
+        "resumeNote": "Paired the agentic procurement workflow with the OSS eval-tooling claim to match Buy n Large's developer-platform and AI-automation mandate.",
+        "coverLetter": "Riley's agentic workflow automation and open-source LLM eval tooling (1.2k stars) speak directly to the developer-platform team's mandate to bring AI-assisted automation to internal tooling at scale.",
+        "coverLetterNote": "Led with the OSS eval-tooling maintainer claim to signal developer-platform credibility alongside the agent-automation record."
       },
       "conversations": [],
       "demo": true,
@@ -935,11 +1149,22 @@
         "pto",
         "learning"
       ],
-      "logo": "../assets/logos/buy-n-large.png"
+      "logo": "../assets/logos/buy-n-large.png",
+      "roleFit": {
+        "why": [
+          "Shipped an agentic tool-use workflow automating a real operational process.",
+          "Maintains an OSS LLM eval tool (1.2k stars) — fits a developer-platform team.",
+          "Comfortable owning internal tooling end-to-end, prototype through production."
+        ],
+        "risks": [
+          "Fit score reflects lighter overlap — role leans more platform-infra than AI-product.",
+          "No megacorp-scale internal-tooling experience evidenced yet."
+        ]
+      }
     },
     {
       "id": "demo-app-14",
-      "company": "Vault-Tec",
+      "company": "CHOAM",
       "role": "Backend Engineer",
       "status": "applied",
       "channel": "board",
@@ -949,16 +1174,20 @@
       "mode": "remote",
       "base": "$155–190K",
       "tc": "~$200–260K",
-      "note": "Prepare for the future — underground.",
-      "domain": "vault-tec.com",
-      "link": "https://vault-tec.com/careers",
+      "note": "Applied. Backend for the spice-logistics platform. The spice must flow.",
+      "domain": "choam.com",
+      "link": "https://choam.com/careers",
       "source": {
         "type": "job-board",
         "name": "HiringCafe (demo)",
-        "url": "https://vault-tec.com/careers/backend-engineer"
+        "url": "https://choam.com/careers/backend-engineer"
       },
       "artifacts": {
-        "jd": "Backend Engineer at Vault-Tec building internal APIs and microservices for the company's enterprise data platform.\n\nArtifact: workspace/jds/demo/vault-tec-backend-engineer.md"
+        "jd": "Backend Engineer at CHOAM building internal APIs and microservices for the company's enterprise data platform.\n\nArtifact: workspace/jds/demo/choam-backend-engineer.md",
+        "resume": "Forward-deployed engineer who owns enterprise integrations (Salesforce, Greenhouse, Workday) end-to-end with zero P1 incidents — transferable discipline for CHOAM's backend data-platform APIs.",
+        "resumeNote": "Leaned on the FDE enterprise-integration claim as the closest analog to CHOAM's backend API/microservices scope.",
+        "coverLetter": "Riley's enterprise integration work — connecting production systems with zero P1 incidents — reflects the same operational rigor CHOAM needs for its backend data platform APIs.",
+        "coverLetterNote": "Framed the FDE integration claim as directly transferable backend/API discipline given the role's lighter AI-tooling emphasis."
       },
       "conversations": [],
       "warn": "Base below target floor; role has no AI surface — cut-signal mismatch",
@@ -974,7 +1203,17 @@
         "retirement",
         "remote_stipend"
       ],
-      "logo": "../assets/logos/vault-tec.png"
+      "logo": "../assets/logos/choam.png",
+      "roleFit": {
+        "why": [
+          "Enterprise integration experience (Salesforce, Greenhouse, Workday) transfers to API work.",
+          "Comfortable owning production systems end-to-end, from design through operation."
+        ],
+        "risks": [
+          "Recent work skews AI-product/customer-facing, not pure backend microservices.",
+          "No direct experience with CHOAM's specific enterprise data-platform stack."
+        ]
+      }
     },
     {
       "id": "demo-app-15",
@@ -992,7 +1231,11 @@
       "domain": "aviato.com",
       "link": "https://aviato.com/careers",
       "artifacts": {
-        "jd": "Senior Software Engineer at Aviato joining a cross-functional product engineering team with occasional ML infrastructure work.\n\nArtifact: workspace/jds/demo/aviato-senior-swe.md"
+        "jd": "Senior Software Engineer at Aviato joining a cross-functional product engineering team with occasional ML infrastructure work.\n\nArtifact: workspace/jds/demo/aviato-senior-swe.md",
+        "resume": "Shipped a production RAG pipeline and an agentic tool-use workflow at Meridian — brings applied-LLM depth to Aviato's cross-functional product team's occasional ML infrastructure work.",
+        "resumeNote": "Used the RAG pipeline claim to cover the 'occasional ML infra work' line since the core role is general product engineering.",
+        "coverLetter": "Riley's production RAG pipeline and agentic tool-use experience give Aviato's product team applied-LLM depth to lean on whenever the roadmap touches ML infrastructure work.",
+        "coverLetterNote": "Kept it product-engineering-forward, with the RAG/agent claims as supporting depth for the ML infra line."
       },
       "conversations": [],
       "demo": true,
@@ -1014,7 +1257,18 @@
         "dueAt": "2026-07-01",
         "note": "No reply yet — send a short follow-up nudge."
       },
-      "logo": "../assets/logos/aviato.png"
+      "logo": "../assets/logos/aviato.png",
+      "roleFit": {
+        "why": [
+          "Production RAG pipeline experience covers the role's occasional ML infra work.",
+          "Agentic tool-use background adds depth beyond typical product-engineering asks.",
+          "Comfortable moving fast in a small, cross-functional product team."
+        ],
+        "risks": [
+          "Fit score reflects thin overlap — role is largely general product engineering.",
+          "ML infrastructure exposure is secondary, not the core of recent work."
+        ]
+      }
     },
     {
       "id": "demo-app-16",
@@ -1032,7 +1286,11 @@
       "domain": "nakatomi.com",
       "link": "https://nakatomi.com/careers",
       "artifacts": {
-        "jd": "Platform Engineer — own infrastructure reliability, deployment pipelines, and internal developer tooling across a hybrid cloud estate.\n\nArtifact: workspace/jds/demo/nakatomi-platform-engineer.md"
+        "jd": "Platform Engineer — own infrastructure reliability, deployment pipelines, and internal developer tooling across a hybrid cloud estate.\n\nArtifact: workspace/jds/demo/nakatomi-platform-engineer.md",
+        "resume": "Ran three concurrent enterprise deployments with zero P1 incidents and maintains an open-source dev-tooling project (1.2k stars) — reliability and tooling instincts that map to Nakatomi's platform scope.",
+        "resumeNote": "Paired the zero-P1 deployment record with the OSS-maintainer claim to speak to reliability plus developer-tooling fit.",
+        "coverLetter": "Riley's zero-P1 enterprise deployment record and open-source tooling maintenance both point to the reliability-first, developer-tooling mindset Nakatomi's Platform Engineering team is hiring for.",
+        "coverLetterNote": "Emphasized reliability discipline (zero P1s) and OSS maintainer credibility for the infra-tooling angle."
       },
       "conversations": [],
       "demo": true,
@@ -1048,11 +1306,22 @@
         "dental"
       ],
       "warn": "Base ceiling matches floor only — tight on comp",
-      "logo": "../assets/logos/nakatomi.png"
+      "logo": "../assets/logos/nakatomi.png",
+      "roleFit": {
+        "why": [
+          "Zero-P1 enterprise deployment track record matches infra-reliability ownership.",
+          "OSS tooling maintainer experience (1.2k-star project) supports dev-tooling scope.",
+          "Comfortable operating across a hybrid, multi-system integration footprint."
+        ],
+        "risks": [
+          "No direct hybrid-cloud or service-mesh operations experience evidenced.",
+          "Deployment-pipeline/CI-CD specifics aren't documented in current claims."
+        ]
+      }
     },
     {
       "id": "demo-app-17",
-      "company": "Veridian Dynamics",
+      "company": "Rekall",
       "role": "Platform Engineer",
       "status": "applied",
       "channel": "board",
@@ -1062,11 +1331,15 @@
       "mode": "hybrid",
       "base": "$155–190K",
       "tc": "~$200–260K",
-      "note": "Applied. 'Science. For a better everything.'",
-      "domain": "veridiandynamics.com",
-      "link": "https://veridiandynamics.com/careers",
+      "note": "Applied. 'We can remember it for you wholesale.'",
+      "domain": "rekall.com",
+      "link": "https://rekall.com/careers",
       "artifacts": {
-        "jd": "Platform Engineer — build and scale Veridian Dynamics' internal platform serving 300+ engineers; own CI/CD, observability stack, and service mesh.\n\nArtifact: workspace/jds/demo/veridian-dynamics-platform-engineer.md"
+        "jd": "Platform Engineer — build and scale Rekall' internal platform serving 300+ engineers; own CI/CD, observability stack, and service mesh.\n\nArtifact: workspace/jds/demo/veridian-dynamics-platform-engineer.md",
+        "resume": "Delivered three concurrent enterprise go-lives with zero P1 incidents and maintains an open-source tool used by dozens of teams — reliability instincts for Rekall's 300-engineer platform.",
+        "resumeNote": "Combined the zero-P1 deployment record with the OSS-maintainer claim to speak to reliability at platform scale.",
+        "coverLetter": "Riley's zero-P1 deployment discipline and experience maintaining tooling used by dozens of external teams line up with what it takes to run a platform 300+ engineers depend on daily.",
+        "coverLetterNote": "Leaned on the reliability record and OSS multi-team support experience for the platform-scale angle."
       },
       "conversations": [],
       "demo": true,
@@ -1082,11 +1355,22 @@
         "pto"
       ],
       "warn": "Base below target floor",
-      "logo": "../assets/logos/veridian.png"
+      "logo": "../assets/logos/rekall.png",
+      "roleFit": {
+        "why": [
+          "Zero-P1 track record across three concurrent go-lives fits the platform reliability bar.",
+          "OSS maintainer experience (42 contributors) shows comfort supporting many users.",
+          "Enterprise integration background suits a platform serving 300+ engineers."
+        ],
+        "risks": [
+          "No direct CI/CD, observability-stack, or service-mesh ownership evidenced.",
+          "Platform scale (300+ engineers) is larger than any documented deployment."
+        ]
+      }
     },
     {
       "id": "demo-app-18",
-      "company": "Dharma Initiative",
+      "company": "Blue Sun",
       "role": "Research Engineer",
       "status": "applied",
       "channel": "board",
@@ -1096,11 +1380,15 @@
       "mode": "remote",
       "base": "$195–235K",
       "tc": "~$285–345K",
-      "note": "Applied. Must enter 4 8 15 16 23 42 every 108 minutes.",
-      "domain": "dharmainitiative.com",
-      "link": "https://dharmainitiative.com/careers",
+      "note": "Applied. Research role — two by two, hands of blue.",
+      "domain": "bluesun.com",
+      "link": "https://bluesun.com/careers",
       "artifacts": {
-        "jd": "Research Engineer — design and deploy applied ML systems at The Dharma Initiative; own model evaluation harnesses, agentic workflows, and cross-site data pipelines.\n\nArtifact: workspace/jds/demo/dharma-initiative-research-engineer.md"
+        "jd": "Research Engineer — design and deploy applied ML systems at The Blue Sun; own model evaluation harnesses, agentic workflows, and cross-site data pipelines.\n\nArtifact: workspace/jds/demo/dharma-initiative-research-engineer.md",
+        "resume": "Maintains an open-source LLM eval library (1.2k stars, 42 contributors) and shipped a production agentic workflow — direct precedent for Blue Sun's eval-harness and agentic-workflow scope.",
+        "resumeNote": "Led with the OSS eval-library claim since it maps almost one-to-one onto Blue Sun's model-evaluation-harness need.",
+        "coverLetter": "Riley's open-source LLM evaluation library and production agentic tool-use workflow are close precedent for the evaluation harnesses and agentic systems Blue Sun's research team owns.",
+        "coverLetterNote": "Matched the eval-library claim directly to the JD's 'model evaluation harnesses' line, with agentic work as support."
       },
       "conversations": [],
       "demo": true,
@@ -1121,7 +1409,18 @@
         "dueAt": "2026-06-29",
         "note": "No reply yet — send a short follow-up nudge."
       },
-      "logo": "../assets/logos/dharma.png"
+      "logo": "../assets/logos/blue-sun.png",
+      "roleFit": {
+        "why": [
+          "Maintains an OSS LLM eval library (1.2k stars) — direct fit for evaluation harnesses.",
+          "Agentic tool-use workflow experience matches the agentic-workflows mandate.",
+          "Track record shipping AI systems to production, not just prototypes."
+        ],
+        "risks": [
+          "No cross-site or multi-region data-pipeline experience evidenced.",
+          "Applied-ML systems breadth beyond RAG/agents/eval isn't documented."
+        ]
+      }
     },
     {
       "id": "demo-app-19",
@@ -1144,7 +1443,11 @@
         "url": "https://ingen.com/careers/senior-software-engineer"
       },
       "artifacts": {
-        "jd": "Senior Software Engineer (AI Platform) — build ML-serving infra and internal tooling for InGen's biotech data platform.\n\nArtifact: workspace/jds/demo/ingen-senior-swe.md"
+        "jd": "Senior Software Engineer (AI Platform) — build ML-serving infra and internal tooling for InGen's biotech data platform.\n\nArtifact: workspace/jds/demo/ingen-senior-swe.md",
+        "resume": "Foregrounds the Meridian production RAG pipeline (prototype to production in 8 weeks) and the Meridian tool-use agent for internal workflow automation, both relevant to InGen's ML-serving and internal tooling scope.",
+        "resumeNote": "Tailored to InGen's AI Platform posting: leads with production RAG pipeline, backs with tool-use agent.",
+        "coverLetter": "Riley's Meridian retrieval-augmented generation pipeline and internal tool-use agent map directly onto InGen's ML-serving infra and internal tooling needs for its biotech data platform.",
+        "coverLetterNote": "Connects RAG pipeline + agentic tooling claims to InGen's AI Platform ML-serving scope."
       },
       "conversations": [],
       "warn": "Safety-critical operations role; clarify operational authority before interviews.",
@@ -1165,7 +1468,16 @@
         "dueAt": "2026-07-02",
         "note": "No reply yet — send a short follow-up nudge."
       },
-      "logo": "../assets/logos/ingen.png"
+      "logo": "../assets/logos/ingen.png",
+      "roleFit": {
+        "why": [
+          "InGen's ML-serving infra mirrors Riley's production RAG pipeline shipped at Meridian.",
+          "Biotech tooling scope lines up with Riley's tool-use agent build experience."
+        ],
+        "risks": [
+          "Onsite NYC + safety-critical data ops warrant clarifying operational authority upfront."
+        ]
+      }
     },
     {
       "id": "demo-app-20",
@@ -1183,7 +1495,11 @@
       "domain": "biosyn.com",
       "link": "https://biosyn.com/careers",
       "artifacts": {
-        "jd": "Backend Engineer — build high-throughput data ingestion and API services for BioSyn's life-sciences platform; Python/Go stack, cloud-native.\n\nArtifact: workspace/jds/demo/biosyn-backend-engineer.md"
+        "jd": "Backend Engineer — build high-throughput data ingestion and API services for BioSyn's life-sciences platform; Python/Go stack, cloud-native.\n\nArtifact: workspace/jds/demo/biosyn-backend-engineer.md",
+        "resume": "Foregrounds Riley's forward-deployed enterprise integration work at Pulsar, paired with open-source LLM evaluation tooling, both signaling backend rigor for BioSyn's high-throughput ingestion and API services.",
+        "resumeNote": "Tailored to BioSyn's backend posting: leads with enterprise integration work, backs with OSS maintainer credibility.",
+        "coverLetter": "Riley's experience integrating enterprise systems as a forward-deployed engineer, plus maintaining an open-source evaluation tool, speaks to the reliability BioSyn needs from its life-sciences data platform.",
+        "coverLetterNote": "Connects enterprise deployment + OSS maintainer claims to BioSyn's backend reliability needs."
       },
       "conversations": [],
       "demo": true,
@@ -1198,7 +1514,17 @@
         "health"
       ],
       "warn": "Base below target floor; no AI surface in JD",
-      "logo": "../assets/logos/biosyn.png"
+      "logo": "../assets/logos/biosyn.png",
+      "roleFit": {
+        "why": [
+          "Pulsar's Salesforce/Workday integration work maps onto BioSyn's API service build-out.",
+          "OSS maintainer background signals engineering rigor for a Python/Go life-sciences stack."
+        ],
+        "risks": [
+          "No AI/LLM surface in the JD, so Riley's LLM work won't be a differentiator here.",
+          "Base band sits below Riley's target floor for a Boston onsite role."
+        ]
+      }
     },
     {
       "id": "demo-app-21",
@@ -1216,7 +1542,11 @@
       "domain": "initech.com",
       "link": "https://initech.com/careers",
       "artifacts": {
-        "jd": "Software Engineer — join Initech's core platform team; build internal tools, APIs, and workflow automations used by ops and finance teams.\n\nArtifact: workspace/jds/demo/initech-software-engineer.md"
+        "jd": "Software Engineer — join Initech's core platform team; build internal tools, APIs, and workflow automations used by ops and finance teams.\n\nArtifact: workspace/jds/demo/initech-software-engineer.md",
+        "resume": "Foregrounds the Meridian agentic procurement workflow — parsing vendor quotes and ERP budget-code lookups with human-in-the-loop approval — alongside the production RAG pipeline, both relevant to Initech's ops/finance automations.",
+        "resumeNote": "Tailored to Initech's internal-tools posting: leads with agentic procurement automation, backs with RAG pipeline.",
+        "coverLetter": "Riley's multi-step tool-use agent that automated procurement approvals for finance and ops teams is a close precedent for Initech's internal tools and workflow-automation needs across ops and finance.",
+        "coverLetterNote": "Connects agentic procurement automation + RAG pipeline claims to Initech's ops/finance tooling scope."
       },
       "conversations": [],
       "demo": true,
@@ -1231,7 +1561,16 @@
         "dental"
       ],
       "warn": "Base below target floor; workflow-automation signal but no LLM surface mentioned",
-      "logo": "../assets/logos/initech.png"
+      "logo": "../assets/logos/initech.png",
+      "roleFit": {
+        "why": [
+          "Meridian's agentic procurement build closely matches Initech's finance workflows.",
+          "Riley's production RAG pipeline shows shipping internal tools ops teams actually use."
+        ],
+        "risks": [
+          "No LLM surface stated in the JD; agentic-workflow fit reads transferable, not direct."
+        ]
+      }
     },
     {
       "id": "demo-app-22",
@@ -1249,7 +1588,11 @@
       "domain": "bachmanity.com",
       "link": "https://bachmanity.com/careers",
       "artifacts": {
-        "jd": "Software Engineer — Bachmanity's small product team; full-stack features, some internal tooling, music-tech stack (Python, React, Postgres).\n\nArtifact: workspace/jds/demo/bachmanity-software-engineer.md"
+        "jd": "Software Engineer — Bachmanity's small product team; full-stack features, some internal tooling, music-tech stack (Python, React, Postgres).\n\nArtifact: workspace/jds/demo/bachmanity-software-engineer.md",
+        "resume": "Foregrounds Riley's informal tech-lead record mentoring engineers to senior while shipping at full IC pace, paired with the Meridian tool-use agent build, both relevant to Bachmanity's small full-stack product team.",
+        "resumeNote": "Tailored to Bachmanity's small-team posting: leads with player-coach mentorship, backs with tool-use agent build.",
+        "coverLetter": "Riley's track record mentoring engineers to senior while maintaining full IC output, plus building a multi-step tool-use agent, fits a small product team like Bachmanity's that needs both ownership and versatility.",
+        "coverLetterNote": "Connects mentorship + agentic tooling claims to Bachmanity's small full-stack team."
       },
       "conversations": [],
       "demo": true,
@@ -1268,7 +1611,17 @@
         "pto"
       ],
       "warn": "Seed-stage comp likely below floor; no AI surface",
-      "logo": "../assets/logos/bachmanity.png"
+      "logo": "../assets/logos/bachmanity.png",
+      "roleFit": {
+        "why": [
+          "Small full-stack scope fits Riley's player-coach pattern of shipping while mentoring.",
+          "Riley's tool-use agent build shows comfort owning internal tooling end to end."
+        ],
+        "risks": [
+          "No AI surface in the JD, so LLM-specific claims carry less weight here.",
+          "Seed-stage comp likely lands below Riley's target floor."
+        ]
+      }
     },
     {
       "id": "demo-app-23",
@@ -1286,7 +1639,11 @@
       "domain": "encom.com",
       "link": "https://encom.com/careers",
       "artifacts": {
-        "jd": "Software Engineer — Encom's core infrastructure team; distributed systems, cloud-native services, and internal developer tooling.\n\nArtifact: workspace/jds/demo/encom-software-engineer.md"
+        "jd": "Software Engineer — Encom's core infrastructure team; distributed systems, cloud-native services, and internal developer tooling.\n\nArtifact: workspace/jds/demo/encom-software-engineer.md",
+        "resume": "Foregrounds Riley's informal tech-lead mentorship of three engineers to senior alongside an open-source LLM evaluation tool, both relevant to Encom's core infrastructure and developer-tooling focus.",
+        "resumeNote": "Tailored to Encom's infra posting: leads with tech-lead mentorship, backs with open-source tooling maintenance.",
+        "coverLetter": "Riley's experience mentoring engineers to senior while maintaining a widely-used open-source evaluation tool speaks to the developer-tooling and systems maturity Encom's infrastructure team is building toward.",
+        "coverLetterNote": "Connects mentorship + OSS maintainer claims to Encom's infra/dev-tooling scope."
       },
       "conversations": [],
       "demo": true,
@@ -1301,7 +1658,17 @@
         "health"
       ],
       "warn": "Base below target floor; pure platform SWE, no AI surface",
-      "logo": "../assets/logos/encom.png"
+      "logo": "../assets/logos/encom.png",
+      "roleFit": {
+        "why": [
+          "Riley's informal tech-lead record fits a core infra team maturing its developer tooling.",
+          "Open-source maintainer background (1.2k stars) signals developer-tooling strength."
+        ],
+        "risks": [
+          "No AI/LLM surface in the JD; reads as a pure infrastructure and tooling role.",
+          "Base band sits below Riley's target floor."
+        ]
+      }
     },
     {
       "id": "demo-app-24",
@@ -1319,7 +1686,11 @@
       "domain": "momcorp.com",
       "link": "https://momcorp.com/careers",
       "artifacts": {
-        "jd": "Software Engineer — MomCorp consumer-products platform; own backend services, integrations, and data pipelines for a global e-commerce footprint.\n\nArtifact: workspace/jds/demo/momcorp-software-engineer.md"
+        "jd": "Software Engineer — MomCorp consumer-products platform; own backend services, integrations, and data pipelines for a global e-commerce footprint.\n\nArtifact: workspace/jds/demo/momcorp-software-engineer.md",
+        "resume": "Foregrounds the Meridian production RAG pipeline built over a 4M-page corpus alongside Pulsar's enterprise integration work with Salesforce and Workday, both transferable to MomCorp's backend services and data-pipeline needs.",
+        "resumeNote": "Tailored to MomCorp's platform posting: leads with production data-pipeline experience, backs with integrations.",
+        "coverLetter": "Riley's experience shipping a production data pipeline at scale, plus integrating enterprise systems as a forward-deployed engineer, fits MomCorp's need for reliable backend services across its e-commerce footprint.",
+        "coverLetterNote": "Connects RAG pipeline + enterprise integration claims to MomCorp's data/backend scope."
       },
       "conversations": [],
       "demo": true,
@@ -1335,11 +1706,21 @@
         "parental"
       ],
       "warn": "Base below target floor; no AI or agentic surface in JD",
-      "logo": "../assets/logos/momcorp.png"
+      "logo": "../assets/logos/momcorp.png",
+      "roleFit": {
+        "why": [
+          "Riley's production RAG pipeline shows shipping data-heavy systems to production.",
+          "Pulsar's Salesforce/Workday integration work maps onto MomCorp's data pipelines."
+        ],
+        "risks": [
+          "No AI surface in the JD, so LLM claims are transferable rather than direct.",
+          "Base band sits below Riley's target floor for a hybrid Austin role."
+        ]
+      }
     },
     {
       "id": "demo-app-25",
-      "company": "Spectre",
+      "company": "Virtucon",
       "role": "Senior Software Engineer",
       "status": "rejected",
       "channel": "recruiter",
@@ -1349,16 +1730,20 @@
       "mode": "onsite",
       "base": "$180–215K",
       "tc": "~$250–310K",
-      "note": "Form rejection — no interview. The org chart is suspiciously octopus-shaped.",
-      "domain": "spectre.com",
-      "link": "https://spectre.com/careers",
+      "note": "Form rejection — no interview. Number Two is taking the org a different direction.",
+      "domain": "virtucon.com",
+      "link": "https://virtucon.com/careers",
       "source": {
         "type": "recruiter",
         "name": "Demo agency recruiter",
-        "url": "https://spectre.com/careers/senior-software-engineer"
+        "url": "https://virtucon.com/careers/senior-software-engineer"
       },
       "artifacts": {
-        "jd": "Senior Software Engineer — backend platform, distributed systems, Kafka/Kubernetes. AI roadmap deferred. Austin office preferred, hybrid.\n\nArtifact: workspace/jds/demo/spectre-senior-swe.md"
+        "jd": "Senior Software Engineer — backend platform, distributed systems, Kafka/Kubernetes. AI roadmap deferred. Austin office preferred, hybrid.\n\nArtifact: workspace/jds/demo/virtucon-senior-swe.md",
+        "resume": "Foregrounds Riley's forward-deployed work running enterprise deployments with zero P1s, alongside informal tech-lead work mentoring engineers to senior, relevant to Virtucon's distributed backend platform scope.",
+        "resumeNote": "Tailored to Virtucon's backend posting: leads with zero-P1 deployment record, backs with tech-lead mentorship.",
+        "coverLetter": "Riley's record of reliable enterprise deployments, plus experience informally leading engineers while shipping at full IC pace, fits the cross-functional ownership Virtucon's distributed backend platform needs.",
+        "coverLetterNote": "Connects deployment reliability + tech-lead mentorship claims to Virtucon's backend platform scope."
       },
       "conversations": [],
       "warn": "Outcome learning: vague security roles need sharper qualification before investing time.",
@@ -1375,11 +1760,20 @@
         "dental",
         "vision"
       ],
-      "logo": "../assets/logos/spectre.png"
+      "logo": "../assets/logos/virtucon.png",
+      "roleFit": {
+        "why": [
+          "Riley's zero-P1 deployment record fits a distributed backend platform role.",
+          "Tech-lead experience signals cross-functional ownership on a Kafka/Kubernetes stack."
+        ],
+        "risks": [
+          "AI roadmap is deferred here, so Riley's LLM-specific work is less directly applicable."
+        ]
+      }
     },
     {
       "id": "demo-app-26",
-      "company": "Spacely Sprockets",
+      "company": "Acme",
       "role": "Senior Engineer",
       "status": "applied",
       "channel": "board",
@@ -1389,11 +1783,15 @@
       "mode": "hybrid",
       "base": "$180–215K",
       "tc": "~$250–310K",
-      "note": "Mr. Spacely runs a tight shop. Sprocket logistics at scale.",
-      "domain": "spacely.com",
-      "link": "https://spacely.com/careers",
+      "note": "Applied. If it's a gadget, Acme makes it. Reliability sold separately.",
+      "domain": "acme.com",
+      "link": "https://acme.com/careers",
       "artifacts": {
-        "jd": "Senior Engineer — automation tooling and integrations, React/Node/Python, LLM features on roadmap. Remote-friendly.\n\nArtifact: workspace/jds/demo/spacely-sprockets-senior-engineer.md"
+        "jd": "Senior Engineer — automation tooling and integrations, React/Node/Python, LLM features on roadmap. Remote-friendly.\n\nArtifact: workspace/jds/demo/spacely-sprockets-senior-engineer.md",
+        "resume": "Foregrounds the Meridian production RAG pipeline alongside Riley's open-source LLM evaluation tooling (1.2k stars, 42 contributors), both directly relevant to Acme's automation-tooling role with LLM features on its roadmap.",
+        "resumeNote": "Tailored to Acme's automation-tooling posting: leads with production RAG experience, backs with OSS eval tooling.",
+        "coverLetter": "Riley's production retrieval-augmented generation work and open-source LLM evaluation tooling map well onto Acme's automation-and-integrations role, especially with LLM features on the near-term roadmap.",
+        "coverLetterNote": "Connects RAG pipeline + OSS eval tooling claims to Acme's upcoming LLM roadmap."
       },
       "conversations": [],
       "demo": true,
@@ -1408,7 +1806,16 @@
         "health",
         "pto"
       ],
-      "logo": "../assets/logos/spacely.png"
+      "logo": "../assets/logos/acme.png",
+      "roleFit": {
+        "why": [
+          "Riley's production RAG pipeline directly supports Acme's stated LLM-features roadmap.",
+          "OSS LLM evaluation tooling signals readiness to validate Acme's planned AI features."
+        ],
+        "risks": [
+          "LLM features are roadmap, not current scope; near-term work may skew to plain tooling."
+        ]
+      }
     },
     {
       "id": "demo-app-27",
@@ -1426,7 +1833,11 @@
       "domain": "zorgindustries.com",
       "link": "https://zorgindustries.com/careers",
       "artifacts": {
-        "jd": "Senior Engineer — backend services, Go/Postgres, microservices. No current AI surface. Fully remote.\n\nArtifact: workspace/jds/demo/zorg-industries-senior-engineer.md"
+        "jd": "Senior Engineer — backend services, Go/Postgres, microservices. No current AI surface. Fully remote.\n\nArtifact: workspace/jds/demo/zorg-industries-senior-engineer.md",
+        "resume": "Foregrounds Riley's forward-deployed engineer work running three concurrent enterprise go-lives with zero P1 incidents, alongside open-source LLM evaluation tooling maintenance, both relevant to Zorg's backend microservices role.",
+        "resumeNote": "Tailored to Zorg's backend posting: leads with zero-P1 deployment reliability, backs with OSS maintainer credibility.",
+        "coverLetter": "Riley's record running enterprise deployments with zero P1 incidents, plus maintaining a widely-used open-source tool, speaks to the reliability and ownership Zorg's backend microservices team needs.",
+        "coverLetterNote": "Connects enterprise deployment reliability + OSS maintainer claims to Zorg's backend scope."
       },
       "conversations": [],
       "demo": true,
@@ -1441,11 +1852,20 @@
         "equity"
       ],
       "warn": "No AI surface — core backend only, clear cut-signal",
-      "logo": "../assets/logos/zorg.png"
+      "logo": "../assets/logos/zorg.png",
+      "roleFit": {
+        "why": [
+          "Riley's zero-P1 deployment record fits a backend role with real reliability stakes.",
+          "Open-source maintainer background signals strong ownership for a small backend team."
+        ],
+        "risks": [
+          "No AI surface in the JD — a clear signal this leans pure backend, not Riley's edge."
+        ]
+      }
     },
     {
       "id": "demo-app-28",
-      "company": "Cobra",
+      "company": "Los Pollos Hermanos",
       "role": "Platform Engineer",
       "status": "applied",
       "channel": "board",
@@ -1455,11 +1875,15 @@
       "mode": "onsite",
       "base": "$155–190K",
       "tc": "~$200–260K",
-      "note": "Cobra — applied cold. The recruiter hissed. Literally.",
-      "domain": "cobra.com",
-      "link": "https://cobra.com/careers",
+      "note": "Applied cold. A man provides — fast food, faster logistics.",
+      "domain": "lospolloshermanos.com",
+      "link": "https://lospolloshermanos.com/careers",
       "artifacts": {
-        "jd": "Platform Engineer — Kubernetes, Terraform, CI/CD pipelines, SRE focus. No current AI surface. Hybrid Austin or remote.\n\nArtifact: workspace/jds/demo/cobra-platform-engineer.md"
+        "jd": "Platform Engineer — Kubernetes, Terraform, CI/CD pipelines, SRE focus. No current AI surface. Hybrid Austin or remote.\n\nArtifact: workspace/jds/demo/cobra-platform-engineer.md",
+        "resume": "Foregrounds Riley's forward-deployed engineer work delivering three enterprise go-lives with zero P1s, alongside the Meridian tool-use agent that automated a manual workflow, relevant to a platform/SRE scope.",
+        "resumeNote": "Tailored to Los Pollos Hermanos's SRE posting: leads with zero-P1 reliability record, backs with workflow automation.",
+        "coverLetter": "Riley's record of zero-P1 enterprise go-lives, plus building a multi-step automation agent, fits the reliability and CI/CD ownership Los Pollos Hermanos needs from a Platform Engineer.",
+        "coverLetterNote": "Connects deployment reliability + workflow automation claims to the Platform Engineer scope."
       },
       "conversations": [],
       "demo": true,
@@ -1475,7 +1899,16 @@
         "bonus"
       ],
       "warn": "Base below floor ($155-190K vs $190K floor) — and no AI scope",
-      "logo": "../assets/logos/cobra.png"
+      "logo": "../assets/logos/los-pollos.png",
+      "roleFit": {
+        "why": [
+          "Riley's zero-P1 record across enterprise go-lives fits a Platform Engineer/SRE role.",
+          "Meridian's tool-use agent shows comfort automating operational workflows end to end."
+        ],
+        "risks": [
+          "Base band sits below Riley's target floor, and there's no AI surface in the role."
+        ]
+      }
     },
     {
       "id": "demo-app-29",
@@ -1498,7 +1931,11 @@
         "url": "https://monstersinc.com/careers/senior-engineer"
       },
       "artifacts": {
-        "jd": "Senior Engineer — Backend & AI Tooling at Monsters Inc, focused on internal developer-platform and AI-assisted incident response tooling.\n\nArtifact: workspace/jds/demo/monsters-inc-senior-engineer.md"
+        "jd": "Senior Engineer — Backend & AI Tooling at Monsters Inc, focused on internal developer-platform and AI-assisted incident response tooling.\n\nArtifact: workspace/jds/demo/monsters-inc-senior-engineer.md",
+        "resume": "Foregrounds the Meridian production RAG pipeline that replaced manual triage with sub-60-second cited queries, alongside the Meridian tool-use agent, both close precedents for Monsters Inc's AI-assisted incident-response tooling.",
+        "resumeNote": "Tailored to Monsters Inc's AI Tooling posting: leads with RAG-based triage precedent, backs with agentic tooling.",
+        "coverLetter": "Riley's Meridian RAG pipeline replaced a 3-hour manual triage process with sub-60-second cited queries — directly relevant to Monsters Inc's AI-assisted incident-response tooling for its internal developer platform.",
+        "coverLetterNote": "Connects RAG-based triage precedent + agentic tooling claims to Monsters Inc's incident-response scope."
       },
       "conversations": [],
       "demo": true,
@@ -1514,7 +1951,16 @@
         "dental",
         "pto"
       ],
-      "logo": "../assets/logos/monsters-inc.png"
+      "logo": "../assets/logos/monsters-inc.png",
+      "roleFit": {
+        "why": [
+          "Meridian's RAG triage is a near-exact precedent for Monsters Inc's incident response.",
+          "Riley's Meridian tool-use agent shows direct AI tooling experience for internal ops."
+        ],
+        "risks": [
+          "Onsite NYC role; Riley's remote-leaning search history is worth flagging early."
+        ]
+      }
     }
   ],
   "sources": [
@@ -2069,11 +2515,11 @@
     },
     {
       "id": "comm-demo-app-6",
-      "company": "Pied Piper",
+      "company": "Globex",
       "role": "Senior Software Engineer",
       "applicationId": "demo-app-6",
       "channel": "referral",
-      "subject": "Your application for Senior Software Engineer at Pied Piper",
+      "subject": "Your application for Senior Software Engineer at Globex",
       "status": "closed",
       "summary": "ATS auto-rejection after apply; no interview rounds — application did not advance.",
       "lastInboundAt": "2026-06-10",
@@ -2082,12 +2528,12 @@
           "id": "msg-demo-app-6-01",
           "direction": "inbound",
           "at": "2026-06-10",
-          "from": "no-reply@piedpiper.example",
+          "from": "no-reply@globex.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Your application for Senior Software Engineer at Pied Piper",
-          "summary": "Generic ATS notice: Pied Piper will not be moving forward with Riley's application; no feedback provided."
+          "subject": "Your application for Senior Software Engineer at Globex",
+          "summary": "Generic ATS notice: Globex will not be moving forward with Riley's application; no feedback provided."
         }
       ],
       "demo": true
@@ -2144,25 +2590,519 @@
     },
     {
       "id": "comm-demo-app-25",
-      "company": "Spectre",
+      "company": "Virtucon",
       "role": "Senior Software Engineer",
       "applicationId": "demo-app-25",
       "channel": "recruiter",
-      "subject": "Your application — Senior Software Engineer at Spectre",
+      "subject": "Your application — Senior Software Engineer at Virtucon",
       "status": "closed",
-      "summary": "ATS form rejection from Spectre — applied 2026-05-29 via recruiter, no interview, declined 2026-06-10.",
+      "summary": "ATS form rejection from Virtucon — applied 2026-05-29 via recruiter, no interview, declined 2026-06-10.",
       "lastInboundAt": "2026-06-10",
       "messages": [
         {
           "id": "msg-demo-app-25-01",
           "direction": "inbound",
           "at": "2026-06-10",
-          "from": "no-reply@spectre.example",
+          "from": "no-reply@virtucon.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Your application — Senior Software Engineer at Spectre",
-          "summary": "Generic ATS rejection: Spectre thanks Riley for applying but is moving forward with other candidates."
+          "subject": "Your application — Senior Software Engineer at Virtucon",
+          "summary": "Generic ATS rejection: Virtucon thanks Riley for applying but is moving forward with other candidates."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-7-apply",
+      "company": "Tyrell Corporation",
+      "applicationId": "demo-app-7",
+      "channel": "board",
+      "subject": "Application received — Senior Platform Engineer at Tyrell Corporation",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-27",
+      "messages": [
+        {
+          "id": "msg-demo-app-7-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-26",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Tyrell Corporation for Senior Platform Engineer."
+        },
+        {
+          "id": "msg-demo-app-7-a2",
+          "direction": "inbound",
+          "at": "2026-05-27",
+          "from": "no-reply@tyrellcorp.com",
+          "summary": "Automated confirmation — Tyrell Corporation received the application; team is reviewing. More human than human — we read every résumé twice."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-8-apply",
+      "company": "Black Mesa",
+      "applicationId": "demo-app-8",
+      "channel": "board",
+      "subject": "Application received — Research Engineer at Black Mesa",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-31",
+      "messages": [
+        {
+          "id": "msg-demo-app-8-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-30",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Black Mesa for Research Engineer."
+        },
+        {
+          "id": "msg-demo-app-8-a2",
+          "direction": "inbound",
+          "at": "2026-05-31",
+          "from": "no-reply@blackmesa.com",
+          "summary": "Automated confirmation — Black Mesa received the application; team is reviewing. Anomalous materials clearance paperwork to follow if selected."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-10-apply",
+      "company": "Abstergo Industries",
+      "applicationId": "demo-app-10",
+      "channel": "board",
+      "subject": "Application received — Senior Software Engineer at Abstergo Industries",
+      "status": "waiting",
+      "lastInboundAt": "2026-06-03",
+      "messages": [
+        {
+          "id": "msg-demo-app-10-a1",
+          "direction": "outbound-sent",
+          "at": "2026-06-02",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Abstergo Industries for Senior Software Engineer."
+        },
+        {
+          "id": "msg-demo-app-10-a2",
+          "direction": "inbound",
+          "at": "2026-06-03",
+          "from": "no-reply@abstergo.com",
+          "summary": "Automated confirmation — Abstergo Industries received the application; team is reviewing. Records retained per standard Animus Project protocol."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-11-apply",
+      "company": "Omni Consumer Products",
+      "applicationId": "demo-app-11",
+      "channel": "referral",
+      "subject": "Application received — Principal Engineer at Omni Consumer Products",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-20",
+      "messages": [
+        {
+          "id": "msg-demo-app-11-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-19",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Omni Consumer Products for Principal Engineer."
+        },
+        {
+          "id": "msg-demo-app-11-a2",
+          "direction": "inbound",
+          "at": "2026-05-20",
+          "from": "no-reply@ocp.com",
+          "summary": "Automated confirmation — Omni Consumer Products received the application; team is reviewing. Your file is logged in the same system that runs the police department now."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-13-apply",
+      "company": "Buy n Large",
+      "applicationId": "demo-app-13",
+      "channel": "board",
+      "subject": "Application received — Staff Engineer at Buy n Large",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-25",
+      "messages": [
+        {
+          "id": "msg-demo-app-13-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-24",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Buy n Large for Staff Engineer."
+        },
+        {
+          "id": "msg-demo-app-13-a2",
+          "direction": "inbound",
+          "at": "2026-05-25",
+          "from": "no-reply@buynlarge.com",
+          "summary": "Automated confirmation — Buy n Large received the application; team is reviewing. Everything, including your candidacy, is being taken care of."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-14-apply",
+      "company": "CHOAM",
+      "applicationId": "demo-app-14",
+      "channel": "board",
+      "subject": "Application received — Backend Engineer at CHOAM",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-13",
+      "messages": [
+        {
+          "id": "msg-demo-app-14-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-12",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to CHOAM for Backend Engineer."
+        },
+        {
+          "id": "msg-demo-app-14-a2",
+          "direction": "inbound",
+          "at": "2026-05-13",
+          "from": "no-reply@choam.com",
+          "summary": "Automated confirmation — CHOAM received the application; team is reviewing. The spice, and your application, must flow."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-15-apply",
+      "company": "Aviato",
+      "applicationId": "demo-app-15",
+      "channel": "referral",
+      "subject": "Application received — Senior Software Engineer at Aviato",
+      "status": "waiting",
+      "lastInboundAt": "2026-06-22",
+      "messages": [
+        {
+          "id": "msg-demo-app-15-a1",
+          "direction": "outbound-sent",
+          "at": "2026-06-21",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Aviato for Senior Software Engineer."
+        },
+        {
+          "id": "msg-demo-app-15-a2",
+          "direction": "inbound",
+          "at": "2026-06-22",
+          "from": "no-reply@aviato.com",
+          "summary": "Automated confirmation — Aviato received the application; team is reviewing. Erlich says the logo has a bird because Aviato flies."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-16-apply",
+      "company": "Nakatomi Corporation",
+      "applicationId": "demo-app-16",
+      "channel": "referral",
+      "subject": "Application received — Platform Engineer at Nakatomi Corporation",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-29",
+      "messages": [
+        {
+          "id": "msg-demo-app-16-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-28",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Nakatomi Corporation for Platform Engineer."
+        },
+        {
+          "id": "msg-demo-app-16-a2",
+          "direction": "inbound",
+          "at": "2026-05-29",
+          "from": "no-reply@nakatomi.com",
+          "summary": "Automated confirmation — Nakatomi Corporation received the application; team is reviewing. Building access badge pending review."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-17-apply",
+      "company": "Rekall",
+      "applicationId": "demo-app-17",
+      "channel": "board",
+      "subject": "Application received — Platform Engineer at Rekall",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-17",
+      "messages": [
+        {
+          "id": "msg-demo-app-17-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-16",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Rekall for Platform Engineer."
+        },
+        {
+          "id": "msg-demo-app-17-a2",
+          "direction": "inbound",
+          "at": "2026-05-17",
+          "from": "no-reply@rekall.com",
+          "summary": "Automated confirmation — Rekall received the application; team is reviewing. We can remember this for you wholesale — expect an update within two weeks."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-18-apply",
+      "company": "Blue Sun",
+      "applicationId": "demo-app-18",
+      "channel": "board",
+      "subject": "Application received — Research Engineer at Blue Sun",
+      "status": "waiting",
+      "lastInboundAt": "2026-06-20",
+      "messages": [
+        {
+          "id": "msg-demo-app-18-a1",
+          "direction": "outbound-sent",
+          "at": "2026-06-19",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Blue Sun for Research Engineer."
+        },
+        {
+          "id": "msg-demo-app-18-a2",
+          "direction": "inbound",
+          "at": "2026-06-20",
+          "from": "no-reply@bluesun.com",
+          "summary": "Automated confirmation — Blue Sun received the application; team is reviewing. Two by two, applications go in — yours is logged."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-19-apply",
+      "company": "InGen",
+      "applicationId": "demo-app-19",
+      "channel": "referral",
+      "subject": "Application received — Senior Software Engineer at InGen",
+      "status": "waiting",
+      "lastInboundAt": "2026-06-23",
+      "messages": [
+        {
+          "id": "msg-demo-app-19-a1",
+          "direction": "outbound-sent",
+          "at": "2026-06-22",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to InGen for Senior Software Engineer."
+        },
+        {
+          "id": "msg-demo-app-19-a2",
+          "direction": "inbound",
+          "at": "2026-06-23",
+          "from": "no-reply@ingen.com",
+          "summary": "Automated confirmation — InGen received the application; recruiting is reviewing. We spared no expense reviewing every submission."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-20-apply",
+      "company": "BioSyn",
+      "applicationId": "demo-app-20",
+      "channel": "board",
+      "subject": "Application received — Backend Engineer at BioSyn",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-23",
+      "messages": [
+        {
+          "id": "msg-demo-app-20-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-22",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to BioSyn for Backend Engineer."
+        },
+        {
+          "id": "msg-demo-app-20-a2",
+          "direction": "inbound",
+          "at": "2026-05-23",
+          "from": "no-reply@biosyn.com",
+          "summary": "Automated confirmation — BioSyn received the application; hiring team is reviewing. Definitely no locusts involved in the process."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-22-apply",
+      "company": "Bachmanity",
+      "applicationId": "demo-app-22",
+      "channel": "referral",
+      "subject": "Application received — Software Engineer at Bachmanity",
+      "status": "waiting",
+      "lastInboundAt": "2026-06-21",
+      "messages": [
+        {
+          "id": "msg-demo-app-22-a1",
+          "direction": "outbound-sent",
+          "at": "2026-06-20",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Bachmanity for Software Engineer."
+        },
+        {
+          "id": "msg-demo-app-22-a2",
+          "direction": "inbound",
+          "at": "2026-06-21",
+          "from": "no-reply@bachmanity.com",
+          "summary": "Automated confirmation — Bachmanity received the application; team is reviewing. Runway's solid, tiger party notwithstanding."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-23-apply",
+      "company": "Encom",
+      "applicationId": "demo-app-23",
+      "channel": "board",
+      "subject": "Application received — Software Engineer at Encom",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-10",
+      "messages": [
+        {
+          "id": "msg-demo-app-23-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-09",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Encom for Software Engineer."
+        },
+        {
+          "id": "msg-demo-app-23-a2",
+          "direction": "inbound",
+          "at": "2026-05-10",
+          "from": "no-reply@encom.com",
+          "summary": "Automated confirmation — Encom received the application; team is reviewing. You're on the grid now."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-24-apply",
+      "company": "MomCorp",
+      "applicationId": "demo-app-24",
+      "channel": "board",
+      "subject": "Application received — Software Engineer at MomCorp",
+      "status": "waiting",
+      "lastInboundAt": "2026-06-01",
+      "messages": [
+        {
+          "id": "msg-demo-app-24-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-31",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to MomCorp for Software Engineer."
+        },
+        {
+          "id": "msg-demo-app-24-a2",
+          "direction": "inbound",
+          "at": "2026-06-01",
+          "from": "no-reply@momcorp.com",
+          "summary": "Automated confirmation — MomCorp received the application; team is reviewing. Mom sends her regards."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-26-apply",
+      "company": "Acme",
+      "applicationId": "demo-app-26",
+      "channel": "board",
+      "subject": "Application received — Senior Engineer at Acme",
+      "status": "waiting",
+      "lastInboundAt": "2026-06-05",
+      "messages": [
+        {
+          "id": "msg-demo-app-26-a1",
+          "direction": "outbound-sent",
+          "at": "2026-06-04",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Acme for Senior Engineer."
+        },
+        {
+          "id": "msg-demo-app-26-a2",
+          "direction": "inbound",
+          "at": "2026-06-05",
+          "from": "no-reply@acme.com",
+          "summary": "Automated confirmation — Acme received the application; team is reviewing. Reliability of this email not guaranteed."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-27-apply",
+      "company": "Zorg Industries",
+      "applicationId": "demo-app-27",
+      "channel": "board",
+      "subject": "Application received — Senior Engineer at Zorg Industries",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-14",
+      "messages": [
+        {
+          "id": "msg-demo-app-27-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-13",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Zorg Industries for Senior Engineer."
+        },
+        {
+          "id": "msg-demo-app-27-a2",
+          "direction": "inbound",
+          "at": "2026-05-14",
+          "from": "no-reply@zorgindustries.com",
+          "summary": "Automated confirmation — Zorg Industries received the application; team is reviewing. We make everything, apparently including hiring pipelines."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-28-apply",
+      "company": "Los Pollos Hermanos",
+      "applicationId": "demo-app-28",
+      "channel": "board",
+      "subject": "Application received — Platform Engineer at Los Pollos Hermanos",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-28",
+      "messages": [
+        {
+          "id": "msg-demo-app-28-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-27",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Los Pollos Hermanos for Platform Engineer."
+        },
+        {
+          "id": "msg-demo-app-28-a2",
+          "direction": "inbound",
+          "at": "2026-05-28",
+          "from": "no-reply@lospolloshermanos.com",
+          "summary": "Automated confirmation — Los Pollos Hermanos received the application; team is reviewing. A platform provides."
+        }
+      ],
+      "demo": true
+    },
+    {
+      "id": "comm-demo-app-29-apply",
+      "company": "Monsters Inc",
+      "applicationId": "demo-app-29",
+      "channel": "board",
+      "subject": "Application received — Senior Engineer at Monsters Inc",
+      "status": "waiting",
+      "lastInboundAt": "2026-05-21",
+      "messages": [
+        {
+          "id": "msg-demo-app-29-a1",
+          "direction": "outbound-sent",
+          "at": "2026-05-20",
+          "from": "riley.chen@rolester.dev",
+          "summary": "Riley applied to Monsters Inc for Senior Engineer."
+        },
+        {
+          "id": "msg-demo-app-29-a2",
+          "direction": "inbound",
+          "at": "2026-05-21",
+          "from": "no-reply@monstersinc.com",
+          "summary": "Automated confirmation — Monsters Inc received the application; team is reviewing. No screams were harmed in this process."
         }
       ],
       "demo": true
@@ -2281,8 +3221,8 @@
     },
     {
       "id": "demo-prospect-6",
-      "company": "Vault-Tec",
-      "role": "Senior Backend Engineer, Vault Systems",
+      "company": "CHOAM",
+      "role": "Senior Backend Engineer, Spice Logistics",
       "fitScore": 76,
       "fitBucket": "medium",
       "status": "prospect",
@@ -2291,15 +3231,15 @@
       "mode": "remote",
       "base": "$180–210K",
       "tc": "~$245–290K",
-      "note": "Underground-facing backend role; decent comp for the AI-lite scope. Overseer's office is hiring quietly.",
-      "domain": "vault-tec.com",
-      "link": "https://vault-tec.com/careers/senior-backend-engineer",
+      "note": "Backend role on the spice-logistics platform; comp's solid for the AI-lite scope. The Landsraad seat is hiring quietly.",
+      "domain": "choam.com",
+      "link": "https://choam.com/careers/senior-backend-engineer",
       "source": {
         "type": "job-board",
         "name": "HiringCafe (demo)"
       },
       "demo": true,
-      "logo": "../assets/logos/vault-tec.png"
+      "logo": "../assets/logos/choam.png"
     },
     {
       "id": "demo-prospect-7",
@@ -2344,6 +3284,28 @@
       },
       "demo": true,
       "logo": "../assets/logos/aperture-science.png"
+    },
+    {
+      "id": "demo-prospect-9",
+      "company": "Prestige Worldwide",
+      "role": "Staff Software Engineer, Platform",
+      "fitScore": 79,
+      "fitBucket": "medium",
+      "status": "reviewed-hold",
+      "fitBasis": "triage",
+      "loc": "Remote (US)",
+      "mode": "remote",
+      "base": "$185–215K",
+      "tc": "~$250–295K",
+      "note": "First class, worldwide. Bold pitch, thin website — worth a closer look before committing.",
+      "domain": "prestigeworldwide.com",
+      "link": "https://prestigeworldwide.com/careers/staff-software-engineer-platform",
+      "source": {
+        "type": "job-board",
+        "name": "HiringCafe (demo)"
+      },
+      "demo": true,
+      "logo": "../assets/logos/prestige-worldwide.png"
     }
   ],
   "analytics": {
