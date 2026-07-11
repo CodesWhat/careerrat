@@ -17,37 +17,38 @@ export const DEMO_LOGOS = {
   // accepted / offers / finals
   "e corp": { src: "../assets/logos/e-corp.png" },
   "aperture science": { src: "../assets/logos/aperture-science.png" },
-  hooli: { src: "../assets/logos/hooli.png" },
-  "weyland-yutani": { src: "../assets/logos/weyland-yutani.png" },
   "cyberdyne systems": { src: "../assets/logos/cyberdyne.png" },
-  "pied piper": { src: "../assets/logos/pied-piper.png" },
   // interview
+  "massive dynamic": { src: "../assets/logos/massive-dynamic.png" },
+  // applied
   "tyrell corporation": { src: "../assets/logos/tyrell.png" },
   "black mesa": { src: "../assets/logos/black-mesa.png" },
-  "massive dynamic": { src: "../assets/logos/massive-dynamic.png" },
   "abstergo industries": { src: "../assets/logos/abstergo.png" },
-  // screen
   "omni consumer products": { src: "../assets/logos/ocp.png" },
-  "umbrella corporation": { src: "../assets/logos/umbrella.png" },
   "buy n large": { src: "../assets/logos/buy-n-large.png" },
-  "vault-tec": { src: "../assets/logos/vault-tec.png" },
   aviato: { src: "../assets/logos/aviato.png" },
-  // applied
   "nakatomi corporation": { src: "../assets/logos/nakatomi.png" },
-  "veridian dynamics": { src: "../assets/logos/veridian.png" },
-  "dharma initiative": { src: "../assets/logos/dharma.png" },
   ingen: { src: "../assets/logos/ingen.png" },
   biosyn: { src: "../assets/logos/biosyn.png" },
-  initech: { src: "../assets/logos/initech.png" },
   bachmanity: { src: "../assets/logos/bachmanity.png" },
   encom: { src: "../assets/logos/encom.png" },
   momcorp: { src: "../assets/logos/momcorp.png" },
-  // rejected / withdrawn
-  spectre: { src: "../assets/logos/spectre.png" },
-  "spacely sprockets": { src: "../assets/logos/spacely.png" },
-  "zorg industries": { src: "../assets/logos/zorg.png" },
-  cobra: { src: "../assets/logos/cobra.png" },
   "monsters inc": { src: "../assets/logos/monsters-inc.png" },
+  choam: { src: "../assets/logos/choam.png" },
+  rekall: { src: "../assets/logos/rekall.png" },
+  "blue sun": { src: "../assets/logos/blue-sun.png" },
+  acme: { src: "../assets/logos/acme.png" },
+  "los pollos hermanos": { src: "../assets/logos/los-pollos.png" },
+  // rejected / withdrawn
+  hooli: { src: "../assets/logos/hooli.png" },
+  "weyland-yutani": { src: "../assets/logos/weyland-yutani.png" },
+  "umbrella corporation": { src: "../assets/logos/umbrella.png" },
+  initech: { src: "../assets/logos/initech.png" },
+  "zorg industries": { src: "../assets/logos/zorg.png" },
+  globex: { src: "../assets/logos/globex.png" },
+  virtucon: { src: "../assets/logos/virtucon.png" },
+  // sourced / decide
+  "prestige worldwide": { src: "../assets/logos/prestige-worldwide.png" },
 };
 
 // Absolute filesystem path to the bundled logo PNG for a demo company name, or
