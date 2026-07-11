@@ -1,6 +1,6 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { Button } from "../components/Button.jsx";
+import { Button, IconButton } from "../components/Button.jsx";
 import { PaperclipIcon } from "../components/icons.jsx";
 import { kindLabel } from "../inbox/intake-labels.js";
 import { ApiError, createIntake, uploadIntakeFile } from "../lib/api.js";
@@ -177,14 +177,13 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
             <span className="capture-assistant__intro">
               <strong>Roland</strong>
             </span>
-            <button
-              type="button"
+            <IconButton
+              label="Close Roland intake"
               className="capture-assistant__close"
               onClick={() => setOpen(false)}
-              aria-label="Close Roland intake"
             >
               ×
-            </button>
+            </IconButton>
           </header>
 
           {result ? (
@@ -214,15 +213,14 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
                   aria-label="Attach a file to Roland"
                 />
                 <div className="capture-assistant__actions">
-                  <button
-                    type="button"
+                  <Button
                     className="capture-assistant__upload"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={submitting}
                   >
                     <PaperclipIcon />
                     <span>Attach</span>
-                  </button>
+                  </Button>
                   <Button
                     className="capture-assistant__send"
                     aria-label="Send to Roland"
@@ -286,14 +284,9 @@ function CaptureResult({ item, onDismiss }) {
         <Link className="capture-result__link" to="/inbox" onClick={onDismiss}>
           Open Inbox
         </Link>
-        <button
-          type="button"
-          className="capture-assistant__dismiss"
-          onClick={onDismiss}
-          aria-label="Dismiss"
-        >
+        <IconButton label="Dismiss" className="capture-assistant__dismiss" onClick={onDismiss}>
           ×
-        </button>
+        </IconButton>
       </div>
       <p className="capture-result__action">
         {item.classification?.proposedAction || "Captured — classifying…"}

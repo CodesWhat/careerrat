@@ -588,7 +588,7 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
                   <div
                     key={row.key}
                     style={{
-                      border: "1px solid var(--border)",
+                      border: "1px solid var(--paper-edge)",
                       borderRadius: 8,
                       padding: 12,
                       minHeight: 96,

@@ -2,8 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button } from "../components/Button.jsx";
+import { Chip } from "../components/Chip.jsx";
 import { CompanyAvatar } from "../components/CompanyAvatar.jsx";
-import { Field, Select, TextField } from "../components/form.jsx";
+import { Field, Select, TextField, Toggle } from "../components/form.jsx";
 import { ChevronDownIcon, ListIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { getSearchSources } from "../lib/api.js";
@@ -401,15 +402,9 @@ function PipelineView({
           // biome-ignore lint/a11y/useAriaPropsSupportedByRole: labeled chip group, not a form control group
           <div aria-label="Active job filters" className="jobs__chip-row">
             {chips.map((chip) => (
-              <button
-                type="button"
-                className="jobs__filter-chip"
-                key={chip.key}
-                onClick={() => removeFilter(chip.key)}
-              >
-                <span>{chip.label}</span>
-                <span aria-hidden="true">x</span>
-              </button>
+              <Chip key={chip.key} onRemove={() => removeFilter(chip.key)}>
+                {chip.label}
+              </Chip>
             ))}
           </div>
         ) : null}
@@ -443,22 +438,18 @@ function ExplorerToolbar({ queryDraft, sankey, state, onClear, onQueryDraft, onU
           <span>Jobs Explorer</span>
         </h2>
         <div className="jobs__header-controls">
-          <label className="jobs__checkbox">
-            <input
-              type="checkbox"
-              checked={!!state.showGhosted}
-              onChange={(event) => onUpdate({ showGhosted: event.target.checked })}
-            />
-            <span>Show ghosted</span>
-          </label>
-          <label className="jobs__checkbox">
-            <input
-              type="checkbox"
-              checked={!!state.hideStale}
-              onChange={(event) => onUpdate({ hideStale: event.target.checked })}
-            />
-            <span>Hide stale</span>
-          </label>
+          <Toggle
+            id="jobs-show-ghosted"
+            checked={!!state.showGhosted}
+            onChange={(value) => onUpdate({ showGhosted: value })}
+            label="Show ghosted"
+          />
+          <Toggle
+            id="jobs-hide-stale"
+            checked={!!state.hideStale}
+            onChange={(value) => onUpdate({ hideStale: value })}
+            label="Hide stale"
+          />
           {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: labeled toggle-button group, not a form control group */}
           <div aria-label="Explorer view" className="jobs__view-toggle">
             {["table", "cards"].map((view) => (
@@ -825,19 +816,19 @@ function SearchResultRow({ row, onOpen }) {
       </span>
       {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: labeled action-button group, not a form control group */}
       <span aria-label={`Actions for ${row.company}`} className="jobs__result-actions">
-        <button
-          type="button"
+        <Button
+          variant="primary"
           className="jobs__result-button jobs__result-button--primary"
           onClick={() => onOpen(row.id)}
         >
           Evaluate
-        </button>
-        <button type="button" className="jobs__result-button">
+        </Button>
+        <Button variant="secondary" className="jobs__result-button">
           Skip
-        </button>
-        <button type="button" className="jobs__result-button">
+        </Button>
+        <Button variant="secondary" className="jobs__result-button">
           Park
-        </button>
+        </Button>
       </span>
     </div>
   );

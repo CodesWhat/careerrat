@@ -8,6 +8,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
+import { IconButton } from "../components/Button.jsx";
 import { ArrowLeftIcon, ArrowRightIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { PREVIEW_CALENDAR } from "./calendarPreviewData.js";
@@ -118,23 +119,13 @@ function DateStrip({
           Today
         </button>
         <div className="calendar__strip-steps">
-          <button
-            aria-label="Previous 14 days"
-            className="calendar__strip-step"
-            onClick={onPrev}
-            type="button"
-          >
+          <IconButton label="Previous 14 days" className="calendar__strip-step" onClick={onPrev}>
             <ArrowLeftIcon />
-          </button>
+          </IconButton>
           <span className="calendar__strip-month">{monthTitleFromIso(windowStartIso)}</span>
-          <button
-            aria-label="Next 14 days"
-            className="calendar__strip-step"
-            onClick={onNext}
-            type="button"
-          >
+          <IconButton label="Next 14 days" className="calendar__strip-step" onClick={onNext}>
             <ArrowRightIcon />
-          </button>
+          </IconButton>
         </div>
       </div>
       <div className="calendar__strip">

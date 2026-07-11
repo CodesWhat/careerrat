@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { Button } from "../../components/Button.jsx";
 import { Field, TextArea, TextField } from "../../components/form.jsx";
 import { UploadIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
@@ -662,14 +663,14 @@ export function ResumeStep({
               className="onboarding-step-card__section onboarding-resume__paste-section"
               aria-label="Resume paste"
             >
-              <button
-                type="button"
-                className="btn btn--secondary onboarding-resume__paste-toggle"
+              <Button
+                variant="secondary"
+                className="onboarding-resume__paste-toggle"
                 onClick={textMode ? handleAddTextAsFile : () => setTextMode(true)}
                 disabled={textMode ? busy || !pasteText.trim() : false}
               >
                 {textMode ? "Add text as file" : "Add resume text"}
-              </button>
+              </Button>
             </section>
 
             {source ? (

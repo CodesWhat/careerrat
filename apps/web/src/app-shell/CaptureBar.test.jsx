@@ -42,7 +42,7 @@ describe("CaptureBar", () => {
     expect(html).not.toContain("Drop jobs, emails, updates, docs, or links.");
     expect(html).toContain('type="file"');
     expect(html).toContain('aria-label="Attach a file to Roland"');
-    expect(html).toContain('class="capture-assistant__upload"');
+    expect(html).toContain('class="btn btn--primary capture-assistant__upload"');
     expect(html).toContain("Attach");
     expect(html).not.toContain("Upload");
     expect(html).toContain('aria-keyshortcuts="Enter Shift+Enter"');

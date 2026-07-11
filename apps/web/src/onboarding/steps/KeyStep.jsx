@@ -4,6 +4,7 @@ import {
   RolesterUserButton,
   useRolesterUser,
 } from "../../auth/clerkControls.jsx";
+import { Button } from "../../components/Button.jsx";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
 const ACCOUNT_AVATAR_SIZE = "96px";
@@ -113,14 +114,14 @@ export function KeyStep({ goNext, goBack, onProgressSelect }) {
               <div className="onboarding-account__panel">
                 <div className="onboarding-account__actions">
                   <RolesterSignUpButton mode="modal">
-                    <button type="button" className="btn btn--primary onboarding-account__cta">
+                    <Button variant="primary" className="onboarding-account__cta">
                       Create account
-                    </button>
+                    </Button>
                   </RolesterSignUpButton>
                   <RolesterSignInButton mode="modal">
-                    <button type="button" className="btn btn--secondary onboarding-account__cta">
+                    <Button variant="secondary" className="onboarding-account__cta">
                       Log in
-                    </button>
+                    </Button>
                   </RolesterSignInButton>
                 </div>
                 <AccountFinePrint />

@@ -10,7 +10,7 @@
 // less than its full current shape silently drops sibling keys.
 import { useEffect, useState } from "react";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
-import { Button } from "../components/Button.jsx";
+import { Button, IconButton } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 import { CompanyAvatar } from "../components/CompanyAvatar.jsx";
 import { Field, Select, TextArea, TextField } from "../components/form.jsx";
@@ -145,9 +145,9 @@ export function JobDrawer({ row, onClose }) {
         aria-label={`${row.company} — ${row.role}`}
         onClick={(e) => e.stopPropagation()}
       >
-        <button type="button" className="job-drawer__close" onClick={onClose} aria-label="Close">
+        <IconButton label="Close" className="job-drawer__close" onClick={onClose}>
           ×
-        </button>
+        </IconButton>
 
         {/* 1. Header */}
         <div className="job-drawer__header">
