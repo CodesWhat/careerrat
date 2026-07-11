@@ -379,11 +379,11 @@ function LibraryHero({ preview, setTab, tab }) {
         <span className="library__eyebrow">{preview ? "Preview data" : "Reusable bank"}</span>
         <h1 className="library__title">Story &amp; evidence bank</h1>
       </div>
-      <div aria-label="Library mode" className="library__tabs" role="tablist">
+      <div aria-label="Library mode" className="jobs__tabs" role="tablist">
         {TAB_OPTIONS.map((option) => (
           <button
             aria-selected={tab === option.key}
-            className={`library__tab${tab === option.key ? " library__tab--active" : ""}`}
+            className={`jobs__tab${tab === option.key ? " jobs__tab--active" : ""}`}
             key={option.key}
             onClick={() => setTab(option.key)}
             role="tab"

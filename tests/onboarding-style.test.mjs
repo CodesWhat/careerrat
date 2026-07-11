@@ -85,8 +85,8 @@ describe("onboarding shell styles", () => {
 
     assert.match(avatar, /box-sizing:\s*border-box/);
     assert.match(avatar, /padding:\s*1px/);
-    assert.match(avatar, /background:\s*#fff/);
-    assert.match(avatar, /color:\s*#231f1c/);
+    assert.match(avatar, /background:\s*var\(--paper-surface\)/);
+    assert.match(avatar, /color:\s*var\(--ink\)/);
     assert.match(avatarImage, /width:\s*112%/);
     assert.match(avatarImage, /height:\s*112%/);
     assert.match(avatarImage, /object-fit:\s*contain/);
@@ -217,7 +217,7 @@ describe("onboarding shell styles", () => {
     const companyPill = cssRule(".onboarding-companies__company-pill");
 
     assert.match(companyPill, /border:\s*1px solid rgba\(105,\s*88,\s*78,\s*0\.16\)/);
-    assert.match(companyPill, /background:\s*rgba\(255,\s*250,\s*242,\s*0\.72\)/);
+    assert.match(companyPill, /background:\s*rgba\(var\(--rgb-surface\),\s*0\.72\)/);
     assert.doesNotMatch(companyPill, /rgba\(220,\s*242,\s*199/);
   });
 
@@ -243,7 +243,7 @@ describe("onboarding shell styles", () => {
     assert.match(icon, /width:\s*36px/);
     assert.match(icon, /height:\s*36px/);
     assert.match(icon, /border-radius:\s*999px/);
-    assert.match(icon, /background:\s*rgba\(255,\s*250,\s*242,\s*0\.78\)/);
+    assert.match(icon, /background:\s*rgba\(var\(--rgb-surface\),\s*0\.78\)/);
     assert.match(field, /min-width:\s*0/);
   });
 

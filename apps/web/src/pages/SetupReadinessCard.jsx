@@ -32,14 +32,6 @@ const FIRST_SEARCH = {
   },
 };
 
-const chipStyle = {
-  alignItems: "flex-start",
-  border: "1px solid var(--paper-edge)",
-  borderRadius: 8,
-  flex: "1 1 170px",
-  padding: "9px 10px",
-};
-
 const iconStyle = {
   flex: "0 0 auto",
   fontSize: 16,
@@ -126,14 +118,7 @@ export function SetupReadinessCard({ setup, firstSearchRun }) {
           const Icon = ready ? CheckCircleIcon : ClockIcon;
           const color = ready ? "var(--teal)" : "var(--mustard)";
           return (
-            <div
-              className="chip"
-              key={row.key}
-              style={{
-                ...chipStyle,
-                color,
-              }}
-            >
+            <div className="chip chip--readiness" key={row.key} style={{ color }}>
               <Icon style={iconStyle} />
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: "block" }}>{row.label}</span>
@@ -145,13 +130,7 @@ export function SetupReadinessCard({ setup, firstSearchRun }) {
           );
         })}
         {firstSearch ? (
-          <div
-            className="chip"
-            style={{
-              ...chipStyle,
-              color: firstSearch.color,
-            }}
-          >
+          <div className="chip chip--readiness" style={{ color: firstSearch.color }}>
             <ClockIcon style={iconStyle} />
             <span style={{ minWidth: 0 }}>
               <span style={{ display: "block" }}>First search</span>

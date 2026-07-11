@@ -113,7 +113,7 @@
   flex: 0 0 auto;
   border-radius: 50%;
   background: var(--coral);
-  color: var(--paper-surface);
+  color: var(--m-on-secondary);
   font-family: "Geist Mono", ui-monospace, monospace;
   font-size: 13px;
   font-weight: 900;

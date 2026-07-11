@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { Button } from "../components/Button.jsx";
+import { TextField } from "../components/form.jsx";
 
 const STORAGE_KEY = "rolester-preview-unlocked";
 const DEFAULT_PASSWORD = "rolester";
@@ -31,18 +33,18 @@ export function PasswordGate({ children }) {
       <form className="preview-gate__panel" onSubmit={submit}>
         <span className="preview-gate__eyebrow">Rolester Preview</span>
         <h1 id="preview-gate-title">Enter password</h1>
-        <input
+        <TextField
           aria-label="Preview password"
           autoComplete="current-password"
           // biome-ignore lint/a11y/noAutofocus: single-purpose password gate, focus belongs on the only field
           autoFocus
-          onChange={(event) => setPassword(event.target.value)}
+          onChange={setPassword}
           placeholder="Password"
           type="password"
           value={password}
         />
         {error ? <p className="preview-gate__error">{error}</p> : null}
-        <button type="submit">Open preview</button>
+        <Button type="submit">Open preview</Button>
       </form>
     </main>
   );

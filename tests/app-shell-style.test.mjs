@@ -124,9 +124,9 @@ describe("app shell styles", () => {
   it("uses the signature squiggly underline for the active product nav item", () => {
     const underline = cssRule(".nav-item--active::after");
 
-    assert.match(underline, /background-image:\s*url\("data:image\/svg\+xml/);
-    assert.match(underline, /stroke='%23ef5542'/);
-    assert.match(underline, /background-size:\s*100% 100%/);
+    assert.match(underline, /mask-image:\s*url\("data:image\/svg\+xml/);
+    assert.match(underline, /background:\s*var\(--coral\)/);
+    assert.match(underline, /mask-size:\s*100% 100%/);
     assert.doesNotMatch(underline, /height:\s*3px/);
     assert.doesNotMatch(underline, /border-radius:\s*999px/);
   });

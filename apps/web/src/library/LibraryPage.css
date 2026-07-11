@@ -57,55 +57,10 @@
 }
 
 /* ---------- Top toggle: Internal | External ----------
- * Mirrors the Jobs Next .jobs__tabs/.jobs__tab recipe (app.css)
- * property-for-property — same padding, border, radius, and active
- * treatment — so the two "Next" pages share one segmented-toggle language.
+ * Reuses the Jobs Next .jobs__tabs/.jobs__tab recipe from app.css directly
+ * (global stylesheet, loaded on every route) so the two "Next" pages share
+ * one segmented-toggle language without a page-scoped copy to keep in sync.
  */
-
-.library__tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  padding: 5px;
-  border: 1px solid rgba(var(--rgb-line), 0.14);
-  border-radius: 16px;
-  background: var(--paper-band);
-}
-
-.library__tab {
-  min-height: 44px;
-  padding: 0 30px;
-  border: 0;
-  border-radius: 12px;
-  background: transparent;
-  color: var(--ink-soft);
-  cursor: pointer;
-  font: inherit;
-  font-size: 14px;
-  font-weight: 800;
-  letter-spacing: var(--label-tracking);
-  text-transform: uppercase;
-  touch-action: manipulation;
-}
-
-.library__tab--active {
-  background: var(--paper-surface);
-  color: var(--ink);
-  box-shadow: var(--card-shadow);
-}
-
-.library__tab:hover {
-  color: var(--ink);
-}
-
-.library__tab--active:hover {
-  color: var(--ink);
-}
-
-.library__tab:focus-visible {
-  outline: 2px solid var(--m-secondary);
-  outline-offset: 2px;
-}
 
 /* ---------- Toolbar: type/kind filter line + search ---------- */
 

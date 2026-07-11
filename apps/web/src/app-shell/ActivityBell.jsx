@@ -71,8 +71,8 @@ export function ActivityBell() {
             <ul className="activity-bell__list">
               {events.map((e) => (
                 <li key={e.id} className="activity-bell__item">
-                  <span className={`activity-bell__dot activity-bell__dot--${e.type}`}>
-                    <KeyIcon iconKey={TYPE_ICON[e.type] || "list"} />
+                  <span className={`activity-bell__dot ${e.dotClass || ""}`.trim()}>
+                    <KeyIcon iconKey={TYPE_ICON[e.type] || "list"} className={e.iconClass} />
                   </span>
                   <span className="activity-bell__body">
                     <span className="activity-bell__title">{e.title}</span>

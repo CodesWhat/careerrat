@@ -6,7 +6,6 @@ import { RolesterClerkProvider } from "./auth/clerkControls.jsx";
 import { PasswordGate } from "./preview/PasswordGate.jsx";
 import "./styles/tokens.css";
 import "./styles/app.css";
-import "./design/design.css";
 
 const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const routerBasename = import.meta.env.VITE_ROUTER_BASENAME || "/app";

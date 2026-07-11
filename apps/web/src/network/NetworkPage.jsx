@@ -258,7 +258,7 @@ export function NetworkPage() {
 function NetworkHero({ needsTouchCount, peopleCount }) {
   return (
     <header className="network__hero">
-      <div className="network__title-block">
+      <div>
         <span className="network__eyebrow">
           <strong>{formatNumber(peopleCount)}</strong> people ·{" "}
           <strong>{formatNumber(needsTouchCount)}</strong> need a touch
