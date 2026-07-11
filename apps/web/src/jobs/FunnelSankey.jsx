@@ -130,6 +130,16 @@ function buildSankeyLayout(sankey) {
         ? 2 * (staleLaid.y + staleLaid.h + 8) - heardLaid.y - screenH
         : y;
       y = Math.min(maxStart, Math.max(centreScreen, clearFloor));
+    } else if (solo && items.some((node) => node.id === "round-1") && staleLaid) {
+      // round-1 replaced the old "screen" node in the numbered-round rewrite but
+      // never inherited its clearance anchor, so a solo round-1 floated to the
+      // column's natural vertical centre and its inbound band crested up into
+      // Going stale. Push round-1 down until it clears stale's bottom by a
+      // comfortable gap, but never float it ABOVE its natural centred position
+      // (`y` at this point) and never past the column's own floor.
+      const maxTop = TOP + COLUMN_HEIGHT - usedHeight;
+      const clearFloor = staleLaid.y + staleLaid.h + 16;
+      y = Math.min(maxTop, Math.max(y, clearFloor));
     } else if (solo && items.some((node) => node.id === "rejected")) {
       y = TOP + COLUMN_HEIGHT - usedHeight;
     } else if (solo && items.some((node) => node.id === "ghosted")) {
@@ -148,14 +158,20 @@ function buildSankeyLayout(sankey) {
     }
   }
 
-  const outOffsets = new Map();
   const inOffsets = new Map();
   const rejectedInOffsets = new Map();
+  // Nest order at Rejected: a source that's farther left (shallower/earlier
+  // round, smaller col) takes an upper slot, the nearer/deeper round sits just
+  // below it, so bands converge roughly parallel instead of crossing. Heard
+  // back — the long, low pre-screen band — is always forced to the very
+  // bottom regardless of its column.
   const rejectedIncoming = links
     .filter((link) => link.to === "rejected" && layout.get(link.from))
     .sort((a, b) => {
       if (a.from === "heardback") return 1;
       if (b.from === "heardback") return -1;
+      const colDelta = toNumber(layout.get(a.from).col) - toNumber(layout.get(b.from).col);
+      if (colDelta !== 0) return colDelta;
       return layout.get(a.from).y - layout.get(b.from).y;
     });
   let rejectedAcc = 0;
@@ -164,16 +180,49 @@ function buildSankeyLayout(sankey) {
     rejectedAcc += Math.max(4, toNumber(link.count) * unit);
   }
 
+  // A source node's out-stack keeps its live continuations stacked from the
+  // TOP as before, but loss links (round → Rejected/Withdrawn) are FLUSHED to
+  // the BOTTOM of the source bar (from.h) rather than merely stacked last —
+  // stacking last still lands at offset 0 (the top) when the loss link is a
+  // node's ONLY out-link (e.g. the deepest round, whose entire outflow is the
+  // loss), which is exactly the case that kept exiting the top.
+  const isLossLink = (link) => link.to === "rejected" || link.to === "withdrawn";
+  const outOffsets = new Map();
+  const bySource = new Map();
+  for (const link of links) {
+    if (!layout.get(link.from) || !layout.get(link.to)) continue;
+    if (!bySource.has(link.from)) bySource.set(link.from, []);
+    bySource.get(link.from).push(link);
+  }
+  const linkH = (link) => Math.max(4, toNumber(link.count) * unit);
+  for (const [fromId, group] of bySource) {
+    const barH = layout.get(fromId).h;
+    const nonLoss = group.filter((l) => !isLossLink(l));
+    const loss = group.filter((l) => isLossLink(l));
+    let top = 0;
+    for (const link of nonLoss) {
+      outOffsets.set(link, top);
+      top += linkH(link);
+    }
+    const lossTotal = loss.reduce((t, l) => t + linkH(l), 0);
+    // Flush loss links to the node's bottom edge; never let them overlap the
+    // live continuations stacked at the top (guards against Math.max(4,…) inflation).
+    let bottom = Math.max(top, barH - lossTotal);
+    for (const link of loss) {
+      outOffsets.set(link, bottom);
+      bottom += linkH(link);
+    }
+  }
+
   const laidLinks = links
     .map((link) => {
       const from = layout.get(link.from);
       const to = layout.get(link.to);
       if (!from || !to) return null;
       const h = Math.max(4, toNumber(link.count) * unit);
-      const out = outOffsets.get(link.from) || 0;
+      const out = outOffsets.get(link) || 0;
       const incoming =
         link.to === "rejected" ? rejectedInOffsets.get(link) || 0 : inOffsets.get(link.to) || 0;
-      outOffsets.set(link.from, out + h);
       if (link.to !== "rejected") inOffsets.set(link.to, incoming + h);
       const x1 = from.x + NODE_WIDTH;
       const x2 = to.x;
