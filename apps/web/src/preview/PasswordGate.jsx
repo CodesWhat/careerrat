@@ -36,7 +36,6 @@ export function PasswordGate({ children }) {
         <TextField
           aria-label="Preview password"
           autoComplete="current-password"
-          // biome-ignore lint/a11y/noAutofocus: single-purpose password gate, focus belongs on the only field
           autoFocus
           onChange={setPassword}
           placeholder="Password"
