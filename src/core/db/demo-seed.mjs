@@ -13,8 +13,17 @@ const DEMO_WORKSPACE_DIR = join(
   "examples/demo-workspace"
 );
 
-export function seedDemo({ repoRoot, env } = {}) {
-  const importResult = importFromTracker({ repoRoot, env, sourceDir: DEMO_WORKSPACE_DIR });
+export function seedDemo({ repoRoot, env, today } = {}) {
+  // Rebase the fixture's evergreen dates to real-today on every seed so the live dev
+  // dashboard always reads as current, without mutating the committed (anchored)
+  // fixture. `today` is overridable for deterministic tests.
+  const rebaseToday = today || new Date().toISOString().slice(0, 10);
+  const importResult = importFromTracker({
+    repoRoot,
+    env,
+    sourceDir: DEMO_WORKSPACE_DIR,
+    rebaseToday,
+  });
   const exportResult = exportToTracker({ repoRoot, env });
   return { ok: true, import: importResult, export: exportResult };
 }

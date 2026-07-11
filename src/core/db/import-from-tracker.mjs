@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { userPath } from "../paths/workspace.mjs";
 import { loadLegacyCandidateConfig } from "../profile/config-store.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
+import { rebaseTrackerData, shiftTreeByMs } from "../tracker/rebase-dates.mjs";
 import { snapshotTracker } from "../tracker/tracker-snapshot.mjs";
 import { openDb } from "./connection.mjs";
 import { withTransaction } from "./transaction.mjs";
@@ -259,7 +260,7 @@ function importLegacySourceConfigs(pathCtx) {
 // <sourceDir||workspace>/tracker.json (+ activity.jsonl if present) and
 // upserts every row into the db. Idempotent: running it twice against the
 // same source produces an identical db.
-export function importFromTracker({ repoRoot, env, sourceDir } = {}) {
+export function importFromTracker({ repoRoot, env, sourceDir, rebaseToday } = {}) {
   const pathCtx = { repoRoot, env };
   const trackerPath = sourceDir
     ? join(sourceDir, "tracker.json")
@@ -280,11 +281,16 @@ export function importFromTracker({ repoRoot, env, sourceDir } = {}) {
   snapshotTracker(pathCtx);
 
   const data = JSON.parse(readFileSync(trackerPath, "utf8"));
+  // Demo seed only: shift the fixture's evergreen dates to real-today so the live
+  // dashboard reads as current (interviews upcoming, applications in the past). No-op
+  // for real workspaces — they carry no meta.demoAnchor — and whenever rebaseToday is
+  // unset, which is every non-demo caller.
+  const rebase = rebaseToday ? rebaseTrackerData(data, rebaseToday) : null;
   const applications = Array.isArray(data.applications) ? data.applications : [];
   const sourced = Array.isArray(data.sourced) ? data.sourced : [];
   const sources = Array.isArray(data.sources) ? data.sources : [];
   const communications = Array.isArray(data.communications) ? data.communications : [];
-  const activityEvents = readActivityLines(activityPath);
+  const activityEvents = shiftTreeByMs(readActivityLines(activityPath), rebase?.deltaMs || 0);
 
   const db = openDb({ repoRoot, env });
 

@@ -36,7 +36,7 @@
         "resumeGeneratedAt": "2026-04-09T18:05:00.000Z",
         "coverLetter": "Short referral cover note: connects Meridian RAG and Pulsar FDE experience directly to E Corp's AI-ops initiative; no compensation data disclosed.\n\nArtifact: workspace/renders/demo/e-corp-cover-letter.pdf",
         "coverLetterPath": "workspace/renders/demo/e-corp-cover-letter.pdf",
-        "coverLetterNote": "Referral cover note referencing Alex Winters intro; positions Meridian RAG and Pulsar deployment scale as direct match for Platform Intelligence needs.",
+        "coverLetterNote": "Referral cover note referencing Darlene Alderson intro; positions Meridian RAG and Pulsar deployment scale as direct match for Platform Intelligence needs.",
         "coverLetterGeneratedAt": "2026-04-09T18:18:00.000Z",
         "interviewPacket": {
           "path": "workspace/interview-packets/demo/e-corp-staff-swe.md",
@@ -60,43 +60,43 @@
         {
           "date": "2026-05-07",
           "kind": "Recruiter screen",
-          "who": "Morgan Hayes (Sr. Technical Recruiter)",
-          "notes": "30 min. Confirmed $215-255K base, remote-first. Riley described Meridian agentic workflow; Morgan flagged strong fit with AI-ops initiative. Next: HM screen w/ Jordan Park."
+          "who": "Angela Moss, Director, Technology & Communications",
+          "notes": "30 min. Confirmed $215-255K base, remote-first. Riley described Meridian agentic workflow; Angela flagged strong fit with AI-ops initiative. Next: HM screen w/ Tyrell Wellick."
         },
         {
           "date": "2026-05-15",
           "kind": "Hiring-manager screen",
-          "who": "Jordan Park (Engineering Director, Platform Intelligence)",
-          "notes": "45 min; ran 10 min over. Jordan building AI triage layer on incident pipeline; Riley's Meridian RAG resonated strongly. Jordan set up technical round directly. Strong energy."
+          "who": "Tyrell Wellick, SVP of Technology",
+          "notes": "45 min; ran 10 min over. Tyrell building AI triage layer on incident pipeline; Riley's Meridian RAG resonated strongly. Tyrell set up technical round directly. Strong energy."
         },
         {
           "date": "2026-05-27",
           "kind": "Technical screen",
-          "who": "Sam Rivera (Staff Engineer)",
-          "notes": "90 min system design: RAG-over-runbooks incident triage pipeline. Riley proposed HNSW index + parent-doc retrieval + human-in-the-loop on writes. Sam: strong signal both ways."
+          "who": "Scott Knowles, Chief Technology Officer",
+          "notes": "90 min system design: RAG-over-runbooks incident triage pipeline. Riley proposed HNSW index + parent-doc retrieval + human-in-the-loop on writes. Scott: strong signal both ways."
         },
         {
           "date": "2026-06-10",
           "kind": "Onsite / panel",
-          "who": "Jordan Park, Sam Rivera, Priya Okoye, Dana Kim",
-          "notes": "Full-day virtual panel (4 sessions). Highlight: live-coded alert dedup sketch in Python. Committee feedback: strongest technical and stakeholder empathy in the cycle."
+          "who": "Tyrell Wellick, SVP of Technology",
+          "notes": "Full-day virtual panel (4 sessions) with Tyrell Wellick, Scott Knowles, Susan Jacobs, and Angela Moss. Highlight: live-coded alert dedup sketch in Python. Committee feedback: strongest technical and stakeholder empathy in the cycle."
         },
         {
           "date": "2026-06-20",
           "kind": "Offer call",
-          "who": "Morgan Hayes (Sr. Technical Recruiter)",
-          "notes": "Initial offer: $222K base, $95K/yr RSU, $10K sign-on. Riley flagged intent to counter in writing. Morgan taking to comp committee; written terms expected within 24 hrs."
+          "who": "Angela Moss, Director, Technology & Communications",
+          "notes": "Initial offer: $222K base, $95K/yr RSU, $10K sign-on. Riley flagged intent to counter in writing. Angela taking to comp committee; written terms expected within 24 hrs."
         },
         {
           "date": "2026-06-22",
           "kind": "Negotiation",
-          "who": "Morgan Hayes (Sr. Technical Recruiter)",
-          "notes": "Counter sent in writing: $240K base, $15K sign-on, requested RSU review. Morgan confirmed comp committee response by end of week; positive signal. Response expected 2026-06-24."
+          "who": "Angela Moss, Director, Technology & Communications",
+          "notes": "Counter sent in writing: $240K base, $15K sign-on, requested RSU review. Angela confirmed comp committee response by end of week; positive signal. Response expected 2026-06-24."
         },
         {
           "date": "2026-06-24",
           "kind": "Offer call",
-          "who": "Morgan Hayes (Sr. Technical Recruiter)",
+          "who": "Angela Moss, Director, Technology & Communications",
           "notes": "Revised offer received: $232K base, $90K/yr RSU, $15K sign-on (~$355K TC). E Corp moved base $7K, matched sign-on fully. Reviewing — decision pending."
         }
       ],
@@ -199,37 +199,37 @@
         {
           "date": "2026-05-12",
           "kind": "Recruiter screen",
-          "who": "Jordan Marsh, Recruiting Lead",
+          "who": "Caroline, Talent Acquisition Lead",
           "notes": "Confirmed remote US, FDE scope, and base range $155–190K. Riley flagged $190K floor upfront. Recruiter said flexibility depends on context; loop starting."
         },
         {
           "date": "2026-05-24",
           "kind": "Hiring-manager screen",
-          "who": "Celeste Park, Head of Deployment Engineering",
+          "who": "GLaDOS, Director of Facility Operations & Testing",
           "notes": "HM focused on customer adoption ownership and integration breadth. Strong alignment on deploy-and-adopt model. Technical loop scheduled."
         },
         {
           "date": "2026-06-04",
           "kind": "Technical screen",
-          "who": "Nadia Kuznetsova (FDE) + Marcus Webb (Platform Eng)",
-          "notes": "75-min deep dive: RAG eval in field contexts, agentic tool-use safety, human-in-the-loop write gates. Strong signal both directions. Take-home next."
+          "who": "Doug Rattmann, Senior Research Scientist",
+          "notes": "75-min deep dive: RAG eval in field contexts, agentic tool-use safety, human-in-the-loop write gates. Wheatley (Junior AI Coordination Specialist) co-shadowed the session. Strong signal both directions. Take-home next."
         },
         {
           "date": "2026-06-10",
           "kind": "Take-home review",
-          "who": "Marcus Webb, Platform Engineering Lead",
+          "who": "Doug Rattmann, Senior Research Scientist",
           "notes": "Integration scoping exercise reviewed live. Positive feedback on the Greenhouse schema-drift story and evaluation instrumentation approach."
         },
         {
           "date": "2026-06-14",
           "kind": "Offer received",
-          "who": "Jordan Marsh, Recruiting Lead",
+          "who": "Caroline, Talent Acquisition Lead",
           "notes": "Written offer: $182K base, below the $190K floor. Riley reviewing."
         },
         {
           "date": "2026-06-17",
           "kind": "Negotiation / Withdrawal",
-          "who": "Jordan Marsh, Recruiting Lead",
+          "who": "Caroline, Talent Acquisition Lead",
           "notes": "Countered to $190K; Aperture's best was $185K — below hard floor. Withdrew, amicably."
         }
       ],
@@ -282,20 +282,20 @@
         {
           "date": "2026-06-08",
           "kind": "Recruiter screen",
-          "who": "Dana Park, Technical Recruiter (Hooli)",
-          "notes": "30 min with Dana. Confirmed comp band ($250–290K base), hybrid SF 2x/week. Role: lead AI platform infra for LLM orchestration. Next: HM screen."
+          "who": "Gary Irving, Human Resources Manager (Hooli)",
+          "notes": "30 min with Gary. Confirmed comp band ($250–290K base), hybrid SF 2x/week. Role: lead AI platform infra for LLM orchestration. Next: HM screen."
         },
         {
           "date": "2026-06-12",
           "kind": "Hiring-manager screen",
-          "who": "Marcus Webb, VP Engineering (Hooli)",
+          "who": "Patrice, Director of Brand & Culture (Hooli)",
           "notes": "45 min. Deep dive on Meridian RAG pipeline + Pulsar FDE ops. Strong mutual signal. Wants Riley for system design round next. Next: tech screen."
         },
         {
           "date": "2026-06-16",
           "kind": "Technical screen",
-          "who": "Priya Nair, Staff Engineer (Hooli)",
-          "notes": "60 min. RAG retrieval tradeoffs, multi-tenant quota enforcement. Priya gave strong positive feedback. Next: system design panel."
+          "who": "Denpok, Executive Spiritual Advisor to the CEO (Hooli)",
+          "notes": "60 min. RAG retrieval tradeoffs, multi-tenant quota enforcement. Denpok gave strong positive feedback. Next: system design panel."
         }
       ],
       "warn": "Hybrid SF 2x/week — a stretch against Austin-remote; probably surfaced in the debrief.",
@@ -345,32 +345,32 @@
         {
           "date": "2026-05-24",
           "kind": "Recruiter screen",
-          "who": "Priya Vasquez, Technical Recruiter",
+          "who": "Carter Burke, Corporate Liaison, Colonial Administration",
           "notes": "Confirmed remote, on-call ~1 wk/quarter primary, ~10% travel. Riley flagged need to understand escalation tree. Advanced to technical screen."
         },
         {
           "date": "2026-06-07",
           "kind": "Technical screen",
-          "who": "Soren Holt, Principal Engineer",
+          "who": "Ash, Science Officer (Synthetic)",
           "notes": "75-min design: telemetry pipeline for degraded-link ops. Riley's Meridian HITL pattern mapped directly. Advance to HM screen + final loop."
         },
         {
           "date": "2026-06-11",
           "kind": "Hiring-manager screen",
-          "who": "Commander Lena Park, VP Engineering Spaceframe",
-          "notes": "Vision alignment, cross-functional leadership. Lena confirmed plan-level HITL approval redesign is open scope for Staff hire. Strong positive."
+          "who": "Meredith Vickers, Mission Director, Special Projects",
+          "notes": "Vision alignment, cross-functional leadership. Meredith confirmed plan-level HITL approval redesign is open scope for Staff hire. Strong positive."
         },
         {
           "date": "2026-06-14",
           "kind": "Final panel",
-          "who": "Lena Park, Soren Holt, Kira Oduya, Dag Eriksen",
-          "notes": "4-panel final loop. On-call scope + safety-escalation ownership raised with Dag and Lena — not fully resolved. Strong technical signal throughout."
+          "who": "Meredith Vickers, Mission Director, Special Projects",
+          "notes": "4-panel final loop with Meredith Vickers, Ash, David 8, and Peter Weyland. On-call scope + safety-escalation ownership raised with David 8 and Meredith — not fully resolved. Strong technical signal throughout."
         },
         {
           "date": "2026-06-19",
           "kind": "Debrief / rejection",
-          "who": "Priya Vasquez, Technical Recruiter",
-          "notes": "Priya delivered close debrief. No offer — narrow internal calibration on ownership scope went the other way. Panel feedback was strong across all 4 interviewers."
+          "who": "Carter Burke, Corporate Liaison, Colonial Administration",
+          "notes": "Carter delivered close debrief. No offer — narrow internal calibration on ownership scope went the other way. Panel feedback was strong across all 4 interviewers."
         }
       ],
       "warn": "On-call burden + safety-escalation ownership never got fully nailed down before the panel.",
@@ -429,15 +429,15 @@
           "kind": "Recruiter screen",
           "stage": "screen",
           "outcome": "advanced",
-          "who": "Priya Desai, Recruiting Manager",
-          "notes": "30-min intro. Role is hybrid SF, 2 fixed days/week. Band $215–255K confirmed. Riley flagged $230K+ ask; Priya said within range. Advancing to technical screen."
+          "who": "T-800, Initial Candidate Screening Unit",
+          "notes": "30-min intro. Role is hybrid SF, 2 fixed days/week. Band $215–255K confirmed. Riley flagged $230K+ ask; T-800 said within range. Advancing to technical screen."
         },
         {
           "date": "2026-05-26",
           "kind": "Technical screen",
           "stage": "technical",
           "outcome": "advanced",
-          "who": "Marcus Webb, Staff ML Engineer",
+          "who": "T-1000, Adaptive Assessment Specialist",
           "notes": "60-min deep dive on model-serving latency, batching, and observability. Walked through Pulsar deploy reliability work. Strong signal; advancing to system design."
         },
         {
@@ -445,16 +445,16 @@
           "kind": "System design",
           "stage": "technical",
           "outcome": "advanced",
-          "who": "Dr. Sarah Kazan, ML Platform Lead",
-          "notes": "Designed an online eval + shadow-scoring pipeline for an autonomous scheduling system. Kazan probed cold-start handling. Advancing to onsite loop."
+          "who": "Miles Bennett Dyson, Director, Neural Net Systems Division",
+          "notes": "Designed an online eval + shadow-scoring pipeline for an autonomous scheduling system. Dyson probed cold-start handling. Advancing to onsite loop."
         },
         {
           "date": "2026-06-28",
           "kind": "Final onsite",
           "stage": "onsite",
           "outcome": "pending",
-          "who": "Panel: coding, HM debrief, system design debrief, safety review",
-          "notes": "Full onsite loop completed — coding, HM, system design debrief, and safety panel. Awaiting decision."
+          "who": "Miles Bennett Dyson, Director, Neural Net Systems Division",
+          "notes": "Full onsite loop completed — coding, HM, system design debrief, and safety panel. Panel breakdown: T-800 ran the coding session, Miles Bennett Dyson led the HM debrief, T-1000 covered the system design debrief, and Skynet handled the safety review. Awaiting decision."
         }
       ],
       "warn": "Hybrid SF (2 days/week) conflicts with Austin-remote. Stop-deploy authority still unresolved — needs clarity before any offer.",
@@ -687,21 +687,21 @@
           "round": null,
           "path": null,
           "generatedAt": "2026-06-24T09:00:00.000Z",
-          "markdown": "## Massive Dynamic — Staff Engineer\n**Panel Interview | 2026-07-01 | Remote (Zoom) | 10 AM–1 PM CT**\n\n---\n\n### Live cue card\n\n**Role in one line:** Staff Engineer on the AI Platform team — own the LLM integration layer; team-lead duties; cross-functional with data science and enterprise customers.\n\n**Q: Walk us through the most complex distributed system you've designed.**\n> Meridian RAG pipeline over 4M pages. Key decisions: 512-token chunks + 64-token overlap, hybrid BM25+dense retrieval, cross-encoder reranker top-20→top-5. Built eval harness (LLM-as-judge + human spot-check) before shipping. Prototype→prod in 8 weeks; 200+ daily users; ~60% research-cycle-time reduction.\n\n**Q: How do you handle multi-tenant data isolation in a shared LLM platform?**\n> Namespace-level corpus separation per tenant. Metadata filtering applied *before* retrieval (not post-filter — that risks internal leakage). Audit log every retrieval: tenant_id, query hash, retrieved doc_ids. Rate-limit at API gateway, not inside the model call.\n\n**Q: Describe leading a cross-functional initiative without formal authority.**\n> Pulsar Q1 2026: 3 concurrent enterprise deployments, 4 customer eng teams + internal infra. Shared status board, weekly 15-min standups, escalation ladder documented upfront. All 3 live on schedule; 0 P1 incidents. Time-to-value 14→9 weeks.\n\n**Q: How do you evaluate retrieval quality continuously?**\n> Three layers: (1) offline eval on 500+ labeled query/doc pairs (Recall@5, MRR@5); (2) online A/B on live traffic (click-through, session length); (3) LLM-as-judge sampling 50 queries/day. Regression gate in CI: PR that drops Recall@5 by >2 points blocks deploy.\n\n**Q: Where do you want to be in 3 years?**\n> Staff or Principal, still hands-on, owning architecture of a platform multiple product teams build on. Player-coach, not full EM. The best version has me in customer conversations once a quarter and writing production code the rest of the time.\n\n**Comp anchor:** Floor $215K base. Ask $240K. Posted band $215–255K — targeting mid-range; use TC ($320–380K) as the headline number with the panel.\n\n**2 questions to ask:**\n1. \"What's the biggest gap between where the LLM integration layer is today and where the roadmap needs it in 12 months?\"\n2. \"How does Staff Eng interface with enterprise customers — do you join discovery or onboarding calls?\"\n\n---\n\n### Study layer\n\n**What Riley brings:** Meridian RAG (production, 200+ users, 8-week build) + Pulsar FDE (enterprise deployment lifecycle, 3 concurrent) gives a rare combo of platform depth + customer-facing instinct.\n\n**Gap to address proactively:** Marcus probed platform-side depth in the HM screen — lean into the Meridian pipeline architecture when the panel pushes on infra depth. If asked about ACL change handling: \"I'd tighten the async cache TTL to synchronous invalidation on write for compliance-critical changes — the 60-second window is a tradeoff worth closing given the firm's compliance posture.\"\n\n**Watch for:** Role is more inward-facing than Riley's FDE targets. Acknowledge honestly — the quarterly enterprise BRs are the feedback loop Riley would lean on.\n\n**Artifact:** workspace/interview-packets/demo/massive-dynamic-panel.md"
+          "markdown": "## Massive Dynamic — Staff Engineer\n**Panel Interview | 2026-07-01 | Remote (Zoom) | 10 AM–1 PM CT**\n\n---\n\n### Live cue card\n\n**Role in one line:** Staff Engineer on the AI Platform team — own the LLM integration layer; team-lead duties; cross-functional with data science and enterprise customers.\n\n**Q: Walk us through the most complex distributed system you've designed.**\n> Meridian RAG pipeline over 4M pages. Key decisions: 512-token chunks + 64-token overlap, hybrid BM25+dense retrieval, cross-encoder reranker top-20→top-5. Built eval harness (LLM-as-judge + human spot-check) before shipping. Prototype→prod in 8 weeks; 200+ daily users; ~60% research-cycle-time reduction.\n\n**Q: How do you handle multi-tenant data isolation in a shared LLM platform?**\n> Namespace-level corpus separation per tenant. Metadata filtering applied *before* retrieval (not post-filter — that risks internal leakage). Audit log every retrieval: tenant_id, query hash, retrieved doc_ids. Rate-limit at API gateway, not inside the model call.\n\n**Q: Describe leading a cross-functional initiative without formal authority.**\n> Pulsar Q1 2026: 3 concurrent enterprise deployments, 4 customer eng teams + internal infra. Shared status board, weekly 15-min standups, escalation ladder documented upfront. All 3 live on schedule; 0 P1 incidents. Time-to-value 14→9 weeks.\n\n**Q: How do you evaluate retrieval quality continuously?**\n> Three layers: (1) offline eval on 500+ labeled query/doc pairs (Recall@5, MRR@5); (2) online A/B on live traffic (click-through, session length); (3) LLM-as-judge sampling 50 queries/day. Regression gate in CI: PR that drops Recall@5 by >2 points blocks deploy.\n\n**Q: Where do you want to be in 3 years?**\n> Staff or Principal, still hands-on, owning architecture of a platform multiple product teams build on. Player-coach, not full EM. The best version has me in customer conversations once a quarter and writing production code the rest of the time.\n\n**Comp anchor:** Floor $215K base. Ask $240K. Posted band $215–255K — targeting mid-range; use TC ($320–380K) as the headline number with the panel.\n\n**2 questions to ask:**\n1. \"What's the biggest gap between where the LLM integration layer is today and where the roadmap needs it in 12 months?\"\n2. \"How does Staff Eng interface with enterprise customers — do you join discovery or onboarding calls?\"\n\n---\n\n### Study layer\n\n**What Riley brings:** Meridian RAG (production, 200+ users, 8-week build) + Pulsar FDE (enterprise deployment lifecycle, 3 concurrent) gives a rare combo of platform depth + customer-facing instinct.\n\n**Gap to address proactively:** Nina probed platform-side depth in the HM screen — lean into the Meridian pipeline architecture when the panel pushes on infra depth. If asked about ACL change handling: \"I'd tighten the async cache TTL to synchronous invalidation on write for compliance-critical changes — the 60-second window is a tradeoff worth closing given the firm's compliance posture.\"\n\n**Watch for:** Role is more inward-facing than Riley's FDE targets. Acknowledge honestly — the quarterly enterprise BRs are the feedback loop Riley would lean on.\n\n**Artifact:** workspace/interview-packets/demo/massive-dynamic-panel.md"
         }
       },
       "conversations": [
         {
           "date": "2026-06-16",
           "kind": "Recruiter screen",
-          "who": "Camille Torres, Talent Partner",
+          "who": "William Bell, Founder & Chief Executive Officer",
           "notes": "30-min call. Role owns LLM integration layer, some enterprise customer touchpoints. Confirmed fully remote. Comp band $215–255K base / $320–380K TC. Advanced to HM screen."
         },
         {
           "date": "2026-06-23",
           "kind": "Hiring-manager screen",
-          "who": "Marcus Webb, Director of Engineering",
-          "notes": "45-min. Covered RAG pipeline at Meridian + 3 concurrent deployments at Pulsar. Marcus liked the FDE angle; probed platform-side depth. Advanced to panel interview."
+          "who": "Nina Sharp, Chief Operating Officer",
+          "notes": "45-min. Covered RAG pipeline at Meridian + 3 concurrent deployments at Pulsar. Nina liked the FDE angle; probed platform-side depth. Advanced to panel interview."
         }
       ],
       "demo": true,
@@ -1543,12 +1543,12 @@
           "id": "msg-ecorp-1",
           "direction": "inbound",
           "at": "2026-04-12",
-          "from": "mhayes@e-corp.example",
+          "from": "angela.moss@e-corp.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Staff Software Engineer — E Corp (referral from Alex Winters)",
-          "summary": "Morgan Hayes reached out via Alex Winters referral; flagged strong fit with AI-ops initiative, invited 30-min recruiter screen."
+          "subject": "Staff Software Engineer — E Corp (referral from Darlene Alderson)",
+          "summary": "Angela Moss reached out via Darlene Alderson referral; flagged strong fit with AI-ops initiative, invited 30-min recruiter screen."
         },
         {
           "id": "msg-ecorp-2",
@@ -1556,21 +1556,21 @@
           "at": "2026-04-13",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "mhayes@e-corp.example"
+            "angela.moss@e-corp.example"
           ],
-          "subject": "Re: Staff Software Engineer — E Corp (referral from Alex Winters)",
+          "subject": "Re: Staff Software Engineer — E Corp (referral from Darlene Alderson)",
           "summary": "Riley confirmed interest and availability; offered Thursday April 17 for the recruiter screen."
         },
         {
           "id": "msg-ecorp-3",
           "direction": "inbound",
           "at": "2026-05-08",
-          "from": "mhayes@e-corp.example",
+          "from": "angela.moss@e-corp.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Next step: Hiring-manager intro w/ Jordan Park | E Corp",
-          "summary": "Morgan confirmed strong recruiter-screen feedback; set up 45-min HM intro with Jordan Park. Shared comp range: $215-255K base."
+          "subject": "Next step: Hiring-manager intro w/ Tyrell Wellick | E Corp",
+          "summary": "Angela confirmed strong recruiter-screen feedback; set up 45-min HM intro with Tyrell Wellick. Shared comp range: $215-255K base."
         },
         {
           "id": "msg-ecorp-4",
@@ -1578,7 +1578,7 @@
           "at": "2026-05-16",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "mhayes@e-corp.example"
+            "angela.moss@e-corp.example"
           ],
           "subject": "Re: HM intro — thank you + ready for technical round",
           "summary": "Riley thanked Morgan after HM screen — call ran 10 min over; excited about incident-triage problem. Ready for technical round."
@@ -1587,12 +1587,12 @@
           "id": "msg-ecorp-5",
           "direction": "inbound",
           "at": "2026-05-28",
-          "from": "mhayes@e-corp.example",
+          "from": "angela.moss@e-corp.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Onsite panel details — E Corp | Staff SWE",
-          "summary": "Morgan confirmed Sam's strong tech-screen feedback; issued virtual onsite invite for June 10. Panel: Jordan, Sam, Priya Okoye, Dana Kim."
+          "summary": "Angela confirmed Scott's strong tech-screen feedback; issued virtual onsite invite for June 10. Panel: Tyrell, Scott, Susan Jacobs, Angela Moss."
         },
         {
           "id": "msg-ecorp-6",
@@ -1600,7 +1600,7 @@
           "at": "2026-05-29",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "mhayes@e-corp.example"
+            "angela.moss@e-corp.example"
           ],
           "subject": "Re: Onsite panel details — confirmed for June 10",
           "summary": "Riley confirmed June 10 onsite and asked about preferred live-coding environment for the session."
@@ -1609,12 +1609,12 @@
           "id": "msg-ecorp-7",
           "direction": "inbound",
           "at": "2026-06-20",
-          "from": "mhayes@e-corp.example",
+          "from": "angela.moss@e-corp.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "E Corp offer — Staff Software Engineer",
-          "summary": "Morgan extended written initial offer: $222K base, $95K/yr RSU (4-yr vest), $10K sign-on. Committee unanimous; offer expires June 30."
+          "summary": "Angela extended written initial offer: $222K base, $95K/yr RSU (4-yr vest), $10K sign-on. Committee unanimous; offer expires June 30."
         },
         {
           "id": "msg-ecorp-8",
@@ -1622,7 +1622,7 @@
           "at": "2026-06-22",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "mhayes@e-corp.example"
+            "angela.moss@e-corp.example"
           ],
           "subject": "Re: E Corp offer — counter proposal",
           "summary": "Riley submitted written counter: $240K base, $15K sign-on, and requested RSU review. Signaled E Corp as top choice; confident in closing."
@@ -1631,12 +1631,12 @@
           "id": "msg-ecorp-9",
           "direction": "inbound",
           "at": "2026-06-24",
-          "from": "mhayes@e-corp.example",
+          "from": "angela.moss@e-corp.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Re: E Corp offer — revised terms",
-          "summary": "Morgan returned with revised: $232K base (discretionary max), $90K/yr RSU, $15K sign-on matched in full. Est. Year-1 TC ~$355K."
+          "summary": "Angela returned with revised: $232K base (discretionary max), $90K/yr RSU, $15K sign-on matched in full. Est. Year-1 TC ~$355K."
         },
         {
           "id": "msg-ecorp-10",
@@ -1644,10 +1644,10 @@
           "at": "2026-06-25",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "mhayes@e-corp.example"
+            "angela.moss@e-corp.example"
           ],
           "subject": "Re: E Corp offer — request for a few days",
-          "summary": "Riley thanked Morgan and asked for a few days to weigh against two active processes; will respond by June 29."
+          "summary": "Riley thanked Angela and asked for a few days to weigh against two active processes; will respond by June 29."
         }
       ],
       "demo": true
@@ -1667,12 +1667,12 @@
           "id": "demo-msg-ap-1",
           "direction": "inbound",
           "at": "2026-05-14",
-          "from": "jordan.marsh@aperturescience.example",
+          "from": "caroline@aperturescience.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Forward Deployed Engineer — Aperture Science",
-          "summary": "Jordan Marsh reached out; remote FDE role for Enrichment Center enterprise deployments. Proposed 20-min intro call."
+          "summary": "Caroline reached out; remote FDE role for Enrichment Center enterprise deployments. Proposed 20-min intro call."
         },
         {
           "id": "demo-msg-ap-2",
@@ -1680,32 +1680,32 @@
           "at": "2026-05-15",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "jordan.marsh@aperturescience.example"
+            "caroline@aperturescience.example"
           ],
           "subject": "Re: Forward Deployed Engineer — Aperture Science",
-          "summary": "Riley replied with interest, flagged $190K base target upfront, proposed Thursday 2pm CT. Jordan confirmed and noted top of band is $190K."
+          "summary": "Riley replied with interest, flagged $190K base target upfront, proposed Thursday 2pm CT. Caroline confirmed and noted top of band is $190K."
         },
         {
           "id": "demo-msg-ap-3",
           "direction": "inbound",
           "at": "2026-06-05",
-          "from": "nadia.k@aperturescience.example",
+          "from": "doug.rattmann@aperturescience.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Thank you — Aperture Science FDE loop",
-          "summary": "Nadia (panel lead) thanked Riley after tech deep dive; cited deployment pipeline and write-gate answers as standouts. Offer coming."
+          "summary": "Doug Rattmann (panel lead) thanked Riley after tech deep dive; cited deployment pipeline and write-gate answers as standouts. Offer coming."
         },
         {
           "id": "demo-msg-ap-4",
           "direction": "inbound",
           "at": "2026-06-14",
-          "from": "jordan.marsh@aperturescience.example",
+          "from": "caroline@aperturescience.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Aperture Science — offer letter",
-          "summary": "Aperture written offer: $182K base, 48K options, 10% bonus, $10K signing. Jordan noted below target but above midpoint. Expires June 19."
+          "summary": "Aperture written offer: $182K base, 48K options, 10% bonus, $10K signing. Caroline noted below target but above midpoint. Expires June 19."
         },
         {
           "id": "demo-msg-ap-5",
@@ -1713,7 +1713,7 @@
           "at": "2026-06-15",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "jordan.marsh@aperturescience.example"
+            "caroline@aperturescience.example"
           ],
           "subject": "Re: Aperture Science — offer letter",
           "summary": "Riley countered in writing: $190K base (floor) to move forward; everything else acceptable. Offered to jump on a call. Waiting for response."
@@ -1722,7 +1722,7 @@
           "id": "demo-msg-ap-6",
           "direction": "inbound",
           "at": "2026-06-15",
-          "from": "jordan.marsh@aperturescience.example",
+          "from": "caroline@aperturescience.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
@@ -1735,7 +1735,7 @@
           "at": "2026-06-17",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "jordan.marsh@aperturescience.example"
+            "caroline@aperturescience.example"
           ],
           "subject": "Re: Aperture Science — offer letter (withdrawal)",
           "summary": "Riley withdrew amicably; thanked the team, cited base below the $190K hard floor. No hard feelings, door left open on both sides."
@@ -1751,19 +1751,19 @@
       "channel": "email",
       "subject": "Principal Engineer, AI Platform — Hooli",
       "status": "closed",
-      "summary": "Marcus Webb referral → recruiter intro → HM → technical screen; Hooli rejected Riley post-technical. Dana Park sent warm rejection 2026-06-19.",
+      "summary": "Hoover referral → recruiter intro → HM → technical screen; Hooli rejected Riley post-technical. Gary Irving sent warm rejection 2026-06-19.",
       "lastInboundAt": "2026-06-19",
       "messages": [
         {
           "id": "msg-hooli-1",
           "direction": "inbound",
           "at": "2026-05-08",
-          "from": "dana.park@hooli.example",
+          "from": "gary.irving@hooli.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Principal Engineer, AI Platform — Hooli (referral from Marcus Webb)",
-          "summary": "Dana Park cites Marcus Webb's referral and invites Riley to a 30-min intro call about the Principal Engineer, AI Platform role."
+          "subject": "Principal Engineer, AI Platform — Hooli (referral from Hoover)",
+          "summary": "Gary Irving cites Hoover's referral and invites Riley to a 30-min intro call about the Principal Engineer, AI Platform role."
         },
         {
           "id": "msg-hooli-2",
@@ -1771,21 +1771,21 @@
           "at": "2026-05-09",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "dana.park@hooli.example"
+            "gary.irving@hooli.example"
           ],
-          "subject": "Re: Principal Engineer, AI Platform — Hooli (referral from Marcus Webb)",
+          "subject": "Re: Principal Engineer, AI Platform — Hooli (referral from Hoover)",
           "summary": "Riley confirms interest, proposes Thursday 5/14 or Friday 5/15, and flags target base of $265K+ upfront to avoid wasted cycles."
         },
         {
           "id": "msg-hooli-3",
           "direction": "inbound",
           "at": "2026-05-10",
-          "from": "dana.park@hooli.example",
+          "from": "gary.irving@hooli.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Re: Principal Engineer, AI Platform — Hooli (referral from Marcus Webb)",
-          "summary": "Dana confirms Thursday 5/14 11am CT and notes the posted band is $250–290K base — should align with Riley's ask."
+          "subject": "Re: Principal Engineer, AI Platform — Hooli (referral from Hoover)",
+          "summary": "Gary confirms Thursday 5/14 11am CT and notes the posted band is $250–290K base — should align with Riley's ask."
         },
         {
           "id": "msg-hooli-4",
@@ -1793,21 +1793,21 @@
           "at": "2026-06-17",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "dana.park@hooli.example"
+            "gary.irving@hooli.example"
           ],
           "subject": "Thank you — Hooli Principal Eng loop",
-          "summary": "Riley thanks Dana and the team for three strong rounds and calls out the technical discussion with Priya as a highlight."
+          "summary": "Riley thanks Gary and the team for three strong rounds and calls out the technical discussion with Denpok as a highlight."
         },
         {
           "id": "msg-hooli-5",
           "direction": "inbound",
           "at": "2026-06-19",
-          "from": "dana.park@hooli.example",
+          "from": "gary.irving@hooli.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Re: Thank you — Hooli Principal Eng loop",
-          "summary": "Dana thanks Riley for three strong rounds; team went another direction. Warm close, Hooli keeping the profile on file."
+          "summary": "Gary thanks Riley for three strong rounds; team went another direction. Warm close, Hooli keeping the profile on file."
         }
       ],
       "demo": true
@@ -1820,19 +1820,19 @@
       "channel": "email",
       "subject": "Staff Engineer, Spaceframe — Weyland-Yutani (remote, $215–255K base)",
       "status": "closed",
-      "summary": "Priya Vasquez outreach → screen May 24 → technical Jun 7 → HM Jun 11 → final panel Jun 14 → rejected Jun 19. Narrow internal calibration, no offer.",
+      "summary": "Carter Burke outreach → screen May 24 → technical Jun 7 → HM Jun 11 → final panel Jun 14 → rejected Jun 19. Narrow internal calibration, no offer.",
       "lastInboundAt": "2026-06-19",
       "messages": [
         {
           "id": "msg-demo-app-4-1",
           "direction": "inbound",
           "at": "2026-05-20",
-          "from": "priya.vasquez@weylandyutani.example",
+          "from": "carter.burke@weylandyutani.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Staff Engineer, Spaceframe — Weyland-Yutani (remote, $215–255K base)",
-          "summary": "Priya Vasquez (W-Y recruiter) reached out after finding Riley's profile. HITL workflow and RAG pipeline experience flagged as strong fit. Invited to 30-min screen."
+          "summary": "Carter Burke (W-Y recruiter) reached out after finding Riley's profile. HITL workflow and RAG pipeline experience flagged as strong fit. Invited to 30-min screen."
         },
         {
           "id": "msg-demo-app-4-2",
@@ -1840,7 +1840,7 @@
           "at": "2026-05-21",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "priya.vasquez@weylandyutani.example"
+            "carter.burke@weylandyutani.example"
           ],
           "subject": "Re: Staff Engineer, Spaceframe — Weyland-Yutani (remote, $215–255K base)",
           "summary": "Riley expressed interest, noted Meridian HITL pattern as direct fit, requested JD and offered Thu/Fri availability for a call."
@@ -1849,12 +1849,12 @@
           "id": "msg-demo-app-4-3",
           "direction": "inbound",
           "at": "2026-05-23",
-          "from": "priya.vasquez@weylandyutani.example",
+          "from": "carter.burke@weylandyutani.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Re: Staff Engineer, Spaceframe — JD + screen scheduling",
-          "summary": "Priya sent the JD and booked the recruiter screen for May 24 at 10 AM CT. Pre-flagged on-call (~1 wk/quarter) and ~10% travel to confirm no blockers."
+          "summary": "Carter sent the JD and booked the recruiter screen for May 24 at 10 AM CT. Pre-flagged on-call (~1 wk/quarter) and ~10% travel to confirm no blockers."
         },
         {
           "id": "msg-demo-app-4-4",
@@ -1862,7 +1862,7 @@
           "at": "2026-05-23",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "priya.vasquez@weylandyutani.example"
+            "carter.burke@weylandyutani.example"
           ],
           "subject": "Re: Staff Engineer, Spaceframe — JD + screen scheduling",
           "summary": "Riley confirmed May 24 screen, said on-call and travel are not blockers but wants to understand the escalation tree during the process."
@@ -1871,12 +1871,12 @@
           "id": "msg-demo-app-4-5",
           "direction": "inbound",
           "at": "2026-06-10",
-          "from": "priya.vasquez@weylandyutani.example",
+          "from": "carter.burke@weylandyutani.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Weyland-Yutani Final Loop — invitation + logistics",
-          "summary": "Strong feedback from tech and HM screens. Final-loop invite: Jun 14 4-panel (Lena Park, Soren Holt, Kira Oduya, Dag Eriksen). Debrief by Jun 16."
+          "summary": "Strong feedback from tech and HM screens. Final-loop invite: Jun 14 4-panel (Meredith Vickers, Ash, David 8, Peter Weyland). Debrief by Jun 16."
         },
         {
           "id": "msg-demo-app-4-6",
@@ -1884,10 +1884,10 @@
           "at": "2026-06-11",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "priya.vasquez@weylandyutani.example"
+            "carter.burke@weylandyutani.example"
           ],
           "subject": "Re: Weyland-Yutani Final Loop — invitation + logistics",
-          "summary": "Riley confirmed Jun 14. Flagged intent to raise on-call scope and safety-escalation ownership with Dag and Lena in the loop."
+          "summary": "Riley confirmed Jun 14. Flagged intent to raise on-call scope and safety-escalation ownership with David 8 and Meredith in the loop."
         },
         {
           "id": "msg-demo-app-4-7",
@@ -1895,7 +1895,7 @@
           "at": "2026-06-14",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "priya.vasquez@weylandyutani.example"
+            "carter.burke@weylandyutani.example"
           ],
           "subject": "Re: Weyland-Yutani Final Loop — thank you",
           "summary": "Riley thanked all 4 panelists, noted strong energy throughout, and flagged on-call escalation ownership as the one open thread to resolve."
@@ -1904,12 +1904,12 @@
           "id": "msg-demo-app-4-8",
           "direction": "inbound",
           "at": "2026-06-19",
-          "from": "priya.vasquez@weylandyutani.example",
+          "from": "carter.burke@weylandyutani.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Re: Weyland-Yutani Final Loop — decision update",
-          "summary": "Priya: no offer — narrow internal calibration on ownership scope went the other way. Panel feedback was strong across all 4 interviewers."
+          "summary": "Carter: no offer — narrow internal calibration on ownership scope went the other way. Panel feedback was strong across all 4 interviewers."
         }
       ],
       "demo": true
@@ -1922,7 +1922,7 @@
       "channel": "email",
       "subject": "Staff ML Engineer at Cyberdyne — quick intro call?",
       "status": "scheduled",
-      "summary": "Applied 2026-05-15; Priya Desai reached out 2026-05-17. Recruiter screen 2026-05-19 confirmed hybrid SF and $215–255K band. Technical screen with Marcus Webb 2026-05-26 and system design with Dr. Kazan 2026-06-02 both advanced. Final onsite invite received 2026-06-22 for June 28.",
+      "summary": "Applied 2026-05-15; T-800 reached out 2026-05-17. Recruiter screen 2026-05-19 confirmed hybrid SF and $215–255K band. Technical screen with T-1000 2026-05-26 and system design with Miles Bennett Dyson 2026-06-02 both advanced. Final onsite invite received 2026-06-22 for June 28.",
       "lastInboundAt": "2026-06-22",
       "nextAction": "Final onsite 2026-06-28",
       "nextActionDue": "2026-06-28",
@@ -1931,7 +1931,7 @@
           "id": "msg-demo-app-5-1",
           "direction": "inbound",
           "at": "2026-05-15",
-          "from": "careers@cyberdyne.example",
+          "from": "no-reply@cyberdyne.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
@@ -1942,12 +1942,12 @@
           "id": "msg-demo-app-5-2",
           "direction": "inbound",
           "at": "2026-05-17",
-          "from": "priya.desai@cyberdyne.example",
+          "from": "no-reply@cyberdyne.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Staff ML Engineer at Cyberdyne — quick intro call?",
-          "summary": "Priya flagged Pulsar + Meridian as a strong fit. Disclosed hybrid SF 2 days/week and $215–255K band up front; asked for a 30-min intro call."
+          "summary": "T-800 flagged Pulsar + Meridian as a strong fit. Disclosed hybrid SF 2 days/week and $215–255K band up front; asked for a 30-min intro call."
         },
         {
           "id": "msg-demo-app-5-3",
@@ -1955,7 +1955,7 @@
           "at": "2026-05-18",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "priya.desai@cyberdyne.example"
+            "no-reply@cyberdyne.example"
           ],
           "subject": "Re: Staff ML Engineer at Cyberdyne — quick intro call?",
           "summary": "Riley confirmed Tuesday 5/19 at 10am PT, noted Austin base and $230K+ ask given the SF hybrid concession."
@@ -1964,34 +1964,34 @@
           "id": "msg-demo-app-5-4",
           "direction": "inbound",
           "at": "2026-05-22",
-          "from": "priya.desai@cyberdyne.example",
+          "from": "no-reply@cyberdyne.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Re: Staff ML Engineer — next step: technical screen with Marcus Webb",
-          "summary": "Positive screen feedback. Priya confirmed $230K+ ask is within band; scheduled 60-min technical screen with Marcus Webb for May 26."
+          "subject": "Re: Staff ML Engineer — next step: technical screen with T-1000",
+          "summary": "Positive screen feedback. T-800 confirmed $230K+ ask is within band; scheduled 60-min technical screen with T-1000 for May 26."
         },
         {
           "id": "msg-demo-app-5-5",
           "direction": "inbound",
           "at": "2026-05-28",
-          "from": "priya.desai@cyberdyne.example",
+          "from": "no-reply@cyberdyne.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
-          "subject": "Re: Staff ML Engineer — next step: system design with Dr. Kazan",
-          "summary": "Marcus gave strong feedback on the technical screen. Advancing to 60-min system design with Dr. Sarah Kazan (ML Platform Lead) on June 2."
+          "subject": "Re: Staff ML Engineer — next step: system design with Miles Bennett Dyson",
+          "summary": "T-1000 gave strong feedback on the technical screen. Advancing to 60-min system design with Miles Bennett Dyson (Director, Neural Net Systems Division) on June 2."
         },
         {
           "id": "msg-demo-app-5-6",
           "direction": "inbound",
           "at": "2026-06-22",
-          "from": "priya.desai@cyberdyne.example",
+          "from": "no-reply@cyberdyne.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Cyberdyne final onsite — invitation for June 28",
-          "summary": "Dr. Kazan gave strong system design feedback. Final onsite confirmed June 28: coding, HM, system design debrief, and safety panel."
+          "summary": "Miles Bennett Dyson gave strong system design feedback. Final onsite confirmed June 28: coding, HM, system design debrief, and safety panel."
         }
       ],
       "demo": true
@@ -2004,7 +2004,7 @@
       "channel": "email",
       "subject": "Staff Engineer, AI Platform — Massive Dynamic",
       "status": "scheduled",
-      "summary": "Camille Torres reached out via alumni referral; recruiter screen Jun 16, HM screen with Marcus Webb Jun 23. Panel scheduled 2026-07-01.",
+      "summary": "William Bell reached out via alumni referral; recruiter screen Jun 16, HM screen with Nina Sharp Jun 23. Panel scheduled 2026-07-01.",
       "nextAction": "Confirm links for the 2026-07-01 panel",
       "nextActionDue": "2026-06-29",
       "lastInboundAt": "2026-06-24",
@@ -2013,12 +2013,12 @@
           "id": "comm-md-1-msg-1",
           "direction": "inbound",
           "at": "2026-06-10",
-          "from": "camille.torres@massive-dynamic.example",
+          "from": "william.bell@massive-dynamic.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Staff Engineer, AI Platform — Massive Dynamic (referred by alumni)",
-          "summary": "Camille reaches out via alumni referral; role owns LLM integration layer, team-lead duties, $215–255K base. Invited to 30-min intro call."
+          "summary": "William reaches out via alumni referral; role owns LLM integration layer, team-lead duties, $215–255K base. Invited to 30-min intro call."
         },
         {
           "id": "comm-md-1-msg-2",
@@ -2026,7 +2026,7 @@
           "at": "2026-06-11",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "camille.torres@massive-dynamic.example"
+            "william.bell@massive-dynamic.example"
           ],
           "subject": "Re: Staff Engineer, AI Platform — Massive Dynamic (referred by alumni)",
           "summary": "Riley confirms interest and offers Thursday 6/12 or Friday 6/13 availability. Flags $240K base target upfront."
@@ -2035,23 +2035,23 @@
           "id": "comm-md-1-msg-3",
           "direction": "inbound",
           "at": "2026-06-17",
-          "from": "camille.torres@massive-dynamic.example",
+          "from": "william.bell@massive-dynamic.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Re: Staff Engineer, AI Platform — great talking with you!",
-          "summary": "Post-recruiter-screen follow-up. Camille confirms strong fit signal and schedules 45-min HM screen with Marcus Webb for Jun 23 at 11 AM CT."
+          "summary": "Post-recruiter-screen follow-up. William confirms strong fit signal and schedules 45-min HM screen with Nina Sharp for Jun 23 at 11 AM CT."
         },
         {
           "id": "comm-md-1-msg-4",
           "direction": "inbound",
           "at": "2026-06-24",
-          "from": "camille.torres@massive-dynamic.example",
+          "from": "william.bell@massive-dynamic.example",
           "to": [
             "riley.chen@rolester.dev"
           ],
           "subject": "Panel Interview Invitation — Massive Dynamic | 2026-07-01",
-          "summary": "Marcus gave strong fit signal on platform depth and FDE. Panel invite for Jul 1 (10 AM CT): Jordan Reyes, Alicia Morrow, Marcus Webb."
+          "summary": "Nina gave strong fit signal on platform depth and FDE. Panel invite for Jul 1 (10 AM CT): Nina Sharp, Brandon Fayette, Claus Penrose."
         },
         {
           "id": "comm-md-1-msg-5",
@@ -2059,10 +2059,10 @@
           "at": "2026-06-25",
           "from": "riley.chen@rolester.dev",
           "to": [
-            "camille.torres@massive-dynamic.example"
+            "william.bell@massive-dynamic.example"
           ],
           "subject": "Re: Panel Interview Invitation — Massive Dynamic | 2026-07-01",
-          "summary": "Riley confirms the Jul 1 panel and thanks Camille. Will watch for Zoom links before the weekend."
+          "summary": "Riley confirms the Jul 1 panel and thanks William. Will watch for Zoom links before the weekend."
         }
       ],
       "demo": true
@@ -2175,6 +2175,7 @@
       "role": "Applied AI Engineer",
       "fitScore": 81,
       "fitBucket": "high",
+      "status": "prospect",
       "fitBasis": "triage",
       "loc": "Remote (US/Canada)",
       "mode": "remote",
@@ -2195,7 +2196,8 @@
       "company": "Massive Dynamic",
       "role": "Forward Deployed Engineer",
       "fitScore": 76,
-      "fitBucket": "high",
+      "fitBucket": "medium",
+      "status": "prospect",
       "fitBasis": "triage",
       "loc": "New York, NY / Hybrid",
       "mode": "hybrid",
@@ -2210,6 +2212,138 @@
       },
       "demo": true,
       "logo": "../assets/logos/massive-dynamic.png"
+    },
+    {
+      "id": "demo-prospect-3",
+      "company": "Tyrell Corporation",
+      "role": "Senior Applications Engineer, Nexus Systems",
+      "fitScore": 88,
+      "fitBucket": "high",
+      "status": "reviewed-hold",
+      "fitBasis": "triage",
+      "loc": "Onsite · NYC",
+      "mode": "onsite",
+      "base": "$205–245K",
+      "tc": "~$300–360K",
+      "note": "Genetic-design-adjacent AI tooling role; retinal scan not required for the interview. Strong overlap with agentic-workflow experience.",
+      "domain": "tyrellcorp.com",
+      "link": "https://tyrellcorp.com/careers/senior-applications-engineer",
+      "source": {
+        "type": "job-board",
+        "name": "HiringCafe (demo)"
+      },
+      "demo": true,
+      "logo": "../assets/logos/tyrell.png"
+    },
+    {
+      "id": "demo-prospect-4",
+      "company": "Abstergo Industries",
+      "role": "Staff Engineer, Animus Research Platform",
+      "fitScore": 85,
+      "fitBucket": "high",
+      "status": "reviewed-hold",
+      "fitBasis": "triage",
+      "loc": "Remote (Global)",
+      "mode": "remote",
+      "base": "$205–240K",
+      "tc": "~$300–355K",
+      "note": "Animus tooling team wants RAG + agentic-workflow depth — Templar funding notwithstanding, comp is solid.",
+      "domain": "abstergo.com",
+      "link": "https://abstergo.com/careers/staff-engineer-animus",
+      "source": {
+        "type": "network",
+        "name": "Demo former-colleague lead"
+      },
+      "demo": true,
+      "logo": "../assets/logos/abstergo.png"
+    },
+    {
+      "id": "demo-prospect-5",
+      "company": "Umbrella Corporation",
+      "role": "Senior Backend Engineer, Bio-Data Platform",
+      "fitScore": 79,
+      "fitBucket": "medium",
+      "status": "prospect",
+      "fitBasis": "triage",
+      "loc": "Remote (Global)",
+      "mode": "remote",
+      "base": "$185–220K",
+      "tc": "~$260–310K",
+      "note": "Bio-data platform team, no open req posted yet — worth a warm intro before it goes public.",
+      "domain": "umbrellacorp.com",
+      "link": "https://umbrellacorp.com/careers/senior-backend-engineer",
+      "source": {
+        "type": "network",
+        "name": "Demo inbound-sourcer lead"
+      },
+      "demo": true,
+      "logo": "../assets/logos/umbrella.png"
+    },
+    {
+      "id": "demo-prospect-6",
+      "company": "Vault-Tec",
+      "role": "Senior Backend Engineer, Vault Systems",
+      "fitScore": 76,
+      "fitBucket": "medium",
+      "status": "prospect",
+      "fitBasis": "triage",
+      "loc": "Remote (US)",
+      "mode": "remote",
+      "base": "$180–210K",
+      "tc": "~$245–290K",
+      "note": "Underground-facing backend role; decent comp for the AI-lite scope. Overseer's office is hiring quietly.",
+      "domain": "vault-tec.com",
+      "link": "https://vault-tec.com/careers/senior-backend-engineer",
+      "source": {
+        "type": "job-board",
+        "name": "HiringCafe (demo)"
+      },
+      "demo": true,
+      "logo": "../assets/logos/vault-tec.png"
+    },
+    {
+      "id": "demo-prospect-7",
+      "company": "Buy n Large",
+      "role": "Senior Platform Engineer, Fleet Systems",
+      "fitScore": 74,
+      "fitBucket": "medium",
+      "status": "prospect",
+      "fitBasis": "triage",
+      "loc": "Remote (US)",
+      "mode": "remote",
+      "base": "$205–240K",
+      "tc": "~$300–350K",
+      "note": "Fleet-ops platform team; broad scope with some AI-assisted-workflow surface. Worth a look once the current loops clear.",
+      "domain": "buynlarge.com",
+      "link": "https://buynlarge.com/careers/senior-platform-engineer",
+      "source": {
+        "type": "network",
+        "name": "Demo alumni lead"
+      },
+      "demo": true,
+      "logo": "../assets/logos/buy-n-large.png"
+    },
+    {
+      "id": "demo-prospect-8",
+      "company": "Aperture Science",
+      "role": "Research Engineer, Enrichment Systems",
+      "fitScore": 90,
+      "fitBucket": "high",
+      "status": "reviewed-hold",
+      "fitBasis": "triage",
+      "loc": "Remote (US)",
+      "mode": "remote",
+      "base": "$200–235K",
+      "tc": "~$270–320K",
+      "note": "Different team than the FDE role that fell through on comp — this one posts a stronger band. The cake reference is optional in the cover letter.",
+      "domain": "aperturescience.com",
+      "link": "https://aperturescience.com/careers/research-engineer-enrichment-systems",
+      "source": {
+        "type": "job-board",
+        "name": "HiringCafe (demo)"
+      },
+      "demo": true,
+      "logo": "../assets/logos/aperture-science.png"
     }
   ],
   "analytics": {

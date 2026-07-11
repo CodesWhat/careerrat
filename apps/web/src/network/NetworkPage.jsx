@@ -81,6 +81,23 @@ function personInitials(name) {
     .join("");
 }
 
+// Harmonized hues (same saturation/lightness family) so the monograms read as a
+// varied-but-tasteful set rather than a sea of identical coral circles. The hue
+// is picked by a stable hash of the name, so a given person always keeps theirs.
+const AVATAR_HUES = [4, 20, 34, 48, 150, 172, 196, 214, 250, 286, 316, 338];
+
+function avatarStyle(name) {
+  const label = String(name || "");
+  let hash = 0;
+  for (let i = 0; i < label.length; i += 1) {
+    hash = (hash * 31 + label.charCodeAt(i)) | 0;
+  }
+  const hue = AVATAR_HUES[Math.abs(hash) % AVATAR_HUES.length];
+  return {
+    background: `linear-gradient(135deg, hsl(${hue} 52% 56%), hsl(${hue} 58% 44%))`,
+  };
+}
+
 function stateKey(company) {
   return company?.reuseState || "closed";
 }
@@ -283,7 +300,7 @@ function PersonCard({ card, onOpen }) {
       type="button"
     >
       <span className="network__person-head">
-        <span aria-hidden="true" className="network__person-avatar">
+        <span aria-hidden="true" className="network__person-avatar" style={avatarStyle(card.name)}>
           {personInitials(card.name)}
         </span>
         <span className="network__company-mark">
@@ -444,7 +461,10 @@ function NetworkDrawer({ card, onClose }) {
           ×
         </IconButton>
         <div className="network__drawer-header">
-          <span className="network__person-avatar network__person-avatar--large">
+          <span
+            className="network__person-avatar network__person-avatar--large"
+            style={avatarStyle(card.name)}
+          >
             {personInitials(card.name)}
           </span>
           <span>
