@@ -2,6 +2,10 @@ node_modules/
 .env
 .env.local
 
+# Local throwaway demo workspace seeded by scripts/demo-serve.sh
+# (ROLESTER_HOME=./.demo-home) — never real data, never checked in.
+.demo-home/
+
 # Turborepo / website build artifacts
 .turbo/
 website/.next/
