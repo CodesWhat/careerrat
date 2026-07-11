@@ -427,20 +427,34 @@
         {
           "date": "2026-05-19",
           "kind": "Recruiter screen",
+          "stage": "screen",
+          "outcome": "advanced",
           "who": "Priya Desai, Recruiting Manager",
           "notes": "30-min intro. Role is hybrid SF, 2 fixed days/week. Band $215–255K confirmed. Riley flagged $230K+ ask; Priya said within range. Advancing to technical screen."
         },
         {
           "date": "2026-05-26",
           "kind": "Technical screen",
+          "stage": "technical",
+          "outcome": "advanced",
           "who": "Marcus Webb, Staff ML Engineer",
           "notes": "60-min deep dive on model-serving latency, batching, and observability. Walked through Pulsar deploy reliability work. Strong signal; advancing to system design."
         },
         {
           "date": "2026-06-02",
           "kind": "System design",
+          "stage": "technical",
+          "outcome": "advanced",
           "who": "Dr. Sarah Kazan, ML Platform Lead",
           "notes": "Designed an online eval + shadow-scoring pipeline for an autonomous scheduling system. Kazan probed cold-start handling. Advancing to onsite loop."
+        },
+        {
+          "date": "2026-06-28",
+          "kind": "Final onsite",
+          "stage": "onsite",
+          "outcome": "pending",
+          "who": "Panel: coding, HM debrief, system design debrief, safety review",
+          "notes": "Full onsite loop completed — coding, HM, system design debrief, and safety panel. Awaiting decision."
         }
       ],
       "warn": "Hybrid SF (2 days/week) conflicts with Austin-remote. Stop-deploy authority still unresolved — needs clarity before any offer.",

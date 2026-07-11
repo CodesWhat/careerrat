@@ -10,39 +10,39 @@ import {
   StarIcon,
 } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
-import { V2_PREVIEW_DASHBOARD } from "../v2/v2MockData.js";
+import { DASHBOARD_PREVIEW } from "./dashboardPreviewData.js";
 
 // The lower-grid panels show three rows and scroll the rest inside the card, so
 // they carry a real queue rather than a truncated top-N with nothing behind it.
 const PANEL_ROW_LIMIT = 12;
 
 const FOCUS_TONE_CLASS = {
-  error: "dashboard-v2__pill--danger",
-  warning: "dashboard-v2__pill--warning",
-  success: "dashboard-v2__pill--success",
-  secondary: "dashboard-v2__pill--muted",
+  error: "dashboard__pill--danger",
+  warning: "dashboard__pill--warning",
+  success: "dashboard__pill--success",
+  secondary: "dashboard__pill--muted",
 };
 
-export function DashboardV2Page() {
+export function DashboardPage() {
   const { data, loading, error, noDatabase } = useDashboardSnapshot();
-  const dashboard = data ? dashboardForV2(data) : null;
-  const model = buildDashboardV2Model(dashboard);
+  const dashboard = data ? dashboardForPage(data) : null;
+  const model = buildDashboardModel(dashboard);
 
   if (noDatabase) {
     return (
-      <div className="dashboard-v2">
+      <div className="dashboard">
         <InlineAlert message="No database workspace detected — run `rolester data import` (or `rolester data init`) first, then reload." />
       </div>
     );
   }
 
   return (
-    <div className="dashboard-v2">
-      <header className="dashboard-v2__hero">
-        <div className="dashboard-v2__title-block">
-          <h1 className="dashboard-v2__title">Dashboard</h1>
+    <div className="dashboard">
+      <header className="dashboard__hero">
+        <div className="dashboard__title-block">
+          <h1 className="dashboard__title">Dashboard</h1>
         </div>
-        <DashboardV2Scoreboard metrics={model.metrics} />
+        <DashboardScoreboard metrics={model.metrics} />
       </header>
 
       {error ? <InlineAlert message={error} /> : null}
@@ -50,12 +50,12 @@ export function DashboardV2Page() {
 
       {dashboard ? (
         <>
-          <section className="dashboard-v2__workbench">
+          <section className="dashboard__workbench">
             <PriorityPanel focus={dashboard.focus} />
             <PipelinePanel model={model} />
           </section>
 
-          <section className="dashboard-v2__lower-grid" aria-label="Dashboard V2 work queues">
+          <section className="dashboard__lower-grid" aria-label="Dashboard work queues">
             <DecisionPanel hasWork={model.decisionHasWork} roles={model.reviewRoles} />
             <FreshFindsPanel roles={model.freshRoles} />
             <TodayPanel events={model.todayEvents} />
@@ -66,12 +66,12 @@ export function DashboardV2Page() {
   );
 }
 
-function DashboardV2Scoreboard({ metrics }) {
+function DashboardScoreboard({ metrics }) {
   return (
-    <section className="dashboard-v2__scoreboard" aria-label="Dashboard status">
+    <section className="dashboard__scoreboard" aria-label="Dashboard status">
       {metrics.map((metric) => (
-        <div className={`dashboard-v2__score dashboard-v2__score--${metric.tone}`} key={metric.key}>
-          <strong data-dashboard-v2-stat={metric.key}>{formatNumber(metric.value)}</strong>
+        <div className={`dashboard__score dashboard__score--${metric.tone}`} key={metric.key}>
+          <strong data-dashboard-stat={metric.key}>{formatNumber(metric.value)}</strong>
           <span>{metric.label}</span>
         </div>
       ))}
@@ -83,7 +83,7 @@ function DashboardV2Scoreboard({ metrics }) {
 // the hero advances to whatever is most important now — no queue beneath it.
 function PriorityPanel({ focus }) {
   return (
-    <article className="dashboard-v2__panel dashboard-v2__panel--priority">
+    <article className="dashboard__panel dashboard__panel--priority">
       <PanelHeader icon={<StarIcon />} title="Priority" to="/jobs" actionLabel="Open Jobs" />
       <PriorityFocus focus={focus} />
     </article>
@@ -93,8 +93,8 @@ function PriorityPanel({ focus }) {
 function PriorityFocus({ focus }) {
   if (!focus) {
     return (
-      <div className="dashboard-v2__focus">
-        <span className="dashboard-v2__pill dashboard-v2__pill--success">Clear</span>
+      <div className="dashboard__focus">
+        <span className="dashboard__pill dashboard__pill--success">Clear</span>
         <h2>Nothing blocking</h2>
         <p>No tracked action needs attention right now.</p>
       </div>
@@ -103,39 +103,69 @@ function PriorityFocus({ focus }) {
 
   const ctaTo = focus.detailId ? `/jobs?open=${encodeURIComponent(focus.detailId)}` : "/jobs";
   const toneClass = FOCUS_TONE_CLASS[focus.tone] || FOCUS_TONE_CLASS.secondary;
+  const facts = Array.isArray(focus.facts) ? focus.facts : [];
+  // Only surface a distinct secondary dossier action — when the primary CTA is
+  // ALREADY "Open dossier" (the interview branch collapses to that once
+  // hasDossier is true), a second identical button would be pure noise.
+  const showDossierLink =
+    focus.hasDossier &&
+    (focus.kind === "interview" || focus.kind === "interview-followup") &&
+    focus.cta !== "Open dossier";
 
   return (
-    <div className="dashboard-v2__focus">
-      {focus.dueText ? (
-        <span className={`dashboard-v2__pill ${toneClass}`}>{duePillLabel(focus.dueText)}</span>
+    <div className="dashboard__focus">
+      {focus.type || focus.dueText ? (
+        <div className="dashboard__focus-tags">
+          {focus.type ? <span className="dashboard__pill">{focus.type}</span> : null}
+          {focus.dueText ? (
+            <span className={`dashboard__pill ${toneClass}`}>{duePillLabel(focus.dueText)}</span>
+          ) : null}
+        </div>
       ) : null}
       <h2>{focus.title}</h2>
       <p>
         {focus.company}
         {focus.role ? ` · ${focus.role}` : ""}
       </p>
-      <Link className="dashboard-v2__primary-link" to={ctaTo}>
-        <span>{focus.cta || "Review"}</span>
-        <ArrowRightIcon />
-      </Link>
+      {focus.meta ? <p className="dashboard__focus-meta">{focus.meta}</p> : null}
+      {facts.length ? (
+        <div className="dashboard__focus-facts">
+          {facts.map((fact) => (
+            <span className="dashboard__focus-fact" key={fact.label}>
+              {fact.label} · <strong>{fact.value}</strong>
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="dashboard__focus-actions">
+        {showDossierLink ? (
+          <Link className="dashboard__secondary-link" to={ctaTo}>
+            <span>Open dossier</span>
+          </Link>
+        ) : null}
+        <Link className="dashboard__primary-link" to={ctaTo}>
+          <span>{focus.cta || "Review"}</span>
+          <ArrowRightIcon />
+        </Link>
+      </div>
     </div>
   );
 }
 
 function PipelinePanel({ model }) {
   return (
-    <aside className="dashboard-v2__panel">
+    <aside className="dashboard__panel">
       <PanelHeader icon={<ListIcon />} title="Momentum" to="/jobs" actionLabel="Open Jobs" />
-      <div className="dashboard-v2__pipeline-list">
+      <div className="dashboard__pipeline-list">
         {model.pipeline.map((item) => (
-          <div className="dashboard-v2__pipeline-row" key={item.key}>
-            <span className="dashboard-v2__pipeline-label">
+          <div className="dashboard__pipeline-row" key={item.key}>
+            <span className="dashboard__pipeline-label">
               <strong>{item.label}</strong>
             </span>
-            <span className="dashboard-v2__pipeline-meter" aria-hidden="true">
+            <span className="dashboard__pipeline-meter" aria-hidden="true">
               <span style={{ width: `${item.width}%` }} />
             </span>
-            <span className="dashboard-v2__pipeline-value">{formatNumber(item.value)}</span>
+            <span className="dashboard__pipeline-value">{formatNumber(item.value)}</span>
           </div>
         ))}
       </div>
@@ -145,7 +175,7 @@ function PipelinePanel({ model }) {
 
 function DecisionPanel({ hasWork, roles }) {
   return (
-    <article className="dashboard-v2__panel">
+    <article className="dashboard__panel">
       <PanelHeader icon={<CheckIcon />} title="Decide" to="/jobs" actionLabel="Open Roles" />
       <RoleList
         roles={roles}
@@ -159,7 +189,7 @@ function DecisionPanel({ hasWork, roles }) {
 
 function FreshFindsPanel({ roles }) {
   return (
-    <article className="dashboard-v2__panel">
+    <article className="dashboard__panel">
       <PanelHeader icon={<SearchIcon />} title="Fresh Finds" to="/jobs" actionLabel="Search" />
       <RoleList roles={roles} emptyText="No fresh roles from the last sweep." />
     </article>
@@ -169,28 +199,28 @@ function FreshFindsPanel({ roles }) {
 function TodayPanel({ events }) {
   const rows = Array.isArray(events) ? events : [];
   return (
-    <article className="dashboard-v2__panel">
+    <article className="dashboard__panel">
       <PanelHeader icon={<CalendarIcon />} title="Today" to="/calendar" actionLabel="Calendar" />
-      <div className="dashboard-v2__event-list">
+      <div className="dashboard__event-list">
         {rows.length ? (
           rows.map((event) => (
             <Link
-              className="dashboard-v2__event-row"
+              className="dashboard__event-row"
               key={calendarEventKey(event)}
               to={event.detailId ? `/jobs?open=${encodeURIComponent(event.detailId)}` : "/calendar"}
             >
-              <span className="dashboard-v2__date-cell">
+              <span className="dashboard__date-cell">
                 <strong>{event.time || formatDateShort(event.iso)}</strong>
                 {event.time ? <small>Today</small> : null}
               </span>
-              <span className="dashboard-v2__row-copy">
+              <span className="dashboard__row-copy">
                 <strong>{event.title}</strong>
                 <small>{event.label || calendarKindLabel(event.kind)}</small>
               </span>
             </Link>
           ))
         ) : (
-          <div className="dashboard-v2__empty">No interviews or calls today.</div>
+          <div className="dashboard__empty">No interviews or calls today.</div>
         )}
       </div>
     </article>
@@ -200,26 +230,26 @@ function TodayPanel({ events }) {
 function RoleList({ roles, emptyText }) {
   const rows = Array.isArray(roles) ? roles : [];
   return (
-    <div className="dashboard-v2__role-list">
+    <div className="dashboard__role-list">
       {rows.length ? (
         rows.map((role) => (
           <Link
-            className="dashboard-v2__role-row"
+            className="dashboard__role-row"
             key={latestRoleKey(role)}
             to={role.detailId ? `/jobs?open=${encodeURIComponent(role.detailId)}` : "/jobs"}
           >
             <CompanyAvatar name={role.company} domain={role.domain} size={32} />
-            <span className="dashboard-v2__row-copy">
+            <span className="dashboard__row-copy">
               <strong>{role.company}</strong>
               <small>{role.role || "Open Role"}</small>
             </span>
             {fitLabel(role.fit) ? (
-              <span className="dashboard-v2__fit">{fitLabel(role.fit)}</span>
+              <span className="dashboard__fit">{fitLabel(role.fit)}</span>
             ) : null}
           </Link>
         ))
       ) : (
-        <div className="dashboard-v2__empty">{emptyText}</div>
+        <div className="dashboard__empty">{emptyText}</div>
       )}
     </div>
   );
@@ -227,13 +257,13 @@ function RoleList({ roles, emptyText }) {
 
 function PanelHeader({ icon, title, to, actionLabel }) {
   return (
-    <header className="dashboard-v2__panel-header">
+    <header className="dashboard__panel-header">
       <h2>
-        <span className="dashboard-v2__panel-icon">{icon}</span>
+        <span className="dashboard__panel-icon">{icon}</span>
         <span>{title}</span>
       </h2>
       {to ? (
-        <Link className="dashboard-v2__panel-link" to={to}>
+        <Link className="dashboard__panel-link" to={to}>
           <span>{actionLabel}</span>
           <ArrowRightIcon />
         </Link>
@@ -242,12 +272,12 @@ function PanelHeader({ icon, title, to, actionLabel }) {
   );
 }
 
-function dashboardForV2(data) {
-  if (hasDashboardV2Content(data)) return data;
-  return import.meta.env.DEV ? V2_PREVIEW_DASHBOARD : data;
+function dashboardForPage(data) {
+  if (hasDashboardContent(data)) return data;
+  return import.meta.env.DEV ? DASHBOARD_PREVIEW : data;
 }
 
-function hasDashboardV2Content(data) {
+function hasDashboardContent(data) {
   if (!data) return false;
   if (data.focus && data.focus.kind !== "clear") return true;
   if ((data.allNextSteps || []).length > 0) return true;
@@ -264,7 +294,7 @@ function hasDashboardV2Content(data) {
   );
 }
 
-function buildDashboardV2Model(data) {
+function buildDashboardModel(data) {
   const allSteps = dashboardAllSteps(data);
   const todayEvents = dashboardTodayEvents(data);
   const reviewRoles = dashboardReviewRoles(data);

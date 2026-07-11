@@ -1,5 +1,4 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { relative, resolve } from "node:path";
 import { test } from "node:test";
@@ -24,8 +23,6 @@ const REACT_PRODUCT_PAGE_FILES = [
   "apps/web/src/onboarding/steps/WelcomeStep.jsx",
   "apps/web/src/onboarding/steps/FinishStep.jsx",
 ];
-
-const TRACKER_DEV_FILE = "src/cli/tracker-dev.mjs";
 
 const LEGACY_STATIC_ROUTES = ["/onboard", "/search", "/packet", "/evaluate", "/answer", "/tracker"];
 
@@ -59,29 +56,6 @@ const FORBIDDEN_PRODUCT_DEPENDENCIES = [
   {
     name: "legacy tracker-derived seen-set helper",
     pattern: /\bbuildSeenSets\b/,
-  },
-];
-
-const DEBUG_EXPORT_ROUTE_PATTERNS = [
-  {
-    name: "legacy dashboard HTML route",
-    pattern: /url\s*===\s*["']\/(?:index\.html|tracker|tracker\.html)["']/,
-  },
-  {
-    name: "raw generated tracker route",
-    pattern: /url\s*===\s*["']\/workspace\/tracker\.json["']/,
-  },
-  {
-    name: "raw generated activity route",
-    pattern: /url\s*===\s*["']\/workspace\/activity\.jsonl["']/,
-  },
-  {
-    name: "raw tracker API route",
-    pattern: /addRoute\s*\(\s*["']GET["']\s*,\s*["']\/api\/tracker["']/,
-  },
-  {
-    name: "raw activity API route",
-    pattern: /addRoute\s*\(\s*["']GET["']\s*,\s*["']\/api\/activity["']/,
   },
 ];
 
@@ -215,82 +189,5 @@ test("normal React product pages do not advertise legacy static-page affordances
         `${relative(REPO_ROOT, resolve(REPO_ROOT, file))} must not expose ${affordance.name}`
       );
     }
-  }
-});
-
-test("compatibility routes in tracker-dev are explicitly classified as debug/export", () => {
-  const source = stripJavaScriptComments(readSource(TRACKER_DEV_FILE));
-
-  assert.match(source, /\bDEBUG_EXPORT_ROUTES\b/, "tracker-dev must define DEBUG_EXPORT_ROUTES");
-  assert.match(source, /\bisDebugExportRoute\b/, "tracker-dev must define isDebugExportRoute");
-  assert.match(
-    source,
-    /isDebugExportRoute\s*\(\s*url\s*\)/,
-    "tracker-dev must dispatch compatibility URLs through isDebugExportRoute(url)"
-  );
-
-  for (const route of DEBUG_EXPORT_ROUTE_PATTERNS) {
-    assertNoMatch(
-      source,
-      route.pattern,
-      `${TRACKER_DEV_FILE} must not register or branch on ${route.name} outside the debug/export allowlist`
-    );
-  }
-});
-
-test("tracker-dev static byte pages are explicit compatibility/debug/export surfaces", () => {
-  const source = stripJavaScriptComments(readSource(TRACKER_DEV_FILE));
-
-  assert.match(
-    source,
-    /\bSTATIC_COMPATIBILITY_ROUTES\b/,
-    "tracker-dev must define STATIC_COMPATIBILITY_ROUTES for retained static byte pages"
-  );
-  assert.match(
-    source,
-    /Static compatibility\/debug\/export routes:/,
-    "tracker-dev 404/help copy must label retained static byte pages as compatibility/debug/export routes"
-  );
-  assertNoMatch(
-    source,
-    /utility pages include[^`]+\/(?:evaluate|answer|onboard|search|packet)/i,
-    "tracker-dev must not group retained static byte pages under normal utility pages"
-  );
-
-  for (const route of ["/evaluate", "/answer", "/onboard", "/search", "/packet"]) {
-    assert.match(
-      source,
-      new RegExp(
-        `\\bSTATIC_COMPATIBILITY_ROUTES\\b[\\s\\S]*path:\\s*["']${route.replace("/", "\\/")}["']`
-      ),
-      `tracker-dev must classify ${route} in STATIC_COMPATIBILITY_ROUTES`
-    );
-  }
-});
-
-test("tracker-dev help labels retained static pages as compatibility/debug/export", () => {
-  const result = spawnSync(process.execPath, [resolve(REPO_ROOT, TRACKER_DEV_FILE), "--help"], {
-    cwd: REPO_ROOT,
-    encoding: "utf8",
-  });
-
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(
-    result.stdout,
-    /Static compatibility\/debug\/export routes:/,
-    "tracker-dev --help must label retained static byte pages as compatibility/debug/export routes"
-  );
-  assert.doesNotMatch(
-    result.stdout,
-    /Retained utility pages and APIs:/,
-    "tracker-dev --help must not group retained static pages under normal utility pages"
-  );
-
-  for (const route of ["/evaluate", "/answer", "/onboard", "/search", "/packet"]) {
-    assert.match(
-      result.stdout,
-      new RegExp(`GET\\s+${route}\\b[\\s\\S]{0,100}Compatibility`, "i"),
-      `tracker-dev --help must classify ${route} as a compatibility route`
-    );
   }
 });

@@ -33,7 +33,20 @@ console.log("\n▸ Prepare prebuilt output");
 rmSync(OUTPUT, { recursive: true, force: true });
 mkdirSync(join(OUTPUT, "static"), { recursive: true });
 cpSync(BUNDLE, join(OUTPUT, "static"), { recursive: true });
-writeFileSync(join(OUTPUT, "config.json"), `${JSON.stringify({ version: 3 }, null, 2)}\n`);
+writeFileSync(
+  join(OUTPUT, "config.json"),
+  `${JSON.stringify(
+    {
+      version: 3,
+      routes: [
+        { handle: "filesystem" },
+        { src: "/design-v3(?:/.*)?", dest: "/design-v3/index.html" },
+      ],
+    },
+    null,
+    2
+  )}\n`
+);
 
 // 3. deploy prebuilt to production under the codeswhat scope
 console.log("\n▸ Deploy to Vercel (codeswhat/rolester-demo, prod)");

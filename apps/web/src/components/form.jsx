@@ -133,9 +133,21 @@ export function filterChipSuggestions({ draft, values = [], suggestions = [], li
     .slice(0, limit);
 }
 
-export function ChipInput({ id, values = [], onChange, placeholder, suggestions = [] }) {
+export function ChipInput({
+  id,
+  values = [],
+  onChange,
+  placeholder,
+  suggestions = [],
+  suggestionLimit = 6,
+}) {
   const [draft, setDraft] = useState("");
-  const filteredSuggestions = filterChipSuggestions({ draft, values, suggestions });
+  const filteredSuggestions = filterChipSuggestions({
+    draft,
+    values,
+    suggestions,
+    limit: suggestionLimit,
+  });
 
   function commit(explicitValue = draft) {
     const trimmed = String(explicitValue || "").trim();

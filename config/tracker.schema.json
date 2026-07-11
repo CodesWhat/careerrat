@@ -103,7 +103,9 @@
               "additionalProperties": true,
               "properties": {
                 "date":      { "type": ["string", "null"] },
-                "kind":      { "type": ["string", "null"] },
+                "kind":      { "type": ["string", "null"], "description": "Free-text DISPLAY label for this round (e.g. 'Technical screen', 'Onsite loop'). Use `stage` for the canonical machine-readable stage id — `kind` is never repurposed as the enum." },
+                "stage":     { "type": ["string", "null"], "description": "Canonical stage id for this round — the STAGE_ORDER vocabulary (src/core/tracker/dashboard-data.js).", "enum": ["sourced", "reviewed-hold", "manual-apply", "applied", "screen", "interview", "assessment", "technical", "hiring-manager", "onsite", "final", "offer", "accepted", "rejected", "withdrawn", null] },
+                "outcome":   { "type": ["string", "null"], "description": "Result of this round. 'pending' = the round happened and is awaiting a decision.", "enum": ["pending", "advanced", "rejected", "cancelled", null] },
                 "who":       { "type": ["string", "null"] },
                 "notes":     { "type": ["string", "null"], "maxLength": 200, "description": "2 sentences max: what happened + immediate next step. Comp/process/coaching go in the typed sibling fields, not here." },
                 "compNote":  { "type": ["string", "null"], "maxLength": 140, "description": "One-sentence comp signal heard on this call (else omit)." },

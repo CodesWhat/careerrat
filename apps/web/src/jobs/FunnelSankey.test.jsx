@@ -1,22 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
 import { describe, expect, it, vi } from "vitest";
-
-const dashboardMock = vi.hoisted(() => ({
-  snapshot: {
-    data: null,
-    loading: false,
-    error: null,
-    noDatabase: false,
-  },
-}));
-
-vi.mock("../app-shell/DashboardContext.jsx", () => ({
-  useDashboardSnapshot: () => dashboardMock.snapshot,
-}));
-
 import { FunnelSankey } from "./FunnelSankey.jsx";
-import { JobsPage } from "./JobsPage.jsx";
 
 const sankey = {
   total: 8,
@@ -169,20 +153,6 @@ const sankey = {
   ],
 };
 
-function renderJobsPage(data) {
-  dashboardMock.snapshot = {
-    data,
-    loading: false,
-    error: null,
-    noDatabase: false,
-  };
-  return renderToStaticMarkup(
-    <MemoryRouter>
-      <JobsPage />
-    </MemoryRouter>
-  );
-}
-
 describe("FunnelSankey", () => {
   it("renders the legacy Sankey nodes, links, counts, and numbered round depth", () => {
     const html = renderToStaticMarkup(<FunnelSankey sankey={sankey} />);
@@ -211,30 +181,20 @@ describe("FunnelSankey", () => {
     expect(html).not.toContain("<svg");
   });
 
-  it("mounts on the jobs page below the existing funnel and list", () => {
-    const html = renderJobsPage({
-      jobs: {
-        funnel: [{ id: "all", label: "All Active", count: 1, color: "#2B2724" }],
-        sankey,
-        rows: [
-          {
-            id: "job-1",
-            source: "application",
-            company: "Alpha Labs",
-            role: "Staff Engineer",
-            stageLabel: "Applied",
-            fit: 86,
-            modeLabel: "Remote",
-            sourceLabel: "Direct apply",
-            appliedLabel: "Jul 1",
-            action: null,
-          },
-        ],
-      },
-    });
+  it("marks the active stage as selected and dims the rest when interactive", () => {
+    const onSelectStage = vi.fn();
+    const html = renderToStaticMarkup(
+      <FunnelSankey sankey={sankey} activeFilter="round-1" onSelectStage={onSelectStage} />
+    );
 
-    expect(html.indexOf("All Active")).toBeLessThan(html.indexOf("Alpha Labs"));
-    expect(html.indexOf("Alpha Labs")).toBeLessThan(html.indexOf("Jobs funnel"));
-    expect(html).toContain("1st round");
+    const roundOneNode = html.match(/<g[^>]*data-sankey-node="round-1"[^>]*>/)?.[0];
+    const coldNode = html.match(/<g[^>]*data-sankey-node="src-cold"[^>]*>/)?.[0];
+    const roundOneLink = html.match(/<path[^>]*data-sankey-link="heardback-round-1"[^>]*>/)?.[0];
+
+    expect(roundOneNode).toContain("is-active");
+    expect(coldNode).toContain("is-dimmed");
+    expect(roundOneLink).toContain("is-active");
+    expect(html).toContain('role="button"');
+    expect(html).toContain('tabindex="0"');
   });
 });

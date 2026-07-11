@@ -151,3 +151,34 @@ export function runVerb({ repoRoot, env }, fn) {
   const exported = exportToTracker(pathCtx);
   return { ok: true, ...result, exported };
 }
+
+// Read-only lookup for a single top-level tracker key stored in `kv` (e.g.
+// strategyReview, storyEnrichment) — no transaction needed. Mirrors the
+// inline `SELECT data FROM kv WHERE key = ...` read in refreshAnalyticsInDb
+// above, generalized so callers outside this module don't hand-roll it.
+export function kvGet({ repoRoot, env, key } = {}) {
+  if (!key) throw new Error("kvGet: key is required");
+  const db = requireDb({ repoRoot, env });
+  const row = db.prepare("SELECT data FROM kv WHERE key = ?").get(key);
+  return row ? JSON.parse(row.data) : null;
+}
+
+// Generic top-level kv-key upsert verb — for tracker.json keys that already
+// have a mechanical CLI writer on the JSON-mode path (whole-key replace, no
+// domain merge/dedupe behavior of their own) and just need the SAME value
+// persisted into the DB's kv table so DB-backed workspaces pick it up (e.g.
+// `strategy-review stamp --write`, `stories sync-enrichment --write`). Keys
+// with real domain behavior (dedupe, status transitions, linked-app CTA
+// updates — calendarBusy/relationshipLeads) keep their own verb file instead
+// of routing through this.
+export function kvUpsert({ repoRoot, env, key, value } = {}) {
+  if (!key) throw new Error("kvUpsert: key is required");
+  return runVerb({ repoRoot, env }, (db) => {
+    db.prepare(
+      `INSERT INTO kv (key, data) VALUES (?, ?)
+       ON CONFLICT(key) DO UPDATE SET data=excluded.data`
+    ).run(key, JSON.stringify(value));
+    const meta = bumpMeta(db);
+    return { key, meta };
+  });
+}

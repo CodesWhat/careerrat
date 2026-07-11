@@ -35,15 +35,19 @@ describe("CaptureBar", () => {
     expect(html).not.toContain("Paste a job posting, recruiter email, status update");
   });
 
-  it("uses Enter-to-send copy and a real footer upload control in the open composer", () => {
+  it("uses a clean composer header and a real footer upload control", () => {
     const html = renderCapture(<CaptureBarView initiallyOpen />);
 
     expect(html).toContain('role="dialog"');
+    expect(html).not.toContain("Drop jobs, emails, updates, docs, or links.");
     expect(html).toContain('type="file"');
-    expect(html).toContain('aria-label="Upload a file to Roland"');
+    expect(html).toContain('aria-label="Attach a file to Roland"');
     expect(html).toContain('class="capture-assistant__upload"');
-    expect(html).toContain("Upload");
-    expect(html).toContain("Enter sends · Shift+Enter adds a line");
+    expect(html).toContain("Attach");
+    expect(html).not.toContain("Upload");
+    expect(html).toContain('aria-keyshortcuts="Enter Shift+Enter"');
+    expect(html).toContain('aria-label="Send to Roland"');
+    expect(html).not.toContain("Enter sends");
     expect(html).not.toContain("Cmd/Ctrl+Enter sends");
     expect(html).not.toContain('class="capture-assistant__input-icon"');
   });

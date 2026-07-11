@@ -6,13 +6,15 @@
 // db that changed in between (see the M10 design doc §2).
 //
 // Design: extract, don't rewrite. `buildDashboardViewModel` (src/core/tracker/
-// dashboard-data.js) is the EXACT function the legacy dashboard render
-// (`rolester tracker`, src/cli/tracker.mjs) already calls — reused here
-// completely UNMODIFIED, never forked. Its verified input contract (read
+// dashboard-data.js) is the same JSON view-model builder used to power this
+// route — reused here completely UNMODIFIED, never forked. (The legacy
+// static-HTML dashboard render this route was originally extracted from —
+// `rolester tracker`, src/cli/tracker.mjs — has since been retired; tracker.mjs
+// now only snapshots/summarizes tracker.json. This route is the sole live
+// caller of buildDashboardViewModel.) Its verified input contract (read
 // directly off its own top ~20 lines, `buildDashboardViewModel(trackerData,
 // {now, activityEvents, modes, settings, library, agentGuidance})`) is
-// assembled from the SAME sources tracker.mjs's runDashboard() already reads,
-// just swapped from disk round-trips to in-process DB/config reads:
+// assembled from these sources:
 //
 //   trackerData     assembleTrackerObject(db)      src/core/db/export-to-tracker.mjs
 //   activityEvents  assembleActivityEvents(db)     same module

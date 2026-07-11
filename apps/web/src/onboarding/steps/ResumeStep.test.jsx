@@ -151,8 +151,10 @@ describe("ResumeStep DOCX intake", () => {
 
     expect(noAiHtml).toContain(".docx");
     expect(aiHtml).toContain(".docx");
-    expect(noAiHtml).toContain("AI reads it in the black box and autofills* the rest");
-    expect(aiHtml).toContain("AI reads it in the black box and autofills* the rest");
+    expect(noAiHtml).toContain("AI reads it in the black box and autofills the rest");
+    expect(aiHtml).toContain("AI reads it in the black box and autofills the rest");
+    expect(noAiHtml).toContain("onboarding-resume__footnote-marker");
+    expect(noAiHtml).toContain("maybe");
   });
 
   it("routes extensions to deterministic DOCX/text paths before AI-only formats", () => {

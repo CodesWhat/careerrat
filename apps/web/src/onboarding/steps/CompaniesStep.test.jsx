@@ -29,6 +29,7 @@ vi.mock("../ChatPanel.jsx", () => ({
   },
 }));
 
+import { resolveCompanySuggestions } from "../companyCatalog.js";
 import * as CompaniesStepModule from "./CompaniesStep.jsx";
 import {
   CompaniesStep,
@@ -128,6 +129,31 @@ describe("proposalSeedsFromCompanies", () => {
 });
 
 describe("CompaniesStep logo UX", () => {
+  it("resolves common companies locally before logo search returns", () => {
+    expect(resolveCompanySuggestions({ query: "sweet" })[0]).toMatchObject({
+      name: "Sweetgreen",
+      domain: "sweetgreen.com",
+      source: "catalog",
+    });
+    expect(resolveCompanySuggestions({ query: "sweet green" })[0]).toMatchObject({
+      name: "Sweetgreen",
+      domain: "sweetgreen.com",
+    });
+  });
+
+  it("merges logo search results without duplicating selected companies", () => {
+    expect(
+      resolveCompanySuggestions({
+        query: "sweet",
+        selectedCompanies: [{ name: "Sweetgreen", domain: "sweetgreen.com" }],
+        logoResults: [
+          { name: "Sweetgreen", domain: "sweetgreen.com" },
+          { name: "Sweet Labs", domain: "sweetlabs.example" },
+        ],
+      })
+    ).toEqual([{ name: "Sweet Labs", domain: "sweetlabs.example", source: "logo-search" }]);
+  });
+
   it("does not ask for logo.dev image credentials during onboarding", () => {
     const html = renderCompaniesStep();
 

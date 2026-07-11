@@ -3,8 +3,8 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync, watch } from "node:fs";
 // Rolester tracker dev server — promoted (Productization Phase 0, P0-2) from a
 // live-reloading dashboard preview into the embedded app server: /app is the
-// product shell, while generated dashboard/tracker feeds remain debug/export
-// compatibility utilities.
+// product shell serving the React SPA and its local APIs. The legacy
+// static-HTML dashboard and its compatibility pages have been retired.
 //
 // Usage:
 //   rolester tracker-dev                 Serve http://localhost:7777 with live reload
@@ -37,19 +37,12 @@ import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { loadLocalAiEnv } from "../core/ai/ai-env.mjs";
-import { ANSWER_PAGE_HTML } from "../core/ai/answer-page.mjs";
 import { createChatRuntime } from "../core/ai/chat-runtime.mjs";
-import { EVALUATE_PAGE_HTML } from "../core/ai/evaluate-page.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { reconcileOrphanedLaneCIntakeItems } from "../core/db/verbs.mjs";
 import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
-import { ONBOARD_PAGE_HTML } from "../core/onboarding/onboard-page.mjs";
-import { PACKET_PAGE_HTML } from "../core/onboarding/packet-page.mjs";
-import { SEARCH_PAGE_HTML } from "../core/onboarding/search-page.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
-import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import {
-  injectLiveReload,
   LIVERELOAD_SNIPPET,
   mimeFor,
   resolvePort,
@@ -69,6 +62,7 @@ import { mountPacketRoutes } from "./packet-route.mjs";
 import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 import { mountSourcingRoutes } from "./sourcing-route.mjs";
+import { mountTrackOutcomeRoutes } from "./track-outcome-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
 
@@ -82,67 +76,6 @@ const PACKAGE_VERSION = (() => {
     return null;
   }
 })();
-
-export const DEBUG_EXPORT_ROUTES = Object.freeze([
-  { path: "/", kind: "legacy-dashboard-html", label: "legacy generated dashboard HTML" },
-  { path: "/index.html", kind: "legacy-dashboard-html", label: "legacy generated dashboard HTML" },
-  { path: "/tracker", kind: "legacy-dashboard-html", label: "legacy generated dashboard HTML" },
-  {
-    path: "/tracker.html",
-    kind: "legacy-dashboard-html",
-    label: "legacy generated dashboard HTML",
-  },
-  {
-    path: "/dashboard-data.js",
-    kind: "generated-dashboard-module",
-    label: "dashboard data export",
-  },
-  {
-    path: "/workspace/dashboard-data.js",
-    kind: "generated-dashboard-module",
-    label: "dashboard data export",
-  },
-  { path: "/workspace/tracker.json", kind: "raw-tracker-export", label: "raw tracker export" },
-  { path: "/workspace/activity.jsonl", kind: "raw-activity-export", label: "raw activity export" },
-  { path: "/workspace/modes.json", kind: "workspace-json-export", label: "modes export" },
-  { path: "/workspace/settings.json", kind: "workspace-json-export", label: "settings export" },
-  { path: "/workspace/library.json", kind: "workspace-json-export", label: "library export" },
-  { path: "/api/tracker", kind: "storage-adapter-tracker", label: "raw tracker adapter feed" },
-  { path: "/api/activity", kind: "storage-adapter-activity", label: "raw activity adapter feed" },
-]);
-
-export const STATIC_COMPATIBILITY_ROUTES = Object.freeze([
-  { path: "/evaluate", kind: "static-evaluate", label: "compatibility evaluation page" },
-  { path: "/answer", kind: "static-answer", label: "compatibility answer drafting page" },
-  { path: "/onboard", kind: "static-onboard", label: "compatibility onboarding page" },
-  { path: "/search", kind: "static-search", label: "compatibility search page" },
-  { path: "/packet", kind: "static-packet", label: "compatibility packet page" },
-]);
-
-const DEBUG_EXPORT_ROUTE_BY_PATH = new Map(DEBUG_EXPORT_ROUTES.map((route) => [route.path, route]));
-const STATIC_COMPATIBILITY_ROUTE_BY_PATH = new Map(
-  STATIC_COMPATIBILITY_ROUTES.map((route) => [route.path, route])
-);
-
-export function isDebugExportRoute(url) {
-  return DEBUG_EXPORT_ROUTE_BY_PATH.has(url);
-}
-
-export function isStaticCompatibilityRoute(url) {
-  return STATIC_COMPATIBILITY_ROUTE_BY_PATH.has(url);
-}
-
-function getDebugExportRoute(url) {
-  return DEBUG_EXPORT_ROUTE_BY_PATH.get(url) || null;
-}
-
-function getStaticCompatibilityRoute(url) {
-  return STATIC_COMPATIBILITY_ROUTE_BY_PATH.get(url) || null;
-}
-
-function formatRouteList(routes) {
-  return routes.map((route) => `${route.path} (${route.label})`).join(", ");
-}
 
 // A monotonic-ish stamp for SSE payloads without Date.now() determinism worries.
 let tick = 0;
@@ -188,13 +121,6 @@ export function createDevServer({
   const pathCtx = { repoRoot };
   const userPaths = resolveUserPaths(pathCtx);
   const TRACKER_CLI = join(repoRoot, "src/cli/tracker.mjs");
-  const TRACKER_JSON = userPath(pathCtx, "workspace/tracker.json");
-  const OUT_HTML = userPath(pathCtx, "workspace/tracker.html");
-  const OUT_DATA = userPath(pathCtx, "workspace/dashboard-data.js");
-  const OUT_MODES = userPath(pathCtx, "workspace/modes.json");
-  const OUT_SETTINGS = userPath(pathCtx, "workspace/settings.json");
-  const OUT_LIBRARY = userPath(pathCtx, "workspace/library.json");
-  const ACTIVITY_JSONL = userPath(pathCtx, "workspace/activity.jsonl");
   const WORKSPACE_DIR = userPaths.workspaceDir;
   const CANDIDATE_DIR = userPaths.candidateDir;
   const TRACKER_SRC_DIR = join(repoRoot, "src/core/tracker");
@@ -205,7 +131,6 @@ export function createDevServer({
   // npm pack/publish), shipped via package.json#files["apps/web/dist"].
   const APP_DIST_DIR = join(repoRoot, "apps/web/dist");
   const APP_INDEX_HTML = join(APP_DIST_DIR, "index.html");
-  const adapter = defaultAdapter(repoRoot);
 
   // SSE clients subscribed to reload/tracker-update/activity-update events.
   const clients = new Set();
@@ -291,18 +216,6 @@ export function createDevServer({
     routes.set(`${method} ${path}`, handler);
   }
 
-  function addStaticCompatibilityPage(path, html) {
-    const route = getStaticCompatibilityRoute(path);
-    if (!route) throw new Error(`Unclassified static compatibility route: ${path}`);
-    addRoute("GET", path, (_req, res) => {
-      res.writeHead(200, {
-        "Content-Type": "text/html; charset=utf-8",
-        "Cache-Control": "no-store",
-      });
-      res.end(html);
-    });
-  }
-
   addRoute("GET", "/api/health", (_req, res) => {
     sendJson(res, 200, { ok: true, version: PACKAGE_VERSION });
   });
@@ -311,30 +224,15 @@ export function createDevServer({
   // the SSE/abort/status-code mechanics and src/core/ai/skill-runtime.mjs for
   // the Agent SDK driver itself. `runSkillStream` is dependency-injected above
   // so tests can stub it without needing the real SDK devDependency installed.
-  // Also registers GET /api/runtime/config (the allowlist evaluate-page.mjs
-  // polls to decide whether its decision buttons can run).
+  // Also registers GET /api/runtime/config (the allowlist the SPA's evaluate
+  // flow polls to decide whether its decision buttons can run).
   mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env });
 
-  // P0-5 — the headline paste → evaluate-job → live verdict slice's UI. A
-  // byte-static page (see src/core/ai/evaluate-page.mjs); it calls the two
-  // routes above from client-side JS.
-  addStaticCompatibilityPage("/evaluate", EVALUATE_PAGE_HTML);
-
-  // Interactive Q&A slice (POC apply-packet item 3) — a byte-static page (see
-  // src/core/ai/answer-page.mjs); it calls the two routes above from
-  // client-side JS, same as /evaluate.
-  addStaticCompatibilityPage("/answer", ANSWER_PAGE_HTML);
-
-  // M1 of the paid-POC journey — the non-AI onboarding wizard. Its HTTP
-  // surface (candidate file seeding, resume parsing, BYOK key storage) is
-  // src/cli/onboard-route.mjs; its byte-static page is
-  // src/core/onboarding/onboard-page.mjs. Deliberately mounted after
-  // mountSkillRunRoute rather than before: unlike /evaluate and /answer, this
-  // page never calls POST /api/skill/run — it exists precisely so a
-  // candidate's workspace is legible before any paid AI usage starts.
+  // M1 of the paid-POC journey — the non-AI onboarding wizard's HTTP surface
+  // (candidate file seeding, resume parsing, BYOK key storage) —
+  // src/cli/onboard-route.mjs. No page mounted here — apps/web's SPA
+  // onboarding wizard is the only client.
   mountOnboardRoutes({ addRoute, repoRoot, env });
-
-  addStaticCompatibilityPage("/onboard", ONBOARD_PAGE_HTML);
 
   // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
   // prompt templates for the Targeting step's "Roland-suggest" chips
@@ -368,26 +266,17 @@ export function createDevServer({
 
   // M3 of the paid-POC journey — the /search surface over the existing
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the
-  // sweep) is src/cli/search-route.mjs; its byte-static page is
-  // src/core/onboarding/search-page.mjs. Each result row's "Evaluate" link
-  // hands the posting URL to /evaluate?url=… (see evaluate-page.mjs's
-  // prefillFromQuery()) — the two pages are deliberately linked, not merged,
-  // so a scan can be re-run/browsed without re-running evaluate-job.
+  // sweep) is src/cli/search-route.mjs. No page mounted here — apps/web's SPA
+  // Jobs surface is the only client.
   mountSearchRoutes({ addRoute, repoRoot, env });
   mountSourcingRoutes({ addRoute, repoRoot, env });
-
-  addStaticCompatibilityPage("/search", SEARCH_PAGE_HTML);
 
   // M4 of the paid-POC journey — the /packet view: review a gated
   // application's tailored resume/cover letter/answers, or generate them live
   // via tailor-application. Its HTTP surface (list + single-packet resolution,
-  // path-safety-checked artifact reads) is src/cli/packet-route.mjs; its
-  // byte-static page is src/core/onboarding/packet-page.mjs. The "Generate
-  // packet" button POSTs the same /api/skill/run mountSkillRunRoute already
-  // registered above, so no new skill-run mechanics are needed here.
+  // path-safety-checked artifact reads) is src/cli/packet-route.mjs. No page
+  // mounted here — apps/web's SPA is the only client.
   mountPacketRoutes({ addRoute, repoRoot, env });
-
-  addStaticCompatibilityPage("/packet", PACKET_PAGE_HTML);
 
   // M6 — the sqlite-backed data layer's JSON API (src/cli/data-route.mjs).
   // Fail-closed per decision 7: every route 409s with a clear "no database
@@ -395,6 +284,13 @@ export function createDevServer({
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
   mountDataRoutes({ addRoute, repoRoot, env });
   mountDeepIngestRoutes({ addRoute, repoRoot, env });
+
+  // Productization — the first "app calls AI -> structured result -> typed DB
+  // write" pipeline for application state (src/cli/track-outcome-route.mjs):
+  // a bounded, schema-validated classification of a pasted status update,
+  // persisted through the same appSetStatus/appSetFields verbs above. Same
+  // fail-closed-409-no-db posture as mountDataRoutes.
+  mountTrackOutcomeRoutes({ addRoute, repoRoot, env });
 
   // M10 — the server-derived dashboard view model (src/cli/dashboard-route.mjs):
   // one GET that reuses dashboard-data.js's buildDashboardViewModel UNMODIFIED
@@ -469,11 +365,6 @@ export function createDevServer({
       return;
     }
 
-    if (isDebugExportRoute(url)) {
-      serveDebugExportRoute(url, res);
-      return;
-    }
-
     // Static assets the dashboard references relatively (../assets/logo.png,
     // ../assets/logos/*). The page lives at /, so those resolve to /assets/*.
     if (url.startsWith("/assets/")) {
@@ -501,113 +392,9 @@ export function createDevServer({
     res.end(buildNotFoundText());
   });
 
-  function serveDebugExportRoute(url, res) {
-    const route = getDebugExportRoute(url);
-    if (!route) {
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("Debug/export route not found");
-      return;
-    }
-
-    switch (route.kind) {
-      case "legacy-dashboard-html":
-        serveLegacyDashboardHtml(res);
-        return;
-      case "generated-dashboard-module":
-        serveFile(OUT_DATA, res, "text/javascript; charset=utf-8");
-        return;
-      case "raw-tracker-export":
-        serveFile(TRACKER_JSON, res, "application/json; charset=utf-8");
-        return;
-      case "raw-activity-export":
-        serveActivityExport(res);
-        return;
-      case "workspace-json-export":
-        if (route.path.endsWith("modes.json")) {
-          serveFile(OUT_MODES, res, "application/json; charset=utf-8");
-        } else if (route.path.endsWith("settings.json")) {
-          serveFile(OUT_SETTINGS, res, "application/json; charset=utf-8");
-        } else {
-          serveFile(OUT_LIBRARY, res, "application/json; charset=utf-8");
-        }
-        return;
-      case "storage-adapter-tracker":
-        serveStorageAdapterTracker(res);
-        return;
-      case "storage-adapter-activity":
-        serveStorageAdapterActivity(res);
-        return;
-      default:
-        res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-        res.end(`Unhandled debug/export route: ${route.kind}`);
-    }
-  }
-
-  function serveLegacyDashboardHtml(res) {
-    if (!existsSync(OUT_HTML)) {
-      res.writeHead(503, { "Content-Type": "text/html; charset=utf-8" });
-      res.end(
-        placeholderPage(
-          "Debug/export dashboard not rendered",
-          "The generated dashboard export is not available yet. The product app remains at <code>/app</code>."
-        )
-      );
-      return;
-    }
-    let html;
-    try {
-      html = readFileSync(OUT_HTML, "utf8");
-    } catch (err) {
-      res.writeHead(500, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end(`Could not read workspace/tracker.html: ${err.message}`);
-      return;
-    }
-    res.writeHead(200, {
-      "Content-Type": "text/html; charset=utf-8",
-      "Cache-Control": "no-store",
-    });
-    res.end(injectLiveReload(html));
-  }
-
-  function serveActivityExport(res) {
-    if (!existsSync(ACTIVITY_JSONL)) {
-      res.writeHead(200, {
-        "Content-Type": "application/x-ndjson; charset=utf-8",
-        "Cache-Control": "no-store",
-      });
-      res.end("");
-      return;
-    }
-    serveFile(ACTIVITY_JSONL, res, "application/x-ndjson; charset=utf-8");
-  }
-
-  function serveStorageAdapterTracker(res) {
-    let data;
-    try {
-      data = adapter.readTracker();
-    } catch (err) {
-      const status = /no tracker\.json/.test(err.message) ? 404 : 500;
-      sendJson(res, status, { error: err.message });
-      return;
-    }
-    sendJson(res, 200, data);
-  }
-
-  function serveStorageAdapterActivity(res) {
-    try {
-      sendJson(res, 200, adapter.readActivity());
-    } catch (err) {
-      sendJson(res, 500, { error: err.message });
-    }
-  }
-
   function buildNotFoundText() {
-    const debugExportPaths = formatRouteList(DEBUG_EXPORT_ROUTES);
-    const staticCompatibilityPaths = formatRouteList(STATIC_COMPATIBILITY_ROUTES);
     return (
       "Not found. Product app route: /app, /app/*.\n" +
-      `Debug/export compatibility routes: ${debugExportPaths}.\n` +
-      `Static compatibility/debug/export routes: ${staticCompatibilityPaths}.\n` +
       "Explicit user-selected chat page: /chat.\n" +
       "Local app APIs include /api/health, /api/runtime/config, /api/skill/run, " +
       "/api/onboard/state, " +
@@ -623,19 +410,6 @@ export function createDevServer({
       "/api/packet/list, /api/packet?id=:id, " +
       "/api/data/*, /api/deep-ingest/*, /api/intake*, /assets/*, /fonts/*, and /__livereload."
     );
-  }
-
-  function serveFile(path, res, contentType) {
-    let body;
-    try {
-      body = readFileSync(path);
-    } catch {
-      res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
-      res.end("File not found");
-      return;
-    }
-    res.writeHead(200, { "Content-Type": contentType, "Cache-Control": "no-store" });
-    res.end(body);
   }
 
   function serveAsset(url, res) {
@@ -916,10 +690,6 @@ function openBrowser(url) {
 }
 
 function printHelp() {
-  const debugExportRoutes = DEBUG_EXPORT_ROUTES.map((route) => route.path).join(", ");
-  const staticCompatibilityRoutes = STATIC_COMPATIBILITY_ROUTES.map(
-    (route) => `  GET  ${route.path.padEnd(32)} Compatibility ${route.label}`
-  ).join("\n");
   process.stdout.write(`rolester tracker-dev — the embedded /app server (React product shell + local APIs)
 
 Usage:
@@ -929,13 +699,6 @@ Usage:
 
 Routes:
   GET  /app, /app/*                     Canonical Vite + React product shell (M7) — build via \`npm run app:build\`
-
-Debug/export compatibility routes:
-  GET  ${debugExportRoutes}
-                                           Generated dashboard/static exports and raw compatibility feeds
-
-Static compatibility/debug/export routes:
-${staticCompatibilityRoutes}
 
 Explicit user-selected chat page:
   GET  /chat                            Conversational ingest-profile interview, turn-by-turn (M2)
@@ -985,6 +748,7 @@ Local app APIs:
   POST /api/data/sourced/promote        sourcedPromote verb
   POST /api/data/comm/message           commAppendMessage verb
   POST /api/data/comm/send              commMarkSent verb (sent-clears-draft)
+  POST /api/track-outcome               Bounded AI status-update classification -> typed appSetStatus/appSetFields write
   POST /api/intake                      Capture a paste/URL into the intake queue + auto-classify (M9)
   GET  /api/intake/list                 Intake queue rows, newest-first (?status=, ?limit=)
   GET  /api/intake/one                  One intake item (?id=)

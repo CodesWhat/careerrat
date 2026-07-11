@@ -4,7 +4,7 @@
 
 Rolester is a local-first job-search engine that is moving from agent-only skill execution toward an Electron/React app runtime where most work is deterministic TypeScript and AI is used only for bounded judgment. The project keeps the existing skill files as orchestration specs for CLI agents, but product flows should run through local APIs, DB verbs, scanners, validators, and small structured AI calls.
 
-The paid app and the free BYO-agent surface should use the same core engine. UI buttons, CLI commands, and agents should converge on one local data/API layer instead of starting a whole `SKILL.md` loop for work that code can perform cheaply and reliably. Compatibility exports can remain for agents and debugging, but they are not product requirements.
+The login-backed app and the developer/BYO fallback should use the same core engine. UI buttons, CLI commands, and agents should converge on one local data/API layer instead of starting a whole `SKILL.md` loop for work that code can perform cheaply and reliably. Compatibility exports can remain for agents and debugging, but they are not product requirements.
 
 ## Core Value
 
@@ -12,8 +12,8 @@ Rolester must complete job-search work locally with predictable cost: determinis
 
 ## Business Context
 
-- **Customer**: Job seekers who want a managed local app without giving up the open-core agent workflow.
-- **Revenue model**: Paid convenience layer for managed AI, packaged desktop UX, updates, and future billing/auth; free BYO-agent remains the funnel.
+- **Customer**: Job seekers who want a managed local app without configuring AI keys or terminal tooling.
+- **Revenue model**: Login-backed managed AI with capped Free + paid tiers; BYO-agent is a developer/internal fallback, not the default customer funnel.
 - **Success metric**: A pilot user can onboard, have sourcing start automatically once enough data exists, keep enriching their profile, discover roles, evaluate, and prepare apply packets from the app with lower AI spend than full skill-agent runs.
 - **Strategy notes**: `ROADMAP.md` Productization and App-first rework sections remain the source for the broader open-core plan.
 

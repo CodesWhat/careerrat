@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Button } from "../../components/Button.jsx";
 import { CompanyAvatar } from "../../components/CompanyAvatar.jsx";
 import { Field, TextField } from "../../components/form.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
@@ -10,6 +9,7 @@ import {
   saveCandidateFile,
   searchLogos,
 } from "../../lib/api.js";
+import { resolveCompanySuggestions } from "../companyCatalog.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
 const SEARCH_DEBOUNCE_MS = 350;
@@ -212,23 +212,35 @@ export function CompaniesStep({
       setSuggestions([]);
       return undefined;
     }
+    let cancelled = false;
+    const localSuggestions = resolveCompanySuggestions({
+      query: trimmed,
+      selectedCompanies: companies,
+    });
+    setSuggestions(localSuggestions);
     const timer = setTimeout(async () => {
       setSearching(true);
       try {
         const res = await searchLogos(trimmed);
-        if (res.ok) {
-          setSuggestions(res.results || []);
-        } else {
-          setSuggestions([]);
-        }
+        if (cancelled) return;
+        setSuggestions(
+          resolveCompanySuggestions({
+            query: trimmed,
+            selectedCompanies: companies,
+            logoResults: res.ok ? res.results || [] : [],
+          })
+        );
       } catch {
-        setSuggestions([]);
+        if (!cancelled) setSuggestions(localSuggestions);
       } finally {
-        setSearching(false);
+        if (!cancelled) setSearching(false);
       }
     }, SEARCH_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [query]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [query, companies]);
 
   useEffect(() => {
     if (!canUseCompanyProposals || proposalBatch || companies.length) return undefined;
@@ -271,6 +283,20 @@ export function CompaniesStep({
     );
     setQuery("");
     setSuggestions([]);
+  }
+
+  function addBestCompanyMatch() {
+    const resolved = resolveCompanySuggestions({
+      query,
+      selectedCompanies: companies,
+      logoResults: suggestions,
+    });
+    const match = resolved[0];
+    if (match) {
+      addCompany(match.name || match.domain, match.domain);
+      return;
+    }
+    addCompany(query, null);
   }
 
   function removeCompany(name) {
@@ -392,25 +418,30 @@ export function CompaniesStep({
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
-                      addCompany(query, null);
+                      addBestCompanyMatch();
                     }
                   }}
                 />
               </Field>
-              {searching ? <p className="field__hint">Searching…</p> : null}
+              {searching ? <p className="field__hint">Resolving…</p> : null}
               {suggestions.length ? (
-                <div className="onboarding-companies__suggestions">
+                // biome-ignore lint/a11y/useAriaPropsSupportedByRole: labelled container for a keyboard-reachable list of match buttons
+                <div className="onboarding-companies__suggestions" aria-label="Company matches">
                   {suggestions.map((s) => (
-                    <div className="company-row" key={`${s.name}-${s.domain}`}>
+                    <button
+                      type="button"
+                      className="company-row company-row--suggestion"
+                      key={`${s.name}-${s.domain}`}
+                      onMouseDown={(event) => event.preventDefault()}
+                      onClick={() => addCompany(s.name || s.domain, s.domain)}
+                    >
                       <CompanyAvatar name={s.name || s.domain} domain={s.domain} />
-                      <span className="company-row__name">{s.name || s.domain}</span>
-                      <Button
-                        variant="secondary"
-                        onClick={() => addCompany(s.name || s.domain, s.domain)}
-                      >
-                        Add
-                      </Button>
-                    </div>
+                      <span className="company-row__main">
+                        <span className="company-row__name">{s.name || s.domain}</span>
+                        {s.domain ? <span className="company-row__domain">{s.domain}</span> : null}
+                      </span>
+                      <span className="company-row__add">Add</span>
+                    </button>
                   ))}
                 </div>
               ) : null}

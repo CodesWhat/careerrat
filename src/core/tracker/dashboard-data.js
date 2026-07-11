@@ -154,35 +154,6 @@ const SANKEY_RESPONSE_META = {
   },
 };
 
-const ICON_PATHS = {
-  mapPin:
-    '<path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0Z"/><circle cx="12" cy="10" r="3"/>',
-  home: '<path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/>',
-  hybrid: '<circle cx="9" cy="9" r="7"/><circle cx="15" cy="15" r="7"/>',
-  building:
-    '<rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2"/>',
-  // building-2: cleaner office tower used for onsite
-  "building-2":
-    '<path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4M10 10h4M10 14h4M10 18h4"/>',
-  // moving truck for relo (plane kept as commented alt)
-  truck:
-    '<path d="M5 18H3c-.6 0-1-.4-1-1V7c0-.6.4-1 1-1h10c.6 0 1 .4 1 1v11"/><path d="M14 9h4l4 4v4c0 .6-.4 1-1 1h-2"/><circle cx="7" cy="18" r="2"/><circle cx="17" cy="18" r="2"/>',
-  // plane alt: '<path d="M17.8 19.2 16 11l3.5-3.5C21 6 21.5 4 21 3c-1-.5-3 0-4.5 1.5L13 8 4.8 6.2c-.5-.1-.9.1-1.1.5l-.3.5c-.2.5-.1 1 .3 1.3L9 12l-2 3H4l-1 1 3 2 2 3 1-1v-3l3-2 3.5 5.3c.3.4.8.5 1.3.3l.5-.2c.4-.3.6-.7.5-1.2z"/>'
-  navigation: '<polygon points="3 11 22 2 13 21 11 13 3 11"/>',
-  flag: '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>',
-  chat: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
-  list: '<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
-  search: '<circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>',
-  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
-  calendar: '<rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/>',
-  check: '<path d="M20 6 9 17l-5-5"/>',
-  send: '<path d="M22 2 11 13"/><path d="M22 2 15 22l-4-9-9-4z"/>',
-  alert:
-    '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
-  star: '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
-  x: '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
-};
-
 const MODE_META = {
   remote: { label: "Remote", icon: "home" },
   hybrid: { label: "Hybrid", icon: "hybrid" },
@@ -296,6 +267,35 @@ const INTERVIEW_ROUND_RE =
 // "rounds" (e.g. a 4-round loop showing as a 9th-round outlier).
 const NON_ROUND_CONV_RE = /\b(?:referral|offer|negotiat|debrief|reference)\w*/i;
 
+// A genuine screen-or-deeper evaluative round, expressed as the typed stage ids a
+// conversations[] entry can carry. Mirrors what INTERVIEW_ROUND_RE matches by text
+// (interview/panel/technical/assessment/onsite/final) — screen is deliberately
+// excluded (a recruiter/phone screen isn't "an interview round"), same as the legacy
+// regex path.
+const ROUND_STAGE_IDS = new Set([
+  "interview",
+  "assessment",
+  "technical",
+  "hiring-manager",
+  "onsite",
+  "final",
+]);
+
+// Newer conversations[] rows carry structured `stage` (a STAGE_ORDER id) and `outcome`
+// ("pending"|"advanced"|"rejected"|"cancelled") fields written by schedule-meeting /
+// track-outcomes. Prefer them when present — they're authoritative — and fall back to
+// the free-text kind/title heuristic only for legacy rows that predate the typed schema.
+function conversationStageId(conv) {
+  const typed = String(conv?.stage || "");
+  return typed && STAGE_ORDER[typed] != null ? typed : null;
+}
+
+function conversationIsWashedOut(conv, text) {
+  const outcome = String(conv?.outcome || "").toLowerCase();
+  if (outcome) return outcome === "rejected" || outcome === "cancelled";
+  return /\b(?:reject|declin|withdraw)\w*/i.test(text);
+}
+
 // The deepest stage an application has actually reached, derived from BOTH the
 // status string and the conversation history. The status string alone tops out
 // wherever the agent last set it (often a generic "interview"), so we also classify
@@ -313,11 +313,15 @@ function furthestStageForApp(app, statusStage = classifyStage(app?.status)) {
   const convs = Array.isArray(app?.conversations) ? app.conversations : [];
   for (const conv of convs) {
     const text = `${conv?.kind || ""} ${conv?.title || ""}`;
-    if (/\b(?:reject|declin|withdraw)\w*/i.test(text)) continue;
-    const scheduling = SCHEDULING_CONV_RE.test(text);
-    if (!scheduling && INTERVIEW_ROUND_RE.test(text)) rounds += 1;
+    if (conversationIsWashedOut(conv, text)) continue;
+    const typedStage = conversationStageId(conv);
+    const scheduling = !typedStage && SCHEDULING_CONV_RE.test(text);
+    const isRound = typedStage
+      ? ROUND_STAGE_IDS.has(typedStage)
+      : !scheduling && INTERVIEW_ROUND_RE.test(text);
+    if (isRound) rounds += 1;
     if (scheduling) continue; // a pending touchpoint never advances the stage
-    const convStage = classifyStage(text);
+    const convStage = typedStage || classifyStage(text);
     const convOrder = STAGE_ORDER[convStage] ?? 0;
     if (convOrder > order && convOrder < STAGE_ORDER.rejected) {
       order = convOrder;
@@ -338,9 +342,10 @@ function deepestRoundStage(app) {
   let bestOrder = 0;
   for (const conv of Array.isArray(app?.conversations) ? app.conversations : []) {
     const text = `${conv?.kind || ""} ${conv?.title || ""}`;
-    if (/\b(?:reject|declin|withdraw)\w*/i.test(text)) continue;
-    if (SCHEDULING_CONV_RE.test(text)) continue;
-    const stage = classifyStage(text);
+    if (conversationIsWashedOut(conv, text)) continue;
+    const typedStage = conversationStageId(conv);
+    if (!typedStage && SCHEDULING_CONV_RE.test(text)) continue;
+    const stage = typedStage || classifyStage(text);
     const order = STAGE_ORDER[stage] ?? 0;
     if (order >= STAGE_ORDER.screen && order < STAGE_ORDER.rejected && order > bestOrder) {
       bestOrder = order;
@@ -363,12 +368,35 @@ function roundCount(app) {
   let rounds = 0;
   for (const conv of Array.isArray(app?.conversations) ? app.conversations : []) {
     const text = `${conv?.kind || ""} ${conv?.title || ""}`;
-    if (/\b(?:reject|declin|withdraw)\w*/i.test(text)) continue;
+    if (conversationIsWashedOut(conv, text)) continue;
+    const typedStage = conversationStageId(conv);
+    if (typedStage) {
+      if (ROUND_STAGE_IDS.has(typedStage)) rounds += 1;
+      continue;
+    }
     if (SCHEDULING_CONV_RE.test(text)) continue;
     if (NON_ROUND_CONV_RE.test(text)) continue; // referral/offer/negotiation/debrief ≠ a round
     rounds += 1;
   }
   return rounds;
+}
+
+// The most recent conversations[] entry carrying a typed `stage` — the structured
+// source of truth for "what round just happened and how did it go" (conv.outcome),
+// used to decide whether a passed interview still needs its outcome logged. Returns
+// null for legacy rows with no typed conversations so callers fall back to treating
+// the outcome as unknown/pending rather than fabricating one.
+function latestTypedConversation(app) {
+  const convs = (Array.isArray(app?.conversations) ? app.conversations : []).filter((conv) =>
+    conversationStageId(conv)
+  );
+  if (!convs.length) return null;
+  return convs.reduce((latest, conv) => {
+    if (!latest) return conv;
+    return (parseTime(conv.date) ?? -Infinity) >= (parseTime(latest.date) ?? -Infinity)
+      ? conv
+      : latest;
+  }, null);
 }
 
 function isAdvanced(app) {
@@ -650,6 +678,35 @@ function networkRecord(records, company) {
   return records.get(key);
 }
 
+// Shared "this looks like an automated/system sender, not a person" check —
+// used both to reject junk names in cleanContactName() and to skip the
+// email-derived display-name fallback in addNetworkContact() below.
+const SYSTEM_SENDER_RE =
+  /\b(no reply|noreply|notification|candidate portal|portal|workday|ashby|greenhouse)\b/i;
+
+// Loose but reliable email-shape check — reused everywhere dashboard-data.js
+// needs to tell an address apart from a plain name string, instead of each
+// call site hand-rolling its own regex.
+function isEmailLike(value) {
+  return /^[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+$/.test(String(value || "").trim());
+}
+
+// Last-resort display name for a contact we only know by email address (e.g.
+// an inbound message whose `from` is a bare address with no display name):
+// "jane.doe@co.example" -> "Jane Doe". Domain-neutral — no assumptions beyond
+// the address's own separators.
+function nameFromEmail(email) {
+  const local = String(email || "")
+    .split("@")[0]
+    .trim();
+  const parts = local
+    .split(/[._+-]+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase());
+  return parts.join(" ");
+}
+
 function cleanContactName(value, company) {
   const companyName = normalizeName(company);
   // Strip HTML tags in a loop so nested-tag patterns don't leave fragments.
@@ -673,12 +730,7 @@ function cleanContactName(value, company) {
     (activeCandidateName && normalized === activeCandidateName)
   )
     return "";
-  if (
-    /@/.test(text) ||
-    /\b(no reply|noreply|notification|candidate portal|portal|workday|ashby|greenhouse)\b/i.test(
-      text
-    )
-  ) {
+  if (/@/.test(text) || SYSTEM_SENDER_RE.test(text)) {
     return "";
   }
   return text;
@@ -694,19 +746,48 @@ function contactTypeFromText(value, fallback = "Recruiter") {
   return fallback;
 }
 
-function addNetworkContact(record, rawName, { company, type, context = "", note = "" } = {}) {
-  const name = cleanContactName(rawName, company || record.company);
+function addNetworkContact(
+  record,
+  rawName,
+  { company, type, context = "", note = "", email = "", title = "", platform = "" } = {}
+) {
+  let name = cleanContactName(rawName, company || record.company);
+  // Prefer an explicitly-passed email; fall back to rawName itself when the
+  // caller handed us a bare address (e.g. message.from/to in an email thread).
+  const emailValue = isEmailLike(email)
+    ? String(email).trim()
+    : isEmailLike(rawName)
+      ? String(rawName).trim()
+      : "";
+  // No usable display name (common when all we have is a bare email) — derive
+  // one from the address rather than dropping the contact entirely, unless it
+  // looks like an automated/system sender.
+  if (!name && emailValue && !SYSTEM_SENDER_RE.test(emailValue)) {
+    name = nameFromEmail(emailValue);
+  }
   if (!name) return;
   const contactType = type || contactTypeFromText(`${rawName} ${context} ${note}`);
   if (contactType === "Portal") return;
   const key = `${normalizeName(contactType)}:${normalizeName(name)}`;
   const existing = record.contactMap.get(key);
   const summary = firstSentence(note || context, "Relationship context captured in tracker.");
+  const titleValue = compactUiText(title, 80);
+  const platformValue = compactUiText(platform, 40);
   if (existing) {
     existing.note = existing.note || summary;
+    existing.email = existing.email || emailValue;
+    existing.title = existing.title || titleValue;
+    existing.platform = existing.platform || platformValue;
     return;
   }
-  record.contactMap.set(key, { type: contactType, name, note: compactUiText(summary, 96) });
+  record.contactMap.set(key, {
+    type: contactType,
+    name,
+    note: compactUiText(summary, 96),
+    email: emailValue,
+    title: titleValue,
+    platform: platformValue,
+  });
 }
 
 function latestNetworkDate(record, ...values) {
@@ -745,6 +826,9 @@ function addNetworkCommunication(record, comm) {
       type: contactTypeFromText(participant.role, "Recruiter"),
       context: participant.role,
       note: comm.summary,
+      email: participant.email,
+      title: participant.role,
+      platform: comm.channel,
     });
   }
 
@@ -756,6 +840,8 @@ function addNetworkCommunication(record, comm) {
         type: contactTypeFromText(`${message.from} ${message.summary}`, "Recruiter"),
         context: message.subject,
         note: message.summary,
+        email: message.from,
+        platform: comm.channel,
       });
     }
     if (message.direction === "outbound-sent" || message.direction === "outbound-draft") {
@@ -765,6 +851,8 @@ function addNetworkCommunication(record, comm) {
           type: contactTypeFromText(`${to} ${message.summary}`, "Recruiter"),
           context: message.subject,
           note: message.summary,
+          email: to,
+          platform: comm.channel,
         });
       }
     }
@@ -819,6 +907,8 @@ function addNetworkRelationshipLead(record, lead, app) {
       type: normalized.type,
       context: normalized.title,
       note: normalized.note,
+      title: normalized.title,
+      platform: normalized.platform,
     });
   }
   return normalized;
@@ -1108,10 +1198,32 @@ function commActionDue(comm = {}, now = new Date()) {
   return daysBetween(due, now) >= 0;
 }
 
+// A "scheduled" comm thread whose follow-up point WAS a specific interview — nextAction
+// like "Final onsite 2026-06-28" — stops being independently actionable once that
+// interview's grace window has passed with no newer round booked (interviewFocusActive
+// false). Without this gate commActionDue never expires: it only checks
+// daysBetween>=0, so a comm row pinned to a now-past interview date reads as "due" every
+// day forever and floats to #1 by oldest-date-wins. buildInterviewFollowUpSteps emits the
+// real, structured "log the outcome" item in its place — see buildNextSteps.
+function isStaleInterviewComm(comm, app, now) {
+  if (!app || comm.status !== "scheduled") return false;
+  const at = scheduledInterviewAt(app);
+  if (!at) return false;
+  if (interviewFocusActive(app, now)) return false; // still upcoming / within grace
+  const interviewTime = parseTime(at);
+  if (interviewTime == null) return false;
+  const commDue = parseTime(comm.nextActionDue) ?? parseTime(comm.lastInboundAt);
+  if (commDue == null) return false;
+  // The comm's own follow-up point is at-or-before that interview — it was pinned to
+  // this round, not a newer ask raised after it (which stays live on its own merits).
+  return commDue <= interviewTime;
+}
+
 // Whether a comm thread is the candidate's to act on right now. Passive (waiting-on-them)
 // statuses surface only when their follow-up timer has fired; everything else open does.
-function commIsActionable(comm = {}, now = new Date()) {
+function commIsActionable(comm = {}, now = new Date(), app = null) {
   if (comm.status === "closed") return false;
+  if (isStaleInterviewComm(comm, app, now)) return false;
   if (PASSIVE_COMM_STATUSES.has(comm.status)) return commActionDue(comm, now);
   return true;
 }
@@ -1123,11 +1235,13 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
   const openCommStatuses = new Set(["needs-reply", "drafted", "blocked"]);
 
   const commSteps = communications
-    .filter(
-      (comm) =>
-        commIsActionable(comm, now) &&
+    .filter((comm) => {
+      const app = appById.get(comm.applicationId);
+      return (
+        commIsActionable(comm, now, app) &&
         (openCommStatuses.has(comm.status) || hasRealActionText(comm.nextAction))
-    )
+      );
+    })
     .map((comm) => {
       const app = appById.get(comm.applicationId);
       const dueAt = comm.nextActionDue || comm.lastInboundAt;
@@ -1135,7 +1249,9 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
       const stepDueText = dueText(dueAt, now);
       const tone = dueTone(dueAt, now);
       const title = comm.nextAction || "Reply needed";
-      const detail = comm.summary || comm.subject || app?.role || "";
+      // Queue/focus-visible text stays templated, never the freeform comm.summary prose
+      // (that belongs in the drawer only) — the role title is the short, factual stand-in.
+      const detail = app?.role || comm.subject || "";
       const actionLabel = nextStepActionLabel({
         title,
         detail,
@@ -1158,6 +1274,14 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
       };
     });
 
+  // A structured "log the interview outcome" item for every active application whose
+  // scheduled interview has passed (grace window elapsed, no newer round booked) and
+  // whose latest typed conversation outcome is still pending/unset. This is the
+  // legitimate replacement for the stale comm masquerade gated out by
+  // isStaleInterviewComm above — it counts exactly once, reads only structured fields
+  // (interviewAt/nextInterviewAt + conversations[].outcome), and never touches prose.
+  const interviewFollowUpSteps = buildInterviewFollowUpSteps(trackerData, now);
+
   const followUpSteps = applications
     .filter((app) => {
       if (!app.followUp) return false;
@@ -1174,7 +1298,8 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
       const stepDueText = dueText(dueAt, now);
       const tone = dueTone(dueAt, now);
       const title = followUpTitle(app);
-      const detail = app.role || app.statusNote || firstSentence(app.note) || "";
+      // Templated, non-prose: the role title only. statusNote/note are drawer-only.
+      const detail = app.role || "";
       const actionLabel = nextStepActionLabel({ title, detail, source: "follow-up", app });
       return {
         title,
@@ -1202,7 +1327,8 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
       const stepDueText = dueText(dueAt, now);
       const tone = dueTone(dueAt, now);
       const title = String(app.nextAction || "").trim();
-      const detail = app.statusNote || firstSentence(app.note) || app.role || "";
+      // Templated, non-prose: the role title only. statusNote/note are drawer-only.
+      const detail = app.role || "";
       const actionLabel = nextStepActionLabel({ title, detail, source: "application", app });
       return {
         title,
@@ -1219,8 +1345,72 @@ function buildNextSteps(trackerData, now, { limit = 3 } = {}) {
       };
     });
 
-  const ordered = [...commSteps, ...applicationSteps, ...followUpSteps].sort(sortByQueuePriority);
+  const ordered = [
+    ...commSteps,
+    ...interviewFollowUpSteps,
+    ...applicationSteps,
+    ...followUpSteps,
+  ].sort(sortByQueuePriority);
   return limit == null ? ordered : ordered.slice(0, limit);
+}
+
+// The structured post-interview item: once an application's scheduled interview has
+// passed (grace window elapsed, no newer round booked — same interviewFocusActive gate
+// buildInterviewFocus uses) and its latest typed conversation outcome is still
+// "pending" (or unset, for legacy rows with no typed conversations), the candidate owes
+// a real action — log what happened — not a resurrected "reply" to a thread about a call
+// that already happened. Reads ONLY structured fields (interviewAt/nextInterviewAt +
+// conversations[].outcome), never comm.summary or freeform notes, and fires at most once
+// per application (there is exactly one "latest" interview per app at any time).
+function buildInterviewFollowUpSteps(trackerData, now) {
+  const applications = trackerData?.applications || [];
+  return applications
+    .filter((app) => isActive(app))
+    .map((app) => {
+      const at = scheduledInterviewAt(app);
+      if (!at || interviewFocusActive(app, now)) return null;
+      const interviewTime = parseTime(at);
+      if (interviewTime == null) return null;
+      const latestConv = latestTypedConversation(app);
+      const outcome = String(latestConv?.outcome || "")
+        .trim()
+        .toLowerCase();
+      if (outcome && outcome !== "pending") return null; // already logged elsewhere
+      const stageId = furthestStageForApp(app).stage;
+      const stageLabel = stageGroupLabel(stageId);
+      const company = app.company || "Unknown company";
+      const stepDueText = dueText(at, now);
+      const tone = dueTone(at, now);
+      const title = `Log ${company} ${stageLabel} outcome`;
+      const dateLabel = formatDateShort(String(at).slice(0, 10));
+      const meta = `${stageLabel} was ${dateLabel} · awaiting your outcome note`;
+      const actionLabel = nextStepActionLabel({
+        title,
+        detail: stageLabel,
+        source: "interview-followup",
+        app,
+      });
+      return {
+        title,
+        company,
+        detail: app.role || "",
+        meta,
+        dueAt: at,
+        dueText: stepDueText,
+        supportingText: queueSupportingText(company, stepDueText, tone),
+        tone,
+        actionLabel,
+        actionToneClass: nextStepActionToneClass(actionLabel, tone),
+        detailId: app.id || "",
+        // Sorts alongside real comm asks (oldest-due-wins) — a 12-day-overdue outcome is
+        // exactly as urgent as a 12-day-overdue reply, so it earns the same queue slot.
+        source: "communication",
+        kind: "interview-followup",
+        stageId,
+        stageLabel,
+      };
+    })
+    .filter(Boolean);
 }
 
 // Turn tracker.storyEnrichment (mirrored from each story's open_questions by
@@ -1307,6 +1497,38 @@ function interviewFocusActive(app, now) {
   return time + INTERVIEW_FOCUS_GRACE_MS >= now.getTime();
 }
 
+// Structured logistics + prep-dossier snapshot for a single application — the same
+// richness buildInterviewFocus always featured, now shared so the action AND
+// interview-followup Focus branches reach it too instead of leaving facts/dossier
+// empty. Safe to call with a missing app (a comm with no linked application resolves
+// to sensible, empty defaults rather than throwing).
+function focusAppContext(app) {
+  const role = app?.role || "Open role";
+  const company = app?.company || "Unknown company";
+  // Logistics only — comp/fit stay in the drawer (Tracker Content Register).
+  const facts = [
+    app?.mode ? { label: "Format", value: titleCase(app.mode) } : null,
+    app?.loc ? { label: "Location", value: app.loc } : null,
+  ].filter(Boolean);
+  const rawDossier = app?.artifacts?.interviewDossier || null;
+  const hasDossier = Boolean(rawDossier?.markdown);
+  const dossier = {
+    title: rawDossier?.title || `${company} — ${role}`,
+    subtitle: app?.interviewNote || `${company} · ${role}`,
+    round: rawDossier?.round || "",
+    generatedAt: rawDossier?.generatedAt || "",
+    markdown: rawDossier?.markdown || "",
+  };
+  return { role, company, facts, dossier, hasDossier };
+}
+
+// The Focus card's generic-action CTA verb, derived from the same nextStepActionLabel
+// classification the Next Steps queue already uses — never a hardcoded "Handle next
+// action" that reads wrong once the underlying item is legitimately something else.
+function focusCtaForActionLabel(label) {
+  return label === "Interview" ? "Prep this interview" : "Handle reply";
+}
+
 function buildInterviewFocus(trackerData, now) {
   // The Focus card features an interview ONLY when a real round is scheduled and still
   // upcoming (within the grace window). An interview-stage app with no booked next round
@@ -1323,47 +1545,30 @@ function buildInterviewFocus(trackerData, now) {
   if (!selected) return null;
 
   const app = selected.app;
-  const role = app.role || "Open role";
-  const company = app.company || "Unknown company";
-  // Structured logistics facts so the dossier card reads full and scannable.
-  // Logistics only — comp/fit stay in the drawer (Tracker Content Register).
-  const facts = [
-    app.mode ? { label: "Format", value: titleCase(app.mode) } : null,
-    app.loc ? { label: "Location", value: app.loc } : null,
-  ].filter(Boolean);
-  // The featured interview's prep document. interview-prep writes this artifact when an
-  // upcoming interview becomes the Focus item; "Open dossier" previews it full-page. When
-  // no dossier exists yet, the card prompts to build one instead of opening an empty modal.
-  const rawDossier = app.artifacts?.interviewDossier || null;
-  const hasDossier = Boolean(rawDossier?.markdown);
-  const dossier = {
-    title: rawDossier?.title || `${company} — ${role}`,
-    subtitle: app.interviewNote || `${company} · ${role}`,
-    round: rawDossier?.round || "",
-    generatedAt: rawDossier?.generatedAt || "",
-    markdown: rawDossier?.markdown || "",
-  };
+  const { role, company, facts, dossier, hasDossier } = focusAppContext(app);
+  // Focus card interview slot reads ONLY the typed interviewNote — logistics, nothing
+  // about comp/fit (those route to the drawer). Legacy rows with only app.note fall
+  // back to a generic line, not the old mixed-topic blob.
+  const meta =
+    app.interviewNote ||
+    (hasDossier
+      ? "Dossier ready — open to review prep context."
+      : "Interview scheduled — generate your prep dossier.");
   return {
     kind: "interview",
-    label: hasDossier ? "Interview dossier" : "Upcoming interview",
+    // The round the app has actually reached (typed conversations preferred) — e.g.
+    // "Onsite" / "Final" / "Hiring manager" — not a generic "Interview" bucket.
+    type: stageGroupLabel(furthestStageForApp(app).stage),
     title: hasDossier ? "Interview dossier" : "Upcoming interview",
     company,
     role,
+    meta,
+    dueText: selected.dueAt ? dueText(selected.dueAt, now) : "Prep",
+    dueAt: selected.dueAt || "",
+    tone: dueTone(selected.dueAt, now),
     facts,
     dossier,
     hasDossier,
-    detail: `${company} · ${role}`,
-    // Focus card interview slot reads ONLY the typed interviewNote — logistics, nothing
-    // about comp/fit (those route to the drawer). Legacy rows with only app.note fall
-    // back to a generic line, not the old mixed-topic blob.
-    note:
-      app.interviewNote ||
-      (hasDossier
-        ? "Dossier ready — open to review prep context."
-        : "Interview scheduled — generate your prep dossier."),
-    dueAt: selected.dueAt,
-    dueText: selected.dueAt ? dueText(selected.dueAt, now) : "Prep",
-    tone: dueTone(selected.dueAt, now),
     detailId: app.id || "",
     // Only offer "Open dossier" when one actually exists, so the CTA never opens empty.
     cta: hasDossier ? "Open dossier" : "Prep this interview",
@@ -1374,56 +1579,95 @@ function buildFocusCard(trackerData, { now, nextSteps, latestRoles } = {}) {
   const interview = buildInterviewFocus(trackerData, now);
   if (interview) return interview;
 
-  const action = nextSteps?.[0];
-  if (action) {
+  const applications = trackerData?.applications || [];
+  const appById = new Map(applications.map((app) => [app.id, app]));
+
+  const primary = nextSteps?.[0];
+  if (primary) {
+    const app = appById.get(primary.detailId);
+    const ctx = focusAppContext(app);
+
+    if (primary.kind === "interview-followup") {
+      // Same structured richness as the interview branch (facts/dossier/hasDossier
+      // resolved off the actual application) — the item just points at a round that
+      // already happened and needs its outcome logged, not a phantom reply.
+      return {
+        kind: "interview-followup",
+        type: primary.stageLabel || stageGroupLabel(primary.stageId || ""),
+        title: primary.title,
+        company: primary.company,
+        role: app?.role || primary.detail || "Open role",
+        meta: primary.meta || primary.supportingText || "",
+        dueText: primary.dueText,
+        dueAt: primary.dueAt || "",
+        tone: primary.tone,
+        facts: ctx.facts,
+        dossier: ctx.dossier,
+        hasDossier: ctx.hasDossier,
+        detailId: primary.detailId || "",
+        cta: "Log outcome",
+      };
+    }
+
+    // Generic next action (comm reply, application follow-up nudge, …). Resolve the
+    // underlying application so role/facts/dossier reach the same richness as the
+    // interview branches instead of leaking the queue item's own templated stand-ins.
+    const type = primary.actionLabel || "Review";
+    const meta = primary.supportingText || `${primary.company} · ${primary.dueText}`;
     return {
       kind: "action",
-      label: "Next action",
-      title: action.title,
-      company: action.company,
-      role: action.detail || "",
-      detail: action.detail || `${action.company} · ${action.dueText}`,
-      note:
-        action.supportingText ||
-        firstSentence(action.detail) ||
-        "This is the next item waiting on you.",
-      dueAt: action.dueAt,
-      dueText: action.dueText,
-      tone: action.tone,
-      detailId: action.detailId || "",
-      cta: "Handle next action",
+      type,
+      title: primary.title,
+      company: primary.company,
+      role: app?.role || primary.detail || "Open role",
+      meta,
+      dueText: primary.dueText,
+      dueAt: primary.dueAt || "",
+      tone: primary.tone,
+      facts: ctx.facts,
+      dossier: ctx.dossier,
+      hasDossier: ctx.hasDossier,
+      detailId: primary.detailId || "",
+      cta: focusCtaForActionLabel(type),
     };
   }
 
   const role = latestRoles?.[0];
   if (role) {
+    const meta = `${role.fit} fit · ${titleCase(role.status)}`;
     return {
       kind: "review",
-      label: "Review queue",
+      type: "Review",
       title: "Best new role",
       company: role.company,
       role: role.role,
-      detail: `${role.fit} · ${role.status}`,
-      note: "No urgent action is ahead of the source queue.",
-      dueAt: "",
+      meta,
       dueText: "Review",
+      dueAt: "",
       tone: "secondary",
+      facts: [],
+      dossier: null,
+      hasDossier: false,
       detailId: role.detailId || "",
       cta: "Review roles",
     };
   }
 
+  const clearMeta =
+    "When new tracker activity arrives, the focus card will promote the next useful item.";
   return {
     kind: "clear",
-    label: "All clear",
+    type: "",
     title: "No urgent action",
     company: "Rolester",
     role: "",
-    detail: "The dashboard has no interview, reply, or review item to elevate.",
-    note: "When new tracker activity arrives, the focus card will promote the next useful item.",
-    dueAt: "",
+    meta: clearMeta,
     dueText: "Clear",
+    dueAt: "",
     tone: "secondary",
+    facts: [],
+    dossier: null,
+    hasDossier: false,
     detailId: "",
     cta: "Review dashboard",
   };
@@ -1873,7 +2117,7 @@ function addCalendarEvent(events, seen, event) {
 function communicationCalendarEvent(comm, app, now) {
   // Only surface comms the candidate has something to DO right now. Passive/closed
   // threads belong in Next Steps or nowhere — not on the calendar time grid.
-  if (!commIsActionable(comm, now)) return null;
+  if (!commIsActionable(comm, now, app)) return null;
   const action = String(comm.nextAction || "").trim();
   if (!action || /^none|n\/a$/i.test(action)) return null;
   const dueAt = comm.nextActionDue || comm.lastInboundAt;
@@ -3081,95 +3325,6 @@ const AVATAR_CLASSES = [
 // Set during buildDashboardViewModel.
 let activeCandidateName = "";
 
-// The stored `domain` is usually the application PORTAL, not the employer. Keying
-// logo.dev on these would paint every Ashby/Greenhouse job with the ATS's own
-// logo, so they can never be a logo source. (Real fix is upstream: capture the
-// company domain when a job is added — see ui-change-queue B9.)
-const ATS_LOGO_DOMAINS = new Set([
-  "ashbyhq.com",
-  "greenhouse.io",
-  "lever.co",
-  "myworkday.com",
-  "myworkdayjobs.com",
-  "workday.com",
-  "breezy.hr",
-  "workable.com",
-  "jobvite.com",
-  "smartrecruiters.com",
-  "icims.com",
-  "bamboohr.com",
-  "recruitee.com",
-  "teamtailor.com",
-  "linkedin.com",
-  "indeed.com",
-  "wellfound.com",
-  "linkedin.net",
-]);
-
-function companyDomainForLogo(domain) {
-  let host = String(domain || "")
-    .trim()
-    .toLowerCase()
-    .replace(/^https?:\/\//, "")
-    .replace(/\/.*$/, "")
-    .replace(/^www\./, "");
-  if (!host) return "";
-  // Strip a leading careers/jobs portal subdomain to recover the employer apex
-  // (jobs.apple.com → apple.com, careers.datadoghq.com → datadoghq.com).
-  host = host.replace(
-    /^(careers?|jobs|job-boards|boards|apply|talent|hire|recruiting|work|explore\.jobs|explore)\./,
-    ""
-  );
-  const registrable = host.split(".").slice(-2).join(".");
-  if (ATS_LOGO_DOMAINS.has(host) || ATS_LOGO_DOMAINS.has(registrable)) return "";
-  return host;
-}
-
-// Resolve a cached logo URL with two strategies, in precision order:
-//   1. Domain — when we have a CLEAN, real employer domain (apple.com), key on it.
-//      Most precise; immune to name collisions.
-//   2. Name search — include the company name so the server cache route can use
-//      logo.dev's /name/ lookup when there is no clean employer domain.
-// A clean domain auto-overrides name search as we capture real domains upstream.
-function buildLogoUrl(domain, name) {
-  const host = companyDomainForLogo(domain);
-  const company = String(name || "").trim();
-  const params = [];
-  if (host) params.push(`domain=${encodeURIComponent(host)}`);
-  if (company) params.push(`name=${encodeURIComponent(company)}`);
-  return params.length ? `/api/logos/img?${params.join("&")}` : "";
-}
-
-// The /api/logos/img cache route forwards &theme=dark to logo.dev and stores a
-// separate dark image. We bake the suffix in at render and re-point every logo on
-// theme toggle (see syncLogoTheme in the shell). The base URL is kept on
-// data-logo-base so the toggle can rebuild the src either way.
-function logoThemeSuffix() {
-  try {
-    return document.documentElement.getAttribute("data-theme") === "dark" ? "&theme=dark" : "";
-  } catch (_e) {
-    return "";
-  }
-}
-
-// One avatar surface: a real logo masking an initials chip, or just the chip.
-// `wrapperClass` carries the size/shape/color utilities for the call site.
-// `logoSrc` is an OPTIONAL explicit image path (e.g. a bundled demo-corp logo); when
-// present it wins over the logo.dev lookup. Real workspaces never set it, so this stays
-// domain-neutral — it's just "use the logo the data already carries, else resolve one."
-function avatarMarkup(domain, name, initialsText, wrapperClass, logoSrc) {
-  const safeInitials = esc(initialsText);
-  if (logoSrc) {
-    return `<span class="${wrapperClass} avatar-has-logo"><img class="avatar-logo-img" src="${esc(logoSrc)}" alt="" loading="lazy" onerror="this.remove()"><span class="avatar-logo-initials">${safeInitials}</span></span>`;
-  }
-  const base = buildLogoUrl(domain, name);
-  if (!base) {
-    return `<span class="${wrapperClass}">${safeInitials}</span>`;
-  }
-  const src = base + logoThemeSuffix();
-  return `<span class="${wrapperClass} avatar-has-logo"><img class="avatar-logo-img" src="${esc(src)}" data-logo-base="${esc(base)}" alt="" loading="lazy" onerror="this.remove()"><span class="avatar-logo-initials">${safeInitials}</span></span>`;
-}
-
 function titleCase(value) {
   return String(value || "")
     .replace(/[-_]+/g, " ")
@@ -3207,12 +3362,6 @@ function normalizeFit(value) {
   const fit = Number(value || 0);
   if (!Number.isFinite(fit)) return 0;
   return Math.max(0, Math.min(100, Math.round(fit)));
-}
-
-function inlineIcon(name, className = "jobs-inline-icon") {
-  const path = ICON_PATHS[name];
-  if (!path) return "";
-  return `<svg class="${esc(className)}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${path}</svg>`;
 }
 
 function baseAskK(value) {
@@ -3343,7 +3492,7 @@ function firstMessageSummary(comm = {}) {
 function communicationAction(comm = {}, app = {}, now = new Date()) {
   if (comm.status === "closed") return null;
   // Waiting-on-them threads aren't the candidate's action until a follow-up timer fires.
-  if (!commIsActionable(comm, now)) return null;
+  if (!commIsActionable(comm, now, app)) return null;
   const title = String(comm.nextAction || "").trim();
   if (!title && comm.status !== "needs-reply") return null;
   const dueAt = comm.nextActionDue || comm.lastInboundAt || comm.updatedAt || "";
@@ -4960,1820 +5109,4 @@ export function buildActivityPulse(events = [], { now = new Date(), limit = 12 }
         appId: e.refs?.applicationId || "",
       };
     });
-}
-
-function activitySourceMarker(actor) {
-  if (actor === "world") {
-    // Inline SVG (not the material-symbols ligature, which renders as mono text in
-    // this dashboard) so the world marker is a real icon regardless of icon-font load.
-    return '<span class="source-icon source-icon-email" data-tooltip="World event" title="World event" role="img" aria-label="World event"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m22 7-8.991 5.727a2 2 0 0 1-2.009 0L2 7"/><rect x="2" y="4" width="20" height="16" rx="2"/></svg></span>';
-  }
-  return '<span class="source-icon source-icon-rolester" data-tooltip="Rolester" title="Rolester" role="img" aria-label="Rolester"><img src="../../assets/logo.png" alt="" /></span>';
-}
-
-function activityDotIcon(row) {
-  return `<svg class="pulse-dot-icon ${esc(row.iconClass)}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${row.iconPath}</svg>`;
-}
-
-function activityTags(tags) {
-  if (!tags.length) return "";
-  const chips = tags
-    .map(
-      (t) =>
-        `<span class="px-1.5 py-0.5 bg-on-tertiary-container/10 text-on-tertiary-container rounded text-[10px] font-bold">${esc(t)}</span>`
-    )
-    .join("");
-  return `<div class="flex gap-1.5 flex-wrap mt-1.5">${chips}</div>`;
-}
-
-function activityCta() {
-  // The pulse feed is read-only history — it never renders a live CTA. A finished
-  // action self-clears in the derived action surfaces (Next Steps / Action Queue /
-  // drawer), which read tracker.json; an immutable event must never carry a button
-  // that outlives the work. See docs/activity-and-action-state.md. The whole row is
-  // navigable to its job via data-detail-id on renderActivityRow instead.
-  return "";
-}
-
-function renderActivityRow(row, isLast) {
-  const inner = `
-            <div class="flex items-center gap-2 mb-0.5 flex-wrap">
-              <span class="font-label-caps text-label-caps text-outline font-data-mono">${esc(row.relTime)}</span>
-              ${activitySourceMarker(row.actor)}
-            </div>
-            <div class="font-bold ${esc(row.titleClass)} text-[13px] leading-tight mb-0.5">${esc(row.title)}</div>
-            ${row.summary ? `<div class="text-[12px] text-on-surface-variant leading-snug">${esc(row.summary)}</div>` : ""}
-            ${activityTags(row.tags)}
-            ${activityCta(row)}`;
-  const body = row.tintClass
-    ? `<div class="${esc(row.tintClass)} rounded-lg p-3">${inner}</div>`
-    : inner;
-  // The last row drops the trailing connector line and uses tighter bottom padding.
-  // A row tied to an application is navigable to its job drawer (history → context),
-  // via the same [data-next-step-item][data-detail-id] delegation the queue uses.
-  const nav = row.appId
-    ? ` data-next-step-item data-detail-id="${esc(row.appId)}" role="button" tabindex="0"`
-    : "";
-  return `
-        <div class="relative flex gap-3 ${isLast ? "pb-2" : "pb-5"}${row.appId ? " cursor-pointer" : ""}"${nav}>
-          ${isLast ? "" : '<div class="pulse-connector"></div>'}
-          <div class="pulse-dot ${esc(row.dotClass)}">${activityDotIcon(row)}</div>
-          <div class="flex-1 min-w-0">${body}</div>
-        </div>`;
-}
-
-function renderActivityEmpty() {
-  return `
-        <div class="py-8 text-center text-[12px] text-on-surface-variant">
-          No activity yet. As Rolester sources, evaluates, tailors, and tracks roles, each action shows up here.
-        </div>`;
-}
-
-export function renderActivityPulse(rows) {
-  if (!rows || rows.length === 0) return renderActivityEmpty();
-  return rows.map((row, i) => renderActivityRow(row, i === rows.length - 1)).join("");
-}
-
-function focusToneClass(tone) {
-  if (tone === "error") return "text-error";
-  if (tone === "warning") return "text-[#e0a93b]";
-  return "text-on-tertiary-container";
-}
-
-function renderFocusCard(focus) {
-  if (!focus) return "";
-  // Interview focus: the CTA opens the full-page dossier preview (NOT the generic job
-  // drawer). Any other focus kind keeps the drawer-delegation behaviour.
-  const buttonAttrs =
-    focus.kind === "interview" && focus.detailId && focus.hasDossier
-      ? ` data-open-dossier="${esc(focus.detailId)}"`
-      : focus.detailId
-        ? ` data-next-step-item data-detail-id="${esc(focus.detailId)}"`
-        : "";
-  const facts = Array.isArray(focus.facts) ? focus.facts : [];
-  const factsHtml = facts.length
-    ? `<dl class="focus-card-facts">${facts
-        .map((fact) => `<div><dt>${esc(fact.label)}</dt><dd>${esc(fact.value)}</dd></div>`)
-        .join("")}</dl>`
-    : "";
-  return `
-        <div class="focus-card-copy">
-          <h3 class="focus-card-title">${esc(focus.title)}</h3>
-          <p class="focus-card-meta">${esc(focus.company)}${focus.role ? ` · ${esc(focus.role)}` : ""}</p>
-          <p class="focus-card-note">${esc(focus.note)}</p>
-          ${factsHtml}
-        </div>
-        <div class="focus-card-actions">
-          <span class="focus-card-due ${esc(focusToneClass(focus.tone))}">${esc(focus.dueText)}</span>
-          <button type="button" class="focus-card-cta"${buttonAttrs}>${esc(focus.cta)}</button>
-        </div>`;
-}
-
-export function renderNextSteps(steps) {
-  return steps
-    .map((step) => {
-      const content = `
-          <div class="min-w-0">
-            <div class="font-bold text-primary text-[14px] leading-tight">${esc(step.title)}</div>
-            <p class="mt-1 text-[12px] text-on-surface-variant">${esc(step.supportingText || `${step.company} · ${step.dueText}`)}</p>
-          </div>
-          <span class="font-label-caps text-label-caps ${esc(step.actionToneClass || "text-secondary")} uppercase font-data-mono">${esc(step.actionLabel || "Review")}</span>`;
-      if (step.detailId) {
-        return `
-        <button type="button" class="grid w-full cursor-pointer grid-cols-[1fr_auto] items-center gap-3 px-4 py-4 text-left transition-colors hover:bg-surface-container-low" data-next-step-item data-detail-id="${esc(step.detailId)}">
-          ${content}
-        </button>`;
-      }
-      return `
-        <div class="grid grid-cols-[1fr_auto] items-center gap-3 px-4 py-4">
-          ${content}
-        </div>`;
-    })
-    .join("");
-}
-
-function fitToneClass(fit) {
-  if (fit >= 80) return "text-on-tertiary-container";
-  if (fit >= 70) return "text-[#e0a93b]";
-  return "text-outline";
-}
-
-function renderLatestRoles(roles) {
-  if (!roles.length) return "";
-  return roles
-    .map((role) => {
-      // Every role row opens its job drawer (same delegation the queue/jobs cards use).
-      const nav = role.detailId
-        ? ` data-next-step-item data-detail-id="${esc(role.detailId)}"`
-        : "";
-      return `
-        <button type="button" class="grid w-full cursor-pointer grid-cols-[1fr_auto] items-center gap-3 px-4 py-3 text-left transition-colors"${nav}>
-          <div class="min-w-0">
-            <div class="font-bold text-primary text-[14px] leading-tight">${esc(role.company)}</div>
-            <div class="mt-1 text-[12px] text-on-surface-variant">${esc(role.role)} · ${esc(role.status)}</div>
-          </div>
-          <span class="jobs-fit" style="--jobs-fit-color:${esc(fitToneColor(role.fit))}" title="Triage fit score">
-            <span>${esc(role.fit)}</span>
-          </span>
-        </button>`;
-    })
-    .join("");
-}
-
-function sourcedRoleGateClass(fitBucket) {
-  const b = String(fitBucket || "").toLowerCase();
-  if (b === "keep") return "text-on-tertiary-container";
-  if (b === "review") return "text-[#e0791f]";
-  return "text-outline";
-}
-
-function renderSourcedRoles(roles) {
-  if (!roles.length) {
-    return `<div class="px-5 py-8 text-center text-[13px] text-on-surface-variant">No sourced roles yet.</div>`;
-  }
-  return roles
-    .map((role) => {
-      const fitColor = fitToneColor(role.fit);
-      const gateLabel = role.fitBucket ? titleCase(role.fitBucket) : "—";
-      const gateClass = sourcedRoleGateClass(role.fitBucket);
-      const locationText = role.location ? ` · ${role.location}` : "";
-      const actionHtml = role.link
-        ? `<div class="text-right font-label-caps text-label-caps text-secondary uppercase"><a href="${esc(role.link)}" target="_blank" rel="noopener noreferrer" class="hover:underline">Open</a></div>`
-        : `<div class="text-right font-label-caps text-label-caps text-outline uppercase">—</div>`;
-      return `
-        <div class="grid w-full grid-cols-[1fr_120px_120px_120px] items-center gap-4 px-5 py-4">
-          <div class="min-w-0">
-            <div class="font-bold text-primary text-[14px]">${esc(role.company)}</div>
-            <div class="mt-1 text-[12px] text-on-surface-variant">${esc(role.role)}${esc(locationText)}</div>
-          </div>
-          <div class="font-data-mono text-[13px]" style="color:${esc(fitColor)}">${esc(role.fit)}</div>
-          <div class="font-label-caps text-label-caps uppercase ${esc(gateClass)}">${esc(gateLabel)}</div>
-          ${actionHtml}
-        </div>`;
-    })
-    .join("");
-}
-
-function renderReviewHoldRoles(roles) {
-  if (!roles.length) return "";
-  return roles
-    .map((role) => {
-      const fitColor = fitToneColor(role.fit);
-      const locationText = role.location ? ` · ${esc(role.location)}` : "";
-      const actionHtml = role.link
-        ? `<div class="text-right font-label-caps text-label-caps text-secondary uppercase"><a href="${esc(role.link)}" target="_blank" rel="noopener noreferrer" class="hover:underline">Open</a></div>`
-        : `<div class="text-right font-label-caps text-label-caps text-outline uppercase">—</div>`;
-      return `
-        <div class="grid w-full grid-cols-[1fr_100px_100px] items-center gap-4 px-5 py-3">
-          <div class="min-w-0">
-            <div class="font-bold text-primary text-[14px]">${esc(role.company)}</div>
-            <div class="mt-1 text-[12px] text-on-surface-variant">${esc(role.role)}${locationText}</div>
-          </div>
-          <div class="font-data-mono text-[13px]" style="color:${esc(fitColor)}">${esc(String(role.fit))}</div>
-          ${actionHtml}
-        </div>`;
-    })
-    .join("");
-}
-
-function stageBadgeClass(row) {
-  if (row.terminal) return "bg-surface-container-highest text-outline";
-  if (row.stage === "sourced") return "bg-secondary-fixed/40 text-secondary";
-  if (row.stage === "accepted" || row.stage === "offer")
-    return "bg-tertiary-container/10 text-on-tertiary-container";
-  if ((STAGE_ORDER[row.stage] ?? 0) >= STAGE_ORDER.screen)
-    return "bg-surface-container-highest text-primary";
-  return "bg-surface-container-highest text-on-surface-variant";
-}
-
-function jsArg(value) {
-  return String(value == null ? "" : value)
-    .replace(/\\/g, "\\\\")
-    .replace(/'/g, "\\'")
-    .replace(/\r?\n/g, " ");
-}
-
-function renderJobRow(row) {
-  const muted = row.terminal;
-  return `
-    <tr class="${row.terminal ? "rejected-row " : ""}hover:bg-surface-container-low transition-colors group cursor-pointer" onclick="openDrawer('${esc(jsArg(row.drawerId))}')">
-      <td class="px-6 py-4">
-        <div class="flex items-center gap-3">
-          ${avatarMarkup(row.domain, row.company, row.initials, `w-8 h-8 rounded ${esc(row.avatarClass)} flex items-center justify-center font-black text-[10px]`, row.logo)}
-          <div>
-            <div class="font-bold ${muted ? "text-outline" : "text-primary"}">${esc(row.company)}</div>
-            <div class="text-[11px] text-outline">${esc(row.location || "Location TBD")}</div>
-          </div>
-        </div>
-      </td>
-      <td class="px-6 py-4 text-body-md ${muted ? "text-on-surface-variant" : "text-on-surface"}">${esc(row.role)}</td>
-      <td class="px-6 py-4 font-data-mono text-data-mono ${muted ? "text-outline" : "text-on-surface"}">${esc(row.comp)}</td>
-      <td class="px-6 py-4">
-        <div class="flex items-center gap-2">
-          <span class="${fitToneClass(row.fit)} font-bold text-[12px] font-data-mono">${esc(fitLabel(row))}</span>
-        </div>
-      </td>
-      <td class="px-6 py-4"><span class="px-2 py-0.5 ${stageBadgeClass(row)} rounded text-[10px] font-bold uppercase tracking-wider">${esc(row.stageLabel)}</span></td>
-      <td class="px-6 py-4 font-data-mono text-data-mono ${muted ? "text-outline" : "text-on-surface-variant"}">${esc(row.appliedLabel)}</td>
-      <td class="px-6 py-4 text-right"><button class="material-symbols-outlined text-outline opacity-0 group-hover:opacity-100 transition-opacity" aria-label="More options">more_vert</button></td>
-    </tr>`;
-}
-
-function renderJobsRows(rows) {
-  return rows.map(renderJobRow).join("");
-}
-
-function renderJobsFunnel(buckets) {
-  return buckets
-    .map(
-      (bucket) => `
-        <button type="button" class="jobs-funnel-step" data-jobs-stage-filter="${esc(bucket.id)}" style="--jobs-stage-color:${esc(bucket.color)}">
-          <span class="jobs-funnel-step-main">
-            <span class="jobs-funnel-label">${esc(bucket.label)}</span>
-            <span class="jobs-funnel-count">${esc(bucket.count)}</span>
-          </span>
-          <span class="jobs-funnel-bar" aria-hidden="true"><span style="width:${esc(bucket.pct)}%"></span></span>
-        </button>`
-    )
-    .join("");
-}
-
-function sankeyTipPayload(title, count, examples) {
-  return esc(
-    JSON.stringify({
-      title,
-      count,
-      examples: examples || [],
-    })
-  );
-}
-
-function renderJobsSankey(sankey) {
-  const W = 1800;
-  const H = 520;
-  const top = 48;
-  const columnHeight = 400;
-  const nodeW = 5;
-  const columns = [...new Set(sankey.nodes.map((node) => node.col))].sort((a, b) => a - b);
-  const maxCol = Math.max(1, ...columns);
-  const leftPad = 220;
-  const usableWidth = W - leftPad - 320;
-  const xForCol = (col) => leftPad + (usableWidth * col) / maxCol;
-  const gapAfterNode = (node, next) =>
-    node?.id === "screen" && (next?.id === "rejected" || next?.id === "ghosted") ? 36 : 16;
-  const columnNodes = (col) => sankey.nodes.filter((node) => node.col === col);
-  const columnGapTotal = (nodes) =>
-    nodes
-      .slice(0, -1)
-      .reduce((total, node, index) => total + gapAfterNode(node, nodes[index + 1]), 0);
-  const columnUnitCaps = columns
-    .map((col) => {
-      const nodes = columnNodes(col);
-      const count = nodes.reduce((total, node) => total + node.count, 0);
-      return count > 0 ? (columnHeight - columnGapTotal(nodes)) / count : 11;
-    })
-    .filter((value) => Number.isFinite(value) && value > 0);
-  // The per-column cap is what makes a column fit inside columnHeight. A high unit
-  // floor (was 4) overrode that for a heavy column — e.g. 113 "Direct apply" rows ×
-  // 4 = 452px overflowed the 400px column and pushed "Recruiter sourced" (and its
-  // stacked count) off the bottom of the viewBox. The 6px node / 4px link minimums
-  // already keep thin nodes visible, so let the caps govern the fit.
-  const unit = Math.max(1, Math.min(11, ...columnUnitCaps));
-  const layout = new Map();
-
-  for (const col of columns) {
-    const nodes = columnNodes(col);
-    const usedHeight =
-      nodes.reduce((total, node) => total + Math.max(6, node.count * unit), 0) +
-      columnGapTotal(nodes);
-    let y = top + Math.max(0, (columnHeight - usedHeight) / 2);
-    // (Columns lay out left→right: Awaiting is placed before the stale column, and the
-    // stale node before the exits column, so both are in `layout` when we need them.)
-    const awaitingLaid = layout.get("awaiting");
-    const staleLaid = layout.get("stale");
-    if (nodes.some((node) => node.id === "stale") && awaitingLaid) {
-      // Going stale is a thick band (≈half the active pipeline) crossing a very short
-      // hop (Awaiting → col 1.5). At that thickness ANY vertical offset bends the band
-      // into a crease, because the stroke is wider than the curve's radius — it reads as
-      // folding back on itself. So top-align the stale sink with Awaiting and let the
-      // band run dead straight: a clean horizontal drain, no fold. Clamp only so a stale
-      // pool taller than the column can't spill past the bottom.
-      const maxTop = top + columnHeight - usedHeight;
-      y = Math.min(awaitingLaid.y, maxTop);
-    } else if (nodes.some((node) => node.id === "screen") && staleLaid) {
-      // Exits column. Centre the winning Screen lane vertically so it has room, with the
-      // Going stale bend above. Keep a floor so Heard back → Screen still clears the
-      // stale node (the band crosses the stale column at ~(heardback.y + colStart + screenH)/2).
-      const heardLaid = layout.get("heardback");
-      const screenNode = nodes.find((node) => node.id === "screen");
-      const screenH = screenNode ? Math.max(6, screenNode.count * unit) : 0;
-      const maxStart = top + columnHeight - usedHeight;
-      const centreScreen = top + columnHeight / 2 - screenH / 2;
-      const clearFloor = heardLaid
-        ? 2 * (staleLaid.y + staleLaid.h + 8) - heardLaid.y - screenH
-        : y;
-      y = Math.min(maxStart, Math.max(centreScreen, clearFloor));
-    } else if (nodes.some((node) => node.id === "rejected")) {
-      // Rejected is the terminal "lost" sink, pinned to the bottom-right corner. Every
-      // drop converges here along the bottom lane: pre-response rejections run nearly
-      // flat from Heard back (which also sits low), the per-round cuts drop in from the
-      // chain above. Bottom-anchoring keeps that heavy band out of the live chain.
-      y = top + columnHeight - usedHeight;
-    } else if (nodes.some((node) => node.id === "ghosted")) {
-      // Ghosted is the decay dead-exit, pinned to the TOP of its own column so the faded
-      // band peels UP off Going stale and leaks away — the mirror of Rejected sinking to
-      // the bottom. Top-anchoring guarantees the band always reads as a rising exit,
-      // whatever height Going stale lands at.
-      y = top;
-    }
-    for (let index = 0; index < nodes.length; index += 1) {
-      const node = nodes[index];
-      const h = Math.max(6, node.count * unit);
-      layout.set(node.id, { ...node, x: xForCol(col), y, h });
-      y += h + gapAfterNode(node, nodes[index + 1]);
-    }
-  }
-
-  const outOffsets = new Map();
-  const inOffsets = new Map();
-  // The Rejected sink stacks its incoming bands deliberately: the per-round cuts
-  // (which fall from the chain above) seat into the TOP of the node, and the heavy
-  // pre-response band (from low-sitting Heard back) runs into the BOTTOM. Default
-  // draw order would invert that — Heard back on top, thin cuts crammed into the
-  // bottom tip — so pre-seat rejected's in-offsets source-high-to-low, Heard back last.
-  const rejInOffset = new Map();
-  {
-    const incoming = sankey.links.filter((link) => link.to === "rejected" && layout.get(link.from));
-    incoming.sort((a, b) => {
-      if (a.from === "heardback") return 1;
-      if (b.from === "heardback") return -1;
-      return layout.get(a.from).y - layout.get(b.from).y;
-    });
-    let acc = 0;
-    for (const link of incoming) {
-      rejInOffset.set(link, acc);
-      acc += Math.max(4, link.count * unit);
-    }
-  }
-  const paths = sankey.links
-    .map((link) => {
-      const from = layout.get(link.from);
-      const to = layout.get(link.to);
-      if (!from || !to) return "";
-      const h = Math.max(4, link.count * unit);
-      const out = outOffsets.get(link.from) || 0;
-      const incoming =
-        link.to === "rejected" ? rejInOffset.get(link) || 0 : inOffsets.get(link.to) || 0;
-      outOffsets.set(link.from, out + h);
-      if (link.to !== "rejected") inOffsets.set(link.to, incoming + h);
-      const x1 = from.x + nodeW;
-      const x2 = to.x;
-      const y1 = from.y + out + h / 2;
-      const y2 = to.y + incoming + h / 2;
-      // Cap the control-point reach at half the span: a 120px floor on a short hop
-      // (e.g. Awaiting → Going stale) would push the two control points past each
-      // other and balloon the band into a blob. Half-span keeps every band a clean,
-      // gentle S that exits each node horizontally.
-      const span = Math.abs(x2 - x1);
-      const curve = Math.min(Math.max(120, span * 0.52), span * 0.5);
-      const tip = sankeyTipPayload(`${from.label} → ${to.label}`, link.count, link.examples);
-      return `<path class="jobs-sankey-link jobs-sankey-filter" d="M ${x1} ${y1} C ${x1 + curve} ${y1}, ${x2 - curve} ${y2}, ${x2} ${y2}" fill="none" stroke="${esc(link.color)}" stroke-width="${esc(h)}" stroke-linecap="butt" data-jobs-stage-filter="${esc(link.filter || "all")}" data-sankey-from="${esc(link.from)}" data-sankey-to="${esc(link.to)}" data-sankey-tip="${tip}" />`;
-    })
-    .join("");
-
-  const nodeMarkup = [...layout.values()]
-    .map((node) => {
-      const isFirst = node.col === 0;
-      const isLast = node.col === maxCol;
-      const isRound = typeof node.id === "string" && node.id.startsWith("round-");
-      const isRejected = node.id === "rejected";
-      const isAccepted = node.id === "accepted";
-      // Round nodes (1st → 4th round) always label ABOVE the line so the red rejection
-      // threads dropping below the chain never tangle with the names. Rejected and the
-      // Accepted 🎉 terminus label to their RIGHT like sinks even when they sit mid-chart
-      // — they're pinned off the live chain, so an above/below label would crash into it.
-      const sideRight = (isLast || isRejected || isAccepted) && !isRound;
-      const labelAbove =
-        node.id === "awaiting" || node.id === "stale" || node.id === "ghosted" || isRound;
-      const labelX = isFirst ? node.x - 8 : sideRight ? node.x + nodeW + 14 : node.x + nodeW / 2;
-      const anchor = isFirst ? "end" : sideRight ? "start" : "middle";
-      // Two-line label: name on top, (count) stacked underneath. Offset the block
-      // so both lines clear the node bar (the count drops ~1.2em below the name).
-      const labelY = labelAbove
-        ? node.y - 26
-        : isFirst || sideRight
-          ? node.y + node.h / 2 - 4
-          : node.y + node.h + 16;
-      const labelClass = `jobs-sankey-node-label${isFirst ? " jobs-sankey-node-label--source" : ""}`;
-      // Always center the (count) under the title, whatever the title's anchor is.
-      // The first column right-aligns (anchor=end) and the last left-aligns
-      // (anchor=start), so the count must be re-centered on the title's midpoint —
-      // estimate the title width from its glyph count (source labels render at 13px).
-      const approxCharW = isFirst ? 7.0 : 7.6;
-      const titleW = String(node.label).length * approxCharW;
-      const countX =
-        anchor === "end" ? labelX - titleW / 2 : anchor === "start" ? labelX + titleW / 2 : labelX;
-      const header = node.col === 0 ? "Source" : node.col === 1 ? "Heard back?" : "Furthest stage";
-      const tip = sankeyTipPayload(`${node.label}: ${node.count}`, node.count);
-      // Decay nodes (stale/ghosted) carry no inline label — the response column is
-      // too tight to stack four labels — so they render as a bare colour segment
-      // identified by the legend and hover tooltip.
-      const labelMarkup = node.hideLabel
-        ? ""
-        : `<text class="${labelClass}" x="${esc(labelX)}" y="${esc(labelY)}" text-anchor="${anchor}">${esc(node.label)}<tspan x="${esc(countX)}" dy="1.2em" text-anchor="middle">(${esc(node.count)})</tspan></text>`;
-      return `
-        <g class="jobs-sankey-node jobs-sankey-filter" data-jobs-stage-filter="${esc(node.filter || "all")}" data-sankey-node-id="${esc(node.id)}" data-sankey-tip="${tip}">
-          <rect x="${esc(node.x)}" y="${esc(node.y)}" width="${nodeW}" height="${esc(node.h)}" rx="2" fill="${esc(node.color)}" />
-          ${labelMarkup}
-          <title>${esc(header)} · ${esc(node.label)} ${esc(node.count)}</title>
-        </g>`;
-    })
-    .join("");
-
-  const legend = sankey.nodes
-    // Response column stays out of the legend (it has inline labels), but the
-    // unlabelled decay exits need a swatch to be identifiable.
-    .filter((node) => node.col !== 1 || node.id === "stale" || node.id === "ghosted")
-    .map(
-      (node) =>
-        `<span class="jobs-sankey-legend-item" data-sankey-legend-id="${esc(node.id)}"><i style="background:${esc(node.color)}"></i>${esc(node.label)}</span>`
-    )
-    .join("");
-  // The funnel SVG always scales to fit the frame (preserveAspectRatio meet), so it
-  // never overflows — no horizontal scroll affordance is needed even at full depth.
-  return `
-    <div class="jobs-sankey-wrap">
-      <div class="jobs-sankey-frame">
-        <svg class="jobs-sankey" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="Jobs Sankey funnel">
-          <g class="jobs-sankey-links">${paths}</g>
-          <g class="jobs-sankey-nodes">${nodeMarkup}</g>
-        </svg>
-      </div>
-      <div class="jobs-sankey-legend">${legend}</div>
-    </div>`;
-}
-
-function tooltipPayload(row) {
-  return esc(JSON.stringify(row.tooltip));
-}
-
-// Per-icon tooltip: hovering a compact icon cell swaps the shared tooltip to
-// explain what that icon means (the row's company/role tip shows everywhere else).
-function iconTipPayload(label, meaning) {
-  return esc(JSON.stringify({ icon: label, meaning: meaning || "" }));
-}
-
-// A quiet application that's drifted past the stale/ghosted line reads its decay in
-// the status pill, not just the action column — so the pill says "Going stale" /
-// "Ghosted" instead of a plain "Applied". staleAction only ever fires on awaiting
-// (pre-screen) applications, so this never masks a real pipeline stage.
-function statusDisplayLabel(row) {
-  if (row.ghosted) return "Ghosted";
-  if (row.stale) return "Going stale";
-  return row.stageGroupLabel || row.stageLabel;
-}
-
-// Decay reads as draining signal, not alarm colour: a neutral grey that lightens
-// as the app rots — medium grey going stale, lighter grey once ghosted. Otherwise
-// fall back to the normal stage colour (muted warm-grey for terminal rows).
-function statusPillTone(row) {
-  if (row.ghosted) return "#878d93";
-  if (row.stale) return "#6f7479";
-  return row.terminal ? "#8d7f73" : stageColor(row.stage);
-}
-
-function statusPillIcon(row) {
-  if (row.ghosted) return "alert";
-  if (row.stale) return "flag";
-  return stageIcon(row);
-}
-
-function statusTitle(row) {
-  const visible = statusDisplayLabel(row);
-  return row.stageLabel && row.stageLabel !== visible ? `${visible} · ${row.stageLabel}` : visible;
-}
-
-function jobActionToneClass(action = {}) {
-  if (action.tone === "error") return "jobs-action-label--error";
-  if (action.tone === "warning") return "jobs-action-label--warning";
-  if (action.tone === "success") return "jobs-action-label--success";
-  return "jobs-action-label--neutral";
-}
-
-function jobActionIcon(action = {}) {
-  if (action.state === "archived") return "check";
-  if (action.state === "interview" || action.workstream === "prepare") return "calendar";
-  if (action.state === "missing-comp") return "search";
-  if (action.state === "ghosted") return "alert";
-  if (action.state === "stale" || action.workstream === "plan") return "flag";
-  if (action.state === "needs-action" || action.workstream === "respond") return "chat";
-  if (action.state === "watch" || action.workstream === "watch") return "clock";
-  if (action.state === "high-fit") return "flag";
-  return "list";
-}
-
-function jobActionAttrs(row) {
-  return [
-    `data-action-state="${esc(row.actionState || "active")}"`,
-    `data-workstream="${esc(row.workstream || "watch")}"`,
-    `data-needs-action="${row.needsAction ? "1" : "0"}"`,
-    `data-stale="${row.stale ? "1" : "0"}"`,
-    `data-ghosted="${row.ghosted ? "1" : "0"}"`,
-    `data-missing-comp="${row.missingComp ? "1" : "0"}"`,
-    `data-high-fit="${row.highFit ? "1" : "0"}"`,
-    `data-interview-path="${row.interviewPath ? "1" : "0"}"`,
-  ].join(" ");
-}
-
-// The action column only earns ink when there's something to actually DO. Passive
-// states — waiting on a reply, monitoring a quiet role, or an archived/closed row —
-// are status, not a task, so they render an empty cell. ("Awaiting isn't an action.")
-const PASSIVE_ACTION_STATES = new Set(["watch", "active", "archived", "high-fit"]);
-function jobActionIsActionable(action = {}) {
-  if (!action?.state) return false;
-  if (action.workstream === "watch" || action.workstream === "archive") return false;
-  return !PASSIVE_ACTION_STATES.has(action.state);
-}
-
-function renderJobsActionCell(row) {
-  const action = row.action || defaultJobAction(row);
-  if (!jobActionIsActionable(action)) return "";
-  const label = action.label || "Review";
-  const title = action.title || "Review role";
-  const meta = action.meta || action.dueText || "Active";
-  return `
-        <div class="jobs-action-cell jobs-action-cell--icon" data-tip="${iconTipPayload(label, `${title} · ${meta}`)}" aria-label="${esc(`${label}: ${title}. ${meta}`)}">
-          <span class="jobs-action-icon ${esc(jobActionToneClass(action))}" aria-hidden="true">
-            ${inlineIcon(jobActionIcon(action), "jobs-action-icon-svg")}
-          </span>
-        </div>`;
-}
-
-function renderJobsExplorerRow(row) {
-  const muted = row.terminal;
-  const stageTone = statusPillTone(row);
-  const sourceLabel = row.sourceLabel || titleCase(row.channel || row.source);
-  const modeLabel = row.modeLabel || "TBD";
-  const locationLabel = row.location || "Location TBD";
-  const statusLabel = statusDisplayLabel(row);
-  return `
-    <tr data-jobs-row data-detail-id="${esc(row.drawerId)}" data-stage="${esc(row.stage)}" data-source-kind="${esc(row.source)}" data-source-bucket="${esc(row.sourceBucket)}" data-channel="${esc(String(row.channel || "").toLowerCase())}" data-source-label="${esc(sourceLabel.toLowerCase())}" data-terminal="${row.terminal ? "1" : "0"}" data-rounds-reached="${row.roundsReached || 0}" data-needs-review="${row.needsReview ? "1" : "0"}" ${jobActionAttrs(row)} data-search="${esc(row.searchText)}" data-company="${esc(row.company.toLowerCase())}" data-role="${esc(row.role.toLowerCase())}" data-location="${esc(locationLabel.toLowerCase())}" data-mode="${esc(row.mode || modeLabel.toLowerCase())}" data-fit="${esc(row.fit)}" data-base="${esc(row.compMidpointK || row.baseK)}" data-applied="${esc(row.appliedAt || row.appliedLabel)}" data-tip="${tooltipPayload(row)}">
-      <td>
-        <div class="jobs-company-cell">
-          ${avatarMarkup(row.domain, row.company, row.initials, `jobs-avatar ${esc(row.avatarClass)}`, row.logo)}
-          <span class="jobs-company-copy">
-            <strong class="${muted ? "is-muted" : ""}">${esc(row.company)}</strong>
-            <small>${esc(sourceLabel)}</small>
-          </span>
-        </div>
-      </td>
-      <td>
-        <div class="jobs-role-cell">
-          <strong>${esc(row.role)}</strong>
-        </div>
-      </td>
-      <td class="jobs-cell-comp" data-tip="${iconTipPayload("Compensation", row.compSummary)}">
-        <span class="jobs-comp-cell" aria-label="${esc(row.compSummary)}">
-          <strong>${esc(row.compCompact || row.comp)}</strong>
-        </span>
-      </td>
-      <td class="jobs-cell-mode" data-tip="${iconTipPayload("Work mode", modeLabel)}">
-        <span class="jobs-mode-chip jobs-mode-icon-only" aria-label="${esc(modeLabel)}">
-          ${inlineIcon(row.modeIcon || "navigation")}
-        </span>
-      </td>
-      <td class="jobs-cell-fit" data-tip="${iconTipPayload(`Fit · ${fitLabel(row)}`, isTriageFit(row) ? "Triage estimate — not yet fully evaluated" : "Evaluated fit score")}">
-        <span class="jobs-fit ${isTriageFit(row) ? "is-triage" : ""}" style="--jobs-fit-color:${esc(fitToneColor(row.fit))}" aria-label="${isTriageFit(row) ? "Triage estimate - not yet fully evaluated" : "Evaluated fit score"}">
-          <span>${esc(fitLabel(row))}</span>
-        </span>
-      </td>
-      <td class="jobs-cell-status" data-tip="${iconTipPayload("Status", statusTitle(row))}"><span class="jobs-stage-pill jobs-stage-icon-only" style="--jobs-stage-color:${esc(stageTone)}" aria-label="${esc(statusLabel)}">${inlineIcon(statusPillIcon(row), "jobs-stage-icon-svg")}</span></td>
-      <td class="jobs-cell-action">
-        ${renderJobsActionCell(row)}
-      </td>
-    </tr>`;
-}
-
-function renderJobsExplorerRows(rows) {
-  return rows.map(renderJobsExplorerRow).join("");
-}
-
-function fitToneColor(fit) {
-  if (fit >= 80) return "#2f9e8f";
-  if (fit >= 70) return "#e0a93b";
-  return "#8d7f73";
-}
-
-function renderJobsCards(rows) {
-  return rows
-    .map((row) => {
-      const stageTone = statusPillTone(row);
-      const modeLabel = row.modeLabel || "TBD";
-      const locationLabel = row.location || "Location TBD";
-      const sourceLabel = row.sourceLabel || titleCase(row.channel || row.source);
-      const statusLabel = statusDisplayLabel(row);
-      const statusHint = statusTitle(row);
-      const action = row.action || defaultJobAction(row);
-      return `
-        <article class="jobs-card" data-jobs-card data-detail-id="${esc(row.drawerId)}" data-stage="${esc(row.stage)}" data-source-kind="${esc(row.source)}" data-source-bucket="${esc(row.sourceBucket)}" data-channel="${esc(String(row.channel || "").toLowerCase())}" data-source-label="${esc(sourceLabel.toLowerCase())}" data-terminal="${row.terminal ? "1" : "0"}" data-rounds-reached="${row.roundsReached || 0}" data-needs-review="${row.needsReview ? "1" : "0"}" ${jobActionAttrs(row)} data-search="${esc(row.searchText)}" data-company="${esc(row.company.toLowerCase())}" data-role="${esc(row.role.toLowerCase())}" data-mode="${esc(row.mode || modeLabel.toLowerCase())}" data-fit="${esc(row.fit)}" data-base="${esc(row.compMidpointK || row.baseK)}" data-applied="${esc(row.appliedAt || row.appliedLabel)}" data-tip="${tooltipPayload(row)}">
-          ${
-            jobActionIsActionable(action)
-              ? `<div class="jobs-card-action">
-            <span class="jobs-action-label ${esc(jobActionToneClass(action))}">${esc(action.label || "Review")}</span>
-            <span>${esc(action.title || "Review role")}</span>
-          </div>`
-              : ""
-          }
-          <div class="jobs-card-top">
-            ${avatarMarkup(row.domain, row.company, row.initials, `jobs-avatar ${esc(row.avatarClass)}`, row.logo)}
-            <span class="jobs-stage-pill jobs-stage-has-icon" style="--jobs-stage-color:${esc(stageTone)}" aria-label="${esc(statusHint)}">${inlineIcon(statusPillIcon(row), "jobs-stage-icon-svg")}<span>${esc(statusLabel)}</span></span>
-          </div>
-          <div class="jobs-card-copy">
-            <h3>${esc(row.role)}</h3>
-            <p>${esc(row.company)}</p>
-          </div>
-          <div class="jobs-card-facts">
-            <span><b>${esc(row.comp)}</b> <small>${row.tc ? `TC ${esc(row.tc)}` : "Comp"}</small></span>
-            <span><b>${esc(locationLabel)}</b> <small>Location</small></span>
-            <span><b>${esc(modeLabel)}</b> <small>Mode</small></span>
-            <span class="jobs-card-fit-block">
-              <span class="jobs-fit ${isTriageFit(row) ? "is-triage" : ""}" style="--jobs-fit-color:${esc(fitToneColor(row.fit))}" aria-label="${isTriageFit(row) ? "Triage estimate - not yet fully evaluated" : "Evaluated fit score"}"><span>${esc(fitLabel(row))}</span></span>
-              <small>Fit</small>
-            </span>
-          </div>
-          ${
-            row.healthBadge
-              ? `<div class="jobs-card-health"><span class="jobs-health-pill" data-health="${esc(row.healthBadge.rating)}" title="${esc(row.healthBadge.title)}">${inlineIcon("alert", "jobs-health-icon-svg")}<span>${esc(row.healthBadge.label)}</span></span></div>`
-              : ""
-          }
-          ${
-            row.statusNote || row.note
-              ? `<p class="jobs-card-note">${esc(row.statusNote || firstSentence(row.note))}</p>`
-              : ""
-          }
-          <div class="jobs-card-meta">
-            <span class="jobs-source-chip">${inlineIcon(row.sourceIcon || "list")}<span>${esc(sourceLabel)}</span></span>
-            <span class="jobs-card-date">${esc(row.appliedLabel)}</span>
-          </div>
-        </article>`;
-    })
-    .join("");
-}
-
-function registerJobDetails(rows) {
-  if (typeof globalThis === "undefined") return;
-  globalThis.rolesterJobDetails = Object.fromEntries(rows.map((row) => [row.drawerId, row.drawer]));
-}
-
-function setText(root, selector, value) {
-  const el = root.querySelector(selector);
-  if (el) el.textContent = String(value);
-}
-
-function setAllText(root, selector, value) {
-  if (typeof root.querySelectorAll === "function") {
-    for (const el of root.querySelectorAll(selector)) {
-      el.textContent = String(value);
-    }
-    return;
-  }
-  setText(root, selector, value);
-}
-
-function renderModeStatus(root, modes) {
-  const queryAll = (selector) => {
-    if (typeof root.querySelectorAll === "function") {
-      return Array.from(root.querySelectorAll(selector));
-    }
-    const el = root.querySelector(selector);
-    return el ? [el] : [];
-  };
-
-  for (const [key, item] of [
-    ["usage", modes.usage],
-    ["application", modes.application],
-  ]) {
-    const displayKey = key === "application" ? "apply" : key;
-    const chips = queryAll(`[data-mode-chip="${key}"]`);
-    const values = queryAll(`[data-mode-value="${key}"]`);
-    for (const value of values) {
-      value.textContent = item.label;
-    }
-    for (const chip of chips) {
-      chip.dataset.modeTone = item.tone;
-      chip.title = item.title;
-      chip.setAttribute("aria-label", `${displayKey} mode: ${item.label}. ${item.title}`);
-    }
-  }
-}
-
-function renderAgentGuidance(root, guidance) {
-  const card = root.querySelector("[data-agent-guidance]");
-  if (card) {
-    card.hidden = false;
-    card.dataset.nextSkill = guidance.nextSkill || "";
-    card.dataset.command = guidance.command || "";
-  }
-  setText(root, "[data-agent-guidance-title]", guidance.title);
-  setText(root, "[data-agent-guidance-message]", guidance.message);
-  setText(root, "[data-agent-guidance-reason]", guidance.reason);
-  const cta = root.querySelector("[data-agent-guidance-cta]");
-  if (cta) {
-    cta.textContent = guidance.ctaLabel;
-    cta.dataset.agentGuidanceAction = guidance.nextSkill || guidance.command || "doctor";
-    cta.title = guidance.nextSkill
-      ? `Ask your agent to run ${guidance.nextSkill}.`
-      : guidance.command || "Run rolester doctor.";
-  }
-}
-
-function renderSettingsList(items, emptyLabel = "Not set") {
-  const values = listOrEmpty(items);
-  if (values.length === 0) {
-    return `<li class="settings-list-empty">${esc(emptyLabel)}</li>`;
-  }
-  return values.map((item) => `<li>${esc(item)}</li>`).join("");
-}
-
-function renderSettingsStatus(root, settings) {
-  const values = {
-    candidate: settings.profile.candidate,
-    headline: settings.profile.headline,
-    location: settings.profile.location,
-    minimumBase: settings.profile.minimumBase,
-    targetBase: settings.profile.targetBase,
-    expectedBase: settings.profile.expectedBase,
-    workAuthorization: settings.profile.workAuthorization,
-    sessionProvider: settings.automation.sessionProvider,
-  };
-
-  for (const [key, value] of Object.entries(values)) {
-    setText(root, `[data-settings-value="${key}"]`, value);
-  }
-
-  const roles = root.querySelector("[data-settings-roles]");
-  if (roles)
-    roles.innerHTML = renderSettingsList(
-      settings.targeting.primaryRoles,
-      "No primary roles configured"
-    );
-
-  const excluded = root.querySelector("[data-settings-excluded]");
-  if (excluded) {
-    excluded.innerHTML = renderSettingsList(
-      settings.targeting.excludedCompanies,
-      "No company exclusions configured"
-    );
-  }
-
-  const boundaries = root.querySelector("[data-settings-boundaries]");
-  if (boundaries) {
-    boundaries.innerHTML = renderSettingsList(
-      settings.honesty.boundaries,
-      "No extra honesty boundaries configured"
-    );
-  }
-
-  const capabilities = root.querySelector("[data-settings-capabilities]");
-  if (capabilities) {
-    capabilities.innerHTML = renderSettingsList(
-      settings.automation.enabledCapabilities,
-      "No automation capabilities enabled"
-    );
-  }
-
-  const files = root.querySelector("[data-settings-files]");
-  if (files)
-    files.innerHTML = renderSettingsList(settings.files, "No candidate config files found");
-}
-
-function renderNetworkContacts(contacts) {
-  const values = objectList(contacts);
-  if (!values.length) {
-    return `
-      <div class="network-contact-node">
-        <span class="network-contact-pill">Signal</span>
-        <div><b>No named contact</b><span>Relationship details will appear after a human thread is captured.</span></div>
-      </div>`;
-  }
-  return values
-    .map(
-      (contact) => `
-        <div class="network-contact-node">
-          <span class="network-contact-pill">${esc(contact.type || "Contact")}</span>
-          <div><b>${esc(contact.name || "Contact")}</b><span>${esc(contact.note || "Relationship context captured.")}</span></div>
-        </div>`
-    )
-    .join("");
-}
-
-function renderNetworkCompanies(companies) {
-  const values = objectList(companies);
-  if (!values.length) {
-    return `
-      <article class="network-company-card">
-        <div class="network-company-head">
-          <div class="network-company-copy">
-            <b>No warm paths yet</b>
-            <span>Human recruiter and hiring-team threads will appear here once captured.</span>
-          </div>
-        </div>
-        <div class="network-reuse-panel" data-reuse-state="closed">
-          <b>Relationship map empty</b>
-          <span>Portal-only applications are intentionally excluded from warm-path reuse.</span>
-        </div>
-      </article>`;
-  }
-  return values
-    .map((company) => {
-      // The card reads as a clean header by default (logo + name); the contacts and
-      // safe-reuse panel — the dense blue chrome — live in a collapsed body the user
-      // expands on demand (see "so much blue" cleanup).
-      return `
-        <article class="network-company-card" data-reuse-state="${esc(company.reuseState)}">
-          <button type="button" class="network-company-head" data-network-toggle aria-expanded="false">
-            ${avatarMarkup(company.domain, company.company, company.initials, "network-company-logo")}
-            <div class="network-company-copy">
-              <b>${esc(company.company)}</b>
-              <span>${esc(company.role)} · ${esc(company.status)}</span>
-            </div>
-            <span class="network-state-pill" data-reuse-state="${esc(company.reuseState)}" style="--network-tone:${esc(company.progressTone)}">${esc(company.stateLabel)}</span>
-            <svg class="network-company-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
-          </button>
-          <div class="network-company-body" data-network-body hidden>
-            <div class="network-contact-stack">
-              ${renderNetworkContacts(company.contacts)}
-            </div>
-            <div class="network-reuse-panel" data-reuse-state="${esc(company.reuseState)}">
-              <b>${esc(company.reuseTitle)}</b>
-              <span>${esc(company.reuseBody)}</span>
-              <div class="network-reuse-meta">
-                <span>${esc(company.reuseScope)}</span>
-                <span>Next safe touch</span>
-                <span>${esc(company.nextTouch)}</span>
-              </div>
-            </div>
-          </div>
-        </article>`;
-    })
-    .join("");
-}
-
-function renderNetworkCoverage(coverage) {
-  return `
-    <div class="network-mini-stat"><strong>${esc(coverage.recruiters || 0)}</strong><span>Recruiters</span></div>
-    <div class="network-mini-stat"><strong>${esc(coverage.hiringManagers || 0)}</strong><span>HM</span></div>
-    <div class="network-mini-stat"><strong>${esc(coverage.signals || 0)}</strong><span>Signals</span></div>`;
-}
-
-function renderNetworkList(items, tones = ["var(--coral)", "var(--sky)", "var(--mustard)"]) {
-  return listOrEmpty(items)
-    .map(
-      (item, index) =>
-        `<li style="--network-tone:${tones[index % tones.length]}"><i></i><span>${esc(item)}</span></li>`
-    )
-    .join("");
-}
-
-function renderNetworkLeadReview(leads = []) {
-  const rows = objectList(leads);
-  if (!rows.length) {
-    return '<div class="network-empty-row">No relationship leads waiting for review.</div>';
-  }
-  return rows
-    .map(
-      (lead) => `
-        <div class="network-sourcing-row">
-          <span class="network-signal-pill" data-state="signal">${esc(lead.label || "Review lead")}</span>
-          <div class="network-signal-copy">
-            <b>${esc(lead.name)}</b>
-            <span>${esc(lead.company)} · ${esc(lead.title || lead.type || "Contact")}</span>
-          </div>
-          <div class="network-signal-meta">
-            <span>${esc(lead.platform || "linkedin")}</span>
-            <span>${esc(lead.note || "Review before outreach.")}</span>
-          </div>
-        </div>`
-    )
-    .join("");
-}
-
-function renderNetworkSourcingTargets(targets = []) {
-  const rows = objectList(targets);
-  if (!rows.length) {
-    return '<div class="network-empty-row">No unconnected active rows need relationship sourcing.</div>';
-  }
-  return rows
-    .map(
-      (target) => `
-        <div class="network-sourcing-row">
-          <span class="network-signal-pill" data-state="ask">${esc(target.label || "Search contact path")}</span>
-          <div class="network-signal-copy">
-            <b>${esc(target.company)}</b>
-            <span>${esc(target.role)} · ${esc(target.fit)} fit</span>
-          </div>
-          <div class="network-signal-meta">
-            <span>${esc(target.capability || "relationship_sourcing")}</span>
-            <span>${esc(target.summary || "Find a reviewed relationship path first.")}</span>
-          </div>
-        </div>`
-    )
-    .join("");
-}
-
-function renderLibraryFilters(items) {
-  const values = objectList(items);
-  if (!values.length)
-    return `<button type="button" class="library-chip" disabled><span>No tags</span><b>0</b></button>`;
-  return values
-    .map(
-      (item) =>
-        `<button type="button" class="library-chip" data-library-tag="${esc(item.label)}"><span>${esc(item.label)}</span><b>${esc(item.count)}</b></button>`
-    )
-    .join("");
-}
-
-function renderLibraryTags(tags) {
-  return objectList(tags)
-    .map((tagItem) => {
-      const tone =
-        tagItem.tone && tagItem.tone !== "teal" ? ` data-tone="${esc(tagItem.tone)}"` : "";
-      return `<span class="library-tag"${tone}>${esc(tagItem.label)}</span>`;
-    })
-    .join("");
-}
-
-function renderLibraryClaimCard(card) {
-  const kind = card.kind || "evidence";
-  const label = card.label || "Evidence Library";
-  const title = card.title || "Reusable material";
-  const summary = card.summary || "";
-  const note = card.note || "Use with the confirmed evidence boundary.";
-  const tagLabels = objectList(card.tags)
-    .map((tagItem) => tagItem.label)
-    .filter(Boolean)
-    .join(", ");
-  return `
-        <article class="library-card" data-library-card="${esc(kind)}" data-library-claim data-claim-type="${esc(kind)}" data-claim-title="${esc(title)}" data-claim-label="${esc(label)}" data-claim-summary="${esc(summary)}" data-claim-note="${esc(note)}" data-claim-tags="${esc(tagLabels)}" role="button" tabindex="0" aria-label="Open ${esc(title)}">
-          <div class="library-card-top">
-            <div class="library-card-copy">
-              <span class="library-card-label">${esc(label)}</span>
-              <b>${esc(title)}</b>
-              <span>${esc(summary)}</span>
-            </div>
-          </div>
-          <div class="library-tag-row">
-            ${renderLibraryTags(card.tags)}
-          </div>
-          <p class="library-card-note">${esc(note)}</p>
-        </article>`;
-}
-
-function renderLibraryGapCallouts(items) {
-  return objectList(items)
-    .map((item) => {
-      const tone = item.tone ? `var(--${esc(item.tone)})` : "var(--coral)";
-      const title = item.title || "Claim gap";
-      const body = item.body || "";
-      return `
-        <div class="library-callout-row" style="--library-tone:${tone}"><i></i><span><b>${esc(title)}</b> — ${esc(body)}</span></div>`;
-    })
-    .join("");
-}
-
-function renderLibraryCards(cards) {
-  const values = objectList(cards);
-  if (!values.length) {
-    return `
-      <article class="library-card" data-library-card="empty">
-        <div class="library-card-top">
-          <div class="library-card-copy">
-            <span class="library-card-label">Evidence Library</span>
-            <b>No reusable material yet</b>
-            <span>Add evidence, stories, or writing style to populate this surface.</span>
-          </div>
-        </div>
-      </article>`;
-  }
-  return values.map((card) => renderLibraryClaimCard(card)).join("");
-}
-
-function renderStrategyRows(rows, emptyLabel) {
-  const values = objectList(rows);
-  if (!values.length) {
-    return `<div class="strategy-empty-row">${esc(emptyLabel)}</div>`;
-  }
-  return values
-    .map(
-      (row) => `
-        <div class="strategy-row" style="--strategy-width:${esc(row.bar || 8)}%">
-          <div class="strategy-row-copy">
-            <b>${esc(row.label)}</b>
-            <span>${esc(row.meta || `${row.total || 0} tracked`)}</span>
-          </div>
-          <span class="strategy-row-rate">${esc(row.rate || "0%")}</span>
-          <i aria-hidden="true"><b></b></i>
-        </div>`
-    )
-    .join("");
-}
-
-function renderStrategyStaleRows(rows) {
-  const values = objectList(rows);
-  if (!values.length) {
-    return `<div class="strategy-empty-row">No quiet active applications.</div>`;
-  }
-  return values
-    .map(
-      (row) => `
-        <button type="button" class="strategy-stale-row" data-detail-id="${esc(row.detailId || "")}" data-next-step-item>
-          <span>
-            <b>${esc(row.title)}</b>
-            <small>${esc(row.meta)}</small>
-          </span>
-          <em>${esc(row.stage || "Applied")}</em>
-        </button>`
-    )
-    .join("");
-}
-
-function renderStrategyStageRows(rows) {
-  const values = objectList(rows);
-  if (!values.length) {
-    return `<div class="strategy-empty-row">No active stage age yet.</div>`;
-  }
-  return values
-    .map(
-      (row) => `
-        <button type="button" class="strategy-stage-row" style="--strategy-width:${esc(row.bar || 8)}%" data-detail-id="${esc(row.detailId || "")}" data-next-step-item>
-          <span>
-            <b>${esc(row.title)}</b>
-            <small>${esc(row.meta)}</small>
-          </span>
-          <em>${esc(row.rate || `${row.daysInStage || 0}d`)}</em>
-          <i aria-hidden="true"><b></b></i>
-        </button>`
-    )
-    .join("");
-}
-
-function renderStrategyCadenceRows(rows) {
-  const values = objectList(rows);
-  if (!values.length) {
-    return `<div class="strategy-empty-row">No cadence nudges right now.</div>`;
-  }
-  return values
-    .map(
-      (row) => `
-        <button type="button" class="strategy-cadence-row" data-tone="${esc(row.tone || "quiet")}" data-detail-id="${esc(row.detailId || "")}" data-next-step-item>
-          <span>
-            <b>${esc(row.title)}</b>
-            <small>${esc(row.meta)}</small>
-          </span>
-          <em>${esc(row.badge || "Plan")}</em>
-        </button>`
-    )
-    .join("");
-}
-
-const STRATEGY_TONE_FILLS = {
-  neutral: "bg-secondary",
-  positive: "bg-on-tertiary-container",
-  warning: "bg-outline",
-};
-
-function renderStrategyTrendRows(rows) {
-  const values = objectList(rows);
-  if (!values.length) {
-    return `<div class="strategy-empty-row">No outcome trend yet.</div>`;
-  }
-  // Applied → Advanced → Interviews → Rejected is a natural funnel. Render it as
-  // horizontal bars scaled to the largest bucket (Applied), so the drop-off and
-  // attrition read at a glance instead of four equal-weight number cards.
-  const peak = Math.max(1, ...values.map((row) => Number(row.value) || 0));
-  return values
-    .map((row) => {
-      const count = Number(row.value) || 0;
-      const pct = Math.round((count / peak) * 100);
-      const fill = STRATEGY_TONE_FILLS[row.tone] || STRATEGY_TONE_FILLS.neutral;
-      // Applied's deltaLabel is "N roles" (redundant with the count); only show the
-      // delta when it's a conversion/attrition percentage.
-      const showDelta = /%/.test(row.deltaLabel || "");
-      return `
-        <div class="grid grid-cols-[88px_minmax(0,1fr)_auto] items-center gap-3" title="${esc(row.meta || "")}">
-          <span class="font-label-caps text-label-caps text-outline uppercase">${esc(row.label)}</span>
-          <div class="h-2.5 overflow-hidden rounded-full bg-surface-container-high">
-            <div class="h-full rounded-full ${fill}" style="width:${pct}%"></div>
-          </div>
-          <span class="flex items-baseline justify-end gap-1.5 tabular-nums">
-            <b class="font-data-mono text-[18px] leading-none font-[300] text-primary">${esc(count)}</b>
-            ${showDelta ? `<em class="text-[11px] not-italic text-on-surface-variant">${esc(row.deltaLabel)}</em>` : ""}
-          </span>
-        </div>`;
-    })
-    .join("");
-}
-
-function renderStrategyHistoryRows(rows) {
-  const values = objectList(rows);
-  if (!values.length) {
-    return `<div class="strategy-empty-row">No dated outcomes yet.</div>`;
-  }
-  return values
-    .map(
-      (row) => `
-        <div class="strategy-history-row">
-          <span>
-            <b>${esc(row.label)}</b>
-            <small>${esc(row.applied || 0)} applied · ${esc(row.advanced || 0)} advanced · ${esc(row.rejected || 0)} rejected</small>
-          </span>
-          <em>${esc(row.responseRate || 0)}%</em>
-        </div>`
-    )
-    .join("");
-}
-
-function renderStrategyLearningSignals(rows) {
-  const values = objectList(rows);
-  if (!values.length) {
-    return `<div class="strategy-empty-row">No winning source or role-family signal yet.</div>`;
-  }
-  return values
-    .map(
-      (row) => `
-        <div class="strategy-signal-row" data-tone="${esc(row.tone || "neutral")}">
-          <span>
-            <b>${esc(row.label)}</b>
-            <small>${esc(row.meta)}</small>
-          </span>
-          <em>${esc(row.value || 0)}</em>
-        </div>`
-    )
-    .join("");
-}
-
-// Renders a compact one-line reevaluation progress footer inside the review
-// panel. Uses inline styles that match the shell's existing CSS token set
-// (--rgb-line, --ink-soft, #e0a93b warning amber) so no new CSS is needed.
-// Returns "" when reevaluation is null/absent — callers can safely concat it.
-function renderReevaluationProgress(reevaluation) {
-  if (!reevaluation) return "";
-  const { label, due, familyLines = [] } = reevaluation;
-  const labelColor = due ? "#e0a93b" : "var(--ink-soft)";
-  const chips = familyLines
-    .slice(0, 3)
-    .map(
-      (f) =>
-        `<span style="font-size:11px;font-weight:750;color:${f.over ? "#e0a93b" : "var(--ink-soft)"};white-space:nowrap">${esc(f.family)} ${esc(String(f.count))}/${esc(String(f.threshold))}</span>`
-    )
-    .join("");
-  return `<div style="grid-column:1/-1;border-top:1px solid rgba(var(--rgb-line),0.08);padding-top:8px;display:flex;align-items:baseline;flex-wrap:wrap;gap:4px 10px"><span style="font-size:12px;font-weight:650;color:${labelColor}">${esc(label)}</span>${chips}</div>`;
-}
-
-function renderStrategyReviewTrigger(trigger = {}, reevaluation) {
-  const action = trigger.ctaAction || "jobs";
-  const ctaLabel = trigger.ctaLabel || "Review details";
-  return `
-    <div class="strategy-review-panel" data-ready="${trigger.ready ? "true" : "false"}">
-      <span>${esc(trigger.ready ? "Review ready" : "Collecting signal")}</span>
-      <div>
-        <b>${esc(trigger.title || "Learning signal still forming")}</b>
-        <p>${esc(trigger.summary || "Keep collecting comparable outcomes before retuning gates.")}</p>
-      </div>
-      <a class="strategy-review-cta" href="#${esc(action)}">${esc(ctaLabel)}</a>${renderReevaluationProgress(reevaluation)}
-    </div>`;
-}
-
-function renderStrategyRecommendation(recommendation = {}) {
-  const action = recommendation.ctaAction || "";
-  const ctaLabel = recommendation.ctaLabel || "";
-  const cta =
-    ctaLabel && action === "actions"
-      ? `<button type="button" class="strategy-recommendation-cta" data-strategy-recommendation-cta onclick="openActionsDrawer()">${esc(ctaLabel)}</button>`
-      : ctaLabel
-        ? `<a class="strategy-recommendation-cta" data-strategy-recommendation-cta href="#${esc(action || "jobs")}">${esc(ctaLabel)}</a>`
-        : "";
-  return `
-    <div class="strategy-recommendation-copy">
-      <div class="strategy-recommendation-title">${esc(recommendation.title || "Build a measurable loop")}</div>
-      <p>${esc(
-        recommendation.summary ||
-          "No applied outcomes are available yet. Source and track a few comparable roles first."
-      )}</p>
-    </div>
-    ${cta}`;
-}
-
-function renderStrategyInsights(root, strategy) {
-  if (!strategy) return;
-  setText(root, '[data-strategy-metric="topSource"]', strategy.metrics.topSource.label);
-  setText(root, '[data-strategy-metric="bestLane"]', strategy.metrics.bestLane.label);
-  setText(root, '[data-strategy-metric="staleCount"]', strategy.metrics.staleCount.value);
-  setText(root, '[data-strategy-metric-detail="topSource"]', strategy.metrics.topSource.rate);
-  setText(root, '[data-strategy-metric-detail="bestLane"]', strategy.metrics.bestLane.rate);
-  setText(root, '[data-strategy-metric-detail="staleCount"]', strategy.metrics.staleCount.rate);
-
-  const sources = root.querySelector("[data-strategy-source-list]");
-  if (sources) sources.innerHTML = renderStrategyRows(strategy.sources, "No source outcomes yet.");
-  const roles = root.querySelector("[data-strategy-role-list]");
-  if (roles) roles.innerHTML = renderStrategyRows(strategy.roles, "No role-lane outcomes yet.");
-  const fits = root.querySelector("[data-strategy-fit-list]");
-  if (fits) fits.innerHTML = renderStrategyRows(strategy.fitBands, "No fit-band outcomes yet.");
-  const stale = root.querySelector("[data-strategy-stale-list]");
-  if (stale) stale.innerHTML = renderStrategyStaleRows(strategy.stale);
-  const stages = root.querySelector("[data-strategy-stage-list]");
-  if (stages) stages.innerHTML = renderStrategyStageRows(strategy.stageAges);
-  const cadence = root.querySelector("[data-strategy-cadence-list]");
-  if (cadence) cadence.innerHTML = renderStrategyCadenceRows(strategy.cadence);
-  const trends = root.querySelector("[data-strategy-trend-list]");
-  if (trends) trends.innerHTML = renderStrategyTrendRows(strategy.learning?.trends);
-  const history = root.querySelector("[data-strategy-history-list]");
-  if (history) history.innerHTML = renderStrategyHistoryRows(strategy.learning?.history);
-  const signals = root.querySelector("[data-strategy-learning-signals]");
-  if (signals) signals.innerHTML = renderStrategyLearningSignals(strategy.learning?.signals);
-  const trigger = root.querySelector("[data-strategy-review-trigger]");
-  if (trigger)
-    trigger.innerHTML = renderStrategyReviewTrigger(
-      strategy.learning?.reviewTrigger,
-      strategy.learning?.reevaluation
-    );
-  const recommendation = root.querySelector("[data-strategy-recommendation]");
-  if (recommendation)
-    recommendation.innerHTML = renderStrategyRecommendation(strategy.recommendation);
-}
-
-function renderCalendarExportControls(event, { compact = false } = {}) {
-  if (!event?.export) return "";
-  const compactClass = compact ? " calendar-export-row--compact" : "";
-  return `
-    <div class="calendar-export-row${compactClass}" aria-label="Calendar export options">
-      <button type="button" class="calendar-export-link" data-calendar-download-event data-calendar-export-id="${esc(event.id || "")}">.ics</button>
-      <a class="calendar-export-link" href="${esc(event.export.googleUrl)}" target="_blank" rel="noreferrer" data-calendar-google-link>Google</a>
-      <a class="calendar-export-link" href="${esc(event.export.outlookUrl)}" target="_blank" rel="noreferrer" data-calendar-outlook-link>Outlook</a>
-    </div>`;
-}
-
-function renderCalendarEvent(event) {
-  // Opaque busy blocks are non-interactive context — no detail link, no export.
-  if (event.kind === "busy") {
-    return `
-    <div class="calendar-event calendar-event--busy" data-kind="busy">
-      <b>${esc(event.title || "Busy")}</b>
-      <small>${esc(event.meta || "")}</small>
-    </div>`;
-  }
-  const detailAttrs = event.detailId
-    ? ` data-next-step-item data-detail-id="${esc(event.detailId)}"`
-    : "";
-  return `
-    <article class="calendar-event${event.done ? " calendar-event--done" : ""}" data-kind="${esc(event.kind || "deadline")}"${event.done ? ' data-done="true"' : ""} data-calendar-export-id="${esc(event.id || "")}">
-      <button type="button" class="calendar-event-main"${detailAttrs}>
-        <b>${esc(event.title)}</b>
-        <small>${esc(event.meta)}</small>
-      </button>
-      ${renderCalendarExportControls(event)}
-    </article>`;
-}
-
-function renderCalendarDay(day) {
-  const state = day.state ? ` data-calendar-day-state="${esc(day.state)}"` : "";
-  const events = day.events?.length
-    ? day.events.map(renderCalendarEvent).join("")
-    : '<div class="calendar-event calendar-event-empty"><b>Open block</b><small>No tracked item</small></div>';
-  return `
-    <article class="calendar-day-card" data-calendar-date="${esc(day.iso)}"${state}>
-      <div class="calendar-day-head"><span>${esc(day.dow)}</span><strong>${esc(day.date)}</strong></div>
-      ${events}
-    </article>`;
-}
-
-function renderCalendarNextUp(item = {}) {
-  const detailAttrs = item.detailId
-    ? ` data-next-step-item data-detail-id="${esc(item.detailId)}"`
-    : "";
-  return `
-    <div class="calendar-rail-head">
-      <strong>Next up</strong>
-      <span>${esc(item.label || calendarKindLabel(item.kind))}</span>
-    </div>
-    <div>
-      <div class="calendar-dossier-title">${esc(item.title || "No dated action")}</div>
-      <p class="calendar-dossier-note mt-3">${esc(item.note || "No dated item is waiting in this week.")}</p>
-    </div>
-    <div class="calendar-action-row">
-      <span>${esc(item.meta || "Calendar clear")}</span>
-      <button type="button" class="focus-card-cta w-fit"${detailAttrs}>${esc(item.cta || "Review jobs")}</button>
-    </div>
-    ${renderCalendarExportControls(item, { compact: true })}`;
-}
-
-function renderCalendarLoops(loops = []) {
-  const rows = objectList(loops);
-  const body = rows.length
-    ? rows
-        .map((item) => {
-          const when = [formatDateShort(item.iso, ""), item.time].filter(Boolean).join(" · ");
-          return `
-    <button type="button" class="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-left" data-next-step-item data-detail-id="${esc(item.detailId || "")}">
-      <span class="flex flex-col leading-tight">
-        <span class="font-bold text-primary text-[13px]">${esc(item.title)}</span>
-        ${when ? `<span class="font-bold text-on-surface-variant text-[11px] tabular-nums">${esc(when)}</span>` : ""}
-      </span>
-      <span class="calendar-kind-pill" data-kind="${esc(item.kind)}">${esc(item.label || calendarKindLabel(item.kind))}</span>
-    </button>`;
-        })
-        .join("")
-    : '<div class="px-3 py-3 text-[12px] font-bold text-on-surface-variant">No dated open loops this week.</div>';
-  return `
-    <div class="calendar-rail-head">
-      <strong>Open loops</strong>
-      <span>${esc(rows.length)} due</span>
-    </div>
-    <div class="dashboard-zebra">${body}</div>`;
-}
-
-function renderCalendarMonthGrid(month = {}) {
-  const labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-    .map((label) => `<div class="calendar-month-label">${label}</div>`)
-    .join("");
-  const cells = objectList(month.days)
-    .map((day, index) => {
-      const classes = ["calendar-month-cell"];
-      // Render-applied checkerboard band (was nth-child(odd) — child #(8+index),
-      // odd when index is odd) so the inline week-expansion row can't shift it.
-      if (index % 2 === 1) classes.push("is-band");
-      if (day.muted) classes.push("is-muted");
-      if (day.isToday) classes.push("is-today");
-      if (day.monthLabel) classes.push("is-month-start");
-      const eventCount = objectList(day.events).length;
-      if (eventCount) classes.push("has-events");
-      const state = day.state ? ` data-calendar-day-state="${esc(day.state)}"` : "";
-      const dots = objectList(day.events)
-        .slice(0, 4)
-        .map((event) => `<i class="calendar-dot" data-kind="${esc(event.kind)}"></i>`)
-        .join("");
-      const dateMarkup = day.monthLabel
-        ? `<strong><span class="calendar-month-tag">${esc(day.monthLabel)}</span>${esc(day.date)}</strong>`
-        : `<strong>${esc(day.date)}</strong>`;
-      return `<button type="button" class="${classes.join(" ")}" data-calendar-date="${esc(day.iso)}" data-calendar-month-day${state}>${dateMarkup}${dots ? `<span class="calendar-dot-row">${dots}</span>` : ""}</button>`;
-    })
-    .join("");
-  return labels + cells;
-}
-
-function renderCalendarTodayList(today = {}) {
-  const rows = objectList(today.events);
-  if (!rows.length) {
-    return '<div class="px-3 py-3 text-[12px] font-bold text-on-surface-variant">No tracked item due today.</div>';
-  }
-  return rows
-    .map(
-      (event) => `
-    <button type="button" class="grid grid-cols-[1fr_auto] gap-3 px-3 py-3 text-left" data-next-step-item data-detail-id="${esc(event.detailId || "")}">
-      <span class="flex flex-col leading-tight">
-        <span class="font-bold text-primary text-[13px]">${esc(event.title)}</span>
-        ${event.time ? `<span class="font-bold text-on-surface-variant text-[11px] tabular-nums">${esc(event.time)}</span>` : ""}
-      </span>
-      <span class="calendar-kind-pill" data-kind="${esc(event.kind)}">${esc(event.label || calendarKindLabel(event.kind))}</span>
-    </button>`
-    )
-    .join("");
-}
-
-function renderUpcomingList(upcoming = {}) {
-  const rows = objectList(upcoming.events);
-  if (!rows.length) {
-    return '<div class="px-3 py-3 text-[12px] font-bold text-on-surface-variant">Nothing upcoming.</div>';
-  }
-  return rows
-    .map(
-      (event) => `
-    <button type="button" class="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-4 py-3 text-left" data-kind="${esc(event.kind)}" data-next-step-item data-detail-id="${esc(event.detailId || "")}">
-      <span class="flex flex-col text-on-surface-variant text-[12px] tabular-nums leading-tight">
-        <span class="font-bold">${esc(formatDateShort(event.iso, ""))}</span>
-        ${event.time ? `<span class="text-[11px] opacity-80">${esc(event.time)}</span>` : ""}
-      </span>
-      <span class="font-bold text-primary text-[13px]">${esc(event.title)}</span>
-      <span class="calendar-kind-pill" data-kind="${esc(event.kind)}">${esc(event.label || calendarKindLabel(event.kind))}</span>
-    </button>`
-    )
-    .join("");
-}
-
-function renderCalendarWeekStats(stats = {}) {
-  return `
-    <div class="calendar-mini-stat"><strong>${esc(stats.interviews || 0)}</strong><span>Interviews</span></div>
-    <div class="calendar-mini-stat"><strong>${esc(stats.replies || 0)}</strong><span>Replies</span></div>
-    <div class="calendar-mini-stat"><strong>${esc(stats.deadlines || 0)}</strong><span>Due</span></div>`;
-}
-
-function renderCalendarProtectedPrep(prep = {}) {
-  const detailAttrs = prep.detailId
-    ? ` data-next-step-item data-detail-id="${esc(prep.detailId)}"`
-    : "";
-  return `
-    <div class="calendar-rail-head">
-      <strong>Protected prep</strong>
-      <span>${esc(prep.label || "Next")}</span>
-    </div>
-    <p class="calendar-dossier-note">${esc(prep.note || "No dated prep item is waiting.")}</p>
-    <button type="button" class="focus-card-cta w-fit"${detailAttrs}>${esc(prep.cta || "Review jobs")}</button>`;
-}
-
-function renderCalendarSyncProviders(sync = {}) {
-  return objectList(sync.providers)
-    .map(
-      (provider) => `
-    <div class="calendar-sync-provider" data-calendar-sync-provider="${esc(provider.key)}">
-      <div>
-        <b>${esc(provider.label)}</b>
-        <small>${esc(provider.channel)} · ${esc(provider.key)}</small>
-      </div>
-      <span>${esc(provider.status || "Consent gated")}</span>
-    </div>`
-    )
-    .join("");
-}
-
-function renderCalendarSyncHistory(sync = {}) {
-  const rows = objectList(sync.history);
-  if (!rows.length) {
-    return '<div class="calendar-sync-empty">No calendar writes yet.</div>';
-  }
-  return rows
-    .map(
-      (write) => `
-    <div class="calendar-sync-history-row" data-calendar-sync-write="${esc(write.id)}">
-      <div>
-        <b>${esc(write.title)}</b>
-        <small>${esc(write.providerLabel)} · ${esc(write.atLabel)}</small>
-      </div>
-      <span>${esc(write.statusLabel)}</span>
-    </div>`
-    )
-    .join("");
-}
-
-function renderCalendarDom(root, calendar, { weekIndex = calendar.currentWeekIndex || 0 } = {}) {
-  if (!root || !calendar) return;
-  const weeks = objectList(calendar.weeks);
-  const safeWeekIndex = Math.max(0, Math.min(weekIndex, Math.max(0, weeks.length - 1)));
-  const week = weeks[safeWeekIndex] || {};
-
-  setText(root, '[data-calendar-stat="thisWeek"]', calendar.metrics?.thisWeek || 0);
-  setText(root, '[data-calendar-stat="interviews"]', calendar.metrics?.interviews || 0);
-  setText(root, '[data-calendar-stat="dueToday"]', calendar.metrics?.dueToday || 0);
-  setAllText(root, "[data-calendar-week-label]", week.label || "No week");
-  setText(root, "[data-calendar-month-title]", calendar.month?.title || "Calendar");
-  setText(root, "[data-calendar-month-count]", calendar.month?.countLabel || "0 tracked");
-  setText(root, "[data-calendar-today-label]", calendar.today?.label || "Today");
-
-  const weekBoard = root.querySelector("[data-calendar-week-board]");
-  if (weekBoard) weekBoard.innerHTML = objectList(week.days).map(renderCalendarDay).join("");
-  const nextUp = root.querySelector("[data-calendar-next-up]");
-  if (nextUp) nextUp.innerHTML = renderCalendarNextUp(week.nextUp);
-  const openLoops = root.querySelector("[data-calendar-open-loops]");
-  if (openLoops) openLoops.innerHTML = renderCalendarLoops(week.loops);
-  const monthGrid = root.querySelector("[data-calendar-month-grid]");
-  if (monthGrid) monthGrid.innerHTML = renderCalendarMonthGrid(calendar.month);
-  const todayList = root.querySelector("[data-calendar-today-list]");
-  if (todayList) todayList.innerHTML = renderCalendarTodayList(calendar.today);
-  const weekStats = root.querySelector("[data-calendar-this-week-stats]");
-  if (weekStats) weekStats.innerHTML = renderCalendarWeekStats(week.stats);
-  const protectedPrep = root.querySelector("[data-calendar-protected-prep]");
-  if (protectedPrep) protectedPrep.innerHTML = renderCalendarProtectedPrep(calendar.protectedPrep);
-  const syncProviders = root.querySelector("[data-calendar-sync-providers]");
-  if (syncProviders) syncProviders.innerHTML = renderCalendarSyncProviders(calendar.sync);
-  const syncHistory = root.querySelector("[data-calendar-sync-history]");
-  if (syncHistory) syncHistory.innerHTML = renderCalendarSyncHistory(calendar.sync);
-
-  const prev = root.querySelector("[data-calendar-prev-week]");
-  if (prev) prev.disabled = safeWeekIndex === 0;
-  const next = root.querySelector("[data-calendar-next-week]");
-  if (next) next.disabled = safeWeekIndex >= weeks.length - 1;
-}
-
-function renderCalendarStatus(root, calendar) {
-  renderCalendarDom(root, calendar);
-  if (typeof globalThis === "undefined") return;
-  globalThis.rolesterCalendarViewModel = calendar;
-  globalThis.rolesterCalendarRender = (state = {}) =>
-    renderCalendarDom(state.root || globalThis.document, calendar, state);
-  if (typeof globalThis.updateCalendarWorkbench === "function") {
-    globalThis.updateCalendarWorkbench(calendar);
-  }
-}
-
-function renderNetworkStatus(root, network) {
-  setText(root, '[data-network-stat="warmPaths"]', network.metrics.warmPaths);
-  setText(root, '[data-network-stat="companies"]', network.metrics.companies);
-  setText(root, '[data-network-stat="dormant"]', network.metrics.dormant);
-
-  const companyGrid = root.querySelector("[data-network-company-grid]");
-  if (companyGrid) companyGrid.innerHTML = renderNetworkCompanies(network.companies);
-  const coverage = root.querySelector("[data-network-coverage]");
-  if (coverage) coverage.innerHTML = renderNetworkCoverage(network.coverage);
-  const gaps = root.querySelector("[data-network-gaps]");
-  if (gaps) gaps.innerHTML = renderNetworkList(network.gaps);
-  const guardrails = root.querySelector("[data-network-guardrails]");
-  if (guardrails)
-    guardrails.innerHTML = renderNetworkList(network.guardrails, [
-      "var(--teal)",
-      "var(--sky)",
-      "var(--coral)",
-    ]);
-  const objections = root.querySelector("[data-network-objections]");
-  if (objections)
-    objections.innerHTML = renderNetworkList(network.objections, [
-      "var(--coral)",
-      "var(--teal)",
-      "var(--plum)",
-    ]);
-  const leadReview = root.querySelector("[data-network-lead-review]");
-  if (leadReview) leadReview.innerHTML = renderNetworkLeadReview(network.sourcing?.reviewLeads);
-  const sourcingTargets = root.querySelector("[data-network-sourcing-targets]");
-  if (sourcingTargets)
-    sourcingTargets.innerHTML = renderNetworkSourcingTargets(network.sourcing?.targets);
-}
-
-function renderLibraryStatus(root, library) {
-  setText(root, '[data-library-stat="claims"]', library.metrics.claims);
-  setText(root, '[data-library-stat="stories"]', library.metrics.stories);
-  setText(root, '[data-library-stat="gaps"]', library.metrics.gaps);
-
-  const filters = root.querySelector("[data-library-filters]");
-  if (filters) filters.innerHTML = renderLibraryFilters(library.filters);
-  const cards = root.querySelector("[data-library-cards]");
-  if (cards) cards.innerHTML = renderLibraryCards(library.cards);
-  const gaps = root.querySelector("[data-library-gaps]");
-  if (gaps) {
-    gaps.innerHTML = renderLibraryGapCallouts(library.gaps);
-    // metrics.gaps already excludes the "No urgent gaps" placeholder, so the whole
-    // Claim guardrails section hides when there's nothing the user must resolve.
-    const region = gaps.closest("[data-library-callout]");
-    if (region) region.hidden = Number(library.metrics?.gaps || 0) === 0;
-  }
-}
-
-export function renderDashboardViewModel(viewModel, root = document) {
-  const updatedChip = root.querySelector("[data-updated-recency]");
-  if (updatedChip && viewModel.recency?.updatedAt) {
-    updatedChip.dataset.updatedAt = viewModel.recency.updatedAt;
-    delete updatedChip.dataset.updatedAgeSeconds;
-    delete updatedChip.dataset.updatedStartedAt;
-    if (typeof globalThis !== "undefined" && typeof globalThis.updateRecencyStats === "function") {
-      globalThis.updateRecencyStats(root);
-    }
-  }
-
-  renderModeStatus(root, viewModel.modes);
-  renderAgentGuidance(root, viewModel.agentGuidance);
-  renderSettingsStatus(root, viewModel.settings);
-  renderStrategyInsights(root, viewModel.strategy);
-  renderCalendarStatus(root, viewModel.calendar);
-  renderNetworkStatus(root, viewModel.network);
-  renderLibraryStatus(root, viewModel.library);
-
-  setText(root, '[data-dashboard-stat="inPlay"]', viewModel.stats.inPlay);
-  setText(root, '[data-dashboard-stat="responseRate"]', `${viewModel.stats.responseRate}%`);
-  setText(root, '[data-dashboard-stat="interviews"]', viewModel.stats.interviews);
-
-  const nextSteps = root.querySelector("#next-steps-list");
-  if (nextSteps) nextSteps.innerHTML = renderNextSteps(viewModel.nextSteps);
-
-  const upcomingList = root.querySelector("#upcoming-list");
-  if (upcomingList) upcomingList.innerHTML = renderUpcomingList(viewModel.calendar?.upcoming);
-
-  const latestRoles = root.querySelector("#latest-roles-list");
-  if (latestRoles) latestRoles.innerHTML = renderLatestRoles(viewModel.latestRoles);
-
-  const sourcedRolesList = root.querySelector("#sourced-roles-list");
-  if (sourcedRolesList) sourcedRolesList.innerHTML = renderSourcedRoles(viewModel.sourcedRoles);
-
-  const reviewHoldList = root.querySelector("#review-hold-list");
-  if (reviewHoldList) reviewHoldList.innerHTML = renderReviewHoldRoles(viewModel.reviewHoldRoles);
-  const reviewHoldCount = root.querySelector("[data-review-hold-count]");
-  if (reviewHoldCount) reviewHoldCount.textContent = viewModel.reviewHoldRoles.length;
-  const reviewHoldLane = root.querySelector("[data-review-hold-lane]");
-  if (reviewHoldLane) reviewHoldLane.hidden = viewModel.reviewHoldRoles.length === 0;
-
-  const focusCard = root.querySelector("#focus-card-body");
-  if (focusCard && viewModel.focus) {
-    focusCard.dataset.focusKind = viewModel.focus.kind;
-    focusCard.dataset.detailId = viewModel.focus.detailId || "";
-    focusCard.setAttribute("data-focus-kind", viewModel.focus.kind);
-    focusCard.setAttribute("data-detail-id", viewModel.focus.detailId || "");
-    focusCard.innerHTML = renderFocusCard(viewModel.focus);
-    // Expose the featured dossier so the "Open dossier" CTA can preview it full-page
-    // (keyed by detailId; the modal handler reads from here).
-    if (typeof globalThis !== "undefined") {
-      globalThis.rolesterDossiers =
-        viewModel.focus.kind === "interview" &&
-        viewModel.focus.detailId &&
-        viewModel.focus.hasDossier
-          ? { [viewModel.focus.detailId]: viewModel.focus.dossier || null }
-          : {};
-    }
-  }
-
-  if (viewModel.activity) {
-    const pulseFeeds = new Set();
-    const pulseFeed = root.querySelector("#pulse-feed");
-    if (pulseFeed) pulseFeeds.add(pulseFeed);
-    if (typeof root.querySelectorAll === "function") {
-      root.querySelectorAll("[data-pulse-feed]").forEach((feed) => {
-        pulseFeeds.add(feed);
-      });
-    }
-    for (const feed of pulseFeeds) {
-      // Both the header popover (#pulse-feed) and the full drawer show the complete
-      // log — the popover is a fixed-height card that scrolls internally, so it no
-      // longer needs the old "latest few" cap. "View all" opens the same feed
-      // full-screen in the drawer.
-      feed.innerHTML = renderActivityPulse(viewModel.activity);
-    }
-  }
-
-  const jobsTable = root.querySelector("#jobs-tbody");
-  if (jobsTable) jobsTable.innerHTML = renderJobsRows(viewModel.jobs.rows);
-
-  const jobsFunnel = root.querySelector("#jobs-funnel-list");
-  if (jobsFunnel) jobsFunnel.innerHTML = renderJobsFunnel(viewModel.jobs.funnel);
-
-  const jobsSankey = root.querySelector("#jobs-sankey-slot");
-  // The funnel is static: it always renders the full population (every stage +
-  // both decay states). Filtering/hiding is a table-only concern, driven by the
-  // explorer toggles and by clicking funnel nodes — neither rebuilds this SVG.
-  if (jobsSankey) jobsSankey.innerHTML = renderJobsSankey(viewModel.jobs.sankey);
-
-  const jobsExplorerBody = root.querySelector("#jobs-explorer-tbody");
-  if (jobsExplorerBody) jobsExplorerBody.innerHTML = renderJobsExplorerRows(viewModel.jobs.rows);
-
-  const jobsCardGrid = root.querySelector("#jobs-card-grid");
-  if (jobsCardGrid) jobsCardGrid.innerHTML = renderJobsCards(viewModel.jobs.rows);
-
-  setText(root, '[data-jobs-count="active"]', viewModel.jobs.visibleCount);
-  setText(root, '[data-jobs-count="screenplus"]', viewModel.jobs.rail.screenPlus);
-  setText(root, '[data-jobs-count="review"]', viewModel.jobs.rail.manualReview);
-  setAllText(root, '[data-jobs-rail-value="screenPlus"]', viewModel.jobs.rail.screenPlus);
-  setAllText(root, '[data-jobs-rail-value="fresh"]', viewModel.jobs.rail.fresh);
-  setAllText(root, '[data-jobs-rail-value="highFit"]', viewModel.jobs.rail.highFit);
-  setAllText(root, '[data-jobs-rail-value="manualReview"]', viewModel.jobs.rail.manualReview);
-  setAllText(root, '[data-jobs-rail-value="terminal"]', viewModel.jobs.rail.terminal);
-  setAllText(root, "[data-jobs-rail-next-title]", viewModel.jobs.rail.nextDecision.title);
-  setAllText(root, "[data-jobs-rail-next-summary]", viewModel.jobs.rail.nextDecision.summary);
-
-  const showingLabel = root.querySelector("#showing-label");
-  if (showingLabel) {
-    showingLabel.dataset.visibleCount = String(viewModel.jobs.visibleCount);
-    showingLabel.dataset.totalCount = String(viewModel.jobs.totalCount);
-    showingLabel.dataset.terminalCount = String(viewModel.jobs.terminalCount);
-    showingLabel.textContent = `Showing ${viewModel.jobs.visibleCount} of ${viewModel.jobs.totalCount} jobs`;
-  }
-
-  const rejectedButton = root.querySelector("#show-rejected-btn");
-  if (rejectedButton) rejectedButton.textContent = "Show rejected";
-  registerJobDetails(viewModel.jobs.rows);
-  globalThis.setupJobsExplorer?.(viewModel.jobs);
-
-  const nextDecisionCard = root.querySelector("[data-jobs-next-decision]");
-  if (nextDecisionCard) {
-    const next = viewModel.jobs.rail.nextDecision;
-    nextDecisionCard.dataset.hasWork = next.hasWork ? "1" : "0";
-    const nextDecisionCta = nextDecisionCard.querySelector("[data-jobs-rail-next]");
-    if (nextDecisionCta && next.action) {
-      nextDecisionCta.dataset.jobsRailAction = next.action;
-    }
-  }
-}
-
-// Parse the activity feed (JSONL — one event per line). Tolerant: a malformed or
-// partial trailing line (crash mid-append) is skipped, never thrown.
-function parseActivityJsonl(text) {
-  const events = [];
-  for (const line of String(text || "").split("\n")) {
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    try {
-      events.push(JSON.parse(trimmed));
-    } catch {
-      // skip malformed/partial line
-    }
-  }
-  return events;
-}
-
-// Fetch the Activity Pulse feed alongside the tracker. The feed is optional —
-// absence or any error degrades to an empty feed (the renderer shows the
-// empty-state), never breaking the rest of the dashboard.
-async function fetchActivityEvents(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return [];
-    return parseActivityJsonl(await res.text());
-  } catch {
-    return [];
-  }
-}
-
-async function fetchModeStatus(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-async function fetchSettingsStatus(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-async function fetchLibraryStatus(url) {
-  try {
-    const res = await fetch(url, { cache: "no-store" });
-    if (!res.ok) return null;
-    return res.json();
-  } catch {
-    return null;
-  }
-}
-
-export async function hydrateDashboardFromTracker({
-  root = document,
-  source = "../../workspace/tracker.json",
-  now = new Date(),
-} = {}) {
-  const activitySource = source.replace(/tracker\.json(\?|$)/, "activity.jsonl$1");
-  const modesSource = source.replace(/tracker\.json(\?|$)/, "modes.json$1");
-  const settingsSource = source.replace(/tracker\.json(\?|$)/, "settings.json$1");
-  const librarySource = source.replace(/tracker\.json(\?|$)/, "library.json$1");
-  const [trackerData, activityEvents, modes, settings, library] = await Promise.all([
-    fetch(source, { cache: "no-store" }).then((response) => {
-      if (!response.ok) throw new Error(`Could not load tracker JSON: ${response.status}`);
-      return response.json();
-    }),
-    fetchActivityEvents(activitySource),
-    fetchModeStatus(modesSource),
-    fetchSettingsStatus(settingsSource),
-    fetchLibraryStatus(librarySource),
-  ]);
-  const effectiveSettings = settings || modes?.settings || null;
-  const viewModel = buildDashboardViewModel(trackerData, {
-    now,
-    activityEvents,
-    modes,
-    settings: effectiveSettings,
-    library,
-    agentGuidance: modes?.agentGuidance || null,
-  });
-  renderDashboardViewModel(viewModel, root);
-  return viewModel;
 }

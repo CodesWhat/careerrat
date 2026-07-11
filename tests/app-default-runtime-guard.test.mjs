@@ -149,16 +149,11 @@ const CLASSIFIED_RETAINED_RUNTIME_FILES = [
   {
     file: "src/cli/tracker-dev.mjs",
     classification: "embedded server mount for classified retained/debug/chat surfaces",
-    patterns: [/\bmountSkillRunRoute\b/, /\bmountChatRoute\b/, /\bSTATIC_COMPATIBILITY_ROUTES\b/],
+    patterns: [/\bmountSkillRunRoute\b/, /\bmountChatRoute\b/],
   },
 ];
 
 const CLASSIFIED_LEGACY_STATIC_RUNTIME_FILES = [
-  {
-    file: "src/core/ai/evaluate-page.mjs",
-    classification: "legacy static evaluate page retained runtime client",
-    patterns: [/fetch\("\/api\/skill\/run"/, /evaluate-job/],
-  },
   {
     file: "src/core/onboarding/chat-page.mjs",
     classification: "legacy static chat page explicit chat client",

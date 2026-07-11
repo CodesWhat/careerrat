@@ -28,6 +28,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { kvGet, kvUpsert } from "../core/db/verbs.mjs";
 import {
   COMMON_COMPETENCIES,
   computeStoryEnrichment,
@@ -393,6 +395,35 @@ function cmdAdd() {
 function runEnrichmentSync({ write }) {
   const { stories } = loadStories({ root: opts.root });
   const entries = computeStoryEnrichment(stories);
+
+  if (dbExists(pathCtx)) {
+    let current;
+    try {
+      current = kvGet({ ...pathCtx, key: "storyEnrichment" });
+    } catch (err) {
+      return { ok: false, error: `read sqlite:kv.storyEnrichment: ${err.message}` };
+    }
+    const prevJson = JSON.stringify(Array.isArray(current) ? current : []);
+    const nextJson = JSON.stringify(entries);
+    const changed = prevJson !== nextJson;
+    if (changed && write) {
+      try {
+        kvUpsert({ ...pathCtx, key: "storyEnrichment", value: entries });
+      } catch (err) {
+        return { ok: false, error: `write sqlite:kv.storyEnrichment: ${err.message}` };
+      }
+    }
+    return {
+      ok: true,
+      applicable: true,
+      trackerExists: true,
+      changed,
+      written: changed && write,
+      count: entries.length,
+      entries,
+    };
+  }
+
   const trackerPath = userPath(pathCtx, "workspace/tracker.json");
   if (!existsSync(trackerPath))
     return { ok: true, applicable: false, trackerExists: false, count: entries.length };

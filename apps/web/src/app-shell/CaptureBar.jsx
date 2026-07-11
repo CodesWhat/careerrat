@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/Button.jsx";
-import { UploadIcon } from "../components/icons.jsx";
+import { PaperclipIcon } from "../components/icons.jsx";
 import { kindLabel } from "../inbox/intake-labels.js";
 import { ApiError, createIntake, uploadIntakeFile } from "../lib/api.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
@@ -176,7 +176,6 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
             </span>
             <span className="capture-assistant__intro">
               <strong>Roland</strong>
-              <small>Drop jobs, emails, updates, docs, or links.</small>
             </span>
             <button
               type="button"
@@ -202,32 +201,37 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
                   onChange={(e) => setText(e.target.value)}
                   onPaste={handlePaste}
                   onKeyDown={handleKeyDown}
+                  aria-keyshortcuts="Enter Shift+Enter"
                   disabled={submitting}
                 />
               </div>
               <div className="capture-assistant__footer">
-                <div className="capture-assistant__footer-left">
-                  <input
-                    ref={fileInputRef}
-                    className="capture-assistant__file-input"
-                    type="file"
-                    onChange={handleFileSelection}
-                    aria-label="Upload a file to Roland"
-                  />
+                <input
+                  ref={fileInputRef}
+                  className="capture-assistant__file-input"
+                  type="file"
+                  onChange={handleFileSelection}
+                  aria-label="Attach a file to Roland"
+                />
+                <div className="capture-assistant__actions">
                   <button
                     type="button"
                     className="capture-assistant__upload"
                     onClick={() => fileInputRef.current?.click()}
                     disabled={submitting}
                   >
-                    <UploadIcon />
-                    <span>Upload</span>
+                    <PaperclipIcon />
+                    <span>Attach</span>
                   </button>
-                  <span>Enter sends · Shift+Enter adds a line</span>
+                  <Button
+                    className="capture-assistant__send"
+                    aria-label="Send to Roland"
+                    onClick={() => submit(text)}
+                    disabled={submitting || !text.trim()}
+                  >
+                    {submitting ? "Capturing…" : "Send"}
+                  </Button>
                 </div>
-                <Button onClick={() => submit(text)} disabled={submitting || !text.trim()}>
-                  {submitting ? "Capturing…" : "Send to Roland"}
-                </Button>
               </div>
             </div>
           )}

@@ -565,8 +565,13 @@ export function ResumeStep({
             </div>
             <div className="onboarding-targeting__media-copy">
               <h1 id="onboarding-resume-title">Upload your resume</h1>
-              <p>AI reads it in the black box and autofills* the rest.</p>
-              <p className="onboarding-resume__footnote">*maybe</p>
+              <p>AI reads it in the black box and autofills the rest.</p>
+              <p className="onboarding-resume__footnote">
+                <span className="onboarding-resume__footnote-marker" aria-hidden="true">
+                  *
+                </span>
+                <span>maybe</span>
+              </p>
             </div>
           </div>
           <div className="onboarding-step-card__content onboarding-step-card__content--dense onboarding-step-card__content--scroll onboarding-resume__action-side">
@@ -725,11 +730,11 @@ export function ResumeStep({
                 ) : null}
               </section>
             ) : null}
-            {previewItem ? (
-              <ResumeDocumentViewer item={previewItem} onClose={() => setPreviewItem(null)} />
-            ) : null}
           </div>
         </section>
+        {previewItem ? (
+          <ResumeDocumentViewer item={previewItem} onClose={() => setPreviewItem(null)} />
+        ) : null}
       </div>
     </OnboardingShell>
   );

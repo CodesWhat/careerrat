@@ -6,9 +6,10 @@
 export { activityAppend } from "./activity.mjs";
 export { analyticsRefresh } from "./analytics.mjs";
 export {
+  appRecordRoundOutcome,
+  appRegisterArtifact,
   appRegisterPacketArtifacts,
   appRegisterPacketQuestionCapture,
-  appRegisterArtifact,
   appScheduleInterview,
   appSetFields,
   appSetStatus,
@@ -70,7 +71,7 @@ export {
   publicSyncPreferenceSet,
 } from "./public-intel.mjs";
 export { relationshipLeadSetStatus, relationshipLeadUpsertBatch } from "./relationship.mjs";
-export { NotFoundError } from "./shared.mjs";
+export { kvGet, kvUpsert, NotFoundError } from "./shared.mjs";
 export { sourceWatermarkUpsert } from "./source.mjs";
 export {
   companyAtsRemove,

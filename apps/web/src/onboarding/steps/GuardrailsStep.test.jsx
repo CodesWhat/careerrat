@@ -55,7 +55,7 @@ describe("GuardrailsStep shell layout", () => {
     expect(html).toContain('class="onboarding-targeting__mark" aria-hidden="true">🚫');
     expect(html).not.toContain('class="onboarding-targeting__mark" aria-hidden="true">🤝');
     expect(html).not.toContain('class="onboarding-targeting__mark" aria-hidden="true">🛡️');
-    expect(html).toContain("Custom avoids");
+    expect(html).toContain("Custom guardrails");
     expect(html).toContain("heavy travel");
     expect(html).toContain("low autonomy");
     expect(html).toContain('class="onboarding-guardrails__side-note"');
@@ -72,9 +72,9 @@ describe("GuardrailsStep shell layout", () => {
     const html = renderGuardrailsStep();
 
     expect(GUARDRAIL_PRESETS.length).toBeGreaterThanOrEqual(10);
-    expect(GUARDRAIL_SUGGESTIONS.length).toBeGreaterThanOrEqual(40);
-    expect(html).toContain('aria-label="Common no-go signals"');
-    expect(html).toContain("Pick common avoids");
+    expect(GUARDRAIL_SUGGESTIONS.length).toBeGreaterThanOrEqual(55);
+    expect(html).toContain('aria-label="Common guardrails"');
+    expect(html).toContain("Pick common guardrails");
     expect(html).toContain("🧳");
     expect(html).toContain("Heavy travel");
     expect(html).toContain("🏢");
@@ -82,8 +82,10 @@ describe("GuardrailsStep shell layout", () => {
     expect(html).toContain(
       'class="field onboarding-custom-entry onboarding-guardrails__custom-field"'
     );
-    expect(html).toContain("Custom avoids");
-    expect(html.indexOf("Pick common avoids")).toBeLessThan(html.indexOf("Custom avoids"));
+    expect(html).toContain("Custom guardrails");
+    expect(html).not.toContain("Custom avoids");
+    expect(html).not.toContain("another no-go");
+    expect(html.indexOf("Pick common guardrails")).toBeLessThan(html.indexOf("Custom guardrails"));
   });
 
   it("offers a deeper emoji suggestion catalog for typed custom avoids", () => {
@@ -107,6 +109,8 @@ describe("GuardrailsStep shell layout", () => {
       expect.arrayContaining([
         expect.objectContaining({ emoji: "💵", label: "No salary range" }),
         expect.objectContaining({ emoji: "🌀", label: "Interview chaos" }),
+        expect.objectContaining({ emoji: "📝", label: "Large unpaid take-home" }),
+        expect.objectContaining({ emoji: "🔇", label: "Poor communication" }),
       ])
     );
   });

@@ -25,6 +25,8 @@
 
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { kvUpsert } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { buildStrategyReviewStamp } from "../core/tracker/dashboard-data.js";
@@ -107,8 +109,12 @@ function cmdStamp() {
     process.exit(0);
   }
 
-  trackerData.strategyReview = marker;
-  writeTrackerJson(trackerPath, trackerData, { at: marker.lastReviewedAt });
+  if (dbExists(pathCtx)) {
+    kvUpsert({ ...pathCtx, key: "strategyReview", value: marker });
+  } else {
+    trackerData.strategyReview = marker;
+    writeTrackerJson(trackerPath, trackerData, { at: marker.lastReviewedAt });
+  }
   if (opts.json) {
     console.log(JSON.stringify({ ok: true, written: true, strategyReview: marker }, null, 2));
   } else {

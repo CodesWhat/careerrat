@@ -6,16 +6,17 @@ import { defineConfig } from "vite";
 // serveApp()); base:"/app/" makes every built asset URL resolve correctly
 // under that mount prefix regardless of what serves it.
 //
-// In dev, `vite` runs its own HMR server on its own port and proxies API +
-// font traffic to a SEPARATELY-running `tracker-dev` instance rather than
+// In dev, `vite` runs its own HMR server on its own port and proxies API,
+// asset, and font traffic to a SEPARATELY-running `tracker-dev` instance rather than
 // re-implementing any of that server's behavior — see apps/web/README.md for
 // the two-process loop. This covers both SSE shapes already in this codebase
 // (GET EventSource streams and hand-parsed POST streams): Vite's dev proxy
 // streams/pipes rather than buffering, so both pass through untouched.
 const TRACKER_DEV_TARGET = `http://127.0.0.1:${process.env.ROLESTER_DEV_PORT || 7777}`;
+const BASE_PATH = process.env.VITE_BASE_PATH || "/app/";
 
 export default defineConfig({
-  base: "/app/",
+  base: BASE_PATH,
   plugins: [react()],
   build: {
     outDir: "dist",
@@ -23,6 +24,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": { target: TRACKER_DEV_TARGET, changeOrigin: true },
+      "/assets": { target: TRACKER_DEV_TARGET, changeOrigin: true },
       "/fonts": { target: TRACKER_DEV_TARGET, changeOrigin: true },
     },
   },

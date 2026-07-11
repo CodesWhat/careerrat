@@ -1,4 +1,4 @@
-// apps/web/src/calendar/CalendarNextPage.jsx — the agenda-first calendar from
+// apps/web/src/calendar/CalendarPage.jsx — the agenda-first calendar from
 // docs/CALENDAR_UX_RESEARCH.md ("The target shape"). Renders fields the way
 // DashboardContext.jsx's data contract requires: `data.calendar` is the
 // unmodified output of buildCalendar() (src/core/tracker/dashboard-data.js) —
@@ -22,44 +22,41 @@ const BUCKET_LABELS = {
 };
 const STRIP_WINDOW_DAYS = 14;
 
-export function CalendarNextPage() {
+export function CalendarPage() {
   const { data, loading, error, noDatabase } = useDashboardSnapshot();
-  const calendar = data ? calendarForNext(data.calendar) : null;
-  const model = buildCalendarNextModel(calendar);
+  const calendar = data ? calendarForPage(data.calendar) : null;
+  const model = buildCalendarModel(calendar);
 
   if (noDatabase) {
     return (
-      <div className="calendar-next">
+      <div className="calendar">
         <InlineAlert message="No database workspace detected — run `rolester data import` (or `rolester data init`) first, then reload." />
       </div>
     );
   }
 
   return (
-    <div className="calendar-next">
-      <CalendarNextHero metrics={model.metrics} />
+    <div className="calendar">
+      <CalendarHero metrics={model.metrics} />
 
       {error ? <InlineAlert message={error} /> : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
-      {calendar ? <CalendarNextBody model={model} /> : null}
+      {calendar ? <CalendarBody model={model} /> : null}
     </div>
   );
 }
 
-function CalendarNextHero({ metrics }) {
+function CalendarHero({ metrics }) {
   return (
-    <header className="calendar-next__hero">
-      <div className="calendar-next__title-block">
-        <h1 className="calendar-next__title">Calendar</h1>
+    <header className="calendar__hero">
+      <div className="calendar__title-block">
+        <h1 className="calendar__title">Calendar</h1>
       </div>
-      <section aria-label="Calendar status" className="calendar-next__scoreboard">
+      <section aria-label="Calendar status" className="calendar__scoreboard">
         {metrics.map((metric) => (
-          <div
-            className={`calendar-next__score calendar-next__score--${metric.tone}`}
-            key={metric.key}
-          >
-            <strong data-calendar-next-stat={metric.key}>{formatNumber(metric.value)}</strong>
+          <div className={`calendar__score calendar__score--${metric.tone}`} key={metric.key}>
+            <strong data-calendar-stat={metric.key}>{formatNumber(metric.value)}</strong>
             <span>{metric.label}</span>
           </div>
         ))}
@@ -68,7 +65,7 @@ function CalendarNextHero({ metrics }) {
   );
 }
 
-function CalendarNextBody({ model }) {
+function CalendarBody({ model }) {
   const [windowStartIso, setWindowStartIso] = useState(model.todayIso);
 
   const handleToday = () => setWindowStartIso(model.todayIso);
@@ -93,7 +90,7 @@ function CalendarNextBody({ model }) {
         windowStartIso={windowStartIso}
       />
 
-      <section aria-label="Agenda" className="calendar-next__agenda">
+      <section aria-label="Agenda" className="calendar__agenda">
         {BUCKET_ORDER.map((key) => (
           <AgendaBucket bucketKey={key} events={model.buckets[key]} key={key} />
         ))}
@@ -115,24 +112,24 @@ function DateStrip({
 }) {
   const days = buildStripDays(windowStartIso, eventsByIso, todayIso);
   return (
-    <section aria-label="Date strip" className="calendar-next__strip-panel">
-      <div className="calendar-next__strip-controls">
-        <button className="calendar-next__strip-nav" onClick={onToday} type="button">
+    <section aria-label="Date strip" className="calendar__strip-panel">
+      <div className="calendar__strip-controls">
+        <button className="calendar__strip-nav" onClick={onToday} type="button">
           Today
         </button>
-        <div className="calendar-next__strip-steps">
+        <div className="calendar__strip-steps">
           <button
             aria-label="Previous 14 days"
-            className="calendar-next__strip-step"
+            className="calendar__strip-step"
             onClick={onPrev}
             type="button"
           >
             <ArrowLeftIcon />
           </button>
-          <span className="calendar-next__strip-month">{monthTitleFromIso(windowStartIso)}</span>
+          <span className="calendar__strip-month">{monthTitleFromIso(windowStartIso)}</span>
           <button
             aria-label="Next 14 days"
-            className="calendar-next__strip-step"
+            className="calendar__strip-step"
             onClick={onNext}
             type="button"
           >
@@ -140,18 +137,18 @@ function DateStrip({
           </button>
         </div>
       </div>
-      <div className="calendar-next__strip">
+      <div className="calendar__strip">
         {days.map((day) => (
           <button
-            className={`calendar-next__strip-day${day.isToday ? " calendar-next__strip-day--today" : ""}`}
+            className={`calendar__strip-day${day.isToday ? " calendar__strip-day--today" : ""}`}
             key={day.iso}
             onClick={() => onSelectDay(day.iso)}
             type="button"
           >
-            <span className="calendar-next__strip-dow">{day.dow}</span>
-            <span className="calendar-next__strip-date">{day.date}</span>
+            <span className="calendar__strip-dow">{day.dow}</span>
+            <span className="calendar__strip-date">{day.date}</span>
             {day.dots.length ? (
-              <span aria-hidden="true" className="calendar-next__strip-dots">
+              <span aria-hidden="true" className="calendar__strip-dots">
                 {day.dots.map((dot) => (
                   <i data-kind={dot.kind} key={dot.key} />
                 ))}
@@ -167,16 +164,16 @@ function DateStrip({
 function AgendaBucket({ bucketKey, events }) {
   const rows = Array.isArray(events) ? events : [];
   return (
-    <article className="calendar-next__bucket">
-      <header className="calendar-next__bucket-header">
+    <article className="calendar__bucket">
+      <header className="calendar__bucket-header">
         <h2>{BUCKET_LABELS[bucketKey]}</h2>
-        <span className="calendar-next__bucket-count">{rows.length}</span>
+        <span className="calendar__bucket-count">{rows.length}</span>
       </header>
-      <div className="calendar-next__bucket-body">
+      <div className="calendar__bucket-body">
         {rows.length ? (
           rows.map((event) => <AgendaEventRow event={event} key={eventKey(event)} />)
         ) : (
-          <div className="calendar-next__empty">Nothing scheduled</div>
+          <div className="calendar__empty">Nothing scheduled</div>
         )}
       </div>
     </article>
@@ -187,9 +184,9 @@ function RecentSection({ events }) {
   const rows = Array.isArray(events) ? events : [];
   if (!rows.length) return null;
   return (
-    <details className="calendar-next__recent">
+    <details className="calendar__recent">
       <summary>Recent · {rows.length}</summary>
-      <div className="calendar-next__recent-body">
+      <div className="calendar__recent-body">
         {rows.map((event) => (
           <AgendaEventRow
             event={event}
@@ -206,7 +203,7 @@ function AgendaEventRow({ event, statusLabel }) {
   const isBusy = event.kind === "busy";
   const pillLabel = statusLabel || event.label || calendarKindLabel(event.kind);
   const copy = (
-    <span className="calendar-next__event-copy">
+    <span className="calendar__event-copy">
       <strong>{event.title}</strong>
       {event.meta ? <small>{event.meta}</small> : null}
     </span>
@@ -214,34 +211,30 @@ function AgendaEventRow({ event, statusLabel }) {
 
   return (
     <div
-      className={`calendar-next__event-row${isBusy ? " calendar-next__event-row--busy" : ""}`}
+      className={`calendar__event-row${isBusy ? " calendar__event-row--busy" : ""}`}
       id={event.anchorId || undefined}
     >
-      <span className="calendar-next__event-time">
+      <span className="calendar__event-time">
         <strong>{event.time || "All day"}</strong>
         <small>{formatDateWithWeekday(event.iso)}</small>
       </span>
 
       {event.detailId && !isBusy ? (
         <Link
-          className="calendar-next__event-link"
+          className="calendar__event-link"
           to={`/jobs?open=${encodeURIComponent(event.detailId)}`}
         >
           {copy}
         </Link>
       ) : (
-        <div className="calendar-next__event-link">{copy}</div>
+        <div className="calendar__event-link">{copy}</div>
       )}
 
-      <div className="calendar-next__event-trailing">
-        <span
-          className={`calendar-next__kind-pill calendar-next__kind-pill--${event.kind || "other"}`}
-        >
+      <div className="calendar__event-trailing">
+        <span className={`calendar__kind-pill calendar__kind-pill--${event.kind || "other"}`}>
           {pillLabel}
         </span>
-        {event.prepped === false ? (
-          <span className="calendar-next__prep-flag">Not prepped</span>
-        ) : null}
+        {event.prepped === false ? <span className="calendar__prep-flag">Not prepped</span> : null}
         {!isBusy && event.export ? <EventExportControls exportData={event.export} /> : null}
       </div>
     </div>
@@ -251,12 +244,12 @@ function AgendaEventRow({ event, statusLabel }) {
 function EventExportControls({ exportData }) {
   const icsHref = `data:text/calendar;charset=utf-8,${encodeURIComponent(exportData.ics)}`;
   return (
-    <div className="calendar-next__export">
-      <a className="calendar-next__export-link" download={exportData.filename} href={icsHref}>
+    <div className="calendar__export">
+      <a className="calendar__export-link" download={exportData.filename} href={icsHref}>
         .ics
       </a>
       <a
-        className="calendar-next__export-link"
+        className="calendar__export-link"
         href={exportData.googleUrl}
         rel="noreferrer"
         target="_blank"
@@ -264,7 +257,7 @@ function EventExportControls({ exportData }) {
         Google
       </a>
       <a
-        className="calendar-next__export-link"
+        className="calendar__export-link"
         href={exportData.outlookUrl}
         rel="noreferrer"
         target="_blank"
@@ -275,7 +268,7 @@ function EventExportControls({ exportData }) {
   );
 }
 
-function calendarForNext(calendar) {
+function calendarForPage(calendar) {
   if (hasCalendarContent(calendar)) return calendar;
   return import.meta.env.DEV ? PREVIEW_CALENDAR : calendar;
 }
@@ -291,7 +284,7 @@ function hasCalendarContent(calendar) {
   );
 }
 
-function buildCalendarNextModel(calendar) {
+function buildCalendarModel(calendar) {
   const todayIso = calendar?.todayIso || new Date().toISOString().slice(0, 10);
   const events = collectCalendarEvents(calendar);
   const { buckets, recent } = classifyEvents(events, todayIso);
@@ -425,7 +418,7 @@ function assignAnchors(buckets, recent) {
 }
 
 function anchorIdForIso(iso) {
-  return `calendar-next-row-${iso}`;
+  return `calendar-row-${iso}`;
 }
 
 function buildEventsByIso(events) {

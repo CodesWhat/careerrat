@@ -167,7 +167,7 @@ const EXTRA_GUARDRAIL_SUGGESTIONS = [
     aliases: ["tools", "devex", "debt"],
   },
   {
-    emoji: "🧟",
+    emoji: "🧰",
     label: "Maintenance-only role",
     value: "Maintenance-only role",
     source: "job_text",
@@ -313,6 +313,111 @@ const EXTRA_GUARDRAIL_SUGGESTIONS = [
     source: "job_text",
     aliases: ["commission", "bonus-heavy"],
   },
+  {
+    emoji: "📍",
+    label: "Relocation required",
+    value: "Relocation required",
+    source: "job_text",
+    aliases: ["relocate", "relocation"],
+  },
+  {
+    emoji: "🛫",
+    label: "Travel over 25%",
+    value: "Travel over 25%",
+    source: "job_text",
+    aliases: ["25% travel", "travel required"],
+  },
+  {
+    emoji: "📝",
+    label: "Large unpaid take-home",
+    value: "Large unpaid take-home",
+    source: "interview_signal",
+    aliases: ["take home", "take-home", "homework", "assignment"],
+  },
+  {
+    emoji: "🕰️",
+    label: "Slow hiring process",
+    value: "Slow hiring process",
+    source: "interview_signal",
+    aliases: ["slow process", "delays", "timeline"],
+  },
+  {
+    emoji: "🎯",
+    label: "No clear priorities",
+    value: "No clear priorities",
+    source: "interview_signal",
+    aliases: ["priorities", "focus"],
+  },
+  {
+    emoji: "🧭",
+    label: "Strategy churn",
+    value: "Strategy churn",
+    source: "company_scan",
+    aliases: ["pivot", "churn", "strategy changes"],
+  },
+  {
+    emoji: "🧯",
+    label: "Burnout culture",
+    value: "Burnout culture",
+    source: "interview_signal",
+    aliases: ["burnout", "stress"],
+  },
+  {
+    emoji: "🧑‍🏫",
+    label: "No mentorship",
+    value: "No mentorship",
+    source: "interview_signal",
+    aliases: ["mentorship", "coaching"],
+  },
+  {
+    emoji: "🧑‍🔬",
+    label: "Research-only work",
+    value: "Research-only work",
+    source: "job_text",
+    aliases: ["research only", "pure research"],
+  },
+  {
+    emoji: "🚪",
+    label: "Backfill after attrition",
+    value: "Backfill after attrition",
+    source: "interview_signal",
+    aliases: ["backfill", "attrition"],
+  },
+  {
+    emoji: "🧷",
+    label: "Undefined role",
+    value: "Undefined role",
+    source: "job_text",
+    aliases: ["undefined", "ambiguous role"],
+  },
+  {
+    emoji: "📊",
+    label: "Metrics theater",
+    value: "Metrics theater",
+    source: "interview_signal",
+    aliases: ["metrics theater", "vanity metrics"],
+  },
+  {
+    emoji: "🧑‍💻",
+    label: "Little hands-on coding",
+    value: "Little hands-on coding",
+    source: "job_text",
+    aliases: ["no coding", "hands-on"],
+  },
+  {
+    emoji: "🔇",
+    label: "Poor communication",
+    value: "Poor communication",
+    source: "interview_signal",
+    aliases: ["communication", "unclear updates"],
+  },
+  {
+    emoji: "🧱",
+    label: "Blocked by dependencies",
+    value: "Blocked by dependencies",
+    source: "interview_signal",
+    aliases: ["dependencies", "blocked"],
+  },
 ];
 
 export const GUARDRAIL_SUGGESTIONS = [...GUARDRAIL_PRESETS, ...EXTRA_GUARDRAIL_SUGGESTIONS];
@@ -440,7 +545,7 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
             <section className="onboarding-guardrails__panel" aria-label="Guardrail choices">
               <div className="onboarding-guardrails__presets">
                 <div className="onboarding-guardrails__preset-header">
-                  <span>Pick common avoids</span>
+                  <span>Pick common guardrails</span>
                   <span className="onboarding-guardrails__info">
                     <button
                       type="button"
@@ -456,7 +561,7 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
                 </div>
                 <section
                   className="onboarding-guardrails__preset-grid"
-                  aria-label="Common no-go signals"
+                  aria-label="Common guardrails"
                 >
                   {GUARDRAIL_PRESETS.map((preset) => {
                     const selected = isGuardrailSelected(avoidSignals, preset.value);
@@ -480,9 +585,9 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
                 </section>
               </div>
               <Field
-                label="Custom avoids"
+                label="Custom guardrails"
                 htmlFor="guardrails-avoid-signals"
-                hint="Press Enter or comma to add another no-go."
+                hint="Press Enter or comma to add another guardrail."
                 className="onboarding-custom-entry onboarding-guardrails__custom-field"
               >
                 <ChipInput
@@ -491,6 +596,7 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
                   onChange={setAvoidSignals}
                   placeholder="e.g. heavy travel"
                   suggestions={GUARDRAIL_SUGGESTIONS}
+                  suggestionLimit={8}
                 />
               </Field>
             </section>

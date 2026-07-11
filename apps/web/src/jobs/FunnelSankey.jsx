@@ -10,6 +10,16 @@ const NODE_WIDTH = 5;
 const LEFT_PAD = 220;
 const RIGHT_PAD = 320;
 
+// The response/decay "waypoint" cluster (Awaiting, Going stale, Ghosted, Heard
+// back) commonly packs into a single shared column (col 1), stacked tightly by
+// `order`. Each of these nodes carries a two-line label (name + count) that is
+// placed ABOVE its own bar — so every node in the cluster needs its own
+// reserved headroom, not just the 16px inter-node gap, or a short node's label
+// bleeds upward into the previous node's bar/label. LABEL_HEADROOM is the
+// vertical room (in px) reserved above a waypoint node's bar for that label.
+const LABEL_HEADROOM = 36;
+const WAYPOINT_LABEL_IDS = new Set(["awaiting", "heardback", "stale", "ghosted"]);
+
 function toNumber(value, fallback = 0) {
   const number = Number(value);
   return Number.isFinite(number) ? number : fallback;
@@ -33,8 +43,30 @@ function nodeTitle(node) {
   return `${node.label}: ${count} ${noun}`;
 }
 
+function interactiveClassName(baseClass, filter, activeFilter, interactive) {
+  if (!interactive) return baseClass;
+  const active = activeFilter === filter;
+  const dimmed = activeFilter && activeFilter !== "all" && !active;
+  return [baseClass, active ? "is-active" : "", dimmed ? "is-dimmed" : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
+function handleInteractiveKeyDown(event, onSelect, filter) {
+  if (event.key !== "Enter" && event.key !== " ") return;
+  event.preventDefault();
+  onSelect(filter);
+}
+
 function gapAfterNode(node, next) {
   return node?.id === "screen" && (next?.id === "rejected" || next?.id === "ghosted") ? 36 : 16;
+}
+
+// Waypoint nodes reserve LABEL_HEADROOM of empty space above their own bar (see
+// LABEL_HEADROOM) so their above-placed label never crosses into a neighboring
+// node's bar or label, however tightly the column packs.
+function rowHeightFor(node, barH) {
+  return WAYPOINT_LABEL_IDS.has(node.id) ? barH + LABEL_HEADROOM : barH;
 }
 
 function buildSankeyLayout(sankey) {
@@ -68,17 +100,27 @@ function buildSankeyLayout(sankey) {
 
   for (const col of columns) {
     const items = columnNodes(col);
-    const usedHeight =
-      items.reduce((total, node) => total + Math.max(6, toNumber(node.count) * unit), 0) +
-      columnGapTotal(items);
+    const rows = items.map((node) => {
+      const barH = Math.max(6, toNumber(node.count) * unit);
+      return { node, barH, rowH: rowHeightFor(node, barH) };
+    });
+    const usedHeight = rows.reduce((total, row) => total + row.rowH, 0) + columnGapTotal(items);
     let y = TOP + Math.max(0, (COLUMN_HEIGHT - usedHeight) / 2);
     const awaitingLaid = layout.get("awaiting");
     const staleLaid = layout.get("stale");
+    // The anchor overrides below (sync with Awaiting, centre on Screen, pin to
+    // the bottom/top) assume the node is the SOLE occupant of its column — true
+    // for the legacy fractional-column layout (each sink gets its own column),
+    // but not when the response/decay cluster shares a single integer column
+    // (col 1) as one packed group. Forcing the whole shared column to the top
+    // just because it contains "ghosted", say, is what produced the collision
+    // this guard fixes — so these overrides only fire for a lone node.
+    const solo = items.length === 1;
 
-    if (items.some((node) => node.id === "stale") && awaitingLaid) {
+    if (solo && items.some((node) => node.id === "stale") && awaitingLaid) {
       const maxTop = TOP + COLUMN_HEIGHT - usedHeight;
       y = Math.min(awaitingLaid.y, maxTop);
-    } else if (items.some((node) => node.id === "screen") && staleLaid) {
+    } else if (solo && items.some((node) => node.id === "screen") && staleLaid) {
       const heardLaid = layout.get("heardback");
       const screenNode = items.find((node) => node.id === "screen");
       const screenH = screenNode ? Math.max(6, toNumber(screenNode.count) * unit) : 0;
@@ -88,17 +130,21 @@ function buildSankeyLayout(sankey) {
         ? 2 * (staleLaid.y + staleLaid.h + 8) - heardLaid.y - screenH
         : y;
       y = Math.min(maxStart, Math.max(centreScreen, clearFloor));
-    } else if (items.some((node) => node.id === "rejected")) {
+    } else if (solo && items.some((node) => node.id === "rejected")) {
       y = TOP + COLUMN_HEIGHT - usedHeight;
-    } else if (items.some((node) => node.id === "ghosted")) {
+    } else if (solo && items.some((node) => node.id === "ghosted")) {
       y = TOP;
     }
 
-    for (let index = 0; index < items.length; index += 1) {
-      const node = items[index];
-      const h = Math.max(6, toNumber(node.count) * unit);
-      layout.set(node.id, { ...node, x: xForCol(col), y, h });
-      y += h + gapAfterNode(node, items[index + 1]);
+    for (let index = 0; index < rows.length; index += 1) {
+      const { node, barH, rowH } = rows[index];
+      // The bar sits at the BOTTOM of its reserved row, leaving rowH - barH of
+      // clear headroom above it for a waypoint node's label — guaranteeing that
+      // headroom lives inside this node's own row rather than borrowing space
+      // from whatever sits above it.
+      const barY = y + rowH - barH;
+      layout.set(node.id, { ...node, x: xForCol(col), y: barY, h: barH });
+      y += rowH + gapAfterNode(node, items[index + 1]);
     }
   }
 
@@ -143,6 +189,91 @@ function buildSankeyLayout(sankey) {
   return { nodes: [...layout.values()], links: laidLinks };
 }
 
+function SankeyLink({ activeFilter, interactive, link, onSelectStage }) {
+  const filter = link.filter || "all";
+  const title = linkTitle(link, link.fromNode, link.toNode);
+  const className = interactiveClassName("funnel-sankey__link", filter, activeFilter, interactive);
+
+  if (interactive) {
+    return (
+      // biome-ignore lint/a11y/useSemanticElements: SVG path can't be a <button>; role+tabIndex+onKeyDown make it keyboard-operable
+      <path
+        aria-label={title}
+        className={className}
+        d={link.d}
+        data-sankey-link={link.id}
+        fill="none"
+        onClick={() => onSelectStage(filter)}
+        onKeyDown={(event) => handleInteractiveKeyDown(event, onSelectStage, filter)}
+        role="button"
+        stroke={link.color || "currentColor"}
+        strokeLinecap="butt"
+        strokeWidth={link.h}
+        tabIndex={0}
+      >
+        <title>{title}</title>
+      </path>
+    );
+  }
+
+  return (
+    <path
+      className={className}
+      d={link.d}
+      data-sankey-link={link.id}
+      fill="none"
+      stroke={link.color || "currentColor"}
+      strokeLinecap="butt"
+      strokeWidth={link.h}
+    >
+      <title>{title}</title>
+    </path>
+  );
+}
+
+function SankeyNode({ activeFilter, interactive, maxCol, node, onSelectStage }) {
+  const filter = node.filter || node.id;
+  const title = nodeTitle(node);
+  const className = interactiveClassName("funnel-sankey__node", filter, activeFilter, interactive);
+  const rect = (
+    <rect
+      fill={node.color || "currentColor"}
+      height={node.h}
+      rx="2"
+      width={NODE_WIDTH}
+      x={node.x}
+      y={node.y}
+    />
+  );
+
+  if (interactive) {
+    return (
+      // biome-ignore lint/a11y/useSemanticElements: SVG <g> can't be a <button>; role+tabIndex+onKeyDown make it keyboard-operable
+      <g
+        aria-label={title}
+        className={className}
+        data-sankey-node={node.id}
+        onClick={() => onSelectStage(filter)}
+        onKeyDown={(event) => handleInteractiveKeyDown(event, onSelectStage, filter)}
+        role="button"
+        tabIndex={0}
+      >
+        {rect}
+        {renderNodeLabel(node, maxCol)}
+        <title>{title}</title>
+      </g>
+    );
+  }
+
+  return (
+    <g className={className} data-sankey-node={node.id}>
+      {rect}
+      {renderNodeLabel(node, maxCol)}
+      <title>{title}</title>
+    </g>
+  );
+}
+
 function renderNodeLabel(node, maxCol) {
   if (node.hideLabel) return null;
 
@@ -152,8 +283,10 @@ function renderNodeLabel(node, maxCol) {
   const isRejected = node.id === "rejected";
   const isAccepted = node.id === "accepted";
   const sideRight = (isLast || isRejected || isAccepted) && !isRound;
-  const labelAbove =
-    node.id === "awaiting" || node.id === "stale" || node.id === "ghosted" || isRound;
+  // Every node in the response/decay waypoint cluster labels the same way —
+  // above its own bar — so a packed shared column never mixes an above-placed
+  // label with a below-placed one that would drift into a neighbor's space.
+  const labelAbove = WAYPOINT_LABEL_IDS.has(node.id) || isRound;
   const labelX = isFirst
     ? node.x - 8
     : sideRight
@@ -185,8 +318,9 @@ function renderNodeLabel(node, maxCol) {
   );
 }
 
-export function FunnelSankey({ sankey }) {
+export function FunnelSankey({ sankey, onSelectStage, activeFilter }) {
   const layout = useMemo(() => buildSankeyLayout(sankey), [sankey]);
+  const interactive = typeof onSelectStage === "function";
   const total = toNumber(
     sankey?.total,
     layout.nodes.reduce((sum, node) => sum + toNumber(node.count), 0)
@@ -227,34 +361,25 @@ export function FunnelSankey({ sankey }) {
           >
             <g className="funnel-sankey__links">
               {layout.links.map((link) => (
-                <path
-                  className="funnel-sankey__link"
-                  d={link.d}
-                  data-sankey-link={link.id}
-                  fill="none"
+                <SankeyLink
+                  activeFilter={activeFilter}
+                  interactive={interactive}
                   key={link.id}
-                  stroke={link.color || "currentColor"}
-                  strokeLinecap="butt"
-                  strokeWidth={link.h}
-                >
-                  <title>{linkTitle(link, link.fromNode, link.toNode)}</title>
-                </path>
+                  link={link}
+                  onSelectStage={onSelectStage}
+                />
               ))}
             </g>
             <g className="funnel-sankey__nodes">
               {layout.nodes.map((node) => (
-                <g className="funnel-sankey__node" data-sankey-node={node.id} key={node.id}>
-                  <rect
-                    fill={node.color || "currentColor"}
-                    height={node.h}
-                    rx="2"
-                    width={NODE_WIDTH}
-                    x={node.x}
-                    y={node.y}
-                  />
-                  {renderNodeLabel(node, maxCol)}
-                  <title>{nodeTitle(node)}</title>
-                </g>
+                <SankeyNode
+                  activeFilter={activeFilter}
+                  interactive={interactive}
+                  key={node.id}
+                  maxCol={maxCol}
+                  node={node}
+                  onSelectStage={onSelectStage}
+                />
               ))}
             </g>
           </svg>

@@ -40,6 +40,28 @@
   filter: drop-shadow(0 4px 10px rgba(var(--rgb-line), 0.12));
 }
 
+.funnel-sankey__node[role="button"],
+.funnel-sankey__link[role="button"] {
+  cursor: pointer;
+}
+
+.funnel-sankey__link.is-active {
+  opacity: 0.94;
+  stroke: var(--ink);
+  filter: drop-shadow(0 3px 8px rgba(var(--rgb-line), 0.24));
+}
+
+.funnel-sankey__node.is-dimmed,
+.funnel-sankey__link.is-dimmed {
+  opacity: 0.14;
+}
+
+.funnel-sankey__node[role="button"]:focus-visible,
+.funnel-sankey__link[role="button"]:focus-visible {
+  outline: 2px solid var(--m-secondary);
+  outline-offset: 4px;
+}
+
 .funnel-sankey__node {
   transition: opacity 0.16s ease;
 }
@@ -48,6 +70,12 @@
   transition:
     filter 0.16s ease,
     stroke 0.16s ease;
+}
+
+.funnel-sankey__node.is-active rect {
+  stroke: var(--ink);
+  stroke-width: 3.5px;
+  filter: drop-shadow(0 3px 9px rgba(var(--rgb-line), 0.3));
 }
 
 .funnel-sankey__node:hover rect {
@@ -74,6 +102,11 @@
   fill: var(--ink-soft);
   font-family: "Geist Mono", "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
   font-weight: 700;
+}
+
+.funnel-sankey__node.is-active .funnel-sankey__node-label {
+  fill: var(--ink);
+  font-weight: 900;
 }
 
 .funnel-sankey__legend {

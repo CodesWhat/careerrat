@@ -1,5 +1,6 @@
 import { ClerkProvider, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/react";
 import { createContext, useContext } from "react";
+import { getStaticPreviewAuthState, isStaticPreviewApi } from "../preview/staticPreviewApi.js";
 
 const DEFAULT_AUTH_STATE = {
   isLoaded: true,
@@ -132,6 +133,14 @@ function ClerkStateBridge({ children }) {
 }
 
 export function RolesterClerkProvider({ publishableKey, children }) {
+  if (isStaticPreviewApi()) {
+    return (
+      <RolesterAuthStateProvider value={getStaticPreviewAuthState()}>
+        {children}
+      </RolesterAuthStateProvider>
+    );
+  }
+
   if (!publishableKey) {
     return <RolesterAuthStateProvider>{children}</RolesterAuthStateProvider>;
   }

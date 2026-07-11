@@ -440,6 +440,105 @@ function ReadyToSendCard({ comms, busyKey, onSend }) {
   );
 }
 
+function toCompNumber(value) {
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
+function formatCompNumber(value) {
+  const number = toCompNumber(value);
+  return number == null ? "Needs info" : `$${Math.round(number)}K`;
+}
+
+function compBarBadge(drawer, state) {
+  if (state === "built") {
+    const parts = ["Built from data"];
+    if (drawer.compSampleSize) {
+      parts.push(`${drawer.compSampleSize} comp${drawer.compSampleSize === 1 ? "" : "s"}`);
+    }
+    if (drawer.compConfidence) parts.push(`${drawer.compConfidence} conf`);
+    if (drawer.compAsOf) parts.push(`as of ${drawer.compAsOf}`);
+    return parts.join(" · ");
+  }
+  if (state === "posted") return "Posted band";
+  if (state === "needs-info") return "Needs more info";
+  return drawer.compStateLabel || "";
+}
+
+function hasCompBarFields(drawer) {
+  return [
+    "floor",
+    "ask",
+    "marketLo",
+    "marketP50",
+    "marketHi",
+    "compState",
+    "compStateLabel",
+    "compBasis",
+    "compConfidence",
+    "compSampleSize",
+    "compAsOf",
+  ].some((key) => drawer[key] != null && drawer[key] !== "");
+}
+
+function CompBar({ drawer }) {
+  if (!hasCompBarFields(drawer)) return null;
+
+  const floorValue = toCompNumber(drawer.floor);
+  const askValue = toCompNumber(drawer.ask);
+  const marketP50 = toCompNumber(drawer.marketP50);
+  const hasMarket = drawer.compHasMarket !== false && marketP50 != null;
+  const marketLo = hasMarket ? (toCompNumber(drawer.marketLo) ?? marketP50) : null;
+  const marketHi = hasMarket ? (toCompNumber(drawer.marketHi) ?? marketP50) : null;
+  const floor = floorValue ?? 200;
+  const ask = askValue ?? 215;
+  const lo = hasMarket ? Math.min(floor, marketLo) - 10 : Math.min(floor, ask) - 10;
+  const hi = hasMarket ? Math.max(ask, marketHi) + 10 : Math.max(floor, ask) + 10;
+  const range = hi - lo || 1;
+  const pct = (value) => `${Math.max(0, Math.min(100, ((value - lo) / range) * 100)).toFixed(1)}%`;
+  const state = drawer.compState || (hasMarket ? "posted" : "needs-info");
+
+  return (
+    <div className="job-drawer__comp-bar" data-state={state}>
+      <div className="job-drawer__comp-provenance">
+        <span>{compBarBadge(drawer, state)}</span>
+        {drawer.compBasis ? <small>{drawer.compBasis}</small> : null}
+      </div>
+      {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: decorative range visualization, not a form control group */}
+      <div aria-label="Compensation range" className="job-drawer__comp-track">
+        {hasMarket ? (
+          <>
+            <span
+              className="job-drawer__comp-market"
+              style={{
+                left: pct(marketLo),
+                width: `${Math.max(0, ((marketHi - marketLo) / range) * 100).toFixed(1)}%`,
+              }}
+            />
+            <span className="job-drawer__comp-p50" style={{ left: pct(marketP50) }} />
+          </>
+        ) : null}
+        <span className="job-drawer__comp-marker" style={{ left: pct(ask) }} />
+      </div>
+      <div className="job-drawer__comp-pins">
+        <CompPin label="Floor" value={floorValue} />
+        <CompPin label="Mkt P50" value={hasMarket ? marketP50 : null} />
+        <CompPin label="Your ask" value={askValue} />
+        <CompPin label="Ceiling" value={hasMarket ? marketHi : null} />
+      </div>
+    </div>
+  );
+}
+
+function CompPin({ label, value }) {
+  return (
+    <span className="job-drawer__comp-pin">
+      <span>{label}</span>
+      <strong>{formatCompNumber(value)}</strong>
+    </span>
+  );
+}
+
 function CompFitCard({ row, drawer, app, isApplication, busy, onSaveCompNote }) {
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(app?.compNote || drawer.compNote || "");
@@ -450,6 +549,7 @@ function CompFitCard({ row, drawer, app, isApplication, busy, onSaveCompNote }) 
 
   return (
     <Card title="Comp & fit">
+      <CompBar drawer={drawer} />
       <p className="field__hint">
         {row.compSummary || drawer.base || "No comp posted."}
         {drawer.compBasis ? ` · ${drawer.compBasis}` : ""}

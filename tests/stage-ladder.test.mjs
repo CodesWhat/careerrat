@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  buildStats,
-  classifyStage,
-  renderTrackerDashboard,
-} from "../src/core/tracker/dashboard.mjs";
+import { buildStats, classifyStage } from "../src/core/tracker/dashboard.mjs";
 
 // ── classifyStage: canonical keyword mapping ──────────────────────────────────
 
@@ -115,48 +111,4 @@ test("buildStats counts a verbose advanced label as advanced (generalised classi
   assert.equal(stats.advanced, 3, "interview + screen + offer are all 'heard back'");
   assert.equal(stats.awaiting, 1, "only the plain 'applied' is still awaiting");
   assert.equal(stats.rejected, 1);
-});
-
-// ── Rendered dashboard: stage groups, pills, sourced entries ──────────────────
-
-test("renderTrackerDashboard groups the Active Pipeline by stage and preserves raw labels", () => {
-  const html = renderTrackerDashboard({
-    applications: [
-      { id: "a1", company: "Aperture", role: "FDE", status: "offer", fitScore: 92 },
-      { id: "a2", company: "Tyrell", role: "AAE", status: "2nd phone interview", fitScore: 84 },
-      { id: "a3", company: "Cyberdyne", role: "PE", status: "rejected", fitScore: 41 },
-    ],
-    sourced: [{ id: "p1", company: "Black Mesa", role: "AAE", fitScore: 80, fitBasis: "triage" }],
-    communications: [],
-    sources: [],
-  });
-
-  assert.match(html, /class="stagefilter"/, "renders the stage filter");
-  assert.match(html, /data-stage="offer"/, "offer group present");
-  assert.match(html, /data-stage="sourced"/, "sourced entry folds in as a sourced group");
-  assert.match(html, /2nd phone interview/, "raw status label preserved verbatim on the pill");
-  assert.ok(!/class="bandfilter"/.test(html), "old band filter markup is gone");
-  // The rejected app is excluded from the active pipeline groups but shown in Rejected.
-  assert.match(html, /Rejected/, "rejected section present");
-});
-
-test("renderTrackerDashboard resolves company avatars through the cached logo route", () => {
-  const html = renderTrackerDashboard({
-    applications: [
-      {
-        id: "logo-cache",
-        company: "Reply Co",
-        domain: "reply.co",
-        role: "Applied AI Engineer",
-        status: "awaiting",
-        fitScore: 86,
-      },
-    ],
-    sourced: [],
-    communications: [],
-    sources: [],
-  });
-
-  assert.match(html, /src="\/api\/logos\/img\?domain=reply\.co&amp;name=Reply%20Co"/);
-  assert.doesNotMatch(html, /img\.logo\.dev/);
 });

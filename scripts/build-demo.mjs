@@ -24,6 +24,7 @@ const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const FIXTURE = join(REPO, "examples/demo-workspace");
 const HOME = join(REPO, "dist/demo-home"); // throwaway render home
 const OUT = join(REPO, "dist/demo"); // deployable static root
+const DESIGN_PREVIEW_OUT = join(OUT, "design-v3");
 
 function step(msg) {
   console.log(`\n▸ ${msg}`);
@@ -63,8 +64,20 @@ cpSync(join(REPO, "assets"), join(OUT, "assets"), { recursive: true });
 cpSync(join(REPO, "fonts"), join(OUT, "fonts"), { recursive: true });
 cpSync(join(REPO, "assets/favicon.ico"), join(OUT, "favicon.ico")); // bare /favicon.ico auto-request
 
+step("Build gated V3 design preview");
+run("npm", ["--workspace", "apps/web", "run", "build"], {
+  VITE_BASE_PATH: "/design-v3/",
+  VITE_ROUTER_BASENAME: "/design-v3",
+  VITE_REQUIRE_PREVIEW_PASSWORD: "true",
+  VITE_STATIC_PREVIEW: "true",
+  VITE_PREVIEW_PASSWORD:
+    process.env.ROLESTER_PREVIEW_PASSWORD || process.env.VITE_PREVIEW_PASSWORD || "rolester",
+});
+cpSync(join(REPO, "apps/web/dist"), DESIGN_PREVIEW_OUT, { recursive: true });
+
 step(`Done → ${OUT}`);
 console.log(`  index.html + dashboard-data.js`);
+console.log(`  design-v3/: gated V3 product preview`);
 console.log(`  workspace/: ${readdirSync(join(OUT, "workspace")).join(", ")}`);
 console.log(`  assets/logos: ${readdirSync(join(OUT, "assets/logos")).length} logos`);
 console.log(`  fonts/: ${readdirSync(join(OUT, "fonts")).join(", ")}`);

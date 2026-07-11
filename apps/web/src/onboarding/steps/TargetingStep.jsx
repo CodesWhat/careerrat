@@ -2,7 +2,6 @@ import { useState } from "react";
 import { Button, IconButton } from "../../components/Button.jsx";
 import { SuggestionChip } from "../../components/Chip.jsx";
 import { ChipInput, Field, TextField } from "../../components/form.jsx";
-import { MagicWandIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import { saveCandidateFile, suggestAssist } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
@@ -385,8 +384,14 @@ export function TargetingStep({
                             className="onboarding-targeting__field-tool"
                             onClick={handleSuggestTitles}
                             disabled={suggestingTitles}
+                            title=""
                           >
-                            <MagicWandIcon />
+                            <span
+                              className="onboarding-targeting__field-tool-glyph"
+                              aria-hidden="true"
+                            >
+                              ✨
+                            </span>
                           </IconButton>
                           <span className="onboarding-targeting__tool-tip" role="tooltip">
                             {suggestingTitles ? "Finding titles..." : "Find more titles"}

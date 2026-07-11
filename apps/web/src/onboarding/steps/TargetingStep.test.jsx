@@ -156,6 +156,8 @@ describe("TargetingStep shell layout", () => {
     expect(html).toContain("Edit Primary");
     expect(html).toContain('aria-label="Find more titles"');
     expect(html).toContain("onboarding-targeting__field-tool");
+    expect(html).toContain("onboarding-targeting__field-tool-glyph");
+    expect(html).toContain("✨");
     expect(html).toContain('class="onboarding-targeting__tool-tip" role="tooltip"');
     expect(html).toContain("Find more titles");
     expect(html).not.toContain(">More role ideas<");

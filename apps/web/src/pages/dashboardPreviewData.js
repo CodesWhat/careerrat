@@ -1,4 +1,4 @@
-export const V2_PREVIEW_DASHBOARD = {
+export const DASHBOARD_PREVIEW = {
   stats: {
     inPlay: 18,
     responseRate: 26,

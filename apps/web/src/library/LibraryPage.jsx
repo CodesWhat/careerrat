@@ -1,33 +1,65 @@
-import { useMemo, useState } from "react";
+// apps/web/src/library/LibraryPage.jsx — the calm, two-view library page.
+// Renders fields the way DashboardContext.jsx's data contract requires:
+// `data.library` is the unmodified output of buildLibraryStatus()
+// (src/core/tracker/dashboard-data.js), itself fed by
+// buildLibrarySnapshot()/buildSnapshotFromDeepIngest()
+// (src/core/tracker/library-snapshot.mjs) — every card's `kind`, `tags`, and
+// `note` is rendered as-is, never re-derived. Client-side work here is
+// limited to filtering an already-built list (same contract
+// CalendarPage.jsx follows for `data.calendar`).
+//
+// Structure is deliberately flat: one hero title, a top Internal|External
+// toggle (`?tab=`), and under it either the reusable-material bank (the
+// `data.library` cards, filtered by a single type line + search) or the
+// outward documents list. No scoreboard, no colored family/lane chip rows,
+// no readiness/guardrails summary panels — those were cut as clutter; see
+// the CSS file header for the full list of what was removed and why.
+//
+// The Documents view is the one place this page does real aggregation:
+// collectLibraryDocuments() gathers each job row's already-computed
+// `row.drawer.artifacts` (built once per row by jobDetailFromRow(),
+// dashboard-data.js:3861, and attached to every entry of `data.jobs.rows` by
+// buildJobs(), dashboard-data.js:4690) into one flat, cross-job list. That
+// mirrors CalendarPage's collectCalendarEvents() — a plain gather of
+// fields the server already computed, scattered across many rows, with no
+// business rule invented here (no restaging, no re-deriving which artifacts
+// exist).
+import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
-import { Button } from "../components/Button.jsx";
-import { Card } from "../components/Card.jsx";
-import { Chip } from "../components/Chip.jsx";
-import { AlertIcon, LibraryIcon, SearchIcon } from "../components/icons.jsx";
-import { PageScaffold } from "../components/PageScaffold.jsx";
+import { Button, IconButton } from "../components/Button.jsx";
+import { PaperclipIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
+import { PREVIEW_DOCUMENTS, PREVIEW_LIBRARY } from "./libraryPreviewData.js";
 import "./LibraryPage.css";
 
-const TYPE_FILTERS = [
+const TAB_OPTIONS = [
+  { key: "internal", label: "Internal" },
+  { key: "external", label: "External" },
+];
+
+const TYPE_OPTIONS = [
   { key: "all", label: "All" },
   { key: "evidence", label: "Evidence" },
   { key: "story", label: "Stories" },
   { key: "voice", label: "Voice" },
 ];
 
-const EMPTY_LIBRARY = {
-  metrics: { claims: 0, stories: 0, gaps: 0 },
-  index: [],
-  filters: [],
-  cards: [],
-  readiness: { proof: 0, stories: 0, voice: 0 },
-  gaps: [],
-  storyLanes: [],
-};
+const DEEP_INGEST_TYPE_OPTIONS = [
+  { key: "honesty", label: "Honesty" },
+  { key: "role_signal", label: "Role signal" },
+];
 
+const DOC_KIND_OPTIONS = [
+  { key: "all", label: "All" },
+  { key: "resume", label: "Resumes" },
+  { key: "cover-letter", label: "Cover letters" },
+];
+
+const NUMBER_FORMAT = new Intl.NumberFormat("en-US");
 const TONE_NAMES = new Set(["teal", "sky", "gold", "plum", "coral"]);
 
-function objectList(value) {
+function asArray(value) {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === "object") : [];
 }
 
@@ -38,17 +70,28 @@ function normalize(value) {
     .trim();
 }
 
-function tagLabels(card) {
-  return objectList(card?.tags)
-    .map((tag) => String(tag.label || "").trim())
-    .filter(Boolean);
+function formatNumber(value) {
+  return NUMBER_FORMAT.format(Number(value) || 0);
 }
 
-function laneNeedles(lane) {
-  const body = String(lane || "").trim();
-  if (!body) return [];
-  const [label, detail] = body.split(/:\s+/, 2);
-  return [label, detail, body].map(normalize).filter(Boolean);
+function safeTone(tone) {
+  return TONE_NAMES.has(tone) ? tone : "teal";
+}
+
+function cardId(card, index = 0) {
+  if (card?.id) return String(card.id);
+  const base = [card?.kind, card?.title || card?.summary || index]
+    .join("-")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "");
+  return base || `library-card-${index}`;
+}
+
+function tagLabels(card) {
+  return asArray(card?.tags)
+    .map((tag) => String(tag.label || "").trim())
+    .filter(Boolean);
 }
 
 function cardHaystack(card) {
@@ -59,341 +102,562 @@ function cardHaystack(card) {
 
 export function filterLibraryCards(cards, filters = {}) {
   const type = normalize(filters.type || "all");
-  const family = normalize(filters.family);
-  const lane = laneNeedles(filters.lane);
   const query = normalize(filters.query);
 
-  return objectList(cards).filter((card) => {
+  return asArray(cards).filter((card) => {
     const kind = normalize(card.kind || "evidence");
-    const tags = normalize(tagLabels(card).join(" "));
-    const haystack = cardHaystack(card);
-
     if (type && type !== "all" && kind !== type) return false;
-    if (family && !tags.includes(family) && !haystack.includes(family)) return false;
-    if (lane.length && !lane.some((needle) => tags.includes(needle) || haystack.includes(needle))) {
-      return false;
-    }
-    if (query && !haystack.includes(query)) return false;
+    if (query && !cardHaystack(card).includes(query)) return false;
     return true;
   });
 }
 
-function normalizeLibrary(library) {
-  if (!library || typeof library !== "object") return EMPTY_LIBRARY;
+function hasLibraryContent(library) {
+  return asArray(library?.cards).length > 0;
+}
+
+// Same "gate the dev fallback, never leak it into prod" contract as
+// CalendarPage's calendarForPage(): a genuinely empty bank in production
+// still shows the honest empty state, not silent mock data.
+function libraryForPage(library) {
+  if (hasLibraryContent(library)) return library;
+  return import.meta.env.DEV ? PREVIEW_LIBRARY : library;
+}
+
+function isDeepIngestLibrary(metrics) {
+  return metrics?.honesty !== undefined || metrics?.roleSignals !== undefined;
+}
+
+function typeOptionsForLibrary(library) {
+  return isDeepIngestLibrary(library?.metrics)
+    ? [...TYPE_OPTIONS, ...DEEP_INGEST_TYPE_OPTIONS]
+    : TYPE_OPTIONS;
+}
+
+function normalizeType(type, options) {
+  return options.some((option) => option.key === type) ? type : "all";
+}
+
+function normalizeTab(value) {
+  return value === "external" ? "external" : "internal";
+}
+
+function findOpenCard(cards, openId) {
+  if (!openId) return null;
+  return cards.find((card) => card.id === openId) || null;
+}
+
+function updateParam(setSearchParams, key, value, fallback = "") {
+  setSearchParams((prev) => {
+    const next = new URLSearchParams(prev);
+    if (!value || value === fallback) next.delete(key);
+    else next.set(key, value);
+    return next;
+  });
+}
+
+// clipboard.writeText is the primary path; a hidden-textarea + execCommand
+// fallback covers browsers/contexts where the async Clipboard API is
+// unavailable or blocked (non-secure context, permission denial) so "Copy
+// reusable text" still works rather than silently failing.
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the legacy fallback below.
+  }
+  if (typeof document === "undefined") return false;
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+// The gather described in the file header comment — one flat list of
+// {kind, note} artifacts across every job, each tagged with the parent job's
+// company/role/detailId so a row can link back into that job's own drawer
+// (the job drawer already renders the artifact; this list is a finder, not a
+// second viewer). Miss a job source (applications vs. sourced) and rows
+// silently vanish, the same risk collectCalendarEvents() calls out.
+export function collectLibraryDocuments(jobs) {
+  const rows = Array.isArray(jobs?.rows) ? jobs.rows : [];
+  const documents = [];
+  for (const row of rows) {
+    const artifacts = Array.isArray(row?.drawer?.artifacts) ? row.drawer.artifacts : [];
+    artifacts.forEach((artifact, index) => {
+      if (!artifact?.kind) return;
+      documents.push({
+        id: `${row.drawerId || row.id || "job"}-${index}-${normalize(artifact.kind)}`,
+        kind: artifact.kind,
+        note: artifact.note || "",
+        company: row.company || "Unknown company",
+        role: row.role || "Open role",
+        detailId: row.drawerId || row.id || "",
+      });
+    });
+  }
+  return documents;
+}
+
+function hasDocumentContent(documents) {
+  return documents.length > 0;
+}
+
+function documentsForPage(jobs) {
+  const documents = collectLibraryDocuments(jobs);
+  if (hasDocumentContent(documents)) return documents;
+  return import.meta.env.DEV ? PREVIEW_DOCUMENTS : documents;
+}
+
+function docKindSlug(kind) {
+  const value = normalize(kind);
+  if (value.includes("resume")) return "resume";
+  if (value.includes("cover")) return "cover-letter";
+  return "jd";
+}
+
+function filterDocuments(documents, query, kind = "all") {
+  const needle = normalize(query);
+  return documents.filter((doc) => {
+    if (kind !== "all" && docKindSlug(doc.kind) !== kind) return false;
+    if (
+      needle &&
+      !normalize([doc.kind, doc.company, doc.role, doc.note].join(" ")).includes(needle)
+    ) {
+      return false;
+    }
+    return true;
+  });
+}
+
+function buildLibraryModel(library, filters) {
+  const typeOptions = typeOptionsForLibrary(library);
+  const cards = asArray(library?.cards).map((card, index) => ({
+    ...card,
+    id: cardId(card, index),
+  }));
+  const filteredCards = filterLibraryCards(cards, filters);
+
   return {
-    metrics: library.metrics || EMPTY_LIBRARY.metrics,
-    index: objectList(library.index),
-    filters: objectList(library.filters),
-    cards: objectList(library.cards),
-    readiness: library.readiness || EMPTY_LIBRARY.readiness,
-    gaps: objectList(library.gaps),
-    storyLanes: objectList(library.storyLanes),
+    preview: Boolean(library?.preview),
+    typeOptions,
+    cards,
+    filteredCards,
   };
 }
 
-function safeTone(tone) {
-  return TONE_NAMES.has(tone) ? tone : "teal";
-}
+export function LibraryPage() {
+  const { data, loading, error, noDatabase } = useDashboardSnapshot();
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [copied, setCopied] = useState(false);
+  const [docQuery, setDocQuery] = useState("");
+  const [docKind, setDocKind] = useState("all");
 
-function formatReadinessValue(key, value) {
-  if (key === "voice") return Number(value || 0) > 0 ? "Ready" : "Missing";
-  return String(Number(value || 0));
-}
+  const library = libraryForPage(data?.library);
+  const typeOptions = typeOptionsForLibrary(library);
+  const tab = normalizeTab(searchParams.get("tab"));
+  const type = normalizeType(searchParams.get("type") || "all", typeOptions);
+  const query = searchParams.get("q") || "";
 
-function SummaryTile({ label, value }) {
+  const model = useMemo(() => buildLibraryModel(library, { type, query }), [library, type, query]);
+  const openCard = findOpenCard(model.cards, searchParams.get("open"));
+
+  const documents = useMemo(() => documentsForPage(data?.jobs), [data?.jobs]);
+  const filteredDocuments = useMemo(
+    () => filterDocuments(documents, docQuery, docKind),
+    [documents, docQuery, docKind]
+  );
+
+  function setTab(nextTab) {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("tab", nextTab);
+      return next;
+    });
+  }
+
+  function resetFilters() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("type");
+      next.delete("q");
+      return next;
+    });
+  }
+
+  function openDrawer(card) {
+    setCopied(false);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set("open", card.id);
+      return next;
+    });
+  }
+
+  function closeDrawer() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("open");
+      return next;
+    });
+  }
+
+  async function copyCard(card) {
+    const text = [card.title, card.summary, card.note].filter(Boolean).join("\n\n");
+    setCopied(await copyTextToClipboard(text));
+  }
+
+  if (noDatabase) {
+    return (
+      <div className="library">
+        <InlineAlert message="No database workspace detected — run `rolester data import` (or `rolester data init`) first, then reload." />
+      </div>
+    );
+  }
+
   return (
-    <div className="library-summary-tile">
-      <strong>{value}</strong>
-      <span>{label}</span>
+    <div className="library">
+      <LibraryHero preview={model.preview} setTab={setTab} tab={tab} />
+
+      {error && !model.preview ? <InlineAlert message={error} /> : null}
+      {loading && !data ? <p className="dashboard-home__loading">Loading…</p> : null}
+
+      {tab === "internal" ? (
+        model.cards.length ? (
+          <LibraryBank
+            model={model}
+            onOpen={openDrawer}
+            onReset={resetFilters}
+            query={query}
+            setSearchParams={setSearchParams}
+            type={type}
+          />
+        ) : (
+          <EmptyLibraryState />
+        )
+      ) : (
+        <LibraryDocuments
+          docKind={docKind}
+          documents={filteredDocuments}
+          onDocKindChange={setDocKind}
+          onQueryChange={setDocQuery}
+          query={docQuery}
+          total={documents.length}
+        />
+      )}
+
+      {openCard ? (
+        <LibraryDrawer
+          card={openCard}
+          copied={copied}
+          onClose={closeDrawer}
+          onCopy={() => copyCard(openCard)}
+        />
+      ) : null}
     </div>
   );
 }
 
-function FilterButton({ active, children, className = "", ...props }) {
+function LibraryHero({ preview, setTab, tab }) {
   return (
-    <button
-      type="button"
-      className={`library-filter-button${active ? " library-filter-button--active" : ""} ${className}`.trim()}
-      aria-pressed={active}
-      {...props}
-    >
-      {children}
-    </button>
-  );
-}
-
-function LibraryTag({ tag }) {
-  const label = String(tag?.label || "").trim();
-  if (!label) return null;
-  return (
-    <span className="library-tag" data-tone={safeTone(tag?.tone)}>
-      {label}
-    </span>
-  );
-}
-
-function EvidenceCard({ card }) {
-  const kind = card.kind || "evidence";
-  const tags = objectList(card.tags);
-
-  return (
-    <article
-      className="card library-evidence-card"
-      data-library-card={kind}
-      data-claim-type={kind}
-      data-claim-title={card.title || ""}
-      data-claim-summary={card.summary || ""}
-      data-claim-note={card.note || ""}
-      data-claim-tags={tagLabels(card).join(", ")}
-    >
-      <div className="library-card-heading">
-        <span className="library-card-label">{card.label || "Evidence Library"}</span>
-        <h3>{card.title || "Reusable material"}</h3>
+    <header className="library__hero">
+      <div className="library__title-block">
+        <span className="library__eyebrow">{preview ? "Preview data" : "Reusable bank"}</span>
+        <h1 className="library__title">Story &amp; evidence bank</h1>
       </div>
-      {card.summary ? <p className="library-card-summary">{card.summary}</p> : null}
-      {tags.length ? (
-        <div className="library-tag-row">
-          {tags.map((tag, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: tag labels can repeat; no stable id available
-            <LibraryTag key={`${tag.label || "tag"}-${index}`} tag={tag} />
+      <div aria-label="Library mode" className="library__tabs" role="tablist">
+        {TAB_OPTIONS.map((option) => (
+          <button
+            aria-selected={tab === option.key}
+            className={`library__tab${tab === option.key ? " library__tab--active" : ""}`}
+            key={option.key}
+            onClick={() => setTab(option.key)}
+            role="tab"
+            type="button"
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </header>
+  );
+}
+
+function LibraryBank({ model, onOpen, onReset, query, setSearchParams, type }) {
+  return (
+    <>
+      <section aria-label="Library filters" className="library__toolbar">
+        <div aria-label="Filter by material type" className="library__segments" role="tablist">
+          {model.typeOptions.map((option) => (
+            <button
+              aria-selected={type === option.key}
+              className={`library__segment${type === option.key ? " library__segment--active" : ""}`}
+              key={option.key}
+              onClick={() => updateParam(setSearchParams, "type", option.key, "all")}
+              role="tab"
+              type="button"
+            >
+              {option.label}
+            </button>
           ))}
         </div>
+
+        <label className="library__searchbox">
+          <SearchIcon />
+          <input
+            aria-label="Search library"
+            onChange={(event) => updateParam(setSearchParams, "q", event.target.value)}
+            placeholder="Search proof, stories, voice…"
+            type="search"
+            value={query}
+          />
+        </label>
+
+        {type !== "all" || query ? (
+          <Button onClick={onReset} variant="secondary">
+            Clear filters
+          </Button>
+        ) : null}
+      </section>
+
+      <div aria-live="polite" className="library__result-count">
+        Showing {formatNumber(model.filteredCards.length)} of {formatNumber(model.cards.length)}
+      </div>
+
+      {model.filteredCards.length ? (
+        <section aria-label="Library cards" className="library__card-grid">
+          {model.filteredCards.map((card) => (
+            <LibraryCard card={card} key={card.id} onOpen={onOpen} />
+          ))}
+        </section>
+      ) : (
+        <div className="library__no-results">
+          <p>No matches. Clear search or filters to see the full bank.</p>
+          <Button onClick={onReset} variant="secondary">
+            Clear filters
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+function LibraryCard({ card, onOpen }) {
+  const tags = asArray(card.tags);
+  return (
+    <button
+      aria-label={`Open library card ${card.title || "Reusable material"}`}
+      className="library__card"
+      data-library-card={card.kind || "evidence"}
+      onClick={() => onOpen(card)}
+      type="button"
+    >
+      <span className="library__card-head">
+        <span className={`library__kind library__kind--${card.kind || "evidence"}`}>
+          {card.label || card.kind || "Evidence"}
+        </span>
+        <span className="library__card-open">Open</span>
+      </span>
+      <strong className="library__card-title">{card.title || "Reusable material"}</strong>
+      {card.summary ? <span className="library__card-summary">{card.summary}</span> : null}
+      {tags.length ? (
+        <span className="library__tag-row">
+          {tags.slice(0, 4).map((tag, index) => (
+            <span
+              className="library__tag"
+              data-tone={safeTone(tag.tone)}
+              // biome-ignore lint/suspicious/noArrayIndexKey: tag labels can repeat; no stable id available
+              key={`${tag.label || "tag"}-${index}`}
+            >
+              {tag.label || "Tag"}
+            </span>
+          ))}
+        </span>
       ) : null}
-      {card.note ? <p className="library-card-note">{card.note}</p> : null}
-    </article>
+      {card.note ? <span className="library__card-note">{card.note}</span> : null}
+    </button>
   );
 }
 
 function EmptyLibraryState() {
   return (
-    <Card className="library-empty-state">
-      <div className="library-empty-state__icon" aria-hidden="true">
-        <LibraryIcon />
-      </div>
-      <div>
-        <h2>No reusable material yet</h2>
-        <p>
-          Run ingest-profile or capture evidence, STAR stories, and writing voice so Rolester has a
-          durable bank to browse here.
-        </p>
-      </div>
-    </Card>
-  );
-}
-
-function NoResultsState({ onReset }) {
-  return (
-    <div className="library-no-results">
-      <p>No matches. Clear search or filters to see the full bank.</p>
-      <Button variant="secondary" onClick={onReset}>
-        Clear filters
-      </Button>
+    <div className="library__empty-state">
+      <h2>No reusable material yet</h2>
+      <p>
+        Run ingest-profile or capture evidence, STAR stories, and writing voice so Rolester has a
+        durable bank to browse here.
+      </p>
     </div>
   );
 }
 
-export function LibraryPage() {
-  const { data, loading, error, noDatabase } = useDashboardSnapshot();
-  const [type, setType] = useState("all");
-  const [family, setFamily] = useState("");
-  const [lane, setLane] = useState("");
-  const [query, setQuery] = useState("");
+function LibraryDocuments({ docKind, documents, onDocKindChange, onQueryChange, query, total }) {
+  return (
+    <section aria-label="Documents" className="library__documents">
+      <header className="library__panel-header library__panel-header--documents">
+        <h2>
+          <span className="library__panel-icon">
+            <PaperclipIcon />
+          </span>
+          Documents
+        </h2>
+        <span className="library__panel-meta">
+          {formatNumber(documents.length)} of {formatNumber(total)}
+        </span>
+      </header>
+      <p className="library__panel-note">
+        Résumés, cover letters, and job descriptions gathered from every job's own artifacts. Opens
+        back into that job's drawer — the artifact isn't duplicated here.
+      </p>
 
-  const library = normalizeLibrary(data?.library);
-  const filteredCards = useMemo(
-    () => filterLibraryCards(library.cards, { type, family, lane, query }),
-    [library.cards, type, family, lane, query]
+      <div className="library__toolbar">
+        <div aria-label="Filter by document type" className="library__segments" role="tablist">
+          {DOC_KIND_OPTIONS.map((option) => (
+            <button
+              aria-selected={docKind === option.key}
+              className={`library__segment${docKind === option.key ? " library__segment--active" : ""}`}
+              key={option.key}
+              onClick={() => onDocKindChange(option.key)}
+              role="tab"
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+
+        <label className="library__searchbox">
+          <SearchIcon />
+          <input
+            aria-label="Search documents"
+            onChange={(event) => onQueryChange(event.target.value)}
+            placeholder="Search resumes, cover letters, job descriptions…"
+            type="search"
+            value={query}
+          />
+        </label>
+      </div>
+
+      {documents.length ? (
+        <div className="library__doc-list">
+          {documents.map((doc) => (
+            <DocumentRow doc={doc} key={doc.id} />
+          ))}
+        </div>
+      ) : total ? (
+        <div className="library__empty-state library__empty-state--compact">
+          <p>No documents match your search.</p>
+        </div>
+      ) : (
+        <div className="library__empty-state library__empty-state--compact">
+          <p>
+            No documents captured on any job yet. Documents appear here once an application picks up
+            a resume, cover letter, or saved job description.
+          </p>
+        </div>
+      )}
+    </section>
   );
+}
 
-  function resetFilters() {
-    setType("all");
-    setFamily("");
-    setLane("");
-    setQuery("");
-  }
+function DocumentRow({ doc }) {
+  return (
+    <div className="library__doc-row">
+      <span className="library__doc-kind" data-kind={docKindSlug(doc.kind)}>
+        {doc.kind}
+      </span>
+      <span className="library__doc-copy">
+        <strong>
+          {doc.company} · {doc.role}
+        </strong>
+        {doc.note ? <small>{doc.note}</small> : null}
+      </span>
+      {doc.detailId ? (
+        <Link className="library__doc-link" to={`/jobs?open=${encodeURIComponent(doc.detailId)}`}>
+          Open job
+        </Link>
+      ) : null}
+    </div>
+  );
+}
 
-  if (noDatabase) {
-    return (
-      <PageScaffold title="Library">
-        <InlineAlert message="No database workspace detected. Run `rolester data import` or `rolester data init`, then reload." />
-      </PageScaffold>
-    );
-  }
+function LibraryDrawer({ card, copied, onClose, onCopy }) {
+  useEffect(() => {
+    function onKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
 
   return (
-    <PageScaffold
-      title="Library"
-      subtitle="The full reusable evidence, story, and writing-voice bank from the shared dashboard snapshot."
-      wide
-    >
-      {error ? <InlineAlert message={error} /> : null}
-      {loading && !data ? <p>Loading...</p> : null}
+    // biome-ignore lint/a11y/noStaticElementInteractions: mouse-only backdrop; Escape is handled above
+    // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only backdrop; Escape is handled above
+    <div className="job-drawer-overlay" onClick={onClose}>
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops backdrop close; not itself interactive */}
+      <aside
+        aria-label="Library card detail"
+        className="job-drawer library__drawer"
+        onClick={(event) => event.stopPropagation()}
+        role="dialog"
+      >
+        <IconButton
+          className="job-drawer__close"
+          label="Close library card detail"
+          onClick={onClose}
+        >
+          ×
+        </IconButton>
+        <div className="library__drawer-header">
+          <span className={`library__kind library__kind--${card.kind || "evidence"}`}>
+            {card.label || card.kind || "Evidence"}
+          </span>
+          <h2>{card.title || "Reusable material"}</h2>
+          {card.summary ? <p>{card.summary}</p> : null}
+        </div>
 
-      {data ? (
-        <>
-          <section className="library-summary" aria-label="Library summary">
-            <Card title="Bank status" className="library-summary-card">
-              <div className="library-summary-grid">
-                {(library.index.length
-                  ? library.index
-                  : [
-                      { label: "Claims", value: library.metrics.claims },
-                      { label: "Stories", value: library.metrics.stories },
-                      { label: "Gaps", value: library.metrics.gaps },
-                    ]
-                ).map((item) => (
-                  <SummaryTile
-                    key={item.label || item.value}
-                    label={item.label || "Metric"}
-                    value={item.value ?? "0"}
-                  />
-                ))}
-              </div>
-            </Card>
+        <section className="library__drawer-section">
+          <h3>Reusable text</h3>
+          <p>{card.note || card.summary || "No reusable note captured yet."}</p>
+          <Button onClick={onCopy} variant="primary">
+            {copied ? "Copied" : "Copy reusable text"}
+          </Button>
+        </section>
 
-            <Card title="Readiness" className="library-summary-card">
-              <div className="library-readiness-row">
-                {Object.entries(library.readiness || EMPTY_LIBRARY.readiness).map(
-                  ([key, value]) => (
-                    <Chip key={key}>
-                      {key}: {formatReadinessValue(key, value)}
-                    </Chip>
-                  )
-                )}
-              </div>
-              <p className="library-muted">
-                Proof, stories, and voice are shown as reusable inputs, not one-off dashboard
-                teasers.
-              </p>
-            </Card>
-
-            <Card title="Claim guardrails" className="library-summary-card">
-              <div className="library-gap-list">
-                {library.gaps.length ? (
-                  library.gaps.map((gap, index) => (
-                    <div
-                      // biome-ignore lint/suspicious/noArrayIndexKey: gap titles can repeat; no stable id available
-                      key={`${gap.title || "gap"}-${index}`}
-                      className="library-gap-row"
-                      data-tone={safeTone(gap.tone)}
-                    >
-                      <AlertIcon />
-                      <span>
-                        <strong>{gap.title || "Claim gap"}</strong>
-                        {gap.body ? ` - ${gap.body}` : null}
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <p className="library-muted">No guardrails are open in the current snapshot.</p>
-                )}
-              </div>
-            </Card>
-          </section>
-
-          {library.cards.length ? (
-            <>
-              <section className="library-lanes" aria-label="Story lanes">
-                <div>
-                  <h2>Story lanes</h2>
-                  <p>Use a lane to narrow the bank around a reusable interview theme.</p>
-                </div>
-                <div className="library-lane-row">
-                  {library.storyLanes.length ? (
-                    library.storyLanes.map((item, index) => {
-                      const body = String(item.body || "").trim();
-                      return (
-                        <FilterButton
-                          // biome-ignore lint/suspicious/noArrayIndexKey: lane bodies can repeat; no stable id available
-                          key={`${body || "lane"}-${index}`}
-                          active={lane === body}
-                          className="library-lane-button"
-                          data-tone={safeTone(item.tone)}
-                          onClick={() => setLane(lane === body ? "" : body)}
-                        >
-                          {body || "Story lane"}
-                        </FilterButton>
-                      );
-                    })
-                  ) : (
-                    <span className="library-muted">No story lanes in this snapshot yet.</span>
-                  )}
-                </div>
-              </section>
-
-              <section className="library-toolbar" aria-label="Library filters">
-                <label className="library-searchbox">
-                  <SearchIcon />
-                  <input
-                    type="search"
-                    value={query}
-                    onChange={(event) => setQuery(event.target.value)}
-                    placeholder="Search proof, stories, voice..."
-                    aria-label="Search library"
-                  />
-                </label>
-
-                <div className="library-filter-group">
-                  {TYPE_FILTERS.map((item) => (
-                    <FilterButton
-                      key={item.key}
-                      active={type === item.key}
-                      onClick={() => setType(item.key)}
-                    >
-                      {item.label}
-                    </FilterButton>
-                  ))}
-                </div>
-
-                <div className="library-filter-group">
-                  {library.filters.length ? (
-                    library.filters.map((item) => {
-                      const label = String(item.label || "").trim();
-                      return (
-                        <FilterButton
-                          key={label || item.count}
-                          active={family === label}
-                          onClick={() => setFamily(family === label ? "" : label)}
-                        >
-                          <span>{label || "Tag"}</span>
-                          <b>{item.count ?? 0}</b>
-                        </FilterButton>
-                      );
-                    })
-                  ) : (
-                    <span className="library-muted">No family tags yet.</span>
-                  )}
-                </div>
-
-                {type !== "all" || family || lane || query ? (
-                  <Button variant="secondary" onClick={resetFilters}>
-                    Clear filters
-                  </Button>
-                ) : null}
-              </section>
-
-              <div className="library-result-count" aria-live="polite">
-                Showing {filteredCards.length} of {library.cards.length}
-              </div>
-
-              {filteredCards.length ? (
-                <section className="library-card-grid" aria-label="Library cards">
-                  {filteredCards.map((card, index) => (
-                    <EvidenceCard
-                      key={`${card.kind || "card"}-${card.title || card.summary || index}`}
-                      card={card}
-                    />
-                  ))}
-                </section>
-              ) : (
-                <NoResultsState onReset={resetFilters} />
-              )}
-            </>
-          ) : (
-            <EmptyLibraryState />
-          )}
-        </>
-      ) : null}
-    </PageScaffold>
+        <section className="library__drawer-section">
+          <h3>Tags</h3>
+          <div className="library__tag-row">
+            {asArray(card.tags).length ? (
+              asArray(card.tags).map((tag, index) => (
+                <span
+                  className="library__tag"
+                  data-tone={safeTone(tag.tone)}
+                  // biome-ignore lint/suspicious/noArrayIndexKey: tag labels can repeat; no stable id available
+                  key={`${tag.label || "tag"}-${index}`}
+                >
+                  {tag.label || "Tag"}
+                </span>
+              ))
+            ) : (
+              <span className="library__empty">No tags yet.</span>
+            )}
+          </div>
+        </section>
+      </aside>
+    </div>
   );
 }

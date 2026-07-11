@@ -13,10 +13,11 @@
 // time (decision 4) — that's appUpsert and appSetStatus here. appSetFields/
 // appScheduleInterview/appRegisterArtifact are comms/scheduling/artifact-style
 // writes (like email-comms/schedule-meeting/tailor-application) and do not.
+
+import { packetManifestSchema } from "../../packet/schemas/packet-schemas.mjs";
+import { validate } from "../../profile/schema-validator.mjs";
 import { classifyStage } from "../../tracker/dashboard.mjs";
 import { buildReevaluationAnalytics } from "../../tracker/outcome-analysis.mjs";
-import { validate } from "../../profile/schema-validator.mjs";
-import { packetManifestSchema } from "../../packet/schemas/packet-schemas.mjs";
 import {
   bumpMeta,
   getRow,
@@ -146,12 +147,12 @@ export function appSetFields({ repoRoot, env, id, patch } = {}) {
   });
 }
 
-// appScheduleInterview({id, at, round?, note?}) — the booking action. A real
-// FUTURE interviewAt is what promotes an interview to the dashboard Focus
-// card; a second call while one is already future-set books the NEXT round
-// into nextInterviewAt instead (Content Register: nextInterviewAt "supersedes
-// interviewAt once a follow-on is booked"). Not outcome-changing.
-export function appScheduleInterview({ repoRoot, env, id, at, round, note } = {}) {
+// appScheduleInterview({id, at, round?, note?, who?}) — the booking action. A
+// real FUTURE interviewAt is what promotes an interview to the dashboard
+// Focus card; a second call while one is already future-set books the NEXT
+// round into nextInterviewAt instead (Content Register: nextInterviewAt
+// "supersedes interviewAt once a follow-on is booked"). Not outcome-changing.
+export function appScheduleInterview({ repoRoot, env, id, at, round, note, who } = {}) {
   if (!at) throw new Error("appScheduleInterview: at is required");
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
@@ -166,7 +167,12 @@ export function appScheduleInterview({ repoRoot, env, id, at, round, note } = {}
     if (note) patch.interviewNote = note;
 
     const conversations = Array.isArray(app.conversations) ? app.conversations.slice() : [];
-    conversations.push({ date: at, kind: round || "Interview", notes: note || null });
+    conversations.push({
+      date: at,
+      kind: round || "Interview",
+      who: who || null,
+      notes: note || null,
+    });
     patch.conversations = conversations;
 
     const updated = { ...app, ...patch };
@@ -178,6 +184,83 @@ export function appScheduleInterview({ repoRoot, env, id, at, round, note } = {}
       refs: { applicationId: id, company: app.company, role: app.role },
     });
     return { id, meta, event };
+  });
+}
+
+const ROUND_OUTCOMES = new Set(["pending", "advanced", "rejected", "cancelled"]);
+
+// A completed round always takes its linked "scheduled" comm thread off the
+// live-actionable list: "advanced"/"pending" still have a next step (the
+// thread just isn't waiting on a scheduled event anymore), "rejected"/
+// "cancelled" close it out.
+const COMM_STATUS_BY_ROUND_OUTCOME = {
+  pending: "waiting",
+  advanced: "waiting",
+  rejected: "closed",
+  cancelled: "closed",
+};
+
+// appRecordRoundOutcome({id, outcome, note, stage?, who?}) — the coordinated
+// "round is done" write. ONE transaction: (1) stamps stage/outcome/who onto
+// the round's conversations[] entry (updates the most recently recorded round
+// if one exists, else appends a new one so this verb also works stand-alone),
+// and (2) resolves every linked communications[] row still sitting in
+// status "scheduled" (found by applicationId) — moved off "scheduled" per
+// COMM_STATUS_BY_ROUND_OUTCOME and nextAction/nextActionDue cleared — so a
+// resolved round's thread stops reading as a live actionable item. Without
+// this second half, `appScheduleInterview` leaves the comm thread pinned to
+// "scheduled" forever once the round has actually happened. Not
+// outcome-changing (mirrors appScheduleInterview/comm.mjs's carve-out): no
+// analytics refresh.
+export function appRecordRoundOutcome({ repoRoot, env, id, outcome, note, stage, who } = {}) {
+  if (!ROUND_OUTCOMES.has(outcome)) {
+    throw new Error(
+      `appRecordRoundOutcome: outcome must be one of ${[...ROUND_OUTCOMES].join(", ")}`
+    );
+  }
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+
+    const conversations = Array.isArray(app.conversations) ? app.conversations.slice() : [];
+    const lastIndex = conversations.length - 1;
+    const target = lastIndex >= 0 ? { ...conversations[lastIndex] } : { date: nowIso() };
+    if (!target.kind) target.kind = stage || "Interview";
+    target.outcome = outcome;
+    if (stage) target.stage = stage;
+    if (who) target.who = who;
+    if (note) target.notes = note;
+    if (lastIndex >= 0) conversations[lastIndex] = target;
+    else conversations.push(target);
+
+    const updated = { ...app, conversations };
+    putRow(db, "applications", id, updated);
+
+    const commRows = db
+      .prepare(
+        "SELECT id, data FROM communications WHERE application_id = ? AND status = 'scheduled'"
+      )
+      .all(String(id));
+    const resolvedCommIds = [];
+    for (const row of commRows) {
+      const comm = JSON.parse(row.data);
+      const resolvedComm = {
+        ...comm,
+        status: COMM_STATUS_BY_ROUND_OUTCOME[outcome],
+        nextAction: null,
+        nextActionDue: null,
+      };
+      putRow(db, "communications", row.id, resolvedComm, { application_id: id });
+      resolvedCommIds.push(row.id);
+    }
+
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "interview",
+      title: `${app.company || id} — ${stage || target.kind || "round"} outcome: ${outcome}`,
+      refs: { applicationId: id, company: app.company, role: app.role },
+      tags: [`outcome:${outcome}`],
+    });
+    return { id, outcome, meta, event, resolvedCommIds };
   });
 }
 

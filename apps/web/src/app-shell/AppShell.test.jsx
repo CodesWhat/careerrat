@@ -6,10 +6,6 @@ vi.mock("./ActivityBell.jsx", () => ({
   ActivityBell: () => <button type="button" aria-label="Activity" />,
 }));
 
-vi.mock("./CaptureBar.jsx", () => ({
-  CaptureBar: () => <div className="capture-assistant">Roland capture</div>,
-}));
-
 import { AppShell } from "./AppShell.jsx";
 
 function renderShell(path = "/") {
@@ -35,12 +31,14 @@ describe("AppShell", () => {
     expect(html).not.toContain('aria-label="Primary"');
   });
 
-  it("keeps real dashboard content mounted under the new shell", () => {
+  it("keeps real dashboard content mounted under the new shell without the v2 Roland assistant", () => {
     const html = renderShell("/");
 
     expect(html).toContain('<main class="app-shell__content">');
     expect(html).toContain("Mounted dashboard");
-    expect(html).toContain('class="capture-assistant"');
+    expect(html).not.toContain('class="capture-assistant"');
+    expect(html).not.toContain("Roland capture");
+    expect(html).not.toContain("Talk to Roland");
     expect(html).not.toContain('class="capture-bar"');
   });
 

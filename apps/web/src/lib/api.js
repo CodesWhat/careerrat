@@ -6,6 +6,11 @@
 // a raw fetch() scattered through components. The backend keeps these route
 // names stable while writing SQLite in DB mode and YAML only as a legacy
 // compatibility export.
+import {
+  isStaticPreviewApi,
+  staticPreviewApiFetch,
+  staticPreviewResumeSeed,
+} from "../preview/staticPreviewApi.js";
 
 export class ApiError extends Error {
   constructor(status, body) {
@@ -17,6 +22,8 @@ export class ApiError extends Error {
 }
 
 async function apiFetch(path, options = {}) {
+  if (isStaticPreviewApi()) return staticPreviewApiFetch(path, options);
+
   const res = await fetch(path, {
     ...options,
     headers: {
@@ -125,6 +132,8 @@ export function parseResumeText(text, { save = true } = {}) {
 // On success this unwraps the shared bounded-AI body.data envelope so
 // ResumeStep.applySeed() still receives the original seed object shape.
 export async function extractResumeAi(file) {
+  if (isStaticPreviewApi()) return staticPreviewResumeSeed(file?.name);
+
   const res = await fetch(`/api/onboard/resume-ai?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
     body: file,
@@ -144,6 +153,8 @@ export async function extractResumeAi(file) {
 }
 
 export async function extractResumeDocx(file) {
+  if (isStaticPreviewApi()) return staticPreviewResumeSeed(file?.name);
+
   const res = await fetch(`/api/onboard/resume-docx?name=${encodeURIComponent(file.name)}`, {
     method: "POST",
     body: file,

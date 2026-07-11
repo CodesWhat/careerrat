@@ -8,7 +8,7 @@ const dashboardContext = vi.hoisted(() => ({
 
 vi.mock("../app-shell/DashboardContext.jsx", () => dashboardContext);
 
-import { CalendarNextPage } from "./CalendarNextPage.jsx";
+import { CalendarPage } from "./CalendarPage.jsx";
 
 const HOOLI_REPLY_EXPORT = {
   filename: "reply-to-hooli-recruiter-2026-07-08.ics",
@@ -192,7 +192,7 @@ const CALENDAR_DATA = {
   },
 };
 
-function renderCalendarNext(snapshot = {}) {
+function renderCalendarPage(snapshot = {}) {
   dashboardContext.useDashboardSnapshot.mockReturnValue({
     data: { calendar: CALENDAR_DATA },
     loading: false,
@@ -203,16 +203,16 @@ function renderCalendarNext(snapshot = {}) {
 
   return renderToStaticMarkup(
     <MemoryRouter>
-      <CalendarNextPage />
+      <CalendarPage />
     </MemoryRouter>
   );
 }
 
-describe("CalendarNextPage", () => {
+describe("CalendarPage", () => {
   it("renders an agenda-first calendar from real dashboard data", () => {
-    const html = renderCalendarNext();
+    const html = renderCalendarPage();
 
-    expect(html).toContain('class="calendar-next"');
+    expect(html).toContain('class="calendar"');
     expect(html).toContain("Calendar</h1>");
     expect(html).not.toContain("Preview Data");
     expect(html).toContain("Today");
@@ -220,9 +220,9 @@ describe("CalendarNextPage", () => {
     expect(html).toContain("This week");
     expect(html).toContain("Next week");
     expect(html).toContain("Later");
-    expect(html).toContain('data-calendar-next-stat="dueToday"');
-    expect(html).toContain('data-calendar-next-stat="interviews"');
-    expect(html).toContain('data-calendar-next-stat="thisWeek"');
+    expect(html).toContain('data-calendar-stat="dueToday"');
+    expect(html).toContain('data-calendar-stat="interviews"');
+    expect(html).toContain('data-calendar-stat="thisWeek"');
 
     // Bucketed rows.
     expect(html).toContain("Reply to Hooli recruiter");
@@ -238,10 +238,10 @@ describe("CalendarNextPage", () => {
     expect(html).toContain("Team standup");
 
     // Kind pills.
-    expect(html).toContain("calendar-next__kind-pill--interview");
-    expect(html).toContain("calendar-next__kind-pill--reply");
-    expect(html).toContain("calendar-next__kind-pill--deadline");
-    expect(html).toContain("calendar-next__kind-pill--busy");
+    expect(html).toContain("calendar__kind-pill--interview");
+    expect(html).toContain("calendar__kind-pill--reply");
+    expect(html).toContain("calendar__kind-pill--deadline");
+    expect(html).toContain("calendar__kind-pill--busy");
 
     // Export controls, visible (not hover-only), siblings of the title link.
     expect(html).toContain(">.ics<");
@@ -265,7 +265,7 @@ describe("CalendarNextPage", () => {
   });
 
   it("uses believable preview data for an empty dev snapshot", () => {
-    const html = renderCalendarNext({
+    const html = renderCalendarPage({
       data: {
         calendar: {
           metrics: { thisWeek: 0, interviews: 0, dueToday: 0 },
@@ -300,7 +300,7 @@ describe("CalendarNextPage", () => {
   });
 
   it("moves a round the server marked done out of Today and into Recent", () => {
-    const html = renderCalendarNext({
+    const html = renderCalendarPage({
       data: {
         calendar: {
           todayIso: "2026-07-08",

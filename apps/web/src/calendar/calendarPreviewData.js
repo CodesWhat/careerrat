@@ -1,5 +1,5 @@
 // apps/web/src/calendar/calendarPreviewData.js — dev-only fallback data for
-// CalendarNextPage.jsx, shown when the live dashboard snapshot carries no
+// CalendarPage.jsx, shown when the live dashboard snapshot carries no
 // calendar content (see hasCalendarContent() + calendarForNext() there).
 // Shaped like buildCalendar()'s real output (src/core/tracker/dashboard-data.js)
 // so every agenda bucket the page renders has an example — except Tomorrow,

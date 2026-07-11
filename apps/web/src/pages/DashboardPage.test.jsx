@@ -13,7 +13,7 @@ vi.mock("../lib/api.js", () => ({
   logoImageUrl: ({ domain, name }) => `/logo/${domain || name}`,
 }));
 
-import { DashboardV2Page } from "./DashboardV2Page.jsx";
+import { DashboardPage } from "./DashboardPage.jsx";
 
 const DASHBOARD_DATA = {
   stats: {
@@ -123,7 +123,7 @@ const DASHBOARD_DATA = {
   },
 };
 
-function renderDashboardV2(snapshot = {}) {
+function renderDashboardPage(snapshot = {}) {
   dashboardContext.useDashboardSnapshot.mockReturnValue({
     data: DASHBOARD_DATA,
     loading: false,
@@ -134,24 +134,24 @@ function renderDashboardV2(snapshot = {}) {
 
   return renderToStaticMarkup(
     <MemoryRouter>
-      <DashboardV2Page />
+      <DashboardPage />
     </MemoryRouter>
   );
 }
 
-describe("DashboardV2Page", () => {
+describe("DashboardPage", () => {
   it("renders an action-first dashboard from the live dashboard snapshot", () => {
-    const html = renderDashboardV2();
+    const html = renderDashboardPage();
 
-    expect(html).toContain('class="dashboard-v2"');
+    expect(html).toContain('class="dashboard"');
     expect(html).toContain(">Dashboard</h1>");
     expect(html).not.toContain("Preview Data");
     expect(html).not.toContain("Dashboard V2 ·");
-    expect(html).toContain('data-dashboard-v2-stat="needsYou"');
+    expect(html).toContain('data-dashboard-stat="needsYou"');
     expect(html).toContain("Needs You");
-    expect(html).toContain('data-dashboard-v2-stat="highFit"');
+    expect(html).toContain('data-dashboard-stat="highFit"');
     expect(html).toContain("High Fit");
-    expect(html).toContain('data-dashboard-v2-stat="activeJobs"');
+    expect(html).toContain('data-dashboard-stat="activeJobs"');
     expect(html).toContain("Active");
 
     expect(html).toContain("Priority");
@@ -191,7 +191,7 @@ describe("DashboardV2Page", () => {
   });
 
   it("uses believable preview data for an empty dev snapshot", () => {
-    const html = renderDashboardV2({
+    const html = renderDashboardPage({
       data: {
         jobs: { rail: {}, visibleCount: 0 },
         calendar: { upcoming: { events: [] } },
