@@ -4605,7 +4605,8 @@ button {
   list-style: none;
 }
 
-.onboarding-companies__add-field {
+.onboarding-companies__combobox {
+  position: relative;
   margin-top: auto;
 }
 
@@ -4675,12 +4676,21 @@ button {
 }
 
 .onboarding-companies__suggestions {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  left: 0;
+  z-index: 1000;
   display: flex;
   flex-direction: column;
   gap: 6px;
-  max-height: 140px;
+  max-height: 320px;
+  padding: 8px;
   overflow: auto;
-  padding-right: 2px;
+  border: 1px solid var(--paper-edge-strong);
+  border-radius: 8px;
+  background: var(--paper-surface);
+  box-shadow: var(--card-shadow);
 }
 
 .onboarding-key__autosave {

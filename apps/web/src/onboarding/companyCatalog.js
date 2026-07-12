@@ -165,6 +165,58 @@ const RAW_COMPANY_CATALOG = [
   ["Marriott", "marriott.com"],
   ["Hilton", "hilton.com"],
   ["Hyatt", "hyatt.com"],
+  ["Best Buy", "bestbuy.com", ["bestbuy", "best-buy"]],
+  ["Wayfair", "wayfair.com"],
+  ["Chewy", "chewy.com"],
+  ["eBay", "ebay.com"],
+  ["Etsy", "etsy.com"],
+  ["Nordstrom", "nordstrom.com"],
+  ["Macy's", "macys.com", ["macys"]],
+  ["Kohl's", "kohls.com", ["kohls"]],
+  ["TJX Companies", "tjx.com", ["tj maxx", "tjmaxx", "marshalls", "homegoods"]],
+  ["Gap Inc.", "gapinc.com", ["gap", "old navy", "banana republic"]],
+  ["Ulta Beauty", "ulta.com", ["ulta"]],
+  ["Ross Stores", "rossstores.com", ["ross", "ross dress for less"]],
+  ["Dollar General", "dollargeneral.com"],
+  ["Dollar Tree", "dollartree.com"],
+  ["Publix", "publix.com"],
+  ["Alaska Airlines", "alaskaair.com"],
+  ["JetBlue Airways", "jetblue.com", ["jetblue"]],
+  ["Wells Fargo", "wellsfargo.com"],
+  ["Citigroup", "citigroup.com", ["citi", "citibank"]],
+  ["U.S. Bancorp", "usbank.com", ["us bank", "usbank"]],
+  ["PNC Financial Services", "pnc.com", ["pnc"]],
+  ["Truist Financial", "truist.com", ["truist"]],
+  ["Progressive", "progressive.com"],
+  ["Allstate", "allstate.com"],
+  ["State Farm", "statefarm.com"],
+  ["Liberty Mutual", "libertymutual.com"],
+  ["MetLife", "metlife.com"],
+  ["Prudential Financial", "prudential.com"],
+  ["The Travelers Companies", "travelers.com", ["travelers"]],
+  ["HCA Healthcare", "hcahealthcare.com", ["hca"]],
+  ["Sony", "sony.com"],
+  ["Universal Music Group", "universalmusic.com"],
+  ["Fox Corporation", "foxcorporation.com", ["fox"]],
+  ["iHeartMedia", "iheartmedia.com", ["iheart"]],
+  ["Live Nation Entertainment", "livenation.com", ["live nation", "ticketmaster"]],
+  ["Verizon", "verizon.com"],
+  ["AT&T", "att.com", ["at&t", "atandt"]],
+  ["T-Mobile US", "t-mobile.com", ["tmobile", "t mobile"]],
+  ["Charter Communications", "charter.com", ["spectrum"]],
+  ["SAP", "sap.com"],
+  ["VMware", "vmware.com"],
+  ["Dell Technologies", "dell.com", ["dell"]],
+  ["HP Inc.", "hp.com"],
+  ["Hewlett Packard Enterprise", "hpe.com", ["hpe"]],
+  ["Qualcomm", "qualcomm.com"],
+  ["Broadcom", "broadcom.com"],
+  ["Texas Instruments", "ti.com"],
+  ["Micron Technology", "micron.com", ["micron"]],
+  ["CrowdStrike", "crowdstrike.com"],
+  ["Palo Alto Networks", "paloaltonetworks.com"],
+  ["Splunk", "splunk.com"],
+  ["Datadog", "datadoghq.com"],
 ];
 
 export const COMPANY_CATALOG = RAW_COMPANY_CATALOG.map(([name, domain, aliases = []]) => ({
@@ -205,6 +257,11 @@ function selectedCompanyKeys(companies = []) {
   return keys;
 }
 
+// Below 3 characters, a substring match is mostly noise (e.g. "be" hitting
+// Adobe/Albertsons/alphabet-as-a-Google-alias) — short queries only surface
+// exact or prefix hits, never substring.
+const MIN_QUERY_LENGTH_FOR_SUBSTRING_MATCH = 3;
+
 function scoreCatalogCompany(company, query) {
   const needle = normalizeSearchText(query);
   const compactNeedle = compactSearchText(query);
@@ -224,6 +281,7 @@ function scoreCatalogCompany(company, query) {
   for (const field of fields) {
     if (field.normalized.startsWith(needle) || field.compact.startsWith(compactNeedle)) return 90;
   }
+  if (compactNeedle.length < MIN_QUERY_LENGTH_FOR_SUBSTRING_MATCH) return 0;
   for (const field of fields) {
     if (field.normalized.includes(needle) || field.compact.includes(compactNeedle)) return 70;
   }

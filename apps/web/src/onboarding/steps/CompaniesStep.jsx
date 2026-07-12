@@ -404,47 +404,51 @@ export function CompaniesStep({
                 </div>
               )}
 
-              <Field
-                label="Add a company"
-                htmlFor="companies-search"
-                hint="Press Enter to include a specific company board."
-                className="onboarding-custom-entry onboarding-companies__add-field"
-              >
-                <TextField
-                  id="companies-search"
-                  value={query}
-                  onChange={setQuery}
-                  placeholder="e.g. Sweetgreen"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      e.preventDefault();
-                      addBestCompanyMatch();
-                    }
-                  }}
-                />
-              </Field>
+              <div className="onboarding-companies__combobox">
+                <Field
+                  label="Add a company"
+                  htmlFor="companies-search"
+                  hint="Press Enter to include a specific company board."
+                  className="onboarding-custom-entry onboarding-companies__add-field"
+                >
+                  <TextField
+                    id="companies-search"
+                    value={query}
+                    onChange={setQuery}
+                    placeholder="e.g. Sweetgreen"
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addBestCompanyMatch();
+                      }
+                    }}
+                  />
+                </Field>
+                {suggestions.length ? (
+                  // biome-ignore lint/a11y/useAriaPropsSupportedByRole: labelled container for a keyboard-reachable list of match buttons
+                  <div className="onboarding-companies__suggestions" aria-label="Company matches">
+                    {suggestions.map((s) => (
+                      <button
+                        type="button"
+                        className="company-row company-row--suggestion"
+                        key={`${s.name}-${s.domain}`}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onClick={() => addCompany(s.name || s.domain, s.domain)}
+                      >
+                        <CompanyAvatar name={s.name || s.domain} domain={s.domain} />
+                        <span className="company-row__main">
+                          <span className="company-row__name">{s.name || s.domain}</span>
+                          {s.domain ? (
+                            <span className="company-row__domain">{s.domain}</span>
+                          ) : null}
+                        </span>
+                        <span className="company-row__add">Add</span>
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
               {searching ? <p className="field__hint">Resolving…</p> : null}
-              {suggestions.length ? (
-                // biome-ignore lint/a11y/useAriaPropsSupportedByRole: labelled container for a keyboard-reachable list of match buttons
-                <div className="onboarding-companies__suggestions" aria-label="Company matches">
-                  {suggestions.map((s) => (
-                    <button
-                      type="button"
-                      className="company-row company-row--suggestion"
-                      key={`${s.name}-${s.domain}`}
-                      onMouseDown={(event) => event.preventDefault()}
-                      onClick={() => addCompany(s.name || s.domain, s.domain)}
-                    >
-                      <CompanyAvatar name={s.name || s.domain} domain={s.domain} />
-                      <span className="company-row__main">
-                        <span className="company-row__name">{s.name || s.domain}</span>
-                        {s.domain ? <span className="company-row__domain">{s.domain}</span> : null}
-                      </span>
-                      <span className="company-row__add">Add</span>
-                    </button>
-                  ))}
-                </div>
-              ) : null}
             </section>
           </div>
         </section>
