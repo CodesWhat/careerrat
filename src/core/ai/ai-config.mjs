@@ -10,7 +10,9 @@
 //      always wins — an operator who already set one gets exactly that.
 //   2. Otherwise config/ai.json (gitignored, user-local; config/ai.example.json
 //      is the tracked template — see config/ai.schema.json for the shape).
-//   3. Otherwise unset — the caller's/SDK's own built-in default applies.
+//   3. Otherwise DEFAULT_MODEL / DEFAULT_SMALL_FAST_MODEL below — the shipped
+//      default, so a fresh BYOK install (key set, nothing else configured)
+//      still sends a real model id instead of `model: null`.
 //
 // Reading config/ai.json is tolerant by design: a missing file, invalid JSON,
 // or a shape that fails config/ai.schema.json is all treated as "no override"
@@ -26,6 +28,14 @@ const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 export const AI_CONFIG_REL_PATH = "config/ai.json";
 export const AI_CONFIG_SCHEMA_PATH = "config/ai.schema.json";
+
+// Shipped defaults — the last fallback tier in resolveModelConfig(), used
+// only when nothing else (explicit arg, env var, config/ai.json) sets a
+// model. Bare aliases, not dated snapshots, so they auto-roll to the latest
+// point release. One home for these ids — import them, never hardcode a
+// model string elsewhere.
+export const DEFAULT_MODEL = "claude-sonnet-5";
+export const DEFAULT_SMALL_FAST_MODEL = "claude-haiku-4-5";
 
 const EMPTY_CONFIG = Object.freeze({ model: null, smallFastModel: null });
 
@@ -83,15 +93,17 @@ export function loadAiConfigFile({ root = DEFAULT_ROOT } = {}) {
   return data;
 }
 
-// The one precedence rule (env > config file > unset), resolved once so every
-// consumer agrees. `env` is injected (defaults to process.env) for testability.
+// The one precedence rule (env > config file > shipped default), resolved
+// once so every consumer agrees. `env` is injected (defaults to process.env)
+// for testability. The shipped default is the last fallback — a configured
+// value (env or file) always wins over it.
 export function resolveModelConfig({ root = DEFAULT_ROOT, env = process.env } = {}) {
   const fileConfig = loadAiConfigFile({ root });
   const envModel = trimmedOrNull(env.ANTHROPIC_MODEL);
   const envSmallFastModel = trimmedOrNull(env.ANTHROPIC_SMALL_FAST_MODEL);
   return {
-    model: envModel || fileConfig.model,
-    smallFastModel: envSmallFastModel || fileConfig.smallFastModel,
+    model: envModel || fileConfig.model || DEFAULT_MODEL,
+    smallFastModel: envSmallFastModel || fileConfig.smallFastModel || DEFAULT_SMALL_FAST_MODEL,
   };
 }
 

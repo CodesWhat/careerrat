@@ -126,6 +126,75 @@ async function* parseSSE(body) {
 // callAI()
 // ---------------------------------------------------------------------------
 
+// Keys that constrain a *value* (length/range/format/uniqueness/default)
+// rather than describe *structure* (type/properties/required/etc). Anthropic's
+// native structured-output wire format (output_config.format.schema) only
+// accepts a subset of JSON Schema and 400s on these ("property 'X' is not
+// supported"). Product schemas are authored for local validation and
+// legitimately use the fuller vocabulary, so we strip only at this wire seam.
+const NATIVE_SCHEMA_STRIPPED_KEYS = new Set([
+  "maxItems",
+  "minItems",
+  "maxLength",
+  "minLength",
+  "pattern",
+  "format",
+  "minimum",
+  "maximum",
+  "exclusiveMinimum",
+  "exclusiveMaximum",
+  "multipleOf",
+  "uniqueItems",
+  "minProperties",
+  "maxProperties",
+  "default",
+]);
+
+// Deep-clones `schema` and strips value-constraint keywords the native
+// structured-output API rejects, recursing into properties/items/$defs/
+// definitions/anyOf/allOf/oneOf/additionalProperties. Structural keywords
+// (type, properties, required, enum, items, description, title, const,
+// anyOf/allOf/oneOf, $ref, $defs) are left intact. The stripped constraints
+// stay enforced locally by the bounded-AI validation layer after parse, so
+// this only loosens model-side guidance — it never weakens correctness.
+// Never mutates its input (callers often pass frozen module constants).
+// Non-object input is returned unchanged.
+export function sanitizeNativeOutputSchema(schema) {
+  if (Array.isArray(schema)) {
+    return schema.map((entry) => sanitizeNativeOutputSchema(entry));
+  }
+  if (schema === null || typeof schema !== "object") {
+    return schema;
+  }
+
+  const out = {};
+  for (const [key, value] of Object.entries(schema)) {
+    if (NATIVE_SCHEMA_STRIPPED_KEYS.has(key)) continue;
+
+    if (key === "properties" || key === "$defs" || key === "definitions") {
+      const nested = {};
+      for (const [propKey, propValue] of Object.entries(value || {})) {
+        nested[propKey] = sanitizeNativeOutputSchema(propValue);
+      }
+      out[key] = nested;
+    } else if (key === "items") {
+      out[key] = sanitizeNativeOutputSchema(value);
+    } else if (key === "anyOf" || key === "allOf" || key === "oneOf") {
+      out[key] = Array.isArray(value)
+        ? value.map((entry) => sanitizeNativeOutputSchema(entry))
+        : value;
+    } else if (key === "additionalProperties") {
+      out[key] =
+        value && typeof value === "object" && !Array.isArray(value)
+          ? sanitizeNativeOutputSchema(value)
+          : value;
+    } else {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
 function buildRequest(
   route,
   {
@@ -139,16 +208,21 @@ function buildRequest(
     action,
     operation,
     outputSchema,
-    outputName,
     outputMode,
   }
 ) {
   const body = { model, max_tokens: maxTokens, messages, stream };
   if (system) body.system = system;
   if (outputMode === "native" && outputSchema) {
-    const format = { type: "json_schema", schema: outputSchema };
-    if (outputName) format.name = outputName;
-    body.output_config = { format };
+    // output_config.format takes only { type, schema } — the API rejects any
+    // extra field (400 "Extra inputs are not permitted"). outputName is only
+    // meaningful for the tool-based fallback mode, never sent natively. The
+    // schema itself is sanitized (see sanitizeNativeOutputSchema) since the
+    // native API also rejects several JSON-Schema value-constraint keywords
+    // that product schemas legitimately use for local validation.
+    body.output_config = {
+      format: { type: "json_schema", schema: sanitizeNativeOutputSchema(outputSchema) },
+    };
   }
 
   const headers = { "content-type": "application/json" };
