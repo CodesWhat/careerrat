@@ -58,6 +58,20 @@
             "recommended_from": { "type": "string", "enum": ["default", "history"] },
             "saved_at": { "type": "string" }
           }
+        },
+        "ai_prompts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "source"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "source": { "type": "string", "enum": ["generated", "edited", "user"] },
+              "updatedAt": { "type": "string" }
+            }
+          }
         }
       }
     },

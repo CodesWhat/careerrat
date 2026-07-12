@@ -98,6 +98,11 @@ import {
 } from "../core/profile/resume-parser.mjs";
 import { validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../core/profile/yaml.mjs";
+import {
+  generateSearchPrompts,
+  getSearchPrompts,
+  saveSearchPrompts,
+} from "../core/search/search-prompts.mjs";
 // M8 additive (Builder B, wizard UI): resolveLogoTokens is already exported
 // by logo-route.mjs for exactly this reuse — see its own header comment.
 // Reused here (not re-derived) so GET /api/onboard/state can report logo.dev
@@ -914,6 +919,32 @@ export function prepareQuickStartFirstSearch({
         runId: result.run.id,
       }).catch(() => {});
     }
+
+    // Best-effort: seed AI search prompts from the now-ready targeting/profile
+    // alongside the first-search kickoff, but only when nothing is stored yet
+    // (repeat quick-start calls must never clobber a user's own edits). Fully
+    // fire-and-forget — a prompt-generation failure (no AI route, model
+    // error) never blocks or fails the quick-start response; the user can
+    // still generate/edit prompts later from the Jobs page.
+    try {
+      if (!getSearchPrompts({ repoRoot, env }).prompts.length) {
+        void generateSearchPrompts({ repoRoot, env })
+          .then((outcome) => {
+            if (outcome.body?.ok) {
+              saveSearchPrompts({
+                repoRoot,
+                env,
+                prompts: outcome.body.data.prompts,
+                defaultSource: "generated",
+              });
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {
+      // best-effort only — never fails quick-start
+    }
+
     return {
       status: result.reused ? 200 : 202,
       body: {

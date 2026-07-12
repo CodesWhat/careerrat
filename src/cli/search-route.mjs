@@ -19,6 +19,17 @@
 //                              — the presence/health strip
 //                              src/core/onboarding/search-page.mjs's header
 //                              renders on load.
+//   POST /api/search/prompts/generate
+//                              Generates AI search-assistant prompts from the
+//                              candidate's stored targeting/profile
+//                              (src/core/search/search-prompts.mjs), persists
+//                              them, and returns the stored list. Bounded-AI
+//                              envelope passthrough on failure (501/422/502 —
+//                              see runBoundedAI's own contract).
+//   GET  /api/search/prompts   Stored ai_prompts (targeting.search_preferences).
+//   PUT  /api/search/prompts   { prompts:[{id?, text}] } — validates non-empty
+//                              text, persists (mints ids for new rows), and
+//                              returns the stored list.
 //
 // `fetchImpl` is dependency-injected (defaults to the real global `fetch`)
 // the same way `runSkillStream` is in skill-run-route.mjs, so tests can drive
@@ -28,6 +39,11 @@ import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
 import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
 import { countDeterministicSources } from "../core/onboarding/first-search-run.mjs";
+import {
+  generateSearchPrompts,
+  getSearchPrompts,
+  saveSearchPrompts,
+} from "../core/search/search-prompts.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other route modules use.
@@ -177,6 +193,98 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
     } catch (err) {
       if (sendDbError(res, err)) return;
       sendJson(res, 500, { error: err.message });
+    }
+  });
+
+  function sendSearchPromptsError(res, err) {
+    if (sendDbError(res, err)) return;
+    sendJson(res, err?.code === "VALIDATION_FAILED" ? 400 : 500, {
+      ok: false,
+      error: { message: err?.message || String(err) },
+      errors: err?.errors || undefined,
+    });
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /api/search/prompts/generate — generate-first AI search prompts,
+  // derived only from stored targeting/profile (see search-prompts.mjs's own
+  // header comment). Generates, persists (source "generated"), and returns
+  // the stored list. AI failures pass the bounded-AI envelope straight
+  // through — same 501 (no route)/422 (schema)/502 (provider) contract every
+  // other bounded-AI route uses.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/search/prompts/generate", async (_req, res) => {
+    let outcome;
+    try {
+      outcome = await generateSearchPrompts({ repoRoot, env });
+    } catch (err) {
+      sendSearchPromptsError(res, err);
+      return;
+    }
+
+    if (!outcome.body?.ok) {
+      sendJson(res, outcome.status, outcome.body);
+      return;
+    }
+
+    try {
+      const saved = saveSearchPrompts({
+        repoRoot,
+        env,
+        prompts: outcome.body.data.prompts,
+        defaultSource: "generated",
+      });
+      sendJson(res, 200, { ok: true, data: { prompts: saved.prompts } });
+    } catch (err) {
+      sendSearchPromptsError(res, err);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // GET /api/search/prompts — stored targeting.search_preferences.ai_prompts.
+  // -------------------------------------------------------------------------
+  addRoute("GET", "/api/search/prompts", (_req, res) => {
+    try {
+      const result = getSearchPrompts({ repoRoot, env });
+      sendJson(res, 200, { ok: true, data: { prompts: result.prompts } });
+    } catch (err) {
+      sendSearchPromptsError(res, err);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // PUT /api/search/prompts — { prompts:[{id?, text}] }. Every posted item
+  // must carry non-empty text (a malformed/empty row is a 400, not a silent
+  // drop); an empty `prompts` array is a legitimate "user cleared the list".
+  // -------------------------------------------------------------------------
+  addRoute("PUT", "/api/search/prompts", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { ok: false, error: { message: err.message } });
+      return;
+    }
+
+    const posted = Array.isArray(body?.prompts) ? body.prompts : null;
+    if (!posted) {
+      sendJson(res, 400, { ok: false, error: { message: "body.prompts must be an array" } });
+      return;
+    }
+    const hasEmptyText = posted.some((p) => !String(p?.text ?? "").trim());
+    if (hasEmptyText) {
+      sendJson(res, 400, {
+        ok: false,
+        error: { message: "every prompt requires non-empty text" },
+      });
+      return;
+    }
+
+    try {
+      const saved = saveSearchPrompts({ repoRoot, env, prompts: posted });
+      sendJson(res, 200, { ok: true, data: { prompts: saved.prompts } });
+    } catch (err) {
+      sendSearchPromptsError(res, err);
     }
   });
 }

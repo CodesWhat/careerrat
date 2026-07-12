@@ -191,6 +191,25 @@ export function getSearchSources() {
   return apiFetch("/api/search/sources", { method: "GET" });
 }
 
+// AI search-assistant prompts (src/cli/search-route.mjs) — generate-first:
+// Rolester generates the prompts, the user edits/adds/removes afterward.
+// GET/PUT both unwrap to the stored { id, text, source, updatedAt } list;
+// generate additionally persists server-side before returning it.
+export function getSearchPrompts() {
+  return apiFetch("/api/search/prompts", { method: "GET" });
+}
+
+export function generateSearchPrompts() {
+  return apiFetch("/api/search/prompts/generate", { method: "POST" });
+}
+
+export function saveSearchPrompts(prompts) {
+  return apiFetch("/api/search/prompts", {
+    method: "PUT",
+    body: JSON.stringify({ prompts }),
+  });
+}
+
 export function startFirstSearchRun(payload = {}) {
   return apiFetch("/api/sourcing/first-run/start", {
     method: "POST",

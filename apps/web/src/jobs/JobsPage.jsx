@@ -8,6 +8,7 @@ import { Field, Select, TextField, Toggle } from "../components/form.jsx";
 import { ChevronDownIcon, ListIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { getSearchSources } from "../lib/api.js";
+import { AiSearchPrompts } from "./AiSearchPrompts.jsx";
 import { FunnelSankey } from "./FunnelSankey.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
 import {
@@ -721,9 +722,11 @@ function SearchView({
 
       {!sourceSetupReady ? (
         <section className="jobs__setup-inline" aria-live="polite">
-          Add RSS sources or tracked company boards first.
+          Add company boards first.
         </section>
       ) : null}
+
+      <AiSearchPrompts />
 
       <section className="jobs__panel">
         <PanelHeader

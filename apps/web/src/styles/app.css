@@ -8687,6 +8687,56 @@ button {
   background: rgba(47, 158, 143, 0.2);
 }
 
+.jobs__ai-prompts-hint {
+  margin: 0;
+  padding: 12px 18px 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.jobs__ai-prompts-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px 18px 0;
+}
+
+.jobs__ai-prompts-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.jobs__ai-prompts-row .text-area {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 100%;
+}
+
+.jobs__ai-prompts-remove {
+  flex: 0 0 auto;
+  margin-top: 8px;
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.jobs__ai-prompts-remove:hover {
+  color: var(--coral);
+}
+
+.jobs__ai-prompts-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 16px 18px 18px;
+}
+
 @media (max-width: 1120px) {
   .jobs__hero,
   .jobs__search-launcher {
