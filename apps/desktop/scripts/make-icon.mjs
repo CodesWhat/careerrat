@@ -64,7 +64,7 @@ async function main() {
   console.log(`wrote ${pngPath}`);
 
   // Build a .icns via macOS iconutil (reliable, native). Generate the standard
-  // iconset sizes from the 1024 master, then pack.
+  // iconset sizes from the 1024 source, then pack.
   const iconset = join(BUILD_DIR, "icon.iconset");
   rmSync(iconset, { recursive: true, force: true });
   mkdirSync(iconset, { recursive: true });
