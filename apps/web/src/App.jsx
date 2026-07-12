@@ -3,6 +3,8 @@ import { AppShell } from "./app-shell/AppShell.jsx";
 import { DashboardProvider } from "./app-shell/DashboardContext.jsx";
 import { CalendarPage } from "./calendar/CalendarPage.jsx";
 import { AccentLab } from "./dev/AccentLab.jsx";
+import { isDevToolsEnabled } from "./dev/devTools.js";
+import { V2Lab } from "./dev/V2Lab.jsx";
 import { InboxPage } from "./inbox/InboxPage.jsx";
 import { JobsPage } from "./jobs/JobsPage.jsx";
 import { LibraryPage } from "./library/LibraryPage.jsx";
@@ -17,6 +19,7 @@ import { SettingsPage } from "./settings/SettingsPage.jsx";
 // through app-shell/DashboardContext.jsx.
 export function App() {
   const location = useLocation();
+  const devToolsEnabled = isDevToolsEnabled();
 
   if (location.pathname === "/onboarding") {
     return (
@@ -24,7 +27,19 @@ export function App() {
         <DashboardProvider>
           <OnboardingPage />
         </DashboardProvider>
-        {import.meta.env.DEV ? <AccentLab /> : null}
+        {devToolsEnabled ? <AccentLab /> : null}
+      </>
+    );
+  }
+
+  // Dev-only design-lab takeover — full viewport, no AppShell. Falls through
+  // to the normal shell (and its `*` ComingSoonPage route) when dev tools
+  // aren't enabled, so /dev/v2 is unreachable in a plain production session.
+  if (location.pathname === "/dev/v2" && devToolsEnabled) {
+    return (
+      <>
+        <V2Lab />
+        <AccentLab />
       </>
     );
   }
@@ -57,7 +72,7 @@ export function App() {
           />
         </Routes>
       </AppShell>
-      {import.meta.env.DEV ? <AccentLab /> : null}
+      {devToolsEnabled ? <AccentLab /> : null}
     </>
   );
 }
