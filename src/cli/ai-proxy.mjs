@@ -62,6 +62,20 @@
 //                              without the request ever reaching upstream.
 //   ROLESTER_PROXY_PORT      default 7788.
 //   ROLESTER_PROXY_METER_ROOT  default process.cwd() — root the usage log is written under.
+//   ROLESTER_METER_DB_URL    optional Supabase project URL (e.g. https://xyz.supabase.co).
+//                             When set together with ROLESTER_METER_DB_KEY, usage events
+//                             are POSTed to that project's PostgREST API instead of the
+//                             local JSONL file — see src/cli/meter-db.mjs and
+//                             scripts/meter-db-schema.sql — so a proxy deployment needs no
+//                             persistent disk. The local JSONL ledger is still used as a
+//                             fallback for any individual event the DB write fails for
+//                             (never both, and never silently dropped). Metadata-only, same
+//                             privacy invariant as above: no request/response body or raw
+//                             token ever reaches this column set.
+//   ROLESTER_METER_DB_KEY    the Supabase service-role key for ROLESTER_METER_DB_URL.
+//                             Required alongside it; a service-role key is required (not an
+//                             anon key) since the schema has RLS enabled with no policies.
+//   ROLESTER_METER_DB_TABLE  default "usage_events" — the PostgREST table name.
 //
 // createProxyServer() below is a pure factory — no listen — so tests can construct
 // one against an isolated meter root and mock upstream and drive it directly.
@@ -72,7 +86,13 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { extractSSEEvents } from "../core/ai/call-ai.mjs";
-import { appendUsageEvent, computeCost, readUsageEvents } from "../core/ai/usage-log.mjs";
+import {
+  appendUsageEvent,
+  canonicalizeUsageEvent,
+  computeCost,
+  readUsageEvents,
+} from "../core/ai/usage-log.mjs";
+import { createDbMeter } from "./meter-db.mjs";
 
 const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -252,6 +272,10 @@ export function createProxyServer({
   meterRoot = process.cwd(),
   userCapUsd = null,
   userCaps = {},
+  meterDbUrl = null,
+  meterDbKey = null,
+  meterDbTable = "usage_events",
+  fetchImpl = fetch,
   env = process.env,
 } = {}) {
   const tokenEntries = buildTokenEntries(proxyToken, proxyTokens);
@@ -282,6 +306,19 @@ export function createProxyServer({
     }
   })();
 
+  // Optional DB sink — see the ROLESTER_METER_DB_* env docs above. Both a URL
+  // and a key are required to enable it; either alone falls back to
+  // JSONL-only, unchanged from today's behavior.
+  const dbMeter =
+    String(meterDbUrl || "").trim() && String(meterDbKey || "").trim()
+      ? createDbMeter({
+          url: meterDbUrl,
+          serviceKey: meterDbKey,
+          table: meterDbTable,
+          fetchImpl,
+        })
+      : null;
+
   // Since-boot totals, seeded from any prior proxy-sourced rows in the usage
   // log so a restart doesn't reset /meter to zero (see usage-log.mjs's own
   // append-only ledger — this is just a running fold over it).
@@ -309,6 +346,39 @@ export function createProxyServer({
     }
   }
 
+  // DB-sourced cap hydration. The local JSONL fold above already covers two
+  // cases: the JSONL-only deployment (dbMeter is null) and, when dbMeter is
+  // set, any events that FAILED to reach the DB and fell back to JSONL (see
+  // recordUsage below). Those are disjoint from what's durably in the DB, so
+  // summing DB sums + local-JSONL sums here double-counts nothing — as long
+  // as a fallback-written JSONL row is never later re-sent to the DB, which
+  // this codebase never does. Kept deliberately simple on that assumption
+  // rather than deduping by event id across the two stores.
+  //
+  // This hydration is async (a network call) while createProxyServer() itself
+  // stays synchronous, matching the existing factory contract tests rely on
+  // (`const { server } = createProxyServer(...)` then `server.listen(...)`).
+  // That leaves a brief window right after boot where DB-sourced spend from
+  // before this process started isn't yet reflected in the cap check — an
+  // acceptable tradeoff for a soft spend cap. main() below awaits
+  // `dbHydration` before opening the socket to close that window for the
+  // real CLI entry point; callers that don't care can ignore the field.
+  let dbHydration = Promise.resolve();
+  if (dbMeter) {
+    dbHydration = dbMeter
+      .hydrateUserCosts()
+      .then((dbCosts) => {
+        for (const [user, cost] of dbCosts) {
+          if (!user || !Number.isFinite(Number(cost))) continue;
+          const prior = userCostByUserId.get(user) || 0;
+          userCostByUserId.set(user, prior + Number(cost));
+        }
+      })
+      .catch((err) => {
+        log(`meter db hydration failed (${err.message}); caps start from local history only`);
+      });
+  }
+
   function recordUsage({ model, feature, skill, action, operation, usage, user, userLabel }) {
     const row = {
       source: "proxy",
@@ -325,7 +395,16 @@ export function createProxyServer({
       cache_read_tokens: usage.cache_read_input_tokens,
       cache_creation_tokens: usage.cache_creation_input_tokens,
     };
-    const { event } = appendUsageEvent(row, { root: meterRoot });
+
+    // Canonicalize once regardless of sink — counters/cap accounting update
+    // synchronously either way, before we know whether a DB write (async)
+    // will even succeed. When there's no DB sink this is exactly today's
+    // behavior: appendUsageEvent() both writes the JSONL row and returns the
+    // same canonical shape.
+    const event = dbMeter
+      ? canonicalizeUsageEvent(row, { env })
+      : appendUsageEvent(row, { root: meterRoot }).event;
+
     counters.requests += 1;
     counters.tokens_in += event.tokens_in;
     counters.tokens_out += event.tokens_out;
@@ -336,6 +415,26 @@ export function createProxyServer({
       const add =
         event.priced && Number.isFinite(Number(event.cost_usd)) ? Number(event.cost_usd) : 0;
       userCostByUserId.set(event.user, prior + add);
+    }
+
+    if (dbMeter) {
+      // Fire-and-forget: the proxied request/response above has already been
+      // fully handled by the time this settles — never block or fail it on a
+      // metering write. On failure, fall back to the local JSONL ledger so
+      // the event is never silently lost; only a metadata-only status string
+      // is ever logged (see meter-db.mjs's `error` contract).
+      dbMeter
+        .append(event)
+        .then((result) => {
+          if (!result.ok) {
+            log(`meter db write failed (${result.error}) — falling back to local usage log`);
+            appendUsageEvent(event, { root: meterRoot });
+          }
+        })
+        .catch((err) => {
+          log(`meter db write threw (${err.message}) — falling back to local usage log`);
+          appendUsageEvent(event, { root: meterRoot });
+        });
     }
   }
 
@@ -523,7 +622,7 @@ export function createProxyServer({
     sendJson(res, 404, { error: "not_found" });
   });
 
-  return { server, counters, meterRoot };
+  return { server, counters, meterRoot, dbHydration };
 }
 
 // Exported for tests that want to check cost math against the same table the
@@ -590,7 +689,7 @@ function parseUserCaps(raw) {
   }
 }
 
-function main() {
+async function main() {
   const proxyToken = process.env.ROLESTER_PROXY_TOKEN;
   const proxyTokens = parseProxyTokens(process.env.ROLESTER_PROXY_TOKENS);
   const upstreamKey = process.env.ROLESTER_UPSTREAM_KEY;
@@ -609,8 +708,11 @@ function main() {
   const meterRoot = process.env.ROLESTER_PROXY_METER_ROOT || process.cwd();
   const userCapUsd = parseUserCapUsd(process.env.ROLESTER_PROXY_USER_CAP_USD);
   const userCaps = parseUserCaps(process.env.ROLESTER_PROXY_USER_CAPS);
+  const meterDbUrl = process.env.ROLESTER_METER_DB_URL || null;
+  const meterDbKey = process.env.ROLESTER_METER_DB_KEY || null;
+  const meterDbTable = process.env.ROLESTER_METER_DB_TABLE || "usage_events";
 
-  const { server } = createProxyServer({
+  const { server, dbHydration } = createProxyServer({
     proxyToken,
     proxyTokens,
     upstreamKey,
@@ -619,7 +721,15 @@ function main() {
     meterRoot,
     userCapUsd,
     userCaps,
+    meterDbUrl,
+    meterDbKey,
+    meterDbTable,
   });
+
+  // Let DB-sourced cap hydration finish before we start accepting requests —
+  // see the long comment on `dbHydration` in createProxyServer(). A no-op
+  // when ROLESTER_METER_DB_URL/-KEY aren't set.
+  await dbHydration;
 
   server.listen(port, "127.0.0.1", () => {
     log(`serving http://127.0.0.1:${port} → upstream ${upstreamUrl}`);
@@ -635,5 +745,8 @@ function main() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  main();
+  main().catch((err) => {
+    log(`fatal: ${err.message}`);
+    process.exit(1);
+  });
 }
