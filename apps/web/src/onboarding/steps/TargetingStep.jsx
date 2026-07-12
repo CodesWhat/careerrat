@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../../components/Button.jsx";
 import { SuggestionChip } from "../../components/Chip.jsx";
 import { ChipInput, Field, TextField } from "../../components/form.jsx";
@@ -145,6 +145,10 @@ export function TargetingStep({
   const compatibilityCutSignals = savedTargeting.cut_signals?.length
     ? normalizeSignals(savedTargeting.cut_signals)
     : normalizeSignals(draftTargeting.cut_signals);
+  // Nothing saved yet but the resume parse already seeded lanes — this is a
+  // confirm-what-Roland-found step, not a blank targeting form.
+  const seededFromResumeUnsaved =
+    !(savedTargeting.role_buckets?.length > 0) && draftTargeting.role_buckets?.length > 0;
 
   const [roleBuckets, setRoleBuckets] = useState(
     seededBuckets.length ? seededBuckets : fallbackBuckets()
@@ -164,6 +168,8 @@ export function TargetingStep({
   const activeEditIndex =
     editingBucket !== null && roleBuckets[editingBucket] ? editingBucket : null;
   const activeEditBucket = activeEditIndex === null ? null : roleBuckets[activeEditIndex];
+  const primaryTitleCount = roleBuckets[0]?.titles?.length ?? 0;
+  const autoSuggestRequestedRef = useRef(false);
 
   function updateBucket(index, patch) {
     setRoleBuckets((buckets) =>
@@ -202,15 +208,16 @@ export function TargetingStep({
     });
   }
 
-  function addTitleToFirstBucket(title) {
-    setRoleBuckets((buckets) => {
-      const next = buckets.length ? buckets : fallbackBuckets();
-      return next.map((bucket, index) =>
-        index === 0 && !bucket.titles.some((t) => t.toLowerCase() === title.toLowerCase())
-          ? { ...bucket, titles: [...bucket.titles, title] }
-          : bucket
-      );
-    });
+  // Accepting a suggested title creates a whole new secondary lane rather
+  // than folding it into an existing one — this is a "another lane you might
+  // want" prompt, not a per-lane title add. Reuses the same addBucket/
+  // updateBucket shape the manual "Add another lane" button uses.
+  function addLaneFromSuggestion(title) {
+    const newIndex = roleBuckets.length;
+    addBucket();
+    updateBucket(newIndex, { name: title, titles: [title] });
+    setEditingBucket(null);
+    setTitleSuggestions((list) => list.filter((value) => value !== title));
   }
 
   async function handleSuggestTitles() {
@@ -233,6 +240,18 @@ export function TargetingStep({
       setSuggestingTitles(false);
     }
   }
+
+  // Auto-fire the same lookup the manual "Find more titles" wand uses, once,
+  // as soon as there's a primary lane worth suggesting against. The ref
+  // guard (not just the empty-suggestions check) is what keeps StrictMode's
+  // double-invoked effect from firing the request twice.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: fires once when eligible, guarded by the ref
+  useEffect(() => {
+    if (autoSuggestRequestedRef.current) return;
+    if (!aiEnabled || !primaryTitleCount || titleSuggestions.length) return;
+    autoSuggestRequestedRef.current = true;
+    handleSuggestTitles();
+  }, [aiEnabled, primaryTitleCount]);
 
   async function handleSaveAndNext() {
     const cleanedBuckets = normalizeBuckets(roleBuckets).filter((bucket) => bucket.titles.length);
@@ -297,7 +316,11 @@ export function TargetingStep({
             </div>
             <div className="onboarding-targeting__media-copy">
               <h1 id="onboarding-targeting-title">Choose your roles</h1>
-              <p>Keep the lanes that feel right. Add the job titles you already know you want.</p>
+              <p>
+                {seededFromResumeUnsaved
+                  ? "We pulled these from your resume. Confirm, tweak, or add another lane."
+                  : "Keep the lanes that feel right. Add the job titles you already know you want."}
+              </p>
             </div>
           </section>
 
@@ -530,25 +553,27 @@ export function TargetingStep({
                     Add another lane
                   </Button>
                 </div>
+
+                {titleSuggestions.length ? (
+                  <div className="onboarding-targeting__lane-suggestions">
+                    <p className="field__label">Other lanes you might want</p>
+                    <div className="chip-row">
+                      {titleSuggestions.map((s) => (
+                        <SuggestionChip
+                          key={s}
+                          onAccept={() => addLaneFromSuggestion(s)}
+                          onDismiss={() =>
+                            setTitleSuggestions((list) => list.filter((x) => x !== s))
+                          }
+                        >
+                          {s}
+                        </SuggestionChip>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
               </section>
             )}
-
-            {titleSuggestions.length ? (
-              <div className="chip-row">
-                {titleSuggestions.map((s) => (
-                  <SuggestionChip
-                    key={s}
-                    onAccept={() => {
-                      addTitleToFirstBucket(s);
-                      setTitleSuggestions((list) => list.filter((x) => x !== s));
-                    }}
-                    onDismiss={() => setTitleSuggestions((list) => list.filter((x) => x !== s))}
-                  >
-                    {s}
-                  </SuggestionChip>
-                ))}
-              </div>
-            ) : null}
           </div>
         </section>
       </div>

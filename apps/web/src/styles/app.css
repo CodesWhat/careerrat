@@ -3791,6 +3791,12 @@ button {
   padding-top: 20px;
 }
 
+.onboarding-targeting__lane-suggestions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
 .onboarding-targeting__add-lane {
   min-height: 42px;
   border-radius: 999px;
@@ -4370,6 +4376,19 @@ button {
   font-size: 19px;
   font-weight: 900;
   line-height: 1;
+}
+
+.onboarding-quick-facts__extra-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.onboarding-quick-facts__pill-row {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
 }
 
 .onboarding-targeting__signal-panel h2 {

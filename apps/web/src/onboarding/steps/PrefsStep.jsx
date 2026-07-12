@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Field, TextField } from "../../components/form.jsx";
+import { Field, NumberField, TextField } from "../../components/form.jsx";
 import { GitHubIcon, GlobeIcon, LinkedInIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import { saveCandidateFile } from "../../lib/api.js";
@@ -122,15 +122,35 @@ export function seedQuickFactsLinks(data = {}) {
   });
 }
 
+function compensationPatch(minimumBase) {
+  return typeof minimumBase === "number" && Number.isFinite(minimumBase) && minimumBase > 0
+    ? { compensation: { minimum_base: minimumBase } }
+    : {};
+}
+
+function authorizationPatch(authChoice) {
+  if (authChoice === "authorized") {
+    return { authorization: { work_authorized: true, requires_sponsorship: false } };
+  }
+  if (authChoice === "sponsorship") {
+    return { authorization: { work_authorized: false, requires_sponsorship: true } };
+  }
+  return {};
+}
+
 export function buildQuickFactsSavePayload({
   links = {},
   modesData = {},
   formDefaultsData = {},
+  minimumBase = null,
+  authChoice = null,
 } = {}) {
   const cleanedLinks = cleanLinkFields(links);
   return {
     profile: {
       candidate: cleanedLinks,
+      ...compensationPatch(minimumBase),
+      ...authorizationPatch(authChoice),
     },
     modes: {
       usage_mode: modesData.usage_mode ?? DEFAULT_MODES.usage_mode,
@@ -282,6 +302,17 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
     )
   );
 
+  const [minimumBase, setMinimumBase] = useState(() => {
+    const value = profileData.compensation?.minimum_base;
+    return typeof value === "number" && Number.isFinite(value) ? value : null;
+  });
+  const [authChoice, setAuthChoice] = useState(() => {
+    const authorization = profileData.authorization || {};
+    if (authorization.work_authorized === true) return "authorized";
+    if (authorization.requires_sponsorship === true) return "sponsorship";
+    return null;
+  });
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -289,7 +320,13 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
     setSaving(true);
     setError(null);
     try {
-      const payload = buildQuickFactsSavePayload({ links, modesData, formDefaultsData });
+      const payload = buildQuickFactsSavePayload({
+        links,
+        modesData,
+        formDefaultsData,
+        minimumBase,
+        authChoice,
+      });
       await saveCandidateFile("profile", payload.profile);
       await saveCandidateFile("modes", payload.modes);
       await saveCandidateFile("form-defaults", payload.formDefaults);
@@ -368,7 +405,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
             </div>
             <div className="onboarding-targeting__media-copy">
               <h1 id="quick-facts-title">Quick facts</h1>
-              <p>Confirm the public links Roland can reuse in packets and forms.</p>
+              <p>Confirm the public links and basics Roland can reuse in packets and forms.</p>
             </div>
           </section>
 
@@ -387,6 +424,56 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
                   onChange={(value) => setLinks((current) => ({ ...current, [field]: value }))}
                 />
               ))}
+
+              <div className="onboarding-quick-facts__extra-fields">
+                <Field
+                  label="Minimum base salary"
+                  htmlFor="quick-facts-minimum-base"
+                  hint="USD per year. Optional."
+                >
+                  <NumberField
+                    id="quick-facts-minimum-base"
+                    value={minimumBase}
+                    onChange={setMinimumBase}
+                    placeholder="Annual base, USD"
+                    min="0"
+                    step="1000"
+                  />
+                </Field>
+                <div className="field">
+                  <span className="field__label">Work authorization</span>
+                  <div
+                    className="onboarding-quick-facts__pill-row"
+                    role="radiogroup"
+                    aria-label="Work authorization"
+                  >
+                    <button
+                      type="button"
+                      className={`onboarding-targeting__priority-choice${authChoice === "authorized" ? " onboarding-targeting__priority-choice--active" : ""}`}
+                      aria-pressed={authChoice === "authorized"}
+                      onClick={() =>
+                        setAuthChoice((current) => (current === "authorized" ? null : "authorized"))
+                      }
+                    >
+                      Authorized to work
+                    </button>
+                    <button
+                      type="button"
+                      className={`onboarding-targeting__priority-choice${authChoice === "sponsorship" ? " onboarding-targeting__priority-choice--active" : ""}`}
+                      aria-pressed={authChoice === "sponsorship"}
+                      onClick={() =>
+                        setAuthChoice((current) =>
+                          current === "sponsorship" ? null : "sponsorship"
+                        )
+                      }
+                    >
+                      Need sponsorship
+                    </button>
+                  </div>
+                  <span className="field__hint">Optional.</span>
+                </div>
+              </div>
+
               <div className="onboarding-quick-facts__add-area">
                 {additionalLinks.map((link, index) => (
                   <AdditionalLinkRow

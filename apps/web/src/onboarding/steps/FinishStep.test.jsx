@@ -11,38 +11,13 @@ const dashboardMock = vi.hoisted(() => ({
   },
 }));
 
-const chatMock = vi.hoisted(() => ({
-  renders: [],
-}));
-
 vi.mock("../../app-shell/DashboardContext.jsx", () => ({
   useDashboardSnapshot: () => dashboardMock.snapshot,
 }));
 
-vi.mock("../ChatPanel.jsx", () => ({
-  ChatPanel: ({ skill, initialChatId }) => {
-    chatMock.renders.push({ skill, initialChatId });
-    return (
-      <div data-testid="chat-marker">
-        CHAT:{skill}:{initialChatId}
-      </div>
-    );
-  },
-}));
-
 import * as FinishStepModule from "./FinishStep.jsx";
 
-const { buildQuickStartAction, buildReadinessRows, FinishStep } = FinishStepModule;
-
-const FORBIDDEN_FIRST_SEARCH_TOKENS = [
-  "chat",
-  "skill",
-  "research-boards",
-  "discover-companies",
-  "search-jobs",
-  "/api/chat",
-  "/api/skill/run",
-];
+const { FinishStep } = FinishStepModule;
 
 const SEARCH_READY_STATE = {
   data: {
@@ -96,14 +71,13 @@ function renderFinish(state = SEARCH_READY_STATE) {
     noDatabase: false,
     refetch: async () => {},
   };
-  chatMock.renders = [];
 
   return renderToStaticMarkup(
     <MemoryRouter>
       <FinishStep
         state={state}
         aiEnabled={true}
-        runtimeCapabilities={{ discoveryChatHandoffs: false, aiAvailable: true }}
+        runtimeCapabilities={{ aiAvailable: true }}
         reload={async () => {}}
         goBack={() => {}}
       />
@@ -115,106 +89,20 @@ function countOccurrences(value, token) {
   return (value.match(new RegExp(token, "g")) || []).length;
 }
 
-function expectNoFirstSearchRuntimeTokens(markup) {
-  const lowerMarkup = markup.toLowerCase();
-  const start = lowerMarkup.indexOf("first search");
-  const end = lowerMarkup.indexOf("</section>", start);
-  const lower =
-    start === -1 ? lowerMarkup : markup.slice(start, end === -1 ? undefined : end).toLowerCase();
-  for (const token of FORBIDDEN_FIRST_SEARCH_TOKENS) {
-    expect(lower, `first-search UI leaked ${token}`).not.toContain(token.toLowerCase());
-  }
-  expect(chatMock.renders).toEqual([]);
-}
-
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
 });
 
-describe("buildReadinessRows", () => {
-  it("maps staged DB setup readiness without merging search/gate/apply gates", () => {
-    const rows = buildReadinessRows(SEARCH_READY_STATE);
-
-    expect(rows).toEqual([
-      {
-        key: "search_ready",
-        label: "Search",
-        status: "Ready",
-        detail: "Rolester can start sourcing roles now.",
-        ready: true,
-      },
-      {
-        key: "gate_ready",
-        label: "Gate",
-        status: "Needs setup",
-        detail: "Needs compensation floor.",
-        ready: false,
-      },
-      {
-        key: "apply_ready",
-        label: "Apply",
-        status: "Needs setup",
-        detail: "Needs evidence claims.",
-        ready: false,
-      },
-      {
-        key: "deep_ingest_complete",
-        label: "Deep ingest",
-        status: "Needs setup",
-        detail: "Needs deeper evidence bank.",
-        ready: false,
-      },
-    ]);
-  });
-});
-
-describe("buildQuickStartAction", () => {
-  it("prompts for first deterministic search while keeping stricter readiness caveats visible", () => {
-    const action = buildQuickStartAction(SEARCH_READY_STATE);
-
-    expect(action).toEqual({
-      enabled: true,
-      label: "Search jobs now",
-      detail:
-        "Rolester can start the first deterministic search now. Gate and apply stay locked until compensation floor and evidence claims are complete.",
-    });
-  });
-
-  it("does not offer first search until search-ready fields are complete", () => {
-    const action = buildQuickStartAction({
-      data: {
-        setup: {
-          readiness: { search_ready: false },
-          missing: {
-            search_ready: ["source resume", "role titles"],
-          },
-        },
-      },
-    });
-
-    expect(action).toEqual({
-      enabled: false,
-      label: "Complete Search setup",
-      detail: "Needs source resume and role titles.",
-    });
-  });
-});
-
 describe("FinishStep shell layout", () => {
-  it("renders in the onboarding shell with the Step 7 wide card and shell action bar", () => {
+  it("renders as a standard two-panel Step 7 card in the onboarding shell", () => {
     const html = renderFinish();
 
-    expect(html).toContain('class="onboarding-shell onboarding-shell--wide"');
+    expect(html).toContain('class="onboarding-shell onboarding-shell--targeting"');
     expect(countOccurrences(html, "onboarding-progress__case--filled")).toBe(8);
-    expect(html).toContain('class="onboarding-step-stack onboarding-step-stack--wide"');
+    expect(html).toContain('class="onboarding-step-stack onboarding-step-stack--targeting"');
     expect(html).toContain('class="onboarding-step-label">Step 7');
-    expect(html).toContain(
-      'class="onboarding-step-card onboarding-step-card--single onboarding-step-card--wide onboarding-step-card--compact"'
-    );
-    expect(html).toContain(
-      'class="onboarding-step-card__content onboarding-step-card__content--dense onboarding-step-card__content--scroll"'
-    );
+    expect(html).toContain('class="onboarding-step-card onboarding-targeting onboarding-finish"');
     expect(html).toContain('class="onboarding-shell__actions"');
     expect(html).toContain('aria-label="Back"');
     expect(html).toContain('aria-label="Finish"');
@@ -223,6 +111,131 @@ describe("FinishStep shell layout", () => {
     expect(html).not.toContain(">Back<");
     expect(html).not.toContain(">Finish<");
     expect(html).not.toContain("wizard-actions");
+  });
+
+  it("uses the shared icon-tile + serif-title media panel with completion copy", () => {
+    const html = renderFinish();
+
+    expect(html).toContain('class="onboarding-targeting__mark" aria-hidden="true">📊');
+    expect(html).toContain('<h1 id="finish-title">');
+    expect(html).toContain("all set");
+    expect(html).toContain("kicking off your first search");
+  });
+
+  it("removes the Setup readiness checklist and every diagnostic/compat affordance", () => {
+    const html = renderFinish();
+
+    expect(html).not.toContain("Setup readiness");
+    expect(html).not.toContain("Needs setup");
+    expect(html).not.toContain("lanes terminal");
+    expect(html).not.toContain("Compatibility export");
+    expect(html).not.toContain("Export compatibility files");
+    expect(html).not.toContain("write-config");
+    expect(html).not.toContain("What's next");
+    expect(html).not.toContain("Open Deep ingest");
+    expect(html).not.toContain("Go to Settings");
+    expect(html).not.toContain("Add your LinkedIn saved search");
+    expect(html).not.toContain("board-preview");
+    expect(html).not.toContain("RSS");
+  });
+});
+
+describe("FinishStep first-search status line", () => {
+  it("shows the starting line before any run exists", () => {
+    const html = renderFinish(stateWithFirstSearch({ status: "not_started" }));
+
+    expect(html).toContain("Starting your first search");
+    expect(html).not.toContain("RSS");
+  });
+
+  it("shows a running line without exposing source-plumbing detail", () => {
+    const html = renderFinish(stateWithFirstSearch({ status: "running" }));
+
+    expect(html).toContain("First search is running");
+    expect(html).toContain("fresh roles will land in Jobs");
+    expect(html).not.toContain("Searching deterministic public sources");
+    expect(html).not.toContain("RSS");
+  });
+
+  it("shows a completed line when roles were found", () => {
+    const html = renderFinish(
+      stateWithFirstSearch({
+        status: "completed",
+        summary: { sourcesAttempted: 3, rolesFound: 2 },
+      })
+    );
+
+    expect(html).toContain("First search is done — fresh roles are in Jobs.");
+    expect(html).not.toContain("RSS");
+  });
+
+  it("shows a truthful zero-result completed line", () => {
+    const html = renderFinish(
+      stateWithFirstSearch({
+        status: "completed",
+        summary: { sourcesAttempted: 3, rolesFound: 0 },
+      })
+    );
+
+    expect(html).toContain("No matches yet");
+    expect(html).not.toContain("RSS");
+  });
+
+  it("shows the fixed source-error copy and a Try again control on failure, never the raw server message", () => {
+    const html = renderFinish(
+      stateWithFirstSearch({
+        status: "failed",
+        error: { message: "No deterministic sources were fetchable." },
+      })
+    );
+
+    expect(html).toContain("Add a company board first — you can do that from Jobs later.");
+    expect(html).toContain("Try again");
+    expect(html).not.toContain("No deterministic sources were fetchable.");
+    expect(html).not.toContain("RSS");
+  });
+});
+
+describe("FinishStep deep-ingest hero", () => {
+  it("renders the CTA using existing panel grammar with a primary action and a quiet finish link", () => {
+    const html = renderFinish();
+
+    expect(html).toContain(
+      'class="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"'
+    );
+    expect(html).toContain("Go deeper while Roland searches");
+    expect(html).toContain(
+      "A guided ingest of your work history makes packets and applications much stronger."
+    );
+    expect(html).toContain(">Start deep ingest<");
+    expect(html).toContain("do it later");
+  });
+});
+
+describe("FinishStep cadence row", () => {
+  it("renders quiet cadence pills with a Most popular tag on Daily and no recommendation echo", () => {
+    const html = renderFinish();
+
+    expect(html).toContain("Search cadence");
+    expect(html).toContain("Daily");
+    expect(html).toContain("Every 3 days");
+    expect(html).toContain("Weekly");
+    expect(html).toContain("Manual only");
+    expect(html).toContain("Most popular");
+    expect(html).not.toContain("Default recommendation");
+    expect(html).not.toContain("Recommended from recent search history");
+    expect(html).not.toContain("Cadence: Daily");
+  });
+
+  it("marks the saved cadence as the selected pill", () => {
+    const html = renderFinish(
+      stateWithFirstSearch(
+        { status: "not_started" },
+        { data: { targeting: { search_preferences: { cadence: { mode: "every-3-days" } } } } }
+      )
+    );
+
+    expect(html).toMatch(/aria-pressed="true"[^>]*>Every 3 days/);
   });
 });
 
@@ -246,25 +259,7 @@ describe("first-search API wrappers", () => {
   });
 });
 
-describe("FinishStep first-search setup task", () => {
-  it("renders cadence choices, default recommendation copy, and a yes-by-default search prompt", () => {
-    const html = renderFinish(stateWithFirstSearch({ status: "not_started" }));
-
-    expect(html).toContain("Search now?");
-    expect(html).toContain("Daily");
-    expect(html).toContain("Every 3 days");
-    expect(html).toContain("Weekly");
-    expect(html).toContain("Manual only");
-    expect(html).toContain("Default recommendation - no local history yet");
-    expect(html).toContain("Search jobs now");
-    expect(html).toContain("Not now");
-    expect(html).toContain("Not started");
-    expect(html).toContain("Open Deep ingest");
-    expect(html).toContain('href="/deep-ingest"');
-    expect(html).not.toContain("Start the deeper interview");
-    expectNoFirstSearchRuntimeTokens(html);
-  });
-
+describe("first-search pure helpers", () => {
   it("does not enable first search when explicit deterministic source counts are zero", () => {
     const task = FinishStepModule.buildFirstSearchTask({
       state: stateWithFirstSearch(
@@ -291,7 +286,6 @@ describe("FinishStep first-search setup task", () => {
 
     expect(task.canStart).toBe(false);
     expect(task.canDefer).toBe(false);
-    expect(task.detail).toContain("Add an RSS source or supported public ATS company");
   });
 
   it("enables first search when supported ATS-only source setup is runnable", () => {
@@ -385,7 +379,7 @@ describe("FinishStep first-search setup task", () => {
     ]);
   });
 
-  it("saves cadence without starting a run when the user chooses Not now", async () => {
+  it("saves a cadence preference without starting a run", async () => {
     expect(FinishStepModule.saveCadencePreference).toBeTypeOf("function");
     const calls = [];
 
@@ -417,133 +411,11 @@ describe("FinishStep first-search setup task", () => {
     ]);
   });
 
-  it("starts first search before continuing deep onboarding when Search now is selected", async () => {
-    expect(FinishStepModule.continueDeepOnboardingAction).toBeTypeOf("function");
-    const calls = [];
-
-    const result = await FinishStepModule.continueDeepOnboardingAction({
-      firstSearchTask: { canStart: true },
-      searchChoice: "now",
-      startFirstSearch: async () => {
-        calls.push("start");
-      },
-      deferFirstSearch: async () => {
-        calls.push("defer");
-      },
-    });
-
-    expect(result).toBe("started");
-    expect(calls).toEqual(["start"]);
-  });
-
-  it("blocks deep onboarding handoff when the first search start fails", async () => {
-    const result = await FinishStepModule.continueDeepOnboardingAction({
-      firstSearchTask: { canStart: true },
-      searchChoice: "now",
-      startFirstSearch: async () => false,
-    });
-
-    expect(result).toBe("blocked");
-  });
-
-  it("records the explicit Not now choice before continuing deep onboarding", async () => {
-    const calls = [];
-
-    const result = await FinishStepModule.continueDeepOnboardingAction({
-      firstSearchTask: { canStart: true },
-      searchChoice: "later",
-      startFirstSearch: async () => {
-        calls.push("start");
-      },
-      deferFirstSearch: async () => {
-        calls.push("defer");
-      },
-    });
-
-    expect(result).toBe("deferred");
-    expect(calls).toEqual(["defer"]);
-  });
-
-  it("renders saved cadence as compact text after state refresh", () => {
-    const html = renderFinish(
-      stateWithFirstSearch(
-        { status: "not_started" },
-        {
-          data: {
-            targeting: {
-              search_preferences: {
-                cadence: { mode: "every-3-days" },
-              },
-            },
-          },
-        }
-      )
-    );
-
-    expect(html).toContain("Cadence: Every 3 days");
-  });
-
-  it("keeps deep onboarding available while the first search is running", () => {
-    const html = renderFinish(stateWithFirstSearch({ status: "running" }));
-
-    expect(html).toContain("Running");
-    expect(html).toContain("Searching deterministic public sources...");
-    expect(html).toContain("Continue deep onboarding");
-    expectNoFirstSearchRuntimeTokens(html);
-  });
-
-  it("shows completed run counts and sourced-role navigation", () => {
-    const html = renderFinish(
-      stateWithFirstSearch({
-        status: "completed",
-        summary: { sourcesAttempted: 3, rolesFound: 2 },
-      })
-    );
-
-    expect(html).toContain("Completed");
-    expect(html).toContain("3 sources attempted");
-    expect(html).toContain("2 roles found");
-    expect(html).toContain("View sourced roles");
-    expectNoFirstSearchRuntimeTokens(html);
-  });
-
-  it("shows truthful zero-result completed copy without a sourced-role link", () => {
-    const html = renderFinish(
-      stateWithFirstSearch({
-        status: "completed",
-        summary: { sourcesAttempted: 3, rolesFound: 0 },
-      })
-    );
-
-    expect(html).toContain("Completed");
-    expect(html).toContain("3 sources attempted");
-    expect(html).toContain("0 roles found");
-    expect(html).toContain(
-      "Search completed. No matching roles found yet; refine titles or add a source, then search again from Jobs."
-    );
-    expect(html).not.toContain("View sourced roles");
-    expectNoFirstSearchRuntimeTokens(html);
-  });
-
-  it("shows actionable failed state copy and retry starts a new first-run request", async () => {
-    const html = renderFinish(
-      stateWithFirstSearch({
-        status: "failed",
-        error: { message: "No deterministic sources were fetchable." },
-      })
-    );
-
-    expect(html).toContain("Failed");
-    expect(html).toContain(
-      "First search failed. Review the source setup message, fix the issue, then retry."
-    );
-    expect(html).toContain("No deterministic sources were fetchable.");
-    expect(html).toContain("Retry search");
-    expectNoFirstSearchRuntimeTokens(html);
-
+  it("retryFirstSearch retries via startFirstSearchRun({ retry: true })", async () => {
     expect(FinishStepModule.retryFirstSearch).toBeTypeOf("function");
     let displayedRun = null;
     let retryPayload = null;
+
     const result = await FinishStepModule.retryFirstSearch({
       startFirstSearchRun: async (payload) => {
         retryPayload = payload;
@@ -560,46 +432,5 @@ describe("FinishStep first-search setup task", () => {
     expect(retryPayload).toEqual({ retry: true });
     expect(result.run.status).toBe("running");
     expect(displayedRun).toEqual({ id: "run-retry", status: "running" });
-  });
-});
-
-describe("FinishStep Deep ingest readiness", () => {
-  it("links incomplete Deep ingest readiness to the workbench without interview or chat copy", () => {
-    const html = renderFinish({
-      ...SEARCH_READY_STATE,
-      data: {
-        ...SEARCH_READY_STATE.data,
-        setup: {
-          readiness: {
-            ...SEARCH_READY_STATE.data.setup.readiness,
-            deep_ingest_complete: false,
-          },
-          missing: {
-            ...SEARCH_READY_STATE.data.setup.missing,
-            deep_ingest_complete: ["4 of 7 lanes terminal", "Role signal needs source"],
-          },
-        },
-        deepIngest: {
-          readiness: {
-            ready: false,
-            terminalCount: 4,
-            requiredCount: 7,
-            todos: [{ lane: "role_signals", reason: "Role signal needs source" }],
-            gaps: [{ lane: "story_bank", reason: "Login-gated source deferred" }],
-          },
-        },
-      },
-    });
-
-    expect(html).toContain("Deep ingest");
-    expect(html).toContain("4 of 7 lanes terminal");
-    expect(html).toContain("Open Deep ingest");
-    expect(html).toContain('href="/deep-ingest"');
-    expect(html).not.toContain("AI interview");
-    expect(html).not.toContain("guided interview");
-    expect(html).not.toContain("deeper interview");
-    expect(html).not.toContain('href="/chat"');
-    expect(html).not.toContain("/api/chat");
-    expect(html).not.toContain("/api/skill/run");
   });
 });
