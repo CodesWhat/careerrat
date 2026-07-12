@@ -194,16 +194,53 @@ function startMockUpstream() {
 }
 
 async function startProxy(opts) {
-  const { server, counters, meterRoot } = createProxyServer(opts);
+  const { server, counters, meterRoot, dbHydration } = createProxyServer(opts);
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address();
   return {
     server,
     counters,
     meterRoot,
+    dbHydration,
     url: `http://127.0.0.1:${port}`,
     close: () => server.close(),
   };
+}
+
+function startMockMeterDb({ aggregateRows = [], postStatus = 201 } = {}) {
+  const requests = [];
+  const server = createServer((req, res) => {
+    const chunks = [];
+    req.on("data", (chunk) => chunks.push(chunk));
+    req.on("end", () => {
+      const bodyText = Buffer.concat(chunks).toString("utf8");
+      requests.push({ method: req.method, url: req.url, headers: { ...req.headers }, bodyText });
+      if (req.method === "GET") {
+        res.writeHead(200, { "content-type": "application/json" });
+        res.end(JSON.stringify(aggregateRows));
+        return;
+      }
+      res.writeHead(postStatus, { "content-type": "application/json" });
+      res.end(
+        postStatus >= 200 && postStatus < 300 ? "" : JSON.stringify({ error: "fake failure" })
+      );
+    });
+  });
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      const { port } = server.address();
+      resolve({ server, requests, url: `http://127.0.0.1:${port}`, close: () => server.close() });
+    });
+  });
+}
+
+async function waitFor(predicate, message) {
+  const deadline = Date.now() + 2000;
+  while (Date.now() < deadline) {
+    if (predicate()) return;
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  assert.fail(message);
 }
 
 // ---------------------------------------------------------------------------
@@ -710,6 +747,169 @@ test("proxy (non-stream): metered bounded calls write labels and allowed usage k
     assert.equal(events[0].operation, "company-seeds");
     assert.equal(events[0].model, "claude-sonnet-5");
     assertUsageEventIsMetadataOnly(events[0]);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Optional PostgREST meter sink
+// ---------------------------------------------------------------------------
+
+test("proxy: healthy meter DB receives metadata-only snake_case event and JSONL stays empty", async () => {
+  const upstream = await startMockUpstream();
+  const meterDb = await startMockMeterDb();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyTokens: { fakeTester: "fake-db-token" },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    meterDbUrl: meterDb.url,
+    meterDbKey: "fake-service-role-key",
+  });
+  try {
+    await proxy.dbHydration;
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: {
+        authorization: "Bearer fake-db-token",
+        "content-type": "application/json",
+        "x-rolester-feature": "company-discovery",
+        "x-rolester-skill": "discover-companies",
+        "x-rolester-action": "seed-generate",
+        "x-rolester-operation": "company-seeds",
+      },
+      body: JSON.stringify({
+        model: "claude-sonnet-5",
+        max_tokens: 16,
+        messages: [{ role: "user", content: FORBIDDEN_CONTENT.join(" ") }],
+      }),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+
+    await waitFor(
+      () => meterDb.requests.some((request) => request.method === "POST"),
+      "meter DB did not receive usage event"
+    );
+    const post = meterDb.requests.find((request) => request.method === "POST");
+    const row = JSON.parse(post.bodyText);
+    assert.equal(
+      row.user_id,
+      createHash("sha256").update("fake-db-token").digest("hex").slice(0, 12)
+    );
+    assert.equal(row.user_label, "fakeTester");
+    assert.equal(Object.hasOwn(row, "user"), false);
+    assert.equal(Object.hasOwn(row, "userLabel"), false);
+    const { user_id, user_label, ...canonicalFields } = row;
+    assertUsageEventIsMetadataOnly({ ...canonicalFields, user: user_id, userLabel: user_label });
+    assert.equal(post.headers.apikey, "fake-service-role-key");
+    assert.equal(post.headers.authorization, "Bearer fake-service-role-key");
+    assert.equal(post.headers.prefer, "return=minimal");
+    assert.equal(readUsageEvents({ root }).length, 0);
+  } finally {
+    proxy.close();
+    meterDb.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: meter DB failure preserves 200 response and writes exactly one JSONL fallback row", async () => {
+  const upstream = await startMockUpstream();
+  const meterDb = await startMockMeterDb({ postStatus: 503 });
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "fake-fallback-token",
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    meterDbUrl: meterDb.url,
+    meterDbKey: "fake-service-role-key",
+  });
+  try {
+    await proxy.dbHydration;
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: "Bearer fake-fallback-token", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+    await waitFor(() => readUsageEvents({ root }).length === 1, "JSONL fallback was not written");
+    assert.equal(readUsageEvents({ root }).length, 1);
+    assert.equal(meterDb.requests.filter((request) => request.method === "POST").length, 1);
+  } finally {
+    proxy.close();
+    meterDb.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: DB hydration restores prior user spend and rejects the first over-cap request", async () => {
+  const upstream = await startMockUpstream();
+  const token = "fake-hydrated-token";
+  const userId = createHash("sha256").update(token).digest("hex").slice(0, 12);
+  const meterDb = await startMockMeterDb({ aggregateRows: [{ user_id: userId, sum: "1.50" }] });
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyTokens: { hydratedTester: token },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: 1,
+    meterDbUrl: meterDb.url,
+    meterDbKey: "fake-service-role-key",
+  });
+  try {
+    await proxy.dbHydration;
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(res.status, 402);
+    const body = await res.json();
+    assert.equal(body.error.type, "cap_exceeded");
+    assert.equal(upstream.requests.length, 0);
+    assert.equal(meterDb.requests.filter((request) => request.method === "POST").length, 0);
+  } finally {
+    proxy.close();
+    meterDb.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: meter DB unset makes no DB fetch calls and retains JSONL behavior", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const dbFetchCalls = [];
+  const proxy = await startProxy({
+    proxyToken: "fake-jsonl-token",
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    fetchImpl: async (...args) => {
+      dbFetchCalls.push(args);
+      throw new Error("DB fetch must remain disabled");
+    },
+  });
+  try {
+    await proxy.dbHydration;
+    const res = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: "Bearer fake-jsonl-token", "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(res.status, 200);
+    await res.text();
+    assert.equal(dbFetchCalls.length, 0);
+    assert.equal(readUsageEvents({ root }).length, 1);
   } finally {
     proxy.close();
     upstream.close();
