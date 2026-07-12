@@ -64,6 +64,8 @@ const ALLOWED_USAGE_KEYS = [
   "shared_cache_hit",
   "cost_usd",
   "priced",
+  "user",
+  "userLabel",
 ];
 const FORBIDDEN_USAGE_KEYS = [
   "prompt",

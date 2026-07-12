@@ -202,6 +202,14 @@ export function canonicalizeUsageEvent(input = {}, { now = new Date(), env = pro
   const action = trimOrNull(input.action);
   const operation = trimOrNull(input.operation);
   const feature = deriveUsageFeature({ feature: input.feature, skill, action, operation });
+  // Per-tester attribution (managed-AI proxy beta, src/cli/ai-proxy.mjs):
+  // `user` is the 12-hex reportingUserId hash of the caller's proxy token
+  // (never the raw token), `userLabel` is the operator-chosen name for that
+  // token ("default" for the single-token env var). Both null on the BYOK
+  // path, which has no notion of a beta tester. Additive fields — older
+  // rows written before they existed simply lack the keys on read.
+  const user = trimOrNull(input.user);
+  const userLabel = trimOrNull(input.userLabel);
   const { cost_usd, priced } = computeCost(
     model,
     { tokens_in, tokens_out, cache_read_tokens, cache_creation_tokens },
@@ -222,6 +230,8 @@ export function canonicalizeUsageEvent(input = {}, { now = new Date(), env = pro
     // before this field existed simply lack the key on read (readUsageEvents
     // parses each line as-is, no backfill).
     upstream: trimOrNull(input.upstream),
+    user,
+    userLabel,
     tokens_in,
     tokens_out,
     cache_read_tokens,

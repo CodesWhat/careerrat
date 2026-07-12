@@ -356,6 +356,30 @@ export async function callAI({
   const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
+    // The managed-AI proxy's per-tester spend cap (src/cli/ai-proxy.mjs) returns
+    // this exact shape on 402, without ever reaching the model provider — a
+    // non-retryable "you're out of budget" signal, not a generic provider
+    // failure. Give it a distinct, human-readable error so callers (see
+    // bounded-ai.mjs) can surface the cap message instead of "AI provider
+    // request failed." The .code lets bounded-ai.mjs match reliably; the
+    // message text itself is the fallback for any caller that only reads it.
+    let parsedError = null;
+    if (res.status === 402) {
+      try {
+        parsedError = text ? JSON.parse(text) : null;
+      } catch {
+        parsedError = null;
+      }
+    }
+    if (parsedError?.error?.type === "cap_exceeded") {
+      const capErr = new Error(
+        parsedError.error.message ||
+          "This beta account has reached its usage cap. Contact the person who invited you to raise it."
+      );
+      capErr.code = "AI_CAP_EXCEEDED";
+      capErr.retryable = false;
+      throw capErr;
+    }
     throw new Error(
       `AI request failed: ${res.status} ${res.statusText}${text ? ` — ${text}` : ""}`
     );

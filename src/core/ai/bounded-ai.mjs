@@ -10,6 +10,7 @@ export const BOUNDED_AI_CODES = Object.freeze({
   NO_AI_ROUTE: "NO_AI_ROUTE",
   AI_PROVIDER_FAILED: "AI_PROVIDER_FAILED",
   AI_LABELS_INVALID: "AI_LABELS_INVALID",
+  AI_CAP_EXCEEDED: "AI_CAP_EXCEEDED",
 });
 
 export const BOUNDED_AI_MODES = Object.freeze({
@@ -139,6 +140,16 @@ function isNoAIError(err) {
   return (
     err?.code === BOUNDED_AI_CODES.NO_AI_ROUTE ||
     /no AI route configured/i.test(String(err?.message || ""))
+  );
+}
+
+// call-ai.mjs throws this (err.code === "AI_CAP_EXCEEDED") when the managed-AI
+// proxy's per-tester spend cap rejected the request with a 402 before it ever
+// reached the model provider — see the matching throw in call-ai.mjs. The
+// regex fallback covers a caller that only inspects the message text.
+function isCapExceededError(err) {
+  return (
+    err?.code === "AI_CAP_EXCEEDED" || /reached its usage cap/i.test(String(err?.message || ""))
   );
 }
 
@@ -381,6 +392,27 @@ export async function runBoundedAI({
         status: 501,
         code: BOUNDED_AI_CODES.NO_AI_ROUTE,
         error: { message: "No AI route is configured for this bounded assist." },
+        ai: aiMetadata({
+          labels: normalizedLabels,
+          used: false,
+          mode: failureMode,
+          retried: false,
+          model: fallbackModel,
+        }),
+        manual,
+      });
+    }
+
+    if (isCapExceededError(err)) {
+      return makeBoundedAIEnvelope({
+        ok: false,
+        status: 402,
+        code: BOUNDED_AI_CODES.AI_CAP_EXCEEDED,
+        error: {
+          message:
+            trimString(err?.message) ||
+            "This beta account has reached its usage cap. Contact the person who invited you to raise it.",
+        },
         ai: aiMetadata({
           labels: normalizedLabels,
           used: false,

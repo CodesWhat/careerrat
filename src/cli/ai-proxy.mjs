@@ -10,6 +10,9 @@
 //   to disk, and never console.logs one (including on error paths). The usage
 //   log (src/core/ai/usage-log.mjs) holds only counts, a model id, and the
 //   skill/action labels the caller sent — never a prompt, a JD, or a resume.
+//   The same invariant covers per-tester attribution below: the log and this
+//   process's own logging ever hold only the 12-hex reportingUserId hash and
+//   the operator-chosen label — never a raw token, in any form, anywhere.
 //
 // The upstream slot is generic on purpose (a base URL + a headers bag), not
 // hardcoded to Anthropic's first-party API, so a later drop-in — e.g. Portkey,
@@ -23,8 +26,22 @@
 //     -H "authorization: Bearer devtoken" -H "content-type: application/json" \
 //     -d '{"model":"claude-haiku-4-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
 //
+//   # multiple beta testers, one process, per-tester spend caps:
+//   ROLESTER_PROXY_TOKENS='{"alice":"tok_alice","bob":"tok_bob"}' \
+//   ROLESTER_PROXY_USER_CAP_USD=10 ROLESTER_PROXY_USER_CAPS='{"alice":25}' \
+//   ROLESTER_UPSTREAM_KEY=sk-ant-... npm run ai-proxy
+//
 // Env:
-//   ROLESTER_PROXY_TOKEN     required — the Bearer token clients present (dev-stub auth).
+//   ROLESTER_PROXY_TOKEN     the Bearer/x-api-key token a single tester presents
+//                            (dev-stub auth). Optional when ROLESTER_PROXY_TOKENS is
+//                            set — at least one of the two is required. Attributed to
+//                            userLabel "default" in the usage log.
+//   ROLESTER_PROXY_TOKENS    optional JSON object of label -> token for multiple beta
+//                            testers, e.g. {"alice":"tok_...","bob":"tok_..."}. Both
+//                            this and ROLESTER_PROXY_TOKEN may be set at once — the
+//                            valid token set is their union. A token's label is an
+//                            operator convenience recorded as userLabel in the usage
+//                            log; it is never sent upstream.
 //   ROLESTER_UPSTREAM_KEY    required — the real provider key injected into upstream calls.
 //   ROLESTER_UPSTREAM_URL    default https://api.anthropic.com — the gateway slot.
 //   ROLESTER_UPSTREAM_HEADERS  optional JSON object of extra headers to inject upstream
@@ -35,6 +52,14 @@
 //                                proxy token — never the raw token) and ai-reporting-tags
 //                                (skill:.../action:... from x-rolester-skill/-action when
 //                                present). Off by default; harmless to other upstreams.
+//   ROLESTER_PROXY_USER_CAP_USD  optional float — per-tester spend cap in USD, checked
+//                                against that tester's own cumulative metered cost_usd
+//                                before every /v1/messages call. Absent or 0 = no cap.
+//   ROLESTER_PROXY_USER_CAPS  optional JSON object of label -> cap USD, overriding
+//                              ROLESTER_PROXY_USER_CAP_USD for specific testers, e.g.
+//                              {"alice": 25}. A tester at or over their cap gets HTTP 402
+//                              {"type":"error","error":{"type":"cap_exceeded",...}}
+//                              without the request ever reaching upstream.
 //   ROLESTER_PROXY_PORT      default 7788.
 //   ROLESTER_PROXY_METER_ROOT  default process.cwd() — root the usage log is written under.
 //
@@ -116,13 +141,40 @@ function extractProvidedToken(headers) {
   return bearer || apiKey;
 }
 
-function requireAuth(req, res, proxyToken) {
-  const provided = extractProvidedToken(req.headers);
-  if (!provided || !tokensMatch(provided, proxyToken)) {
-    sendJson(res, 401, { error: "unauthorized" });
-    return false;
+// Builds the effective set of valid (label, token) pairs from the two config
+// surfaces: the single ROLESTER_PROXY_TOKEN (labeled "default" for usage-log
+// attribution) and the multi-tester ROLESTER_PROXY_TOKENS map. Both may be
+// set at once — the valid token set is their union. Labels are operator-
+// facing only and are never sent upstream.
+function buildTokenEntries(proxyToken, proxyTokens) {
+  const entries = [];
+  const single = String(proxyToken || "").trim();
+  if (single) entries.push({ label: "default", token: single });
+  for (const [label, token] of Object.entries(proxyTokens || {})) {
+    const t = String(token || "").trim();
+    if (t) entries.push({ label: String(label || "").trim() || "default", token: t });
   }
-  return true;
+  return entries;
+}
+
+// Checks the presented token against every configured (label, token) pair —
+// never breaks early on a match, so auth timing doesn't vary with how many
+// testers are configured or which one matched. On success returns the
+// matched entry's label + the raw provided token (for reportingUserId() and
+// the cap check downstream); on failure sends 401 and returns null.
+function requireAuth(req, res, tokenEntries) {
+  const provided = extractProvidedToken(req.headers);
+  let matchedLabel = null;
+  if (provided) {
+    for (const { label, token } of tokenEntries) {
+      if (tokensMatch(provided, token)) matchedLabel = label;
+    }
+  }
+  if (!matchedLabel) {
+    sendJson(res, 401, { error: "unauthorized" });
+    return null;
+  }
+  return { label: matchedLabel, token: provided };
 }
 
 function readRequestBody(req) {
@@ -193,16 +245,31 @@ function buildUpstreamHeaders(
 
 export function createProxyServer({
   proxyToken,
+  proxyTokens = {},
   upstreamKey,
   upstreamUrl = "https://api.anthropic.com",
   upstreamHeaders = {},
   meterRoot = process.cwd(),
+  userCapUsd = null,
+  userCaps = {},
   env = process.env,
 } = {}) {
-  if (!String(proxyToken || "").trim())
-    throw new Error("ai-proxy: ROLESTER_PROXY_TOKEN is required");
+  const tokenEntries = buildTokenEntries(proxyToken, proxyTokens);
+  if (tokenEntries.length === 0)
+    throw new Error("ai-proxy: ROLESTER_PROXY_TOKEN or ROLESTER_PROXY_TOKENS is required");
   if (!String(upstreamKey || "").trim())
     throw new Error("ai-proxy: ROLESTER_UPSTREAM_KEY is required");
+
+  // Per-tester spend cap: a global default (ROLESTER_PROXY_USER_CAP_USD) plus
+  // optional per-label overrides (ROLESTER_PROXY_USER_CAPS). 0/absent = no cap.
+  const globalUserCap = Number.isFinite(userCapUsd) && userCapUsd > 0 ? userCapUsd : null;
+  function capForUser(label) {
+    if (label && Object.hasOwn(userCaps, label)) {
+      const override = Number(userCaps[label]);
+      return Number.isFinite(override) && override > 0 ? override : null;
+    }
+    return globalUserCap;
+  }
 
   const base = upstreamUrl.replace(/\/+$/, "");
   // Host of the upstream base URL, for the usage log's `upstream` field (cost-
@@ -219,6 +286,14 @@ export function createProxyServer({
   // log so a restart doesn't reset /meter to zero (see usage-log.mjs's own
   // append-only ledger — this is just a running fold over it).
   const counters = { requests: 0, tokens_in: 0, tokens_out: 0, cost_usd: 0, unpriced_requests: 0 };
+  // Per-user cumulative spend (priced cost only — an unpriced request counts
+  // 0 toward the cap, never a guess), hydrated once here from the durable
+  // usage log so a process restart doesn't reset caps to zero, then kept
+  // current in recordUsage() as new proxy events are appended. This is an
+  // in-memory fold over the log, not a second source of truth: it exists
+  // only so the per-request cap check is O(1) instead of re-reading the
+  // whole file on every call.
+  const userCostByUserId = new Map();
   for (const event of readUsageEvents({ root: meterRoot })) {
     if (event.source !== "proxy") continue;
     counters.requests += 1;
@@ -226,9 +301,15 @@ export function createProxyServer({
     counters.tokens_out += event.tokens_out || 0;
     if (event.priced) counters.cost_usd += event.cost_usd || 0;
     else counters.unpriced_requests += 1;
+    if (event.user) {
+      const prior = userCostByUserId.get(event.user) || 0;
+      const add =
+        event.priced && Number.isFinite(Number(event.cost_usd)) ? Number(event.cost_usd) : 0;
+      userCostByUserId.set(event.user, prior + add);
+    }
   }
 
-  function recordUsage({ model, feature, skill, action, operation, usage }) {
+  function recordUsage({ model, feature, skill, action, operation, usage, user, userLabel }) {
     const row = {
       source: "proxy",
       feature: feature || null,
@@ -237,6 +318,8 @@ export function createProxyServer({
       operation: operation || null,
       model,
       upstream: upstreamHost,
+      user: user || null,
+      userLabel: userLabel || null,
       tokens_in: usage.input_tokens,
       tokens_out: usage.output_tokens,
       cache_read_tokens: usage.cache_read_input_tokens,
@@ -248,15 +331,45 @@ export function createProxyServer({
     counters.tokens_out += event.tokens_out;
     if (event.priced) counters.cost_usd += event.cost_usd;
     else counters.unpriced_requests += 1;
+    if (event.user) {
+      const prior = userCostByUserId.get(event.user) || 0;
+      const add =
+        event.priced && Number.isFinite(Number(event.cost_usd)) ? Number(event.cost_usd) : 0;
+      userCostByUserId.set(event.user, prior + add);
+    }
   }
 
-  async function proxyPass(req, res) {
+  async function proxyPass(req, res, auth) {
     const url = new URL(req.url, "http://internal");
     const path = url.pathname;
     const featureLabel = req.headers["x-rolester-feature"];
     const skillLabel = req.headers["x-rolester-skill"];
     const actionLabel = req.headers["x-rolester-action"];
     const operationLabel = req.headers["x-rolester-operation"];
+
+    const userId = reportingUserId(auth.token);
+    const userLabel = auth.label;
+    const shouldMeter = path === "/v1/messages" && req.method === "POST";
+
+    // Per-tester spend cap — checked BEFORE forwarding, using only the
+    // in-memory accumulator (no upstream call, no request body read). "At or
+    // over cap already" is the trip condition: this gates the next request
+    // once prior spend has reached the cap, not the request that pushes it
+    // over (the cost of the in-flight request isn't known until it returns).
+    if (shouldMeter) {
+      const cap = capForUser(userLabel);
+      if (cap !== null && (userCostByUserId.get(userId) || 0) >= cap) {
+        sendJson(res, 402, {
+          type: "error",
+          error: {
+            type: "cap_exceeded",
+            message:
+              "This beta account has reached its usage cap. Contact the person who invited you to raise it.",
+          },
+        });
+        return;
+      }
+    }
 
     let bodyBuffer = Buffer.alloc(0);
     if (req.method !== "GET" && req.method !== "HEAD") {
@@ -294,7 +407,6 @@ export function createProxyServer({
       return;
     }
 
-    const shouldMeter = path === "/v1/messages" && req.method === "POST";
     const contentType = upstreamRes.headers.get("content-type") || "";
     const isSSE = contentType.includes("text/event-stream");
 
@@ -372,6 +484,8 @@ export function createProxyServer({
         action: actionLabel,
         operation: operationLabel,
         usage,
+        user: userId,
+        userLabel,
       });
     }
   }
@@ -387,7 +501,8 @@ export function createProxyServer({
   }
 
   const server = createServer((req, res) => {
-    if (!requireAuth(req, res, proxyToken)) return;
+    const auth = requireAuth(req, res, tokenEntries);
+    if (!auth) return;
 
     const path = (req.url || "/").split("?")[0];
 
@@ -397,7 +512,7 @@ export function createProxyServer({
     }
 
     if (path.startsWith("/v1/")) {
-      proxyPass(req, res).catch((err) => {
+      proxyPass(req, res, auth).catch((err) => {
         log(`proxy pass failed: ${err.message}`);
         if (!res.headersSent) sendJson(res, 500, { error: "proxy_error" });
         else res.end();
@@ -431,12 +546,60 @@ function parseUpstreamHeaders(raw) {
   }
 }
 
+// label -> token map for multi-tester auth (ROLESTER_PROXY_TOKENS). Never
+// logs a token value on parse failure — only the env var name.
+function parseProxyTokens(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return {};
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [label, token] of Object.entries(parsed)) {
+      const t = String(token || "").trim();
+      if (t) out[label] = t;
+    }
+    return out;
+  } catch {
+    log("ROLESTER_PROXY_TOKENS is not valid JSON — ignoring");
+    return {};
+  }
+}
+
+function parseUserCapUsd(raw) {
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
+}
+
+// label -> cap USD override map (ROLESTER_PROXY_USER_CAPS).
+function parseUserCaps(raw) {
+  const trimmed = String(raw || "").trim();
+  if (!trimmed) return {};
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    const out = {};
+    for (const [label, cap] of Object.entries(parsed)) {
+      const n = Number(cap);
+      if (Number.isFinite(n) && n > 0) out[label] = n;
+    }
+    return out;
+  } catch {
+    log("ROLESTER_PROXY_USER_CAPS is not valid JSON — ignoring");
+    return {};
+  }
+}
+
 function main() {
   const proxyToken = process.env.ROLESTER_PROXY_TOKEN;
+  const proxyTokens = parseProxyTokens(process.env.ROLESTER_PROXY_TOKENS);
   const upstreamKey = process.env.ROLESTER_UPSTREAM_KEY;
 
-  if (!String(proxyToken || "").trim() || !String(upstreamKey || "").trim()) {
-    log("refusing to start: ROLESTER_PROXY_TOKEN and ROLESTER_UPSTREAM_KEY are both required");
+  const hasAnyProxyToken = String(proxyToken || "").trim() || Object.keys(proxyTokens).length > 0;
+  if (!hasAnyProxyToken || !String(upstreamKey || "").trim()) {
+    log(
+      "refusing to start: ROLESTER_PROXY_TOKEN or ROLESTER_PROXY_TOKENS, and ROLESTER_UPSTREAM_KEY, are required"
+    );
     process.exit(1);
   }
 
@@ -444,13 +607,18 @@ function main() {
   const upstreamUrl = process.env.ROLESTER_UPSTREAM_URL || "https://api.anthropic.com";
   const upstreamHeaders = parseUpstreamHeaders(process.env.ROLESTER_UPSTREAM_HEADERS);
   const meterRoot = process.env.ROLESTER_PROXY_METER_ROOT || process.cwd();
+  const userCapUsd = parseUserCapUsd(process.env.ROLESTER_PROXY_USER_CAP_USD);
+  const userCaps = parseUserCaps(process.env.ROLESTER_PROXY_USER_CAPS);
 
   const { server } = createProxyServer({
     proxyToken,
+    proxyTokens,
     upstreamKey,
     upstreamUrl,
     upstreamHeaders,
     meterRoot,
+    userCapUsd,
+    userCaps,
   });
 
   server.listen(port, "127.0.0.1", () => {
