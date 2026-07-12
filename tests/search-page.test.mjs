@@ -47,39 +47,13 @@ function teardown(dev, repoRoot) {
 // GET /search
 // ---------------------------------------------------------------------------
 
-test("GET /search returns HTML with the expected structural hooks", async () => {
-  const repoRoot = tempRepo();
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/search`);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-type") || "", /text\/html/);
-    const html = await res.text();
-    for (const hook of [
-      'data-hook="sources-summary"',
-      'data-hook="scan-btn"',
-      'data-hook="scan-status"',
-      'data-hook="results-summary"',
-      'data-hook="results-list"',
-    ]) {
-      assert.ok(html.includes(hook), `expected ${hook} in the page`);
-    }
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-test("GET /search serves the same byte-static page regardless of repo state", async () => {
-  const repoRoot = tempRepo();
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/search`);
-    const html = await res.text();
-    assert.equal(html, SEARCH_PAGE_HTML);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
+// GET /search was intentionally removed from tracker-dev.mjs by a85a9e96
+// ("retire the static-HTML dashboard and /evaluate, /answer, /packet,
+// /search, /onboard, /tracker compat pages ... Electron only loads /app") —
+// the route is gone, apps/web's SPA at /app is the canonical surface now.
+// SEARCH_PAGE_HTML itself still exists as an orphaned export (still checked
+// below for content/hook correctness), it's just no longer mounted, so the
+// two HTTP-serving tests that used to live here are dead and deleted.
 
 test("the results-list container starts with an empty-state message, not an offer-row", () => {
   assert.ok(SEARCH_PAGE_HTML.includes("No results yet"));
@@ -148,27 +122,11 @@ test("scanner review panel exposes public-intel hooks, copy, and local decision 
 // Mounting /search didn't disturb the existing routes
 // ---------------------------------------------------------------------------
 
-test("existing routes still work alongside the new /search route", async () => {
-  const repoRoot = tempRepo();
-  const dev = await bootServer(repoRoot);
-  try {
-    const health = await fetch(`${baseUrl(dev)}/api/health`);
-    assert.equal(health.status, 200);
-
-    const evaluate = await fetch(`${baseUrl(dev)}/evaluate`);
-    assert.equal(evaluate.status, 200);
-
-    const onboard = await fetch(`${baseUrl(dev)}/onboard`);
-    assert.equal(onboard.status, 200);
-
-    const sources = await fetch(`${baseUrl(dev)}/api/search/sources`);
-    // No DB is seeded in this fixture. The DB-first route should still be
-    // mounted and answering with a setup conflict, not falling through.
-    assert.equal(sources.status, 409);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
+// "existing routes still work alongside the new /search route" deleted —
+// it asserted GET /evaluate and GET /onboard both 200, both retired by
+// a85a9e96 alongside /search itself. /api/health and /api/search/sources
+// (409-no-db) coverage already lives in api-server.test.mjs and
+// search-route.test.mjs respectively.
 
 test("the 404 fallback body mentions /search and its API routes", async () => {
   const repoRoot = tempRepo();

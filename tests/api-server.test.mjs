@@ -60,91 +60,15 @@ function teardown(dev, repoRoot) {
   rmSync(repoRoot, { recursive: true, force: true });
 }
 
-// ---------------------------------------------------------------------------
-// GET /api/tracker
-// ---------------------------------------------------------------------------
-
-test("GET /api/tracker returns the parsed tracker.json as JSON", async () => {
-  const repoRoot = tempRepo();
-  writeTracker(repoRoot);
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/api/tracker`);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-type") || "", /application\/json/);
-    const body = await res.json();
-    assert.equal(body.applications[0].company, "Aperture Science");
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-test("GET /api/tracker returns a 404 JSON error when tracker.json is missing", async () => {
-  const repoRoot = tempRepo();
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/api/tracker`);
-    assert.equal(res.status, 404);
-    const body = await res.json();
-    assert.ok(body.error, "expected a JSON error body");
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-test("GET /api/tracker returns a 500 JSON error when tracker.json is corrupt", async () => {
-  const repoRoot = tempRepo();
-  const trackerPath = join(resolveUserPaths({ repoRoot }).workspaceDir, "tracker.json");
-  writeFileSync(trackerPath, "{not valid json", "utf8");
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/api/tracker`);
-    assert.equal(res.status, 500);
-    const body = await res.json();
-    assert.ok(body.error, "expected a JSON error body");
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-// ---------------------------------------------------------------------------
-// GET /api/activity
-// ---------------------------------------------------------------------------
-
-test("GET /api/activity returns [] before any activity has been written", async () => {
-  const repoRoot = tempRepo();
-  writeTracker(repoRoot);
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/api/activity`);
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.deepEqual(body, []);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-test("GET /api/activity reflects an event written via the adapter", async () => {
-  const repoRoot = tempRepo();
-  writeTracker(repoRoot);
-  const dev = await bootServer(repoRoot);
-  try {
-    const appendRes = defaultAdapter(repoRoot).appendActivity({
-      type: "system",
-      title: "api-server test event",
-    });
-    assert.equal(appendRes.ok, true);
-
-    const apiRes = await fetch(`${baseUrl(dev)}/api/activity`);
-    assert.equal(apiRes.status, 200);
-    const body = await apiRes.json();
-    assert.equal(body.length, 1);
-    assert.equal(body[0].title, "api-server test event");
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
+// GET /api/tracker and GET /api/activity (the raw StorageAdapter tracker/
+// activity feeds) were intentionally removed from tracker-dev.mjs by a85a9e96
+// ("retire the static-HTML dashboard ... Electron only loads /app" — see the
+// `"/api/tracker" ... "raw tracker adapter feed"` / `"/api/activity" ...
+// "raw activity adapter feed"` lines it deleted from the legacy-routes table).
+// Both were superseded by the DB-backed GET /api/data/dashboard
+// (src/cli/dashboard-route.mjs), whose tracker/activity slices are already
+// covered by tests/dashboard-route.test.mjs. The five dead tests that lived
+// here are deleted.
 
 // ---------------------------------------------------------------------------
 // GET /api/health

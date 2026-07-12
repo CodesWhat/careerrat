@@ -56,50 +56,13 @@ function teardown(dev, repoRoot) {
 // GET /answer
 // ---------------------------------------------------------------------------
 
-test("GET /answer returns HTML with the expected structural hooks", async () => {
-  const repoRoot = tempRepoWithSkills(["answer-question"]);
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/answer`);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-type") || "", /text\/html/);
-    const html = await res.text();
-    for (const hook of [
-      'data-hook="question-input"',
-      'data-hook="context-input"',
-      'data-hook="run-btn"',
-      'data-hook="run-status"',
-      'data-hook="feed-section"',
-      'data-hook="event-feed"',
-      'data-hook="error-box"',
-      'data-hook="answer-card"',
-      'data-hook="answer-text"',
-      'data-hook="source-line"',
-      'data-hook="durable-line"',
-      'data-hook="persisted-line"',
-      'data-hook="excluded-line"',
-      'data-hook="meta-duration"',
-      'data-hook="meta-usage"',
-      'data-hook="meta-cost"',
-    ]) {
-      assert.ok(html.includes(hook), `expected ${hook} in the page`);
-    }
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-test("GET /answer serves the same byte-static page regardless of repo state", async () => {
-  const repoRoot = tempRepoWithSkills([]);
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/answer`);
-    const html = await res.text();
-    assert.equal(html, ANSWER_PAGE_HTML);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
+// GET /answer was intentionally removed from tracker-dev.mjs by a85a9e96
+// ("retire the static-HTML dashboard and /evaluate, /answer, /packet,
+// /search, /onboard, /tracker compat pages ... Electron only loads /app") —
+// apps/web's SPA at /app is the canonical answer surface now.
+// ANSWER_PAGE_HTML itself still exists as an orphaned export (content still
+// checked below), it's just no longer mounted, so the two HTTP-serving tests
+// that used to live here are dead and deleted.
 
 // ---------------------------------------------------------------------------
 // GET /api/runtime/config — answer-question reflected the same way evaluate-job is
@@ -163,18 +126,6 @@ test("answer page drafts through the local packet answers API by default", () =>
 // Mounting /answer didn't disturb the existing routes
 // ---------------------------------------------------------------------------
 
-test("existing routes still work alongside the new /answer route", async () => {
-  const repoRoot = tempRepoWithSkills(["answer-question"]);
-  const dev = await bootServer(repoRoot);
-  try {
-    const health = await fetch(`${baseUrl(dev)}/api/health`);
-    assert.equal(health.status, 200);
-    const body = await health.json();
-    assert.equal(body.ok, true);
-
-    const evaluate = await fetch(`${baseUrl(dev)}/evaluate`);
-    assert.equal(evaluate.status, 200);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
+// "existing routes still work alongside the new /answer route" deleted — it
+// asserted GET /evaluate 200, retired by a85a9e96 alongside /answer itself.
+// /api/health coverage already lives in api-server.test.mjs.

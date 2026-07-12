@@ -190,7 +190,12 @@ test("GET /app serves a 503 placeholder (never a raw 404) when apps/web/dist doe
   }
 });
 
-test("legacy routes are unaffected: GET /api/health and GET /onboard still 200 alongside /app", async () => {
+test("legacy routes are unaffected: GET /api/health still 200 alongside /app", async () => {
+  // Was "... and GET /onboard still 200 ..." — GET /onboard was itself
+  // intentionally removed by a85a9e96 ("retire the static-HTML dashboard and
+  // /evaluate, /answer, /packet, /search, /onboard, /tracker compat pages ...
+  // Electron only loads /app"), so its 200 check is dead alongside it. What's
+  // left worth guarding is that mounting /app didn't disturb /api/health.
   const repoRoot = tempRepo();
   writeFakeDist(repoRoot);
   const dev = await bootServer(repoRoot);
@@ -198,10 +203,6 @@ test("legacy routes are unaffected: GET /api/health and GET /onboard still 200 a
     const health = await fetch(`${baseUrl(dev)}/api/health`);
     assert.equal(health.status, 200);
     assert.equal((await health.json()).ok, true);
-
-    const onboard = await fetch(`${baseUrl(dev)}/onboard`);
-    assert.equal(onboard.status, 200);
-    assert.match(await onboard.text(), /<html/i);
   } finally {
     teardown(dev, repoRoot);
   }

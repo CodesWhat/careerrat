@@ -150,6 +150,12 @@ test("chat-page.mjs's inline <script> contains no backtick or template-literal c
 // ---------------------------------------------------------------------------
 
 test("existing routes still work alongside the new /chat route", async () => {
+  // Used to also assert GET /onboard and GET /evaluate 200 — both retired by
+  // a85a9e96 ("retire the static-HTML dashboard and /evaluate, /answer,
+  // /packet, /search, /onboard, /tracker compat pages ... Electron only
+  // loads /app"), well after /chat itself was intentionally kept ("Explicit
+  // user-selected chat page: /chat." in the 404 fallback). /api/health is
+  // the still-live route worth guarding here.
   const repoRoot = tempRepoWithSkills(["ingest-profile"]);
   const dev = await bootServer(repoRoot);
   try {
@@ -157,12 +163,6 @@ test("existing routes still work alongside the new /chat route", async () => {
     assert.equal(health.status, 200);
     const body = await health.json();
     assert.equal(body.ok, true);
-
-    const onboard = await fetch(`${baseUrl(dev)}/onboard`);
-    assert.equal(onboard.status, 200);
-
-    const evaluate = await fetch(`${baseUrl(dev)}/evaluate`);
-    assert.equal(evaluate.status, 200);
   } finally {
     teardown(dev, repoRoot);
   }

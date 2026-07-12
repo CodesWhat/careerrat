@@ -1,4 +1,4 @@
-const STATIC_PREVIEW = import.meta.env.VITE_STATIC_PREVIEW === "true";
+const STATIC_PREVIEW = import.meta.env?.VITE_STATIC_PREVIEW === "true";
 
 const PREVIEW_COMPANIES = [
   { name: "Buy n Large", domain: "buynlarge.com" },

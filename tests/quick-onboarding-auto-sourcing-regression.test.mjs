@@ -92,15 +92,27 @@ test("first-search backend routes stay deterministic and local", () => {
 });
 
 test("Jobs page manual search uses the deterministic sourcing endpoint", () => {
+  // a85a9e96 rebuilt JobsPage.jsx (structured priority card + SPA de-version)
+  // and extracted the manual-search action into apps/web/src/jobs/jobsSearch.js
+  // (hasDbSourceSetup/runJobsPageSearch) — startSearchRun/purpose now live
+  // there instead of inline on the page, and the setup-needed copy changed
+  // from "Finish Search setup before running a job search." to "Finish
+  // Search Setup" / "Add company boards first.".
   const jobsPage = stripJavaScriptComments(source("apps/web/src/jobs/JobsPage.jsx"));
   assert.match(jobsPage, /\bgetSearchSources\b/);
-  assert.match(jobsPage, /\bstartSearchRun\b/);
-  assert.match(jobsPage, /purpose: "manual-search"/);
+  assert.match(jobsPage, /\brunJobsPageSearch\b/);
+  assert.match(jobsPage, /\bhasDbSourceSetup\b/);
   assert.match(jobsPage, /Search jobs/);
-  assert.match(jobsPage, /Searching\.\.\./);
-  assert.match(jobsPage, /Finish Search setup before running a job search\./);
+  assert.match(jobsPage, /Searching…/);
+  assert.match(jobsPage, /Add company boards first\./);
   assert.doesNotMatch(jobsPage, /\bstartFirstSearchRun\b/);
   assertNoForbiddenRuntime(jobsPage, "Jobs page manual search");
+
+  const jobsSearch = stripJavaScriptComments(source("apps/web/src/jobs/jobsSearch.js"));
+  assert.match(jobsSearch, /\bstartSearchRun\b/);
+  assert.match(jobsSearch, /purpose: "manual-search"/);
+  assert.doesNotMatch(jobsSearch, /\bstartFirstSearchRun\b/);
+  assertNoForbiddenRuntime(jobsSearch, "jobsSearch manual search helper");
 
   const apiSource = stripJavaScriptComments(source("apps/web/src/lib/api.js"));
   const startSearchRun = functionBlock(apiSource, "export function startSearchRun");

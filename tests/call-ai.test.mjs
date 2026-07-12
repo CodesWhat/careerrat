@@ -273,7 +273,10 @@ test("callAI (BYOK, native output): sends Anthropic json_schema output_config", 
     const [req] = upstream.requests;
     assert.equal(req.headers["x-api-key"], "sk-ant-test");
     assert.equal(req.body.output_config.format.type, "json_schema");
-    assert.equal(req.body.output_config.format.name, "classification");
+    // format.name is never sent natively — the Anthropic API 400s on it
+    // ("Extra inputs are not permitted"); outputName only matters to the
+    // tool-based fallback mode. See src/core/ai/call-ai.mjs buildRequest().
+    assert.equal(Object.hasOwn(req.body.output_config.format, "name"), false);
     assert.deepEqual(req.body.output_config.format.schema, OUTPUT_SCHEMA);
   } finally {
     upstream.close();
@@ -515,7 +518,8 @@ test("callAI (proxy path, native output): forwards json_schema body plus auth an
     assert.equal(req.headers["x-rolester-action"], "seed-generate");
     assert.equal(req.headers["x-rolester-operation"], "company-seeds");
     assert.equal(req.body.output_config.format.type, "json_schema");
-    assert.equal(req.body.output_config.format.name, "classification");
+    // format.name is never sent natively — see the BYOK native-output test above.
+    assert.equal(Object.hasOwn(req.body.output_config.format, "name"), false);
     assert.deepEqual(req.body.output_config.format.schema, OUTPUT_SCHEMA);
 
     const events = readUsageEvents({ root });

@@ -31,9 +31,9 @@ describe("app shell styles", () => {
     const navList = cssRule(".nav-list");
 
     assert.match(shell, /display:\s*grid/);
-    assert.match(shell, /grid-template-rows:\s*72px minmax\(0,\s*1fr\)/);
+    assert.match(shell, /grid-template-rows:\s*auto minmax\(0,\s*1fr\)/);
     assert.match(header, /display:\s*grid/);
-    assert.match(header, /grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/);
+    assert.match(header, /grid-template-columns:\s*auto 1fr auto/);
     assert.match(primary, /justify-content:\s*center/);
     assert.doesNotMatch(brandLockup, /border-right/);
     assert.match(brand, /font-family:\s*"Fraunces"/);
@@ -59,11 +59,11 @@ describe("app shell styles", () => {
     assert.match(onboardingRight, /-webkit-app-region:\s*drag/);
     assert.match(
       css,
-      /\.app-shell__header :is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\],\s*\.cl-userButtonTrigger\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
+      /\.app-shell__header\s+:is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\],\s*\.cl-userButtonTrigger\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
     );
     assert.match(
       css,
-      /\.onboarding-shell__header :is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\],\s*\.cl-userButtonTrigger\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
+      /\.onboarding-shell__header\s+:is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\],\s*\.cl-userButtonTrigger\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
     );
   });
 
@@ -139,21 +139,21 @@ describe("app shell styles", () => {
       ".app-shell__avatar,\n.app-shell__avatar :is(.cl-rootBox, .cl-userButtonBox, .cl-userButtonTrigger)"
     );
 
-    assert.match(utility, /width:\s*48px/);
-    assert.match(utility, /height:\s*48px/);
+    assert.match(utility, /width:\s*38px/);
+    assert.match(utility, /height:\s*38px/);
     assert.match(utility, /border-radius:\s*999px/);
-    assert.match(scopedUtility, /flex:\s*0 0 48px/);
-    assert.match(scopedUtility, /min-width:\s*48px/);
-    assert.match(scopedUtility, /max-width:\s*48px/);
-    assert.match(scopedUtility, /min-height:\s*48px/);
-    assert.match(scopedUtility, /max-height:\s*48px/);
+    assert.match(scopedUtility, /flex:\s*0 0 38px/);
+    assert.match(scopedUtility, /min-width:\s*38px/);
+    assert.match(scopedUtility, /max-width:\s*38px/);
+    assert.match(scopedUtility, /min-height:\s*38px/);
+    assert.match(scopedUtility, /max-height:\s*38px/);
     assert.match(scopedUtility, /aspect-ratio:\s*1 \/ 1/);
     assert.match(scopedUtility, /padding:\s*0/);
     assert.match(scopedUtility, /border-radius:\s*999px/);
-    assert.match(avatar, /width:\s*48px/);
-    assert.match(avatar, /height:\s*48px/);
-    assert.match(clerkRoot, /max-width:\s*48px/);
-    assert.match(clerkRoot, /max-height:\s*48px/);
+    assert.match(avatar, /width:\s*38px/);
+    assert.match(avatar, /height:\s*38px/);
+    assert.match(clerkRoot, /max-width:\s*38px/);
+    assert.match(clerkRoot, /max-height:\s*38px/);
   });
 
   it("keeps Roland launcher art contained inside the circular headshot", () => {

@@ -50,100 +50,13 @@ function teardown(dev, repoRoot) {
 // GET /onboard
 // ---------------------------------------------------------------------------
 
-test("GET /onboard returns HTML with the expected structural hooks", async () => {
-  const repoRoot = tempRepo();
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/onboard`);
-    assert.equal(res.status, 200);
-    assert.match(res.headers.get("content-type") || "", /text\/html/);
-    const html = await res.text();
-    for (const hook of [
-      // Nav / progress / state
-      'data-hook="progress-text"',
-      'data-hook="state-summary"',
-      'data-hook="back-btn"',
-      'data-hook="next-btn"',
-      // Step 1
-      'data-hook="step-1"',
-      'data-hook="init-btn"',
-      'data-hook="init-result"',
-      // Step 2
-      'data-hook="step-2"',
-      'data-hook="resume-textarea"',
-      'data-hook="resume-file"',
-      'data-hook="resume-submit"',
-      'data-hook="resume-use"',
-      'data-hook="resume-errors"',
-      'data-hook="resume-result"',
-      // Step 3
-      'data-hook="step-3"',
-      'data-hook="profile-full-name"',
-      'data-hook="profile-email"',
-      'data-hook="profile-phone"',
-      'data-hook="profile-location"',
-      'data-hook="profile-linkedin"',
-      'data-hook="profile-github"',
-      'data-hook="profile-portfolio"',
-      'data-hook="profile-domain"',
-      'data-hook="profile-submit"',
-      'data-hook="profile-errors"',
-      // Step 4
-      'data-hook="step-4"',
-      'data-hook="targeting-titles"',
-      'data-hook="targeting-keep"',
-      'data-hook="targeting-cut"',
-      'data-hook="targeting-submit"',
-      'data-hook="targeting-errors"',
-      // Step 5
-      'data-hook="step-5"',
-      'data-hook="form-work-auth"',
-      'data-hook="form-sponsorship"',
-      'data-hook="form-eeo"',
-      'data-hook="form-linkedin"',
-      'data-hook="form-github"',
-      'data-hook="form-portfolio"',
-      'data-hook="form-defaults-submit"',
-      'data-hook="form-defaults-errors"',
-      // Step 6
-      'data-hook="step-6"',
-      'data-hook="evidence-list"',
-      'data-hook="evidence-submit"',
-      'data-hook="evidence-errors"',
-      'data-hook="evidence-status"',
-      // Step 7
-      'data-hook="step-7"',
-      'data-hook="ai-key-input"',
-      'data-hook="ai-key-submit"',
-      'data-hook="ai-key-status"',
-      // Step 8
-      'data-hook="step-8"',
-      'data-hook="finish-btn"',
-      'data-hook="finish-result"',
-      'data-hook="finish-links"',
-      'data-hook="link-search"',
-      'data-hook="link-evaluate"',
-      'data-hook="link-answer"',
-      'data-hook="link-tracker"',
-    ]) {
-      assert.ok(html.includes(hook), `expected ${hook} in the page`);
-    }
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
-
-test("GET /onboard serves the same byte-static page regardless of repo state", async () => {
-  const repoRoot = tempRepo();
-  const dev = await bootServer(repoRoot);
-  try {
-    const res = await fetch(`${baseUrl(dev)}/onboard`);
-    const html = await res.text();
-    assert.equal(html, ONBOARD_PAGE_HTML);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
+// GET /onboard was intentionally removed from tracker-dev.mjs by a85a9e96
+// ("retire the static-HTML dashboard and /evaluate, /answer, /packet,
+// /search, /onboard, /tracker compat pages ... Electron only loads /app") —
+// apps/web's SPA at /app is the canonical onboarding surface now.
+// ONBOARD_PAGE_HTML itself still exists as an orphaned export (content still
+// checked below), it's just no longer mounted, so the two HTTP-serving tests
+// that used to live here are dead and deleted.
 
 test("GET /onboard's steps 2-8 start hidden; step 1 does not", async () => {
   const html = ONBOARD_PAGE_HTML;
@@ -192,27 +105,11 @@ test("onboard-page.mjs's inline <script> never uses a template literal or backti
 // Mounting /onboard didn't disturb the existing routes
 // ---------------------------------------------------------------------------
 
-test("existing routes still work alongside the new /onboard route", async () => {
-  const repoRoot = tempRepo();
-  const dev = await bootServer(repoRoot);
-  try {
-    const health = await fetch(`${baseUrl(dev)}/api/health`);
-    assert.equal(health.status, 200);
-    const body = await health.json();
-    assert.equal(body.ok, true);
-
-    const evaluate = await fetch(`${baseUrl(dev)}/evaluate`);
-    assert.equal(evaluate.status, 200);
-
-    const answer = await fetch(`${baseUrl(dev)}/answer`);
-    assert.equal(answer.status, 200);
-
-    const onboardState = await fetch(`${baseUrl(dev)}/api/onboard/state`);
-    assert.equal(onboardState.status, 200);
-  } finally {
-    teardown(dev, repoRoot);
-  }
-});
+// "existing routes still work alongside the new /onboard route" deleted —
+// it asserted GET /evaluate and GET /answer both 200, both retired by
+// a85a9e96 alongside /onboard itself. /api/health and /api/onboard/state
+// coverage already lives in api-server.test.mjs and onboard-route.test.mjs
+// respectively.
 
 test("the 404 fallback body mentions /onboard and the onboarding API routes", async () => {
   const repoRoot = tempRepo();

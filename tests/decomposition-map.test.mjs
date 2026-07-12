@@ -483,14 +483,21 @@ test("VER-05 docs and app wrappers keep discovery routing split aligned", () => 
   const localProposalStep = requiredSlice(
     companiesStepText,
     "export async function runCompanyProposalCreate",
-    "// Step 6",
+    // The onboarding wizard's step numbering shifted — Companies is now
+    // Step 4 (was Step 6) — so the end-of-helpers marker moved with it.
+    "// Step 4",
     "CompaniesStep local proposal helpers"
   );
   assert.doesNotMatch(localProposalStep, /ChatPanel|startChat|\/api\/chat|\/api\/skill\/run/);
-  assert.match(
-    companiesStepText,
-    /Agent-led discovery[\s\S]+<ChatPanel skill="discover-companies"/
-  );
+  // ca6371e8 removed CompaniesStep's "Agent-led discovery" ChatPanel
+  // escalation entirely — company discovery is local-proposal-only now.
+  // CompaniesStep.test.jsx's own "does not render proposal admin controls,
+  // chat handoffs, or logo.dev setup UI" test (added in the same commit)
+  // asserts the same absence via `not.toContain("CHAT:discover-companies")`.
+  // ChatPanel itself still exists and is used by the Inbox intake-triage
+  // surface (apps/web/src/inbox/IntakeCard.jsx), just not here.
+  assert.doesNotMatch(companiesStepText, /ChatPanel skill="discover-companies"/);
+  assert.doesNotMatch(companiesStepText, /Agent-led discovery/);
 });
 
 test("all Phase 1 artifacts keep the non-runtime boundary and D-01 through D-14 coverage", () => {

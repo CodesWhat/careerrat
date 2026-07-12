@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
+import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
 import {
   buildChildEnv,
   discoverSkillDirs,
@@ -228,7 +229,7 @@ test("buildChildEnv: an explicit ANTHROPIC_MODEL in baseEnv wins over config/ai.
   }
 });
 
-test("buildChildEnv: a missing config/ai.json applies no override — no ANTHROPIC_MODEL key added", () => {
+test("buildChildEnv: a missing config/ai.json falls back to the shipped default model", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-noaiconfig-"));
   try {
     const childEnv = buildChildEnv({
@@ -237,14 +238,14 @@ test("buildChildEnv: a missing config/ai.json applies no override — no ANTHROP
       baseEnv: {},
       repoRoot,
     });
-    assert.equal(childEnv.ANTHROPIC_MODEL, undefined);
-    assert.equal(childEnv.ANTHROPIC_SMALL_FAST_MODEL, undefined);
+    assert.equal(childEnv.ANTHROPIC_MODEL, DEFAULT_MODEL);
+    assert.equal(childEnv.ANTHROPIC_SMALL_FAST_MODEL, DEFAULT_SMALL_FAST_MODEL);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
 
-test("buildChildEnv: a malformed config/ai.json applies no override, never throws", () => {
+test("buildChildEnv: a malformed config/ai.json never throws, falls back to the shipped default model", () => {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-badaiconfig-"));
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   writeFileSync(join(repoRoot, "config", "ai.json"), "{not valid json", "utf8");
@@ -255,7 +256,7 @@ test("buildChildEnv: a malformed config/ai.json applies no override, never throw
       baseEnv: {},
       repoRoot,
     });
-    assert.equal(childEnv.ANTHROPIC_MODEL, undefined);
+    assert.equal(childEnv.ANTHROPIC_MODEL, DEFAULT_MODEL);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

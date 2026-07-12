@@ -11,6 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import {
+  DEFAULT_MODEL,
+  DEFAULT_SMALL_FAST_MODEL,
   loadAiConfigFile,
   normalizeAiConfig,
   resolveModelConfig,
@@ -131,12 +133,12 @@ test("loadAiConfigFile: a schema-invalid shape (unexpected property) is silently
 // resolveModelConfig — the one precedence rule: env > config file > unset
 // ---------------------------------------------------------------------------
 
-test("resolveModelConfig: no env, no config file -> both null", () => {
+test("resolveModelConfig: no env, no config file -> falls back to the shipped defaults", () => {
   const repoRoot = tempRepo();
   try {
     assert.deepEqual(resolveModelConfig({ root: repoRoot, env: {} }), {
-      model: null,
-      smallFastModel: null,
+      model: DEFAULT_MODEL,
+      smallFastModel: DEFAULT_SMALL_FAST_MODEL,
     });
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
@@ -177,13 +179,13 @@ test("resolveModelConfig: an explicit env var wins over config/ai.json", () => {
   }
 });
 
-test("resolveModelConfig: a malformed config/ai.json never breaks resolution — falls back to nulls", () => {
+test("resolveModelConfig: a malformed config/ai.json never breaks resolution — falls back to the shipped default", () => {
   const repoRoot = tempRepo();
   try {
     writeAiConfig(repoRoot, "{not valid json");
     assert.deepEqual(
       resolveModelConfig({ root: repoRoot, env: { ANTHROPIC_MODEL: "claude-sonnet-5" } }),
-      { model: "claude-sonnet-5", smallFastModel: null }
+      { model: "claude-sonnet-5", smallFastModel: DEFAULT_SMALL_FAST_MODEL }
     );
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });

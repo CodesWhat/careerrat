@@ -73,7 +73,11 @@ test("the exported tracker.json passes the same checks scripts/verify-tracker.mj
 
   const data = loadTrackerData(result.trackerPath);
   assert.equal(data.apps.length, 29);
-  assert.equal(data.sourced.length, 2);
+  // examples/demo-workspace/tracker.json#sourced grew from 2 to 9 in 2a9bf4c
+  // (stage-tiered demo enrichment) — this test never checks a hardcoded
+  // shape beyond the round-trip + 0-schema-errors bar, so the count just
+  // needs to track the fixture's current contents.
+  assert.equal(data.sourced.length, 9);
 
   const { errors } = validateTrackerData(data);
   assert.deepEqual(errors, [], `verify-tracker must report 0 errors, got: ${errors.join("; ")}`);

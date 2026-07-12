@@ -215,9 +215,12 @@ test("examples/demo-workspace imports cleanly and twice produces an identical DB
 
   const first = importFromTracker({ repoRoot, sourceDir: demoDir });
   assert.equal(first.counts.applications, 29);
-  assert.equal(first.counts.sourced, 2);
+  // examples/demo-workspace/tracker.json was enriched in 2a9bf4c (stage-tiered
+  // demo artifact packages): sourced grew from 2 -> 9 and communications from
+  // 10 -> 29. sources (1) was untouched.
+  assert.equal(first.counts.sourced, 9);
   assert.equal(first.counts.sources, 1);
-  assert.equal(first.counts.communications, 10);
+  assert.equal(first.counts.communications, 29);
 
   const db = openDb({ repoRoot });
   const firstDump = dumpDb(db);

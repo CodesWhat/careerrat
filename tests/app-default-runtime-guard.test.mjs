@@ -6,6 +6,11 @@ import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 
+// Synced against source deletions/renames from 728a5f85 (calendar V2/V3
+// consolidation: CalendarEventChip/MonthView/WeekView deleted) and a85a9e96
+// (JobFunnel/JobRow deleted — replaced by FunnelSankey.jsx + inline rows on
+// JobsPage.jsx; HomePage.jsx deleted — DashboardV2Page de-versioned to
+// DashboardPage.jsx as its replacement).
 const APP_DEFAULT_FILES = [
   "apps/web/src/App.jsx",
   "apps/web/src/main.jsx",
@@ -15,10 +20,7 @@ const APP_DEFAULT_FILES = [
   "apps/web/src/app-shell/DashboardContext.jsx",
   "apps/web/src/app-shell/NavList.jsx",
   "apps/web/src/app-shell/useNeedsYouCount.js",
-  "apps/web/src/calendar/CalendarEventChip.jsx",
   "apps/web/src/calendar/CalendarPage.jsx",
-  "apps/web/src/calendar/MonthView.jsx",
-  "apps/web/src/calendar/WeekView.jsx",
   "apps/web/src/components/Button.jsx",
   "apps/web/src/components/Card.jsx",
   "apps/web/src/components/Chip.jsx",
@@ -32,9 +34,8 @@ const APP_DEFAULT_FILES = [
   "apps/web/src/inbox/intake-labels.js",
   "apps/web/src/jobs/FunnelSankey.jsx",
   "apps/web/src/jobs/JobDrawer.jsx",
-  "apps/web/src/jobs/JobFunnel.jsx",
-  "apps/web/src/jobs/JobRow.jsx",
   "apps/web/src/jobs/JobsPage.jsx",
+  "apps/web/src/jobs/jobsSearch.js",
   "apps/web/src/library/LibraryPage.jsx",
   "apps/web/src/network/NetworkPage.jsx",
   "apps/web/src/onboarding/OnboardingPage.jsx",
@@ -48,7 +49,7 @@ const APP_DEFAULT_FILES = [
   "apps/web/src/onboarding/steps/TargetingStep.jsx",
   "apps/web/src/onboarding/steps/WelcomeStep.jsx",
   "apps/web/src/pages/ComingSoonPage.jsx",
-  "apps/web/src/pages/HomePage.jsx",
+  "apps/web/src/pages/DashboardPage.jsx",
   "apps/web/src/pages/SetupReadinessCard.jsx",
   "apps/web/src/settings/SettingsPage.jsx",
   "src/cli/assist-route.mjs",
@@ -328,10 +329,7 @@ test("SEC-01 app-default guard scans the named product/default file set", () => 
     "apps/web/src/app-shell/DashboardContext.jsx",
     "apps/web/src/app-shell/NavList.jsx",
     "apps/web/src/app-shell/useNeedsYouCount.js",
-    "apps/web/src/calendar/CalendarEventChip.jsx",
     "apps/web/src/calendar/CalendarPage.jsx",
-    "apps/web/src/calendar/MonthView.jsx",
-    "apps/web/src/calendar/WeekView.jsx",
     "apps/web/src/components/Button.jsx",
     "apps/web/src/components/Card.jsx",
     "apps/web/src/components/Chip.jsx",
@@ -345,9 +343,8 @@ test("SEC-01 app-default guard scans the named product/default file set", () => 
     "apps/web/src/inbox/intake-labels.js",
     "apps/web/src/jobs/FunnelSankey.jsx",
     "apps/web/src/jobs/JobDrawer.jsx",
-    "apps/web/src/jobs/JobFunnel.jsx",
-    "apps/web/src/jobs/JobRow.jsx",
     "apps/web/src/jobs/JobsPage.jsx",
+    "apps/web/src/jobs/jobsSearch.js",
     "apps/web/src/library/LibraryPage.jsx",
     "apps/web/src/network/NetworkPage.jsx",
     "apps/web/src/onboarding/OnboardingPage.jsx",
@@ -361,7 +358,7 @@ test("SEC-01 app-default guard scans the named product/default file set", () => 
     "apps/web/src/onboarding/steps/TargetingStep.jsx",
     "apps/web/src/onboarding/steps/WelcomeStep.jsx",
     "apps/web/src/pages/ComingSoonPage.jsx",
-    "apps/web/src/pages/HomePage.jsx",
+    "apps/web/src/pages/DashboardPage.jsx",
     "apps/web/src/pages/SetupReadinessCard.jsx",
     "apps/web/src/settings/SettingsPage.jsx",
     "src/cli/assist-route.mjs",

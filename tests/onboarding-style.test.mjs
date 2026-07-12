@@ -19,6 +19,19 @@ function cssRuleIn(css, selector) {
   return match[1];
 }
 
+// cssRule() finds the first substring match, so a bare class selector that
+// is also a suffix of an earlier, more-specific compound selector (e.g.
+// ".onboarding-targeting__summary-signals .onboarding-targeting__signal-pill-remove")
+// can shadow the base rule it's meant to look up. baseCssRule() anchors the
+// match to the start of a line so it only finds the selector's own
+// (unscoped) rule.
+function baseCssRule(selector) {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = cssText().match(new RegExp(`(?:^|\\n)${escaped}\\s*\\{([^}]*)\\}`));
+  assert.ok(match, `Expected to find a base (unscoped) CSS rule for ${selector}`);
+  return match[1];
+}
+
 function mediaBlockContaining(query, selector) {
   const css = cssText();
   const marker = `@media (${query})`;
@@ -261,13 +274,18 @@ describe("onboarding shell styles", () => {
   it("anchors the add-company field at the bottom with helper text right-aligned", () => {
     const companiesPanel = cssRule(".onboarding-companies__panel");
     const companyList = cssRule(".onboarding-companies__company-list");
-    const addField = cssRule(".onboarding-companies__add-field");
+    // The typeahead popover-positioning fix (aa1f6bd3) renamed the anchored
+    // wrapper from .onboarding-companies__add-field to
+    // .onboarding-companies__combobox (also adding position: relative so the
+    // suggestions popover can sit above the input) — the inner
+    // .onboarding-companies__add-field element remains for the hint styling.
+    const combobox = cssRule(".onboarding-companies__combobox");
     const addFieldHint = cssRule(".onboarding-companies__add-field .field__hint");
 
     assert.match(companiesPanel, /min-height:\s*100%/);
     assert.match(companyList, /flex:\s*1 1 auto/);
     assert.match(companyList, /max-height:\s*none/);
-    assert.match(addField, /margin-top:\s*auto/);
+    assert.match(combobox, /margin-top:\s*auto/);
     assert.match(addFieldHint, /align-self:\s*flex-end/);
     assert.match(addFieldHint, /text-align:\s*right/);
   });
@@ -341,12 +359,12 @@ describe("onboarding shell styles", () => {
     const signalRow = cssRule(".onboarding-targeting__summary-signal-row");
     const pillList = cssRule(".onboarding-targeting__summary-pill-list");
     const signalPill = cssRule(".onboarding-targeting__signal-pill");
-    const signalPillRemove = cssRule(".onboarding-targeting__signal-pill-remove");
+    const signalPillRemove = baseCssRule(".onboarding-targeting__signal-pill-remove");
 
     assert.match(signalGrid, /display:\s*flex/);
     assert.match(signalGrid, /flex-direction:\s*column/);
     assert.match(signalRow, /display:\s*grid/);
-    assert.match(signalRow, /grid-template-columns:\s*24px minmax\(0,\s*1fr\)/);
+    assert.match(signalRow, /grid-template-columns:\s*22px minmax\(0,\s*1fr\)/);
     assert.match(pillList, /flex-wrap:\s*wrap/);
     assert.match(signalPill, /border-radius:\s*999px/);
     assert.match(signalPillRemove, /border:\s*0/);
@@ -432,15 +450,19 @@ describe("onboarding shell styles", () => {
     const object = cssRule(".onboarding-resume__document-object");
 
     assert.match(actionSide, /position:\s*relative/);
-    assert.match(viewer, /position:\s*absolute/);
-    assert.match(viewer, /inset:\s*14px/);
-    assert.match(viewer, /z-index:\s*9/);
+    assert.match(viewer, /position:\s*fixed/);
+    assert.match(viewer, /inset:\s*clamp\(12px,\s*2vw,\s*24px\)/);
+    assert.match(viewer, /z-index:\s*90/);
     assert.match(stage, /place-items:\s*stretch/);
     assert.match(object, /height:\s*100%/);
   });
 
-  it("top-aligns wizard action panels after the welcome step", () => {
-    assert.match(cssRule(".onboarding-key__action-side"), /justify-content:\s*flex-start/);
+  it("top-aligns wizard action panels after the welcome step, except the compact account card", () => {
+    // KeyStep's action-side holds a short sign-up/sign-in card (see
+    // KeyStep.jsx), not a scrollable list like Targeting/Companies — 0af26faa
+    // deliberately centered it instead of top-aligning it, matching a small
+    // card's proportions rather than leaving a large empty gap beneath it.
+    assert.match(cssRule(".onboarding-key__action-side"), /justify-content:\s*center/);
     assert.match(cssRule(".onboarding-targeting__content"), /justify-content:\s*flex-start/);
     assert.match(
       cssRule(".onboarding-targeting__content--signals"),
