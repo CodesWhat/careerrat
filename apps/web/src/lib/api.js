@@ -532,3 +532,80 @@ export function promoteSourced({ id, appRow } = {}) {
     body: JSON.stringify({ id, appRow }),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Deep ingest workbench (src/cli/deep-ingest-route.mjs) — the six-endpoint
+// surface behind DeepIngestPage.jsx: state, source submit (paste/link JSON)
+// and upload (raw file bytes), a proposal build step, proposal decisions
+// (confirm/save edits/defer/mark not available/reject/reopen/retry), and lane
+// state writes. Every write mutates SQLite source/proposal/lane rows
+// directly (core/db/verbs/deep-ingest.mjs) and returns its own partial shape,
+// so DeepIngestPage always re-reads getDeepIngestState() after a write rather
+// than trying to merge a response into local state — this file stays a thin
+// fetch layer with no derived state of its own.
+// ---------------------------------------------------------------------------
+
+// GET /api/deep-ingest/state — buildDeepIngestViewModel()'s full view model
+// (lanes, readiness, sources, proposals, review queue, confirmed rows).
+// Unwraps the {ok, data} envelope so callers get the view model directly.
+export async function getDeepIngestState() {
+  const body = await apiFetch("/api/deep-ingest/state");
+  return body?.data ?? body;
+}
+
+// POST /api/deep-ingest/sources — `payload` IS normalizeDeepIngestSource()'s
+// input shape verbatim: targetShape, sourceKind, plus `text` (paste/note
+// kinds) or `url` (url/linkedin/portfolio/project_link kinds) — see
+// core/deep-ingest/source-normalize.mjs for the full per-kind field
+// contract.
+export function submitDeepIngestSource(payload = {}) {
+  return apiFetch("/api/deep-ingest/sources", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+// POST /api/deep-ingest/sources/upload — same raw-bytes-as-body convention
+// as extractResumeAi/uploadIntakeFile above: targetShape and the filename
+// travel as query params, the File itself IS the request body.
+export async function uploadDeepIngestFile(file, { targetShape } = {}) {
+  const params = new URLSearchParams();
+  if (targetShape) params.set("targetShape", targetShape);
+  params.set("name", file.name);
+  const res = await fetch(`/api/deep-ingest/sources/upload?${params.toString()}`, {
+    method: "POST",
+    body: file,
+  });
+  const text = await res.text();
+  let body = {};
+  if (text) {
+    try {
+      body = JSON.parse(text);
+    } catch {
+      body = { raw: text };
+    }
+  }
+  if (!res.ok) throw new ApiError(res.status, body);
+  return body?.data ?? body;
+}
+
+// POST /api/deep-ingest/proposal-decisions — `decision` is "confirm" (routes
+// to deepIngestConfirmProposal) or one of deepIngestProposalDecision's verbs
+// ("save_edits" | "defer" | "mark_not_available" | "reject" | "reopen" |
+// "retry"); `reason` is required for defer/mark_not_available/reject (see
+// verbs/deep-ingest.mjs's PROPOSAL_DECISION_TO_STATUS map).
+export function decideDeepIngestProposal(payload = {}) {
+  return apiFetch("/api/deep-ingest/proposal-decisions", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+// POST /api/deep-ingest/lane-states — direct deepIngestLaneSetState write;
+// `reason` is required when `status` is "deferred" or "not_available".
+export function updateDeepIngestLaneState(payload = {}) {
+  return apiFetch("/api/deep-ingest/lane-states", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}

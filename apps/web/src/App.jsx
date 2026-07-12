@@ -2,6 +2,7 @@ import { Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./app-shell/AppShell.jsx";
 import { DashboardProvider } from "./app-shell/DashboardContext.jsx";
 import { CalendarPage } from "./calendar/CalendarPage.jsx";
+import { DeepIngestPage } from "./deep-ingest/DeepIngestPage.jsx";
 import { InboxPage } from "./inbox/InboxPage.jsx";
 import { JobsPage } from "./jobs/JobsPage.jsx";
 import { LibraryPage } from "./library/LibraryPage.jsx";
@@ -35,15 +36,7 @@ export function App() {
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/network" element={<NetworkPage />} />
         <Route path="/library" element={<LibraryPage />} />
-        <Route
-          path="/deep-ingest"
-          element={
-            <ComingSoonPage
-              title="Deep ingest"
-              description="Deep ingest is on its way — check back soon."
-            />
-          }
-        />
+        <Route path="/deep-ingest" element={<DeepIngestPage />} />
         <Route
           path="*"
           element={<ComingSoonPage title="Not found" description="This page doesn't exist yet." />}

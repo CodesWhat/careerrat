@@ -10624,3 +10624,281 @@ button {
   font-size: 10px;
   color: var(--ink-soft);
 }
+
+/* ── Deep ingest workbench (/deep-ingest, DeepIngestPage.jsx) ─────────────
+ * Layout-only classes: every panel reuses .card/.card__header/.card__title/
+ * .card__body, every status pill reuses .badge/.badge--*, every button
+ * reuses .btn/.btn--*, and the file dropzone reuses .dropzone/.dropzone__icon
+ * (see the resume-upload dropzone in ResumeStep.jsx for the matching
+ * pattern). No left-edge accent stripe on any row or card — state is always
+ * conveyed via badge tone/text, per the repo's standing Card rule. */
+
+.deep-ingest {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.deep-ingest__hero {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.deep-ingest__title {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(36px, 4.4vw, 52px);
+  font-weight: 900;
+  letter-spacing: 0;
+  line-height: 0.96;
+  text-wrap: balance;
+}
+
+.deep-ingest__subtitle {
+  max-width: 640px;
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.deep-ingest__loading {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.deep-ingest__panel .card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.deep-ingest__panel-icon {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  color: var(--coral);
+}
+
+.deep-ingest__panel-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.deep-ingest__progress-text {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
+.deep-ingest__lane-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.deep-ingest__lane-row {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+}
+
+.deep-ingest__lane-main {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.deep-ingest__lane-label {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.deep-ingest__lane-reason {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.4;
+}
+
+.deep-ingest__lane-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.deep-ingest__segmented {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--paper-band);
+}
+
+.deep-ingest__segment {
+  min-height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+  touch-action: manipulation;
+}
+
+.deep-ingest__segment:hover {
+  color: var(--ink);
+}
+
+.deep-ingest__segment--active {
+  background: var(--paper-surface);
+  color: var(--ink);
+  box-shadow: var(--card-shadow);
+}
+
+.deep-ingest__dropzone {
+  min-height: 96px;
+}
+
+.deep-ingest__form-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.deep-ingest__empty {
+  padding: 14px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.deep-ingest__source-list,
+.deep-ingest__proposal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deep-ingest__source-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 12px;
+  padding: 12px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+}
+
+.deep-ingest__source-row--active {
+  background: color-mix(in srgb, var(--m-secondary) 10%, var(--paper-band));
+}
+
+.deep-ingest__source-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.deep-ingest__source-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deep-ingest__source-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
+.deep-ingest__source-preview {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.deep-ingest__source-side {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.deep-ingest__source-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.deep-ingest__proposal-row {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 4px;
+  padding: 12px;
+  border: 0;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.deep-ingest__proposal-row--active {
+  background: color-mix(in srgb, var(--m-secondary) 10%, var(--paper-band));
+}
+
+.deep-ingest__proposal-title {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.deep-ingest__proposal-summary {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
+}
