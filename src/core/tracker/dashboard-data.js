@@ -620,16 +620,16 @@ function buildSettingsStatus(settings = {}) {
 // that field.
 function profileCompFromSettings(settings) {
   const profile = settings?.profile || {};
-  const minimumBaseK = Number(profile.minimumBaseK);
-  const targetBaseK = Number(profile.targetBaseK);
-  const expectedBaseK = Number(profile.expectedBaseK);
+  // Number(null) is 0 (finite), so an unset field must be rejected before
+  // coercion or it renders as a real $0K pin.
+  const compK = (value) => {
+    if (value == null || value === "") return null;
+    const number = Number(value);
+    return Number.isFinite(number) ? number : null;
+  };
   return {
-    floorK: Number.isFinite(minimumBaseK) ? minimumBaseK : null,
-    askK: Number.isFinite(targetBaseK)
-      ? targetBaseK
-      : Number.isFinite(expectedBaseK)
-        ? expectedBaseK
-        : null,
+    floorK: compK(profile.minimumBaseK),
+    askK: compK(profile.targetBaseK) ?? compK(profile.expectedBaseK),
   };
 }
 

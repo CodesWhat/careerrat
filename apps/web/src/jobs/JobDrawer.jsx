@@ -441,6 +441,9 @@ function ReadyToSendCard({ comms, busyKey, onSend }) {
 }
 
 function toCompNumber(value) {
+  // Number(null) is 0 (finite) — an absent value must stay null so the pin
+  // renders "Needs info" instead of a fabricated $0K.
+  if (value == null || value === "") return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
 }
