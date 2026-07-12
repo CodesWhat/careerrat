@@ -68,11 +68,16 @@ export const ROLESTER_CLERK_APPEARANCE = {
     },
     socialButtonsBlockButton: {
       minHeight: "44px",
-      borderColor: "color-mix(in srgb, var(--ink-soft) 18%, transparent)",
-      borderRadius: "var(--card-radius)",
+      border: "1px solid var(--paper-edge-strong)",
+      borderRadius: "999px",
       backgroundColor: "var(--paper-surface)",
       color: "var(--ink)",
-      fontWeight: "800",
+      fontWeight: "600",
+    },
+    socialButtonsBlockButtonText: {
+      fontFamily: '"Geist Sans", Inter, ui-sans-serif, system-ui, sans-serif',
+      fontWeight: "600",
+      color: "var(--ink)",
     },
     formFieldLabel: {
       color: "var(--ink)",
@@ -150,7 +155,20 @@ export function RolesterClerkProvider({ publishableKey, children }) {
   }
 
   return (
-    <ClerkProvider publishableKey={publishableKey} appearance={ROLESTER_CLERK_APPEARANCE}>
+    <ClerkProvider
+      publishableKey={publishableKey}
+      appearance={ROLESTER_CLERK_APPEARANCE}
+      // Clerk's default post-auth redirect lands on the app ORIGIN ROOT
+      // (e.g. http://127.0.0.1:PORT/?__clerk_db_jwt=...), which has no
+      // product route mounted there (see tracker-dev.mjs — only /app/* is
+      // the SPA). Pin the fallback (used when the sign-in/up flow itself
+      // didn't already carry a `redirect_url`) back into the SPA so
+      // completing auth never leaves /app/*. These are the current (v6)
+      // Clerk prop names — the predecessor afterSignInUrl/afterSignUpUrl are
+      // gone in this SDK version (see apps/web/package.json).
+      signInFallbackRedirectUrl="/app/onboarding"
+      signUpFallbackRedirectUrl="/app/onboarding"
+    >
       <ClerkStateBridge>{children}</ClerkStateBridge>
     </ClerkProvider>
   );

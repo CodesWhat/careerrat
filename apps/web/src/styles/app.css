@@ -3147,10 +3147,18 @@ button {
   position: relative;
   grid-column: 2;
   grid-row: 1;
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  align-content: stretch;
-  justify-content: stretch;
+  /* Flow, not a fixed-row grid: with a 3-track grid (auto/1fr/auto) the
+     files list was stretched into a track sized independent of its content,
+     and its own min-height could grow the item past that track's boundary
+     into the "Add resume text" button's track — the button's position was
+     fixed by track layout, not pushed down by the files list, so the two
+     visually collided once a file (or the Review & edit section) grew the
+     content. A column flex lets every child push the next one down
+     naturally at any file count; the ancestor's overflow:auto
+     (.onboarding-step-card__content--scroll) still scrolls the whole panel
+     if total content ever exceeds the card's height. */
+  display: flex;
+  flex-direction: column;
   gap: 14px;
   background: rgba(var(--rgb-surface), 0.86);
 }
@@ -3530,7 +3538,7 @@ button {
 }
 
 .onboarding-resume__paste-section {
-  align-self: end;
+  flex-shrink: 0;
 }
 
 .onboarding-step-stack--targeting {
@@ -5287,9 +5295,18 @@ button {
   inset: 0;
   display: grid;
   place-items: center;
+  /* Clerk's own internal class sets justify-content: flex-start on this
+     grid, which parks the auto-sized track at the left edge. place-content
+     sets both justify-content and align-content, beating that at
+     equal-or-later cascade since this stylesheet loads after Clerk's. */
+  place-content: center;
   width: 100vw;
   min-height: 100dvh;
   padding: 24px;
+}
+
+.cl-socialButtonsBlockButton:hover {
+  background: var(--paper-band);
 }
 
 .cl-modalContent .cl-rootBox,

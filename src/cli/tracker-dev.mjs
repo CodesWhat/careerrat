@@ -388,6 +388,26 @@ export function createDevServer({
       return;
     }
 
+    // Safety net — Clerk (see apps/web/src/auth/clerkControls.jsx) redirects
+    // the browser back to the app ORIGIN ROOT after OAuth (e.g.
+    // http://127.0.0.1:PORT/?__clerk_db_jwt=...), and its modal's internal
+    // "Sign in" link points at /CLERK-ROUTER/VIRTUAL/sign-in — both are
+    // outside the /app/* SPA mount, so without this they'd hit the plain-text
+    // 404 route list below instead of the product shell. clerkControls.jsx
+    // pins signInFallbackRedirectUrl/signUpFallbackRedirectUrl to /app so
+    // this should rarely fire, but it's the server-side backstop for any
+    // path Clerk's own config doesn't cover (stale links, direct hits, etc).
+    if (url === "/") {
+      res.writeHead(302, { Location: "/app" });
+      res.end();
+      return;
+    }
+    if (url === "/CLERK-ROUTER" || url.startsWith("/CLERK-ROUTER/")) {
+      res.writeHead(302, { Location: "/app/onboarding" });
+      res.end();
+      return;
+    }
+
     res.writeHead(404, { "Content-Type": "text/plain; charset=utf-8" });
     res.end(buildNotFoundText());
   });

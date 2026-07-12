@@ -36,10 +36,6 @@ const STEPS = [
   { key: "finish", label: "Finish", Component: FinishStep, fullBleed: true },
 ];
 
-function findFile(state, name) {
-  return state?.files?.find((f) => f.name === name) ?? null;
-}
-
 function deriveDoneFlags(state, { isSignedIn = false } = {}) {
   if (!state) return STEPS.map(() => false);
   const targeting = state.data?.targeting ?? {};
@@ -50,7 +46,9 @@ function deriveDoneFlags(state, { isSignedIn = false } = {}) {
     (targeting.role_buckets ?? []).some((b) => (b.titles ?? []).length > 0),
     (targeting.tracked_companies ?? []).length > 0,
     (targeting.cut_signals ?? []).length > 0,
-    !!findFile(state, "modes")?.valid,
+    // modes is scaffold-valid from workspace init, so file validity can't
+    // signal completion here — Quick facts only completes via explicit goNext.
+    false,
     !!state.searchSourcesPresent,
   ];
 }
@@ -59,15 +57,6 @@ function doneFlagIndexes(doneFlags, { stepCount = STEPS.length } = {}) {
   return (Array.isArray(doneFlags) ? doneFlags : [])
     .map((done, index) => (done ? index : null))
     .filter((index) => index !== null && index < stepCount);
-}
-
-function previousStepIndexes(stepIndex, { stepCount = STEPS.length } = {}) {
-  const maxStep = Math.max(0, stepCount - 1);
-  const numericStep = Number(stepIndex);
-  const focusedStep = Number.isFinite(numericStep)
-    ? Math.max(0, Math.min(maxStep, Math.trunc(numericStep)))
-    : 0;
-  return Array.from({ length: focusedStep }, (_, index) => index);
 }
 
 function isPlainObject(value) {
@@ -202,11 +191,7 @@ export function OnboardingPage() {
         setStepIndex(initialStepIndex);
         setCompletedIndexes(
           normalizeCompletedIndexes(
-            [
-              ...previousStepIndexes(initialStepIndex, { stepCount: STEPS.length }),
-              ...next.onboardingDraft.completedIndexes,
-              ...stateDoneIndexes,
-            ],
+            [...next.onboardingDraft.completedIndexes, ...stateDoneIndexes],
             { stepCount: STEPS.length }
           )
         );

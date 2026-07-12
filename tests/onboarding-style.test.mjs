@@ -318,6 +318,7 @@ describe("onboarding shell styles", () => {
     assert.match(modalBackdrop, /background:\s*rgba\(0,\s*0,\s*0,\s*0\.74\)/);
     assert.match(modalContent, /display:\s*grid/);
     assert.match(modalContent, /place-items:\s*center/);
+    assert.match(modalContent, /place-content:\s*center/);
     assert.match(modalContent, /padding:\s*24px/);
   });
 
@@ -388,11 +389,17 @@ describe("onboarding shell styles", () => {
     const filesPanel = cssRule(".onboarding-resume__files-panel");
     const pasteSection = cssRule(".onboarding-resume__paste-section");
 
-    assert.match(actionSide, /display:\s*grid/);
-    assert.match(actionSide, /grid-template-rows:\s*auto minmax\(0,\s*1fr\) auto/);
+    // Column flex, not a fixed-row grid: a grid with a content-independent
+    // 1fr row let the files list overflow its track into the paste button's
+    // track once a file (or the Review & edit section) grew the content —
+    // see .onboarding-resume__action-side's own comment in app.css. Flex
+    // flow lets each child push the next one down naturally at any file
+    // count instead.
+    assert.match(actionSide, /display:\s*flex/);
+    assert.match(actionSide, /flex-direction:\s*column/);
     assert.match(filesPanel, /min-height:\s*96px/);
     assert.match(filesPanel, /overflow:\s*auto/);
-    assert.match(pasteSection, /align-self:\s*end/);
+    assert.match(pasteSection, /flex-shrink:\s*0/);
   });
 
   it("keeps resume text entry inside the upload row instead of expanding the footer action", () => {
