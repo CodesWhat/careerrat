@@ -47,7 +47,7 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
       if (err.status === 409) {
         return (
           err.body?.error ||
-          "No database workspace detected — run `rolester data import` (or `rolester data init`) first."
+          "This workspace hasn't finished setup yet. Finish setup, then try again."
         );
       }
       return err.body?.error || `Capture failed (${err.status}).`;

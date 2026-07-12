@@ -248,7 +248,7 @@ export function JobsPage() {
   if (noDatabase) {
     return (
       <div className="jobs">
-        <InlineAlert message="No database workspace detected — run `rolester data import` (or `rolester data init`) first, then reload." />
+        <InlineAlert message="This workspace hasn't finished setup yet — finish setup, then reload." />
       </div>
     );
   }

@@ -324,7 +324,7 @@ export function LibraryPage() {
   if (noDatabase) {
     return (
       <div className="library">
-        <InlineAlert message="No database workspace detected — run `rolester data import` (or `rolester data init`) first, then reload." />
+        <InlineAlert message="This workspace hasn't finished setup yet — finish setup, then reload." />
       </div>
     );
   }
@@ -498,8 +498,8 @@ function EmptyLibraryState() {
     <div className="library__empty-state">
       <h2>No reusable material yet</h2>
       <p>
-        Run ingest-profile or capture evidence, STAR stories, and writing voice so Rolester has a
-        durable bank to browse here.
+        Finish onboarding or deep ingest to capture evidence, STAR stories, and writing voice so
+        Rolester has a durable bank to browse here.
       </p>
     </div>
   );

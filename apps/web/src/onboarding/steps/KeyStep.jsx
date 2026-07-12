@@ -105,7 +105,7 @@ export function KeyStep({ goNext, goBack, onProgressSelect }) {
               <p className="onboarding-account__intro">
                 Free tier forever.
                 <br />
-                No 💳 required!
+                No credit card required.
               </p>
             </div>
           </div>

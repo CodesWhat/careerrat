@@ -52,7 +52,7 @@ describe("Account step", () => {
     expect(html).toContain("Rolester");
     expect(html).toContain("Your Rolester account.");
     expect(html).toContain("Free tier forever.");
-    expect(html).toContain("No 💳 required!");
+    expect(html).toContain("No credit card required.");
     expect(html).toContain("Create account");
     expect(html).toContain("Log in");
     expect(html).toContain("Signing in keeps usage tied to you.");
