@@ -678,3 +678,170 @@ test("VER-04 invalid and review-only decisions fail closed without confirmed wri
   assert.equal(existsSync(trackerPath), false);
   assert.equal(existsSync(activityPath), false);
 });
+
+test("failed approve attempts never bump the proposal's own version or record a decision", async () => {
+  // Regression guard for a live incident: two failed approve-supported-ats
+  // attempts (a bad action name, then a genuine validation failure) against
+  // the same pending proposal must leave it byte-for-byte unchanged in the
+  // DB — still version 1, still undecided — so a client can safely retry
+  // with the same expectedVersion after fixing its request.
+  const repoRoot = setupRepo();
+  const calls = [];
+  const server = bootServer(repoRoot, {
+    companyAtsUpsertImpl: forbidden("companyAtsUpsert", calls),
+    sourcedUpsertBatchImpl: forbidden("sourcedUpsertBatch", calls),
+  });
+  putBatch(
+    repoRoot,
+    pendingBatch({
+      proposals: [
+        supportedProposal({
+          confidenceTier: "borderline",
+          proposedAction: "review",
+          reviewReasons: ["scanner-review"],
+        }),
+      ],
+    })
+  );
+
+  let response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+    batchId: "batch-acme",
+    proposalId: "proposal-acme",
+    action: "approve",
+    expectedVersion: 1,
+  });
+  assert.equal(response.status, 400);
+  assert.equal(response.body.code, "BAD_REQUEST");
+
+  response = await postJson(
+    server,
+    "/api/discovery/company-proposal-decisions",
+    decisionRequest({ action: "approve-supported-ats", expectedVersion: 1 })
+  );
+  assert.equal(response.status, 422);
+  assert.equal(response.body.code, "VALIDATION_FAILED");
+
+  assert.equal(calls.length, 0);
+  const stored = companyProposalBatchGet({ repoRoot, batchId: "batch-acme" }).batch;
+  assert.equal(stored.version, 1);
+  assert.equal(stored.proposals.length, 1);
+  assert.equal(stored.proposals[0].version, 1);
+  assert.equal(stored.proposals[0].decision, undefined);
+
+  // The same request, retried unchanged with the still-valid expectedVersion,
+  // must fail the exact same way — not "already decided" — proving nothing
+  // was silently consumed by the two failures above.
+  response = await postJson(
+    server,
+    "/api/discovery/company-proposal-decisions",
+    decisionRequest({ action: "approve-supported-ats", expectedVersion: 1 })
+  );
+  assert.equal(response.status, 422);
+  assert.equal(response.body.code, "VALIDATION_FAILED");
+});
+
+test("VER-05 userConfirmed lets a user explicitly keep a borderline supported ATS proposal", async () => {
+  const repoRoot = setupRepo();
+  const proposal = supportedProposal({
+    confidenceTier: "borderline",
+    proposedAction: "review",
+    reviewReasons: ["scanner-review"],
+  });
+  writeJobArtifact(repoRoot, proposal.capturedOffers[0]);
+  putBatch(repoRoot, pendingBatch({ proposals: [proposal] }));
+
+  const calls = [];
+  const server = bootServer(repoRoot, {
+    companyAtsUpsertImpl: (args) => {
+      calls.push({ name: "companyAtsUpsert", args });
+      return companyAtsUpsert(args);
+    },
+    sourcedUpsertBatchImpl: (args) => {
+      calls.push({ name: "sourcedUpsertBatch", args });
+      return sourcedUpsertBatch(args);
+    },
+  });
+
+  // Without userConfirmed, the auto-gate bar still applies unchanged.
+  let response = await postJson(
+    server,
+    "/api/discovery/company-proposal-decisions",
+    decisionRequest()
+  );
+  assert.equal(response.status, 422);
+  assert.equal(response.body.code, "VALIDATION_FAILED");
+  assert.equal(calls.length, 0);
+
+  // An explicit user keep (userConfirmed: true) IS the review — it approves.
+  response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+    ...decisionRequest(),
+    userConfirmed: true,
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.ok, true);
+  assert.equal(response.body.data.decision.action, "approve-supported-ats");
+  assert.equal(response.body.data.decision.decidedBy, "user-confirmed");
+  assert.equal(response.body.data.sourceConfig.status, "added");
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ["companyAtsUpsert", "sourcedUpsertBatch"]
+  );
+
+  const stored = companyProposalBatchGet({ repoRoot, batchId: "batch-acme" }).batch;
+  assert.equal(stored.proposals[0].decision.decidedBy, "user-confirmed");
+});
+
+test("VER-05 userConfirmed still refuses unsupported_public and non-pending proposals", async () => {
+  const repoRoot = setupRepo();
+  const calls = [];
+  const server = bootServer(repoRoot, {
+    companyAtsUpsertImpl: forbidden("companyAtsUpsert", calls),
+    sourcedUpsertBatchImpl: forbidden("sourcedUpsertBatch", calls),
+  });
+
+  putBatch(
+    repoRoot,
+    pendingBatch({
+      proposals: [
+        supportedProposal({
+          classification: "unsupported_public",
+          atsProvider: "",
+          jobBoardUrl: "",
+          confidenceTier: "borderline",
+          proposedAction: "cache-only",
+        }),
+      ],
+    })
+  );
+  let response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+    ...decisionRequest(),
+    userConfirmed: true,
+  });
+  assert.equal(response.status, 422);
+  assert.equal(response.body.code, "VALIDATION_FAILED");
+
+  putBatch(
+    repoRoot,
+    pendingBatch({
+      batchId: "batch-decided-confirmed",
+      proposals: [
+        {
+          ...supportedProposal({ proposalId: "proposal-decided-confirmed" }),
+          version: 2,
+          decision: { action: "reject", status: "rejected" },
+        },
+      ],
+    })
+  );
+  response = await postJson(server, "/api/discovery/company-proposal-decisions", {
+    batchId: "batch-decided-confirmed",
+    proposalId: "proposal-decided-confirmed",
+    action: "approve-supported-ats",
+    expectedVersion: 2,
+    userConfirmed: true,
+  });
+  assert.equal(response.status, 409);
+  assert.equal(response.body.code, "CONFLICT");
+
+  assert.equal(calls.length, 0);
+});

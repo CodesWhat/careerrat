@@ -426,6 +426,187 @@ describe("runCompanyProposalDecision", () => {
     ]);
     expect(chatMock.renders).toEqual([]);
   });
+
+  it("includes userConfirmed in the decision payload when the caller passes it", async () => {
+    const calls = [];
+
+    await CompaniesStepModule.runCompanyProposalDecision({
+      batchId: "batch-actions",
+      proposal: SUPPORTED_PROPOSAL,
+      action: "approve-supported-ats",
+      userConfirmed: true,
+      decideProposal: async (payload) => {
+        calls.push(payload);
+        return { ok: true, data: { decision: {}, proposal: SUPPORTED_PROPOSAL } };
+      },
+      readProposals: async () => ({ ok: true, data: { batch: null } }),
+    });
+
+    expect(calls).toEqual([
+      {
+        batchId: "batch-actions",
+        proposalId: "proposal-supported",
+        action: "approve-supported-ats",
+        expectedVersion: 3,
+        userConfirmed: true,
+      },
+    ]);
+  });
+
+  it("omits userConfirmed from the decision payload by default", async () => {
+    const calls = [];
+
+    await CompaniesStepModule.runCompanyProposalDecision({
+      batchId: "batch-actions",
+      proposal: SUPPORTED_PROPOSAL,
+      action: "reject",
+      decideProposal: async (payload) => {
+        calls.push(payload);
+        return { ok: true, data: { decision: {}, proposal: SUPPORTED_PROPOSAL } };
+      },
+      readProposals: async () => ({ ok: true, data: { batch: null } }),
+    });
+
+    expect(calls).toEqual([
+      {
+        batchId: "batch-actions",
+        proposalId: "proposal-supported",
+        action: "reject",
+        expectedVersion: 3,
+      },
+    ]);
+  });
+});
+
+describe("reconcileCompanyProposalDecisions", () => {
+  const KEPT_SUPPORTED_CHIP = {
+    name: "Acme AI",
+    domain: "acme.example",
+    source: "ai",
+    proposalId: "proposal-supported",
+    batchId: "batch-actions",
+    classification: "supported_ats",
+    version: 3,
+  };
+
+  const KEPT_UNSUPPORTED_CHIP = {
+    name: "Review Co",
+    domain: "review.example",
+    source: "ai",
+    proposalId: "proposal-review",
+    batchId: "batch-actions",
+    classification: "unsupported_public",
+    version: 4,
+  };
+
+  it("approves a kept supported_ats proposal chip with userConfirmed: true", async () => {
+    const calls = [];
+    const decideProposal = async (payload) => {
+      calls.push(payload);
+      return { conflict: false };
+    };
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies: [KEPT_SUPPORTED_CHIP],
+        removedProposals: [],
+        decideProposal,
+      })
+    ).resolves.toEqual({ hadFailure: false });
+
+    expect(calls).toEqual([
+      {
+        batchId: "batch-actions",
+        proposal: KEPT_SUPPORTED_CHIP,
+        action: "approve-supported-ats",
+        userConfirmed: true,
+      },
+    ]);
+  });
+
+  it("does not call a decision for a kept unsupported_public chip", async () => {
+    const calls = [];
+    const decideProposal = async (payload) => {
+      calls.push(payload);
+      return { conflict: false };
+    };
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies: [KEPT_UNSUPPORTED_CHIP],
+        removedProposals: [],
+        decideProposal,
+      })
+    ).resolves.toEqual({ hadFailure: false });
+
+    expect(calls).toEqual([]);
+  });
+
+  it("rejects a proposal-seeded chip the user removed", async () => {
+    const calls = [];
+    const decideProposal = async (payload) => {
+      calls.push(payload);
+      return { conflict: false };
+    };
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies: [],
+        removedProposals: [KEPT_SUPPORTED_CHIP],
+        decideProposal,
+      })
+    ).resolves.toEqual({ hadFailure: false });
+
+    expect(calls).toEqual([
+      {
+        batchId: "batch-actions",
+        proposal: KEPT_SUPPORTED_CHIP,
+        action: "reject",
+      },
+    ]);
+  });
+
+  it("does not reject a removed proposal the user re-added by name", async () => {
+    const calls = [];
+    const decideProposal = async (payload) => {
+      calls.push(payload);
+      return { conflict: false };
+    };
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies: [{ ...KEPT_SUPPORTED_CHIP, source: "manual", proposalId: undefined }],
+        removedProposals: [KEPT_SUPPORTED_CHIP],
+        decideProposal,
+      })
+    ).resolves.toEqual({ hadFailure: false });
+
+    expect(calls).toEqual([]);
+  });
+
+  it("treats a decision conflict or thrown error as a soft failure without throwing", async () => {
+    const decideProposal = async () => ({ conflict: true });
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies: [KEPT_SUPPORTED_CHIP],
+        removedProposals: [],
+        decideProposal,
+      })
+    ).resolves.toEqual({ hadFailure: true });
+
+    const throwingDecideProposal = async () => {
+      throw new Error("network down");
+    };
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies: [KEPT_SUPPORTED_CHIP],
+        removedProposals: [],
+        decideProposal: throwingDecideProposal,
+      })
+    ).resolves.toEqual({ hadFailure: true });
+  });
 });
 
 describe("CompaniesStep", () => {

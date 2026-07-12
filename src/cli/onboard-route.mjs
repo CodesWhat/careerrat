@@ -851,6 +851,7 @@ export function prepareQuickStartFirstSearch({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
+  retry = false,
 } = {}) {
   const pathCtx = { repoRoot, env };
   if (!dbExists(pathCtx)) {
@@ -904,7 +905,7 @@ export function prepareQuickStartFirstSearch({
   }
 
   try {
-    const result = startFirstSearchRun({ repoRoot, env, retryFailed: false });
+    const result = startFirstSearchRun({ repoRoot, env, retryFailed: retry === true });
     if (result.reused !== true && result.run?.status === "running") {
       void runFirstSearchInBackground({
         repoRoot,
@@ -1645,10 +1646,26 @@ export function mountOnboardRoutes({
   });
 
   // -------------------------------------------------------------------------
-  // POST /api/onboard/quick-start — search-ready DB setup -> durable first search.
+  // POST /api/onboard/quick-start — search-ready DB setup -> durable first
+  // search. Optional JSON body { retry: true } retries a previously failed
+  // first-search run instead of reusing it forever; an empty/missing body
+  // keeps the default (no retry) behavior.
   // -------------------------------------------------------------------------
-  addRoute("POST", "/api/onboard/quick-start", (_req, res) => {
-    const result = prepareQuickStartFirstSearch({ repoRoot, env, fetchImpl });
+  addRoute("POST", "/api/onboard/quick-start", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+
+    const result = prepareQuickStartFirstSearch({
+      repoRoot,
+      env,
+      fetchImpl,
+      retry: body?.retry === true,
+    });
     sendJson(res, result.status, result.body);
   });
 

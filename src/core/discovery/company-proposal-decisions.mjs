@@ -95,6 +95,13 @@ function normalizeDecisionBody(body = {}) {
     expectedVersion: normalizeExpectedVersion(body.expectedVersion ?? body.expected_version),
     reason: String(body.reason || "").trim(),
     note: String(body.note || "").trim(),
+    // userConfirmed marks an explicit user keep/approve (e.g. onboarding's
+    // Companies step Save & Next) rather than an unattended auto-gate
+    // approval. It is the review the confirm-first gate exists to require,
+    // so it relaxes the confidence-tier/proposedAction bar in
+    // assertApprovalAllowed below — it never bypasses classification or
+    // pending-state checks.
+    userConfirmed: body.userConfirmed === true || body.user_confirmed === true,
   };
 }
 
@@ -169,13 +176,30 @@ function assertPendingProposal({ proposal, collection, expectedVersion, action }
   }
 }
 
-function assertApprovalAllowed(proposal) {
+function assertApprovalAllowed(proposal, { userConfirmed = false } = {}) {
+  const hasBoard =
+    Boolean(String(proposal?.jobBoardUrl || "").trim()) &&
+    Boolean(String(proposal?.atsProvider || "").trim());
+  const isSupportedAts = proposal?.classification === "supported_ats";
+
+  // An explicit user keep/approve (userConfirmed) IS the review the
+  // confirm-first gate exists to require, so it can approve a borderline or
+  // review-tier proposal without waiting on the auto-gate's confidence bar.
+  // It still refuses unsupported_public proposals and anything without a
+  // resolved board to approve into.
+  if (userConfirmed) {
+    if (isSupportedAts && hasBoard) return;
+    throw makeError("only pending supported ATS proposals can be approved", {
+      code: "VALIDATION_FAILED",
+      status: 422,
+    });
+  }
+
   const supported =
-    proposal?.classification === "supported_ats" &&
+    isSupportedAts &&
     proposal?.confidenceTier === "high-confidence" &&
     proposal?.proposedAction === "approve-supported-ats" &&
-    String(proposal?.jobBoardUrl || "").trim() &&
-    String(proposal?.atsProvider || "").trim();
+    hasBoard;
   if (!supported) {
     throw makeError("only pending high-confidence supported ATS proposals can be approved", {
       code: "VALIDATION_FAILED",
@@ -357,7 +381,8 @@ async function applyApproval({
   companyAtsUpsertImpl,
   sourcedUpsertBatchImpl,
 }) {
-  assertApprovalAllowed(proposal);
+  const userConfirmed = request.userConfirmed === true;
+  assertApprovalAllowed(proposal, { userConfirmed });
   const decidedAt = nowIso(now);
   const sourceConfig = companyAtsUpsertImpl({
     repoRoot,
@@ -374,6 +399,7 @@ async function applyApproval({
     status: "approved",
     now,
     extra: {
+      decidedBy: userConfirmed ? "user-confirmed" : "auto-gate",
       sourceConfig: sourceConfigSummary(sourceConfig),
       sourced: sourcedSummary(sourced, rows),
     },

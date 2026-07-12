@@ -56,6 +56,11 @@ function normalizeCompanyTarget(company, source = "manual") {
       ? ""
       : String(company?.domain || company?.domain_hint || company?.domainHint || "").trim();
   if (!name) return null;
+  const isObject = typeof company === "object" && company !== null;
+  const proposalId = isObject ? String(company?.proposalId || "").trim() : "";
+  const batchId = isObject ? String(company?.batchId || "").trim() : "";
+  const classification = isObject ? String(company?.classification || "").trim() : "";
+  const version = isObject ? company?.version : undefined;
   return {
     name,
     domain: domain || null,
@@ -65,6 +70,10 @@ function normalizeCompanyTarget(company, source = "manual") {
       typeof company === "string"
         ? ""
         : String(company?.confidence || company?.confidenceTier || "").trim(),
+    ...(proposalId ? { proposalId } : {}),
+    ...(batchId ? { batchId } : {}),
+    ...(classification ? { classification } : {}),
+    ...(version != null ? { version } : {}),
   };
 }
 
@@ -92,6 +101,10 @@ function targetsFromProposalBatch(batch) {
           domain: proposal?.company?.domain,
           roleSeen: proposal?.roleSeen,
           confidenceTier: proposal?.confidenceTier,
+          proposalId: proposal?.proposalId,
+          batchId: batch?.batchId,
+          classification: proposal?.classification,
+          version: proposal?.version,
         },
         "ai"
       )
@@ -134,6 +147,7 @@ export async function runCompanyProposalDecision({
   batchId,
   proposal,
   action,
+  userConfirmed = false,
   decideProposal = decideCompanyProposal,
   readProposals = getCompanyProposals,
 } = {}) {
@@ -142,6 +156,7 @@ export async function runCompanyProposalDecision({
     proposalId: proposal?.proposalId,
     action,
     expectedVersion: proposal?.version,
+    ...(userConfirmed ? { userConfirmed: true } : {}),
   };
   try {
     const result = await decideProposal(payload);
@@ -173,6 +188,61 @@ export async function runCompanyProposalDecision({
   }
 }
 
+// Save & Next converts kept/removed proposal-seeded chips into real decisions
+// so the onboarding Companies step actually resolves supported-ATS boards
+// into sourced-scan.tracked_companies (the deterministic first-search source
+// count reads that table, not targeting.tracked_companies names). Runs
+// sequentially — parallel decision calls on the same batch race each other's
+// expectedVersion. Never throws: a partial failure surfaces as a soft toast,
+// it never blocks the wizard from advancing.
+export async function reconcileCompanyProposalDecisions({
+  companies = [],
+  removedProposals = [],
+  decideProposal = runCompanyProposalDecision,
+} = {}) {
+  const currentNames = new Set(
+    (Array.isArray(companies) ? companies : []).map((company) => company.name.toLowerCase())
+  );
+  const keptSupported = (Array.isArray(companies) ? companies : []).filter(
+    (company) =>
+      company.source === "ai" && company.proposalId && company.classification === "supported_ats"
+  );
+  const stillRemoved = (Array.isArray(removedProposals) ? removedProposals : []).filter(
+    (company) => company.proposalId && !currentNames.has(company.name.toLowerCase())
+  );
+
+  let hadFailure = false;
+
+  for (const chip of keptSupported) {
+    try {
+      const outcome = await decideProposal({
+        batchId: chip.batchId,
+        proposal: chip,
+        action: "approve-supported-ats",
+        userConfirmed: true,
+      });
+      if (outcome?.conflict) hadFailure = true;
+    } catch {
+      hadFailure = true;
+    }
+  }
+
+  for (const chip of stillRemoved) {
+    try {
+      const outcome = await decideProposal({
+        batchId: chip.batchId,
+        proposal: chip,
+        action: "reject",
+      });
+      if (outcome?.conflict) hadFailure = true;
+    } catch {
+      hadFailure = true;
+    }
+  }
+
+  return { hadFailure };
+}
+
 // Step 4 — Companies. AI-seeded company board targets plus manual company
 // add/search. Saved company names persist to targeting.yml#tracked_companies
 // — the candidate's own shortlist
@@ -200,6 +270,7 @@ export function CompaniesStep({
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [removedProposals, setRemovedProposals] = useState([]);
   const [proposalBatch, setProposalBatch] = useState(initialProposalBatch);
   const [seedStatus, setSeedStatus] = useState(initialProposalBatch ? "ready" : "idle");
   const [seedError, setSeedError] = useState(null);
@@ -300,6 +371,10 @@ export function CompaniesStep({
   }
 
   function removeCompany(name) {
+    const removed = companies.find((company) => company.name === name);
+    if (removed?.source === "ai" && removed?.proposalId) {
+      setRemovedProposals((current) => [...current, removed]);
+    }
     setCompanies((list) => list.filter((company) => company.name !== name));
   }
 
@@ -307,8 +382,19 @@ export function CompaniesStep({
     setSaving(true);
     setError(null);
     try {
+      const { hadFailure } = await reconcileCompanyProposalDecisions({
+        companies,
+        removedProposals,
+      });
       await saveCandidateFile("targeting", { tracked_companies: companies.map((c) => c.name) });
-      showToast("Saved.");
+      if (hadFailure) {
+        showToast(
+          "Some company boards couldn't be confirmed — Roland will retry later.",
+          "warning"
+        );
+      } else {
+        showToast("Saved.");
+      }
       goNext();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
