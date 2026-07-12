@@ -44,6 +44,14 @@ function formatBase(value) {
   return `$${num}`;
 }
 
+// Raw $K figure alongside the display string above — the Jobs drawer's comp
+// pins need a real number to plot on the gauge, not a formatted "$200K"
+// string to re-parse. null when unset so callers never fabricate a number.
+function baseK(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.round(num / 1000) : null;
+}
+
 function compactLocation(location = {}, candidate = {}) {
   const modes = [];
   if (location.remote) modes.push("Remote");
@@ -97,6 +105,9 @@ export function buildSettingsSnapshot({
       minimumBase: formatBase(compensation.minimum_base),
       targetBase: formatBase(compensation.target_base),
       expectedBase: formatBase(compensation.expected_base),
+      minimumBaseK: baseK(compensation.minimum_base),
+      targetBaseK: baseK(compensation.target_base),
+      expectedBaseK: baseK(compensation.expected_base),
       workAuthorization: workAuthorization(authorization),
     },
     targeting: {

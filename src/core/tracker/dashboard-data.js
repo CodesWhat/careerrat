@@ -612,6 +612,27 @@ function buildSettingsStatus(settings = {}) {
   };
 }
 
+// The candidate's real compensation floor/target for the Jobs drawer's
+// Compensation Range pins (see compRangeView) — sourced from the settings
+// snapshot's raw $K figures (candidate/profile.yml's compensation.minimum_base
+// / target_base / expected_base, via settings-snapshot.mjs), never a
+// fabricated placeholder. floorK/askK are null when the candidate hasn't set
+// that field.
+function profileCompFromSettings(settings) {
+  const profile = settings?.profile || {};
+  const minimumBaseK = Number(profile.minimumBaseK);
+  const targetBaseK = Number(profile.targetBaseK);
+  const expectedBaseK = Number(profile.expectedBaseK);
+  return {
+    floorK: Number.isFinite(minimumBaseK) ? minimumBaseK : null,
+    askK: Number.isFinite(targetBaseK)
+      ? targetBaseK
+      : Number.isFinite(expectedBaseK)
+        ? expectedBaseK
+        : null,
+  };
+}
+
 function objectList(value) {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === "object") : [];
 }
@@ -3681,14 +3702,33 @@ function moneyBandK(value) {
 //   built      — no posted band; estimated from tracker comparables (compEstimate)
 //   needs-info — no posted band and no comparable data yet
 // floor + ask come from the persisted compEstimate (resolved arrangement floor +
-// target anchor) so they are real config values, not UI placeholders.
-function compRangeView(row, sourceRecord = {}) {
+// target anchor) when a skill has written one for this application; otherwise
+// they fall back to the candidate's own compensation config (profile.yml's
+// minimum_base / target_base / expected_base, passed in as profileComp) so the
+// pins are always a real number the candidate set, never a fabricated
+// placeholder. null when neither source has a value.
+function compRangeView(row, sourceRecord = {}, profileComp = {}) {
   const est =
     sourceRecord && typeof sourceRecord.compEstimate === "object"
       ? sourceRecord.compEstimate
       : null;
-  const floorK = est && Number.isFinite(Number(est.floorK)) ? Math.round(Number(est.floorK)) : null;
-  const askK = est && Number.isFinite(Number(est.askK)) ? Math.round(Number(est.askK)) : null;
+  // profileComp.floorK/askK are already `number | null` (see
+  // profileCompFromSettings) — check for null explicitly before Number()
+  // coercion, since Number(null) is 0 (finite), not NaN.
+  const profileFloorK = profileComp.floorK != null ? Number(profileComp.floorK) : null;
+  const profileAskK = profileComp.askK != null ? Number(profileComp.askK) : null;
+  const floorK =
+    est && Number.isFinite(Number(est.floorK))
+      ? Math.round(Number(est.floorK))
+      : Number.isFinite(profileFloorK)
+        ? Math.round(profileFloorK)
+        : null;
+  const askK =
+    est && Number.isFinite(Number(est.askK))
+      ? Math.round(Number(est.askK))
+      : Number.isFinite(profileAskK)
+        ? Math.round(profileAskK)
+        : null;
 
   const postedBand = moneyBandK(row.comp);
   if (postedBand) {
@@ -4012,8 +4052,14 @@ function buildHealthBadge(ch) {
   return { rating: ch.rating, label: word, title: `Company health: ${scope} — internal signal` };
 }
 
-function jobDetailFromRow(row, sourceRecord = {}, communications = [], now = new Date()) {
-  const compView = compRangeView(row, sourceRecord);
+function jobDetailFromRow(
+  row,
+  sourceRecord = {},
+  communications = [],
+  now = new Date(),
+  profileComp = {}
+) {
+  const compView = compRangeView(row, sourceRecord, profileComp);
   const artifacts = sourceRecord.artifacts || {};
   const artifactList = [
     artifacts.jd || artifacts.jobDescription
@@ -4141,8 +4187,11 @@ function jobDetailFromRow(row, sourceRecord = {}, communications = [], now = new
     // Re-derive action live from canonical tracker.json fields so the drawer
     // always reflects current state, not a stale build-time snapshot in row.action.
     nextAction: buildJobAction(row, sourceRecord, communications, now),
-    floor: compView.floorK ?? 200,
-    ask: compView.askK ?? (row.fit >= 85 ? 230 : row.fit >= 75 ? 215 : 200),
+    // null when neither a persisted compEstimate nor the candidate's own
+    // compensation config has a value — never a fabricated placeholder number
+    // (see compRangeView). The drawer renders that as a "Needs info" pin.
+    floor: compView.floorK,
+    ask: compView.askK,
     marketLo: compView.marketLo,
     marketP50: compView.marketP50,
     marketHi: compView.marketHi,
@@ -4187,7 +4236,7 @@ function jobDetailFromRow(row, sourceRecord = {}, communications = [], now = new
   };
 }
 
-function applicationJobRow(app, index, communications = [], now = new Date()) {
+function applicationJobRow(app, index, communications = [], now = new Date(), profileComp = {}) {
   const statusStage = classifyStage(app.status);
   const {
     stage,
@@ -4275,10 +4324,10 @@ function applicationJobRow(app, index, communications = [], now = new Date()) {
     .join(" ")
     .toLowerCase();
   row.tooltip = jobTooltip(row);
-  return { ...row, drawer: jobDetailFromRow(row, app, communications, now) };
+  return { ...row, drawer: jobDetailFromRow(row, app, communications, now, profileComp) };
 }
 
-function sourcedJobRow(role, index, now = new Date()) {
+function sourcedJobRow(role, index, now = new Date(), profileComp = {}) {
   const status = role.status || "sourced";
   const stage = classifyStage(
     status === "prospect" || status === "saved" || status === "gated" ? "" : status
@@ -4346,7 +4395,7 @@ function sourcedJobRow(role, index, now = new Date()) {
     .join(" ")
     .toLowerCase();
   row.tooltip = jobTooltip(row);
-  return { ...row, drawer: jobDetailFromRow(row, role, [], now) };
+  return { ...row, drawer: jobDetailFromRow(row, role, [], now, profileComp) };
 }
 
 function communicationsForApplication(app, communications = []) {
@@ -4841,13 +4890,19 @@ function buildJobsRail(rows) {
   };
 }
 
-function buildJobs(trackerData, { now = new Date(), activityEvents = [] } = {}) {
+function buildJobs(trackerData, { now = new Date(), activityEvents = [], profileComp = {} } = {}) {
   const communications = trackerData?.communications || [];
   const applicationRows = (trackerData?.applications || []).map((app, index) =>
-    applicationJobRow(app, index, communicationsForApplication(app, communications), now)
+    applicationJobRow(
+      app,
+      index,
+      communicationsForApplication(app, communications),
+      now,
+      profileComp
+    )
   );
   const sourcedRows = (trackerData?.sourced || trackerData?.prospects || []).map((role, index) =>
-    sourcedJobRow(role, index, now)
+    sourcedJobRow(role, index, now, profileComp)
   );
   const activeRows = applicationRows.filter((row) => !row.terminal);
   const activeSourcedRows = sourcedRows.filter((row) => !row.terminal);
@@ -4954,7 +5009,11 @@ export function buildDashboardViewModel(
     reviewHoldRoles: buildReviewHoldRoles(trackerData),
     calendar: buildCalendar(trackerData, { now }),
     strategy: buildStrategyInsights(trackerData, { now }),
-    jobs: buildJobs(trackerData, { now, activityEvents }),
+    jobs: buildJobs(trackerData, {
+      now,
+      activityEvents,
+      profileComp: profileCompFromSettings(settings),
+    }),
     network: buildNetwork(trackerData, { now }),
     // No limit: keep the full history so the "View all" drawer is complete; the
     // dock view-model slices to DASHBOARD_ACTIVITY_LIMIT at render time.

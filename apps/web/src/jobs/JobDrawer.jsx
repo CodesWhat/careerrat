@@ -490,13 +490,19 @@ function CompBar({ drawer }) {
   const hasMarket = drawer.compHasMarket !== false && marketP50 != null;
   const marketLo = hasMarket ? (toCompNumber(drawer.marketLo) ?? marketP50) : null;
   const marketHi = hasMarket ? (toCompNumber(drawer.marketHi) ?? marketP50) : null;
-  const floor = floorValue ?? 200;
-  const ask = askValue ?? 215;
-  const lo = hasMarket ? Math.min(floor, marketLo) - 10 : Math.min(floor, ask) - 10;
-  const hi = hasMarket ? Math.max(ask, marketHi) + 10 : Math.max(floor, ask) + 10;
+  const state = drawer.compState || (hasMarket ? "posted" : "needs-info");
+
+  // The gauge scale is anchored off whatever real numbers are actually
+  // present — never a fabricated placeholder floor/ask. When nothing anchors
+  // the scale (no floor, no ask, no market), skip the track entirely and
+  // fall back to the pins row, which already renders its own "Needs info"
+  // state per pin.
+  const anchors = [floorValue, askValue, marketLo, marketHi].filter((value) => value != null);
+  const hasScale = anchors.length > 0;
+  const lo = hasScale ? Math.min(...anchors) - 10 : 0;
+  const hi = hasScale ? Math.max(...anchors) + 10 : 1;
   const range = hi - lo || 1;
   const pct = (value) => `${Math.max(0, Math.min(100, ((value - lo) / range) * 100)).toFixed(1)}%`;
-  const state = drawer.compState || (hasMarket ? "posted" : "needs-info");
 
   return (
     <div className="job-drawer__comp-bar" data-state={state}>
@@ -504,22 +510,26 @@ function CompBar({ drawer }) {
         <span>{compBarBadge(drawer, state)}</span>
         {drawer.compBasis ? <small>{drawer.compBasis}</small> : null}
       </div>
-      {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: decorative range visualization, not a form control group */}
-      <div aria-label="Compensation range" className="job-drawer__comp-track">
-        {hasMarket ? (
-          <>
-            <span
-              className="job-drawer__comp-market"
-              style={{
-                left: pct(marketLo),
-                width: `${Math.max(0, ((marketHi - marketLo) / range) * 100).toFixed(1)}%`,
-              }}
-            />
-            <span className="job-drawer__comp-p50" style={{ left: pct(marketP50) }} />
-          </>
-        ) : null}
-        <span className="job-drawer__comp-marker" style={{ left: pct(ask) }} />
-      </div>
+      {hasScale ? (
+        // biome-ignore lint/a11y/useAriaPropsSupportedByRole: decorative range visualization, not a form control group
+        <div aria-label="Compensation range" className="job-drawer__comp-track">
+          {hasMarket ? (
+            <>
+              <span
+                className="job-drawer__comp-market"
+                style={{
+                  left: pct(marketLo),
+                  width: `${Math.max(0, ((marketHi - marketLo) / range) * 100).toFixed(1)}%`,
+                }}
+              />
+              <span className="job-drawer__comp-p50" style={{ left: pct(marketP50) }} />
+            </>
+          ) : null}
+          {askValue != null ? (
+            <span className="job-drawer__comp-marker" style={{ left: pct(askValue) }} />
+          ) : null}
+        </div>
+      ) : null}
       <div className="job-drawer__comp-pins">
         <CompPin label="Floor" value={floorValue} />
         <CompPin label="Mkt P50" value={hasMarket ? marketP50 : null} />
