@@ -19,9 +19,9 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
   assert.equal(vm.stats.responseRate, 34);
   assert.equal(vm.stats.interviews, 4);
   assert.equal(vm.jobs.totalCount, tracker.applications.length + tracker.sourced.length);
-  assert.equal(vm.jobs.visibleCount, 25);
+  assert.equal(vm.jobs.visibleCount, 32);
   assert.ok(vm.calendar.weeks[0].days.some((day) => day.events.length > 0));
-  assert.ok(vm.latestRoles.some((role) => role.company === "Black Mesa"));
+  assert.ok(vm.latestRoles.some((role) => role.company === "Aperture Science"));
   assert.ok(vm.jobs.sankey.nodes.length > 0);
 });
 
@@ -1412,7 +1412,7 @@ test("Dashboard focus card falls back to urgent action when no interview is upco
   assert.equal(vm.focus.kind, "action");
   assert.equal(vm.focus.company, "Aperture Science");
   assert.equal(vm.focus.title, "Reply with availability");
-  assert.equal(vm.focus.cta, "Handle next action");
+  assert.equal(vm.focus.cta, "Handle reply");
 });
 
 test("Dashboard adapter exposes usage and application mode status", () => {

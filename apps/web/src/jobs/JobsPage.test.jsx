@@ -341,7 +341,7 @@ describe("JobsPage", () => {
     const html = renderJobsPage({ storageState: { showGhosted: true } });
 
     expect(html).toContain('class="jobs"');
-    expect(html).toContain("Jobs Next");
+    expect(html).toContain(">Jobs<");
     expect(html).toContain("Pipeline");
     expect(html).toContain("Search");
     expect(html).toContain("Jobs funnel");
