@@ -376,3 +376,121 @@ export function deriveEvidenceSeed(parsed) {
 
   return { claims };
 }
+
+// ---------------------------------------------------------------------------
+// deriveTargetingSeed
+// ---------------------------------------------------------------------------
+
+const MAX_TARGETING_TITLES = 6;
+
+// Separators that can join a job title to the rest of a header line (company,
+// location, employment type, ...). Order here does not decide precedence —
+// splitTitleFromHeader() picks whichever candidate occurs earliest in the
+// line — this list just enumerates what counts as a separator at all.
+const TITLE_SEPARATORS = [
+  / — /, // em dash
+  / – /, // en dash
+  / - /, // spaced hyphen only (never a hyphenated word like "full-stack")
+  / \| /,
+  / @ /,
+  / at /i, // word-bounded via the surrounding spaces
+  /, /,
+];
+
+// Strip leading markdown heading markers (#, ##, ###), bold markers (**),
+// bullet chars, and whitespace, repeatedly, so combinations like
+// "- **Title**" reduce down to "Title**" (only leading markers are in
+// scope — trailing bold asterisks, if any, are left for the plausibility
+// check downstream).
+function stripLeadingMarkers(line) {
+  let s = line;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const noSpace = s.replace(/^\s+/, "");
+    if (noSpace !== s) {
+      s = noSpace;
+      changed = true;
+      continue;
+    }
+    const noHeading = s.replace(/^#{1,3}\s*/, "");
+    if (noHeading !== s) {
+      s = noHeading;
+      changed = true;
+      continue;
+    }
+    const noBold = s.replace(/^\*\*/, "");
+    if (noBold !== s) {
+      s = noBold;
+      changed = true;
+      continue;
+    }
+    const noBullet = s.replace(/^[-*•]\s*/, "");
+    if (noBullet !== s) {
+      s = noBullet;
+      changed = true;
+    }
+  }
+  return s;
+}
+
+// Split a cleaned header line on whichever known separator occurs earliest
+// in the string, returning the left segment (the candidate title). Returns
+// the whole line unchanged if no separator is present.
+function splitTitleFromHeader(line) {
+  let bestIndex = -1;
+  for (const re of TITLE_SEPARATORS) {
+    const m = line.match(re);
+    if (m && (bestIndex === -1 || m.index < bestIndex)) {
+      bestIndex = m.index;
+    }
+  }
+  return bestIndex === -1 ? line : line.slice(0, bestIndex);
+}
+
+// Matches a bare 19xx/20xx year, the tell for a date-range fragment leaking
+// into the candidate title (e.g. a header line with no separator at all).
+const DATE_RANGE_RE = /\b(19|20)\d{2}\b/;
+
+function isPlausibleTitle(candidate) {
+  if (!candidate) return false;
+  if (candidate.length > 60) return false;
+  if (/\d/.test(candidate)) return false;
+  if (candidate.includes("@")) return false;
+  if (/http/i.test(candidate)) return false;
+  if (DATE_RANGE_RE.test(candidate)) return false;
+  return true;
+}
+
+// Derive a targeting-role seed from parsed experience blocks: each block's
+// header line yields at most one plausible job title, generic separator/
+// plausibility heuristics only (no hardcoded title/keyword lists — this repo
+// stays domain-neutral). Returns null when no title survives so callers can
+// skip sending an empty seed.
+export function deriveTargetingSeed(parsed) {
+  const blocks = parsed?.sections?.experience || [];
+  const titles = [];
+  const seen = new Set();
+
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    const firstLine = lines.find((l) => l.trim() !== "");
+    if (!firstLine) continue;
+
+    const cleaned = stripLeadingMarkers(firstLine.trim());
+    const candidate = splitTitleFromHeader(cleaned).trim();
+    if (!isPlausibleTitle(candidate)) continue;
+
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    titles.push(candidate);
+    if (titles.length >= MAX_TARGETING_TITLES) break;
+  }
+
+  if (!titles.length) return null;
+
+  return {
+    role_buckets: [{ name: "Primary", priority: "primary", titles }],
+  };
+}

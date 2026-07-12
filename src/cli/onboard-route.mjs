@@ -93,6 +93,7 @@ import { buildSearchSources } from "../core/profile/generate-search-sources.mjs"
 import {
   deriveEvidenceSeed,
   deriveProfileSeed,
+  deriveTargetingSeed,
   parseResume,
 } from "../core/profile/resume-parser.mjs";
 import { validate } from "../core/profile/schema-validator.mjs";
@@ -1159,6 +1160,8 @@ export function mountOnboardRoutes({
     const parsed = parseResume(text);
     const profileSeed = deriveProfileSeed(parsed);
     const evidenceSeed = deriveEvidenceSeed(parsed);
+    const rawTargetingSeed = deriveTargetingSeed(parsed);
+    const targetingSeed = rawTargetingSeed ? normalizeTargetingSeed(rawTargetingSeed) : null;
     const resumeDocument = buildResumeDocumentFromParsed(parsed);
     const sections = {
       experience: parsed.sections.experience.length,
@@ -1189,7 +1192,13 @@ export function mountOnboardRoutes({
       }
     }
 
-    sendJson(res, 200, { profileSeed, evidenceSeed, sections, resumeDocument });
+    sendJson(res, 200, {
+      profileSeed,
+      evidenceSeed,
+      sections,
+      resumeDocument,
+      ...(targetingSeed?.role_buckets?.length ? { targetingSeed } : {}),
+    });
   });
 
   // -------------------------------------------------------------------------
@@ -1262,6 +1271,8 @@ export function mountOnboardRoutes({
     const parsed = parseResume(text);
     const profileSeed = deriveProfileSeed(parsed);
     const evidenceSeed = deriveEvidenceSeed(parsed);
+    const rawTargetingSeed = deriveTargetingSeed(parsed);
+    const targetingSeed = rawTargetingSeed ? normalizeTargetingSeed(rawTargetingSeed) : null;
     const resumeDocument = buildResumeDocumentFromParsed(parsed);
     const sections = {
       experience: parsed.sections.experience.length,
@@ -1300,6 +1311,7 @@ export function mountOnboardRoutes({
       resumeDocument,
       source: "docx",
       savedPath: savedRelPath,
+      ...(targetingSeed?.role_buckets?.length ? { targetingSeed } : {}),
     });
   });
 
