@@ -365,6 +365,36 @@ test("runBoundedAI maps no-AI route errors to a 501 manual envelope without mark
   assertNoSensitiveFields(result.body);
 });
 
+test("runBoundedAI maps cap errors to a non-retryable 402 manual envelope without marking AI used", async () => {
+  const err = new Error(
+    "This beta account has reached its usage cap. Contact the person who invited you to raise it."
+  );
+  err.code = BOUNDED_AI_CODES.AI_CAP_EXCEEDED;
+  err.retryable = false;
+  let attempts = 0;
+
+  const result = await runBoundedAI({
+    labels: LABELS,
+    schema: SEED_SCHEMA,
+    manual: MANUAL,
+    maxRetries: 3,
+    invoke: async () => {
+      attempts++;
+      throw err;
+    },
+  });
+
+  assert.equal(attempts, 1);
+  assert.equal(result.status, 402);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.code, BOUNDED_AI_CODES.AI_CAP_EXCEEDED);
+  assert.match(result.body.error.message, /reached its usage cap/i);
+  assert.equal(result.body.ai.used, false);
+  assert.equal(result.body.ai.retried, false);
+  assert.deepEqual(result.body.manual, MANUAL);
+  assertNoSensitiveFields(result.body);
+});
+
 test("runBoundedAI maps generic provider errors to a safe 502 manual envelope", async () => {
   const result = await runBoundedAI({
     labels: LABELS,

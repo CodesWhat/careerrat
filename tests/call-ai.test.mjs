@@ -151,7 +151,7 @@ function sseFixture(model) {
 // Records every request's headers+body, replies JSON or SSE depending on the
 // request body's `stream` flag — good enough to stand in for either Anthropic
 // itself (BYOK) or the proxy (proxy path), since both hit the same shape.
-function startMockUpstream() {
+function startMockUpstream({ status = 200, responseBody = null } = {}) {
   const requests = [];
   const server = createServer((req, res) => {
     const chunks = [];
@@ -171,7 +171,10 @@ function startMockUpstream() {
         body: parsed,
       });
 
-      if (parsed.stream) {
+      if (status !== 200) {
+        res.writeHead(status, { "content-type": "application/json" });
+        res.end(JSON.stringify(responseBody));
+      } else if (parsed.stream) {
         res.writeHead(200, { "content-type": "text/event-stream" });
         res.end(sseFixture(parsed.model));
       } else {
@@ -226,6 +229,64 @@ test("callAI: throws the resolveAIRoute error when no route is configured", asyn
     () => callAI({ model: "claude-haiku-4-5", messages: [], maxTokens: 8, env: {} }),
     /no AI route configured/
   );
+});
+
+test("callAI: maps proxy cap responses to a friendly non-retryable AI_CAP_EXCEEDED error", async () => {
+  const upstream = await startMockUpstream({
+    status: 402,
+    responseBody: {
+      type: "error",
+      error: {
+        type: "cap_exceeded",
+        message:
+          "This beta account has reached its usage cap. Contact the person who invited you to raise it.",
+      },
+    },
+  });
+  try {
+    await assert.rejects(
+      () =>
+        callAI({
+          model: "claude-haiku-4-5",
+          messages: [],
+          maxTokens: 8,
+          env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "fake-token" },
+        }),
+      (err) => {
+        assert.equal(err.code, "AI_CAP_EXCEEDED");
+        assert.equal(err.retryable, false);
+        assert.match(err.message, /reached its usage cap/i);
+        return true;
+      }
+    );
+  } finally {
+    upstream.close();
+  }
+});
+
+test("callAI: non-cap proxy errors retain the generic failure behavior", async () => {
+  const upstream = await startMockUpstream({
+    status: 402,
+    responseBody: { type: "error", error: { type: "payment_required", message: "generic" } },
+  });
+  try {
+    await assert.rejects(
+      () =>
+        callAI({
+          model: "claude-haiku-4-5",
+          messages: [],
+          maxTokens: 8,
+          env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "fake-token" },
+        }),
+      (err) => {
+        assert.equal(err.code, undefined);
+        assert.match(err.message, /AI request failed: 402/);
+        return true;
+      }
+    );
+  } finally {
+    upstream.close();
+  }
 });
 
 // ---------------------------------------------------------------------------

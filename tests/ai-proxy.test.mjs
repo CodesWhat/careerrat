@@ -15,13 +15,13 @@
 
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createProxyServer } from "../src/cli/ai-proxy.mjs";
-import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
+import { computeCost, readUsageEvents, usageLogAbsPath } from "../src/core/ai/usage-log.mjs";
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "rolester-ai-proxy-"));
@@ -364,6 +364,8 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
     assert.equal(upReq.headers["x-rolester-skill"], undefined);
     assert.equal(upReq.headers["x-rolester-action"], undefined);
     assert.equal(upReq.headers["x-rolester-operation"], undefined);
+    assert.equal(upReq.headers["ai-reporting-user"], undefined);
+    assert.equal(upReq.headers["ai-reporting-tags"], undefined);
 
     const expected = computeCost("claude-sonnet-5", {
       tokens_in: 1000,
@@ -388,6 +390,263 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
     assert.equal(events[0].upstream, new URL(upstream.url).host); // cost-drift visibility
   } finally {
     proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: multi-token map and legacy token form one auth union; wrong tokens 401", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const proxy = await startProxy({
+    proxyToken: "fake-legacy-token",
+    proxyTokens: { alpha: "fake-alpha-token", beta: "fake-beta-token" },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+  });
+  try {
+    for (const token of ["fake-alpha-token", "fake-beta-token", "fake-legacy-token"]) {
+      const res = await fetch(`${proxy.url}/v1/messages`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+      });
+      assert.equal(res.status, 200);
+      await res.text();
+    }
+    const wrong = await fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: "Bearer fake-wrong-token", "content-type": "application/json" },
+      body: "{}",
+    });
+    assert.equal(wrong.status, 401);
+    await wrong.json();
+    assert.equal(upstream.requests.length, 3);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: usage attributes distinct token hashes and labels without persisting raw tokens", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const tokens = {
+    alpha: "fake-private-alpha-token",
+    beta: "fake-private-beta-token",
+    default: "fake-private-default-token",
+  };
+  const proxy = await startProxy({
+    proxyToken: tokens.default,
+    proxyTokens: { alpha: tokens.alpha, beta: tokens.beta },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+  });
+  try {
+    for (const token of [tokens.alpha, tokens.beta, tokens.default]) {
+      const res = await fetch(`${proxy.url}/v1/messages`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+      });
+      assert.equal(res.status, 200);
+      await res.text();
+    }
+
+    const events = readUsageEvents({ root });
+    assert.deepEqual(
+      events.map((event) => event.userLabel),
+      ["alpha", "beta", "default"]
+    );
+    assert.deepEqual(
+      events.map((event) => event.user),
+      [tokens.alpha, tokens.beta, tokens.default].map((token) =>
+        createHash("sha256").update(token, "utf8").digest("hex").slice(0, 12)
+      )
+    );
+    assert.equal(new Set(events.map((event) => event.user)).size, 3);
+
+    const meterFile = readFileSync(usageLogAbsPath(root), "utf8");
+    for (const token of Object.values(tokens)) assert.equal(meterFile.includes(token), false);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: forwards while under cap, then 402s the next request without upstream or identity leakage", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const token = "fake-capped-token";
+  const perRequestCost = computeCost("claude-sonnet-5", {
+    tokens_in: 1000,
+    tokens_out: 500,
+    cache_read_tokens: 100,
+    cache_creation_tokens: 200,
+  }).cost_usd;
+  const proxy = await startProxy({
+    proxyTokens: { cappedTester: token },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: perRequestCost,
+  });
+  try {
+    const request = () =>
+      fetch(`${proxy.url}/v1/messages`, {
+        method: "POST",
+        headers: {
+          authorization: `Bearer ${token}`,
+          "content-type": "application/json",
+          "x-rolester-skill": "fake-skill",
+        },
+        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+      });
+    const underCap = await request();
+    assert.equal(underCap.status, 200);
+    await underCap.text();
+    assert.equal(upstream.requests.length, 1);
+
+    const capped = await request();
+    assert.equal(capped.status, 402);
+    const body = await capped.json();
+    assert.equal(body.error.type, "cap_exceeded");
+    assert.equal(JSON.stringify(body).includes(token), false);
+    assert.equal(JSON.stringify(body).includes("cappedTester"), false);
+    assert.equal(upstream.requests.length, 1);
+    assert.equal(upstream.requests[0].headers["x-rolester-skill"], undefined);
+    assert.equal(upstream.requests[0].headers["ai-reporting-user"], undefined);
+    assert.equal(upstream.requests[0].headers["ai-reporting-tags"], undefined);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: per-label caps override global cap, including zero for unlimited", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const perRequestCost = computeCost("claude-sonnet-5", {
+    tokens_in: 1000,
+    tokens_out: 500,
+    cache_read_tokens: 100,
+    cache_creation_tokens: 200,
+  }).cost_usd;
+  const proxy = await startProxy({
+    proxyTokens: { strict: "fake-strict-token", unlimited: "fake-unlimited-token" },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: perRequestCost * 10,
+    userCaps: { strict: perRequestCost, unlimited: 0 },
+  });
+  const send = (token) =>
+    fetch(`${proxy.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+  try {
+    for (const expectedStatus of [200, 402]) {
+      const res = await send("fake-strict-token");
+      assert.equal(res.status, expectedStatus);
+      await res.text();
+    }
+    for (let i = 0; i < 2; i++) {
+      const res = await send("fake-unlimited-token");
+      assert.equal(res.status, 200);
+      await res.text();
+    }
+    assert.equal(upstream.requests.length, 3);
+  } finally {
+    proxy.close();
+    upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: absent and zero global caps are unlimited", async () => {
+  const upstream = await startMockUpstream();
+  const roots = [tempRoot(), tempRoot()];
+  const proxies = [];
+  try {
+    for (const [index, userCapUsd] of [undefined, 0].entries()) {
+      const proxy = await startProxy({
+        proxyToken: `fake-unlimited-${index}`,
+        upstreamKey: "sk-fake-upstream",
+        upstreamUrl: upstream.url,
+        meterRoot: roots[index],
+        userCapUsd,
+      });
+      proxies.push(proxy);
+      for (let i = 0; i < 2; i++) {
+        const res = await fetch(`${proxy.url}/v1/messages`, {
+          method: "POST",
+          headers: {
+            authorization: `Bearer fake-unlimited-${index}`,
+            "content-type": "application/json",
+          },
+          body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+        });
+        assert.equal(res.status, 200);
+        await res.text();
+      }
+    }
+    assert.equal(upstream.requests.length, 4);
+  } finally {
+    for (const proxy of proxies) proxy.close();
+    upstream.close();
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("createProxyServer: rehydrates per-user spend so caps survive restart", async () => {
+  const upstream = await startMockUpstream();
+  const root = tempRoot();
+  const token = "fake-restart-token";
+  const perRequestCost = computeCost("claude-sonnet-5", {
+    tokens_in: 1000,
+    tokens_out: 500,
+    cache_read_tokens: 100,
+    cache_creation_tokens: 200,
+  }).cost_usd;
+  const options = {
+    proxyTokens: { restartTester: token },
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    userCapUsd: perRequestCost,
+  };
+  let first;
+  let second;
+  try {
+    first = await startProxy(options);
+    const initial = await fetch(`${first.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(initial.status, 200);
+    await initial.text();
+    first.close();
+
+    second = await startProxy(options);
+    const afterRestart = await fetch(`${second.url}/v1/messages`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+      body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+    });
+    assert.equal(afterRestart.status, 402);
+    await afterRestart.json();
+    assert.equal(upstream.requests.length, 1);
+  } finally {
+    first?.close();
+    second?.close();
     upstream.close();
     rmSync(root, { recursive: true, force: true });
   }
