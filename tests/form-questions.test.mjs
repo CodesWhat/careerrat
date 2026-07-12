@@ -513,14 +513,19 @@ describe("parseManualQuestions", () => {
     );
   });
 
-  it("picks up bare lines only when they end in a question mark", () => {
+  it("picks up bare lines ending in a question mark, or reading as an imperative prompt", () => {
     const result = parseManualQuestions(
       "Please answer the following:\nWhat's your notice period?\nThanks for applying."
     );
     assert.deepEqual(
       result.questions.map((q) => q.label),
-      ["What's your notice period?"]
+      ["Please answer the following:", "What's your notice period?"]
     );
+  });
+
+  it("still drops a bare line that neither ends in '?' nor reads as an imperative prompt", () => {
+    const result = parseManualQuestions("Thanks for applying.\nWe look forward to your reply.");
+    assert.deepEqual(result.questions, []);
   });
 
   it("ignores blank lines and returns an empty list for non-question text", () => {

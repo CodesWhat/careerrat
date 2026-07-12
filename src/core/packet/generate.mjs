@@ -648,11 +648,20 @@ export async function generatePacket({
     context: packetContext,
     proposals: [
       ...(coverLetter.blocks || []).map((block) => ({ kind: "coverLetter", ...block })),
-      ...(answers.answers || []).map((answer) => ({
-        kind: "answer",
-        text: answer.answer,
-        evidenceIds: answer.evidenceIds || [],
-      })),
+      // Deterministic disclosure answers (work auth / sponsorship / salary
+      // floor / notice period) are structured facts sourced from onboarding,
+      // not AI claims needing an evidence citation — and a disclosure salary
+      // answer states the candidate's ask-side minimum_base floor, not
+      // current compensation, so it must never be run through the
+      // private-leak check either. Excluding them from proposals entirely
+      // covers both.
+      ...(answers.answers || [])
+        .filter((answer) => !answer.disclosure)
+        .map((answer) => ({
+          kind: "answer",
+          text: answer.answer,
+          evidenceIds: answer.evidenceIds || [],
+        })),
     ],
   });
   const lintGaps = Object.entries(sources).flatMap(([kind, markdown]) =>

@@ -1,5 +1,7 @@
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
+import { candidateConfigGet } from "../db/verbs.mjs";
 import { buildShortAnswer, forbiddenWordingFor } from "../documents/tailor.mjs";
+import { resolveDisclosureAnswer } from "./disclosure.mjs";
 import { buildPromptVisibleSources } from "./generate.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
 import { packetAnswerProposalSchema } from "./schemas/packet-schemas.mjs";
@@ -115,6 +117,58 @@ function manualAnswers(questions, reason) {
   return questions.map((question) => needsYouAnswer(question, reason));
 }
 
+// Best-effort persisted screening-answer lookup — screening_answers lives in
+// candidate form-defaults (DB-backed), not on the packet context, so this
+// needs its own repoRoot-scoped read. Callers that pass context only (no
+// repoRoot, e.g. unit tests) simply get no screening-answer match and fall
+// through to profile facts / the AI batch.
+function loadFormDefaults({ repoRoot, env }) {
+  if (!repoRoot) return null;
+  try {
+    return candidateConfigGet({ repoRoot, env })["form-defaults"] || null;
+  } catch {
+    return null;
+  }
+}
+
+function disclosureAnswerEntry(question, resolved) {
+  return {
+    questionId: String(question.id),
+    question: question.label,
+    answer: resolved.answer,
+    evidenceIds: [],
+    uploadReady: true,
+    gap: null,
+    disclosure: true,
+    source: resolved.source,
+  };
+}
+
+// Split captured questions into ones answerable deterministically (work
+// authorization / sponsorship / salary floor / notice period, resolved from
+// persisted screening answers or profile facts) and everything else, which
+// still goes to the AI exactly as before.
+function partitionDisclosureQuestions({ questions, formDefaults, profile }) {
+  const deterministic = [];
+  const aiBatch = [];
+  for (const question of questions) {
+    const resolved = resolveDisclosureAnswer(question, { formDefaults, profile });
+    if (resolved) {
+      deterministic.push(disclosureAnswerEntry(question, resolved));
+    } else {
+      aiBatch.push(question);
+    }
+  }
+  return { deterministic, aiBatch };
+}
+
+function mergeAnswersInOrder(answerable, deterministicMap, resolvedMap) {
+  return answerable.map((question) => {
+    const id = String(question.id);
+    return deterministicMap.get(id) || resolvedMap.get(id);
+  });
+}
+
 export async function draftPacketAnswers({
   repoRoot,
   env = process.env,
@@ -133,7 +187,28 @@ export async function draftPacketAnswers({
   capture = capture || { answerable: [], excluded: [] };
   const answerable = capture.answerable;
   const excludedQuestionIds = capture.excluded.map((q) => String(q.id));
-  const prompt = promptFor({ context, questions: answerable });
+
+  const formDefaults = loadFormDefaults({ repoRoot, env });
+  const profile = context?.profile || context?.candidate || {};
+  const { deterministic, aiBatch } = partitionDisclosureQuestions({
+    questions: answerable,
+    formDefaults,
+    profile,
+  });
+  const deterministicMap = new Map(deterministic.map((answer) => [answer.questionId, answer]));
+
+  if (aiBatch.length === 0) {
+    const answers = answerable.map((question) => deterministicMap.get(String(question.id)));
+    return {
+      answers,
+      excludedQuestionIds,
+      uploadReady: answers.every((answer) => answer.uploadReady),
+      ai: { used: false },
+      manual: { required: answers.some((answer) => !answer.uploadReady) },
+    };
+  }
+
+  const prompt = promptFor({ context, questions: aiBatch });
 
   const aiResult = await runAI({
     labels: LABELS,
@@ -157,10 +232,13 @@ export async function draftPacketAnswers({
   });
 
   if (!aiResult.body?.ok) {
-    const answers = manualAnswers(
-      answerable,
-      aiResult.body?.error?.message || "AI unavailable; answer manually"
+    const resolvedMap = new Map(
+      manualAnswers(
+        aiBatch,
+        aiResult.body?.error?.message || "AI unavailable; answer manually"
+      ).map((answer) => [answer.questionId, answer])
     );
+    const answers = mergeAnswersInOrder(answerable, deterministicMap, resolvedMap);
     return {
       answers,
       excludedQuestionIds,
@@ -175,15 +253,19 @@ export async function draftPacketAnswers({
   );
   const allowedEvidenceIds = evidenceIds(context);
   const forbidden = forbiddenForContext(context);
-  const answers = answerable.map((question) =>
-    normalizeAnswer({
-      proposal: proposals.get(String(question.id)),
-      question,
-      context,
-      allowedEvidenceIds,
-      forbidden,
-    })
+  const resolvedMap = new Map(
+    aiBatch.map((question) => [
+      String(question.id),
+      normalizeAnswer({
+        proposal: proposals.get(String(question.id)),
+        question,
+        context,
+        allowedEvidenceIds,
+        forbidden,
+      }),
+    ])
   );
+  const answers = mergeAnswersInOrder(answerable, deterministicMap, resolvedMap);
   return {
     answers,
     excludedQuestionIds,

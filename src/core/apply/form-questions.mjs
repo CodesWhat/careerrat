@@ -422,10 +422,22 @@ function normalizeAshbyEntry(entry) {
 // parseManualQuestions
 // ---------------------------------------------------------------------------
 
-// Numbered ("1.", "1)"), bulleted ("-", "*", "•"), or bare lines. Bare lines
-// only count as a question when they end in "?" — otherwise a pasted JD
-// paragraph would get chopped into false-positive "questions" line by line.
+// Numbered ("1.", "1)"), bulleted ("-", "*", "•"), or bare lines. A bare line
+// counts as a question when it ends in "?", OR when it reads as an
+// interrogative/imperative prompt: starts with a question stem (describe,
+// tell, why, what, please, ...), ends with ".", "?", or ":", and is 4-40
+// words long — this catches pasted imperative prompts like "Describe a
+// technical system you owned end-to-end and the impact it had." without
+// chopping a pasted JD paragraph into false-positive "questions" line by
+// line (JD paragraphs rarely open on a bare question stem, and the word-count
+// band keeps out both short paragraph fragments and long paragraph runs).
 const LIST_MARKER = /^\s*(?:\d+[.)]|[-*•])\s+/;
+const QUESTION_STEM =
+  /^(?:describe|tell|explain|share|walk|list|provide|outline|summarize|give|detail|why|what|how|when|where|which|who|do|does|are|is|have|has|will|would|can|could|please)\b/i;
+
+function wordCount(text) {
+  return text.split(/\s+/).filter(Boolean).length;
+}
 
 /**
  * Tolerant parse of a pasted question list (the Lever/Workday/other
@@ -449,7 +461,13 @@ export function parseManualQuestions(text, { url = "", fetchedAt } = {}) {
     if (!stripped) continue;
 
     const wasListMarked = stripped !== line;
-    if (!wasListMarked && !/\?\s*$/.test(stripped)) continue;
+    const endsQuestionMark = /\?\s*$/.test(stripped);
+    const isImperativePrompt =
+      QUESTION_STEM.test(stripped) &&
+      /[.?:]\s*$/.test(stripped) &&
+      wordCount(stripped) >= 4 &&
+      wordCount(stripped) <= 40;
+    if (!wasListMarked && !endsQuestionMark && !isImperativePrompt) continue;
 
     n += 1;
     questions.push({
