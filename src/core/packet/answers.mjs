@@ -149,7 +149,9 @@ export async function draftPacketAnswers({
     system:
       "Draft short application answers. Use NEEDS YOU when evidence is missing. Do not answer demographic or EEO prompts.",
     outputName: "packet_answer_proposals",
-    maxTokens: 1600,
+    // Sized for many-question forms: a mid-JSON max_tokens truncation parses
+    // as failure and every answer degrades to NEEDS YOU.
+    maxTokens: 3600,
     root: repoRoot,
     env,
   });

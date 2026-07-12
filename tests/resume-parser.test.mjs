@@ -223,7 +223,7 @@ test("every claim has the fixed evidence note", () => {
   const parsed = parseResume(RESUME);
   const { claims } = deriveEvidenceSeed(parsed);
   for (const c of claims) {
-    assert.equal(c.evidence, "Source: resume. Verify scope and outcome before use.");
+    assert.equal(c.evidence, "Source: candidate resume (user-provided).");
   }
 });
 

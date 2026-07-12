@@ -332,10 +332,44 @@ function stripBullet(line) {
   return line.replace(/^[\s\-*•]+/, "").trim();
 }
 
+function isBulletLine(line) {
+  return /^\s*[-*•]/.test(line);
+}
+
+// Resume text is usually hard-wrapped; a bullet's continuation lines are the
+// non-bullet lines that follow it. Join them back so each claim is a whole
+// accomplishment, not a mid-sentence fragment. Non-bullet lines that don't
+// follow a bullet (headers, date ranges) stand alone.
+function joinWrappedLines(lines) {
+  const logical = [];
+  let previousWasBullet = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      previousWasBullet = false;
+      continue;
+    }
+    if (isBulletLine(raw) || !previousWasBullet || !logical.length) {
+      logical.push(line);
+      previousWasBullet = isBulletLine(raw);
+    } else {
+      logical[logical.length - 1] += ` ${line}`;
+    }
+  }
+  return logical;
+}
+
+// A bare employment date range ("2021 - Present", "2018 – 2021") has digits
+// but is not an accomplishment.
+function isDateRange(line) {
+  return /^\d{4}\s*[-–—]\s*(\d{4}|present|current|now)$/i.test(line);
+}
+
 // Determine if a line qualifies as an accomplishment.
 function isAccomplishment(line) {
   const stripped = stripBullet(line);
   if (!stripped) return false;
+  if (isDateRange(stripped)) return false;
 
   // Check for a strong past-tense accomplishment verb early in the line.
   // We look at the first few words (up to 4) to find the verb.
@@ -359,7 +393,7 @@ export function deriveEvidenceSeed(parsed) {
   let counter = 1;
 
   for (const block of sources) {
-    const lines = block.split("\n");
+    const lines = joinWrappedLines(block.split("\n"));
     for (const line of lines) {
       if (!isAccomplishment(line)) continue;
       const claim = stripBullet(line);
@@ -368,7 +402,7 @@ export function deriveEvidenceSeed(parsed) {
       claims.push({
         id,
         claim,
-        evidence: "Source: resume. Verify scope and outcome before use.",
+        evidence: "Source: candidate resume (user-provided).",
       });
       counter++;
     }

@@ -304,7 +304,10 @@ export async function draftCoverLetterBlocks({
     system:
       'Draft cover letter blocks. Every block must list at least one id from confirmedEvidence.claims in its evidenceIds array, and only ids from that list. If a block cannot be grounded in a listed claim, start its text with "NEEDS YOU:" and leave evidenceIds empty. Do not include private compensation or unconfirmed claims.',
     outputName: "packet_cover_letter_blocks",
-    maxTokens: 1800,
+    // A full multi-block letter plus JSON overhead regularly exceeds 1800
+    // tokens; a mid-JSON max_tokens truncation parses as failure and the
+    // whole draft degrades to a NEEDS YOU punt.
+    maxTokens: 4000,
     root: repoRoot,
     env,
   });
