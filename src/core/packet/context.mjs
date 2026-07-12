@@ -1,15 +1,17 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, normalize, relative, sep } from "node:path";
-import { appRegisterArtifact } from "../db/verbs.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
-import { resolveUserPaths } from "../paths/workspace.mjs";
+import { appRegisterArtifact, candidateArtifactGet, candidateConfigGet } from "../db/verbs.mjs";
 import { parseSavedJob } from "../evaluate/gate.mjs";
+import { resolveUserPaths } from "../paths/workspace.mjs";
 
 const JOB_BODY_MIN_CHARS = 40;
 
 function cleanText(value) {
-  return String(value || "").replace(/\r\n/g, "\n").trim();
+  return String(value || "")
+    .replace(/\r\n/g, "\n")
+    .trim();
 }
 
 function slugPart(value) {
@@ -154,6 +156,15 @@ export function buildPacketContext({
     }
   }
 
+  const config = candidateConfigGet({ repoRoot, env });
+  const candidate = withoutCurrentComp(config.profile || {});
+  const sourceResume = candidateArtifactGet({
+    repoRoot,
+    env,
+    id: "source-resume",
+    kind: "source-resume",
+  });
+
   return {
     applicationId,
     app: {
@@ -175,8 +186,12 @@ export function buildPacketContext({
         comp: app.compNote ?? "",
       },
     },
-    candidate: withoutCurrentComp(tracker.candidate || tracker.profile || {}),
-    targeting: withoutCurrentComp(tracker.targeting || {}),
+    candidate,
+    profile: candidate,
+    targeting: withoutCurrentComp(config.targeting || {}),
+    evidence: { claims: config.evidence?.claims || [] },
+    ...(config.honesty ? { honesty: config.honesty } : {}),
+    ...(sourceResume ? { sourceResume } : {}),
   };
 }
 

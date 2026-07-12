@@ -19,6 +19,7 @@ export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {
   candidateApplicationLimitUpsert,
   candidateArtifactExists,
+  candidateArtifactGet,
   candidateArtifactPut,
   candidateConfigGet,
   candidateConfigPatch,

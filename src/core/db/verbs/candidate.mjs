@@ -769,3 +769,18 @@ export function candidateArtifactExists({ repoRoot, env, id, kind } = {}) {
   }
   return !!db.prepare("SELECT 1 FROM candidate_artifacts WHERE kind = ? LIMIT 1").get(String(kind));
 }
+
+export function candidateArtifactGet({ repoRoot, env, id, kind } = {}) {
+  if (!id && !kind) return null;
+  const db = requireDb({ repoRoot, env });
+  let row = null;
+  if (id) {
+    row = db.prepare("SELECT data FROM candidate_artifacts WHERE id = ?").get(String(id));
+  }
+  if (!row && kind) {
+    row = db
+      .prepare("SELECT data FROM candidate_artifacts WHERE kind = ? LIMIT 1")
+      .get(String(kind));
+  }
+  return row ? JSON.parse(row.data) : null;
+}

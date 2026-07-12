@@ -302,7 +302,7 @@ export async function draftCoverLetterBlocks({
     call,
     messages: [{ role: "user", content: promptForCoverLetter(context) }],
     system:
-      "Draft cover letter blocks. Use only confirmed evidence IDs. Do not include private compensation or unconfirmed claims.",
+      'Draft cover letter blocks. Every block must list at least one id from confirmedEvidence.claims in its evidenceIds array, and only ids from that list. If a block cannot be grounded in a listed claim, start its text with "NEEDS YOU:" and leave evidenceIds empty. Do not include private compensation or unconfirmed claims.',
     outputName: "packet_cover_letter_blocks",
     maxTokens: 1800,
     root: repoRoot,
@@ -326,16 +326,27 @@ export async function draftCoverLetterBlocks({
     context,
     proposals: blocks.map((block) => ({ kind: "coverLetter", ...block })),
   });
-  if (!blocks.length || !validation.ok) {
+  // A block the model honestly marked NEEDS YOU is a confirmation gap, not a
+  // contract violation — keep it (and the grounded blocks around it) inline,
+  // the way the answers flow does. Only hard violations (missing/unknown
+  // evidence IDs, private leaks, forbidden wording) discard the draft.
+  const hardGaps = validation.gaps.filter((gap) => gap.message !== "user confirmation is required");
+  if (!blocks.length || hardGaps.length) {
     return {
-      blocks: [needsYouBlock(validation.gaps[0]?.message || "confirm cover-letter evidence")],
+      blocks: [needsYouBlock(hardGaps[0]?.message || "confirm cover-letter evidence")],
       uploadReady: false,
       ai: aiResult.body.ai,
       manual: { required: true },
       gaps: validation.gaps,
     };
   }
-  return { blocks, uploadReady: true, ai: aiResult.body.ai, manual: { required: false } };
+  return {
+    blocks,
+    uploadReady: validation.ok,
+    ai: aiResult.body.ai,
+    manual: { required: !validation.ok },
+    ...(validation.ok ? {} : { gaps: validation.gaps }),
+  };
 }
 
 function questionLabelById(capture) {
@@ -600,6 +611,13 @@ export async function generatePacket({
     context: packetContext,
     questionCapture,
   });
+  if (!capture.path && !capture.questions.length) {
+    const err = new Error(
+      `no application questions captured for "${id}" — capture the form questions first (packet questions step) and retry`
+    );
+    err.code = "BAD_QUESTION_CAPTURE";
+    throw err;
+  }
   const sourceMap = enumeratePacketSources(packetContext, capture);
   const sourceSplit = splitConfirmedAndProposedPacketSources(sourceMap);
   const coverLetter = await coverDraft({
