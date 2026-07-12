@@ -19,6 +19,14 @@
 // via ROLESTER_UPSTREAM_URL + ROLESTER_UPSTREAM_HEADERS carrying
 // x-portkey-config — needs no code change here.
 //
+// The per-request pipeline (auth, upstream header injection/stripping, SSE
+// usage parsing, the metering row shape) lives in src/cli/proxy-core.mjs,
+// shared with the Vercel serverless front end at apps/proxy-vercel/. This
+// file owns everything specific to being a long-lived node:http process: the
+// in-memory per-user spend accumulator (hydrated from the meter at boot so a
+// restart doesn't reset caps), the JSONL fallback sink, and main()'s env
+// parsing + socket binding.
+//
 // Usage:
 //   ROLESTER_PROXY_TOKEN=devtoken ROLESTER_UPSTREAM_KEY=sk-ant-... npm run ai-proxy
 //
@@ -82,7 +90,6 @@
 // main() is the only caller that reads env, validates it, and binds a socket, and
 // only runs when this file is the entry script (see the import.meta.url guard).
 
-import { createHash, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { extractSSEEvents } from "../core/ai/call-ai.mjs";
@@ -93,36 +100,27 @@ import {
   readUsageEvents,
 } from "../core/ai/usage-log.mjs";
 import { createDbMeter } from "./meter-db.mjs";
-
-const ANTHROPIC_VERSION = "2023-06-01";
-
-// Headers that are either transport-specific (must not be forwarded verbatim
-// through fetch) or carry the client's own auth/metering labels (must never
-// reach the upstream provider or leak which skill/action is asking).
-const STRIPPED_INBOUND_HEADERS = new Set([
-  "authorization",
-  "x-api-key",
-  "host",
-  "connection",
-  "content-length",
-  "transfer-encoding",
-  "keep-alive",
-  "upgrade",
-  "te",
-  "trailer",
-  "proxy-authenticate",
-  "proxy-authorization",
-]);
-
-// Response headers we don't pass through: they describe the upstream
-// connection/encoding, not the body we're re-serving byte-for-byte over ours.
-const STRIPPED_RESPONSE_HEADERS = new Set([
-  "connection",
-  "transfer-encoding",
-  "content-length",
-  "content-encoding",
-  "keep-alive",
-]);
+import {
+  applyNonStreamUsage,
+  applySSEUsageEvent,
+  authenticate,
+  buildCapExceededBody,
+  buildResponseHeaders,
+  buildTokenEntries,
+  buildUpstreamHeaders,
+  buildUsageRow,
+  fireAndForgetDbWrite,
+  newUsageAccumulator,
+  normalizeUpstreamBase,
+  parseProxyTokensEnv,
+  parseUpstreamHeadersEnv,
+  parseUserCapsEnv,
+  parseUserCapUsdEnv,
+  reportingUserId,
+  resolveUpstreamHost,
+  resolveUserCap,
+  shouldMeterRequest,
+} from "./proxy-core.mjs";
 
 function log(msg) {
   // Never interpolate request/response bodies here — see the privacy invariant above.
@@ -134,67 +132,16 @@ function sendJson(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-// Fixed-length digest compare: avoids both a length-branch timing leak and
-// timingSafeEqual's own throw-on-mismatched-length-buffers behavior.
-function digest(s) {
-  return createHash("sha256")
-    .update(String(s ?? ""), "utf8")
-    .digest();
-}
-function tokensMatch(provided, expected) {
-  return timingSafeEqual(digest(provided), digest(expected));
-}
-
-// Accepts the proxy token two ways: `authorization: Bearer <token>` (how
-// call-ai.mjs's own proxy route sends it) or a bare `x-api-key: <token>` —
-// the header the real Anthropic SDK client sends when ANTHROPIC_API_KEY is
-// set (verified against the installed @anthropic-ai/claude-agent-sdk bundle,
-// not assumed), which is how the embedded skill runtime (P0-4) routes the
-// Agent SDK's own traffic through this proxy without an Authorization header
-// at all. Shared with buildUpstreamHeaders() below, which hashes whichever
-// token was actually presented into the (opt-in) ai-reporting-user header.
-function extractProvidedToken(headers) {
-  const header = String(headers.authorization || "");
-  const match = /^Bearer\s+(.+)$/i.exec(header.trim());
-  const bearer = match ? match[1] : "";
-  const apiKey = String(headers["x-api-key"] || "").trim();
-  return bearer || apiKey;
-}
-
-// Builds the effective set of valid (label, token) pairs from the two config
-// surfaces: the single ROLESTER_PROXY_TOKEN (labeled "default" for usage-log
-// attribution) and the multi-tester ROLESTER_PROXY_TOKENS map. Both may be
-// set at once — the valid token set is their union. Labels are operator-
-// facing only and are never sent upstream.
-function buildTokenEntries(proxyToken, proxyTokens) {
-  const entries = [];
-  const single = String(proxyToken || "").trim();
-  if (single) entries.push({ label: "default", token: single });
-  for (const [label, token] of Object.entries(proxyTokens || {})) {
-    const t = String(token || "").trim();
-    if (t) entries.push({ label: String(label || "").trim() || "default", token: t });
-  }
-  return entries;
-}
-
-// Checks the presented token against every configured (label, token) pair —
-// never breaks early on a match, so auth timing doesn't vary with how many
-// testers are configured or which one matched. On success returns the
-// matched entry's label + the raw provided token (for reportingUserId() and
-// the cap check downstream); on failure sends 401 and returns null.
+// Checks the presented token against every configured (label, token) pair
+// (proxy-core's authenticate(), pure) and writes the 401 response on failure
+// — the node:http-specific half of auth.
 function requireAuth(req, res, tokenEntries) {
-  const provided = extractProvidedToken(req.headers);
-  let matchedLabel = null;
-  if (provided) {
-    for (const { label, token } of tokenEntries) {
-      if (tokensMatch(provided, token)) matchedLabel = label;
-    }
-  }
-  if (!matchedLabel) {
+  const auth = authenticate(req.headers, tokenEntries);
+  if (!auth) {
     sendJson(res, 401, { error: "unauthorized" });
     return null;
   }
-  return { label: matchedLabel, token: provided };
+  return auth;
 }
 
 function readRequestBody(req) {
@@ -204,59 +151,6 @@ function readRequestBody(req) {
     req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
-}
-
-// First 12 hex chars of sha256(token) — stable per token, never the token
-// itself. Long enough to attribute usage per-caller at the gateway without
-// being reversible or colliding across a realistic number of proxy tokens.
-function reportingUserId(token) {
-  return createHash("sha256").update(String(token), "utf8").digest("hex").slice(0, 12);
-}
-
-// "skill:x,action:y" from the x-rolester-* labels, or null when neither is
-// present — never emit an empty ai-reporting-tags header.
-function buildReportingTags(inboundHeaders) {
-  const tags = [];
-  const feature = inboundHeaders["x-rolester-feature"];
-  const skill = inboundHeaders["x-rolester-skill"];
-  const action = inboundHeaders["x-rolester-action"];
-  const operation = inboundHeaders["x-rolester-operation"];
-  if (feature) tags.push(`feature:${Array.isArray(feature) ? feature.join(",") : feature}`);
-  if (skill) tags.push(`skill:${Array.isArray(skill) ? skill.join(",") : skill}`);
-  if (action) tags.push(`action:${Array.isArray(action) ? action.join(",") : action}`);
-  if (operation)
-    tags.push(`operation:${Array.isArray(operation) ? operation.join(",") : operation}`);
-  return tags.length ? tags.join(",") : null;
-}
-
-function buildUpstreamHeaders(
-  inboundHeaders,
-  upstreamKey,
-  extraHeaders,
-  { env = process.env } = {}
-) {
-  const out = {};
-  for (const [key, value] of Object.entries(inboundHeaders)) {
-    if (value === undefined) continue;
-    const k = key.toLowerCase();
-    if (STRIPPED_INBOUND_HEADERS.has(k)) continue;
-    if (k.startsWith("x-rolester-")) continue;
-    out[key] = Array.isArray(value) ? value.join(", ") : value;
-  }
-  out["x-api-key"] = upstreamKey;
-  out["anthropic-version"] = inboundHeaders["anthropic-version"] || ANTHROPIC_VERSION;
-  Object.assign(out, extraHeaders || {});
-
-  // Opt-in Vercel AI Gateway attribution headers — see the ROLESTER_UPSTREAM_REPORTING
-  // doc at the top of this file. Off by default; harmless to other upstreams.
-  if (String(env.ROLESTER_UPSTREAM_REPORTING || "").trim() === "1") {
-    const providedToken = extractProvidedToken(inboundHeaders);
-    if (providedToken) out["ai-reporting-user"] = reportingUserId(providedToken);
-    const tags = buildReportingTags(inboundHeaders);
-    if (tags) out["ai-reporting-tags"] = tags;
-  }
-
-  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -288,23 +182,13 @@ export function createProxyServer({
   // optional per-label overrides (ROLESTER_PROXY_USER_CAPS). 0/absent = no cap.
   const globalUserCap = Number.isFinite(userCapUsd) && userCapUsd > 0 ? userCapUsd : null;
   function capForUser(label) {
-    if (label && Object.hasOwn(userCaps, label)) {
-      const override = Number(userCaps[label]);
-      return Number.isFinite(override) && override > 0 ? override : null;
-    }
-    return globalUserCap;
+    return resolveUserCap({ label, globalUserCap, userCaps });
   }
 
-  const base = upstreamUrl.replace(/\/+$/, "");
+  const base = normalizeUpstreamBase(upstreamUrl);
   // Host of the upstream base URL, for the usage log's `upstream` field (cost-
   // drift visibility across providers) — never throws on a malformed URL.
-  const upstreamHost = (() => {
-    try {
-      return new URL(base).host || null;
-    } catch {
-      return null;
-    }
-  })();
+  const upstreamHost = resolveUpstreamHost(base);
 
   // Optional DB sink — see the ROLESTER_METER_DB_* env docs above. Both a URL
   // and a key are required to enable it; either alone falls back to
@@ -380,21 +264,17 @@ export function createProxyServer({
   }
 
   function recordUsage({ model, feature, skill, action, operation, usage, user, userLabel }) {
-    const row = {
-      source: "proxy",
-      feature: feature || null,
-      skill: skill || null,
-      action: action || null,
-      operation: operation || null,
+    const row = buildUsageRow({
       model,
-      upstream: upstreamHost,
-      user: user || null,
-      userLabel: userLabel || null,
-      tokens_in: usage.input_tokens,
-      tokens_out: usage.output_tokens,
-      cache_read_tokens: usage.cache_read_input_tokens,
-      cache_creation_tokens: usage.cache_creation_input_tokens,
-    };
+      feature,
+      skill,
+      action,
+      operation,
+      usage,
+      user,
+      userLabel,
+      upstreamHost,
+    });
 
     // Canonicalize once regardless of sink — counters/cap accounting update
     // synchronously either way, before we know whether a DB write (async)
@@ -423,18 +303,14 @@ export function createProxyServer({
       // metering write. On failure, fall back to the local JSONL ledger so
       // the event is never silently lost; only a metadata-only status string
       // is ever logged (see meter-db.mjs's `error` contract).
-      dbMeter
-        .append(event)
-        .then((result) => {
-          if (!result.ok) {
-            log(`meter db write failed (${result.error}) — falling back to local usage log`);
-            appendUsageEvent(event, { root: meterRoot });
-          }
-        })
-        .catch((err) => {
-          log(`meter db write threw (${err.message}) — falling back to local usage log`);
+      fireAndForgetDbWrite({
+        dbMeter,
+        event,
+        onFailure: (error, reason) => {
+          log(`meter db write ${reason} (${error}) — falling back to local usage log`);
           appendUsageEvent(event, { root: meterRoot });
-        });
+        },
+      });
     }
   }
 
@@ -448,7 +324,7 @@ export function createProxyServer({
 
     const userId = reportingUserId(auth.token);
     const userLabel = auth.label;
-    const shouldMeter = path === "/v1/messages" && req.method === "POST";
+    const shouldMeter = shouldMeterRequest(path, req.method);
 
     // Per-tester spend cap — checked BEFORE forwarding, using only the
     // in-memory accumulator (no upstream call, no request body read). "At or
@@ -458,14 +334,7 @@ export function createProxyServer({
     if (shouldMeter) {
       const cap = capForUser(userLabel);
       if (cap !== null && (userCostByUserId.get(userId) || 0) >= cap) {
-        sendJson(res, 402, {
-          type: "error",
-          error: {
-            type: "cap_exceeded",
-            message:
-              "This beta account has reached its usage cap. Contact the person who invited you to raise it.",
-          },
-        });
+        sendJson(res, 402, buildCapExceededBody());
         return;
       }
     }
@@ -494,11 +363,7 @@ export function createProxyServer({
       return;
     }
 
-    const resHeaders = {};
-    for (const [key, value] of upstreamRes.headers.entries()) {
-      if (STRIPPED_RESPONSE_HEADERS.has(key.toLowerCase())) continue;
-      resHeaders[key] = value;
-    }
+    const resHeaders = buildResponseHeaders(upstreamRes.headers);
     res.writeHead(upstreamRes.status, resHeaders);
 
     if (!upstreamRes.body) {
@@ -513,14 +378,7 @@ export function createProxyServer({
     let sseBuffer = "";
     const jsonChunks = shouldMeter && !isSSE ? [] : null;
 
-    const usage = {
-      input_tokens: 0,
-      output_tokens: 0,
-      cache_read_input_tokens: 0,
-      cache_creation_input_tokens: 0,
-    };
-    let modelSeen = null;
-    let sawUsage = false;
+    const acc = newUsageAccumulator();
 
     const reader = upstreamRes.body.getReader();
     try {
@@ -536,19 +394,7 @@ export function createProxyServer({
           sseBuffer += decoder.decode(value, { stream: true });
           const { events, remainder } = extractSSEEvents(sseBuffer);
           sseBuffer = remainder;
-          for (const event of events) {
-            if (event?.type === "message_start" && event.message?.usage) {
-              usage.input_tokens = event.message.usage.input_tokens || 0;
-              usage.cache_read_input_tokens = event.message.usage.cache_read_input_tokens || 0;
-              usage.cache_creation_input_tokens =
-                event.message.usage.cache_creation_input_tokens || 0;
-              modelSeen = event.message.model || modelSeen;
-              sawUsage = true;
-            } else if (event?.type === "message_delta" && event.usage?.output_tokens != null) {
-              usage.output_tokens = event.usage.output_tokens;
-              sawUsage = true;
-            }
-          }
+          for (const event of events) applySSEUsageEvent(acc, event);
         } else {
           jsonChunks.push(value);
         }
@@ -562,27 +408,20 @@ export function createProxyServer({
     if (!isSSE) {
       try {
         const parsed = JSON.parse(Buffer.concat(jsonChunks).toString("utf8"));
-        if (parsed?.usage) {
-          usage.input_tokens = parsed.usage.input_tokens || 0;
-          usage.output_tokens = parsed.usage.output_tokens || 0;
-          usage.cache_read_input_tokens = parsed.usage.cache_read_input_tokens || 0;
-          usage.cache_creation_input_tokens = parsed.usage.cache_creation_input_tokens || 0;
-          modelSeen = parsed.model || modelSeen;
-          sawUsage = true;
-        }
+        applyNonStreamUsage(acc, parsed);
       } catch {
         // malformed/non-JSON upstream body — nothing to meter, never logged
       }
     }
 
-    if (sawUsage) {
+    if (acc.sawUsage) {
       recordUsage({
-        model: modelSeen,
+        model: acc.modelSeen,
         feature: featureLabel,
         skill: skillLabel,
         action: actionLabel,
         operation: operationLabel,
-        usage,
+        usage: acc.usage,
         user: userId,
         userLabel,
       });
@@ -633,60 +472,30 @@ export { computeCost };
 // Boot (CLI entry point only — see the import.meta.url guard at the bottom)
 // ---------------------------------------------------------------------------
 
+// The four env-parsing bodies below live in proxy-core.mjs (shared with the
+// Vercel handler); these are thin wrappers that supply this process's own
+// log() for the parse-failure message, preserving the exact wording main()
+// has always logged.
 function parseUpstreamHeaders(raw) {
-  const trimmed = String(raw || "").trim();
-  if (!trimmed) return {};
-  try {
-    const parsed = JSON.parse(trimmed);
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
-  } catch {
-    log("ROLESTER_UPSTREAM_HEADERS is not valid JSON — ignoring");
-    return {};
-  }
+  return parseUpstreamHeadersEnv(raw, {
+    onError: () => log("ROLESTER_UPSTREAM_HEADERS is not valid JSON — ignoring"),
+  });
 }
 
-// label -> token map for multi-tester auth (ROLESTER_PROXY_TOKENS). Never
-// logs a token value on parse failure — only the env var name.
 function parseProxyTokens(raw) {
-  const trimmed = String(raw || "").trim();
-  if (!trimmed) return {};
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out = {};
-    for (const [label, token] of Object.entries(parsed)) {
-      const t = String(token || "").trim();
-      if (t) out[label] = t;
-    }
-    return out;
-  } catch {
-    log("ROLESTER_PROXY_TOKENS is not valid JSON — ignoring");
-    return {};
-  }
+  return parseProxyTokensEnv(raw, {
+    onError: () => log("ROLESTER_PROXY_TOKENS is not valid JSON — ignoring"),
+  });
 }
 
 function parseUserCapUsd(raw) {
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : null;
+  return parseUserCapUsdEnv(raw);
 }
 
-// label -> cap USD override map (ROLESTER_PROXY_USER_CAPS).
 function parseUserCaps(raw) {
-  const trimmed = String(raw || "").trim();
-  if (!trimmed) return {};
-  try {
-    const parsed = JSON.parse(trimmed);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
-    const out = {};
-    for (const [label, cap] of Object.entries(parsed)) {
-      const n = Number(cap);
-      if (Number.isFinite(n) && n > 0) out[label] = n;
-    }
-    return out;
-  } catch {
-    log("ROLESTER_PROXY_USER_CAPS is not valid JSON — ignoring");
-    return {};
-  }
+  return parseUserCapsEnv(raw, {
+    onError: () => log("ROLESTER_PROXY_USER_CAPS is not valid JSON — ignoring"),
+  });
 }
 
 async function main() {

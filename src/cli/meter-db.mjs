@@ -159,5 +159,74 @@ export function createDbMeter({ url, serviceKey, table = "usage_events", fetchIm
     return out;
   }
 
-  return { append, hydrateUserCosts };
+  // Single-user cost sum for a per-request serverless cap check (see
+  // apps/proxy-vercel and proxy-core.mjs's meterDbWrite doc) — there's no
+  // long-lived accumulator across invocations, so the cap check re-derives
+  // "how much has this user spent" from the DB on every request instead of
+  // once at boot. Same aggregate-first/paged-fallback shape as
+  // hydrateUserCosts(), just filtered to one user_id via `eq.` instead of
+  // grouped over all of them. Returns a plain number (0 when the user has no
+  // rows yet or on total failure — see the caller's own eventually-
+  // consistent-cap doc; never throws).
+  async function userCost(userId) {
+    const id = String(userId || "").trim();
+    if (!id) return 0;
+    const viaAggregate = await userCostViaAggregate(id);
+    if (viaAggregate !== null) return viaAggregate;
+    return userCostViaPaging(id);
+  }
+
+  async function userCostViaAggregate(userId) {
+    try {
+      const qs = new URLSearchParams({
+        select: "user_id,cost_usd.sum()",
+        user_id: `eq.${userId}`,
+      });
+      const res = await fetchImpl(`${restUrl}?${qs.toString()}`, { headers: headers() });
+      if (!res.ok) {
+        await res.text().catch(() => {});
+        return null;
+      }
+      const rows = await res.json();
+      if (!Array.isArray(rows)) return null;
+      const sum = Number(rows[0]?.sum);
+      return Number.isFinite(sum) ? sum : 0;
+    } catch {
+      return null;
+    }
+  }
+
+  async function userCostViaPaging(userId) {
+    let total = 0;
+    let offset = 0;
+    for (;;) {
+      const qs = new URLSearchParams({
+        select: "cost_usd",
+        user_id: `eq.${userId}`,
+      });
+      let res;
+      try {
+        res = await fetchImpl(`${restUrl}?${qs.toString()}`, {
+          headers: headers({ range: `${offset}-${offset + PAGE_SIZE - 1}` }),
+        });
+      } catch {
+        break; // partial sum stands — see hydrateViaPaging's own doc
+      }
+      if (!res.ok) {
+        await res.text().catch(() => {});
+        break;
+      }
+      const rows = await res.json();
+      if (!Array.isArray(rows) || rows.length === 0) break;
+      for (const row of rows) {
+        const cost = Number(row?.cost_usd);
+        if (Number.isFinite(cost)) total += cost;
+      }
+      if (rows.length < PAGE_SIZE) break;
+      offset += PAGE_SIZE;
+    }
+    return total;
+  }
+
+  return { append, hydrateUserCosts, userCost };
 }
