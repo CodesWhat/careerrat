@@ -510,11 +510,18 @@ function normalizeLimitStatus(value) {
 
 function normalizeCap(value) {
   if (value == null || value === "") return null;
-  if (typeof value === "string") return parseFlowMap(value);
+  // A flow-style YAML cap (`cap: { max: 5, window_days: 180 }`) reaches here
+  // as a literal string — parse it, then fall through to the same object
+  // normalization every other shape gets (returning the parsed map raw let
+  // un-coerced values skip schema validation's number checks).
+  if (typeof value === "string") return normalizeCap(parseFlowMap(value));
   if (isPlainObject(value)) {
     const max = Number(value.max);
-    const windowDays = Number(value.window_days);
-    if (!Number.isFinite(max) || !Number.isFinite(windowDays)) return null;
+    if (!Number.isFinite(max)) return null;
+    // window_days: null is meaningful — a lifetime cap with no rolling
+    // window (e.g. "one application per candidate, ever").
+    const windowDays = value.window_days == null ? null : Number(value.window_days);
+    if (windowDays !== null && !Number.isFinite(windowDays)) return null;
     return { ...value, max, window_days: windowDays };
   }
   return null;

@@ -24,7 +24,7 @@
                 "additionalProperties": true,
                 "properties": {
                   "max": { "type": "number" },
-                  "window_days": { "type": "number" }
+                  "window_days": { "type": ["number", "null"] }
                 }
               }
             ]
