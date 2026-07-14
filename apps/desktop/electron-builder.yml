@@ -20,6 +20,7 @@ files:
   - desktop-runtime.mjs
   - desktop-routing.mjs
   - desktop-smoke.mjs
+  - window-options.mjs
   - package.json
 extraResources:
   - from: staging/rolester
