@@ -159,18 +159,28 @@ function mirrorClaudeSkills() {
   log("mirrored .agents/skills → .claude/skills");
 }
 
-// Install ONLY the SDK's own dependency tree into staging/rolester's own
-// node_modules — the packaged runtime resolves `@anthropic-ai/claude-agent-sdk`
-// from there. The core npm package stays zero-dep; this install is scoped to
-// the staged copy only and never touches the repo root's node_modules or
-// lockfile (--no-save --no-package-lock).
+// Install the SDK's dependency tree PLUS the root package.json runtime
+// `dependencies` into staging/rolester's own node_modules — the packaged
+// runtime resolves `@anthropic-ai/claude-agent-sdk` from there, and the
+// engine is no longer zero-dep (mammoth landed with docx resume parsing;
+// shipping without root deps made the packaged server hang at boot on
+// ERR_MODULE_NOT_FOUND). This install is scoped to the staged copy only and
+// never touches the repo root's node_modules or lockfile
+// (--no-save --no-package-lock).
 function installSdk(pkg) {
   const version = pkg.devDependencies?.["@anthropic-ai/claude-agent-sdk"];
   if (!version) {
     throw new Error("root package.json is missing the @anthropic-ai/claude-agent-sdk devDependency");
   }
+  const runtimeDeps = Object.entries(pkg.dependencies || {}).map(
+    ([name, range]) => `${name}@${range}`
+  );
   const npmCmd = process.platform === "win32" ? "npm.cmd" : "npm";
-  log(`npm install @anthropic-ai/claude-agent-sdk@${version} into ${stagingRoot} …`);
+  log(
+    `npm install @anthropic-ai/claude-agent-sdk@${version}${
+      runtimeDeps.length ? ` + ${runtimeDeps.join(", ")}` : ""
+    } into ${stagingRoot} …`
+  );
   // --prefix pins the install root explicitly (on top of the from-scratch,
   // workspaces-free manifest above) so this can never resolve against, or
   // write into, the real repo's root node_modules/package-lock.json — see
@@ -185,6 +195,7 @@ function installSdk(pkg) {
       "--no-package-lock",
       "--omit=dev",
       `@anthropic-ai/claude-agent-sdk@${version}`,
+      ...runtimeDeps,
     ],
     { cwd: stagingRoot, stdio: "inherit" }
   );

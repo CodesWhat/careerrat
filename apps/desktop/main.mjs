@@ -19,7 +19,7 @@
 // comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
 // pass. The scripted verification path for `npx electron . --smoke`.
 
-import { app, BrowserWindow, Menu, nativeImage, nativeTheme, shell } from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell } from "electron";
 import { existsSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
@@ -403,6 +403,20 @@ app.whenReady().then(async () => {
   app.on("activate", () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(url, route);
   });
+}).catch((err) => {
+  // A boot() failure (e.g. a module missing from the staged engine) used to
+  // surface only as an UnhandledPromiseRejectionWarning — no window, no exit,
+  // a process that just sat there (--smoke hung forever instead of failing).
+  // Fail loudly instead: log, show a dialog in GUI mode, exit nonzero.
+  log(`BOOT FAILED: ${err?.stack || err?.message || err}`);
+  if (!isSmoke) {
+    try {
+      dialog.showErrorBox("Rolester failed to start", String(err?.message || err));
+    } catch {
+      // dialog unavailable (very early failure) — the log line above stands.
+    }
+  }
+  app.exit(1);
 });
 
 app.on("window-all-closed", () => {
