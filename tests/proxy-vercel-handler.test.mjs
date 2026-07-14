@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { once } from "node:events";
 import { createServer } from "node:http";
+import { Writable } from "node:stream";
 import { test } from "node:test";
 import handler from "../apps/proxy-vercel/api/v1/[...path].mjs";
 
@@ -120,6 +122,59 @@ function request(path, { token = TOKEN, method = "POST", stream = false } = {}) 
           }),
   });
 }
+
+function legacyRequest(path, { token = TOKEN, method = "POST" } = {}) {
+  const headers = {
+    host: "proxy.test",
+    "x-forwarded-proto": "http",
+    "content-type": "application/json",
+    "x-rolester-skill": "evaluate-job",
+    "x-rolester-action": "gate",
+  };
+  if (token !== null) headers.authorization = `Bearer ${token}`;
+  return {
+    method,
+    url: path,
+    headers,
+    body:
+      method === "GET"
+        ? undefined
+        : {
+            model: "claude-test",
+            stream: false,
+            messages: [{ role: "user", content: FORBIDDEN_CONTENT[0] }],
+          },
+  };
+}
+
+class LegacyResponse extends Writable {
+  constructor() {
+    super();
+    this.status = null;
+    this.headers = {};
+    this.chunks = [];
+  }
+
+  setHeader(name, value) {
+    this.headers[String(name).toLowerCase()] = value;
+  }
+
+  writeHead(status, headers = {}) {
+    this.status = status;
+    for (const [name, value] of Object.entries(headers)) this.setHeader(name, value);
+    return this;
+  }
+
+  _write(chunk, _encoding, callback) {
+    this.chunks.push(Buffer.from(chunk));
+    callback();
+  }
+
+  text() {
+    return Buffer.concat(this.chunks).toString("utf8");
+  }
+}
+
 function assertMetadataOnly(row) {
   assert.equal(Object.hasOwn(row, "user_id"), true);
   assert.equal(Object.hasOwn(row, "user_label"), true);
@@ -127,6 +182,41 @@ function assertMetadataOnly(row) {
     assert.equal(Object.hasOwn(row, key), false);
   for (const secret of FORBIDDEN_CONTENT) assert.equal(JSON.stringify(row).includes(secret), false);
 }
+
+test("legacy handler writes a 401 response for an unauthenticated request", async () => {
+  const h = await harness();
+  setEnv(h);
+  const res = new LegacyResponse();
+  const finished = once(res, "finish");
+  try {
+    await handler(legacyRequest("/api/v1/messages", { token: null }), res);
+    await finished;
+
+    assert.equal(res.status, 401);
+    assert.deepEqual(JSON.parse(res.text()), { error: "unauthorized" });
+    assert.equal(h.upstreamRequests.length, 0);
+    assert.equal(h.dbRequests.length, 0);
+  } finally {
+    await h.stop();
+  }
+});
+
+test("legacy handler strips the /api prefix before forwarding upstream", async () => {
+  const h = await harness();
+  setEnv(h);
+  const res = new LegacyResponse();
+  const finished = once(res, "finish");
+  try {
+    await handler(legacyRequest("/api/v1/messages"), res);
+    await finished;
+
+    assert.equal(res.status, 200);
+    assert.equal(h.upstreamRequests.length, 1);
+    assert.equal(h.upstreamRequests[0].url, "/v1/messages");
+  } finally {
+    await h.stop();
+  }
+});
 
 test("handler returns 401 for absent/wrong tokens without upstream or DB traffic", async () => {
   const h = await harness();
