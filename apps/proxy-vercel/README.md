@@ -2,11 +2,16 @@
 
 Serverless front end for `src/cli/ai-proxy.mjs`'s per-request pipeline (see that file and `src/cli/proxy-core.mjs`). No JSONL fallback here — apply `scripts/meter-db-schema.sql` to your Supabase project **before** the first request.
 
-Deploy (run from this directory; imports reach into `../../src/cli/`, so enable
-"Include files outside the Root Directory" in the Vercel project's Root
-Directory settings, or deploy from the repo root instead):
+Deploy — use the staging script (imports reach into `../../src/cli/`, and a
+bare CLI deploy from this directory would not carry them; the script assembles
+a flat self-contained copy and deploys that):
 
-    vercel --scope codeswhat
+    bash scripts/deploy-proxy-vercel.sh --prod --yes
+
+Clients use the bare deployment domain as the base URL (e.g.
+`ROLESTER_AI_PROXY_URL=https://rolester-proxy.vercel.app`): vercel.json
+rewrites `/v1/*` onto the function's `/api/v1/*` mount, and the handler strips
+the `/api` prefix before metering and upstream forwarding.
 
 Required env vars (Project Settings → Environment Variables):
 `ROLESTER_PROXY_TOKEN` or `ROLESTER_PROXY_TOKENS`, `ROLESTER_UPSTREAM_KEY`,

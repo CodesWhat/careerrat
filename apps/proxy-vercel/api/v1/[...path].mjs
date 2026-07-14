@@ -92,7 +92,10 @@ import {
   shouldMeterRequest,
 } from "../../../../src/cli/proxy-core.mjs";
 
-export const config = { runtime: "nodejs" };
+// supportsResponseStreaming: without it, the legacy (req, res) invocation
+// path below buffers the whole response before sending — which would silently
+// break SSE passthrough (the entire stream would arrive as one flush).
+export const config = { runtime: "nodejs", supportsResponseStreaming: true };
 
 function jsonResponse(status, body) {
   return new Response(JSON.stringify(body), {
@@ -108,11 +111,76 @@ function warn(msg) {
   console.error(`[proxy-vercel] ${msg}`);
 }
 
-export default async function handler(request, context) {
+// Deployed behavior (observed 2026-07-14, Vercel CLI 55 / @vercel/node): this
+// project's functions are invoked with the LEGACY Node (req, res) signature
+// even with the fetch-style export — `req.url` arrives as a relative path, so
+// `new URL(request.url)` threw before auth ever ran. The default export is now
+// a dispatcher: web-signature calls (tests, future runtimes) pass through
+// untouched; a Node ServerResponse second arg gets bridged to the web handler.
+export default async function handler(requestOrReq, contextOrRes) {
+  const isNodeRes =
+    typeof contextOrRes?.setHeader === "function" && typeof contextOrRes?.end === "function";
+  if (!isNodeRes) return webHandler(requestOrReq, contextOrRes);
+
+  const req = requestOrReq;
+  const res = contextOrRes;
+  const host = req.headers.host || "localhost";
+  const proto = req.headers["x-forwarded-proto"] || "https";
+
+  // Vercel's legacy helpers may have already consumed the body stream into
+  // req.body (Buffer, string, or parsed JSON); fall back to reading the
+  // stream ourselves when they haven't. content-length is dropped so fetch
+  // recomputes it — a re-serialized parsed body can differ byte-for-byte.
+  let body;
+  if (req.method !== "GET" && req.method !== "HEAD") {
+    if (req.body !== undefined && req.body !== null) {
+      body = Buffer.isBuffer(req.body)
+        ? req.body
+        : typeof req.body === "string"
+          ? Buffer.from(req.body)
+          : Buffer.from(JSON.stringify(req.body));
+    } else {
+      const chunks = [];
+      for await (const chunk of req) chunks.push(chunk);
+      body = Buffer.concat(chunks);
+    }
+  }
+
+  const headerPairs = [];
+  for (const [name, value] of Object.entries(req.headers)) {
+    if (name === "content-length") continue;
+    if (typeof value === "string") headerPairs.push([name, value]);
+  }
+
+  const request = new Request(`${proto}://${host}${req.url}`, {
+    method: req.method,
+    headers: headerPairs,
+    body,
+  });
+
+  // No context.waitUntil on this path — webHandler already awaits the meter
+  // write before closing the stream when waitUntil is absent.
+  const response = await webHandler(request, null);
+
+  res.writeHead(response.status, Object.fromEntries(response.headers));
+  if (!response.body) {
+    res.end();
+    return;
+  }
+  const { Readable } = await import("node:stream");
+  Readable.fromWeb(response.body).pipe(res);
+}
+
+async function webHandler(request, context) {
   const env = process.env;
   const method = request.method;
   const url = new URL(request.url);
-  const path = url.pathname;
+  // Vercel's file-system routing mounts this function under /api, but the
+  // proxy pipeline (metering match, upstream forward) and every client speak
+  // the node server's root-relative paths (/v1/messages) — shave the platform
+  // prefix off before either sees it. ../../vercel.json rewrites /v1/* to
+  // /api/v1/* so callers can use the bare deployment domain as the base URL.
+  const path = url.pathname.replace(/^\/api(?=\/|$)/, "");
   const headers = normalizeHeaders(request.headers);
 
   // Config is read fresh on every invocation rather than module-level-cached
