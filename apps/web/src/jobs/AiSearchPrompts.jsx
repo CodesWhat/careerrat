@@ -3,11 +3,12 @@
 // yourself model): Rolester generates plain-English AI-search-assistant
 // prompts from the candidate's stored targeting/profile
 // (src/core/search/search-prompts.mjs), and the user edits/adds/removes rows
-// from there. Auto-generates once on mount when the stored list is empty and
-// AI is enabled — same ref-guard-against-StrictMode-double-fire pattern
-// TargetingStep.jsx's auto-suggest effect uses.
+// from there. Generation is EXPLICIT-ONLY (the Regenerate button) — these
+// prompts feed the AI web-search lane, not the free board sweep, so
+// auto-firing a metered AI call on tab mount spent money without user intent
+// (Scott, 2026-07-14: free searches are board API calls, no AI needed).
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "../components/Button.jsx";
 import { TextArea } from "../components/form.jsx";
 import { MagicWandIcon } from "../components/icons.jsx";
@@ -45,7 +46,6 @@ export function AiSearchPrompts() {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState(null);
   const [aiEnabled, setAiEnabled] = useState(false);
-  const autoGenerateRequestedRef = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -80,17 +80,6 @@ export function AiSearchPrompts() {
       setGenerating(false);
     }
   }
-
-  // Auto-fire generation once, only when the stored list is empty and AI is
-  // enabled. The ref guard (not just the empty-rows check) is what keeps
-  // StrictMode's double-invoked effect from firing the request twice.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: fires once when eligible, guarded by the ref
-  useEffect(() => {
-    if (loading || autoGenerateRequestedRef.current) return;
-    if (!aiEnabled || rows.length) return;
-    autoGenerateRequestedRef.current = true;
-    handleGenerate();
-  }, [loading, aiEnabled, rows.length]);
 
   function updateRow(id, text) {
     setDirty(true);
@@ -172,7 +161,9 @@ export function AiSearchPrompts() {
         </div>
       ) : (
         <div className="jobs__empty">
-          {generating ? "Generating prompts…" : "No AI search prompts yet."}
+          {generating
+            ? "Generating prompts…"
+            : "No AI search prompts yet. Regenerate builds them from your targeting."}
         </div>
       )}
 

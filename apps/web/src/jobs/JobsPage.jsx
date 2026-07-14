@@ -710,13 +710,14 @@ function SearchView({
           {sourceSetupSummary(model.sourceSetup, sourceSetupReady)}
         </SearchModeCard>
         <SearchModeCard
-          actionLabel="Run Primary Lane"
+          actionLabel="Coming soon"
           disabled
           eyebrow="AI web search"
-          meta="Primary Role Lane"
+          meta="Coming soon"
           title="AI Web Search"
         >
-          Primary lane across public company pages, search results, and curated role lists.
+          Primary lane across public company pages, search results, and curated role lists. Not
+          wired up yet — the prompts below are saved for it.
         </SearchModeCard>
       </section>
 
