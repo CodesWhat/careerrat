@@ -9,7 +9,12 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
-import { candidateConfigGet, sourceConfigGet } from "../src/core/db/verbs.mjs";
+import {
+  candidateArtifactExists,
+  candidateArtifactGet,
+  candidateConfigGet,
+  sourceConfigGet,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 import { canonicalizeEvent, eventId } from "../src/core/tracker/activity-log.mjs";
@@ -240,6 +245,8 @@ test("importFromTracker migrates legacy candidate YAML into canonical SQLite set
   const sourceDir = join(repoRoot, "fixture-source");
   writeSourceFixture(sourceDir);
   mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  const sourceResume = "# Legacy Candidate\n\nStaff engineer with platform experience.\n";
+  writeFileSync(join(repoRoot, "candidate/SOURCE_RESUME.md"), sourceResume);
   writeFileSync(
     join(repoRoot, "candidate/profile.yml"),
     `${stringifyYaml({
@@ -291,6 +298,11 @@ test("importFromTracker migrates legacy candidate YAML into canonical SQLite set
   assert.equal(result.counts.candidate.evidence, 1);
   assert.equal(result.counts.candidate.modes, true);
   assert.equal(result.counts.candidate["application-limits"], true);
+  assert.equal(result.counts.candidate["source-resume"], true);
+  assert.equal(candidateArtifactExists({ repoRoot, id: "source-resume" }), true);
+  const sourceResumeArtifact = candidateArtifactGet({ repoRoot, id: "source-resume" });
+  assert.equal(sourceResumeArtifact.source, "legacy-import");
+  assert.equal(sourceResumeArtifact.text, sourceResume);
   const config = candidateConfigGet({ repoRoot });
   assert.equal(config.profile.candidate.full_name, "Legacy Candidate");
   assert.equal(config.profile.compensation.minimum_base, 181234);
@@ -303,11 +315,36 @@ test("importFromTracker migrates legacy candidate YAML into canonical SQLite set
     max: 4,
     window_days: 180,
   });
+  assert.equal(config.setup.missing.search_ready.includes("source resume"), false);
   assert.equal(
     existsSync(userPath({ repoRoot }, "candidate/profile.yml")),
     true,
     "legacy YAML remains as import source, but DB is now canonical"
   );
+
+  const second = importFromTracker({ repoRoot, sourceDir });
+  assert.equal(second.counts.candidate["source-resume"], false);
+  assert.equal(
+    candidateArtifactGet({ repoRoot, id: "source-resume" }).savedAt,
+    sourceResumeArtifact.savedAt,
+    "re-import must preserve the original artifact timestamp"
+  );
+});
+
+test("importFromTracker skips the legacy source résumé artifact when the file is absent", () => {
+  const repoRoot = tempRepo();
+  const sourceDir = join(repoRoot, "fixture-source");
+  writeSourceFixture(sourceDir);
+  mkdirSync(join(repoRoot, "candidate"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "candidate/profile.yml"),
+    `${stringifyYaml({ candidate: { full_name: "Legacy Candidate" } })}\n`
+  );
+
+  const result = importFromTracker({ repoRoot, sourceDir });
+
+  assert.equal(result.counts.candidate["source-resume"], false);
+  assert.equal(candidateArtifactExists({ repoRoot, id: "source-resume" }), false);
 });
 
 test("importFromTracker migrates legacy source config files into SQLite idempotently", () => {
