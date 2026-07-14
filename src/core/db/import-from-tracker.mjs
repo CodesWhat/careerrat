@@ -20,6 +20,8 @@ import { snapshotTracker } from "../tracker/tracker-snapshot.mjs";
 import { openDb } from "./connection.mjs";
 import { withTransaction } from "./transaction.mjs";
 import {
+  candidateArtifactExists,
+  candidateArtifactPut,
   candidateConfigPatch,
   candidateEvidenceMerge,
   candidateSetupInitialize,
@@ -224,7 +226,30 @@ function importLegacyCandidateSetup(pathCtx) {
     const result = candidateEvidenceMerge({ ...pathCtx, claims });
     counts.evidence = result.added;
   }
+
+  // The source résumé is a copy-only candidate file, not a schema-validated
+  // config, so the loop above never touches it — but the search-readiness
+  // gate (computeCandidateSetup) keys on the source-resume ARTIFACT row.
+  // Without this, a legacy workspace imported with a perfectly good
+  // candidate/SOURCE_RESUME.md still read "not search-ready". Existing
+  // artifact rows win (an onboarding upload has richer data than this seed).
+  counts["source-resume"] = importLegacySourceResume(pathCtx);
   return counts;
+}
+
+function importLegacySourceResume(pathCtx) {
+  if (candidateArtifactExists({ ...pathCtx, id: "source-resume" })) return false;
+  const resumePath = userPath(pathCtx, "candidate/SOURCE_RESUME.md");
+  if (!existsSync(resumePath)) return false;
+  const text = readFileSync(resumePath, "utf8");
+  if (!text.trim()) return false;
+  candidateArtifactPut({
+    ...pathCtx,
+    id: "source-resume",
+    kind: "source-resume",
+    data: { text, savedAt: new Date().toISOString(), source: "legacy-import" },
+  });
+  return true;
 }
 
 function importLegacySourceConfigs(pathCtx) {
