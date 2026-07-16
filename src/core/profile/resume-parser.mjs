@@ -40,6 +40,15 @@ const ACCOMPLISHMENT_VERBS = new Set([
 // Matches http(s) URLs.
 const URL_RE = /https?:\/\/[^\s,<>"')]+/g;
 
+// Matches scheme-less contact links for KNOWN hosts only (linkedin.com,
+// github.com), optionally www.-prefixed, e.g. "linkedin.com/in/name" or
+// "www.github.com/name". Requires a following "/path" so a bare mention of
+// the host with nothing after it doesn't match. Deliberately not a general
+// bare-domain matcher — that would false-positive on skill tokens like
+// "node.js" or "socket.io". The leading \b also keeps "mygithub.com" from
+// matching, since there's no word boundary between "my" and "github".
+const BARE_CONTACT_URL_RE = /\b(?:www\.)?(?:linkedin|github)\.com\/[^\s,<>"')]+/gi;
+
 // Matches a first RFC-ish email.
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 
@@ -118,8 +127,15 @@ function extractPhone(text) {
 
 function extractUrls(text) {
   const matches = text.match(URL_RE) || [];
-  // Dedupe while preserving first-seen order.
-  return [...new Set(matches)];
+  // Scheme-less contact links (linkedin.com/..., github.com/...) get an
+  // https:// prefix so they normalize into the same shape as full URLs
+  // before hostnameMatches/extractLinkedin/extractGithub see them.
+  const bare = text.match(BARE_CONTACT_URL_RE) || [];
+  const normalizedBare = bare.map((u) => `https://${u}`);
+  // Dedupe while preserving first-seen order. A bare match that's actually
+  // part of an already-captured https:// URL normalizes to an identical
+  // string, so it collapses here instead of producing a duplicate.
+  return [...new Set([...matches, ...normalizedBare])];
 }
 
 function hostnameMatches(url, domain) {
@@ -156,11 +172,16 @@ function extractFullName(lines) {
     // heading like "# Alex Rivera" is usually the candidate's name, so keep it.
     if (isHeading(line) && classifyHeading(line) !== "other") continue;
     if (trimmed.includes("@")) continue;
-    if (URL_RE.test(trimmed)) {
+    // A contact line with only bare links ("linkedin.com/in/x") must skip
+    // here the same way a full-URL line does, or it falls through to the
+    // name check below and gets misclassified.
+    if (URL_RE.test(trimmed) || BARE_CONTACT_URL_RE.test(trimmed)) {
       URL_RE.lastIndex = 0;
+      BARE_CONTACT_URL_RE.lastIndex = 0;
       continue;
     }
     URL_RE.lastIndex = 0;
+    BARE_CONTACT_URL_RE.lastIndex = 0;
     // Count digit clusters — a phone/contact line will have many.
     const digitMatches = trimmed.match(/\d+/g) || [];
     const totalDigits = digitMatches.reduce((s, m) => s + m.length, 0);

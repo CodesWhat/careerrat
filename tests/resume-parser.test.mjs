@@ -56,6 +56,16 @@ Graduated with honors. GPA 3.8/4.0.
 - Delivered comprehensive documentation and examples for contributors
 `.trim();
 
+const BARE_LINK_RESUME = `
+linkedin.com/in/alexrivera | github.com/alexrivera
+Alex Rivera
+alex.rivera@example.com
+
+## Experience
+
+- Built reliable developer tooling.
+`.trim();
+
 // ---------------------------------------------------------------------------
 // parseResume — contact extraction
 // ---------------------------------------------------------------------------
@@ -100,6 +110,40 @@ test("portfolio is null when no non-linkedin non-github URL exists", () => {
   const minimal = `Jane Doe\njane@example.com | https://linkedin.com/in/janedoe | https://github.com/janedoe\n\n## Experience\n\nBuilt stuff.`;
   const parsed = parseResume(minimal);
   assert.equal(parsed.contact.portfolio, null);
+});
+
+test("normalizes and extracts bare linkedin and github contact URLs", () => {
+  const parsed = parseResume(BARE_LINK_RESUME);
+  assert.equal(parsed.contact.linkedin, "https://linkedin.com/in/alexrivera");
+  assert.equal(parsed.contact.github, "https://github.com/alexrivera");
+});
+
+test("normalizes and extracts www-prefixed bare contact URLs", () => {
+  const text = `Taylor Morgan\ntaylor@example.com | www.linkedin.com/in/taylormorgan | www.github.com/taylormorgan\n\n## Experience\n\n- Shipped useful software.`;
+  const parsed = parseResume(text);
+  assert.equal(parsed.contact.linkedin, "https://www.linkedin.com/in/taylormorgan");
+  assert.equal(parsed.contact.github, "https://www.github.com/taylormorgan");
+});
+
+test("preserves full-scheme contact URLs and deduplicates their bare matches", () => {
+  const text = `Jordan Lee\njordan@example.com | https://linkedin.com/in/jordanlee | https://github.com/jordanlee | github.com/jordanlee\n\n## Experience\n\n- Built useful software.`;
+  const parsed = parseResume(text);
+  assert.equal(parsed.contact.linkedin, "https://linkedin.com/in/jordanlee");
+  assert.equal(parsed.contact.github, "https://github.com/jordanlee");
+  assert.equal(parsed.links.filter((url) => url === "https://github.com/jordanlee").length, 1);
+});
+
+test("does not treat unrelated domains, skill tokens, or pathless hosts as links", () => {
+  const text = `Casey Jones\ncasey@example.com | mygithub.com/caseyjones | github.com\n\n## Skills\n\nNode.js, socket.io`;
+  const parsed = parseResume(text);
+  assert.deepEqual(parsed.links, []);
+  assert.equal(parsed.contact.linkedin, null);
+  assert.equal(parsed.contact.github, null);
+});
+
+test("skips a bare-link-only contact line when detecting the full name", () => {
+  const parsed = parseResume(BARE_LINK_RESUME);
+  assert.equal(parsed.contact.full_name, "Alex Rivera");
 });
 
 // ---------------------------------------------------------------------------
@@ -180,6 +224,13 @@ test("deriveProfileSeed omits keys whose contact value is null", () => {
   for (const [k, v] of Object.entries(seed.candidate)) {
     assert.notEqual(v, null, `key "${k}" should not be null in deriveProfileSeed output`);
   }
+});
+
+test("deriveProfileSeed carries normalized bare contact URLs end to end", () => {
+  const parsed = parseResume(BARE_LINK_RESUME);
+  const seed = deriveProfileSeed(parsed);
+  assert.equal(seed.candidate.linkedin, "https://linkedin.com/in/alexrivera");
+  assert.equal(seed.candidate.github, "https://github.com/alexrivera");
 });
 
 // ---------------------------------------------------------------------------
