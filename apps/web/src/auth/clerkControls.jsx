@@ -29,6 +29,9 @@ export const ROLESTER_CLERK_APPEARANCE = {
     colorInputForeground: "var(--ink)",
     colorBorder: "color-mix(in srgb, var(--ink-soft) 20%, transparent)",
     colorRing: "color-mix(in srgb, var(--coral) 24%, transparent)",
+    // Overlay values stay theme-independent black on purpose: --ink flips to
+    // a light color in dark theme, and a light-mixed backdrop/shadow would
+    // render as a bright scrim over a dark page instead of dimming it.
     colorModalBackdrop: "rgba(0, 0, 0, 0.74)",
     colorShadow: "rgba(0, 0, 0, 0.22)",
     fontFamily: '"Geist Sans", Inter, ui-sans-serif, system-ui, sans-serif',
@@ -68,9 +71,13 @@ export const ROLESTER_CLERK_APPEARANCE = {
     },
     socialButtonsBlockButton: {
       minHeight: "44px",
-      border: "1px solid var(--paper-edge-strong)",
+      // A border alone read as invisible against the card (paper-surface on
+      // paper-surface, --paper-edge-strong too faint to register) — give the
+      // button its own paper-band surface plus a border mixed well above the
+      // card's 16% ink-soft so it reads as a pressable pill in both themes.
+      border: "1px solid color-mix(in srgb, var(--ink-soft) 38%, transparent)",
       borderRadius: "999px",
-      backgroundColor: "var(--paper-surface)",
+      backgroundColor: "var(--paper-band)",
       color: "var(--ink)",
       fontWeight: "600",
     },
@@ -109,8 +116,15 @@ export const ROLESTER_CLERK_APPEARANCE = {
       fontWeight: "700",
     },
     footer: {
+      // The footer (sign-up prompt + "Secured by Clerk" badge) sits below the
+      // card on the dimmed modal backdrop. A translucent background did
+      // nothing there — go opaque and round the bottom corners to match the
+      // card so the footer reads as an attached continuation of it, not a
+      // separate block floating on the scrim.
       borderTopColor: "color-mix(in srgb, var(--ink-soft) 12%, transparent)",
-      background: "color-mix(in srgb, var(--paper-band) 62%, transparent)",
+      background: "var(--paper-surface)",
+      borderBottomLeftRadius: "var(--card-radius)",
+      borderBottomRightRadius: "var(--card-radius)",
     },
     footerActionText: {
       color: "var(--ink-soft)",
