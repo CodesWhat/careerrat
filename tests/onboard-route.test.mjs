@@ -20,6 +20,7 @@ import {
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Readable } from "node:stream";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
@@ -32,7 +33,11 @@ import {
   sourcingRunFail,
   sourcingRunStart,
 } from "../src/core/db/verbs/sourcing-runs.mjs";
-import { candidateConfigGet } from "../src/core/db/verbs.mjs";
+import { candidateArtifactGet, candidateConfigGet } from "../src/core/db/verbs.mjs";
+import {
+  extractDocxResumeMarkdown,
+  extractDocxResumeText,
+} from "../src/core/onboarding/resume-docx.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
   CANDIDATE_FILES,
@@ -122,6 +127,74 @@ function bootServer(repoRoot, env = {}, extra = {}) {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve({ server, env }));
   });
+}
+
+function mountDirectRoutes(repoRoot, env = {}, extra = {}) {
+  const routes = new Map();
+  mountOnboardRoutes({
+    addRoute(method, path, handler) {
+      routes.set(`${method} ${path}`, handler);
+    },
+    repoRoot,
+    env,
+    ...extra,
+  });
+  return routes;
+}
+
+async function postDirect(routes, path, body, headers = {}) {
+  const requestPath = path.split("?")[0];
+  const handler = routes.get(`POST ${requestPath}`);
+  assert.ok(handler, `expected mounted route for POST ${requestPath}`);
+  const req = Readable.from([body]);
+  req.method = "POST";
+  req.url = path;
+  req.headers = headers;
+  let status = 200;
+  let responseBody = "";
+  const res = {
+    writeHead(nextStatus) {
+      status = nextStatus;
+      return this;
+    },
+    end(chunk = "") {
+      responseBody += String(chunk);
+    },
+  };
+  await handler(req, res);
+  return { status, body: responseBody ? JSON.parse(responseBody) : {} };
+}
+
+function postJsonDirect(routes, path, payload) {
+  return postDirect(routes, path, JSON.stringify(payload ?? {}), {
+    "content-type": "application/json",
+  });
+}
+
+function postResumeDocxDirect(routes, name, bytes) {
+  return postDirect(routes, `/api/onboard/resume-docx?name=${encodeURIComponent(name)}`, bytes);
+}
+
+async function getDirect(routes, path) {
+  const handler = routes.get(`GET ${path}`);
+  assert.ok(handler, `expected mounted route for GET ${path}`);
+  const req = Readable.from([]);
+  req.method = "GET";
+  req.url = path;
+  req.headers = {};
+  let status = 200;
+  let responseBody = "";
+  const res = {
+    writeHead(nextStatus) {
+      status = nextStatus;
+      return this;
+    },
+    end(chunk = "") {
+      responseBody += String(chunk);
+    },
+  };
+  await handler(req, res);
+  return { status, body: responseBody ? JSON.parse(responseBody) : {} };
 }
 
 // A fake runSkillStream() for POST /api/onboard/resume-ai: takes a list of
@@ -324,6 +397,41 @@ function makeDocxResume(paragraphs) {
       `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:body>${body}<w:sectPr/></w:body>
+</w:document>`,
+    ],
+  ]);
+}
+
+function makeDocxResumeWithHyperlink({ anchorText, url }) {
+  return makeZip([
+    [
+      "[Content_Types].xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+</Types>`,
+    ],
+    [
+      "_rels/.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`,
+    ],
+    [
+      "word/_rels/document.xml.rels",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rIdLink" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xmlEscape(url)}" TargetMode="External"/>
+</Relationships>`,
+    ],
+    [
+      "word/document.xml",
+      `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body><w:p><w:hyperlink r:id="rIdLink"><w:r><w:t>${xmlEscape(anchorText)}</w:t></w:r></w:hyperlink></w:p><w:sectPr/></w:body>
 </w:document>`,
     ],
   ]);
@@ -991,6 +1099,21 @@ describe("POST /api/onboard/resume", () => {
 // POST /api/onboard/resume-docx — RED contract for Phase 7 DOCX intake.
 // ---------------------------------------------------------------------------
 
+describe("DOCX resume extraction", () => {
+  it("preserves hyperlink targets in markdown when raw text contains only the anchor", async () => {
+    const url = "https://profile.example.test/public";
+    const bytes = makeDocxResumeWithHyperlink({ anchorText: "Public profile", url });
+
+    const rawText = await extractDocxResumeText(bytes);
+    const markdown = await extractDocxResumeMarkdown(bytes);
+
+    assert.equal(rawText, "Public profile");
+    assert.equal(rawText.includes(url), false);
+    assert.match(markdown, /Public profile/);
+    assert.equal(markdown.includes(url), true);
+  });
+});
+
 describe("POST /api/onboard/resume-docx", () => {
   const VALID_DOCX = makeDocxResume([
     "Jane Doe",
@@ -1011,14 +1134,20 @@ describe("POST /api/onboard/resume-docx", () => {
       err.code = "NO_AI_ROUTE";
       throw err;
     };
-    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
     try {
-      await postJson(server, "/api/onboard/init", {});
+      await postJsonDirect(routes, "/api/onboard/init", {});
 
-      const { status, body } = await postResumeDocx(server, "../source resume.docx", VALID_DOCX);
+      const { status, body } = await postResumeDocxDirect(
+        routes,
+        "../source resume.docx",
+        VALID_DOCX
+      );
 
       assert.equal(status, 200);
       assert.equal(body.source, "docx");
+      assert.equal(body.extraction, "local");
+      assert.notEqual(body.extraction, "ai");
       assert.equal(body.profileSeed.candidate.full_name, "Jane Doe");
       assert.equal(body.profileSeed.candidate.email, "jane.doe@example.com");
       assert.equal(body.sections.experience, 1);
@@ -1032,7 +1161,9 @@ describe("POST /api/onboard/resume-docx", () => {
       assert.match(saved[0], /^\d+-source_resume\.docx$/);
       assert.ok(readFileSync(join(uploadDir, saved[0])).equals(VALID_DOCX));
 
-      const state = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      const artifact = candidateArtifactGet({ repoRoot, id: "source-resume" });
+      assert.equal(artifact.source, "docx");
+      const state = (await getDirect(routes, "/api/onboard/state")).body;
       assert.equal(state.sourceResumePresent, true);
       assert.equal(
         state.data.setup.missing.search_ready.includes("source resume"),
@@ -1040,7 +1171,126 @@ describe("POST /api/onboard/resume-docx", () => {
         "usable DOCX extraction must satisfy source-resume readiness"
       );
     } finally {
-      await closeServer(server);
+      closeAll();
+    }
+  });
+
+  it("uses bounded AI when configured and persists AI-derived seeds and source text", async () => {
+    const repoRoot = buildTempRoot();
+    const markdown = [
+      "# Resume Candidate",
+      "[LinkedIn](https://www.linkedin.com/in/profile-handle)",
+      "[GitHub](https://github.com/profile-handle)",
+    ].join("\n");
+    const fullText = "AI-derived source resume text.";
+    const aiReply = JSON.stringify({
+      full_text: fullText,
+      resume_document: {
+        contact: {
+          full_name: "Resume Candidate",
+          email: "candidate@example.test",
+          phone: null,
+          location: null,
+          linkedin: "https://www.linkedin.com/in/profile-handle",
+          github: "https://github.com/profile-handle",
+          portfolio: null,
+        },
+        headline: "Platform engineer",
+        summary: null,
+        experience: [],
+        education: [],
+        skills: [{ category: null, items: ["JavaScript"] }],
+        projects: [],
+        certifications: [],
+        other_sections: [],
+      },
+      candidate: {
+        full_name: "Resume Candidate",
+        email: "candidate@example.test",
+        linkedin: "https://www.linkedin.com/in/profile-handle",
+        github: "https://github.com/profile-handle",
+      },
+      claims: [{ claim: "Built platform systems.", evidence: "Resume experience." }],
+      sections: { experience: 1, education: 0, skills: 1, projects: 0, other: 0 },
+      targeting_suggestions: {
+        role_buckets: [
+          {
+            name: "Platform engineering",
+            priority: "primary",
+            titles: ["Platform Engineer"],
+          },
+        ],
+        keep_signals: ["platform systems"],
+        tracked_companies: [],
+      },
+    });
+    const calls = [];
+    const runSkillStream = fakeRunSkillStream([aiReply], {
+      onCall: (info) => calls.push(info),
+    });
+    const extractDocxResumeMarkdown = async () => markdown;
+    const routes = mountDirectRoutes(
+      repoRoot,
+      { ANTHROPIC_API_KEY: "test-key" },
+      { runSkillStream, extractDocxResumeMarkdown }
+    );
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+
+      const { status, body } = await postResumeDocxDirect(routes, "resume.docx", VALID_DOCX);
+
+      assert.equal(status, 200);
+      assert.equal(body.source, "docx");
+      assert.equal(body.extraction, "ai");
+      assert.equal(
+        body.profileSeed.candidate.linkedin,
+        "https://www.linkedin.com/in/profile-handle"
+      );
+      assert.equal(body.profileSeed.candidate.github, "https://github.com/profile-handle");
+      assert.equal(body.targetingSeed.role_buckets[0].priority, "primary");
+      assert.equal(calls.length, 1);
+      assert.deepEqual(calls[0].tools, ["Read"]);
+      assert.match(calls[0].input.path, /-resume\.docx\.md$/);
+      assert.equal(readFileSync(calls[0].input.path, "utf8"), markdown);
+
+      const artifact = candidateArtifactGet({ repoRoot, id: "source-resume" });
+      assert.equal(artifact.source, "docx");
+      assert.equal(artifact.extraction, "ai");
+      assert.equal(artifact.text, fullText);
+      assert.equal(artifact.resumeDocument.headline, "Platform engineer");
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("falls back to local extraction after bounded AI exhausts its retry", async () => {
+    const repoRoot = buildTempRoot();
+    const calls = [];
+    const runSkillStream = fakeRunSkillStream(["not json", "still not json"], {
+      onCall: (info) => calls.push(info),
+    });
+    const routes = mountDirectRoutes(
+      repoRoot,
+      { ANTHROPIC_API_KEY: "test-key" },
+      { runSkillStream, extractDocxResumeMarkdown: async () => "# Converted resume" }
+    );
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+
+      const { status, body } = await postResumeDocxDirect(routes, "resume.docx", VALID_DOCX);
+
+      assert.equal(status, 200);
+      assert.equal(body.source, "docx");
+      assert.equal(body.extraction, "local");
+      assert.equal(body.profileSeed.candidate.email, "jane.doe@example.com");
+      assert.equal(calls.length, 2, "bounded AI should make one attempt and one retry");
+      const uploadPath = candidatePath(repoRoot, body.savedPath);
+      assert.ok(readFileSync(uploadPath).equals(VALID_DOCX));
+
+      const artifact = candidateArtifactGet({ repoRoot, id: "source-resume" });
+      assert.match(artifact.text, /Built deterministic onboarding workflows/);
+    } finally {
+      closeAll();
     }
   });
 
@@ -1191,13 +1441,17 @@ describe("POST /api/onboard/resume-ai", () => {
     return { status: res.status, body };
   }
 
+  function postResumeAiDirect(routes, name, bytes) {
+    return postDirect(routes, `/api/onboard/resume-ai?name=${encodeURIComponent(name)}`, bytes);
+  }
+
   it("happy path: returns the shared envelope with seed data under body.data and exact AI labels", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
-    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
     try {
-      await postJson(server, "/api/onboard/init", {});
-      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const { status, body } = await postResumeAiDirect(routes, "resume.pdf", FAKE_PDF_BYTES);
       assert.equal(status, 200);
       assert.equal(body.ok, true);
       assert.equal(body.profileSeed, undefined);
@@ -1251,7 +1505,7 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.match(saved[0], /^\d+-resume\.pdf$/);
       assert.ok(readFileSync(join(uploadDir, saved[0])).equals(FAKE_PDF_BYTES));
 
-      const state = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
+      const state = (await getDirect(routes, "/api/onboard/state")).body;
       assert.equal(state.sourceResumePresent, true);
       assert.equal(
         state.data.setup.missing.search_ready.includes("source resume"),
@@ -1259,7 +1513,7 @@ describe("POST /api/onboard/resume-ai", () => {
         "PDF/image upload must satisfy the source-resume readiness input"
       );
     } finally {
-      await closeServer(server);
+      closeAll();
     }
   });
 

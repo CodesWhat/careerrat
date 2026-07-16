@@ -180,11 +180,23 @@ test("DB-backed search readiness comes from source config, not generated YAML", 
   assert.match(searchSourcesRoute, /\bcountDeterministicSources\b/);
 });
 
-test("DOCX onboarding remains raw-text only and candidate setup covers export formats", () => {
+test("DOCX onboarding offers AI markdown extraction while preserving raw-text local fallback", () => {
   const docxParser = stripJavaScriptComments(source("src/core/onboarding/resume-docx.mjs"));
   assert.match(docxParser, /\bmammoth\.extractRawText\b/);
   assert.match(docxParser, /\bnormalizeDocxResumeText\b/);
-  assert.doesNotMatch(docxParser, /\bconvertToHtml\b|\bconvertToMarkdown\b/);
+  assert.match(docxParser, /\bmammoth\.convertToMarkdown\b/);
+  assert.match(docxParser, /\bmammoth\.convertToHtml\b/);
+
+  const onboardRoute = stripJavaScriptComments(source("src/cli/onboard-route.mjs"));
+  const docxRoute = onboardRoute.slice(
+    onboardRoute.indexOf('addRoute("POST", "/api/onboard/resume-docx"'),
+    onboardRoute.indexOf('addRoute("POST", "/api/onboard/resume-ai"')
+  );
+  assert.match(docxRoute, /resolveAIRoute\(env\)\.type !== "none"/);
+  assert.match(docxRoute, /extractDocxResumeMarkdown\(bytes\)/);
+  assert.match(docxRoute, /runResumeExtractBounded/);
+  assert.match(docxRoute, /const parsed = parseResume\(text\)/);
+  assert.match(docxRoute, /extraction: "local"/);
 
   const candidateSetupTests = source("tests/candidate-setup.test.mjs");
   assert.match(candidateSetupTests, /defaults form-defaults\.document_formats to PDF packets/);

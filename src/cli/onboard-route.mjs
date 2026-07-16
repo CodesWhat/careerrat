@@ -76,6 +76,7 @@ import {
   startFirstSearchRun,
 } from "../core/onboarding/first-search-run.mjs";
 import {
+  extractDocxResumeMarkdown as defaultExtractDocxResumeMarkdown,
   extractDocxResumeText as defaultExtractDocxResumeText,
   looksLikeUsableResumeText,
   normalizeDocxResumeText,
@@ -984,6 +985,7 @@ export function mountOnboardRoutes({
   // touching the real @anthropic-ai/claude-agent-sdk devDependency.
   runSkillStream = defaultRunSkillStream,
   extractDocxResumeText = defaultExtractDocxResumeText,
+  extractDocxResumeMarkdown = defaultExtractDocxResumeMarkdown,
   fetchImpl = fetch,
 }) {
   const pathCtx = { repoRoot, env };
@@ -1236,9 +1238,23 @@ export function mountOnboardRoutes({
   // -------------------------------------------------------------------------
   // POST /api/onboard/resume-docx?name=<filename> — raw DOCX bytes.
   //
-  // DOCX intake is deterministic: save the original upload, extract raw text
-  // locally, quality-gate the text, and only then write source-resume readiness.
-  // PDF/image resumes remain on the existing AI upload path.
+  // Save the original upload, extract raw text locally, and quality-gate it —
+  // that part is still fully deterministic and unconditional (unusable text
+  // 422s before any AI is attempted). Once the text is usable: if an AI route
+  // is configured, convert the DOCX to markdown (extractDocxResumeMarkdown
+  // preserves hyperlink targets extractDocxResumeText drops — the fix for
+  // vanishing LinkedIn/GitHub contact links), write it as an intake sidecar,
+  // and run it through the same resume-extract flow POST /api/onboard/resume-ai
+  // uses, via runResumeExtractBounded() (a hoisted function declaration
+  // defined below, after the resume-ai route — JS hoists these to the top of
+  // mountOnboardRoutes' scope, so the call site here is valid; it's
+  // positioned there rather than above so the file's own retained-runtime
+  // classification tests keep scoping the AI-touching literals to the
+  // resume-ai route's slice rather than this deterministic-by-default one).
+  // Any AI failure (unavailable, schema-invalid, provider error, or a thrown
+  // error) falls back to today's fully deterministic response — a DOCX
+  // upload must never fail, or behave differently, because the AI upgrade
+  // failed when the deterministic text was already usable.
   // -------------------------------------------------------------------------
   addRoute("POST", "/api/onboard/resume-docx", async (req, res) => {
     const requestUrl = new URL(req.url, "http://127.0.0.1");
@@ -1300,6 +1316,77 @@ export function mountOnboardRoutes({
       return;
     }
 
+    // AI upgrade — resolveAIRoute() never throws, it reports {type: "none"}
+    // when neither ANTHROPIC_API_KEY nor ROLESTER_AI_PROXY_URL is set (same
+    // check GET /api/onboard/state already uses for keyConfigured), so this
+    // is a plain gate, not a try/catch. Skipping the AI call entirely when no
+    // route is configured means a DOCX upload with no key behaves exactly
+    // like it did before this route existed — no invokeResumeExtract, no
+    // runSkillStream call, nothing to fail.
+    if (resolveAIRoute(env).type !== "none") {
+      try {
+        const markdown = await extractDocxResumeMarkdown(bytes);
+        const markdownRelPath = `${savedRelPath}.md`;
+        atomicWriteFile(userPath(pathCtx, markdownRelPath), markdown);
+
+        const outcome = await runResumeExtractBounded({
+          savedPath: userPath(pathCtx, markdownRelPath),
+        });
+
+        if (outcome.body.ok) {
+          const extracted = outcome.body.data || {};
+          const aiResumeDocument = extracted.resume_document;
+          const fullText =
+            normalizeDocxResumeText(extracted.full_text || "") ||
+            resumeDocumentToPlainText(aiResumeDocument);
+          const aiClaims = (extracted.claims || []).map((c, i) => ({
+            id: `resume-${String(i + 1).padStart(3, "0")}`,
+            claim: String(c?.claim ?? ""),
+            evidence: String(c?.evidence ?? ""),
+          }));
+          const aiTargetingSeed = normalizeTargetingSeed(extracted.targeting_suggestions);
+
+          if (dbExists(pathCtx)) {
+            candidateArtifactPut({
+              ...pathCtx,
+              id: "source-resume",
+              kind: "source-resume",
+              data: {
+                path: savedRelPath,
+                filename: sanitizeUploadFilename(name),
+                savedAt: new Date().toISOString(),
+                source: "docx",
+                extraction: "ai",
+                text: fullText,
+                resumeDocument: aiResumeDocument,
+              },
+            });
+          } else {
+            const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+            const dest = userPath(pathCtx, entry.candidatePath);
+            mkdirSync(dirname(dest), { recursive: true });
+            atomicWriteFile(dest, fullText);
+          }
+
+          sendJson(res, 200, {
+            ok: true,
+            profileSeed: { candidate: extracted.candidate || {} },
+            evidenceSeed: { claims: aiClaims },
+            sections: extracted.sections || {},
+            resumeDocument: aiResumeDocument,
+            source: "docx",
+            extraction: "ai",
+            savedPath: savedRelPath,
+            ...(aiTargetingSeed?.role_buckets?.length ? { targetingSeed: aiTargetingSeed } : {}),
+          });
+          return;
+        }
+      } catch {
+        // Fall through to the deterministic path below — an AI hiccup never
+        // fails a DOCX upload the deterministic parser already handled.
+      }
+    }
+
     const parsed = parseResume(text);
     const profileSeed = deriveProfileSeed(parsed);
     const evidenceSeed = deriveEvidenceSeed(parsed);
@@ -1342,6 +1429,7 @@ export function mountOnboardRoutes({
       sections,
       resumeDocument,
       source: "docx",
+      extraction: "local",
       savedPath: savedRelPath,
       ...(targetingSeed?.role_buckets?.length ? { targetingSeed } : {}),
     });
@@ -1354,11 +1442,10 @@ export function mountOnboardRoutes({
   // unlike every other route in this file) — `name` travels as a query
   // param purely so the server knows the original filename/extension.
   // Saves under workspace/intake/resume-uploads/, then runs the
-  // resume-extract skill one-shot (tools: ["Read"] only) over the embedded
-  // runtime, buffers its reply, and parses/validates/retries via the shared
-  // bounded-AI fallback helper. The route keeps the Read-only skill adapter
-  // because PDF/image extraction needs local file access, while the response
-  // shape now uses the common bounded envelope.
+  // resume-extract skill one-shot via runResumeExtractBounded() (a hoisted
+  // function declaration defined right after this route — the same helper
+  // POST /api/onboard/resume-docx's AI upgrade calls over its converted
+  // markdown sidecar). The response shape uses the common bounded envelope.
   // -------------------------------------------------------------------------
   addRoute("POST", "/api/onboard/resume-ai", async (req, res) => {
     const requestUrl = new URL(req.url, "http://127.0.0.1");
@@ -1397,47 +1484,7 @@ export function mountOnboardRoutes({
     // and would corrupt binary data.
     writeFileSync(savedPath, bytes);
 
-    const schema = JSON.parse(readFileSync(join(repoRoot, RESUME_EXTRACT_SCHEMA_PATH), "utf8"));
-
-    // One attempt of the one-shot skill run: Read-only tool surface, the
-    // saved file's path as input (a corrective addendum on a retry — see
-    // structured-oneshot.mjs's own header comment for why `invoke` throwing
-    // here is deliberately NOT caught inside runStructuredOneshot). Buffers
-    // every `assistant` event's text blocks in order, exactly like
-    // skill-runtime.mjs's own header comment describes for a driven
-    // (non-SSE-passthrough) run.
-    async function invokeResumeExtract({ correction }) {
-      let rawText = "";
-      await runSkillStream({
-        skill: "resume-extract",
-        action: RESUME_AI_LABELS.action,
-        operation: RESUME_AI_LABELS.operation,
-        input: correction
-          ? `Read the file at this exact path: ${savedPath}\n\n${correction}`
-          : { path: savedPath },
-        repoRoot,
-        env,
-        tools: ["Read"],
-        onEvent: (evt) => {
-          if (evt.type !== "assistant") return;
-          for (const block of evt.data?.message?.content ?? []) {
-            if (block?.type === "text" && typeof block.text === "string") {
-              rawText += block.text;
-            }
-          }
-        },
-      });
-      return rawText;
-    }
-
-    const outcome = await runBoundedAI({
-      labels: RESUME_AI_LABELS,
-      schema,
-      manual: RESUME_AI_MANUAL,
-      structuredMode: "fallback",
-      maxRetries: 1,
-      invoke: invokeResumeExtract,
-    });
+    const outcome = await runResumeExtractBounded({ savedPath });
 
     if (!outcome.body.ok) {
       sendJson(res, outcome.status, outcome.body);
@@ -1490,6 +1537,58 @@ export function mountOnboardRoutes({
       },
     });
   });
+
+  // Shared by the two routes above: POST /api/onboard/resume-ai (PDF/image,
+  // over the saved upload itself) and POST /api/onboard/resume-docx's AI
+  // upgrade (over a converted markdown sidecar). Runs the resume-extract
+  // skill one-shot against `savedPath`, Read-only tool surface, buffers the
+  // assistant's text reply, and validates/retries it via the shared
+  // bounded-AI fallback helper. Lifted out of the resume-ai route body
+  // unchanged — same labels, same schema, same retry contract — so both
+  // callers get identical AI behavior.
+  async function runResumeExtractBounded({ savedPath }) {
+    const schema = JSON.parse(readFileSync(join(repoRoot, RESUME_EXTRACT_SCHEMA_PATH), "utf8"));
+
+    // One attempt of the one-shot skill run: Read-only tool surface, the
+    // saved file's path as input (a corrective addendum on a retry — see
+    // structured-oneshot.mjs's own header comment for why `invoke` throwing
+    // here is deliberately NOT caught inside runStructuredOneshot). Buffers
+    // every `assistant` event's text blocks in order, exactly like
+    // skill-runtime.mjs's own header comment describes for a driven
+    // (non-SSE-passthrough) run.
+    async function invokeResumeExtract({ correction }) {
+      let rawText = "";
+      await runSkillStream({
+        skill: "resume-extract",
+        action: RESUME_AI_LABELS.action,
+        operation: RESUME_AI_LABELS.operation,
+        input: correction
+          ? `Read the file at this exact path: ${savedPath}\n\n${correction}`
+          : { path: savedPath },
+        repoRoot,
+        env,
+        tools: ["Read"],
+        onEvent: (evt) => {
+          if (evt.type !== "assistant") return;
+          for (const block of evt.data?.message?.content ?? []) {
+            if (block?.type === "text" && typeof block.text === "string") {
+              rawText += block.text;
+            }
+          }
+        },
+      });
+      return rawText;
+    }
+
+    return runBoundedAI({
+      labels: RESUME_AI_LABELS,
+      schema,
+      manual: RESUME_AI_MANUAL,
+      structuredMode: "fallback",
+      maxRetries: 1,
+      invoke: invokeResumeExtract,
+    });
+  }
 
   // -------------------------------------------------------------------------
   // POST /api/onboard/candidate/:name — { data } deep-merge, validate, write.

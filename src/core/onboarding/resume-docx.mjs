@@ -33,6 +33,34 @@ export async function extractDocxResumeText(buffer) {
   return normalizeDocxResumeText(result?.value || "");
 }
 
+// mammoth.extractRawText() above keeps only anchor text and drops the href —
+// that's why hyperlinked LinkedIn/GitHub contact links vanish from plain-text
+// DOCX intake. convertToMarkdown() preserves them as "[text](url)", so the AI
+// resume-extract pass (which reads this markdown, never the raw text) can
+// still find the URL. Falls back to convertToHtml() + a minimal anchor
+// transform if a future mammoth version ever drops convertToMarkdown.
+export async function extractDocxResumeMarkdown(buffer) {
+  const markdown =
+    typeof mammoth.convertToMarkdown === "function"
+      ? (await mammoth.convertToMarkdown({ buffer }))?.value || ""
+      : htmlAnchorsToMarkdownLinks((await mammoth.convertToHtml({ buffer }))?.value || "");
+  return normalizeDocxResumeText(markdown);
+}
+
+function htmlAnchorsToMarkdownLinks(html) {
+  return String(html || "")
+    .replace(/<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_match, href, inner) => {
+      const text = inner.replace(/<[^>]+>/g, "").trim();
+      return href ? `${text} (${href})` : text;
+    })
+    .replace(/<[^>]+>/g, "\n")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
 export function normalizeDocxResumeText(text) {
   return stripUnsafeControlCharacters(
     String(text || "")
