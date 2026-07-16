@@ -25,7 +25,11 @@ import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
-import { decideExternalOpen, resolveDesktopRuntimePaths } from "./desktop-runtime.mjs";
+import {
+  choosePreferredPort,
+  decideExternalOpen,
+  resolveDesktopRuntimePaths,
+} from "./desktop-runtime.mjs";
 import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
 import { buildBrowserWindowOptions } from "./window-options.mjs";
 
@@ -55,6 +59,14 @@ const isSmoke = process.argv.includes("--smoke");
 // before app is ready, i.e. before any default menu is built.
 app.setName("Rolester");
 app.setAboutPanelOptions({ applicationName: "Rolester" });
+
+// Google's OAuth consent screen rejects UAs it doesn't recognize with
+// disallowed_useragent. Electron's default fallback UA tacks our own
+// " Rolester/<version> Electron/<version>" tokens on after the Chrome/Safari
+// tokens Google's allowlist actually checks — strip just those two tokens so
+// the request reads as a plain Chromium browser. Must run before any
+// BrowserWindow is created; the UA is fixed at window construction.
+app.userAgentFallback = app.userAgentFallback.replace(/\s(Rolester|Electron)\/[\d.]+/g, "");
 
 // --- Trap 3 -------------------------------------------------------------
 // Data root. A packaged app's Resources/ tree is read-only (code-signed) —
@@ -88,6 +100,26 @@ function loadEngineModule(relPath) {
 
 function log(msg) {
   process.stdout.write(`[desktop] ${msg}\n`);
+}
+
+// Binds `server` to `port` on loopback and resolves with the port actually
+// bound (relevant when `port` is 0, i.e. "pick any free ephemeral port").
+// Rejects with the raw listen error (e.g. EADDRINUSE) instead of swallowing
+// it — the caller decides whether a retry is warranted.
+function listenOnPort(server, port) {
+  return new Promise((resolve, reject) => {
+    function onError(err) {
+      server.removeListener("listening", onListening);
+      reject(err);
+    }
+    function onListening() {
+      server.removeListener("error", onError);
+      resolve(server.address().port);
+    }
+    server.once("error", onError);
+    server.once("listening", onListening);
+    server.listen(port, "127.0.0.1");
+  });
 }
 
 // Plain node:http instead of Electron's main-process `fetch()` (which is
@@ -144,10 +176,24 @@ async function boot() {
 
   dev.startWatching();
 
-  const port = await new Promise((resolve, reject) => {
-    dev.server.once("error", reject);
-    dev.server.listen(0, "127.0.0.1", () => resolve(dev.server.address().port));
-  });
+  // Packaged mode listens on a stable, configurable port instead of an
+  // ephemeral one: Clerk's dev-browser sign-in state is keyed by origin
+  // (host+port), so a port that changes on every relaunch would silently
+  // sign the candidate back out each time they reopen the app. Dev/smoke
+  // keep the ephemeral port (0) unchanged. If the preferred port is already
+  // taken, fall back to an ephemeral one rather than failing to boot.
+  const preferredPort = choosePreferredPort({ isPackaged: app.isPackaged, env: process.env });
+  let port;
+  try {
+    port = await listenOnPort(dev.server, preferredPort);
+  } catch (err) {
+    if (err?.code === "EADDRINUSE" && preferredPort !== 0) {
+      log(`port ${preferredPort} in use, retrying with an ephemeral port: ${err.message}`);
+      port = await listenOnPort(dev.server, 0);
+    } else {
+      throw err;
+    }
+  }
 
   const url = `http://127.0.0.1:${port}`;
   log(`serving ${url}`);
@@ -201,7 +247,7 @@ async function shutdown() {
 }
 
 function openExternalIfAllowed(target, baseUrl) {
-  const decision = decideExternalOpen({ target, baseUrl });
+  const decision = decideExternalOpen({ target, baseUrl, env: process.env });
   if (decision.action === "open-external") {
     shell.openExternal(decision.url).catch((err) => {
       log(`external open failed: ${err.message}`);
@@ -222,13 +268,20 @@ function createWindow(url, route, { load = true } = {}) {
   });
 
   // External links (target=_blank) and any navigation away from our own
-  // loopback origin open in the OS browser instead of inside the app window.
+  // loopback origin open in the OS browser instead of inside the app window
+  // — except the Google/Clerk OAuth chain (accounts.google.com, Clerk's
+  // frontend-API domain): decideExternalOpen tags those "ignore"/"auth-origin"
+  // so the popup opens in-window instead, letting the sign-in flow complete
+  // and hand the session back to this same webContents.
   win.webContents.setWindowOpenHandler(({ url: target }) => {
-    openExternalIfAllowed(target, url);
+    const decision = openExternalIfAllowed(target, url);
+    if (decision.action === "ignore" && decision.reason === "auth-origin") {
+      return { action: "allow" };
+    }
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, target) => {
-    const decision = decideExternalOpen({ target, baseUrl: url });
+    const decision = decideExternalOpen({ target, baseUrl: url, env: process.env });
     if (decision.action === "ignore") return;
 
     event.preventDefault();

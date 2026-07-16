@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
+  choosePreferredPort,
+  DEFAULT_PACKAGED_PORT,
   decideExternalOpen,
   isAllowedExternalUrl,
   resolveDesktopRuntimePaths,
@@ -195,6 +197,52 @@ describe("desktop external URL decisions", () => {
     );
   });
 
+  it("keeps built-in HTTPS authentication origins in the Electron window", () => {
+    for (const target of [
+      "https://accounts.google.com/o/oauth2/auth",
+      "https://accounts.youtube.com/accounts/ServiceLogin",
+      "https://rolester-dev.clerk.accounts.dev/v1/client",
+    ]) {
+      assert.deepEqual(decideExternalOpen({ target }), {
+        action: "ignore",
+        reason: "auth-origin",
+        url: target,
+      });
+    }
+  });
+
+  it("keeps configured exact and suffix authentication origins in the Electron window", () => {
+    const env = {
+      ROLESTER_AUTH_HOSTS: "login.example.test, .oauth.example.test",
+    };
+
+    for (const target of [
+      "https://login.example.test/authorize",
+      "https://tenant.oauth.example.test/callback",
+    ]) {
+      assert.deepEqual(decideExternalOpen({ target, env }), {
+        action: "ignore",
+        reason: "auth-origin",
+        url: target,
+      });
+    }
+  });
+
+  it("ignores malformed configured auth-host entries without disrupting matching", () => {
+    const env = {
+      ROLESTER_AUTH_HOSTS: ", , ://bad host, ., login.example.test,",
+    };
+
+    assert.equal(
+      decideExternalOpen({ target: "https://login.example.test/authorize", env }).reason,
+      "auth-origin"
+    );
+    assert.deepEqual(decideExternalOpen({ target: "https://ordinary.example.test/jobs", env }), {
+      action: "open-external",
+      url: "https://ordinary.example.test/jobs",
+    });
+  });
+
   it("returns an external-open decision only for safe external targets", () => {
     assert.deepEqual(
       decideExternalOpen({
@@ -217,6 +265,45 @@ describe("desktop external URL decisions", () => {
         reason: "blocked-protocol:javascript:",
         url: "javascript:alert(1)",
       }
+    );
+  });
+});
+
+describe("desktop preferred port selection", () => {
+  it("uses the stable default port for packaged launches", () => {
+    assert.equal(choosePreferredPort({ isPackaged: true, env: {} }), DEFAULT_PACKAGED_PORT);
+  });
+
+  it("uses a valid packaged port override", () => {
+    assert.equal(
+      choosePreferredPort({
+        isPackaged: true,
+        env: { ROLESTER_DESKTOP_PORT: "48123" },
+      }),
+      48123
+    );
+  });
+
+  it("falls back for invalid packaged port overrides", () => {
+    for (const value of ["not-a-port", "48123garbage", "0", "65536"]) {
+      assert.equal(
+        choosePreferredPort({
+          isPackaged: true,
+          env: { ROLESTER_DESKTOP_PORT: value },
+        }),
+        DEFAULT_PACKAGED_PORT,
+        `${value} should use the packaged default`
+      );
+    }
+  });
+
+  it("uses an ephemeral port in development even when an override is set", () => {
+    assert.equal(
+      choosePreferredPort({
+        isPackaged: false,
+        env: { ROLESTER_DESKTOP_PORT: "48123" },
+      }),
+      0
     );
   });
 });
