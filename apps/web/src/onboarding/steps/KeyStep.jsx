@@ -108,7 +108,11 @@ function DesktopGoogleSignIn() {
 // of v1 onboarding; inference is routed through the product backend.
 export function KeyStep({ goNext, goBack, onProgressSelect }) {
   const { isLoaded, isSignedIn, user, desktopAuthAvailable } = useRolesterUser();
-  const canContinue = isLoaded && isSignedIn;
+  // Account is currently OPTIONAL: Continue unlocks as soon as Clerk state
+  // has loaded, signed in or not, so the rest of onboarding stays testable
+  // end-to-end while the desktop sign-in flow is still being beta-hardened.
+  // Sign-in is still offered right here; it just doesn't gate progress.
+  const canContinue = isLoaded;
 
   return (
     <OnboardingShell

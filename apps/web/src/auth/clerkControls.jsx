@@ -156,6 +156,10 @@ export const ROLESTER_CLERK_APPEARANCE_DESKTOP = {
     ...ROLESTER_CLERK_APPEARANCE.elements,
     socialButtons: { display: "none" },
     socialButtonsBlockButton: { display: "none" },
+    // With the social row gone, Clerk's "or" divider would sit orphaned at
+    // the top of the card above the email field — hide it too so the modal
+    // reads as a clean email-only form.
+    dividerRow: { display: "none" },
   },
 };
 

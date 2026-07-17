@@ -97,7 +97,9 @@ describe("Account step", () => {
     expect(html).not.toContain("API key");
     expect(html).not.toContain("Connected (BYOK)");
     expect(html).not.toContain("Seven quick steps");
-    expect(html).toContain('disabled=""');
+    // Account is optional for now — Continue is enabled even signed out (see
+    // KeyStep.jsx's canContinue comment).
+    expect(html).not.toContain('disabled=""');
   });
 
   it("unlocks continue and shows the signed-in identity after Clerk signs in", () => {
