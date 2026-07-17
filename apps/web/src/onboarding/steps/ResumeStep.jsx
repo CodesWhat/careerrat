@@ -399,6 +399,16 @@ export function ResumeStep({
     claimsRef.current = claims;
   }, [claims]);
 
+  // The files panel scrolls (overflow: auto) and the feed renders below the
+  // file rows, so without this the newest activity line sits past the fold
+  // and the takeover reads as frozen. block: "nearest" scrolls only the
+  // panel, never the page.
+  const activityFeedRef = useRef(null);
+  useEffect(() => {
+    if (!streamActivity.length) return;
+    activityFeedRef.current?.lastElementChild?.scrollIntoView({ block: "nearest" });
+  }, [streamActivity]);
+
   // Clear every outstanding AI-progress interval on unmount — a navigation
   // away mid-extraction must not leave a timer ticking against a detached
   // uploadItems setter. Also abort any in-flight resume-ai-stream fetch so
@@ -928,7 +938,11 @@ export function ResumeStep({
               ) : null}
               {error ? <InlineAlert message={error} /> : null}
               {streamActivity.length ? (
-                <ul className="onboarding-resume__activity-feed" aria-label="Extraction activity">
+                <ul
+                  ref={activityFeedRef}
+                  className="onboarding-resume__activity-feed"
+                  aria-label="Extraction activity"
+                >
                   {streamActivity.map((entry) => (
                     <li key={entry.id} className="onboarding-resume__activity-feed-item">
                       {entry.message}
