@@ -648,6 +648,86 @@ export function promoteSourced({ id, appRow } = {}) {
   });
 }
 
+// POST /api/data/sourced/status — sourcedSetStatus verb. The Jobs Search
+// tab's Skip action calls this with to:"cut" (the taxonomy's archived,
+// recoverable sourced[] state — track-outcomes SKILL.md's canonical status
+// vocabulary); there's no "park"/"hold" sourced[] state in that vocabulary.
+export function setSourcedStatus({ id, to, note } = {}) {
+  return apiFetch("/api/data/sourced/status", {
+    method: "POST",
+    body: JSON.stringify({ id, to, note }),
+  });
+}
+
+// GET /api/data/applications — the raw applications[] rows (not the derived
+// dashboard.jobs.rows shape). Used to read back fields dashboard-data.js
+// never maps through to the derived row (e.g. packetGate, stamped by
+// PacketGateCard's setAppFields call) — see useApplicationGates.js.
+export function getApplications() {
+  return apiFetch("/api/data/applications");
+}
+
+// ---------------------------------------------------------------------------
+// Packet engine (src/cli/packet-route.mjs) — the Jobs drawer's Evaluate/
+// Documents sections. Every route here already existed and is already
+// mounted; this file only adds thin client wrappers, same convention as
+// every other section above. NOTE the response-shape split: the POST routes
+// (gate/generate/export) wrap their payload as {ok, data}, but GET /api/packet
+// returns its object directly (no {ok,data} envelope) — see packet-route.mjs.
+// ---------------------------------------------------------------------------
+
+// POST /api/packet/gate — evaluatePacketGate. Body is applicationId-keyed;
+// `jobBody`/`jobUrl` are optional overrides (evaluatePacketGate reads the
+// already-captured JD off the application's artifacts.jd by default — see
+// the JD-body capture invariant in AGENTS.md — so a normal call only needs
+// applicationId). evaluatePacketGate does NOT persist the verdict onto the
+// application row itself; callers that want it to survive a reload must
+// follow up with setAppFields (see PacketGateCard.jsx).
+export function runPacketGate({ applicationId, jobBody, jobUrl } = {}) {
+  return apiFetch("/api/packet/gate", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, jobBody, jobUrl }),
+  });
+}
+
+// POST /api/packet/generate — generatePacket. Requires packet questions to
+// already be captured for this application (POST /api/packet/questions,
+// out of this UI's scope) — an application with none throws
+// BAD_QUESTION_CAPTURE, surfaced as an ordinary ApiError.
+export function generatePacketDocuments({ applicationId, applyIntent, formats } = {}) {
+  return apiFetch("/api/packet/generate", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, applyIntent, formats }),
+  });
+}
+
+// POST /api/packet/export — exportPacketArtifacts. Renders the generated
+// markdown sources to real PDF/DOCX files under workspace/tailored/ and
+// registers them on the application row; `userFacing` in the response is
+// {resume:[{format,path,name}], coverLetter:[...], answers:[...]}.
+export function exportPacketDocuments({ applicationId, formats } = {}) {
+  return apiFetch("/api/packet/export", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, formats }),
+  });
+}
+
+// GET /api/packet?id= — NOT wrapped in {ok,data} (see this section's header
+// comment) — returns {id, company, role, resumeNote, artifacts:{resume,
+// coverLetter, answers}} directly, each artifact either null or
+// {path, markdown, html, binary, kind, url, needsYou?}.
+export function getPacket(id) {
+  return apiFetch(`/api/packet?id=${encodeURIComponent(id)}`);
+}
+
+// Not a fetch wrapper — GET /api/packet/artifact?id=&kind= is meant to be
+// used directly as a binary embed src (PDF/DOCX), same convention as
+// logoImageUrl above. Only meaningful when the artifact view's own `.url`
+// field (from getPacket) is set (binary artifacts only).
+export function packetArtifactUrl(id, kind) {
+  return `/api/packet/artifact?id=${encodeURIComponent(id)}&kind=${encodeURIComponent(kind)}`;
+}
+
 // ---------------------------------------------------------------------------
 // Deep ingest workbench (src/cli/deep-ingest-route.mjs) — the six-endpoint
 // surface behind DeepIngestPage.jsx: state, source submit (paste/link JSON)

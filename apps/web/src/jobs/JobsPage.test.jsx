@@ -5,13 +5,27 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 const dashboardContext = vi.hoisted(() => ({
   useDashboardSnapshot: vi.fn(),
 }));
+const capturedButtons = vi.hoisted(() => []);
 
 vi.mock("../app-shell/DashboardContext.jsx", () => dashboardContext);
+
+vi.mock("../components/Button.jsx", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    Button: (props) => {
+      capturedButtons.push(props);
+      return actual.Button(props);
+    },
+  };
+});
 
 vi.mock("../lib/api.js", () => ({
   getApplication: vi.fn(async () => ({ data: null })),
   getCommunications: vi.fn(async () => ({ data: [] })),
   getDashboard: vi.fn(async () => ({ setup: null })),
+  getApplications: vi.fn(async () => ({ data: [] })),
+  getPacket: vi.fn(async () => ({ artifacts: {} })),
   getRuntimeConfig: vi.fn(async () => ({ aiWebSearch: { available: true } })),
   getSearchSources: vi.fn(async () => ({ ready: true })),
   logoImageUrl: ({ domain, name }) => `/logo/${domain || name}`,
@@ -19,13 +33,18 @@ vi.mock("../lib/api.js", () => ({
   markCommSent: vi.fn(async () => ({})),
   mergeNestedField: vi.fn((base, field, patch) => ({ ...(base?.[field] || {}), ...patch })),
   promoteSourced: vi.fn(async () => ({})),
+  runPacketGate: vi.fn(async () => ({ data: {} })),
   scheduleInterview: vi.fn(async () => ({})),
   setAppFields: vi.fn(async () => ({})),
   setAppStatus: vi.fn(async () => ({})),
+  setSourcedStatus: vi.fn(async () => ({})),
+  exportPacketDocuments: vi.fn(async () => ({ data: {} })),
+  generatePacketDocuments: vi.fn(async () => ({ data: {} })),
   startSearchRun: vi.fn(async () => ({ run: { status: "running" } })),
   runAiWebSearchStream: vi.fn(async () => {}),
 }));
 
+import { setSourcedStatus } from "../lib/api.js";
 import { JobsPage } from "./JobsPage.jsx";
 
 // No jsdom in this suite (vitest's default "node" environment has neither
@@ -336,6 +355,8 @@ function renderJobsPage({ route = "/jobs", snapshot = {}, storageState = null } 
 
 afterEach(() => {
   globalThis.localStorage.clear();
+  capturedButtons.length = 0;
+  vi.clearAllMocks();
 });
 
 describe("JobsPage", () => {
@@ -386,5 +407,28 @@ describe("JobsPage", () => {
     expect(html).toContain("Run AI Web Search");
     expect(html).toContain("Configure an AI key in Settings to enable this lane.");
     expect(html).not.toContain("Coming soon");
+  });
+
+  it("search results use Open and Skip actions, with no Park action", () => {
+    const html = renderJobsPage({ route: "/jobs?tab=search" });
+
+    // "Open" is deliberate: the button only opens the drawer (evaluation is
+    // the drawer's PacketGateCard), so labelling it "Evaluate" was a lie.
+    expect(html).toContain(">Open<");
+    expect(html).toContain(">Skip<");
+    expect(html).not.toContain(">Park<");
+    expect(html).not.toContain(">Evaluate<");
+  });
+
+  it("Skip cuts the sourced row and refetches the dashboard", async () => {
+    const refetch = vi.fn(async () => {});
+    renderJobsPage({ route: "/jobs?tab=search", snapshot: { refetch } });
+    const skip = capturedButtons.find((props) => props.children === "Skip");
+    expect(skip).toBeTruthy();
+
+    await skip.onClick();
+
+    expect(setSourcedStatus).toHaveBeenCalledWith({ id: "sourced-triage", to: "cut" });
+    expect(refetch).toHaveBeenCalledOnce();
   });
 });

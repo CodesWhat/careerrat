@@ -8,7 +8,7 @@
 // application row (getApplication) because appSetFields is a shallow
 // one-level merge (verbs/app.mjs) — patching a nested object from anything
 // less than its full current shape silently drops sibling keys.
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button, IconButton } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
@@ -20,14 +20,21 @@ import {
   appendCommMessage,
   getApplication,
   getCommunications,
+  getPacket,
   markCommSent,
   mergeNestedField,
   promoteSourced,
+  runPacketGate,
   scheduleInterview,
   setAppFields,
   setAppStatus,
+  setSourcedStatus,
 } from "../lib/api.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
+import { ArtifactViewerModal } from "./ArtifactViewerModal.jsx";
+import { PacketDocumentsCard } from "./PacketDocumentsCard.jsx";
+import { PacketGateCard } from "./PacketGateCard.jsx";
+import { deriveJobCta } from "./useApplicationGates.js";
 
 const STATUS_OPTIONS = [
   { value: "applied", label: "Applied" },
@@ -54,6 +61,18 @@ const ROUND_OPTIONS = [
   { value: "offer", label: "Offer" },
 ];
 
+// jobDetailFromRow's artifact list (dashboard-data.js) uses display labels,
+// not the packet-route.mjs artifact `kind` param — map the clickable ones
+// back to their GET /api/packet?id= key.
+const VIEWABLE_ARTIFACT_KIND_BY_LABEL = { Resume: "resume", "Cover letter": "coverLetter" };
+
+// Statuses that count as "gate passed, not yet applied" (Phase A's
+// "Mark applied" one-click primary action) — mirrors sourcedPromote's own
+// default post-promotion status (track-outcomes SKILL.md's canonical status
+// vocabulary: reviewed-hold = "passed the evaluate-job gate; ready to
+// pursue").
+const PRE_APPLIED_STATUSES = new Set(["reviewed-hold"]);
+
 function toDatetimeLocal(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -62,7 +81,7 @@ function toDatetimeLocal(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
-export function JobDrawer({ row, onClose }) {
+export function JobDrawer({ row, onClose, initialSection }) {
   const { refetch } = useDashboardSnapshot();
   const [app, setApp] = useState(null);
   const [comms, setComms] = useState([]);
@@ -70,6 +89,7 @@ export function JobDrawer({ row, onClose }) {
   const [busyKey, setBusyKey] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [viewer, setViewer] = useState(null); // {title, artifact} | null
 
   const isApplication = row.source === "application";
 
@@ -117,6 +137,42 @@ export function JobDrawer({ row, onClose }) {
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
 
+  // Deep-link support for the Phase D "next-step" CTA (Pipeline-tab rows and
+  // this drawer's own header): JobsPage passes the target section through
+  // `initialSection` (?section= in the URL), and the CTA click handler below
+  // re-uses this same scroll for an already-open drawer.
+  const scrollToSection = useCallback((section) => {
+    if (!section) return;
+    document
+      .getElementById(`drawer-section-${section}`)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, []);
+
+  useEffect(() => {
+    if (!initialSection) return;
+    const timer = setTimeout(() => scrollToSection(initialSection), 0);
+    return () => clearTimeout(timer);
+  }, [initialSection, scrollToSection]);
+
+  // Phase C item 8 — the existing (read-only) Artifacts card's Resume/Cover
+  // letter chips open the same rendered view PacketDocumentsCard's chips do.
+  async function handleViewArtifact(label) {
+    const kind = VIEWABLE_ARTIFACT_KIND_BY_LABEL[label];
+    if (!kind) return;
+    setActionError(null);
+    try {
+      const packet = await getPacket(row.id);
+      const artifact = packet?.artifacts?.[kind];
+      if (!artifact) {
+        setActionError(`${label} isn't available to preview yet.`);
+        return;
+      }
+      setViewer({ title: `${label} — preview`, artifact });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : `Could not load ${label.toLowerCase()}`);
+    }
+  }
+
   async function runWrite(key, fn, successNote) {
     setBusyKey(key);
     setActionError(null);
@@ -133,244 +189,351 @@ export function JobDrawer({ row, onClose }) {
   }
 
   const drawer = row.drawer || {};
+  // Phase D's single derived next-step CTA — pure derivation from row/gate
+  // state (no stored CTA field), so it self-clears once its condition no
+  // longer holds (AGENTS.md's "completed-action clears its CTA" invariant).
+  const drawerCta = deriveJobCta(row, app?.packetGate);
 
   return (
-    // biome-ignore lint/a11y/noStaticElementInteractions: mouse-only backdrop; Escape (above) is the keyboard equivalent
-    // biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only backdrop; Escape (above) is the keyboard equivalent
-    <div className="job-drawer-overlay" onClick={onClose}>
-      {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops the backdrop's click-to-close from firing; not itself an interactive control */}
-      <div
-        className="job-drawer"
-        role="dialog"
-        aria-label={`${row.company} — ${row.role}`}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <IconButton label="Close" className="job-drawer__close" onClick={onClose}>
-          ×
-        </IconButton>
+    <>
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: mouse-only backdrop; Escape (above) is the keyboard equivalent */}
+      {/* biome-ignore lint/a11y/useKeyWithClickEvents: mouse-only backdrop; Escape (above) is the keyboard equivalent */}
+      <div className="job-drawer-overlay" onClick={onClose}>
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops the backdrop's click-to-close from firing; not itself an interactive control */}
+        <div
+          className="job-drawer"
+          role="dialog"
+          aria-label={`${row.company} — ${row.role}`}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <IconButton label="Close" className="job-drawer__close" onClick={onClose}>
+            ×
+          </IconButton>
 
-        {/* 1. Header */}
-        <div className="job-drawer__header">
-          <CompanyAvatar name={row.company} domain={row.domain} size={40} />
-          <div className="job-drawer__header-text">
-            <h2 className="job-drawer__company">{row.company}</h2>
-            <p className="job-drawer__role">{row.role}</p>
+          {/* 1. Header */}
+          <div className="job-drawer__header">
+            <CompanyAvatar name={row.company} domain={row.domain} size={40} />
+            <div className="job-drawer__header-text">
+              <h2 className="job-drawer__company">{row.company}</h2>
+              <p className="job-drawer__role">{row.role}</p>
+            </div>
+            <span className="badge badge--muted">{drawer.stage || row.stageLabel}</span>
           </div>
-          <span className="badge badge--muted">{drawer.stage || row.stageLabel}</span>
-        </div>
-        {row.statusNote ? <p className="field__hint">{row.statusNote}</p> : null}
-        {drawer.link ? (
-          <a className="job-drawer__link" href={drawer.link} target="_blank" rel="noreferrer">
-            View posting
-          </a>
-        ) : null}
-        {drawer.warn ? <InlineAlert tone="error" message={drawer.warn} /> : null}
-
-        {loadError ? <InlineAlert message={loadError} /> : null}
-        {actionError ? <InlineAlert message={actionError} /> : null}
-        {notice ? <p className="field__hint">{notice}</p> : null}
-
-        {/* 2. Interview panel */}
-        {drawer.interview && (drawer.interview.chips?.length || drawer.interview.detail) ? (
-          <Card title="Interview">
-            {drawer.interview.chips?.length ? (
-              <div className="chip-row">
-                {drawer.interview.chips.map((c) => (
-                  <span className="chip" key={c.label}>
-                    <span className="field__label">{c.label}:</span>&nbsp;{c.value}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-            {drawer.interview.detail ? <p>{drawer.interview.detail}</p> : null}
-          </Card>
-        ) : null}
-
-        {isApplication ? (
-          <ScheduleInterviewCard
-            app={app}
-            busy={busyKey === "schedule"}
-            onSchedule={(payload) =>
-              runWrite(
-                "schedule",
-                () => scheduleInterview({ id: row.id, ...payload }),
-                "Interview saved."
-              )
-            }
-          />
-        ) : null}
-
-        {/* 3. Ready-to-send panel */}
-        {isApplication ? (
-          <ReadyToSendCard
-            comms={comms}
-            busyKey={busyKey}
-            onSend={(commId) =>
-              runWrite(`send-${commId}`, () => markCommSent({ id: commId }), "Marked sent.")
-            }
-          />
-        ) : null}
-
-        {/* Follow-up complete */}
-        {isApplication && app?.followUp?.dueAt ? (
-          <Card title="Follow-up">
-            <p>{app.followUp.note || app.followUp.title || app.followUp.kind || "Follow-up due"}</p>
-            <p className="field__hint">Due {app.followUp.dueAt}</p>
+          {row.statusNote ? <p className="field__hint">{row.statusNote}</p> : null}
+          {drawer.link ? (
+            <a className="job-drawer__link" href={drawer.link} target="_blank" rel="noreferrer">
+              View posting
+            </a>
+          ) : null}
+          {drawer.warn ? <InlineAlert tone="error" message={drawer.warn} /> : null}
+          {isApplication && drawerCta ? (
             <Button
               variant="secondary"
-              disabled={busyKey === "followup"}
-              onClick={() =>
-                runWrite(
-                  "followup",
-                  () =>
-                    setAppFields({
-                      id: row.id,
-                      patch: {
-                        followUp: mergeNestedField(app, "followUp", { dueAt: null, draft: null }),
-                      },
-                    }),
-                  "Follow-up marked done."
-                )
-              }
+              className="job-drawer__cta"
+              onClick={() => scrollToSection(drawerCta.section)}
             >
-              {busyKey === "followup" ? "Saving…" : "Mark follow-up done"}
+              {drawerCta.label}
             </Button>
-          </Card>
-        ) : null}
+          ) : null}
 
-        {/* 4. Comp & Fit */}
-        <CompFitCard
-          row={row}
-          drawer={drawer}
-          app={app}
-          isApplication={isApplication}
-          busy={busyKey === "compNote"}
-          onSaveCompNote={(value) =>
-            runWrite(
-              "compNote",
-              () => setAppFields({ id: row.id, patch: { compNote: value } }),
-              "Comp note saved."
-            )
-          }
-        />
+          {loadError ? <InlineAlert message={loadError} /> : null}
+          {actionError ? <InlineAlert message={actionError} /> : null}
+          {notice ? <p className="field__hint">{notice}</p> : null}
 
-        {/* 5. Communications thread */}
-        {isApplication ? (
-          <CommsThreadCard
-            comms={comms}
-            busyKey={busyKey}
-            onAddNote={(commId, text) =>
-              runWrite(
-                `note-${commId}`,
-                () =>
-                  appendCommMessage({
-                    id: commId,
-                    message: { direction: "note", summary: text, at: new Date().toISOString() },
-                  }),
-                "Note added."
-              )
-            }
-          />
-        ) : null}
-
-        {/* 6. Signals & learnings */}
-        {drawer.learnings?.length ? (
-          <Card title="Signals & learnings">
-            <ul className="job-drawer__list">
-              {drawer.learnings.map((l, i) => (
-                // learnings is a flat string list with no stable id.
-                // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
-                <li key={i}>{l}</li>
-              ))}
-            </ul>
-          </Card>
-        ) : null}
-
-        {/* 7. Artifacts */}
-        {drawer.artifacts?.length ? (
-          <Card title="Artifacts">
-            <ul className="job-drawer__list">
-              {drawer.artifacts.map((a, i) => (
-                // artifacts is a small fixed-shape list with no stable id.
-                // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
-                <li key={i}>
-                  <strong>{a.kind}:</strong> {a.note}
-                </li>
-              ))}
-            </ul>
-          </Card>
-        ) : null}
-
-        {/* Notes */}
-        {isApplication ? (
-          <NotesCard
-            app={app}
-            busyKey={busyKey}
-            onSave={(field, value) =>
-              runWrite(
-                field,
-                () => setAppFields({ id: row.id, patch: { [field]: value } }),
-                "Saved."
-              )
-            }
-          />
-        ) : null}
-
-        {/* 8. Per-app activity timeline */}
-        {drawer.timeline?.length ? (
-          <Card title="Timeline">
-            <ul className="job-drawer__timeline">
-              {drawer.timeline.map((t, i) => (
-                // timeline entries have no stable id (derived, re-ordered display list).
-                // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
-                <li key={i} className="job-drawer__timeline-item">
-                  <span className="job-drawer__timeline-icon">
-                    <KeyIcon iconKey={t.icon} />
-                  </span>
-                  <span>
-                    <span className="job-drawer__timeline-title">{t.title}</span>
-                    <span className="job-drawer__timeline-at">{t.at}</span>
-                    {t.desc ? <span className="job-drawer__timeline-desc">{t.desc}</span> : null}
-                  </span>
-                </li>
-              ))}
-            </ul>
-          </Card>
-        ) : null}
-
-        {/* 9. Status control */}
-        <Card title="Status">
+          {/* Evaluate (Phase B) — explicit-click packet gate, only meaningful once a
+            role has been promoted into applications[] (packet gate is
+            applicationId-keyed; sourced rows don't have one yet). */}
           {isApplication ? (
-            <StatusControl
-              currentStatus={app?.status || row.status}
-              busy={busyKey === "status"}
-              onSave={(to, note) =>
+            <div id="drawer-section-evaluate">
+              <PacketGateCard
+                verdict={app?.packetGate || null}
+                busy={busyKey === "evaluate"}
+                onEvaluate={() =>
+                  runWrite(
+                    "evaluate",
+                    async () => {
+                      const res = await runPacketGate({ applicationId: row.id });
+                      await setAppFields({
+                        id: row.id,
+                        patch: {
+                          packetGate: { ...res.data, evaluatedAt: new Date().toISOString() },
+                          fitBasis: "evaluated",
+                        },
+                      });
+                    },
+                    "Evaluated."
+                  )
+                }
+              />
+            </div>
+          ) : null}
+
+          {/* Documents (Phase C) — generate/export, explicit-click only. */}
+          {isApplication ? (
+            <div id="drawer-section-documents">
+              <PacketDocumentsCard
+                applicationId={row.id}
+                onView={({ title, artifact }) => setViewer({ title, artifact })}
+              />
+            </div>
+          ) : null}
+
+          {/* 2. Interview panel */}
+          {drawer.interview && (drawer.interview.chips?.length || drawer.interview.detail) ? (
+            <Card title="Interview">
+              {drawer.interview.chips?.length ? (
+                <div className="chip-row">
+                  {drawer.interview.chips.map((c) => (
+                    <span className="chip" key={c.label}>
+                      <span className="field__label">{c.label}:</span>&nbsp;{c.value}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {drawer.interview.detail ? <p>{drawer.interview.detail}</p> : null}
+            </Card>
+          ) : null}
+
+          {isApplication ? (
+            <ScheduleInterviewCard
+              app={app}
+              busy={busyKey === "schedule"}
+              onSchedule={(payload) =>
                 runWrite(
-                  "status",
-                  () => setAppStatus({ id: row.id, to, note: note || undefined }),
-                  "Status updated."
+                  "schedule",
+                  () => scheduleInterview({ id: row.id, ...payload }),
+                  "Interview saved."
                 )
               }
             />
-          ) : (
-            <>
-              <p className="field__hint">
-                This role is still in Sourced — gate it before promoting it into the active
-                pipeline.
+          ) : null}
+
+          {/* 3. Ready-to-send panel */}
+          {isApplication ? (
+            <ReadyToSendCard
+              comms={comms}
+              busyKey={busyKey}
+              onSend={(commId) =>
+                runWrite(`send-${commId}`, () => markCommSent({ id: commId }), "Marked sent.")
+              }
+            />
+          ) : null}
+
+          {/* Follow-up complete */}
+          {isApplication && app?.followUp?.dueAt ? (
+            <Card title="Follow-up">
+              <p>
+                {app.followUp.note || app.followUp.title || app.followUp.kind || "Follow-up due"}
               </p>
+              <p className="field__hint">Due {app.followUp.dueAt}</p>
               <Button
-                disabled={busyKey === "promote"}
+                variant="secondary"
+                disabled={busyKey === "followup"}
                 onClick={() =>
-                  runWrite("promote", () => promoteSourced({ id: row.id }), "Promoted to pipeline.")
+                  runWrite(
+                    "followup",
+                    () =>
+                      setAppFields({
+                        id: row.id,
+                        patch: {
+                          followUp: mergeNestedField(app, "followUp", { dueAt: null, draft: null }),
+                        },
+                      }),
+                    "Follow-up marked done."
+                  )
                 }
               >
-                {busyKey === "promote" ? "Promoting…" : "Gate this role → promote to pipeline"}
+                {busyKey === "followup" ? "Saving…" : "Mark follow-up done"}
               </Button>
-            </>
-          )}
-        </Card>
+            </Card>
+          ) : null}
+
+          {/* 4. Comp & Fit */}
+          <CompFitCard
+            row={row}
+            drawer={drawer}
+            app={app}
+            isApplication={isApplication}
+            busy={busyKey === "compNote"}
+            onSaveCompNote={(value) =>
+              runWrite(
+                "compNote",
+                () => setAppFields({ id: row.id, patch: { compNote: value } }),
+                "Comp note saved."
+              )
+            }
+          />
+
+          {/* 5. Communications thread */}
+          {isApplication ? (
+            <CommsThreadCard
+              comms={comms}
+              busyKey={busyKey}
+              onAddNote={(commId, text) =>
+                runWrite(
+                  `note-${commId}`,
+                  () =>
+                    appendCommMessage({
+                      id: commId,
+                      message: { direction: "note", summary: text, at: new Date().toISOString() },
+                    }),
+                  "Note added."
+                )
+              }
+            />
+          ) : null}
+
+          {/* 6. Signals & learnings */}
+          {drawer.learnings?.length ? (
+            <Card title="Signals & learnings">
+              <ul className="job-drawer__list">
+                {drawer.learnings.map((l, i) => (
+                  // learnings is a flat string list with no stable id.
+                  // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
+                  <li key={i}>{l}</li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+
+          {/* 7. Artifacts */}
+          {drawer.artifacts?.length ? (
+            <Card title="Artifacts">
+              <ul className="job-drawer__list">
+                {drawer.artifacts.map((a, i) => (
+                  // artifacts is a small fixed-shape list with no stable id.
+                  // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
+                  <li key={i}>
+                    <strong>{a.kind}:</strong>{" "}
+                    {VIEWABLE_ARTIFACT_KIND_BY_LABEL[a.kind] ? (
+                      <button
+                        type="button"
+                        className="job-drawer__link-button"
+                        onClick={() => handleViewArtifact(a.kind)}
+                      >
+                        {a.note}
+                      </button>
+                    ) : (
+                      a.note
+                    )}
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+
+          {/* Notes */}
+          {isApplication ? (
+            <NotesCard
+              app={app}
+              busyKey={busyKey}
+              onSave={(field, value) =>
+                runWrite(
+                  field,
+                  () => setAppFields({ id: row.id, patch: { [field]: value } }),
+                  "Saved."
+                )
+              }
+            />
+          ) : null}
+
+          {/* 8. Per-app activity timeline */}
+          {drawer.timeline?.length ? (
+            <Card title="Timeline">
+              <ul className="job-drawer__timeline">
+                {drawer.timeline.map((t, i) => (
+                  // timeline entries have no stable id (derived, re-ordered display list).
+                  // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
+                  <li key={i} className="job-drawer__timeline-item">
+                    <span className="job-drawer__timeline-icon">
+                      <KeyIcon iconKey={t.icon} />
+                    </span>
+                    <span>
+                      <span className="job-drawer__timeline-title">{t.title}</span>
+                      <span className="job-drawer__timeline-at">{t.at}</span>
+                      {t.desc ? <span className="job-drawer__timeline-desc">{t.desc}</span> : null}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          ) : null}
+
+          {/* 9. Status control */}
+          <div id="drawer-section-status">
+            <Card title="Status">
+              {isApplication ? (
+                <>
+                  {PRE_APPLIED_STATUSES.has(app?.status || row.status) ? (
+                    <Button
+                      disabled={busyKey === "mark-applied"}
+                      onClick={() =>
+                        runWrite(
+                          "mark-applied",
+                          () => setAppStatus({ id: row.id, to: "applied" }),
+                          "Marked applied."
+                        )
+                      }
+                    >
+                      {busyKey === "mark-applied" ? "Marking applied…" : "Mark applied"}
+                    </Button>
+                  ) : null}
+                  <StatusControl
+                    currentStatus={app?.status || row.status}
+                    busy={busyKey === "status"}
+                    onSave={(to, note) =>
+                      runWrite(
+                        "status",
+                        () => setAppStatus({ id: row.id, to, note: note || undefined }),
+                        "Status updated."
+                      )
+                    }
+                  />
+                </>
+              ) : (
+                <>
+                  <p className="field__hint">
+                    This role is still in Sourced — promote it to the active pipeline, or skip it.
+                  </p>
+                  <div className="job-drawer__inline-actions">
+                    <Button
+                      disabled={busyKey === "promote"}
+                      onClick={() =>
+                        runWrite(
+                          "promote",
+                          () => promoteSourced({ id: row.id }),
+                          "Promoted to pipeline."
+                        )
+                      }
+                    >
+                      {busyKey === "promote" ? "Promoting…" : "Promote to pipeline"}
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={busyKey === "skip"}
+                      onClick={() =>
+                        runWrite(
+                          "skip",
+                          () => setSourcedStatus({ id: row.id, to: "cut" }),
+                          "Skipped."
+                        )
+                      }
+                    >
+                      {busyKey === "skip" ? "Skipping…" : "Skip"}
+                    </Button>
+                  </div>
+                </>
+              )}
+            </Card>
+          </div>
+        </div>
       </div>
-    </div>
+      <ArtifactViewerModal
+        title={viewer?.title}
+        artifact={viewer?.artifact}
+        onClose={() => setViewer(null)}
+      />
+    </>
   );
 }
 

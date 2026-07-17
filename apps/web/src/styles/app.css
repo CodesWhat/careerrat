@@ -10516,6 +10516,126 @@ button {
   flex: 1;
 }
 
+/* Drawer header's derived next-step CTA (Phase D) and the Artifacts card's
+   "View" chip links (Phase C) — plain text-style buttons, same treatment as
+   .job-drawer__link, never a bordered/chip button (no new card chrome). */
+.job-drawer__cta {
+  align-self: flex-start;
+}
+
+.job-drawer__link-button {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sky);
+  cursor: pointer;
+}
+
+.job-drawer__link-button:hover {
+  text-decoration: underline;
+}
+
+/* Pipeline-tab rows' derived next-step CTA (Phase D) — a small text button
+   inline with the existing action-cell text, not a new bordered chip. */
+.jobs__cta-button {
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--sky);
+  cursor: pointer;
+  text-align: left;
+}
+
+.jobs__cta-button:hover {
+  text-decoration: underline;
+}
+
+.jobs__cta-button--card {
+  align-self: flex-start;
+  margin: 0 14px 12px;
+}
+
+/* Full-page packet-artifact viewer (Phase C) — same fixed-overlay pattern as
+   .onboarding-resume__document-viewer, including the Electron drag-region
+   gotcha: the toolbar paints over the frameless window's drag strip, so its
+   close control needs -webkit-app-region: no-drag or the desktop app's
+   window-drag swallows its clicks (only shows up packaged, not in a browser). */
+.packet-viewer-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(var(--rgb-line), 0.35);
+}
+
+.packet-viewer {
+  -webkit-app-region: no-drag;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  width: calc(100vw - clamp(24px, 4vw, 48px));
+  height: calc(100vh - clamp(24px, 4vw, 48px));
+  padding: 12px;
+  border: 1px solid rgba(var(--rgb-line), 0.14);
+  border-radius: 8px;
+  background: var(--paper-surface);
+  box-shadow: 0 28px 72px rgba(var(--rgb-line), 0.24);
+}
+
+.packet-viewer__toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.packet-viewer__title {
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.packet-viewer__close {
+  -webkit-app-region: no-drag;
+}
+
+.packet-viewer__stage {
+  min-height: 0;
+  overflow: auto;
+  border: 1px solid rgba(var(--rgb-line), 0.08);
+  border-radius: 8px;
+  background: var(--paper-band);
+}
+
+.packet-viewer__object,
+.packet-viewer__object iframe {
+  width: 100%;
+  height: 100%;
+  min-height: 360px;
+  border: 0;
+}
+
+.packet-viewer__markdown {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 34px 30px;
+}
+
+.packet-viewer__markdown :is(h1, h2, h3) {
+  margin-top: 1.4em;
+}
+
+.packet-viewer__markdown :first-child {
+  margin-top: 0;
+}
+
 /* ── M10 — Home pipeline snapshot ────────────────────────────────────────── */
 
 .pipeline-snapshot {

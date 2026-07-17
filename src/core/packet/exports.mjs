@@ -1,9 +1,10 @@
-import { existsSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { homedir } from "node:os";
 import { basename, extname, join, normalize, relative, sep } from "node:path";
-import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { appRegisterPacketArtifacts as registerPacketArtifacts } from "../db/verbs.mjs";
+import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
 function cleanText(value) {
@@ -42,6 +43,64 @@ function outputKey(kind, format) {
 function titleFor(app, kind) {
   const label = kind === "coverLetter" ? "Cover Letter" : kind === "answers" ? "Answers" : "Resume";
   return [app.company, app.role, label].filter(Boolean).join(" - ") || label;
+}
+
+// tailor-application SKILL.md STEP 11b: every rendered resume/cover-letter
+// PDF also gets a convenience copy under the real OS home, organized by
+// company — never a workspace-relative location. ROLESTER_DOWNLOADS_DIR lets
+// tests redirect this away from the real home (mirroring the ROLESTER_HOME
+// override in paths/workspace.mjs); production always resolves the real
+// os.homedir().
+function downloadsRoot(env) {
+  const override = String(env?.ROLESTER_DOWNLOADS_DIR || "").trim();
+  if (override) return override;
+  return join(homedir(), "Downloads", "rolester");
+}
+
+// Only resume/coverLetter get the Downloads convenience copy per SKILL.md
+// STEP 11b ("After every PDF renders (resume and cover letter)...") —
+// answers artifacts are not part of that convention.
+function downloadsLabelFor(kind) {
+  if (kind === "resume") return "Resume";
+  if (kind === "coverLetter") return "Cover Letter";
+  return null;
+}
+
+function safePathSegment(value, fallback) {
+  const cleaned = String(value || "")
+    .replace(/[/\\\0]/g, "-")
+    .trim();
+  return cleaned || fallback;
+}
+
+// A same-named file left by a prior round is displaced into archive/ first,
+// so the company root only ever shows what's live (SKILL.md STEP 11b).
+function archivePriorDownloadsCopy(companyDir, fileName) {
+  const existing = join(companyDir, fileName);
+  if (!existsSync(existing)) return;
+  const archiveDir = join(companyDir, "archive");
+  mkdirSync(archiveDir, { recursive: true });
+  renameSync(existing, join(archiveDir, fileName));
+}
+
+// Non-fatal by design: a Downloads-copy failure must never fail the export
+// itself, so every error is swallowed and returned for the caller to record
+// rather than thrown.
+function copyPdfToDownloads({ env, company, kind, absPath }) {
+  const label = downloadsLabelFor(kind);
+  if (!label) return null;
+  try {
+    const companyName = safePathSegment(company, "unknown");
+    const companyDir = join(downloadsRoot(env), companyName);
+    mkdirSync(companyDir, { recursive: true });
+    const fileName = `${companyName} - ${label}.pdf`;
+    archivePriorDownloadsCopy(companyDir, fileName);
+    const dest = join(companyDir, fileName);
+    copyFileSync(absPath, dest);
+    return { ok: true, path: dest };
+  } catch (err) {
+    return { ok: false, error: err?.message || String(err) };
+  }
 }
 
 function requestedFormats({ request = {}, uploadRequirements = [] } = {}) {
@@ -141,6 +200,8 @@ export async function exportPacketArtifacts({
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
   const artifacts = {};
   const userFacing = { resume: [], coverLetter: [], answers: [] };
+  const downloadsErrors = [];
+  const generatedAt = now().toISOString();
 
   for (const [sourceKey, storedPath] of sourceEntries(sources)) {
     const full = resolveWorkspacePath(workspaceDir, storedPath);
@@ -161,16 +222,24 @@ export async function exportPacketArtifacts({
     });
 
     artifacts[sourceKey] = storedPath;
+    // BUG: the read path (GET /api/packet, isGatedIn) keys off the plain
+    // artifacts.<kind> field, not this finer-grained <kind>Source key — stamp
+    // it too, pointed at the same source markdown, so an export run
+    // standalone (without generatePacket) still leaves the packet readable.
+    artifacts[kind] = storedPath;
+    artifacts[`${kind}GeneratedAt`] = generatedAt;
     for (const format of ["pdf", "docx"]) {
       const absPath = result[format];
       if (!absPath) continue;
       const key = outputKey(kind, format);
       artifacts[key] = workspaceDisplayPath(workspaceDir, absPath);
-      userFacing[kind].push({
-        format,
-        path: artifacts[key],
-        name: basename(absPath),
-      });
+      const entry = { format, path: artifacts[key], name: basename(absPath) };
+      if (format === "pdf") {
+        const copy = copyPdfToDownloads({ env, company: app.company, kind, absPath });
+        if (copy?.ok) entry.downloadsPath = copy.path;
+        else if (copy && !copy.ok) downloadsErrors.push({ kind, format, message: copy.error });
+      }
+      userFacing[kind].push(entry);
     }
   }
 
@@ -184,7 +253,7 @@ export async function exportPacketArtifacts({
     now,
     manifest: {
       applicationId: id,
-      generatedAt: now().toISOString(),
+      generatedAt,
       uploadReady: true,
       status: "exported",
       gapCount: 0,
@@ -198,6 +267,7 @@ export async function exportPacketArtifacts({
     formats: selectedFormats,
     artifacts,
     userFacing,
+    ...(downloadsErrors.length ? { downloadsErrors } : {}),
     registered,
   };
 }

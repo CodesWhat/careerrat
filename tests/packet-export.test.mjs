@@ -21,6 +21,16 @@ function tempRepo() {
   return repoRoot;
 }
 
+// exportPacketArtifacts now also copies rendered resume/cover-letter PDFs to
+// a Downloads convenience folder (tailor-application SKILL.md STEP 11b).
+// ROLESTER_DOWNLOADS_DIR redirects that away from the real OS home so these
+// tests never write into the machine's actual ~/Downloads.
+function tempDownloadsEnv() {
+  const dir = mkdtempSync(join(tmpdir(), "rolester-packet-downloads-"));
+  cleanupRoots.push(dir);
+  return { ROLESTER_DOWNLOADS_DIR: dir };
+}
+
 function writeWorkspaceFile(repoRoot, relPath, content) {
   const full = join(repoRoot, "workspace", relPath);
   mkdirSync(dirname(full), { recursive: true });
@@ -185,10 +195,11 @@ test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources
   seedApp(repoRoot, sources);
   const calls = [];
   const { exportPacketArtifacts } = await importPacketExports();
+  const downloadsEnv = tempDownloadsEnv();
 
   const result = await exportPacketArtifacts({
     repoRoot,
-    env: {},
+    env: downloadsEnv,
     appId: "app-export",
     packetSources: sources,
     exportArtifact: fakeExporter(calls),
@@ -220,6 +231,87 @@ test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources
     result.userFacing.resume.some((file) => file.format === "markdown"),
     false,
     "source markdown is tracked internally but not returned as the normal user-facing export"
+  );
+  const resumeDownload = join(downloadsEnv.ROLESTER_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
+  const coverDownload = join(
+    downloadsEnv.ROLESTER_DOWNLOADS_DIR,
+    "Acme",
+    "Acme - Cover Letter.pdf"
+  );
+  assert.equal(result.userFacing.resume[0].downloadsPath, resumeDownload);
+  assert.equal(result.userFacing.coverLetter[0].downloadsPath, coverDownload);
+  assert.equal(existsSync(resumeDownload), true);
+  assert.equal(existsSync(coverDownload), true);
+  assert.equal(
+    result.userFacing.answers[0].downloadsPath ?? null,
+    null,
+    "answers PDFs are workspace artifacts only"
+  );
+  assert.equal(
+    existsSync(join(downloadsEnv.ROLESTER_DOWNLOADS_DIR, "Acme", "Acme - Answers.pdf")),
+    false
+  );
+});
+
+test("exportPacketArtifacts archives a prior same-named Downloads PDF on re-export", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const downloadsEnv = tempDownloadsEnv();
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: downloadsEnv,
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    exportArtifact: fakeExporter([]),
+  });
+  const live = join(downloadsEnv.ROLESTER_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
+  writeFileSync(live, "%PDF-1.4\nprior export marker\n", "utf8");
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: downloadsEnv,
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    exportArtifact: fakeExporter([]),
+  });
+
+  const archived = join(
+    downloadsEnv.ROLESTER_DOWNLOADS_DIR,
+    "Acme",
+    "archive",
+    "Acme - Resume.pdf"
+  );
+  assert.equal(existsSync(archived), true);
+  assert.match(readFileSync(archived, "utf8"), /prior export marker/);
+  assert.doesNotMatch(readFileSync(live, "utf8"), /prior export marker/);
+});
+
+test("exportPacketArtifacts reports Downloads copy failures without failing workspace export", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot);
+  seedApp(repoRoot, sources);
+  const blockedRoot = join(tempRepo(), "not-a-directory");
+  writeFileSync(blockedRoot, "file blocks directory creation", "utf8");
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  const result = await exportPacketArtifacts({
+    repoRoot,
+    env: { ROLESTER_DOWNLOADS_DIR: blockedRoot },
+    appId: "app-export",
+    packetSources: { resumeSource: sources.resumeSource },
+    exportArtifact: fakeExporter([]),
+  });
+
+  assert.match(result.artifacts.resumePdf, /^workspace\/tailored\/.+\.pdf$/);
+  assert.equal(result.userFacing.resume.length, 1);
+  assert.equal(result.userFacing.resume[0].downloadsPath ?? null, null);
+  assert.equal(result.downloadsErrors.length, 1);
+  assert.deepEqual(
+    { kind: result.downloadsErrors[0].kind, format: result.downloadsErrors[0].format },
+    { kind: "resume", format: "pdf" }
   );
 });
 
@@ -254,7 +346,7 @@ test("exportPacketArtifacts generates DOCX only for explicit selection or captur
 
     await exportPacketArtifacts({
       repoRoot,
-      env: {},
+      env: tempDownloadsEnv(),
       appId: "app-export",
       packetSources: { resumeSource: sources.resumeSource },
       request: entry.request,
@@ -291,7 +383,9 @@ test("appRegisterPacketArtifacts stamps source and export fields through the DB-
     appId: "app-export",
     artifacts: {
       packetManifest: sources.packetManifest,
+      resume: sources.resumeSource,
       resumeDocx: docxPath,
+      resumeGeneratedAt: "2026-07-06T15:00:00.000Z",
       resumePdf: pdfPath,
       resumeSource: sources.resumeSource,
     },
@@ -301,6 +395,8 @@ test("appRegisterPacketArtifacts stamps source and export fields through the DB-
   const app = readApp(repoRoot);
   assert.equal(app.artifacts.packetManifest, sources.packetManifest);
   assert.equal(app.artifacts.resumeSource, sources.resumeSource);
+  assert.equal(app.artifacts.resume, sources.resumeSource);
+  assert.equal(app.artifacts.resumeGeneratedAt, "2026-07-06T15:00:00.000Z");
   assert.equal(app.artifacts.resumePdf, pdfPath);
   assert.equal(app.artifacts.resumeDocx, docxPath);
   assert.equal(result.id, "app-export");
@@ -326,6 +422,7 @@ test("POST /api/packet/export exports saved packet sources through the local rou
   seedApp(repoRoot, sources);
   const calls = [];
   const server = await bootPacketServer(repoRoot, {
+    env: tempDownloadsEnv(),
     packetExportArtifact: fakeExporter(calls),
   });
 

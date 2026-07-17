@@ -47,6 +47,40 @@ export function sourcedUpsertBatch({ repoRoot, env, rows } = {}) {
   });
 }
 
+// sourcedSetStatus({id, to, note?}) — a single-field status patch for a
+// sourced[] row (e.g. the Jobs Search tab's Skip action). sourcedUpsertBatch
+// REPLACES the whole row (putRow does a full JSON-blob overwrite, not a
+// merge — see shared.mjs's putRow), so evaluate-job STEP 9 patches status by
+// reading the full current row and rewriting it whole; that's fine for a
+// skill that already has the full row in hand, but the Jobs UI only ever
+// sees the derived dashboard row shape (dashboard-data.js), never the raw
+// sourced[] blob — sending that shape through upsert-batch would silently
+// drop every field upsert-batch didn't know to carry over. This verb avoids
+// that by patching just `status` (+ optional `note`) on the CURRENT row.
+// Modeled on appSetStatus (app.mjs): same meta bump + activity event +
+// analytics refresh — outcome-changing, same as every other sourced[]/
+// applications[] status transition.
+export function sourcedSetStatus({ repoRoot, env, id, to, note } = {}) {
+  if (!to) throw new Error("sourcedSetStatus: to is required");
+  return runVerb({ repoRoot, env }, (db) => {
+    const role = requireRow(db, "sourced", id, "sourced role");
+    const from = role.status || "sourced";
+    const updated = { ...role, status: to };
+    if (note) updated.note = note;
+
+    putRow(db, "sourced", id, updated);
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "status_change",
+      title: `${role.company || id} — sourced ${from} → ${to}`,
+      refs: { company: role.company, role: role.role },
+      tags: [`status:${to}`],
+    });
+    const analytics = refreshAnalytics(db);
+    return { id, from, to, meta, event, analytics };
+  });
+}
+
 // sourcedPromote({id, appRow?}) — a sourced role passing the gate becomes an
 // application: moved into applications[] and removed from sourced[] in ONE
 // transaction (AGENTS.md: "Sourced roles stay in sourced[] until the gate ...

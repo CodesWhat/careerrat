@@ -29,6 +29,7 @@ import {
   relationshipLeadSetStatus,
   relationshipLeadUpsertBatch,
   sourcedPromote,
+  sourcedSetStatus,
   sourcedUpsertBatch,
   sourceWatermarkUpsert,
 } from "../core/db/verbs.mjs";
@@ -282,6 +283,13 @@ export function mountDataRoutes({ addRoute, repoRoot, env = process.env }) {
         throw badRequest("body.rows must be a non-empty array");
       }
       return sourcedUpsertBatch({ ...pathCtx, rows: body.rows });
+    });
+  });
+
+  addRoute("POST", "/api/data/sourced/status", async (req, res) => {
+    await withBodyVerb(req, res, (body) => {
+      if (!body?.id || !body?.to) throw badRequest("body.id and body.to are required");
+      return sourcedSetStatus({ ...pathCtx, ...body });
     });
   });
 

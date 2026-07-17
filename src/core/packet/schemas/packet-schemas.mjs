@@ -82,6 +82,16 @@ export const packetManifestSchema = {
         coverLetterDocx: workspacePath,
         answersDocx: workspacePath,
         packetManifest: workspacePath,
+        // Plain keys the read path (GET /api/packet, isGatedIn) and the
+        // older appRegisterArtifact write path key off — generate/export
+        // stamp these alongside the finer-grained <kind>Source/Pdf/Docx keys
+        // above so both write paths land on artifacts the read path finds.
+        resume: workspacePath,
+        coverLetter: workspacePath,
+        answers: workspacePath,
+        resumeGeneratedAt: { type: "string" },
+        coverLetterGeneratedAt: { type: "string" },
+        answersGeneratedAt: { type: "string" },
       },
     },
     questions: {

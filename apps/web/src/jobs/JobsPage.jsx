@@ -7,7 +7,7 @@ import { CompanyAvatar } from "../components/CompanyAvatar.jsx";
 import { Field, Select, TextField, Toggle } from "../components/form.jsx";
 import { ChevronDownIcon, ListIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
-import { getRuntimeConfig, getSearchSources } from "../lib/api.js";
+import { getRuntimeConfig, getSearchSources, setSourcedStatus } from "../lib/api.js";
 import { AiSearchPrompts } from "./AiSearchPrompts.jsx";
 import { FunnelSankey } from "./FunnelSankey.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
@@ -21,6 +21,8 @@ import {
 } from "./jobsExplorer.js";
 import { PREVIEW_JOBS } from "./jobsPreviewData.js";
 import { hasDbSourceSetup, runAiWebSearchLane, runJobsPageSearch } from "./jobsSearch.js";
+import { GateBadge } from "./PacketGateCard.jsx";
+import { deriveJobCta, useApplicationGates } from "./useApplicationGates.js";
 
 const STORAGE_KEY = "rolester-jobs-next-explorer";
 
@@ -113,6 +115,9 @@ export function JobsPage() {
   const [explorerState, setExplorerState] = useState(loadExplorerState);
   const [queryDraft, setQueryDraft] = useState(explorerState.query);
   const [searchParams, setSearchParams] = useSearchParams();
+  const [skippingId, setSkippingId] = useState(null);
+  const [skipError, setSkipError] = useState(null);
+  const gatesByAppId = useApplicationGates();
 
   const snapshot = data ? jobsForPage(data) : null;
   const model = useMemo(
@@ -122,6 +127,7 @@ export function JobsPage() {
   const tab = normalizeTab(searchParams.get("tab"));
   const searchFilter = normalizeSearchFilter(searchParams.get("queue"));
   const openId = searchParams.get("open");
+  const openSection = searchParams.get("section") || null;
   const openRow = openId ? model.rows.find((row) => row.id === openId) : null;
   const sourceSetupReady = hasDbSourceSetup(model.sourceSetup);
   const manualSearchRunning = manualSearchPending || model.manualSearchRun?.status === "running";
@@ -224,10 +230,15 @@ export function JobsPage() {
     });
   }
 
-  function openDrawer(id) {
+  // `section` deep-links into one of the drawer's new sections (Phase D's
+  // derived CTA) — optional, so every existing onOpen(id) call site (row
+  // click, "Open" button) keeps working unchanged.
+  function openDrawer(id, section) {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set("open", id);
+      if (section) next.set("section", section);
+      else next.delete("section");
       return next;
     });
   }
@@ -236,8 +247,25 @@ export function JobsPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.delete("open");
+      next.delete("section");
       return next;
     });
+  }
+
+  // Skip a sourced role — taxonomy's archived/recoverable "cut" state (see
+  // track-outcomes SKILL.md's canonical status vocabulary; there's no
+  // separate "park"/"hold" sourced[] state to distinguish from this).
+  async function handleSkipSourced(id) {
+    setSkippingId(id);
+    setSkipError(null);
+    try {
+      await setSourcedStatus({ id, to: "cut" });
+      await refetch();
+    } catch (err) {
+      setSkipError(err?.body?.error || (err instanceof Error ? err.message : "Skip failed"));
+    } finally {
+      setSkippingId(null);
+    }
   }
 
   async function handleManualSearch() {
@@ -339,10 +367,12 @@ export function JobsPage() {
       {sourceSetupError ? <InlineAlert message={sourceSetupError} /> : null}
       {visibleManualSearchError ? <InlineAlert message={visibleManualSearchError} /> : null}
       {visibleAiSearchError ? <InlineAlert message={visibleAiSearchError} /> : null}
+      {skipError ? <InlineAlert message={skipError} /> : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
       {snapshot && tab === "pipeline" ? (
         <PipelineView
+          gatesByAppId={gatesByAppId}
           model={model}
           queryDraft={queryDraft}
           state={explorerState}
@@ -385,16 +415,21 @@ export function JobsPage() {
           onOpen={openDrawer}
           onPromptsState={handleAiPromptsState}
           onSearch={handleManualSearch}
+          onSkip={handleSkipSourced}
+          skippingId={skippingId}
           sourceSetupReady={sourceSetupReady}
         />
       ) : null}
 
-      {openRow ? <JobDrawer row={openRow} onClose={closeDrawer} /> : null}
+      {openRow ? (
+        <JobDrawer row={openRow} onClose={closeDrawer} initialSection={openSection} />
+      ) : null}
     </div>
   );
 }
 
 function PipelineView({
+  gatesByAppId,
   model,
   queryDraft,
   state,
@@ -495,11 +530,17 @@ function PipelineView({
 
         {filteredRows.length ? (
           state.view === "table" ? (
-            <JobsTable rows={filteredRows} state={state} onOpen={onOpen} onSort={setSort} />
+            <JobsTable
+              gatesByAppId={gatesByAppId}
+              rows={filteredRows}
+              state={state}
+              onOpen={onOpen}
+              onSort={setSort}
+            />
           ) : (
             <div className="jobs__cards">
               {filteredRows.map((row) => (
-                <JobsCard key={row.id} row={row} onOpen={onOpen} />
+                <JobsCard key={row.id} gate={gatesByAppId[row.id]} row={row} onOpen={onOpen} />
               ))}
             </div>
           )
@@ -654,7 +695,7 @@ function ExplorerToolbar({ queryDraft, sankey, state, onClear, onQueryDraft, onU
   );
 }
 
-function JobsTable({ rows, state, onOpen, onSort }) {
+function JobsTable({ gatesByAppId, rows, state, onOpen, onSort }) {
   return (
     <div className="jobs__table-wrap">
       <table className="jobs__table">
@@ -671,51 +712,68 @@ function JobsTable({ rows, state, onOpen, onSort }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            // biome-ignore lint/a11y/useSemanticElements: a <tr> can't be replaced with <button> without breaking table semantics; role+tabIndex+onKeyDown make it keyboard-operable
-            <tr
-              key={row.id}
-              role="button"
-              tabIndex={0}
-              aria-label={`Open ${row.company} ${row.role}`}
-              onClick={() => onOpen(row.id)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onOpen(row.id);
-                }
-              }}
-            >
-              <td>
-                <span className="jobs__company-cell">
-                  <CompanyAvatar name={row.company} domain={row.domain} size={34} />
-                  <span>
-                    <span className="jobs__company-name">{row.company}</span>
-                    <span className="jobs__subline">{row.location || row.domain}</span>
+          {rows.map((row) => {
+            const cta = deriveJobCta(row, gatesByAppId[row.id]);
+            return (
+              // biome-ignore lint/a11y/useSemanticElements: a <tr> can't be replaced with <button> without breaking table semantics; role+tabIndex+onKeyDown make it keyboard-operable
+              <tr
+                key={row.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`Open ${row.company} ${row.role}`}
+                onClick={() => onOpen(row.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    onOpen(row.id);
+                  }
+                }}
+              >
+                <td>
+                  <span className="jobs__company-cell">
+                    <CompanyAvatar name={row.company} domain={row.domain} size={34} />
+                    <span>
+                      <span className="jobs__company-name">{row.company}</span>
+                      <span className="jobs__subline">{row.location || row.domain}</span>
+                    </span>
+                    <HealthBadge badge={row.healthBadge} />
                   </span>
-                  <HealthBadge badge={row.healthBadge} />
-                </span>
-              </td>
-              <td>{row.role}</td>
-              <td className="jobs__num">
-                <FitValue row={row} />
-              </td>
-              <td className="jobs__num">{formatCompK(row)}</td>
-              <td>
-                <span className="jobs__stage-cell">
-                  <span className="jobs__stage-pill">{row.stageLabel || row.stage}</span>
-                  <DecayPill row={row} />
-                </span>
-              </td>
-              <td className="jobs__num">{row.appliedLabel || row.appliedAt || ""}</td>
-              <td>
-                <span className="jobs__action-cell">
-                  <span>{row.action?.cta || "Open details"}</span>
-                  {row.action?.dueText ? <small>{row.action.dueText}</small> : null}
-                </span>
-              </td>
-            </tr>
-          ))}
+                </td>
+                <td>{row.role}</td>
+                <td className="jobs__num">
+                  <FitValue row={row} />
+                  <GateBadge gate={gatesByAppId[row.id]?.gate} />
+                </td>
+                <td className="jobs__num">{formatCompK(row)}</td>
+                <td>
+                  <span className="jobs__stage-cell">
+                    <span className="jobs__stage-pill">{row.stageLabel || row.stage}</span>
+                    <DecayPill row={row} />
+                  </span>
+                </td>
+                <td className="jobs__num">{row.appliedLabel || row.appliedAt || ""}</td>
+                <td>
+                  <span className="jobs__action-cell">
+                    {cta ? (
+                      <button
+                        type="button"
+                        className="jobs__cta-button"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          onOpen(row.id, cta.section);
+                        }}
+                      >
+                        {cta.label}
+                      </button>
+                    ) : (
+                      <span>{row.action?.cta || "Open details"}</span>
+                    )}
+                    {row.action?.dueText ? <small>{row.action.dueText}</small> : null}
+                  </span>
+                </td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -735,7 +793,8 @@ function SortHeader({ column, state, onSort }) {
   );
 }
 
-function JobsCard({ row, onOpen }) {
+function JobsCard({ gate, row, onOpen }) {
+  const cta = deriveJobCta(row, gate);
   return (
     <article className="jobs__card">
       <button type="button" className="jobs__card-button" onClick={() => onOpen(row.id)}>
@@ -753,6 +812,7 @@ function JobsCard({ row, onOpen }) {
           <span>
             Fit <FitValue row={row} />
           </span>
+          <GateBadge gate={gate?.gate} />
         </span>
         <span className="jobs__card-footer">
           <span className="jobs__stage-cell">
@@ -765,6 +825,18 @@ function JobsCard({ row, onOpen }) {
           </span>
         </span>
       </button>
+      {cta ? (
+        <button
+          type="button"
+          className="jobs__cta-button jobs__cta-button--card"
+          onClick={(event) => {
+            event.stopPropagation();
+            onOpen(row.id, cta.section);
+          }}
+        >
+          {cta.label}
+        </button>
+      ) : null}
     </article>
   );
 }
@@ -778,6 +850,8 @@ function SearchView({
   onOpen,
   onPromptsState,
   onSearch,
+  onSkip,
+  skippingId,
   sourceSetupReady,
 }) {
   const filteredRoles = filterSearchRows(model.sourcedRoles, filter);
@@ -847,7 +921,15 @@ function SearchView({
         </div>
         <div className="jobs__row-list">
           {filteredRoles.length ? (
-            filteredRoles.map((row) => <SearchResultRow key={row.id} row={row} onOpen={onOpen} />)
+            filteredRoles.map((row) => (
+              <SearchResultRow
+                key={row.id}
+                row={row}
+                onOpen={onOpen}
+                onSkip={onSkip}
+                skipping={skippingId === row.id}
+              />
+            ))
           ) : (
             <div className="jobs__empty">No sourced roles match this queue.</div>
           )}
@@ -890,7 +972,7 @@ function SearchStatusStrip({ aiSearchStatusText, manualSearchRunning, model, sou
   );
 }
 
-function SearchResultRow({ row, onOpen }) {
+function SearchResultRow({ row, onOpen, onSkip, skipping }) {
   return (
     <div className="jobs__row jobs__result-row">
       <CompanyAvatar name={row.company} domain={row.domain} size={38} />
@@ -913,13 +995,15 @@ function SearchResultRow({ row, onOpen }) {
           className="jobs__result-button jobs__result-button--primary"
           onClick={() => onOpen(row.id)}
         >
-          Evaluate
+          Open
         </Button>
-        <Button variant="secondary" className="jobs__result-button">
-          Skip
-        </Button>
-        <Button variant="secondary" className="jobs__result-button">
-          Park
+        <Button
+          variant="secondary"
+          className="jobs__result-button"
+          disabled={skipping}
+          onClick={() => onSkip(row.id)}
+        >
+          {skipping ? "Skipping…" : "Skip"}
         </Button>
       </span>
     </div>

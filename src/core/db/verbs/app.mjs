@@ -350,7 +350,12 @@ export function appRegisterPacketArtifacts({
   }
 
   for (const [key, value] of Object.entries(artifacts)) {
-    if (value !== null && value !== undefined) assertWorkspacePath(value, key);
+    if (value === null || value === undefined) continue;
+    // <kind>GeneratedAt stamps (the appRegisterArtifact convention, mirrored
+    // here for the plain resume/coverLetter/answers keys) are ISO timestamps,
+    // not workspace paths — exempt them from the path check.
+    if (key.endsWith("GeneratedAt")) continue;
+    assertWorkspacePath(value, key);
   }
 
   return runVerb({ repoRoot, env }, (db) => {

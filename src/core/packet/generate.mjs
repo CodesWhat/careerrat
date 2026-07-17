@@ -399,7 +399,14 @@ function assertAtsSafe(name, markdown, { allowNeedsYou = false } = {}) {
   }
 }
 
-function buildSourceArtifacts({ context, questionCapture, coverLetter, answers, services = {} }) {
+function buildSourceArtifacts({
+  context,
+  questionCapture,
+  coverLetter,
+  answers,
+  services = {},
+  skipAnswers = false,
+}) {
   const profile = profileFromContext(context);
   const evidence = evidenceFromContext(context);
   const honesty = honestyFromContext(context);
@@ -432,12 +439,17 @@ function buildSourceArtifacts({ context, questionCapture, coverLetter, answers, 
         evidence,
         blocks: coverBlocks.map((block) => block.text),
       });
-  const answersMarkdown = renderAnswersMarkdown({ answers: answers.answers, questionCapture });
-
   assertAtsSafe("resume", resume);
   assertAtsSafe("coverLetter", coverLetterMarkdown, { allowNeedsYou: coverHasNeedsYou });
-  assertAtsSafe("answers", answersMarkdown, { allowNeedsYou: true });
 
+  // Artifacts-only generation (no question capture yet) skips the answers
+  // artifact entirely rather than writing a placeholder NEEDS YOU file — see
+  // generatePacket's skipAnswers/BAD_QUESTION_CAPTURE handling.
+  if (skipAnswers) {
+    return { resume, coverLetter: coverLetterMarkdown };
+  }
+  const answersMarkdown = renderAnswersMarkdown({ answers: answers.answers, questionCapture });
+  assertAtsSafe("answers", answersMarkdown, { allowNeedsYou: true });
   return { resume, coverLetter: coverLetterMarkdown, answers: answersMarkdown };
 }
 
@@ -462,7 +474,9 @@ function writeWorkspaceArtifacts({
   const writes = {
     resumeSource: [`${base}-resume.md`, sources.resume],
     coverLetterSource: [`${base}-cover-letter.md`, sources.coverLetter],
-    answersSource: [`${base}-answers.md`, sources.answers],
+    // Omitted entirely (not written as an empty/placeholder file) when the
+    // answers artifact was skipped — see buildSourceArtifacts.
+    ...(sources.answers != null ? { answersSource: [`${base}-answers.md`, sources.answers] } : {}),
     packetManifest: [`${base}-packet-manifest.json`, `${JSON.stringify(manifest, null, 2)}\n`],
   };
 
@@ -486,6 +500,23 @@ function writeWorkspaceArtifacts({
       artifacts[artifactKey] = workspaceDisplayPath(relative(workspaceDir, full));
     }
   }
+
+  // BUG: the read path (GET /api/packet, isGatedIn, GET /api/packet/artifact
+  // in packet-route.mjs) and the older appRegisterArtifact write path both
+  // key off the plain artifacts.resume/coverLetter/answers fields, not the
+  // finer-grained <kind>Source/<kind>Pdf/<kind>Docx keys above. Stamp the
+  // plain keys too, pointed at the source markdown (the representation the
+  // read path renders inline as {path, markdown, html}), preserving the
+  // <kind>GeneratedAt stamp convention appRegisterArtifact uses.
+  artifacts.resume = artifacts.resumeSource;
+  artifacts.resumeGeneratedAt = manifest.generatedAt;
+  artifacts.coverLetter = artifacts.coverLetterSource;
+  artifacts.coverLetterGeneratedAt = manifest.generatedAt;
+  if (artifacts.answersSource) {
+    artifacts.answers = artifacts.answersSource;
+    artifacts.answersGeneratedAt = manifest.generatedAt;
+  }
+
   return artifacts;
 }
 
@@ -497,8 +528,12 @@ async function loadCaptureForGeneration({ repoRoot, env, appId, context, questio
         await loadPacketQuestionCapture({ repoRoot, env, appId }),
         context
       );
-    } catch {
-      return normalizeQuestionCapture(null, context);
+    } catch (err) {
+      // No capture ever recorded degrades to "no capture" below. A capture
+      // that WAS recorded but fails to load (corrupt JSON, failed schema
+      // validation) is a real error and must not be masked as "no capture".
+      if (err?.code === "NOT_FOUND") return normalizeQuestionCapture(null, context);
+      throw err;
     }
   }
   return normalizeQuestionCapture(null, context);
@@ -526,11 +561,18 @@ function manifestFor({
     questions: questionCapture.questions,
     excludedQuestions: questionCapture.excluded,
     questionCaptureSource: questionCapture.path,
-    answerLineage: {
-      answeredQuestionIds: answerIds,
-      excludedQuestionIds: answers.excludedQuestionIds || questionCapture.excluded.map((q) => q.id),
-      source: questionCapture.path,
-    },
+    // No capture (the artifacts-only degrade path) → no lineage to point at;
+    // a null source fails the manifest schema's string requirement.
+    ...(questionCapture.path
+      ? {
+          answerLineage: {
+            answeredQuestionIds: answerIds,
+            excludedQuestionIds:
+              answers.excludedQuestionIds || questionCapture.excluded.map((q) => q.id),
+            source: questionCapture.path,
+          },
+        }
+      : {}),
     artifacts,
     sources: {
       present: Object.fromEntries(
@@ -547,19 +589,30 @@ function manifestFor({
 }
 
 function dbManifestFor({ manifest, context, artifacts }) {
-  return {
-    ...manifest,
-    artifacts,
-    questions: appFromContext(context).packetManifest?.questions || {
-      source: manifest.questionCaptureSource,
-      capturedAt: manifest.generatedAt,
-      answerableCount: manifest.questions.length,
-      excludedCount: manifest.excludedQuestions.length,
-      answerableIds: manifest.questions.map((q) => String(q.id)),
-      excludedIds: manifest.excludedQuestions.map((q) => String(q.id)),
-      demographicSectionPresent: false,
-    },
-  };
+  const existingQuestions = appFromContext(context).packetManifest?.questions;
+  // In the artifacts-only degrade path (no question capture) there is no
+  // capture source to point at — packetManifestSchema's questions.source is a
+  // workspacePath, so a null-source fallback fails validation
+  // (BAD_PACKET_MANIFEST). Omit the questions section entirely instead of
+  // fabricating one; the manifest schema doesn't require it.
+  const fallbackQuestions = manifest.questionCaptureSource
+    ? {
+        source: manifest.questionCaptureSource,
+        capturedAt: manifest.generatedAt,
+        answerableCount: manifest.questions.length,
+        excludedCount: manifest.excludedQuestions.length,
+        answerableIds: manifest.questions.map((q) => String(q.id)),
+        excludedIds: manifest.excludedQuestions.map((q) => String(q.id)),
+        demographicSectionPresent: false,
+      }
+    : undefined;
+  const questions = existingQuestions || fallbackQuestions;
+  const dbManifest = { ...manifest, artifacts };
+  // `manifest.questions` is the captured-question ARRAY (manifestFor); the DB
+  // manifest wants the summary OBJECT here — never let the array leak through.
+  if (questions) dbManifest.questions = questions;
+  else delete dbManifest.questions;
+  return dbManifest;
 }
 
 function gapObjects(...lists) {
@@ -614,13 +667,20 @@ export async function generatePacket({
     context: packetContext,
     questionCapture,
   });
-  if (!capture.path && !capture.questions.length) {
+  const hasQuestionCapture = Boolean(capture.path) || capture.questions.length > 0;
+  // applyIntent (the submit-ready path, e.g. apply-job) still hard-requires a
+  // real question capture so the answers artifact can be produced before an
+  // ATS submission. The artifacts-only path (the Jobs drawer's "generate
+  // resume + cover letter") degrades instead of failing — see skipAnswers
+  // below and buildSourceArtifacts.
+  if (!hasQuestionCapture && applyIntent) {
     const err = new Error(
       `no application questions captured for "${id}" — capture the form questions first (packet questions step) and retry`
     );
     err.code = "BAD_QUESTION_CAPTURE";
     throw err;
   }
+  const skipAnswers = !hasQuestionCapture;
   const sourceMap = enumeratePacketSources(packetContext, capture);
   const sourceSplit = splitConfirmedAndProposedPacketSources(sourceMap);
   const coverLetter = await coverDraft({
@@ -643,6 +703,7 @@ export async function generatePacket({
     coverLetter,
     answers,
     services,
+    skipAnswers,
   });
   const validation = validatePacketEvidenceIds({
     context: packetContext,
@@ -669,7 +730,25 @@ export async function generatePacket({
       .findings.filter((finding) => finding.pattern === "needs-you-marker")
       .map((finding) => ({ kind, message: finding.text }))
   );
-  const gaps = gapObjects(validation.gaps, coverLetter.gaps, answers.gaps, lintGaps);
+  // Explicit skip record for the artifacts-only degrade path (BAD_QUESTION_
+  // CAPTURE relaxation above) — the UI needs to see *why* no answers artifact
+  // exists rather than inferring it from a missing key.
+  const skippedAnswersGap = skipAnswers
+    ? [
+        {
+          kind: "answers",
+          message:
+            "answers artifact skipped — no application questions captured yet; capture the form questions (packet questions step), then regenerate, to produce answers",
+        },
+      ]
+    : [];
+  const gaps = gapObjects(
+    validation.gaps,
+    coverLetter.gaps,
+    answers.gaps,
+    lintGaps,
+    skippedAnswersGap
+  );
   const uploadReady =
     Boolean(applyIntent) &&
     gaps.length === 0 &&

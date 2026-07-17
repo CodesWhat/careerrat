@@ -461,6 +461,50 @@ test("POST /api/data/sourced/upsert-batch: 400 without rows, 200 + persisted cre
   }
 });
 
+test("POST /api/data/sourced/status: validates input, patches the row, and returns 404 for unknown ids", async () => {
+  const repoRoot = tempRepo();
+  seedDb(repoRoot);
+  const server = await bootServer(repoRoot);
+  try {
+    for (const payload of [{}, { id: "sourced-1" }, { to: "cut" }]) {
+      const invalid = await postJson(server, "/api/data/sourced/status", payload);
+      assert.equal(invalid.status, 400);
+    }
+
+    const missing = await postJson(server, "/api/data/sourced/status", {
+      id: "does-not-exist",
+      to: "cut",
+    });
+    assert.equal(missing.status, 404);
+
+    const db = openDb({ repoRoot });
+    const beforeMeta = db.prepare("SELECT version FROM meta WHERE id = 1").get();
+    const beforeActivity = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
+    const ok = await postJson(server, "/api/data/sourced/status", {
+      id: "sourced-1",
+      to: "cut",
+      note: "Not aligned with the target scope.",
+    });
+
+    assert.equal(ok.status, 200);
+    assert.equal(ok.body.data.from, "sourced");
+    assert.equal(ok.body.data.to, "cut");
+    assert.ok(ok.body.data.analytics);
+    assert.equal(ok.body.meta.version, beforeMeta.version + 1);
+    assert.equal(
+      db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n,
+      beforeActivity + 1
+    );
+    const row = db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-1");
+    assert.deepEqual(
+      { status: JSON.parse(row.data).status, note: JSON.parse(row.data).note },
+      { status: "cut", note: "Not aligned with the target scope." }
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/data/comm/send: sent-clears-draft, 404 for an unknown comm id", async () => {
   const repoRoot = tempRepo();
   seedDb(repoRoot);

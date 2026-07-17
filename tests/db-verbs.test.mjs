@@ -15,6 +15,7 @@ import {
   activityAppend,
   analyticsRefresh,
   appRegisterArtifact,
+  appRegisterPacketArtifacts,
   appScheduleInterview,
   appSetFields,
   appSetStatus,
@@ -33,6 +34,7 @@ import {
   relationshipLeadSetStatus,
   relationshipLeadUpsertBatch,
   sourcedPromote,
+  sourcedSetStatus,
   sourcedUpsertBatch,
   sourceWatermarkUpsert,
 } from "../src/core/db/verbs.mjs";
@@ -359,7 +361,79 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
       rows: [{ id: "sourced-batch-1", company: "BatchCo", fitScore: 60 }],
     })
   );
+  expectOneBump("sourcedSetStatus", () =>
+    sourcedSetStatus({
+      repoRoot,
+      id: "sourced-batch-1",
+      to: "cut",
+      note: "Outside the target role family.",
+    })
+  );
   expectOneBump("sourcedPromote", () => sourcedPromote({ repoRoot, id: "sourced-promote-me" }));
+});
+
+test("sourcedSetStatus patches status and note, refreshes analytics, and rejects an unknown id", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const result = sourcedSetStatus({
+    repoRoot,
+    id: "sourced-promote-me",
+    to: "cut",
+    note: "Role scope is not a match.",
+  });
+
+  const row = db.prepare("SELECT data FROM sourced WHERE id = ?").get("sourced-promote-me");
+  const sourced = JSON.parse(row.data);
+  assert.equal(sourced.status, "cut");
+  assert.equal(sourced.note, "Role scope is not a match.");
+  assert.equal(result.from, "sourced");
+  assert.equal(result.to, "cut");
+  assert.ok(result.analytics, "status changes must refresh outcome analytics");
+  const storedAnalytics = db.prepare("SELECT data FROM analytics WHERE id = 1").get();
+  assert.deepEqual(JSON.parse(storedAnalytics.data), result.analytics);
+
+  assert.throws(
+    () => sourcedSetStatus({ repoRoot, id: "missing-role", to: "cut" }),
+    (err) => err?.code === "NOT_FOUND"
+  );
+});
+
+test("appRegisterPacketArtifacts accepts GeneratedAt timestamps but still rejects external paths", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+
+  appRegisterPacketArtifacts({
+    repoRoot,
+    id: "app-non-interview",
+    artifacts: {
+      resume: "workspace/tailored/example-resume.md",
+      resumeGeneratedAt: "2026-07-17T12:00:00.000Z",
+    },
+    manifest: {
+      applicationId: "app-non-interview",
+      generatedAt: "2026-07-17T12:00:00.000Z",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 0,
+      artifacts: {},
+    },
+  });
+
+  const db = openDb({ repoRoot });
+  const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview");
+  assert.equal(JSON.parse(row.data).artifacts.resumeGeneratedAt, "2026-07-17T12:00:00.000Z");
+
+  assert.throws(
+    () =>
+      appRegisterPacketArtifacts({
+        repoRoot,
+        id: "app-non-interview",
+        artifacts: { resumePdf: "/tmp/outside-workspace.pdf" },
+      }),
+    /workspace|artifact path/i
+  );
 });
 
 // activityAppend is the one domain-action-shaped verb that does NOT bump the
