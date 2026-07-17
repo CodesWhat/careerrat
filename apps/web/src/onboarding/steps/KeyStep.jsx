@@ -4,6 +4,7 @@ import {
   RolesterUserButton,
   useRolesterUser,
 } from "../../auth/clerkControls.jsx";
+import { useDesktopGoogleSignIn } from "../../auth/useDesktopGoogleSignIn.js";
 import { Button } from "../../components/Button.jsx";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
@@ -66,11 +67,47 @@ function AccountFinePrint() {
   );
 }
 
+// Electron desktop shell only — see useDesktopGoogleSignIn.js's header
+// comment for the full system-browser handoff flow this drives. Rendered
+// above the existing Create account/Log in row (KeyStep below), never in
+// place of it: Google is the fast path, Clerk's own modal (email, other
+// providers) stays available underneath. Clerk's own in-modal social button
+// is hidden whenever this is shown — see ROLESTER_CLERK_APPEARANCE_DESKTOP in
+// ../../auth/clerkControls.jsx — so there is exactly one Google entry point,
+// not two that behave differently.
+function DesktopGoogleSignIn() {
+  const { phase, error, isWaiting, start, cancel } = useDesktopGoogleSignIn();
+
+  return (
+    <>
+      <div className="onboarding-account__actions">
+        {isWaiting ? (
+          <>
+            <Button variant="secondary" className="onboarding-account__cta" disabled>
+              Waiting for Google sign-in…
+            </Button>
+            <Button variant="secondary" className="onboarding-account__cta" onClick={cancel}>
+              Cancel
+            </Button>
+          </>
+        ) : (
+          <Button variant="primary" className="onboarding-account__cta" onClick={start}>
+            Continue with Google
+          </Button>
+        )}
+      </div>
+      {phase === "error" && error ? (
+        <p className="onboarding-account__fine-print">{error}</p>
+      ) : null}
+    </>
+  );
+}
+
 // Step 1 — Account. Clerk identifies the user for durable free-tier tracking,
 // billing, and future hosted usage metering. AI credentials are no longer part
 // of v1 onboarding; inference is routed through the product backend.
 export function KeyStep({ goNext, goBack, onProgressSelect }) {
-  const { isLoaded, isSignedIn, user } = useRolesterUser();
+  const { isLoaded, isSignedIn, user, desktopAuthAvailable } = useRolesterUser();
   const canContinue = isLoaded && isSignedIn;
 
   return (
@@ -112,6 +149,7 @@ export function KeyStep({ goNext, goBack, onProgressSelect }) {
           <div className="onboarding-step-card__content onboarding-key__action-side onboarding-account__action-side">
             {!isSignedIn ? (
               <div className="onboarding-account__panel">
+                {desktopAuthAvailable ? <DesktopGoogleSignIn /> : null}
                 <div className="onboarding-account__actions">
                   <RolesterSignUpButton mode="modal">
                     <Button variant="primary" className="onboarding-account__cta">

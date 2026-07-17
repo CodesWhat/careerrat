@@ -4,10 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
-  AUTH_FLOW_USER_AGENT,
-  buildAuthUaFilterPatterns,
   choosePreferredPort,
   DEFAULT_PACKAGED_PORT,
+  DESKTOP_SIGN_IN_PATH,
   decideExternalOpen,
   isAllowedExternalUrl,
   resolveDesktopRuntimePaths,
@@ -199,64 +198,50 @@ describe("desktop external URL decisions", () => {
     );
   });
 
-  it("keeps built-in HTTPS authentication origins in the Electron window", () => {
-    for (const target of [
-      "https://accounts.google.com/o/oauth2/auth",
-      "https://accounts.youtube.com/accounts/ServiceLogin",
-      "https://rolester-dev.clerk.accounts.dev/v1/client",
-    ]) {
-      assert.deepEqual(decideExternalOpen({ target }), {
-        action: "ignore",
-        reason: "auth-origin",
-        url: target,
-      });
-    }
-  });
-
-  it("keeps configured exact and suffix authentication origins in the Electron window", () => {
-    const env = {
-      ROLESTER_AUTH_HOSTS: "login.example.test, .oauth.example.test",
-    };
-
-    for (const target of [
-      "https://login.example.test/authorize",
-      "https://tenant.oauth.example.test/callback",
-    ]) {
-      assert.deepEqual(decideExternalOpen({ target, env }), {
-        action: "ignore",
-        reason: "auth-origin",
-        url: target,
-      });
-    }
-  });
-
-  it("ignores malformed configured auth-host entries without disrupting matching", () => {
-    const env = {
-      ROLESTER_AUTH_HOSTS: ", , ://bad host, ., login.example.test,",
-    };
-
-    assert.equal(
-      decideExternalOpen({ target: "https://login.example.test/authorize", env }).reason,
-      "auth-origin"
-    );
-    assert.deepEqual(decideExternalOpen({ target: "https://ordinary.example.test/jobs", env }), {
-      action: "open-external",
-      url: "https://ordinary.example.test/jobs",
-    });
-  });
-
-  it("returns an external-open decision only for safe external targets", () => {
+  it("sends the desktop sign-in page out to the OS browser even though it's same-origin", () => {
     assert.deepEqual(
       decideExternalOpen({
         baseUrl: "http://127.0.0.1:61234",
-        target: "https://example.com/jobs",
+        target: `http://127.0.0.1:61234${DESKTOP_SIGN_IN_PATH}?nonce=abc-123`,
       }),
       {
         action: "open-external",
-        url: "https://example.com/jobs",
+        reason: "desktop-sign-in",
+        url: `http://127.0.0.1:61234${DESKTOP_SIGN_IN_PATH}?nonce=abc-123`,
       }
     );
+  });
 
+  it("keeps every other same-origin path in-window, including neighboring /app routes", () => {
+    for (const path of ["/app", "/app/onboarding", "/app/desktop-sign-in/sso-callback"]) {
+      assert.deepEqual(
+        decideExternalOpen({
+          baseUrl: "http://127.0.0.1:61234",
+          target: `http://127.0.0.1:61234${path}`,
+        }),
+        {
+          action: "ignore",
+          reason: "same-origin",
+          url: `http://127.0.0.1:61234${path}`,
+        }
+      );
+    }
+  });
+
+  it("sends off-origin HTTPS targets to the OS browser, including Google's OAuth chain", () => {
+    for (const target of [
+      "https://example.com/jobs",
+      "https://accounts.google.com/o/oauth2/auth",
+      "https://rolester-dev.clerk.accounts.dev/v1/client",
+    ]) {
+      assert.deepEqual(decideExternalOpen({ baseUrl: "http://127.0.0.1:61234", target }), {
+        action: "open-external",
+        url: target,
+      });
+    }
+  });
+
+  it("denies unsafe protocols even for a same-origin base", () => {
     assert.deepEqual(
       decideExternalOpen({
         baseUrl: "http://127.0.0.1:61234",
@@ -268,56 +253,6 @@ describe("desktop external URL decisions", () => {
         url: "javascript:alert(1)",
       }
     );
-  });
-});
-
-describe("desktop authentication request overrides", () => {
-  it("builds the default auth-host URL patterns when no override is configured", () => {
-    for (const env of [{}, { UNRELATED_SETTING: "ignored" }]) {
-      const patterns = buildAuthUaFilterPatterns(env);
-
-      assert.ok(patterns.includes("https://accounts.google.com/*"));
-      assert.ok(patterns.includes("https://*.clerk.accounts.dev/*"));
-    }
-  });
-
-  it("maps configured exact and suffix auth hosts to Electron URL patterns", () => {
-    const patterns = buildAuthUaFilterPatterns({
-      ROLESTER_AUTH_HOSTS: "login.example.test,.oauth.example.test",
-    });
-
-    assert.ok(patterns.includes("https://login.example.test/*"));
-    assert.ok(patterns.includes("https://*.oauth.example.test/*"));
-  });
-
-  it("drops malformed configured auth hosts while retaining valid entries", () => {
-    const patterns = buildAuthUaFilterPatterns({
-      ROLESTER_AUTH_HOSTS: "login.example.test, bad host, ://bad host, , ., .oauth.example.test",
-    });
-
-    assert.ok(patterns.includes("https://login.example.test/*"));
-    assert.ok(patterns.includes("https://*.oauth.example.test/*"));
-    assert.equal(
-      patterns.some((pattern) => pattern.includes("bad host")),
-      false
-    );
-    assert.equal(
-      patterns.some((pattern) => pattern.includes("://://")),
-      false
-    );
-    assert.equal(patterns.includes("https://*./*"), false);
-  });
-
-  it("uses a Firefox user agent without Chrome or Electron branding", () => {
-    assert.ok(AUTH_FLOW_USER_AGENT.includes("Firefox/"));
-    assert.equal(AUTH_FLOW_USER_AGENT.includes("Chrome"), false);
-    assert.equal(AUTH_FLOW_USER_AGENT.includes("Electron"), false);
-  });
-
-  it("builds default auth-host URL patterns when called without an env argument", () => {
-    assert.doesNotThrow(() => buildAuthUaFilterPatterns());
-    assert.ok(buildAuthUaFilterPatterns().includes("https://accounts.google.com/*"));
-    assert.ok(buildAuthUaFilterPatterns().includes("https://*.clerk.accounts.dev/*"));
   });
 });
 

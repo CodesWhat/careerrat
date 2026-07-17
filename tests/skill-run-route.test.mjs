@@ -132,6 +132,7 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
         manualCompanySeeds: true,
         chatHandoffs: true,
       },
+      desktop: { authAvailable: false },
     });
     assert.doesNotMatch(JSON.stringify(body), /sk-ant-test|ANTHROPIC_API_KEY|APPLE|PASSWORD/);
     assert.equal(called, false);
@@ -171,6 +172,7 @@ test("GET /api/runtime/config: reports no AI route and no discovery chat handoff
         manualCompanySeeds: true,
         chatHandoffs: false,
       },
+      desktop: { authAvailable: false },
     });
   } finally {
     await closeServer(server);

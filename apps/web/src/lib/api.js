@@ -609,3 +609,28 @@ export function updateDeepIngestLaneState(payload = {}) {
     body: JSON.stringify(payload),
   });
 }
+
+// src/cli/desktop-auth-route.mjs — the Electron desktop shell's
+// system-browser Google OAuth handoff. See apps/web/src/auth/
+// useDesktopGoogleSignIn.js for the client-side state machine these back.
+export function startDesktopSignIn() {
+  return apiFetch("/api/desktop-auth/start", { method: "POST" });
+}
+
+export function getDesktopSignInStatus(nonce) {
+  return apiFetch(`/api/desktop-auth/status?nonce=${encodeURIComponent(nonce)}`);
+}
+
+export function cancelDesktopSignIn(nonce) {
+  return apiFetch("/api/desktop-auth/cancel", {
+    method: "POST",
+    body: JSON.stringify({ nonce }),
+  });
+}
+
+export function claimDesktopSignIn(nonce) {
+  return apiFetch("/api/desktop-auth/claim", {
+    method: "POST",
+    body: JSON.stringify({ nonce }),
+  });
+}

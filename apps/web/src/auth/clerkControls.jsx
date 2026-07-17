@@ -1,5 +1,6 @@
 import { ClerkProvider, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/react";
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
+import { getRuntimeConfig } from "../lib/api.js";
 import { getStaticPreviewAuthState, isStaticPreviewApi } from "../preview/staticPreviewApi.js";
 
 const DEFAULT_AUTH_STATE = {
@@ -7,6 +8,9 @@ const DEFAULT_AUTH_STATE = {
   isSignedIn: false,
   user: null,
   hasClerkProvider: false,
+  // Electron desktop shell only — see RolesterClerkProvider below and
+  // src/cli/desktop-auth-route.mjs. Always false on plain web.
+  desktopAuthAvailable: false,
 };
 
 const RolesterAuthContext = createContext(DEFAULT_AUTH_STATE);
@@ -137,6 +141,24 @@ export const ROLESTER_CLERK_APPEARANCE = {
   },
 };
 
+// Desktop-only variant: identical to ROLESTER_CLERK_APPEARANCE except Clerk's
+// own in-modal social-button row is hidden. The Electron desktop shell drives
+// Google sign-in itself through the system-browser handoff
+// (useDesktopGoogleSignIn.js) — Clerk's built-in social button would attempt
+// the same in-window OAuth dance Google rejects inside Electron, so it's
+// hidden rather than left for the user to click by mistake. Only ever passed
+// to <ClerkProvider> when desktopAuthAvailable is true (see
+// RolesterClerkProvider below) — plain web always gets the base appearance
+// object unchanged.
+export const ROLESTER_CLERK_APPEARANCE_DESKTOP = {
+  ...ROLESTER_CLERK_APPEARANCE,
+  elements: {
+    ...ROLESTER_CLERK_APPEARANCE.elements,
+    socialButtons: { display: "none" },
+    socialButtonsBlockButton: { display: "none" },
+  },
+};
+
 export function RolesterAuthStateProvider({ value = {}, children }) {
   return (
     <RolesterAuthContext.Provider value={{ ...DEFAULT_AUTH_STATE, ...value }}>
@@ -145,17 +167,57 @@ export function RolesterAuthStateProvider({ value = {}, children }) {
   );
 }
 
-function ClerkStateBridge({ children }) {
+function ClerkStateBridge({ desktopAuthAvailable, children }) {
   const clerkUser = useUser();
 
+  // Defensive net for the desktop sign-in handoff (useDesktopGoogleSignIn.js
+  // navigates here with ?__clerk_db_jwt=<jwt> via window.location.replace).
+  // clerk-js normally strips that param from the URL itself the instant it
+  // adopts the dev-browser session (see
+  // node_modules/@clerk/shared/dist/devBrowser.mjs) — this only does
+  // anything if that somehow didn't happen, once we independently know the
+  // session is live.
+  useEffect(() => {
+    if (!clerkUser.isSignedIn) return;
+    const url = new URL(window.location.href);
+    if (!url.searchParams.has("__clerk_db_jwt")) return;
+    url.searchParams.delete("__clerk_db_jwt");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [clerkUser.isSignedIn]);
+
   return (
-    <RolesterAuthStateProvider value={{ ...clerkUser, hasClerkProvider: true }}>
+    <RolesterAuthStateProvider
+      value={{ ...clerkUser, hasClerkProvider: true, desktopAuthAvailable }}
+    >
       {children}
     </RolesterAuthStateProvider>
   );
 }
 
 export function RolesterClerkProvider({ publishableKey, children }) {
+  const [desktopAuthAvailable, setDesktopAuthAvailable] = useState(false);
+
+  // Electron desktop shell detection — GET /api/runtime/config's
+  // desktop.authAvailable flag (set from ROLESTER_DESKTOP_SHELL, see
+  // apps/desktop/main.mjs's boot()). Fetched once at provider mount; plain
+  // web never sets that env var, so this resolves to false there and both
+  // ROLESTER_CLERK_APPEARANCE and the RolesterSignInButton/KeyStep "Continue
+  // with Google" affordance stay exactly as they were before this feature.
+  useEffect(() => {
+    if (isStaticPreviewApi() || !publishableKey) return;
+    let cancelled = false;
+    getRuntimeConfig()
+      .then((config) => {
+        if (!cancelled) setDesktopAuthAvailable(config?.desktop?.authAvailable === true);
+      })
+      .catch(() => {
+        // best-effort — desktopAuthAvailable stays false, same as plain web
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [publishableKey]);
+
   if (isStaticPreviewApi()) {
     return (
       <RolesterAuthStateProvider value={getStaticPreviewAuthState()}>
@@ -171,7 +233,9 @@ export function RolesterClerkProvider({ publishableKey, children }) {
   return (
     <ClerkProvider
       publishableKey={publishableKey}
-      appearance={ROLESTER_CLERK_APPEARANCE}
+      appearance={
+        desktopAuthAvailable ? ROLESTER_CLERK_APPEARANCE_DESKTOP : ROLESTER_CLERK_APPEARANCE
+      }
       // Clerk's default post-auth redirect lands on the app ORIGIN ROOT
       // (e.g. http://127.0.0.1:PORT/?__clerk_db_jwt=...), which has no
       // product route mounted there (see tracker-dev.mjs — only /app/* is
@@ -183,7 +247,7 @@ export function RolesterClerkProvider({ publishableKey, children }) {
       signInFallbackRedirectUrl="/app/onboarding"
       signUpFallbackRedirectUrl="/app/onboarding"
     >
-      <ClerkStateBridge>{children}</ClerkStateBridge>
+      <ClerkStateBridge desktopAuthAvailable={desktopAuthAvailable}>{children}</ClerkStateBridge>
     </ClerkProvider>
   );
 }

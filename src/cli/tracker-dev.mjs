@@ -54,6 +54,7 @@ import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
 import { mountDeepIngestRoutes } from "./deep-ingest-route.mjs";
+import { mountDesktopAuthRoutes } from "./desktop-auth-route.mjs";
 import { mountDiscoveryRoutes } from "./discovery-route.mjs";
 import { mountIntakeRoutes } from "./intake-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
@@ -233,6 +234,13 @@ export function createDevServer({
   // src/cli/onboard-route.mjs. No page mounted here — apps/web's SPA
   // onboarding wizard is the only client.
   mountOnboardRoutes({ addRoute, repoRoot, env });
+
+  // The Electron desktop shell's system-browser Google OAuth handoff (see
+  // src/cli/desktop-auth-route.mjs's own header comment for the full flow).
+  // Mounted unconditionally — the routes themselves are inert plumbing; only
+  // the client's decision to show the "Continue with Google" affordance is
+  // gated on GET /api/runtime/config's desktop.authAvailable flag below.
+  mountDesktopAuthRoutes({ addRoute, repoRoot, env });
 
   // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
   // prompt templates for the Targeting step's "Roland-suggest" chips
@@ -421,6 +429,8 @@ export function createDevServer({
       "/api/onboard/resume, /api/onboard/profile, /api/onboard/targeting, " +
       "/api/onboard/form-defaults, /api/onboard/evidence, /api/onboard/ai-key, " +
       "/api/onboard/finish, /api/onboard/*, " +
+      "/api/desktop-auth/start, /api/desktop-auth/status, /api/desktop-auth/cancel, " +
+      "/api/desktop-auth/handoff, /api/desktop-auth/complete, /api/desktop-auth/claim, " +
       "/api/discovery/*, /api/settings/*, /api/chat/start, /api/chat/events, " +
       "/api/chat/message, /api/chat/interrupt, /api/chat/close, /api/chat/by-skill, " +
       "/api/chat/list, /api/chat/*, /api/search/*, /api/sourcing/*, /api/packet*, " +

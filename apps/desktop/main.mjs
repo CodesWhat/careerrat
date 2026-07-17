@@ -19,24 +19,13 @@
 // comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
 // pass. The scripted verification path for `npx electron . --smoke`.
 
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  Menu,
-  nativeImage,
-  nativeTheme,
-  session,
-  shell,
-} from "electron";
+import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell } from "electron";
 import { existsSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
 import {
-  AUTH_FLOW_USER_AGENT,
-  buildAuthUaFilterPatterns,
   choosePreferredPort,
   decideExternalOpen,
   resolveDesktopRuntimePaths,
@@ -170,6 +159,13 @@ if (isSmoke) {
 }
 
 async function boot() {
+  // Desktop flag for the SPA's system-browser Google OAuth handoff (see
+  // src/cli/desktop-auth-route.mjs and GET /api/runtime/config's
+  // desktop.authAvailable field in src/cli/skill-run-route.mjs). Set before
+  // createDevServer() — same placement style as the ROLESTER_HOME injection
+  // above, which also must land before any engine module reads process.env.
+  process.env.ROLESTER_DESKTOP_SHELL = "1";
+
   const { createDevServer } = await loadEngineModule("src/cli/tracker-dev.mjs");
   const { resolveUserPaths, userPath } = await loadEngineModule("src/core/paths/workspace.mjs");
   const { dbExists } = await loadEngineModule("src/core/db/connection.mjs");
@@ -280,15 +276,13 @@ function createWindow(url, route, { load = true } = {}) {
 
   // External links (target=_blank) and any navigation away from our own
   // loopback origin open in the OS browser instead of inside the app window
-  // — except the Google/Clerk OAuth chain (accounts.google.com, Clerk's
-  // frontend-API domain): decideExternalOpen tags those "ignore"/"auth-origin"
-  // so the popup opens in-window instead, letting the sign-in flow complete
-  // and hand the session back to this same webContents.
+  // — including the Google OAuth chain now: decideExternalOpen's
+  // DESKTOP_SIGN_IN_PATH carve-out (apps/desktop/desktop-runtime.mjs) routes
+  // the desktop sign-in page itself out to the OS browser, where the whole
+  // Google/Clerk redirect chain runs and hands the finished session back
+  // through src/cli/desktop-auth-route.mjs instead of this webContents.
   win.webContents.setWindowOpenHandler(({ url: target }) => {
-    const decision = openExternalIfAllowed(target, url);
-    if (decision.action === "ignore" && decision.reason === "auth-origin") {
-      return { action: "allow" };
-    }
+    openExternalIfAllowed(target, url);
     return { action: "deny" };
   });
   win.webContents.on("will-navigate", (event, target) => {
@@ -410,32 +404,6 @@ async function waitForClientMount(wc, timeoutMs = 5000, intervalMs = 100) {
 }
 
 app.whenReady().then(async () => {
-  // Stripping the Rolester/Electron tokens above isn't enough on its own:
-  // Chromium still sends Client Hints (Sec-CH-UA etc.) that let Google's
-  // embedded-browser detector cross-check the UA against the real engine and
-  // catch the mismatch, which is what actually trips "This browser or app
-  // may not be secure". Firefox sends no client hints, so there's nothing to
-  // cross-check — rewrite the User-Agent to Firefox's, but only for requests
-  // to the OAuth-chain hosts (never the app's own origin or the rest of the
-  // web). Must run before any window/webContents makes a request, i.e.
-  // before boot()/createWindow() below.
-  const authUaFilterPatterns = buildAuthUaFilterPatterns(process.env);
-  if (authUaFilterPatterns.length > 0) {
-    session.defaultSession.webRequest.onBeforeSendHeaders(
-      { urls: authUaFilterPatterns },
-      (details, callback) => {
-        // Chromium attaches Sec-CH-UA client-hint headers independently of
-        // the User-Agent header — a Firefox UA alongside Chromium brand
-        // hints is itself the mismatch Google detects, so drop them here.
-        for (const header of Object.keys(details.requestHeaders)) {
-          if (/^sec-ch-ua/i.test(header)) delete details.requestHeaders[header];
-        }
-        details.requestHeaders["User-Agent"] = AUTH_FLOW_USER_AGENT;
-        callback({ requestHeaders: details.requestHeaders });
-      }
-    );
-  }
-
   // Dev dock icon (macOS). The packaged app gets its icon from the baked
   // .icns (electron-builder mac.icon), but an unpackaged `electron .` run shows
   // the default Electron icon unless we set it here. build/ isn't bundled into

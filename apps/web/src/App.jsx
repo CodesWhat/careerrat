@@ -1,6 +1,9 @@
 import { Route, Routes, useLocation } from "react-router-dom";
 import { AppShell } from "./app-shell/AppShell.jsx";
 import { DashboardProvider } from "./app-shell/DashboardContext.jsx";
+import { DesktopSignInCallbackPage } from "./auth/DesktopSignInCallbackPage.jsx";
+import { DesktopSignInErrorPage } from "./auth/DesktopSignInErrorPage.jsx";
+import { DesktopSignInPage } from "./auth/DesktopSignInPage.jsx";
 import { CalendarPage } from "./calendar/CalendarPage.jsx";
 import { DeepIngestPage } from "./deep-ingest/DeepIngestPage.jsx";
 import { InboxPage } from "./inbox/InboxPage.jsx";
@@ -24,6 +27,21 @@ export function App() {
         <OnboardingPage />
       </DashboardProvider>
     );
+  }
+
+  // The Electron desktop shell's system-browser Google OAuth handoff (see
+  // apps/desktop/desktop-runtime.mjs's DESKTOP_SIGN_IN_PATH carve-out and
+  // apps/web/src/auth/DesktopSignInPage.jsx's header comment). These load in
+  // a fresh system-browser tab, never inside the app shell's nav — chrome-less
+  // full-page routes, same pattern as /onboarding above.
+  if (location.pathname === "/desktop-sign-in") {
+    return <DesktopSignInPage />;
+  }
+  if (location.pathname === "/desktop-sign-in/sso-callback") {
+    return <DesktopSignInCallbackPage />;
+  }
+  if (location.pathname === "/desktop-sign-in/error") {
+    return <DesktopSignInErrorPage />;
   }
 
   return (
