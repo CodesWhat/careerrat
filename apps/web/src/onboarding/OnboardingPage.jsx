@@ -36,6 +36,14 @@ const STEPS = [
   { key: "finish", label: "Finish", Component: FinishStep, fullBleed: true },
 ];
 
+// Steps whose completion IS the visit — welcome, account (sign-in is
+// currently optional), quick facts, and finish never get a data-derived done
+// flag from deriveDoneFlags, so a Continue click is the only signal they have.
+// Data steps (resume, targeting, companies, guardrails) must only go green
+// when deriveDoneFlags finds real data — never merely from being visited —
+// so they are deliberately excluded here.
+const VISIT_COMPLETE_STEPS = new Set([0, 1, 6, 7]);
+
 function deriveDoneFlags(state, { isSignedIn = false } = {}) {
   if (!state) return STEPS.map(() => false);
   const targeting = state.data?.targeting ?? {};
@@ -57,6 +65,21 @@ function doneFlagIndexes(doneFlags, { stepCount = STEPS.length } = {}) {
   return (Array.isArray(doneFlags) ? doneFlags : [])
     .map((done, index) => (done ? index : null))
     .filter((index) => index !== null && index < stepCount);
+}
+
+// The set of pills that should render as complete: durable visit-completions
+// unioned with whatever deriveDoneFlags can prove from real data right now.
+// Shared by render (completionIndexesForShell) and pill-jump eligibility
+// (goToCompletedStep) so a genuinely-done data step is always reachable even
+// if it never went through goNext.
+function unionCompletedIndexes({ completedIndexes, state, isSignedIn }) {
+  return normalizeCompletedIndexes(
+    [
+      ...completedIndexes,
+      ...doneFlagIndexes(deriveDoneFlags(state, { isSignedIn }), { stepCount: STEPS.length }),
+    ],
+    { stepCount: STEPS.length }
+  );
 }
 
 function isPlainObject(value) {
@@ -189,11 +212,19 @@ export function OnboardingPage() {
           draft: next.onboardingDraft,
         });
         setStepIndex(initialStepIndex);
+        // Self-heal stale drafts: an older build could persist a data-step
+        // index (resume/targeting/companies/guardrails) into completedIndexes
+        // just from a Continue click. Drop anything outside
+        // VISIT_COMPLETE_STEPS here so a phantom completion never resurrects
+        // — stateDoneIndexes below still lights those pills up honestly when
+        // the data is actually present.
+        const trustedDraftCompletedIndexes = next.onboardingDraft.completedIndexes.filter((index) =>
+          VISIT_COMPLETE_STEPS.has(index)
+        );
         setCompletedIndexes(
-          normalizeCompletedIndexes(
-            [...next.onboardingDraft.completedIndexes, ...stateDoneIndexes],
-            { stepCount: STEPS.length }
-          )
+          normalizeCompletedIndexes([...trustedDraftCompletedIndexes, ...stateDoneIndexes], {
+            stepCount: STEPS.length,
+          })
         );
         setHasPositioned(true);
       } else {
@@ -229,16 +260,22 @@ export function OnboardingPage() {
   }
 
   function goNext() {
-    setCompletedIndexes((current) =>
-      normalizeCompletedIndexes([...current, stepIndex], { stepCount: STEPS.length })
-    );
+    // Only visit-complete steps get marked done just for being clicked
+    // through. Data steps earn their pill from deriveDoneFlags instead (see
+    // completionIndexesForShell / unionCompletedIndexes) so an empty
+    // targeting/companies/guardrails step never shows green.
+    if (VISIT_COMPLETE_STEPS.has(stepIndex)) {
+      setCompletedIndexes((current) =>
+        normalizeCompletedIndexes([...current, stepIndex], { stepCount: STEPS.length })
+      );
+    }
     void refreshThenAdvance({ load, setStepIndex, stepCount: STEPS.length });
   }
   function goBack() {
     setStepIndex((i) => Math.max(i - 1, 0));
   }
   function goToCompletedStep(index) {
-    const completedSet = new Set(completedIndexes);
+    const completedSet = new Set(unionCompletedIndexes({ completedIndexes, state, isSignedIn }));
     setStepIndex((current) => {
       const target = Math.max(0, Math.min(Number(index) || 0, STEPS.length - 1));
       return target < current || completedSet.has(target) ? target : current;
@@ -251,13 +288,7 @@ export function OnboardingPage() {
 
   const { Component, fullBleed } = STEPS[stepIndex];
   const aiEnabled = runtimeCapabilities.aiAvailable;
-  const completionIndexesForShell = normalizeCompletedIndexes(
-    [
-      ...completedIndexes,
-      ...doneFlagIndexes(deriveDoneFlags(state, { isSignedIn }), { stepCount: STEPS.length }),
-    ],
-    { stepCount: STEPS.length }
-  );
+  const completionIndexesForShell = unionCompletedIndexes({ completedIndexes, state, isSignedIn });
   const stepProps = {
     state,
     draftSeeds,

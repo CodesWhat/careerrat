@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Button } from "../../components/Button.jsx";
 import { Field, TextArea, TextField } from "../../components/form.jsx";
 import { UploadIcon } from "../../components/icons.jsx";
@@ -92,6 +92,23 @@ function formatFileSize(size) {
 
 function fileItemId(file, index) {
   return `${file?.name || "file"}-${file?.size || 0}-${file?.lastModified || 0}-${index}`;
+}
+
+// The AI extraction route (POST /api/onboard/resume-ai) is genuinely slow —
+// verified ~127s end to end on a live install — and the fetch has no client
+// timeout. Without live progress the tiny "Reading..." status reads as hung
+// well before it's actually done, so this ticks a per-item elapsed clock
+// instead of a static label.
+function formatAiElapsedDetail(elapsedSeconds) {
+  return `AI is reading your resume… ${elapsedSeconds}s (usually 1–2 min)`;
+}
+
+function summarizeSections(sections) {
+  if (!sections) return "";
+  return (
+    `${sections.experience ?? 0} experience, ${sections.education ?? 0} education, ` +
+    `${sections.skills ?? 0} skills, ${sections.projects ?? 0} project section(s) found.`
+  );
 }
 
 function previewKindForFile(file) {
@@ -330,6 +347,7 @@ export function describeResumeUploadError(err, { mode = "unsupported", ext = "" 
 export function ResumeStep({
   state,
   aiEnabled,
+  draftSeeds,
   setDraftSeeds,
   goNext,
   goBack,
@@ -338,6 +356,7 @@ export function ResumeStep({
   initialTextMode = false,
 }) {
   const fileInputRef = useRef(null);
+  const aiTimersRef = useRef({}); // uploadItem id -> setInterval id, one per in-flight AI extraction
   const [dragActive, setDragActive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -358,12 +377,68 @@ export function ResumeStep({
   const [claims, setClaims] = useState([]);
   const [saving, setSaving] = useState(false);
 
+  // Clear every outstanding AI-progress interval on unmount — a navigation
+  // away mid-extraction must not leave a timer ticking against a detached
+  // uploadItems setter.
+  useEffect(() => {
+    return () => {
+      for (const id of Object.values(aiTimersRef.current)) clearInterval(id);
+      aiTimersRef.current = {};
+    };
+  }, []);
+
+  // Restore-on-mount: extraction results only otherwise live in this
+  // component's local state, so navigating away mid-extract (or after) and
+  // back would normally lose everything except the targeting seed. applySeed
+  // below mirrors the extraction into draftSeeds.resumeReview (owned by
+  // OnboardingPage, which stays mounted across step navigation) — replay it
+  // back into local state here whenever this step remounts empty.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only restore
+  useEffect(() => {
+    if (uploadItems.length || claims.length) return;
+    const resumeReview = draftSeeds?.resumeReview;
+    if (!resumeReview) return;
+
+    const candidate = resumeReview.profileSeed?.candidate ?? {};
+    setProfileFields((prev) => {
+      const next = { ...prev };
+      for (const key of PROFILE_FIELDS) {
+        if (candidate[key]) next[key] = candidate[key];
+      }
+      return next;
+    });
+    setClaims(
+      (resumeReview.claims ?? []).map((c) => ({
+        ...c,
+        selected: c.selected === undefined ? true : c.selected,
+      }))
+    );
+    setSections(resumeReview.sections ?? null);
+    setSource(resumeReview.source ?? null);
+    setUploadItems([
+      {
+        id: "restored-resume-review",
+        name: "Resume extraction",
+        type: resumeReview.source === "ai" ? "AI" : resumeReview.source === "docx" ? "DOCX" : "TXT",
+        size: "",
+        status: "done",
+        detail: "Restored from last extraction",
+        previewKind: "text",
+        previewText: summarizeSections(resumeReview.sections),
+      },
+    ]);
+  }, []);
+
   function applySeed(result, { appendClaims = false, appendSections = false } = {}) {
-    setSource(result.source === "ai" ? "ai" : result.source === "docx" ? "docx" : "text");
+    const resolvedSource =
+      result.source === "ai" ? "ai" : result.source === "docx" ? "docx" : "text";
+    const seedCandidate = result.profileSeed?.candidate ?? {};
+    const seedClaims = result.evidenceSeed?.claims ?? [];
+
+    setSource(resolvedSource);
     setSections((prev) =>
       appendSections ? mergeSections(prev, result.sections) : (result.sections ?? null)
     );
-    const seedCandidate = result.profileSeed?.candidate ?? {};
     setProfileFields((prev) => {
       const next = { ...prev };
       for (const key of PROFILE_FIELDS) {
@@ -371,15 +446,40 @@ export function ResumeStep({
       }
       return next;
     });
-    const seedClaims = result.evidenceSeed?.claims ?? [];
     setClaims((prev) =>
       appendClaims
         ? mergeClaims(prev, seedClaims)
         : seedClaims.map((c) => ({ ...c, selected: true }))
     );
-    if (result.targetingSeed) {
-      setDraftSeeds?.((prev) => ({ ...prev, targeting: result.targetingSeed }));
-    }
+
+    // Mirror the extraction into the durable draft so it survives step
+    // navigation mid-extract or after — this runs regardless of whether
+    // ResumeStep is still mounted (see handleFiles's fetch closure), since
+    // setDraftSeeds is owned by OnboardingPage, not this component.
+    setDraftSeeds?.((prev) => {
+      const prevResumeReview = prev?.resumeReview ?? null;
+      const nextCandidate = { ...(prevResumeReview?.profileSeed?.candidate ?? {}) };
+      for (const key of PROFILE_FIELDS) {
+        if (seedCandidate[key]) nextCandidate[key] = seedCandidate[key];
+      }
+      const nextClaims = appendClaims
+        ? mergeClaims(prevResumeReview?.claims, seedClaims)
+        : seedClaims.map((c) => ({ ...c, selected: true }));
+      const nextSections = appendSections
+        ? mergeSections(prevResumeReview?.sections, result.sections)
+        : (result.sections ?? null);
+      return {
+        ...prev,
+        resumeReview: {
+          profileSeed: { candidate: nextCandidate },
+          claims: nextClaims,
+          sections: nextSections,
+          source: resolvedSource,
+          savedAt: new Date().toISOString(),
+        },
+        ...(result.targetingSeed ? { targeting: result.targetingSeed } : {}),
+      };
+    });
   }
 
   async function handleFiles(files) {
@@ -408,11 +508,38 @@ export function ResumeStep({
       const itemId = nextItems[index].id;
       const ext = extOf(file.name);
       const mode = getResumeUploadMode(file.name, { aiEnabled });
+      const isAiRead = mode === "ai";
       setUploadItems((items) =>
         items.map((item) =>
-          item.id === itemId ? { ...item, status: "reading", detail: "Reading..." } : item
+          item.id === itemId
+            ? {
+                ...item,
+                status: "reading",
+                detail: isAiRead ? formatAiElapsedDetail(0) : "Reading...",
+                aiReading: isAiRead,
+              }
+            : item
         )
       );
+
+      // The AI route has no client timeout and can genuinely take ~2 minutes
+      // (see formatAiElapsedDetail's header comment), so a static "Reading..."
+      // reads as hung — tick a live elapsed clock into this item's detail
+      // instead. Keyed by itemId in a ref so overlapping handleFiles calls
+      // (e.g. two drops before the first resolves) each get their own timer.
+      let aiTimer = null;
+      if (isAiRead) {
+        const startedAt = Date.now();
+        aiTimer = setInterval(() => {
+          const elapsedSeconds = Math.max(0, Math.round((Date.now() - startedAt) / 1000));
+          setUploadItems((items) =>
+            items.map((item) =>
+              item.id === itemId ? { ...item, detail: formatAiElapsedDetail(elapsedSeconds) } : item
+            )
+          );
+        }, 1000);
+        aiTimersRef.current[itemId] = aiTimer;
+      }
 
       try {
         const { seed } = await parseResumeFileForReview(file, { aiEnabled });
@@ -432,6 +559,7 @@ export function ResumeStep({
                       : seed.source === "docx"
                         ? "Parsed DOCX"
                         : "Parsed",
+                  aiReading: false,
                 }
               : item
           )
@@ -442,9 +570,16 @@ export function ResumeStep({
         if (described.showPaste) setTextMode(true);
         setUploadItems((items) =>
           items.map((item) =>
-            item.id === itemId ? { ...item, status: "error", detail: "Needs review" } : item
+            item.id === itemId
+              ? { ...item, status: "error", detail: "Needs review", aiReading: false }
+              : item
           )
         );
+      } finally {
+        if (aiTimer) {
+          clearInterval(aiTimer);
+          delete aiTimersRef.current[itemId];
+        }
       }
     }
 
@@ -522,6 +657,14 @@ export function ResumeStep({
         await saveEvidenceSeed(selected);
       }
       if (Object.keys(candidatePatch).length || selected.length) showToast("Saved.");
+      // The extraction is committed to the server now, so the durable
+      // fallback copy in draftSeeds is no longer needed — drop it, but keep
+      // draftSeeds.targeting since TargetingStep still consumes that seed.
+      setDraftSeeds?.((prev) => {
+        if (!prev || !("resumeReview" in prev)) return prev;
+        const { resumeReview: _resumeReview, ...rest } = prev;
+        return rest;
+      });
       goNext();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
@@ -531,6 +674,7 @@ export function ResumeStep({
   }
 
   const accept = aiEnabled ? `${LOCAL_ACCEPT},${AI_ACCEPT}` : LOCAL_ACCEPT;
+  const aiReadInProgress = uploadItems.some((item) => item.status === "reading" && item.aiReading);
   const visibleFileItems = uploadItems.length
     ? uploadItems
     : showExampleFile
@@ -657,6 +801,12 @@ export function ResumeStep({
                 </ul>
               ) : null}
               {error ? <InlineAlert message={error} /> : null}
+              {aiReadInProgress ? (
+                <p className="onboarding-account__fine-print">
+                  AI extraction usually takes a minute or two. Keep the app open — results land here
+                  when it finishes.
+                </p>
+              ) : null}
             </section>
 
             <section

@@ -3381,6 +3381,14 @@ button {
   position: fixed;
   inset: clamp(12px, 2vw, 24px);
   z-index: 90;
+  /* The onboarding header is a frameless-window drag strip
+     (-webkit-app-region: drag above). Electron computes drag regions
+     geometrically, not by DOM nesting, so this fixed overlay's toolbar —
+     which paints over that strip — must carve itself out or its close
+     button gets swallowed by window-drag in the desktop app (it works in a
+     plain browser, which has no drag regions). Same for the Clerk modal
+     below. */
+  -webkit-app-region: no-drag;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
@@ -5318,10 +5326,17 @@ button {
 .cl-modalBackdrop {
   background: rgba(0, 0, 0, 0.74);
   backdrop-filter: blur(8px);
+  /* Clerk's modal portal paints over the onboarding header's window-drag
+     strip — carve it out of the drag region or its top-edge controls (the
+     close ✕ in particular) are unclickable in the desktop app. See the
+     onboarding-resume__document-viewer rule for the full explanation of
+     this Electron drag-region gotcha. */
+  -webkit-app-region: no-drag;
 }
 
 .cl-modalContent {
   inset: 0;
+  -webkit-app-region: no-drag;
   display: grid;
   place-items: center;
   /* Clerk's own internal class sets justify-content: flex-start on this
