@@ -89,7 +89,7 @@ after(() => {
   }
 });
 
-test("prepareFirstSearchSources writes merged SQLite search-sources without compatibility YAML", () => {
+test("prepareFirstSearchSources writes merged SQLite search-sources without compatibility YAML", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
   sourceConfigPut({
@@ -112,7 +112,7 @@ test("prepareFirstSearchSources writes merged SQLite search-sources without comp
     },
   });
 
-  const result = prepareFirstSearchSources({ repoRoot, env: {} });
+  const result = await prepareFirstSearchSources({ repoRoot, env: {} });
 
   assert.equal(result.ok, true);
   assert.equal(result.sources.stored, true);
@@ -159,12 +159,12 @@ test("countDeterministicSources separates fetchable RSS and supported ATS from s
   });
 });
 
-test("failed first-search can retry as fresh work after deterministic source setup is fixed", () => {
+test("failed first-search can retry as fresh work after deterministic source setup is fixed", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot, { domain: "operations" });
   seedNoDeterministicSources(repoRoot);
 
-  const failed = startFirstSearchRun({ repoRoot, env: {} });
+  const failed = await startFirstSearchRun({ repoRoot, env: {} });
   assert.equal(failed.reused, false);
   assert.equal(failed.run.status, "failed");
   assert.equal(failed.run.error.code, "NO_DETERMINISTIC_SOURCES");
@@ -188,7 +188,7 @@ test("failed first-search can retry as fresh work after deterministic source set
     },
   });
 
-  const retry = startFirstSearchRun({ repoRoot, env: {}, retryFailed: true });
+  const retry = await startFirstSearchRun({ repoRoot, env: {}, retryFailed: true });
   assert.equal(retry.reused, false);
   assert.equal(retry.run.status, "running");
   assert.notEqual(retry.run.id, failed.run.id);
@@ -217,7 +217,7 @@ test("zero-result scans with attempted deterministic sources complete with zero-
     },
   });
 
-  const start = startFirstSearchRun({ repoRoot, env: {} });
+  const start = await startFirstSearchRun({ repoRoot, env: {} });
   assert.equal(start.run.status, "running");
 
   await runFirstSearchInBackground({

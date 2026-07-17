@@ -420,13 +420,13 @@ test("buildSearchSources: Wellfound entry absent when domain is absent", () => {
 });
 
 // ---------------------------------------------------------------------------
-// generate-search-sources — Lever seeding from targeting.tracked_companies
+// generate-search-sources — tracked company names never guess ATS boards
 // ---------------------------------------------------------------------------
 
-test("buildSearchSources: seeds one Lever entry per company in targeting.tracked_companies", () => {
+test("buildSearchSources: does not guess Lever boards from tracked company names", () => {
   const result = buildSearchSources(targetingWithCompanies, baseNonTechProfile);
   const lever = result.searches.filter((s) => s.provider === "Lever");
-  assert.equal(lever.length, 2, "expected one Lever entry per tracked company");
+  assert.equal(lever.length, 0, "bare company names must not become guessed Lever URLs");
 });
 
 test("buildSearchSources: Lever entries have correct shape", () => {
@@ -439,17 +439,10 @@ test("buildSearchSources: Lever entries have correct shape", () => {
   }
 });
 
-test("buildSearchSources: Lever entries encode the correct company slugs", () => {
+test("buildSearchSources: tracked company slugs are not emitted as Lever URLs", () => {
   const result = buildSearchSources(targetingWithCompanies, baseNonTechProfile);
   const urls = result.searches.filter((s) => s.provider === "Lever").map((s) => s.url);
-  assert.ok(
-    urls.some((u) => u.includes("stripe")),
-    "expected stripe slug"
-  );
-  assert.ok(
-    urls.some((u) => u.includes("airbnb")),
-    "expected airbnb slug"
-  );
+  assert.deepEqual(urls, []);
 });
 
 test("buildSearchSources: no Lever entries when tracked_companies absent or empty", () => {
@@ -458,11 +451,11 @@ test("buildSearchSources: no Lever entries when tracked_companies absent or empt
   assert.equal(lever.length, 0, "no Lever entries expected when tracked_companies is empty");
 });
 
-test("buildSearchSources: Lever seeding is domain-neutral (appears for both tech and non-tech)", () => {
+test("buildSearchSources: Lever guessing stays disabled for both tech and non-tech", () => {
   const techResult = buildSearchSources(targetingWithCompanies, baseTechProfile);
   const nonTechResult = buildSearchSources(targetingWithCompanies, baseNonTechProfile);
-  assert.equal(techResult.searches.filter((s) => s.provider === "Lever").length, 2);
-  assert.equal(nonTechResult.searches.filter((s) => s.provider === "Lever").length, 2);
+  assert.equal(techResult.searches.filter((s) => s.provider === "Lever").length, 0);
+  assert.equal(nonTechResult.searches.filter((s) => s.provider === "Lever").length, 0);
 });
 
 test("buildSearchSources: full config with Wellfound+Lever validates against schema", () => {

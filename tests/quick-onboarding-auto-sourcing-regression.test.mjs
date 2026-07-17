@@ -75,7 +75,7 @@ test("first-search backend routes stay deterministic and local", () => {
   const onboardRoute = stripJavaScriptComments(source("src/cli/onboard-route.mjs"));
   const quickStartFunction = functionBlock(
     onboardRoute,
-    "export function prepareQuickStartFirstSearch"
+    "export async function prepareQuickStartFirstSearch"
   );
   assert.match(quickStartFunction, /\bstartFirstSearchRun\b/);
   assert.match(quickStartFunction, /\brunFirstSearchInBackground\b/);

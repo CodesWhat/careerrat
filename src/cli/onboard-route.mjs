@@ -743,7 +743,7 @@ export function prepareQuickStartSourcing({ repoRoot, env = process.env } = {}) 
   };
 }
 
-export function prepareQuickStartFirstSearch({
+export async function prepareQuickStartFirstSearch({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
@@ -801,7 +801,12 @@ export function prepareQuickStartFirstSearch({
   }
 
   try {
-    const result = startFirstSearchRun({ repoRoot, env, retryFailed: retry === true });
+    const result = await startFirstSearchRun({
+      repoRoot,
+      env,
+      fetchImpl,
+      retryFailed: retry === true,
+    });
     if (result.reused !== true && result.run?.status === "running") {
       void runFirstSearchInBackground({
         repoRoot,
@@ -1912,7 +1917,7 @@ export function mountOnboardRoutes({
       return;
     }
 
-    const result = prepareQuickStartFirstSearch({
+    const result = await prepareQuickStartFirstSearch({
       repoRoot,
       env,
       fetchImpl,

@@ -566,7 +566,7 @@ describe("reconcileCompanyProposalDecisions", () => {
     ]);
   });
 
-  it("does not reject a removed proposal the user re-added by name", async () => {
+  it("mints and approves a removed proposal the user re-added manually by name", async () => {
     const calls = [];
     const decideProposal = async (payload) => {
       calls.push(payload);
@@ -578,10 +578,90 @@ describe("reconcileCompanyProposalDecisions", () => {
         companies: [{ ...KEPT_SUPPORTED_CHIP, source: "manual", proposalId: undefined }],
         removedProposals: [KEPT_SUPPORTED_CHIP],
         decideProposal,
+        createProposals: async (payload) => {
+          calls.push({ create: payload });
+          return {
+            pending: {
+              data: {
+                batch: {
+                  batchId: "batch-minted",
+                  proposals: [
+                    {
+                      ...SUPPORTED_PROPOSAL,
+                      proposalId: "proposal-minted",
+                      classification: "supported_ats",
+                      version: 1,
+                    },
+                  ],
+                },
+              },
+            },
+          };
+        },
       })
     ).resolves.toEqual({ hadFailure: false });
 
-    expect(calls).toEqual([]);
+    expect(calls).toEqual([
+      { create: { manualSeeds: [{ name: "Acme AI", domain_hint: "acme.example" }] } },
+      {
+        batchId: "batch-minted",
+        proposal: expect.objectContaining({
+          name: "Acme AI",
+          proposalId: "proposal-minted",
+          classification: "supported_ats",
+        }),
+        action: "approve-supported-ats",
+        userConfirmed: true,
+      },
+    ]);
+  });
+
+  it("continues approving successful mints when the mint response is partial", async () => {
+    const calls = [];
+    const companies = [
+      { name: "Acme AI", domain: "acme.example", source: "manual" },
+      { name: "No Board Co", domain: "noboard.example", source: "manual" },
+    ];
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies,
+        removedProposals: [],
+        createProposals: async () => ({
+          pending: {
+            data: {
+              batch: {
+                batchId: "batch-partial",
+                proposals: [
+                  {
+                    ...SUPPORTED_PROPOSAL,
+                    proposalId: "proposal-partial",
+                    classification: "supported_ats",
+                    version: 2,
+                  },
+                ],
+              },
+            },
+          },
+        }),
+        decideProposal: async (payload) => {
+          calls.push(payload);
+          return { conflict: false };
+        },
+      })
+      // "No Board Co" never gets a proposalId back from the partial mint —
+      // that's a real partial failure (see reconcileCompanyProposalDecisions'
+      // own comment), so it still surfaces the soft warning even though the
+      // chip that did mint gets approved below.
+    ).resolves.toEqual({ hadFailure: true });
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toMatchObject({
+      batchId: "batch-partial",
+      proposal: { proposalId: "proposal-partial", name: "Acme AI" },
+      action: "approve-supported-ats",
+      userConfirmed: true,
+    });
   });
 
   it("treats a decision conflict or thrown error as a soft failure without throwing", async () => {

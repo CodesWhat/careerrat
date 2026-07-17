@@ -1,12 +1,22 @@
 import { BOUNDED_AI_CODES, makeBoundedAIEnvelope, runBoundedAI } from "../ai/bounded-ai.mjs";
+import { resolveAIRoute } from "../ai/call-ai.mjs";
 import { validate } from "../profile/schema-validator.mjs";
-import { COMPANY_DISCOVERY_BATCH_MAX } from "./company-board-resolver.mjs";
+import { COMPANY_DISCOVERY_BATCH_MAX, normalizeCompanyKey } from "./company-board-resolver.mjs";
 import { buildCompanySeedContext } from "./company-context.mjs";
 
 export const COMPANY_SEED_LABELS = Object.freeze({
   skill: "discover-companies",
   action: "seed-generate",
   operation: "company-seeds",
+});
+
+// Distinct operation from COMPANY_SEED_LABELS so usage logging can tell the
+// two bounded-AI calls apart: this one only fills a missing domain_hint on
+// bare-name manual seeds, it never proposes new companies.
+export const COMPANY_SEED_DOMAIN_FILL_LABELS = Object.freeze({
+  skill: "discover-companies",
+  action: "seed-generate",
+  operation: "company-seeds-domain-fill",
 });
 
 const MANUAL_SEED_FALLBACK = Object.freeze({
@@ -36,6 +46,30 @@ export const companySeedSchema = Object.freeze({
           role_family_hint: { type: "string" },
           confidence: { type: "string", enum: ["high", "medium", "low"] },
           source_hint: { type: "string" },
+        },
+      },
+    },
+  },
+});
+
+// Companion schema for COMPANY_SEED_DOMAIN_FILL_LABELS: a name-only lookup,
+// never a proposal. No why/confidence/etc — those already exist on the
+// manual seed being filled.
+export const companySeedDomainFillSchema = Object.freeze({
+  type: "object",
+  required: ["companies"],
+  additionalProperties: false,
+  properties: {
+    companies: {
+      type: "array",
+      maxItems: COMPANY_DISCOVERY_BATCH_MAX,
+      items: {
+        type: "object",
+        required: ["name"],
+        additionalProperties: false,
+        properties: {
+          name: { type: "string" },
+          domain_hint: { type: "string" },
         },
       },
     },
@@ -127,6 +161,79 @@ function seedPrompt({ context, maxCompanies, now }) {
   ].join("\n\n");
 }
 
+function domainFillPrompt({ context, names, now }) {
+  return [
+    "For each company name below, return its official primary domain (the one its careers page lives on) if you can identify it with confidence.",
+    "This fills in a bare company name typed or extracted from a resume for Rolester's discover-companies workflow; it is not a proposal to add a company.",
+    "Use the candidate context only to disambiguate an ambiguous or generic name, never to invent a domain.",
+    "Omit a company from the response entirely rather than guessing at a domain you are not confident about.",
+    JSON.stringify(
+      {
+        generatedAt:
+          now instanceof Date ? now.toISOString() : new Date(now || Date.now()).toISOString(),
+        companies: names,
+        context,
+      },
+      null,
+      2
+    ),
+  ].join("\n\n");
+}
+
+// Manual seeds that are bare names (no domain/homepage/url given) can never
+// resolve to a board downstream (resolveCompanyBoard throws without a URL or
+// domain hint). One batched lookup call fills in what it confidently can;
+// everything else degrades to the seeds exactly as normalized, never thrown.
+async function fillManualDomainHints({ repoRoot, env, context, seeds, call, now }) {
+  const hintless = seeds.filter((seed) => !seed.domain_hint);
+  if (hintless.length === 0) return { seeds, ai: { used: false } };
+  if (resolveAIRoute(env).type === "none") return { seeds, ai: { used: false } };
+
+  const safeContext = context || buildCompanySeedContext({ repoRoot, env });
+  const fillResult = await runBoundedAI({
+    labels: COMPANY_SEED_DOMAIN_FILL_LABELS,
+    schema: companySeedDomainFillSchema,
+    manual: MANUAL_SEED_FALLBACK,
+    structuredMode: "native-preferred",
+    outputName: "company_seed_domain_fill_response",
+    tier: "smallFast",
+    maxTokens: 512,
+    root: repoRoot,
+    env,
+    call,
+    system:
+      "You resolve official company domains for a confirm-first company-discovery workflow. Return only JSON matching the supplied schema; omit any company you cannot identify with confidence.",
+    messages: [
+      {
+        role: "user",
+        content: domainFillPrompt({
+          context: safeContext,
+          names: hintless.map((seed) => seed.name),
+          now,
+        }),
+      },
+    ],
+  });
+
+  if (!fillResult.body?.ok) return { seeds, ai: fillResult.body?.ai || { used: false } };
+
+  const hints = new Map();
+  for (const company of fillResult.body.data?.companies || []) {
+    const key = normalizeCompanyKey(company?.name);
+    const hint = trimString(company?.domain_hint);
+    if (key && hint) hints.set(key, hint);
+  }
+  if (hints.size === 0) return { seeds, ai: fillResult.body.ai };
+
+  const filled = seeds.map((seed) => {
+    if (seed.domain_hint) return seed;
+    const hint = hints.get(normalizeCompanyKey(seed.name));
+    return hint ? { ...seed, domain_hint: hint } : seed;
+  });
+
+  return { seeds: filled, ai: fillResult.body.ai };
+}
+
 export async function generateCompanySeeds({
   repoRoot,
   env = process.env,
@@ -152,11 +259,20 @@ export async function generateCompanySeeds({
   }
 
   if (normalizedManual.length > 0) {
+    const cappedManual = normalizedManual.slice(0, maxCompanies);
+    const { seeds: filledManual, ai: fillAI } = await fillManualDomainHints({
+      repoRoot,
+      env,
+      context,
+      seeds: cappedManual,
+      call,
+      now,
+    });
     return makeBoundedAIEnvelope({
       ok: true,
       status: 200,
-      data: { companies: normalizedManual.slice(0, maxCompanies) },
-      ai: { used: false },
+      data: { companies: filledManual },
+      ai: fillAI,
       manual: MANUAL_SEED_FALLBACK,
     });
   }

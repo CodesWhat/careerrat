@@ -36,7 +36,8 @@ const DEFAULT_CADENCE = { mode: "daily", recommended_from: "default" };
 // Copy rule: the word "RSS" (or any source-plumbing jargon) never reaches the
 // wizard. Any first-search failure — whatever the server actually said —
 // renders as this one human line, regardless of message text.
-const FIRST_SEARCH_FAILURE_COPY = "Add a company board first — you can do that from Jobs later.";
+const FIRST_SEARCH_FAILURE_COPY =
+  "Couldn't reach any of your companies' job boards yet — retry below, or run a search from the Jobs tab anytime.";
 
 function errorMessage(err, fallback) {
   return err?.body?.error || (err instanceof Error ? err.message : fallback);

@@ -61,11 +61,11 @@ export function mountSourcingRoutes({
     }
   });
 
-  addRoute("POST", "/api/sourcing/first-run/start", (_req, res) => {
+  addRoute("POST", "/api/sourcing/first-run/start", async (_req, res) => {
     try {
       const latest = latestSourcingRunForUi({ repoRoot, env, purpose: "first-search" });
       const retryFailed = latest.run?.status === "failed";
-      const result = startFirstSearchRun({ repoRoot, env, retryFailed });
+      const result = await startFirstSearchRun({ repoRoot, env, fetchImpl, retryFailed });
       startBackground({ repoRoot, env, fetchImpl, result });
       sendJson(res, result.reused ? 200 : 202, result);
     } catch (err) {
@@ -73,9 +73,9 @@ export function mountSourcingRoutes({
     }
   });
 
-  addRoute("POST", "/api/sourcing/search/start", (_req, res) => {
+  addRoute("POST", "/api/sourcing/search/start", async (_req, res) => {
     try {
-      const result = startManualSearchRun({ repoRoot, env });
+      const result = await startManualSearchRun({ repoRoot, env, fetchImpl });
       startBackground({ repoRoot, env, fetchImpl, result });
       sendJson(res, result.reused ? 200 : 202, result);
     } catch (err) {

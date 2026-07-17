@@ -189,7 +189,9 @@ describe("FinishStep first-search status line", () => {
       })
     );
 
-    expect(html).toContain("Add a company board first — you can do that from Jobs later.");
+    expect(html).toContain(
+      "Couldn&#x27;t reach any of your companies&#x27; job boards yet — retry below, or run a search from the Jobs tab anytime."
+    );
     expect(html).toContain("Try again");
     expect(html).not.toContain("No deterministic sources were fetchable.");
     expect(html).not.toContain("RSS");

@@ -1,14 +1,31 @@
 import { runSourcedScan } from "../../../scripts/scan-sourced.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
-import { sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
+import { companyBoardResolutionGet } from "../db/verbs/company-discovery.mjs";
+import { companyAtsUpsert, sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
 import {
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunLatest,
   sourcingRunStart,
 } from "../db/verbs/sourcing-runs.mjs";
+import { normalizeCompanyKey, resolveCompanyBoard } from "../discovery/company-board-resolver.mjs";
 import { buildSearchSources } from "../profile/generate-search-sources.mjs";
 import { inferProvider } from "../scoring/sourced-scanner.mjs";
+
+// Bounded backfill for automatic company-board resolution ahead of the first
+// search: on a fresh install, targeting.tracked_companies is just a list of
+// bare names (config/targeting.schema.json), so countDeterministicSources
+// below can't count them until they land in the sourced-scan config with a
+// supported careers_url. discover-companies/company-proposals may have
+// already resolved a board for one of these names earlier in onboarding
+// (cached in company_board_resolutions) without the confirm-first gate ever
+// promoting it into sourced-scan. This backfill promotes only those already-
+// resolved, high-confidence boards — it never invents a domain from a bare
+// name (no slugify(name)+".com" guessing), so a name with no prior
+// resolution is simply left for the user/discover-companies to resolve.
+const COMPANY_BOARD_BACKFILL_BUDGET_MS = 5000;
+const COMPANY_BOARD_BACKFILL_CONCURRENCY = 4;
+const COMPANY_BOARD_BACKFILL_TIMEOUT_MS = 3000;
 
 const NO_DETERMINISTIC_SOURCES = Object.freeze({
   code: "NO_DETERMINISTIC_SOURCES",
@@ -159,6 +176,91 @@ function sourceSetupError() {
   return { ...NO_DETERMINISTIC_SOURCES };
 }
 
+function trackedCompanyNames(candidateConfig) {
+  const seen = new Set();
+  const names = [];
+  for (const raw of asArray(candidateConfig?.targeting?.tracked_companies)) {
+    const name = String(raw || "").trim();
+    const key = name.toLowerCase();
+    if (!name || seen.has(key)) continue;
+    seen.add(key);
+    names.push(name);
+  }
+  return names;
+}
+
+function knownCompanyNames(sourcedScan) {
+  return new Set(
+    asArray(sourcedScan?.tracked_companies)
+      .map((entry) =>
+        String(entry?.name || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+}
+
+// A bare tracked-company name only gets a resolver attempt when it already
+// has a real, previously-resolved board cached under its company key — that
+// cache entry is the only hint source allowed here.
+function cachedBoardHint({ repoRoot, env, name }) {
+  const companyKey = normalizeCompanyKey(name);
+  if (!companyKey) return "";
+  const cached = companyBoardResolutionGet({ repoRoot, env, companyKey }).resolution;
+  return String(cached?.job_board_url || cached?.careers_url || "").trim();
+}
+
+async function backfillCompanyBoards({ repoRoot, env, fetchImpl, candidateConfig, sourcedScan }) {
+  const summary = { attempted: 0, resolved: 0, promoted: 0 };
+  const known = knownCompanyNames(sourcedScan);
+  const pending = trackedCompanyNames(candidateConfig).filter(
+    (name) => !known.has(name.toLowerCase())
+  );
+  if (!pending.length) return summary;
+
+  const deadline = Date.now() + COMPANY_BOARD_BACKFILL_BUDGET_MS;
+  let cursor = 0;
+
+  async function worker() {
+    while (cursor < pending.length) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      const name = pending[cursor++];
+      const hint = cachedBoardHint({ repoRoot, env, name });
+      if (!hint) continue;
+      summary.attempted += 1;
+      try {
+        const result = await resolveCompanyBoard({
+          repoRoot,
+          env,
+          seed: { name, job_board_url: hint },
+          fetchImpl,
+          timeoutMs: Math.min(COMPANY_BOARD_BACKFILL_TIMEOUT_MS, remaining),
+        });
+        if (result?.status !== "supported_ats") continue;
+        summary.resolved += 1;
+        if (result.promotable && result.careersUrl) {
+          companyAtsUpsert({
+            repoRoot,
+            env,
+            entry: { name: result.companyName || name, careers_url: result.careersUrl },
+          });
+          summary.promoted += 1;
+        }
+      } catch {
+        // One company's resolution failure/timeout never sinks the batch —
+        // it just stays unresolved until a later first/manual search retries it.
+      }
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(COMPANY_BOARD_BACKFILL_CONCURRENCY, pending.length) }, worker)
+  );
+  return summary;
+}
+
 function currentSourceConfigs(pathCtx) {
   return {
     searchSources: sourceConfigGet({ ...pathCtx, name: "search-sources" }).data,
@@ -191,17 +293,27 @@ function ensureSearchReady(pathCtx) {
   return config;
 }
 
-function startSearchRun({ repoRoot, env, purpose, retryFailed = false, trigger } = {}) {
+async function startSearchRun({
+  repoRoot,
+  env,
+  fetchImpl = fetch,
+  purpose,
+  retryFailed = false,
+  trigger,
+} = {}) {
   const pathCtx = { repoRoot, env };
   const config = ensureSearchReady(pathCtx);
-  const prepared = prepareFirstSearchSources({ repoRoot, env, config });
+  const prepared = await prepareFirstSearchSources({ repoRoot, env, fetchImpl, config });
   const deterministicSources = prepared.deterministicSources;
   const start = sourcingRunStart({
     ...pathCtx,
     purpose,
     retryFailed,
     trigger,
-    metadata: { deterministicSources },
+    metadata: {
+      deterministicSources,
+      companyBoardResolution: prepared.companyBoardResolution,
+    },
   });
 
   let run = start.run;
@@ -240,14 +352,31 @@ export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
   };
 }
 
-export function prepareFirstSearchSources({ repoRoot, env = process.env, config = null } = {}) {
+export async function prepareFirstSearchSources({
+  repoRoot,
+  env = process.env,
+  fetchImpl = fetch,
+  config = null,
+} = {}) {
   const pathCtx = { repoRoot, env };
   const candidateConfig = config || candidateConfigGet(pathCtx);
   const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
   const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
   const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
   const sources = sourceConfigPut({ ...pathCtx, name: "search-sources", data: next });
-  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  let sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+
+  const companyBoardResolution = await backfillCompanyBoards({
+    repoRoot,
+    env,
+    fetchImpl,
+    candidateConfig,
+    sourcedScan,
+  });
+  if (companyBoardResolution.promoted > 0) {
+    sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  }
+
   const deterministicSources = countDeterministicSources({
     searchSources: sources.data,
     sourcedScan,
@@ -259,25 +388,37 @@ export function prepareFirstSearchSources({ repoRoot, env = process.env, config 
     searchSources: sources.data,
     sourcedScan,
     deterministicSources,
+    companyBoardResolution,
     readiness: candidateConfig.setup?.readiness || {},
     missing: candidateConfig.setup?.missing || {},
   };
 }
 
-export function startFirstSearchRun({ repoRoot, env = process.env, retryFailed = false } = {}) {
+export async function startFirstSearchRun({
+  repoRoot,
+  env = process.env,
+  fetchImpl = fetch,
+  retryFailed = false,
+} = {}) {
   return startSearchRun({
     repoRoot,
     env,
+    fetchImpl,
     purpose: "first-search",
     retryFailed,
     trigger: retryFailed ? "first-search-retry" : "search-ready",
   });
 }
 
-export function startManualSearchRun({ repoRoot, env = process.env } = {}) {
+export async function startManualSearchRun({
+  repoRoot,
+  env = process.env,
+  fetchImpl = fetch,
+} = {}) {
   return startSearchRun({
     repoRoot,
     env,
+    fetchImpl,
     purpose: "manual-search",
     retryFailed: false,
     trigger: "manual-search",

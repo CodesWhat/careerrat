@@ -188,30 +188,73 @@ export async function runCompanyProposalDecision({
   }
 }
 
-// Save & Next converts kept/removed proposal-seeded chips into real decisions
-// so the onboarding Companies step actually resolves supported-ATS boards
-// into sourced-scan.tracked_companies (the deterministic first-search source
-// count reads that table, not targeting.tracked_companies names). Runs
-// sequentially — parallel decision calls on the same batch race each other's
-// expectedVersion. Never throws: a partial failure surfaces as a soft toast,
-// it never blocks the wizard from advancing.
+// Save & Next converts kept/removed chips into real decisions so the
+// onboarding Companies step actually resolves supported-ATS boards into
+// sourced-scan.tracked_companies (the deterministic first-search source
+// count reads that table, not targeting.tracked_companies names). Kept chips
+// with no proposalId — manually typed, autocomplete picks, resume-extraction
+// seeds — are minted into proposals first via a manualSeeds create call, so
+// every kept company gets a shot at resolution, not just AI-proposed ones.
+// Minting is best-effort: a failed or partial mint just leaves those chips
+// without a proposalId, which drops them out of the approval loop below
+// rather than blocking Save & Next — a server-side backfill covers them
+// later. Decisions run sequentially — parallel calls on the same batch race
+// each other's expectedVersion. Never throws: a partial failure surfaces as
+// a soft toast, it never blocks the wizard from advancing.
 export async function reconcileCompanyProposalDecisions({
   companies = [],
   removedProposals = [],
   decideProposal = runCompanyProposalDecision,
+  createProposals = runCompanyProposalCreate,
 } = {}) {
   const currentNames = new Set(
     (Array.isArray(companies) ? companies : []).map((company) => company.name.toLowerCase())
   );
-  const keptSupported = (Array.isArray(companies) ? companies : []).filter(
-    (company) =>
-      company.source === "ai" && company.proposalId && company.classification === "supported_ats"
+
+  let hadFailure = false;
+  let resolvedCompanies = Array.isArray(companies) ? companies : [];
+
+  const unresolved = resolvedCompanies.filter((company) => !company.proposalId);
+  if (unresolved.length) {
+    try {
+      const created = await createProposals({
+        manualSeeds: proposalSeedsFromCompanies(unresolved),
+      });
+      const batch =
+        proposalBatchFromResponse(created?.pending) ||
+        proposalBatchFromResponse(created?.created) ||
+        null;
+      const mintedByName = new Map(
+        targetsFromProposalBatch(batch).map((target) => [target.name.toLowerCase(), target])
+      );
+      resolvedCompanies = resolvedCompanies.map((company) => {
+        const minted = !company.proposalId && mintedByName.get(company.name.toLowerCase());
+        if (!minted) return company;
+        return {
+          ...company,
+          proposalId: minted.proposalId,
+          batchId: minted.batchId,
+          classification: minted.classification,
+          version: minted.version,
+        };
+      });
+      // A partial mint (some unresolved chips got a proposalId back, others
+      // didn't — e.g. no supported-ATS board found for one of them) still
+      // leaves those chips silently unresolved from here down. That's a
+      // real failure, not a fully successful save: surface the same soft
+      // warning a thrown/rejected mint would.
+      if (resolvedCompanies.some((company) => !company.proposalId)) hadFailure = true;
+    } catch {
+      hadFailure = true;
+    }
+  }
+
+  const keptSupported = resolvedCompanies.filter(
+    (company) => company.proposalId && company.classification === "supported_ats"
   );
   const stillRemoved = (Array.isArray(removedProposals) ? removedProposals : []).filter(
     (company) => company.proposalId && !currentNames.has(company.name.toLowerCase())
   );
-
-  let hadFailure = false;
 
   for (const chip of keptSupported) {
     try {

@@ -1,4 +1,3 @@
-import { leverSearchEntry } from "../providers/lever.mjs";
 import { buildWellfoundUrl } from "../providers/wellfound.mjs";
 
 // Generate a search-sources configuration object from targeting + profile.
@@ -164,15 +163,6 @@ export function buildSearchSources(targeting, profile) {
       }),
       enabled: true,
     });
-  }
-
-  // Domain-neutral ATS seeding: one Lever board entry per tracked company.
-  // Data-driven from targeting.tracked_companies — never hardcoded.
-  // Fires for any domain (tech or non-tech).
-  for (const company of targeting.tracked_companies ?? []) {
-    if (company && typeof company === "string" && company.trim()) {
-      searches.push(leverSearchEntry(company.trim()));
-    }
   }
 
   // --- source_catalog (fixed reference) ---
