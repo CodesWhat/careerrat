@@ -232,6 +232,47 @@ test("resolves a supported ATS hint through provider inference and persists cach
   assert.ok(cached.provenance.some((entry) => entry.source === "supported-ats-hint"));
 });
 
+test("caches API URLs for Recruitee and Workday supported ATS hints", async () => {
+  const cases = [
+    {
+      name: "Acme Recruitee",
+      domainHint: "https://acme.recruitee.com",
+      host: "acme.recruitee.com",
+      provider: "recruitee",
+      apiUrl: "https://acme.recruitee.com/api/offers/",
+    },
+    {
+      name: "Acme Workday",
+      domainHint: "https://acme.wd5.myworkdayjobs.com/careers",
+      host: "acme.wd5.myworkdayjobs.com",
+      provider: "workday",
+      apiUrl: "https://acme.wd5.myworkdayjobs.com/wday/cxs/acme/careers/jobs",
+    },
+  ];
+
+  for (const fixture of cases) {
+    const repoRoot = setupRepo();
+    const result = await resolveCompanyBoard({
+      repoRoot,
+      seed: { name: fixture.name, domain_hint: fixture.domainHint },
+      fetchImpl: rejectingFetch(),
+      lookupHost: lookupHostFor({ [fixture.host]: "203.0.113.30" }),
+      now: NOW,
+    });
+
+    assert.equal(result.status, "supported_ats", fixture.name);
+    assert.equal(result.atsProvider, fixture.provider, fixture.name);
+    assert.equal(result.apiUrl, fixture.apiUrl, fixture.name);
+
+    const cached = companyBoardResolutionGet({
+      repoRoot,
+      companyKey: normalizeCompanyKey(fixture.name),
+    }).resolution;
+    assert.equal(cached.ats_provider, fixture.provider, fixture.name);
+    assert.equal(cached.api_url, fixture.apiUrl, fixture.name);
+  }
+});
+
 test("discovers a supported ATS board from public homepage and careers links within the redirect cap", async () => {
   const repoRoot = setupRepo();
   const fetchImpl = fetchFrom({

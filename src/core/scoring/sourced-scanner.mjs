@@ -385,6 +385,8 @@ export function inferProvider(entry = {}) {
   if (/jobs\.lever\.co\//.test(url)) return "lever";
   if (/apply\.workable\.com\//.test(url)) return "workable";
   if (/(careers|jobs)\.smartrecruiters\.com\//.test(url)) return "smartrecruiters";
+  if (/\/\/[a-z0-9][a-z0-9-]*\.recruitee\.com/i.test(url)) return "recruitee";
+  if (/[\w-]+\.wd[\w-]*\.myworkdayjobs\.com\//.test(url)) return "workday";
   return null;
 }
 
@@ -508,6 +510,8 @@ export async function fetchProvider(provider, entry, fetchImpl = fetch) {
   if (provider === "lever") return fetchLever(entry, fetchImpl);
   if (provider === "workable") return fetchWorkable(entry, fetchImpl);
   if (provider === "smartrecruiters") return fetchSmartRecruiters(entry, fetchImpl);
+  if (provider === "recruitee") return fetchRecruitee(entry, fetchImpl);
+  if (provider === "workday") return fetchWorkday(entry, fetchImpl);
   if (provider === "rss") return fetchRss(entry, fetchImpl);
   throw new Error(`unsupported provider: ${provider}`);
 }
@@ -590,14 +594,18 @@ async function fetchText(url, fetchImpl, options = {}) {
 async function fetchWithTimeout(
   url,
   fetchImpl,
-  { timeoutMs = DEFAULT_TIMEOUT_MS, retries = 0 } = {}
+  { timeoutMs = DEFAULT_TIMEOUT_MS, retries = 0, method, body, headers } = {}
 ) {
   let lastError;
   for (let attempt = 0; attempt <= retries; attempt++) {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
     try {
-      return await fetchImpl(url, { signal: controller.signal, redirect: "follow" });
+      const init = { signal: controller.signal, redirect: "follow" };
+      if (method) init.method = method;
+      if (body !== undefined) init.body = body;
+      if (headers) init.headers = headers;
+      return await fetchImpl(url, init);
     } catch (error) {
       lastError = error;
       if (attempt < retries) await delay(500 * (attempt + 1));
@@ -761,6 +769,126 @@ async function fetchSmartRecruiters(entry, fetchImpl) {
       ),
     };
   });
+}
+
+// Ported from santifer/career-ops (MIT License, Copyright (c) 2026 Santiago
+// Fernández de Valderrama — github.com/santifer/career-ops) providers/recruitee.mjs.
+// Per-tenant subdomains are the variable part — SSRF defence uses a regex match
+// on `<safe-slug>.recruitee.com` rather than a static allowlist.
+const RECRUITEE_HOST_RE = /^[a-z0-9][a-z0-9-]*\.recruitee\.com$/;
+
+async function fetchRecruitee(entry, fetchImpl) {
+  const parsed = new URL(entry.careers_url);
+  if (parsed.protocol !== "https:" || !RECRUITEE_HOST_RE.test(parsed.hostname)) {
+    throw new Error(
+      `recruitee: untrusted hostname "${parsed.hostname}" — must match <slug>.recruitee.com`
+    );
+  }
+  const apiUrl = `https://${parsed.hostname}/api/offers/`;
+  const json = await fetchJson(apiUrl, fetchImpl);
+  const offers = Array.isArray(json?.offers) ? json.offers : [];
+  return offers.map((j) => {
+    const city = j.city || "";
+    const country = j.country || "";
+    const remote = j.remote ? "Remote" : "";
+    const location = j.location || [city, country, remote].filter(Boolean).join(", ");
+
+    // Validate offer URL: must parse as https://<safe-slug>.recruitee.com/...
+    let url = "";
+    const rawUrl = j.careers_url || j.url || "";
+    if (typeof rawUrl === "string" && rawUrl) {
+      try {
+        const offerUrl = new URL(rawUrl);
+        if (offerUrl.protocol === "https:" && RECRUITEE_HOST_RE.test(offerUrl.hostname)) {
+          url = offerUrl.href;
+        }
+      } catch {
+        // malformed URL → leave url = ""
+      }
+    }
+
+    return {
+      title: j.title || "",
+      url,
+      company: entry.name,
+      location,
+      comp: "",
+      bodyText: htmlToText(j.description || ""),
+    };
+  });
+}
+
+// Ported from santifer/career-ops (MIT License, Copyright (c) 2026 Santiago
+// Fernández de Valderrama — github.com/santifer/career-ops) providers/workday.mjs.
+// Auto-detects from careers_url pattern
+// `https://<tenant>.<instance>.myworkdayjobs.com[/<locale>]/<site>`, e.g.
+// https://23andme.wd5.myworkdayjobs.com/23 →
+//      POST https://23andme.wd5.myworkdayjobs.com/wday/cxs/23andme/23/jobs
+//
+// Workday only exposes a relative "postedOn" label ("Posted Today",
+// "Posted 5 Days Ago", "Posted 30+ Days Ago"); postedAt is derived from it
+// and omitted (null) for the unbounded "30+ Days Ago" form.
+const WD_PAGE_LIMIT = 20;
+const WD_MAX_PAGES = 50; // safety cap — at most 1000 postings per site
+const WORKDAY_URL_RE =
+  /^https:\/\/([\w-]+)\.(wd[\w-]*)\.myworkdayjobs\.com\/(?:[a-z]{2}-[A-Z]{2}\/)?([^/?#]+)/;
+
+function resolveWorkdayEndpoint(entry) {
+  const url = entry.careers_url || "";
+  const m = url.match(WORKDAY_URL_RE);
+  if (!m) return null;
+  const [, tenant, instance, site] = m;
+  const origin = `https://${tenant}.${instance}.myworkdayjobs.com`;
+  return {
+    api: `${origin}/wday/cxs/${tenant}/${site}/jobs`,
+    // externalPath is relative to the site, not the host root — without the
+    // site segment the URL 404s.
+    jobBase: `${origin}/${site}`,
+  };
+}
+
+function parseWorkdayPostedOn(label) {
+  if (!label) return undefined;
+  if (/posted\s+today/i.test(label)) return Date.now();
+  if (/posted\s+yesterday/i.test(label)) return Date.now() - 86_400_000;
+  const m = label.match(/posted\s+(\d+)(\+?)\s*day/i);
+  if (!m || m[2] === "+") return undefined; // "30+ Days Ago" — unbounded, no usable date
+  return Date.now() - Number(m[1]) * 86_400_000;
+}
+
+async function fetchWorkday(entry, fetchImpl) {
+  const ep = resolveWorkdayEndpoint(entry);
+  if (!ep) throw new Error(`workday: cannot derive CXS endpoint for ${entry.name}`);
+
+  const jobs = [];
+  for (let page = 0; page < WD_MAX_PAGES; page++) {
+    const body = JSON.stringify({
+      limit: WD_PAGE_LIMIT,
+      offset: page * WD_PAGE_LIMIT,
+      searchText: "",
+      appliedFacets: {},
+    });
+    const json = await fetchJson(ep.api, fetchImpl, {
+      method: "POST",
+      body,
+      headers: { "content-type": "application/json", accept: "application/json" },
+    });
+    const postings = Array.isArray(json?.jobPostings) ? json.jobPostings : [];
+    for (const j of postings) {
+      if (!j.externalPath) continue;
+      const postedAtMs = parseWorkdayPostedOn(j.postedOn);
+      jobs.push({
+        title: j.title || "",
+        url: ep.jobBase + j.externalPath,
+        company: entry.name,
+        location: j.locationsText || "",
+        comp: "",
+        postedAt: postedAtMs != null ? new Date(postedAtMs).toISOString() : null,
+      });
+    }
+    if (postings.length < WD_PAGE_LIMIT) break;
+  }
+  return jobs;
 }
 
 function formatAshbyComp(compensation) {
