@@ -226,6 +226,14 @@ export function readPacketApplicationsFromDb({ repoRoot, env = process.env } = {
 function statusForError(err) {
   if (err?.code === "NO_DATABASE") return 409;
   if (err?.code === "NOT_FOUND") return 404;
+  // The packet lane never writes a degraded artifact (see generate.mjs's
+  // draftResumeProposal/draftCoverLetterBlocks/buildSourceArtifacts) — these
+  // map its hard-failure codes to a status a caller can act on instead of a
+  // blanket 500.
+  if (err?.code === "NO_SOURCE_RESUME") return 409;
+  if (err?.code === "PACKET_AI_UNAVAILABLE") return 503;
+  if (err?.code === "PACKET_RESUME_INVALID" || err?.code === "PACKET_COVER_INVALID") return 502;
+  if (err?.code === "PACKET_RESUME_ERROR") return 500;
   if (err?.code === "BAD_REQUEST" || /^BAD_/.test(String(err?.code || ""))) return 400;
   return 500;
 }
@@ -241,6 +249,7 @@ export function mountPacketRoutes({
   packetGateInvoke,
   packetAnswersCall,
   packetCoverLetterCall,
+  packetResumeCall,
   packetExportArtifact,
 }) {
   const pathCtx = { repoRoot, env };
@@ -324,6 +333,7 @@ export function mountPacketRoutes({
         ...pathCtx,
         ...body,
         coverLetterCall: packetCoverLetterCall,
+        resumeCall: packetResumeCall,
         packetAnswersCall,
       });
       sendJson(res, 200, { ok: true, data });

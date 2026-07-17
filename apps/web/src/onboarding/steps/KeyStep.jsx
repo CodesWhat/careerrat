@@ -106,13 +106,15 @@ function DesktopGoogleSignIn() {
 // Step 1 — Account. Clerk identifies the user for durable free-tier tracking,
 // billing, and future hosted usage metering. AI credentials are no longer part
 // of v1 onboarding; inference is routed through the product backend.
-export function KeyStep({ goNext, goBack, onProgressSelect }) {
+export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities }) {
   const { isLoaded, isSignedIn, user, desktopAuthAvailable } = useRolesterUser();
-  // Account is currently OPTIONAL: Continue unlocks as soon as Clerk state
-  // has loaded, signed in or not, so the rest of onboarding stays testable
-  // end-to-end while the desktop sign-in flow is still being beta-hardened.
-  // Sign-in is still offered right here; it just doesn't gate progress.
-  const canContinue = isLoaded;
+  const aiAvailable = runtimeCapabilities?.aiAvailable === true;
+  // Rolester needs AI to work: Continue unlocks once Clerk state has loaded
+  // AND either the user is signed in or managed AI is already available
+  // without sign-in (see OnboardingPage's goNext structural guard, which
+  // enforces this same rule server-side of the click).
+  const canContinue = isLoaded && (isSignedIn || aiAvailable);
+  const blockedReason = !isSignedIn && !aiAvailable;
 
   return (
     <OnboardingShell
@@ -167,6 +169,11 @@ export function KeyStep({ goNext, goBack, onProgressSelect }) {
                   </RolesterSignInButton>
                 </div>
                 <AccountFinePrint />
+                {blockedReason ? (
+                  <p className="onboarding-account__fine-print">
+                    Rolester needs AI to work — sign in or add your Anthropic key to continue.
+                  </p>
+                ) : null}
               </div>
             ) : null}
 

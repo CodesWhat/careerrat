@@ -423,64 +423,86 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
           </section>
 
           <div className="onboarding-step-card__content onboarding-step-card__content--dense onboarding-targeting__content onboarding-finish__content">
-            <p className="onboarding-finish__status-line" aria-live="polite">
-              {statusView.text}{" "}
-              {statusView.canRetry ? (
-                <button
-                  type="button"
-                  className="onboarding-inline-link"
-                  onClick={retryAction}
-                  disabled={quickStarting}
-                >
-                  Try again
-                </button>
-              ) : null}
-            </p>
-
-            <section
-              className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"
-              aria-labelledby="finish-hero-title"
-            >
-              <h2 id="finish-hero-title">Go deeper while Roland searches</h2>
-              <p>
-                A guided ingest of your work history makes packets and applications much stronger.
-              </p>
-              <div className="onboarding-step-card__action-group">
-                <Button onClick={() => navigate("/deep-ingest")}>Start deep ingest</Button>
-                <button type="button" className="onboarding-inline-link" onClick={handleFinish}>
-                  I'll do it later — finish
-                </button>
-              </div>
-            </section>
-
-            <section className="onboarding-step-card__section onboarding-finish__cadence">
-              <span className="field__label">Search cadence</span>
-              <div
-                className="onboarding-guardrails__preset-grid"
-                role="radiogroup"
-                aria-label="Search cadence"
+            {!state?.sourceResumePresent ? (
+              // Résumé required: every generated document is built from it,
+              // so the first-search status/hero/cadence actions below stay
+              // hidden until one is on file — see OnboardingPage's goNext
+              // structural guard for the matching hard block on advancing.
+              <section
+                className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"
+                aria-labelledby="finish-blocked-title"
               >
-                {CADENCE_OPTIONS.map((option) => {
-                  const active = selectedCadence === option.mode;
-                  return (
+                <h2 id="finish-blocked-title">Résumé required</h2>
+                <p>
+                  Rolester builds every document from your résumé. Import it before finishing setup.
+                </p>
+                <div className="onboarding-step-card__action-group">
+                  <Button onClick={() => onProgressSelect?.(2)}>Go to Resume step</Button>
+                </div>
+              </section>
+            ) : (
+              <>
+                <p className="onboarding-finish__status-line" aria-live="polite">
+                  {statusView.text}{" "}
+                  {statusView.canRetry ? (
                     <button
-                      key={option.mode}
                       type="button"
-                      className={`onboarding-guardrails__preset${active ? " onboarding-guardrails__preset--selected" : ""}`}
-                      aria-pressed={active}
-                      disabled={savingCadence}
-                      onClick={() => handleSelectCadence(option.mode)}
+                      className="onboarding-inline-link"
+                      onClick={retryAction}
+                      disabled={quickStarting}
                     >
-                      {option.label}
-                      {option.mode === MOST_POPULAR_CADENCE ? (
-                        <span className="badge badge--muted">Most popular</span>
-                      ) : null}
+                      Try again
                     </button>
-                  );
-                })}
-              </div>
-              {cadenceError ? <InlineAlert message={cadenceError} /> : null}
-            </section>
+                  ) : null}
+                </p>
+
+                <section
+                  className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"
+                  aria-labelledby="finish-hero-title"
+                >
+                  <h2 id="finish-hero-title">Go deeper while Roland searches</h2>
+                  <p>
+                    A guided ingest of your work history makes packets and applications much
+                    stronger.
+                  </p>
+                  <div className="onboarding-step-card__action-group">
+                    <Button onClick={() => navigate("/deep-ingest")}>Start deep ingest</Button>
+                    <button type="button" className="onboarding-inline-link" onClick={handleFinish}>
+                      I'll do it later — finish
+                    </button>
+                  </div>
+                </section>
+
+                <section className="onboarding-step-card__section onboarding-finish__cadence">
+                  <span className="field__label">Search cadence</span>
+                  <div
+                    className="onboarding-guardrails__preset-grid"
+                    role="radiogroup"
+                    aria-label="Search cadence"
+                  >
+                    {CADENCE_OPTIONS.map((option) => {
+                      const active = selectedCadence === option.mode;
+                      return (
+                        <button
+                          key={option.mode}
+                          type="button"
+                          className={`onboarding-guardrails__preset${active ? " onboarding-guardrails__preset--selected" : ""}`}
+                          aria-pressed={active}
+                          disabled={savingCadence}
+                          onClick={() => handleSelectCadence(option.mode)}
+                        >
+                          {option.label}
+                          {option.mode === MOST_POPULAR_CADENCE ? (
+                            <span className="badge badge--muted">Most popular</span>
+                          ) : null}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {cadenceError ? <InlineAlert message={cadenceError} /> : null}
+                </section>
+              </>
+            )}
           </div>
         </section>
       </div>

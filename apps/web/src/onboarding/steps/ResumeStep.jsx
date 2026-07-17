@@ -352,6 +352,7 @@ export function ResumeStep({
   aiEnabled,
   draftSeeds,
   setDraftSeeds,
+  reload,
   goNext,
   goBack,
   onProgressSelect,
@@ -636,6 +637,7 @@ export function ResumeStep({
     setError(null);
     setBusy(true);
 
+    let anyExtracted = false;
     for (const [index, file] of fileList.entries()) {
       const itemId = nextItems[index].id;
       const ext = extOf(file.name);
@@ -681,6 +683,7 @@ export function ResumeStep({
           appendClaims: true,
           appendSections: hadExistingItems || fileList.length > 1 || index > 0,
         });
+        anyExtracted = true;
         setUploadItems((items) =>
           items.map((item) =>
             item.id === itemId
@@ -717,6 +720,11 @@ export function ResumeStep({
       }
     }
 
+    // The extraction routes write the source-resume file to disk server-side
+    // as they run, ahead of handleSaveAndNext — reload() here is what flips
+    // state.sourceResumePresent so the Continue affordance's disabled check
+    // unblocks without waiting for a full step navigation.
+    if (anyExtracted) await reload?.();
     setBusy(false);
   }
 
@@ -759,6 +767,9 @@ export function ResumeStep({
       setPreviewItem(nextItem);
       setPasteText("");
       setTextMode(false);
+      // save: true (the default) already wrote source-resume to disk above —
+      // reload() flips state.sourceResumePresent, same as handleFiles.
+      await reload?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Resume parse failed");
     } finally {
@@ -830,7 +841,11 @@ export function ResumeStep({
             // busy = any file parse in flight (the AI read runs ~2 min) —
             // advancing mid-extract would save a half-empty review, so
             // forward-nav waits for the parse loop to settle. Back stays live.
-            disabled={saving || busy}
+            // !state.sourceResumePresent = no résumé imported yet — Rolester
+            // builds every document from it, so Continue stays locked until
+            // an extraction has actually landed on disk (see handleFiles'/
+            // handleAddTextAsFile's reload() calls, which flip this flag).
+            disabled={saving || busy || !state?.sourceResumePresent}
           />
         </>
       }
@@ -956,6 +971,9 @@ export function ResumeStep({
                   AI extraction usually takes a minute or two. Keep the app open — results land here
                   when it finishes.
                 </p>
+              ) : null}
+              {!state?.sourceResumePresent ? (
+                <p className="field__hint">Import your résumé to continue.</p>
               ) : null}
             </section>
 

@@ -260,6 +260,22 @@ export function OnboardingPage() {
   }
 
   function goNext() {
+    // Structural guard, ahead of anything step-local: neither the account
+    // step nor the resume step may advance without their hard prerequisite,
+    // regardless of what a step component's own Continue button did or
+    // didn't check — a step-local disabled button is UX, this is the gate.
+    const currentStepKey = STEPS[stepIndex].key;
+    if (currentStepKey === "account" && !isSignedIn && !runtimeCapabilities.aiAvailable) {
+      showToast(
+        "Rolester needs AI to work — sign in or add your Anthropic key to continue",
+        "error"
+      );
+      return;
+    }
+    if (currentStepKey === "resume" && !state?.sourceResumePresent) {
+      showToast("Import your résumé to continue — Rolester builds every document from it", "error");
+      return;
+    }
     // Only visit-complete steps get marked done just for being clicked
     // through. Data steps earn their pill from deriveDoneFlags instead (see
     // completionIndexesForShell / unionCompletedIndexes) so an empty

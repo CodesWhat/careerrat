@@ -136,6 +136,25 @@ const CAPTURED_QUESTIONS = {
   ],
 };
 
+const RESUME_DRAFT = async () => ({
+  proposal: {
+    summary: "Applied AI engineer focused on customer workflow delivery.",
+    experience: [
+      {
+        company: "Confirmed Employer",
+        roles: [
+          {
+            title: "Applied AI Lead",
+            bullets: ["Built production AI workflows from prototype to deployed customer tools."],
+          },
+        ],
+      },
+    ],
+  },
+  ai: { used: true },
+  gaps: [],
+});
+
 async function loadGenerateModule() {
   return import("../src/core/packet/generate.mjs");
 }
@@ -183,6 +202,74 @@ test("packetCoverLetterProposalSchema requires generated prose blocks with evide
   assert.ok(proposal.blocks.every((block) => block.text.trim().length > 0));
 });
 
+test("draftCoverLetterBlocks throws PACKET_AI_UNAVAILABLE for an AI failure envelope", async () => {
+  const { draftCoverLetterBlocks } = await loadGenerateModule();
+
+  await assert.rejects(
+    draftCoverLetterBlocks({
+      context: PACKET_CONTEXT,
+      runAI: async () => ({
+        body: {
+          ok: false,
+          code: "NO_AI_ROUTE",
+          error: { message: "offline" },
+          ai: { used: false },
+        },
+      }),
+    }),
+    (err) => err.code === "PACKET_AI_UNAVAILABLE" && err.details === "NO_AI_ROUTE"
+  );
+});
+
+test("draftCoverLetterBlocks throws PACKET_COVER_INVALID for empty or hard-invalid blocks", async () => {
+  const { draftCoverLetterBlocks } = await loadGenerateModule();
+
+  await assert.rejects(
+    draftCoverLetterBlocks({
+      context: PACKET_CONTEXT,
+      runAI: async () => ({ body: { ok: true, ai: { used: true }, data: { blocks: [] } } }),
+    }),
+    (err) => err.code === "PACKET_COVER_INVALID" && /no usable blocks/i.test(err.message)
+  );
+  await assert.rejects(
+    draftCoverLetterBlocks({
+      context: PACKET_CONTEXT,
+      runAI: async () => ({
+        body: {
+          ok: true,
+          ai: { used: true },
+          data: { blocks: [{ text: "Unsupported claim.", evidenceIds: ["missing-id"] }] },
+        },
+      }),
+    }),
+    (err) => err.code === "PACKET_COVER_INVALID" && /missing-id/i.test(err.message)
+  );
+});
+
+test("draftCoverLetterBlocks keeps grounded blocks beside honest NEEDS YOU blocks", async () => {
+  const { draftCoverLetterBlocks } = await loadGenerateModule();
+  const result = await draftCoverLetterBlocks({
+    context: PACKET_CONTEXT,
+    runAI: async () => ({
+      body: {
+        ok: true,
+        ai: { used: true },
+        data: {
+          blocks: [
+            { text: "Grounded production AI workflow proof.", evidenceIds: ["ev-ai-001"] },
+            { text: "NEEDS YOU: confirm a company-specific detail.", evidenceIds: [] },
+          ],
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.blocks.length, 2);
+  assert.equal(result.uploadReady, false);
+  assert.equal(result.manual.required, true);
+  assert.match(result.gaps[0].message, /user confirmation is required/i);
+});
+
 test("generatePacket never passes empty cover-letter prose blocks into the scaffold helper", async () => {
   const { generatePacket } = await loadGenerateModule();
   let scaffoldSawBlocks = false;
@@ -199,6 +286,7 @@ test("generatePacket never passes empty cover-letter prose blocks into the scaff
       },
       buildShortAnswer,
     },
+    draftResumeProposal: RESUME_DRAFT,
     draftCoverLetterBlocks: async () => ({
       blocks: [
         {
@@ -235,6 +323,7 @@ test("generatePacket carries captured questions into packetManifest.questions by
     appId: "app-packet",
     context: PACKET_CONTEXT,
     questionCapture: CAPTURED_QUESTIONS,
+    draftResumeProposal: RESUME_DRAFT,
     draftCoverLetterBlocks: async () => ({
       blocks: [{ text: "Evidence-backed cover letter block.", evidenceIds: ["ev-ai-001"] }],
     }),
@@ -338,6 +427,7 @@ test("unsupported claims become NEEDS YOU gaps and block upload-ready state", as
   const result = await generatePacket({
     context: PACKET_CONTEXT,
     questionCapture: CAPTURED_QUESTIONS,
+    draftResumeProposal: RESUME_DRAFT,
     draftCoverLetterBlocks: async () => ({
       blocks: [{ text: "NEEDS YOU: confirm a company-specific proof point.", evidenceIds: [] }],
     }),

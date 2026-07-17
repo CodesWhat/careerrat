@@ -10,16 +10,29 @@ const dashboardMock = vi.hoisted(() => ({
     refetch: async () => {},
   },
 }));
+const capturedButtons = vi.hoisted(() => []);
 
 vi.mock("../../app-shell/DashboardContext.jsx", () => ({
   useDashboardSnapshot: () => dashboardMock.snapshot,
 }));
+
+vi.mock("../../components/Button.jsx", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    Button: (props) => {
+      capturedButtons.push(props);
+      return actual.Button(props);
+    },
+  };
+});
 
 import * as FinishStepModule from "./FinishStep.jsx";
 
 const { FinishStep } = FinishStepModule;
 
 const SEARCH_READY_STATE = {
+  sourceResumePresent: true,
   data: {
     setup: {
       readiness: {
@@ -65,7 +78,7 @@ function stateWithFirstSearch(firstSearchRun, extra = {}) {
   };
 }
 
-function renderFinish(state = SEARCH_READY_STATE) {
+function renderFinish(state = SEARCH_READY_STATE, props = {}) {
   dashboardMock.snapshot = {
     data: null,
     noDatabase: false,
@@ -80,6 +93,7 @@ function renderFinish(state = SEARCH_READY_STATE) {
         runtimeCapabilities={{ aiAvailable: true }}
         reload={async () => {}}
         goBack={() => {}}
+        {...props}
       />
     </MemoryRouter>
   );
@@ -92,6 +106,35 @@ function countOccurrences(value, token) {
 beforeEach(() => {
   vi.clearAllMocks();
   vi.unstubAllGlobals();
+  capturedButtons.length = 0;
+});
+
+describe("FinishStep resume gate", () => {
+  it("renders the blocked notice and routes its action back to the Resume step", () => {
+    const onProgressSelect = vi.fn();
+    const html = renderFinish(
+      { ...SEARCH_READY_STATE, sourceResumePresent: false },
+      { onProgressSelect }
+    );
+
+    expect(html).toContain("Résumé required");
+    expect(html).toContain("Import it before finishing setup.");
+    expect(html).toContain("Go to Resume step");
+    expect(html).not.toContain("Go deeper while Roland searches");
+
+    const resumeButton = capturedButtons.find((props) => props.children === "Go to Resume step");
+    expect(resumeButton).toBeTruthy();
+    resumeButton.onClick();
+    expect(onProgressSelect).toHaveBeenCalledWith(2);
+  });
+
+  it("renders normal finish content when a source resume exists", () => {
+    const html = renderFinish({ ...SEARCH_READY_STATE, sourceResumePresent: true });
+
+    expect(html).toContain("Go deeper while Roland searches");
+    expect(html).toContain("Search cadence");
+    expect(html).not.toContain("Résumé required");
+  });
 });
 
 describe("FinishStep shell layout", () => {

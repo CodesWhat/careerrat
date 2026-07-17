@@ -12,7 +12,11 @@ import { after, test } from "node:test";
 import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
-import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
+import {
+  candidateArtifactPut,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+} from "../src/core/db/verbs/candidate.mjs";
 
 const cleanupRoots = [];
 
@@ -50,7 +54,7 @@ function importTrackerFixture(repoRoot, applications) {
   );
 }
 
-function seedPacketReadyApp(repoRoot) {
+function seedPacketReadyApp(repoRoot, { sourceResume = true } = {}) {
   const jdPath = writeWorkspaceFile(
     repoRoot,
     "jobs/acme-applied-ai-engineer.md",
@@ -131,6 +135,98 @@ function seedPacketReadyApp(repoRoot) {
       },
     ],
   });
+  if (sourceResume) seedSourceResume(repoRoot);
+}
+
+function seedSourceResume(repoRoot) {
+  candidateArtifactPut({
+    repoRoot,
+    id: "source-resume",
+    kind: "source-resume",
+    data: {
+      text: [
+        "Northwind Digital | New York, NY | 2020 - 2024",
+        "Applied AI Engineer | 2022 - 2024",
+        "Shipped production AI workflow pilots using OpenAI API and SQLite.",
+      ].join("\n"),
+      source: "test",
+    },
+  });
+}
+
+function seedPacketCandidate(repoRoot, { sourceResume = true } = {}) {
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { candidate: { full_name: "Alex Rivera" } },
+  });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      {
+        id: "ev-agentic-pilots",
+        claim: "Shipped three production AI workflow pilots into daily customer use",
+        evidence: "Source: resume (Experience — Northwind Digital).",
+      },
+    ],
+  });
+  if (sourceResume) seedSourceResume(repoRoot);
+}
+
+function validPacketResumeCall() {
+  return {
+    model: "resume-test-double",
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          summary: "Applied AI engineer building grounded customer workflows.",
+          experience: [
+            {
+              company: "Northwind Digital",
+              location: "New York, NY",
+              dates: "2020 - 2024",
+              roles: [
+                {
+                  title: "Applied AI Engineer",
+                  dates: "2022 - 2024",
+                  bullets: ["Shipped production AI workflow pilots into daily customer use."],
+                },
+              ],
+            },
+          ],
+          skillGroups: [{ label: "Delivery", items: ["OpenAI API", "SQLite"] }],
+        }),
+      },
+    ],
+  };
+}
+
+function validPacketCoverLetterCall() {
+  return {
+    model: "cover-test-double",
+    content: [
+      {
+        type: "text",
+        text: JSON.stringify({
+          blocks: [
+            {
+              text: "Acme AI matches my production AI workflow delivery experience.",
+              evidenceIds: ["ev-agentic-pilots"],
+            },
+          ],
+        }),
+      },
+    ],
+  };
+}
+
+function validPacketCalls(overrides = {}) {
+  return {
+    packetResumeCall: async () => validPacketResumeCall(),
+    packetCoverLetterCall: async () => validPacketCoverLetterCall(),
+    ...overrides,
+  };
 }
 
 function readApp(repoRoot, id) {
@@ -223,7 +319,7 @@ test("POST /api/packet/gate: 409 when SQLite has not been initialized", async ()
 test("POST /api/packet/gate: malformed JSON is a local 400, not a skill-runtime handoff", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);
-  const server = await bootServer(repoRoot);
+  const server = await bootServer(repoRoot, validPacketCalls());
   try {
     const { status, body } = await postRaw(server, "/api/packet/gate", "{");
     assert.equal(status, 400);
@@ -373,7 +469,7 @@ test("POST /api/packet/generate: stamps packet source/export artifacts through D
     "generated tracker export must not be required before packet generation"
   );
 
-  const server = await bootServer(repoRoot);
+  const server = await bootServer(repoRoot, validPacketCalls());
   try {
     const { status, body } = await postJson(server, "/api/packet/generate", {
       appId: "app-packet",
@@ -432,6 +528,99 @@ test("POST /api/packet/generate: stamps packet source/export artifacts through D
   }
 });
 
+test("POST /api/packet/generate: threads packetResumeCall into tailored resume generation", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  let resumeCallCount = 0;
+  const packetResumeCall = async () => {
+    resumeCallCount += 1;
+    return validPacketResumeCall();
+  };
+  const server = await bootServer(repoRoot, validPacketCalls({ packetResumeCall }));
+  try {
+    const generated = await postJson(server, "/api/packet/generate", {
+      appId: "app-packet",
+      applyIntent: false,
+      formats: [],
+    });
+    assert.equal(generated.status, 200);
+    assert.equal(generated.body.ok, true);
+    assert.equal(resumeCallCount, 1);
+    assert.match(
+      generated.body.data.sources.resume,
+      /\*\*Northwind Digital\*\* - New York, NY \| 2020 - 2024/
+    );
+    assert.match(generated.body.data.sources.resume, /### Applied AI Engineer \| 2022 - 2024/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/generate: returns 409 when no source resume is on file", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot, { sourceResume: false });
+  let resumeCalls = 0;
+  const server = await bootServer(
+    repoRoot,
+    validPacketCalls({
+      packetResumeCall: async () => {
+        resumeCalls += 1;
+        return validPacketResumeCall();
+      },
+    })
+  );
+  try {
+    const generated = await postJson(server, "/api/packet/generate", {
+      appId: "app-packet",
+      applyIntent: false,
+      formats: [],
+    });
+    assert.equal(generated.status, 409);
+    assert.equal(generated.body.code, "NO_SOURCE_RESUME");
+    assert.match(generated.body.error.message, /no source résumé on file/i);
+    assert.equal(resumeCalls, 0);
+    assert.deepEqual(readApp(repoRoot, "app-packet").artifacts, {
+      jd: "workspace/jobs/acme-applied-ai-engineer.md",
+      packetQuestionsSource: "workspace/jobs/acme-applied-ai-engineer.questions.json",
+      packetQuestionsCapturedAt: "2026-07-06T13:00:00Z",
+      packetQuestionCount: 1,
+      packetQuestionExcludedCount: 0,
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/generate: returns 503 when the resume AI call is unavailable", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  let resumeCalls = 0;
+  const server = await bootServer(
+    repoRoot,
+    validPacketCalls({
+      packetResumeCall: async () => {
+        resumeCalls += 1;
+        const err = new Error("no AI route configured");
+        err.code = "NO_AI_ROUTE";
+        throw err;
+      },
+    })
+  );
+  try {
+    const generated = await postJson(server, "/api/packet/generate", {
+      appId: "app-packet",
+      applyIntent: false,
+      formats: [],
+    });
+    assert.equal(generated.status, 503);
+    assert.equal(generated.body.code, "PACKET_AI_UNAVAILABLE");
+    assert.match(generated.body.error.message, /document generation needs AI/i);
+    assert.equal(resumeCalls, 1);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/packet/generate: no capture degrades without apply intent and skips answers", async () => {
   const repoRoot = tempRepo();
   const jdPath = writeWorkspaceFile(
@@ -448,7 +637,8 @@ test("POST /api/packet/generate: no capture degrades without apply intent and sk
       artifacts: { jd: jdPath },
     },
   ]);
-  const server = await bootServer(repoRoot);
+  seedPacketCandidate(repoRoot);
+  const server = await bootServer(repoRoot, validPacketCalls());
   try {
     const generated = await postJson(server, "/api/packet/generate", {
       applicationId: "app-no-questions",

@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { renderToStaticMarkup } from "react-dom/server";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { getRuntimeConfig } from "../lib/api.js";
 import {
   deriveRuntimeCapabilities,
@@ -7,6 +8,129 @@ import {
   refreshThenAdvance,
   resolveInitialStep,
 } from "./OnboardingPage.jsx";
+
+async function mountGoNextHarness({ stepIndex, state, isSignedIn, aiAvailable }) {
+  vi.resetModules();
+  const captured = { props: null };
+  const setters = Array.from({ length: 9 }, () => vi.fn());
+  const initialStates = [false, null, state, { aiAvailable }, stepIndex, true, null, {}, []];
+  let stateIndex = 0;
+
+  vi.doMock("react", async () => {
+    const actual = await vi.importActual("react");
+    return {
+      ...actual,
+      useCallback: (fn) => fn,
+      useEffect: () => {},
+      useState: () => {
+        const index = stateIndex++;
+        return [initialStates[index], setters[index]];
+      },
+    };
+  });
+  vi.doMock("../auth/clerkControls.jsx", () => ({
+    useRolesterUser: () => ({ isSignedIn }),
+  }));
+  const captureStep = (props) => {
+    captured.props = props;
+    return null;
+  };
+  vi.doMock("./steps/KeyStep.jsx", () => ({ KeyStep: captureStep }));
+  vi.doMock("./steps/ResumeStep.jsx", () => ({ ResumeStep: captureStep }));
+  vi.doMock("../lib/api.js", () => ({
+    getOnboardState: vi.fn(async () => state),
+    getRuntimeConfig: vi.fn(async () => ({ ai: { available: aiAvailable, route: "test" } })),
+    getOnboardingDraft: vi.fn(async () => ({ draft: { stepIndex, completedIndexes: [] } })),
+    saveOnboardingDraft: vi.fn(async () => ({ ok: true })),
+  }));
+
+  const { OnboardingPage } = await import("./OnboardingPage.jsx");
+  renderToStaticMarkup(<OnboardingPage />);
+  expect(captured.props).toBeTruthy();
+  return { goNext: captured.props.goNext, setters };
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.doUnmock("react");
+  vi.doUnmock("../auth/clerkControls.jsx");
+  vi.doUnmock("./steps/KeyStep.jsx");
+  vi.doUnmock("./steps/ResumeStep.jsx");
+  vi.doUnmock("../lib/api.js");
+});
+
+describe("OnboardingPage goNext prerequisites", () => {
+  it("blocks the account step and shows an error toast without sign-in or AI", async () => {
+    const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation(() => 0);
+    const { goNext, setters } = await mountGoNextHarness({
+      stepIndex: 1,
+      state: { sourceResumePresent: true },
+      isSignedIn: false,
+      aiAvailable: false,
+    });
+
+    goNext();
+
+    expect(setters[4]).not.toHaveBeenCalled();
+    expect(setters[6]).toHaveBeenCalledWith({
+      message: "Rolester needs AI to work — sign in or add your Anthropic key to continue",
+      tone: "error",
+    });
+    timeout.mockRestore();
+  });
+
+  it("advances the account step when signed in or AI is available", async () => {
+    for (const auth of [
+      { isSignedIn: true, aiAvailable: false },
+      { isSignedIn: false, aiAvailable: true },
+    ]) {
+      const { goNext, setters } = await mountGoNextHarness({
+        stepIndex: 1,
+        state: { sourceResumePresent: true },
+        ...auth,
+      });
+      goNext();
+      await vi.waitFor(() => expect(setters[4]).toHaveBeenCalled());
+      const advance = setters[4].mock.calls.at(-1)[0];
+      expect(advance(1)).toBe(2);
+      expect(setters[6]).not.toHaveBeenCalled();
+    }
+  });
+
+  it("blocks the resume step and shows an error toast without a source resume", async () => {
+    const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation(() => 0);
+    const { goNext, setters } = await mountGoNextHarness({
+      stepIndex: 2,
+      state: { sourceResumePresent: false },
+      isSignedIn: true,
+      aiAvailable: true,
+    });
+
+    goNext();
+
+    expect(setters[4]).not.toHaveBeenCalled();
+    expect(setters[6]).toHaveBeenCalledWith({
+      message: "Import your résumé to continue — Rolester builds every document from it",
+      tone: "error",
+    });
+    timeout.mockRestore();
+  });
+
+  it("advances the resume step when a source resume exists", async () => {
+    const { goNext, setters } = await mountGoNextHarness({
+      stepIndex: 2,
+      state: { sourceResumePresent: true },
+      isSignedIn: true,
+      aiAvailable: true,
+    });
+
+    goNext();
+    await vi.waitFor(() => expect(setters[4]).toHaveBeenCalled());
+    const advance = setters[4].mock.calls.at(-1)[0];
+    expect(advance(2)).toBe(3);
+    expect(setters[6]).not.toHaveBeenCalled();
+  });
+});
 
 describe("refreshThenAdvance", () => {
   it("refreshes derived onboarding state before advancing to the next step", async () => {

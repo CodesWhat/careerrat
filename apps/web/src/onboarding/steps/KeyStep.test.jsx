@@ -26,7 +26,7 @@ vi.mock("@clerk/react", () => ({
 import { RolesterAuthStateProvider } from "../../auth/clerkControls.jsx";
 import { KeyStep } from "./KeyStep.jsx";
 
-function renderKeyStep() {
+function renderKeyStep({ aiAvailable = false } = {}) {
   return renderToStaticMarkup(
     <RolesterAuthStateProvider
       value={{
@@ -36,7 +36,13 @@ function renderKeyStep() {
         hasClerkProvider: true,
       }}
     >
-      <KeyStep reload={async () => {}} goNext={vi.fn()} goBack={vi.fn()} showToast={vi.fn()} />
+      <KeyStep
+        reload={async () => {}}
+        goNext={vi.fn()}
+        goBack={vi.fn()}
+        showToast={vi.fn()}
+        runtimeCapabilities={{ aiAvailable }}
+      />
     </RolesterAuthStateProvider>
   );
 }
@@ -93,13 +99,24 @@ describe("Account step", () => {
     expect(html).toContain("onboarding-nav-button--next");
     expect(html).not.toContain(">Continue<");
     expect(html).not.toContain("Save key");
-    expect(html).not.toContain("Anthropic");
     expect(html).not.toContain("API key");
     expect(html).not.toContain("Connected (BYOK)");
     expect(html).not.toContain("Seven quick steps");
-    // Account is optional for now — Continue is enabled even signed out (see
-    // KeyStep.jsx's canContinue comment).
+    expect(html).toContain('aria-label="Continue"');
+    expect(html).toContain('disabled=""');
+    expect(html).toContain(
+      "Rolester needs AI to work — sign in or add your Anthropic key to continue."
+    );
+  });
+
+  it("enables Continue when managed AI is available without sign-in", () => {
+    const html = renderKeyStep({ aiAvailable: true });
+
+    expect(html).toContain('aria-label="Continue"');
     expect(html).not.toContain('disabled=""');
+    expect(html).not.toContain(
+      "Rolester needs AI to work — sign in or add your Anthropic key to continue."
+    );
   });
 
   it("unlocks continue and shows the signed-in identity after Clerk signs in", () => {

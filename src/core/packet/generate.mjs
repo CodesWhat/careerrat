@@ -5,8 +5,8 @@ import { appRegisterPacketArtifacts } from "../db/verbs.mjs";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import {
   buildCoverLetterScaffold,
-  buildResumeMarkdown,
   buildShortAnswer,
+  buildStructuredResumeMarkdown,
   forbiddenWordingFor,
   validateAtsSafe,
 } from "../documents/tailor.mjs";
@@ -14,12 +14,21 @@ import { resolveUserPaths } from "../paths/workspace.mjs";
 import { draftPacketAnswers as draftPacketAnswersCore } from "./answers.mjs";
 import { buildPacketContext } from "./context.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
-import { packetCoverLetterProposalSchema } from "./schemas/packet-schemas.mjs";
+import {
+  packetCoverLetterProposalSchema,
+  packetResumeProposalSchema,
+} from "./schemas/packet-schemas.mjs";
 
 const COVER_LABELS = Object.freeze({
   skill: "packet-engine",
   action: "draft-cover-letter",
   operation: "packet:cover-letter",
+});
+
+const RESUME_LABELS = Object.freeze({
+  skill: "packet-engine",
+  action: "draft-resume",
+  operation: "packet:resume",
 });
 
 function cleanText(value) {
@@ -274,15 +283,6 @@ function promptForCoverLetter(context = {}) {
   ].join("\n");
 }
 
-function needsYouBlock(reason) {
-  return {
-    text: `NEEDS YOU: ${reason}`,
-    evidenceIds: [],
-    uploadReady: false,
-    gap: reason,
-  };
-}
-
 export async function draftCoverLetterBlocks({
   repoRoot,
   env = process.env,
@@ -312,13 +312,17 @@ export async function draftCoverLetterBlocks({
     env,
   });
 
+  // The packet lane never writes a degraded cover letter: an AI-call failure
+  // is a real error, not a NEEDS YOU punt — throw so the caller (generatePacket
+  // -> the /api/packet/generate route) surfaces it instead of persisting a
+  // placeholder artifact.
   if (!aiResult.body?.ok) {
-    return {
-      blocks: [needsYouBlock(aiResult.body?.error?.message || "draft cover-letter proof")],
-      uploadReady: false,
-      ai: aiResult.body?.ai || { used: false },
-      manual: { required: true, code: aiResult.body?.code || "PACKET_COVER_REVIEW" },
-    };
+    const err = new Error(
+      `document generation needs AI (${aiResult.body?.error?.message || aiResult.body?.code || "AI call failed"}) — check your AI settings and retry`
+    );
+    err.code = "PACKET_AI_UNAVAILABLE";
+    err.details = aiResult.body?.error?.code || aiResult.body?.code || null;
+    throw err;
   }
 
   const blocks = (aiResult.body.data?.blocks || []).map((block) => ({
@@ -332,16 +336,18 @@ export async function draftCoverLetterBlocks({
   // A block the model honestly marked NEEDS YOU is a confirmation gap, not a
   // contract violation — keep it (and the grounded blocks around it) inline,
   // the way the answers flow does. Only hard violations (missing/unknown
-  // evidence IDs, private leaks, forbidden wording) discard the draft.
+  // evidence IDs, private leaks, forbidden wording) fail the draft outright —
+  // the packet lane never writes a degraded cover letter for those either.
   const hardGaps = validation.gaps.filter((gap) => gap.message !== "user confirmation is required");
   if (!blocks.length || hardGaps.length) {
-    return {
-      blocks: [needsYouBlock(hardGaps[0]?.message || "confirm cover-letter evidence")],
-      uploadReady: false,
-      ai: aiResult.body.ai,
-      manual: { required: true },
-      gaps: validation.gaps,
-    };
+    const violationMessages = (
+      hardGaps.length ? hardGaps : [{ message: "cover-letter draft produced no usable blocks" }]
+    ).map((gap) => gap.message);
+    const err = new Error(
+      `AI cover-letter draft failed grounding validation (${violationMessages.join("; ")}) — regenerate to retry`
+    );
+    err.code = "PACKET_COVER_INVALID";
+    throw err;
   }
   return {
     blocks,
@@ -350,6 +356,263 @@ export async function draftCoverLetterBlocks({
     manual: { required: !validation.ok },
     ...(validation.ok ? {} : { gaps: validation.gaps }),
   };
+}
+
+function promptForResume(context = {}) {
+  return [
+    "Tailor the candidate's résumé to the target job using only the provided sources.",
+    "Return JSON matching packetResumeProposalSchema.",
+    "",
+    JSON.stringify(buildPromptVisibleSources(context), null, 2),
+  ].join("\n");
+}
+
+function normalizeResumeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Pure/deterministic grounding check for an AI resume proposal: every
+// structural fact it claims (employer, title, dated years) must actually
+// appear in the candidate's real imported résumé text, not just be
+// plausible-sounding. This runs regardless of what the model's schema
+// validation already passed — the schema can't check facts against sources.
+// Skills are deliberately NOT checked here — see draftResumeProposal's
+// lenient skills pass, which drops individual unmatched items instead of
+// failing the whole proposal.
+export function validateResumeProposal({ context = {}, proposal = {} } = {}) {
+  const sourceText = normalizeResumeText(context.sourceResume?.text);
+  const rawSourceText = String(context.sourceResume?.text || "");
+  const violations = [];
+
+  const checkYears = (dates, label) => {
+    if (!dates) return;
+    const years = String(dates).match(/\b(19|20)\d{2}\b/g) || [];
+    for (const year of years) {
+      if (!rawSourceText.includes(year)) {
+        violations.push(`resume ${label} dates "${dates}" year ${year} not found in source résumé`);
+      }
+    }
+  };
+
+  for (const entry of proposal.experience || []) {
+    const company = normalizeResumeText(entry.company);
+    if (!company || !sourceText.includes(company)) {
+      violations.push(`resume entry company "${entry.company}" not found in source résumé`);
+    }
+    checkYears(entry.dates, "entry");
+    for (const role of entry.roles || []) {
+      const title = normalizeResumeText(role.title);
+      if (!title || !sourceText.includes(title)) {
+        violations.push(`resume role title "${role.title}" not found in source résumé`);
+      }
+      checkYears(role.dates, "role");
+    }
+  }
+
+  const leakText = [
+    proposal.summary,
+    ...(proposal.experience || []).flatMap((entry) =>
+      (entry.roles || []).flatMap((role) => role.bullets || [])
+    ),
+    ...(proposal.sections || []).flatMap((section) => section.bullets || []),
+  ].join("\n");
+  const leakIssue = privateLeakMessage(leakText);
+  if (leakIssue) violations.push(leakIssue);
+
+  return { ok: violations.length === 0, violations };
+}
+
+// Safety trims (silent, never fail) — bound how much a runaway proposal can
+// inflate the artifact regardless of what schema validation already passed.
+// Shared by the initial AI call and the one-shot grounding-correction retry
+// below so both attempts get the exact same shaping before validation.
+function buildResumeProposalFromAiData(data = {}) {
+  return {
+    summary: cleanText(data.summary),
+    experience: (Array.isArray(data.experience) ? data.experience : [])
+      .slice(0, 8)
+      .map((entry) => ({
+        company: cleanText(entry.company),
+        location: cleanText(entry.location),
+        dates: cleanText(entry.dates),
+        roles: (Array.isArray(entry.roles) ? entry.roles : []).slice(0, 6).map((role) => ({
+          title: cleanText(role.title),
+          dates: cleanText(role.dates),
+          bullets: (Array.isArray(role.bullets) ? role.bullets : [])
+            .map((bullet) => cleanText(bullet))
+            .filter((bullet) => bullet.length > 0)
+            .slice(0, 8),
+        })),
+      })),
+    sections: (Array.isArray(data.sections) ? data.sections : []).slice(0, 3).map((section) => ({
+      heading: cleanText(section.heading),
+      bullets: (Array.isArray(section.bullets) ? section.bullets : [])
+        .map((bullet) => cleanText(bullet))
+        .filter((bullet) => bullet.length > 0),
+    })),
+    skillGroups: (Array.isArray(data.skillGroups) ? data.skillGroups : [])
+      .slice(0, 6)
+      .map((group) => ({
+        label: cleanText(group.label),
+        items: (Array.isArray(group.items) ? group.items : [])
+          .map((item) => cleanText(item))
+          .filter(Boolean),
+      })),
+    education: (Array.isArray(data.education) ? data.education : [])
+      .map((entry) => cleanText(entry))
+      .filter(Boolean),
+  };
+}
+
+// The one-shot grounding-correction retry message: lists the exact
+// violations validateResumeProposal found, verbatim, plus the rejected draft
+// for context, and instructs the model to fix ONLY those facts against the
+// candidate's real source résumé rather than rewriting the whole thing.
+function resumeGroundingCorrectionMessage({ violations, priorData }) {
+  return {
+    role: "user",
+    content: [
+      "The résumé draft you returned failed grounding validation against sourceResume.text:",
+      ...violations.map((violation) => `- ${violation}`),
+      "",
+      "Your previous draft:",
+      JSON.stringify(priorData),
+      "",
+      "Fix ONLY the facts listed above so they match sourceResume.text exactly — do not change anything else. Return the corrected JSON matching packetResumeProposalSchema.",
+    ].join("\n"),
+  };
+}
+
+export async function draftResumeProposal({
+  repoRoot,
+  env = process.env,
+  context = {},
+  call,
+  runAI = runBoundedAI,
+} = {}) {
+  // The packet lane never writes a degraded résumé: every failure path below
+  // throws instead of falling back to the deterministic claims-list resume —
+  // generatePacket only reaches buildSourceArtifacts on success.
+  if (!cleanText(context.sourceResume?.text)) {
+    const err = new Error(
+      "no source résumé on file — import your résumé (onboarding Resume step) before generating documents"
+    );
+    err.code = "NO_SOURCE_RESUME";
+    throw err;
+  }
+
+  const baseMessages = [{ role: "user", content: promptForResume(context) }];
+  const runResumeAI = (messages) =>
+    runAI({
+      labels: RESUME_LABELS,
+      schema: packetResumeProposalSchema,
+      manual: {
+        available: true,
+        reason: "packet-resume-review",
+        action: "Review and tailor the resume manually.",
+      },
+      structuredMode: "native-preferred",
+      call,
+      messages,
+      system:
+        "Tailor the candidate's résumé for the target job. Use ONLY facts present in sourceResume.text, candidateProfile, and confirmedEvidence.claims. Never invent or alter employers, titles, dates, numbers, or metrics. Group roles held at the same employer under one experience entry with the employer's location and overall dates; every company and title must appear verbatim in sourceResume.text. Write a summary paragraph that names the target role and company and honestly mirrors the job description's language. Select and order the material most relevant to the job description; omit weak or irrelevant bullets instead of padding. Group skills into 3-5 skillGroups whose labels echo the job description's priorities; include a certifications group only if certifications appear in the sources; every skill item must appear somewhere in the sources. Optionally include up to 3 extra sections (e.g. Open Source, Projects) only when the source material supports them. Do not include private compensation or unconfirmed claims.",
+      outputName: "packet_resume_proposal",
+      // The nested experience/roles/sections/skillGroups structure plus a full
+      // bullet set regularly exceeds 8000 tokens; a mid-JSON max_tokens
+      // truncation parses as failure — see the !aiResult.body?.ok throw below,
+      // which surfaces that as PACKET_AI_UNAVAILABLE rather than degrading.
+      maxTokens: 10000,
+      root: repoRoot,
+      env,
+    });
+
+  let aiResult = await runResumeAI(baseMessages);
+
+  if (!aiResult.body?.ok) {
+    const err = new Error(
+      `document generation needs AI (${aiResult.body?.error?.message || aiResult.body?.code || "AI call failed"}) — check your AI settings and retry`
+    );
+    err.code = "PACKET_AI_UNAVAILABLE";
+    err.details = aiResult.body?.error?.code || aiResult.body?.code || null;
+    throw err;
+  }
+
+  let proposal = buildResumeProposalFromAiData(aiResult.body.data);
+  let validation = validateResumeProposal({ context, proposal });
+
+  if (!validation.ok) {
+    // One correction pass: ask the model to fix ONLY the flagged facts
+    // against the real source résumé instead of discarding the whole draft.
+    // A second unresolved failure (bad retry validation, or the retry call
+    // itself failing) throws — there is no further fallback.
+    const retryResult = await runResumeAI([
+      ...baseMessages,
+      resumeGroundingCorrectionMessage({
+        violations: validation.violations,
+        priorData: aiResult.body.data,
+      }),
+    ]);
+    const retryOk = Boolean(retryResult.body?.ok);
+    const retryProposal = retryOk ? buildResumeProposalFromAiData(retryResult.body.data) : null;
+    const retryValidation = retryOk
+      ? validateResumeProposal({ context, proposal: retryProposal })
+      : null;
+
+    if (!retryOk || !retryValidation.ok) {
+      const violations =
+        retryValidation && !retryValidation.ok ? retryValidation.violations : validation.violations;
+      const err = new Error(
+        `AI resume draft failed grounding validation (${violations.join("; ")}) — regenerate to retry`
+      );
+      err.code = "PACKET_RESUME_INVALID";
+      throw err;
+    }
+
+    aiResult = retryResult;
+    proposal = retryProposal;
+    validation = retryValidation;
+  }
+
+  // Lenient skills pass: unlike company/title/dates (hard facts that must
+  // survive verbatim), a skill mention is routinely paraphrased ("React" vs
+  // "React.js") — so an unmatched skill item is dropped individually rather
+  // than discarding the whole proposal. Checked against a wider haystack
+  // (source résumé + candidate profile + evidence claim text) since a real
+  // skill can legitimately live in any of those, not just the résumé body.
+  const haystack = normalizeResumeText(
+    [
+      context.sourceResume?.text,
+      JSON.stringify(profileFromContext(context)),
+      ...(evidenceFromContext(context).claims || []).map((claim) => claim.claim),
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+  const droppedSkills = [];
+  const skillGroups = proposal.skillGroups
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        const found = haystack.includes(normalizeResumeText(item));
+        if (!found) droppedSkills.push(item);
+        return found;
+      }),
+    }))
+    .filter((group) => group.items.length > 0);
+  const cleanedProposal = { ...proposal, skillGroups };
+  const skillsGap = droppedSkills.length
+    ? [
+        {
+          kind: "resume",
+          message: `skills omitted (not found in sources): ${droppedSkills.join(", ")}`,
+        },
+      ]
+    : [];
+
+  return { proposal: cleanedProposal, ai: aiResult.body.ai, gaps: skillsGap };
 }
 
 function questionLabelById(capture) {
@@ -403,6 +666,7 @@ function buildSourceArtifacts({
   context,
   questionCapture,
   coverLetter,
+  resumeProposal = null,
   answers,
   services = {},
   skipAnswers = false,
@@ -418,12 +682,28 @@ function buildSourceArtifacts({
       ...(context.job?.frontmatter || {}),
     },
   };
-  const resume = (services.buildResumeMarkdown || buildResumeMarkdown)({
-    profile,
-    evidence,
-    job,
-    honesty,
-  });
+
+  // The packet lane never writes a degraded résumé: draftResumeProposal now
+  // throws on every failure path (no source résumé, AI unavailable, grounding
+  // validation), so generatePacket only reaches this function with a
+  // validated proposal in hand — resumeProposal.proposal is required, not
+  // optional. An assembly failure here is a real bug, not a fallback trigger,
+  // and propagates (wrapped) rather than degrading to the deterministic
+  // claims-list resume.
+  let resume;
+  try {
+    resume = (services.buildStructuredResumeMarkdown || buildStructuredResumeMarkdown)({
+      profile,
+      proposal: resumeProposal.proposal,
+      evidence,
+      honesty,
+    });
+  } catch (err) {
+    const wrapped = new Error(err?.message || "resume assembly failed");
+    wrapped.code = "PACKET_RESUME_ERROR";
+    throw wrapped;
+  }
+
   const coverBlocks = coverLetter.blocks || [];
   const coverHasNeedsYou = coverBlocks.some((block) => /^NEEDS YOU:/i.test(block.text || ""));
   const coverLetterMarkdown = coverHasNeedsYou
@@ -640,9 +920,11 @@ export async function generatePacket({
   questionCapture,
   services = {},
   draftCoverLetterBlocks: coverDraft = draftCoverLetterBlocks,
+  draftResumeProposal: resumeDraft = draftResumeProposal,
   draftPacketAnswers = draftPacketAnswersCore,
   exportPacketArtifacts,
   coverLetterCall,
+  resumeCall,
   packetAnswersCall,
 } = {}) {
   const id = cleanText(
@@ -683,12 +965,13 @@ export async function generatePacket({
   const skipAnswers = !hasQuestionCapture;
   const sourceMap = enumeratePacketSources(packetContext, capture);
   const sourceSplit = splitConfirmedAndProposedPacketSources(sourceMap);
-  const coverLetter = await coverDraft({
-    repoRoot,
-    env,
-    context: packetContext,
-    call: coverLetterCall,
-  });
+  // The resume and cover-letter drafts are independent AI calls (different
+  // schemas, different prompts) — run them concurrently rather than
+  // sequentially. answers stays sequential where it already was.
+  const [resumeProposal, coverLetter] = await Promise.all([
+    resumeDraft({ repoRoot, env, context: packetContext, call: resumeCall }),
+    coverDraft({ repoRoot, env, context: packetContext, call: coverLetterCall }),
+  ]);
   const answers = await draftPacketAnswers({
     repoRoot,
     env,
@@ -701,6 +984,7 @@ export async function generatePacket({
     context: packetContext,
     questionCapture: capture,
     coverLetter,
+    resumeProposal,
     answers,
     services,
     skipAnswers,
@@ -745,6 +1029,7 @@ export async function generatePacket({
   const gaps = gapObjects(
     validation.gaps,
     coverLetter.gaps,
+    resumeProposal?.gaps,
     answers.gaps,
     lintGaps,
     skippedAnswersGap

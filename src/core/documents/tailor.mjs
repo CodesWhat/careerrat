@@ -185,26 +185,18 @@ export function validateAtsSafe(markdown) {
 }
 
 // ---------------------------------------------------------------------------
-// buildResumeMarkdown
+// buildResumeHeader
 // ---------------------------------------------------------------------------
 
 /**
- * Assemble a complete tailored resume in ATS-safe markdown from REAL data only.
- * Never invents content — all bullets come verbatim from evidence bank claims.
+ * Assemble the name/contact/links header block shared by both resume
+ * builders (buildResumeMarkdown and buildStructuredResumeMarkdown).
  *
- * @param {{
- *   profile: { candidate: { full_name: string, email: string, phone?: string, location?: string, linkedin?: string, github?: string, portfolio?: string } },
- *   evidence: { claims: Array<object> },
- *   job: { signals?: string[], frontmatter?: object },
- *   honesty: { education?: { add_education_section?: boolean }, tools?: { do_not_claim?: string[] } },
- *   summary?: string
- * }} opts
+ * @param {{ candidate: { full_name: string, email?: string, phone?: string, location?: string, linkedin?: string, github?: string, portfolio?: string } }} profile
  * @returns {string}
  */
-export function buildResumeMarkdown({ profile, evidence, job, honesty, summary }) {
+export function buildResumeHeader(profile) {
   const c = profile.candidate;
-
-  // --- Header ---
   const headerLines = [`# ${c.full_name}`];
 
   const contactParts = [];
@@ -223,7 +215,28 @@ export function buildResumeMarkdown({ profile, evidence, job, honesty, summary }
     headerLines.push(linkParts.join(" | "));
   }
 
-  const sections = [headerLines.join("\n")];
+  return headerLines.join("\n");
+}
+
+// ---------------------------------------------------------------------------
+// buildResumeMarkdown
+// ---------------------------------------------------------------------------
+
+/**
+ * Assemble a complete tailored resume in ATS-safe markdown from REAL data only.
+ * Never invents content — all bullets come verbatim from evidence bank claims.
+ *
+ * @param {{
+ *   profile: { candidate: { full_name: string, email: string, phone?: string, location?: string, linkedin?: string, github?: string, portfolio?: string } },
+ *   evidence: { claims: Array<object> },
+ *   job: { signals?: string[], frontmatter?: object },
+ *   honesty: { education?: { add_education_section?: boolean }, tools?: { do_not_claim?: string[] } },
+ *   summary?: string
+ * }} opts
+ * @returns {string}
+ */
+export function buildResumeMarkdown({ profile, evidence, job, honesty, summary }) {
+  const sections = [buildResumeHeader(profile)];
 
   // --- Summary (only if explicitly provided) ---
   if (summary && summary.trim().length > 0) {
@@ -268,6 +281,125 @@ export function buildResumeMarkdown({ profile, evidence, job, honesty, summary }
   const ats = validateAtsSafe(output);
   if (!ats.ok) {
     throw new Error(`buildResumeMarkdown produced ATS-unsafe output: ${ats.issues.join("; ")}`);
+  }
+
+  return output;
+}
+
+// ---------------------------------------------------------------------------
+// buildStructuredResumeMarkdown
+// ---------------------------------------------------------------------------
+
+/**
+ * Assemble a tailored resume from an AI-drafted proposal — a summary,
+ * employer-grouped experience (roles nested under each employer, so a
+ * promotion or multiple titles at one company render as one entry), optional
+ * extra sections (e.g. Open Source, Projects), grouped skills, and education.
+ * Assembly + validation only — every fact must already have been grounded in
+ * the source résumé by the caller (see generate.mjs's validateResumeProposal);
+ * this function never invents content, it only lays out what the proposal
+ * provides.
+ *
+ * @param {{
+ *   profile: { candidate: object },
+ *   proposal: {
+ *     summary?: string,
+ *     experience: Array<{
+ *       company: string, location?: string, dates?: string,
+ *       roles: Array<{ title: string, dates?: string, bullets: string[] }>
+ *     }>,
+ *     sections?: Array<{ heading: string, bullets: string[] }>,
+ *     skillGroups?: Array<{ label: string, items: string[] }>,
+ *     education?: string[]
+ *   },
+ *   evidence: { claims: Array<object> },
+ *   honesty: { education?: { add_education_section?: boolean }, tools?: { do_not_claim?: string[] } }
+ * }} opts
+ * @returns {string}
+ */
+export function buildStructuredResumeMarkdown({ profile, proposal, evidence, honesty }) {
+  const sections = [buildResumeHeader(profile)];
+
+  // --- Summary (only if the proposal supplied one) ---
+  if (proposal.summary && proposal.summary.trim().length > 0) {
+    sections.push(`## Summary\n\n${proposal.summary.trim()}`);
+  }
+
+  // --- Experience, grouped by employer with roles nested underneath ---
+  // Bold company lines and role headings are plain markdown, ATS-safe per
+  // validateAtsSafe (no tables/images/HTML/tabs/box-drawing glyphs).
+  const experienceBlocks = (proposal.experience || []).map((entry) => {
+    let companyLine = `**${entry.company}**`;
+    if (entry.location && entry.location.trim().length > 0) {
+      companyLine += ` - ${entry.location.trim()}`;
+    }
+    if (entry.dates && entry.dates.trim().length > 0) {
+      companyLine += ` | ${entry.dates.trim()}`;
+    }
+    const roleBlocks = (entry.roles || []).map((role) => {
+      let titleLine = `### ${role.title}`;
+      if (role.dates && role.dates.trim().length > 0) {
+        titleLine += ` | ${role.dates.trim()}`;
+      }
+      const lines = [titleLine];
+      for (const bullet of role.bullets || []) {
+        lines.push(`- ${bullet}`);
+      }
+      return lines.join("\n");
+    });
+    return [companyLine, ...roleBlocks].join("\n\n");
+  });
+  sections.push(`## Experience\n\n${experienceBlocks.join("\n\n")}`);
+
+  // --- Extra sections (e.g. Open Source, Projects) — never re-emit one of
+  // the fixed headings this function already owns.
+  const fixedHeadings = new Set(["summary", "experience", "skills", "education"]);
+  for (const extra of proposal.sections || []) {
+    if (fixedHeadings.has(String(extra.heading || "").toLowerCase())) continue;
+    const bulletLines = (extra.bullets || []).map((bullet) => `- ${bullet}`).join("\n");
+    sections.push(`## ${extra.heading}\n\n${bulletLines}`);
+  }
+
+  // --- Skills, one labeled group per line (ATS-safe: plain lines, no table/columns).
+  // Blank-line separated: single newlines collapse into one paragraph when the
+  // markdown is rendered to HTML/PDF.
+  if (Array.isArray(proposal.skillGroups) && proposal.skillGroups.length > 0) {
+    const skillLines = proposal.skillGroups
+      .map((group) => `**${group.label}:** ${(group.items || []).join(", ")}`)
+      .join("\n\n");
+    sections.push(`## Skills\n\n${skillLines}`);
+  }
+
+  // --- Education (only if the proposal supplied entries and honesty allows it) ---
+  if (
+    Array.isArray(proposal.education) &&
+    proposal.education.length > 0 &&
+    honesty?.education?.add_education_section !== false
+  ) {
+    sections.push(`## Education\n\n${proposal.education.map((entry) => `- ${entry}`).join("\n")}`);
+  }
+
+  const output = sections.join("\n\n");
+
+  // --- Honesty validation ---
+  // Use ALL claims (not a signals-filtered subset) since the AI already did
+  // the selection — every claim's forbidden wording still applies.
+  const forbidden = forbiddenWordingFor(evidence.claims || [], honesty);
+  assertNoForbidden(output, forbidden);
+
+  // --- Placeholder lint gate ---
+  const { clean, findings } = lintArtifact(output);
+  if (!clean) {
+    const detail = findings.map((f) => `line ${f.line}: ${f.text}`).join("; ");
+    throw new Error(`buildStructuredResumeMarkdown produced unresolved placeholders: ${detail}`);
+  }
+
+  // --- ATS-safety gate ---
+  const ats = validateAtsSafe(output);
+  if (!ats.ok) {
+    throw new Error(
+      `buildStructuredResumeMarkdown produced ATS-unsafe output: ${ats.issues.join("; ")}`
+    );
   }
 
   return output;

@@ -214,6 +214,68 @@ export const packetCoverLetterProposalSchema = {
   },
 };
 
+export const packetResumeProposalSchema = {
+  type: "object",
+  required: ["experience"],
+  additionalProperties: false,
+  properties: {
+    summary: { type: "string" },
+    experience: {
+      type: "array",
+      minItems: 1,
+      items: {
+        type: "object",
+        required: ["company", "roles"],
+        additionalProperties: false,
+        properties: {
+          company: { type: "string" },
+          location: { type: "string" },
+          dates: { type: "string" },
+          roles: {
+            type: "array",
+            minItems: 1,
+            items: {
+              type: "object",
+              required: ["title", "bullets"],
+              additionalProperties: false,
+              properties: {
+                title: { type: "string" },
+                dates: { type: "string" },
+                bullets: { type: "array", minItems: 1, items: { type: "string" } },
+              },
+            },
+          },
+        },
+      },
+    },
+    sections: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["heading", "bullets"],
+        additionalProperties: false,
+        properties: {
+          heading: { type: "string" },
+          bullets: { type: "array", minItems: 1, items: { type: "string" } },
+        },
+      },
+    },
+    skillGroups: {
+      type: "array",
+      items: {
+        type: "object",
+        required: ["label", "items"],
+        additionalProperties: false,
+        properties: {
+          label: { type: "string" },
+          items: { type: "array", minItems: 1, items: { type: "string" } },
+        },
+      },
+    },
+    education: { type: "array", items: { type: "string" } },
+  },
+};
+
 export const packetGenerateRequestSchema = {
   type: "object",
   additionalProperties: true,

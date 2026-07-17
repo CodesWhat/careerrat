@@ -74,6 +74,21 @@ describe("ResumeStep shell layout", () => {
     expect(html).not.toContain("DOCX board-required");
   });
 
+  it("disables Continue and shows an import hint until a source resume exists", () => {
+    const html = renderResumeStep({ state: { ...BASE_STATE, sourceResumePresent: false } });
+
+    expect(html).toMatch(/aria-label="Continue"[^>]*disabled=""/);
+    expect(html).toContain("Import your résumé to continue.");
+  });
+
+  it("enables Continue and removes the import hint when a source resume exists", () => {
+    const html = renderResumeStep({ state: { ...BASE_STATE, sourceResumePresent: true } });
+
+    expect(html).toContain('aria-label="Continue"');
+    expect(html).not.toMatch(/aria-label="Continue"[^>]*disabled=""/);
+    expect(html).not.toContain("Import your résumé to continue.");
+  });
+
   it("puts upload, files, and paste into a top-middle-bottom card layout", () => {
     const html = renderResumeStep({ aiEnabled: true });
 
