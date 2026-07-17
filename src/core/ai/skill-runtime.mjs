@@ -370,13 +370,17 @@ const CONVERSATIONAL_POSTURE =
 // `mode` defaults to "oneshot" so every existing call site (runSkillStream,
 // below) is byte-identical to the pre-M2 text; "conversational" is the only
 // other value and swaps in CONVERSATIONAL_POSTURE above.
-export function buildPrompt({ skill, input, mode = "oneshot" }) {
+export function buildPrompt({ skill, input, mode = "oneshot", skillMdPath }) {
   const body = typeof input === "string" ? input : JSON.stringify(input ?? {});
   const posture = mode === "conversational" ? CONVERSATIONAL_POSTURE : ONESHOT_POSTURE;
+  // Smaller/faster models guess wrong filenames for the spec (e.g. a literal
+  // `resume-extract.SKILL.md`) and burn their whole run failing to find it, so
+  // when the caller knows the resolved path, state it outright.
+  const spec = skillMdPath
+    ? `following its SKILL.md exactly — the spec file is at \`${skillMdPath}\`; Read that exact path first. `
+    : "following its SKILL.md exactly. ";
   return (
-    `Run the \`${skill}\` skill against the following input, following its SKILL.md exactly. ` +
-    `${posture}\n\n` +
-    body
+    `Run the \`${skill}\` skill against the following input, ${spec}` + `${posture}\n\n` + body
   );
 }
 
@@ -472,7 +476,11 @@ export async function runSkillStream({
   }
 
   const q = query({
-    prompt: buildPrompt({ skill, input }),
+    prompt: buildPrompt({
+      skill,
+      input,
+      skillMdPath: join(repoRoot, ".agents", "skills", skill, "SKILL.md"),
+    }),
     options: {
       cwd: repoRoot,
       env: childEnv,
