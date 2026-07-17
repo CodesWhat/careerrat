@@ -3377,6 +3377,33 @@ button {
   color: var(--coral);
 }
 
+/* The "reading takeover" activity feed — last 3-4 AI progress lines, newest
+   last. Deliberately no card chrome of its own (no border, no accent edge):
+   it renders inline inside the existing files panel, and each line fades
+   toward the older end so the newest message reads as "what's happening
+   right now" without a spinner or extra affordance. */
+.onboarding-resume__activity-feed {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 2px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.onboarding-resume__activity-feed-item {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  opacity: 0.6;
+}
+
+.onboarding-resume__activity-feed-item:last-child {
+  color: var(--ink);
+  opacity: 1;
+}
+
 .onboarding-resume__document-viewer {
   position: fixed;
   inset: clamp(12px, 2vw, 24px);

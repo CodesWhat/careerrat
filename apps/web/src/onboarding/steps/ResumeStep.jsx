@@ -9,8 +9,10 @@ import {
   parseResumeText,
   saveCandidateFile,
   saveEvidenceSeed,
+  streamResumeAi,
 } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
+import { extractProgressiveSeed, parsePartialResumeJson } from "./partialJson.js";
 
 // .txt/.md keep using the existing zero-AI deterministic parse
 // (POST /api/onboard/resume); pdf/image go through the AI extraction route
@@ -357,6 +359,9 @@ export function ResumeStep({
 }) {
   const fileInputRef = useRef(null);
   const aiTimersRef = useRef({}); // uploadItem id -> setInterval id, one per in-flight AI extraction
+  const streamTextRef = useRef(""); // accumulated raw "json" chunk text for the in-flight AI stream
+  const streamAbortRef = useRef(null); // AbortController for the in-flight resume-ai-stream fetch
+  const streamActivitySeqRef = useRef(0); // monotonic id source — activity lines can repeat verbatim
   const [dragActive, setDragActive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
@@ -367,6 +372,10 @@ export function ResumeStep({
   const [uploadItems, setUploadItems] = useState([]);
   const [showExampleFile, setShowExampleFile] = useState(true);
   const [previewItem, setPreviewItem] = useState(null);
+  // Last 3-4 activity lines from the in-flight AI stream, newest last — the
+  // "reading takeover" feed. Empty outside an active stream (including the
+  // buffered-fallback path, which has no activity events of its own).
+  const [streamActivity, setStreamActivity] = useState([]);
 
   const [profileFields, setProfileFields] = useState(() => {
     const candidate = state?.data?.profile?.candidate ?? {};
@@ -377,13 +386,28 @@ export function ResumeStep({
   const [claims, setClaims] = useState([]);
   const [saving, setSaving] = useState(false);
 
+  // Mirrors of profileFields/claims kept in refs so the async AI-stream
+  // handler (which lives outside React's render cycle, across many awaited
+  // ticks) can snapshot "the value right before this stream started" for a
+  // restart to revert to, without capturing a stale closure over state.
+  const profileFieldsRef = useRef(profileFields);
+  const claimsRef = useRef(claims);
+  useEffect(() => {
+    profileFieldsRef.current = profileFields;
+  }, [profileFields]);
+  useEffect(() => {
+    claimsRef.current = claims;
+  }, [claims]);
+
   // Clear every outstanding AI-progress interval on unmount — a navigation
   // away mid-extraction must not leave a timer ticking against a detached
-  // uploadItems setter.
+  // uploadItems setter. Also abort any in-flight resume-ai-stream fetch so
+  // it doesn't keep running (and updating state) after this step unmounts.
   useEffect(() => {
     return () => {
       for (const id of Object.values(aiTimersRef.current)) clearInterval(id);
       aiTimersRef.current = {};
+      streamAbortRef.current?.abort();
     };
   }, []);
 
@@ -482,6 +506,103 @@ export function ResumeStep({
     });
   }
 
+  // Runs the resume-ai-stream SSE path for one AI-mode file, live-filling
+  // profileFields/claims as "json" chunks arrive (the "reading takeover").
+  // Falls back transparently to the buffered extractResumeAi on any stream
+  // error, thrown exception (older server without the route, network), or a
+  // stream that ends without ever sending "done" — the caller always gets
+  // back a seed in the same shape parseResumeFileForReview's "ai" branch
+  // returns, so the rest of handleFiles doesn't need to know which path ran.
+  async function extractResumeAiWithTakeover(file) {
+    const preStreamProfileFields = profileFieldsRef.current;
+    const preStreamClaims = claimsRef.current;
+    // Activity lines can repeat verbatim (e.g. two restarts both showing
+    // "Double-checking the extraction…"), so each entry gets a synthetic id
+    // rather than keying list rows off the message text itself.
+    function pushActivity(message) {
+      streamActivitySeqRef.current += 1;
+      const entry = { id: streamActivitySeqRef.current, message };
+      setStreamActivity((prev) => [...prev, entry].slice(-4));
+    }
+
+    // Flips the review section on immediately (it's gated on `source`) so
+    // the form is visible and filling in as chunks land, not just at done.
+    setSource("ai");
+    setStreamActivity([]);
+    streamTextRef.current = "";
+    const controller = new AbortController();
+    streamAbortRef.current = controller;
+
+    let doneData = null;
+    let streamFailed = false;
+
+    try {
+      await streamResumeAi(file, {
+        signal: controller.signal,
+        onEvent: (payload) => {
+          if (!payload || typeof payload !== "object") return;
+          switch (payload.type) {
+            case "activity":
+              if (payload.message) pushActivity(payload.message);
+              break;
+            case "json": {
+              if (typeof payload.chunk !== "string") break;
+              streamTextRef.current += payload.chunk;
+              const partial = parsePartialResumeJson(streamTextRef.current);
+              if (!partial) break;
+              const progressive = extractProgressiveSeed(partial);
+              if (Object.keys(progressive.candidate).length) {
+                setProfileFields((prev) => {
+                  const next = { ...prev };
+                  for (const key of PROFILE_FIELDS) {
+                    if (progressive.candidate[key]) next[key] = progressive.candidate[key];
+                  }
+                  return next;
+                });
+              }
+              if (progressive.claims.length) {
+                setClaims((prev) => mergeClaims(prev, progressive.claims));
+              }
+              break;
+            }
+            case "restart":
+              streamTextRef.current = "";
+              setProfileFields(preStreamProfileFields);
+              setClaims(preStreamClaims);
+              pushActivity("Double-checking the extraction…");
+              break;
+            case "done":
+              doneData = payload.data;
+              break;
+            case "error":
+              streamFailed = true;
+              break;
+            default:
+              // "saved" and any future frame types carry no UI action here.
+              break;
+          }
+        },
+      });
+    } catch {
+      streamFailed = true;
+    } finally {
+      streamAbortRef.current = null;
+    }
+
+    if (streamFailed || !doneData) {
+      // Revert the cosmetic preview to exactly what was there before this
+      // stream started — the buffered call's own applySeed (run by the
+      // caller) is the only thing that should fill the form from here.
+      setProfileFields(preStreamProfileFields);
+      setClaims(preStreamClaims);
+      setStreamActivity([]);
+      return extractResumeAi(file);
+    }
+
+    setStreamActivity([]);
+    return doneData;
+  }
+
   async function handleFiles(files) {
     const fileList = Array.from(files || []).filter(Boolean);
     if (!fileList.length) return;
@@ -542,7 +663,9 @@ export function ResumeStep({
       }
 
       try {
-        const { seed } = await parseResumeFileForReview(file, { aiEnabled });
+        const seed = isAiRead
+          ? await extractResumeAiWithTakeover(file)
+          : (await parseResumeFileForReview(file, { aiEnabled })).seed;
         applySeed(seed, {
           appendClaims: true,
           appendSections: hadExistingItems || fileList.length > 1 || index > 0,
@@ -693,7 +816,10 @@ export function ResumeStep({
             direction="next"
             label="Continue"
             onClick={handleSaveAndNext}
-            disabled={saving}
+            // busy = any file parse in flight (the AI read runs ~2 min) —
+            // advancing mid-extract would save a half-empty review, so
+            // forward-nav waits for the parse loop to settle. Back stays live.
+            disabled={saving || busy}
           />
         </>
       }
@@ -801,6 +927,15 @@ export function ResumeStep({
                 </ul>
               ) : null}
               {error ? <InlineAlert message={error} /> : null}
+              {streamActivity.length ? (
+                <ul className="onboarding-resume__activity-feed" aria-label="Extraction activity">
+                  {streamActivity.map((entry) => (
+                    <li key={entry.id} className="onboarding-resume__activity-feed-item">
+                      {entry.message}
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
               {aiReadInProgress ? (
                 <p className="onboarding-account__fine-print">
                   AI extraction usually takes a minute or two. Keep the app open — results land here

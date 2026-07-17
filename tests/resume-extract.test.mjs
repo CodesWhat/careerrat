@@ -194,8 +194,6 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): resume-extract reads a re
 
     assert.match(outcome.data.full_text, /Jane Doe/);
     assert.match(outcome.data.full_text, /jane\.doe@example\.test/);
-    assert.equal(outcome.data.resume_document.contact.email, "jane.doe@example.test");
-    assert.ok(Array.isArray(outcome.data.resume_document.experience));
     assert.equal(outcome.data.candidate.email, "jane.doe@example.test");
     assert.ok(outcome.data.sections.experience >= 1);
     assert.ok(Array.isArray(outcome.data.claims) && outcome.data.claims.length >= 1);

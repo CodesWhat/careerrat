@@ -61,40 +61,15 @@ case:
 ## Output schema
 
 The fenced block must be a single JSON object matching
-`config/resume-extract.schema.json`:
+`config/resume-extract.schema.json`. The recomposable `resume_document` source object
+was dropped from this contract for speed (it roughly halved output tokens, which was
+most of a resume-extract call's wall-clock time) — it returns only if/when a later
+tailoring step actually needs a structured resume rebuild; `full_text` alone covers
+today's callers:
 
 ```json
 {
   "full_text": "Jane Doe\njane.doe@example.com\n\nExperience\nLed a team of 6 engineers shipping the payments platform rewrite\n\nSkills\nPython, JavaScript, SQL",
-  "resume_document": {
-    "contact": {
-      "full_name": "Jane Doe",
-      "email": "jane.doe@example.com",
-      "phone": null,
-      "location": null,
-      "linkedin": null,
-      "github": null,
-      "portfolio": null
-    },
-    "headline": null,
-    "summary": null,
-    "experience": [
-      {
-        "company": "Acme Corp",
-        "title": "Engineering Manager",
-        "location": null,
-        "start_date": null,
-        "end_date": null,
-        "bullets": ["Led a team of 6 engineers shipping the payments platform rewrite"],
-        "raw_text": "Engineering Manager — Acme Corp\nLed a team of 6 engineers shipping the payments platform rewrite"
-      }
-    ],
-    "education": [],
-    "skills": [{ "category": null, "items": ["Python", "JavaScript", "SQL"] }],
-    "projects": [],
-    "certifications": [],
-    "other_sections": []
-  },
   "candidate": {
     "full_name": "Jane Doe",
     "email": "jane.doe@example.com",
@@ -135,13 +110,8 @@ The fenced block must be a single JSON object matching
   the visible reading order, headings, bullets, dates, employers, contact lines, and
   skill lists. Normalize repeated whitespace and line breaks, but do not summarize,
   rewrite, omit sections, or add facts. If part of the document is illegible, include
-  the legible text only; never invent missing content.
-- `resume_document` — the recomposable, ATS-safe source object. Extract every
-  visible resume section into this structure so Rolester can later rebuild a clean
-  plain resume without depending on the original formatting. Keep `raw_text` for each
-  entry as a local audit trail. Use `null` for unknown scalar fields, empty arrays
-  for absent repeated sections, and put any section that does not fit the named
-  buckets into `other_sections` instead of dropping it.
+  the legible text only; never invent missing content. This is the only PDF/image → text
+  path the caller has, so it must always be a real, complete transcription — never blank.
 - `candidate.*` — contact fields only, each `null` when absent from the document.
 - `claims[]` — one entry per genuine accomplishment line (a past-tense achievement
   verb, a metric/number, or a clearly scoped deliverable) drawn from experience or

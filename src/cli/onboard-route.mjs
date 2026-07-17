@@ -48,7 +48,7 @@
 // files but never claims to have run the interview.
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, extname, join } from "node:path";
+import { basename, dirname, extname, join } from "node:path";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
 import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
@@ -308,116 +308,6 @@ function buildResumeDocumentFromParsed(parsed) {
       raw_text: normalizeDocxResumeText(block),
     })),
   };
-}
-
-function pushResumeBlock(lines, heading, blocks, renderBlock) {
-  if (!Array.isArray(blocks) || !blocks.length) return;
-  lines.push("", heading);
-  for (const block of blocks) {
-    const rendered = normalizeDocxResumeText(renderBlock(block));
-    if (rendered) lines.push(rendered);
-  }
-}
-
-function joinCompact(parts, separator = " | ") {
-  return parts
-    .map((part) => nullableText(part))
-    .filter(Boolean)
-    .join(separator);
-}
-
-function resumeDocumentToPlainText(document) {
-  if (!document || typeof document !== "object") return "";
-  const lines = [];
-  const contact = document.contact || {};
-  if (contact.full_name) lines.push(contact.full_name);
-  const contactLine = joinCompact([
-    contact.email,
-    contact.phone,
-    contact.location,
-    contact.linkedin,
-    contact.github,
-    contact.portfolio,
-  ]);
-  if (contactLine) lines.push(contactLine);
-  if (document.headline) lines.push("", document.headline);
-  if (document.summary) lines.push("", "Summary", document.summary);
-
-  pushResumeBlock(lines, "Experience", document.experience, (entry) => {
-    const header = joinCompact([entry.title, entry.company], " — ");
-    const meta = joinCompact([
-      entry.location,
-      joinCompact([entry.start_date, entry.end_date], " - "),
-    ]);
-    const bullets = Array.isArray(entry.bullets)
-      ? entry.bullets
-          .map((bullet) => `- ${String(bullet).trim()}`)
-          .filter((bullet) => bullet !== "- ")
-      : [];
-    return [header, meta, ...bullets, entry.raw_text && !bullets.length ? entry.raw_text : ""]
-      .filter(Boolean)
-      .join("\n");
-  });
-
-  pushResumeBlock(lines, "Education", document.education, (entry) =>
-    [
-      joinCompact([entry.degree, entry.institution], " — "),
-      entry.location,
-      entry.dates,
-      entry.raw_text,
-    ]
-      .filter(Boolean)
-      .join("\n")
-  );
-
-  if (Array.isArray(document.skills) && document.skills.length) {
-    lines.push("", "Skills");
-    for (const group of document.skills) {
-      const items = Array.isArray(group.items)
-        ? group.items.map((item) => String(item).trim()).filter(Boolean)
-        : [];
-      if (!items.length) continue;
-      lines.push(group.category ? `${group.category}: ${items.join(", ")}` : items.join(", "));
-    }
-  }
-
-  pushResumeBlock(lines, "Projects", document.projects, (entry) => {
-    const tech =
-      Array.isArray(entry.technologies) && entry.technologies.length
-        ? `Technologies: ${entry.technologies.join(", ")}`
-        : "";
-    const bullets = Array.isArray(entry.bullets)
-      ? entry.bullets
-          .map((bullet) => `- ${String(bullet).trim()}`)
-          .filter((bullet) => bullet !== "- ")
-      : [];
-    return [
-      entry.name,
-      entry.description,
-      ...bullets,
-      tech,
-      entry.raw_text && !bullets.length ? entry.raw_text : "",
-    ]
-      .filter(Boolean)
-      .join("\n");
-  });
-
-  pushResumeBlock(lines, "Certifications", document.certifications, (entry) =>
-    [joinCompact([entry.name, entry.issuer], " — "), entry.date, entry.raw_text]
-      .filter(Boolean)
-      .join("\n")
-  );
-
-  pushResumeBlock(lines, "Additional", document.other_sections, (section) => {
-    const items = Array.isArray(section.items)
-      ? section.items.map((item) => `- ${String(item).trim()}`).filter((item) => item !== "- ")
-      : [];
-    return [section.heading, ...items, section.raw_text && !items.length ? section.raw_text : ""]
-      .filter(Boolean)
-      .join("\n");
-  });
-
-  return normalizeDocxResumeText(lines.join("\n"));
 }
 
 // Deep-merge `patch` onto `base`: object keys merge recursively: an array in
@@ -1335,10 +1225,12 @@ export function mountOnboardRoutes({
 
         if (outcome.body.ok) {
           const extracted = outcome.body.data || {};
-          const aiResumeDocument = extracted.resume_document;
-          const fullText =
-            normalizeDocxResumeText(extracted.full_text || "") ||
-            resumeDocumentToPlainText(aiResumeDocument);
+          // full_text is required by config/resume-extract.schema.json, and the
+          // bounded validator above already enforced its presence — no
+          // resume_document-derived fallback needed here anymore (that
+          // recomposable object was dropped from the extract contract; see
+          // SKILL.md's own note).
+          const fullText = normalizeDocxResumeText(extracted.full_text || "");
           const aiClaims = (extracted.claims || []).map((c, i) => ({
             id: `resume-${String(i + 1).padStart(3, "0")}`,
             claim: String(c?.claim ?? ""),
@@ -1358,7 +1250,6 @@ export function mountOnboardRoutes({
                 source: "docx",
                 extraction: "ai",
                 text: fullText,
-                resumeDocument: aiResumeDocument,
               },
             });
           } else {
@@ -1373,7 +1264,6 @@ export function mountOnboardRoutes({
             profileSeed: { candidate: extracted.candidate || {} },
             evidenceSeed: { claims: aiClaims },
             sections: extracted.sections || {},
-            resumeDocument: aiResumeDocument,
             source: "docx",
             extraction: "ai",
             savedPath: savedRelPath,
@@ -1435,46 +1325,33 @@ export function mountOnboardRoutes({
     });
   });
 
-  // -------------------------------------------------------------------------
-  // POST /api/onboard/resume-ai?name=<filename> — raw PDF/image bytes.
-  //
-  // Frozen M8 contract: the request body IS the file (no JSON envelope,
-  // unlike every other route in this file) — `name` travels as a query
-  // param purely so the server knows the original filename/extension.
-  // Saves under workspace/intake/resume-uploads/, then runs the
-  // resume-extract skill one-shot via runResumeExtractBounded() (a hoisted
-  // function declaration defined right after this route — the same helper
-  // POST /api/onboard/resume-docx's AI upgrade calls over its converted
-  // markdown sidecar). The response shape uses the common bounded envelope.
-  // -------------------------------------------------------------------------
-  addRoute("POST", "/api/onboard/resume-ai", async (req, res) => {
-    const requestUrl = new URL(req.url, "http://127.0.0.1");
-    const name = (requestUrl.searchParams.get("name") || "").trim();
-    if (!name) {
-      sendJson(res, 400, { error: "?name=<filename> is required" });
-      return;
-    }
-
+  // Shared upload intake for POST /api/onboard/resume-ai and its SSE sibling
+  // POST /api/onboard/resume-ai-stream below: identical ?name= extension
+  // check, 5MB raw-body cap, and saved-upload path for both — only what
+  // happens with the file afterward (a buffered response vs. a live
+  // progress stream) differs between the two routes.
+  async function saveResumeAiUpload(req, name) {
     const ext = extname(name).toLowerCase();
     if (!RESUME_AI_ALLOWED_EXTENSIONS.has(ext)) {
-      sendJson(res, 400, {
-        error:
-          `unsupported file type "${ext || name}" — resume-ai accepts PDF/image uploads only ` +
-          "(.pdf .png .jpg .jpeg .webp); .txt/.md resumes go through POST /api/onboard/resume",
-      });
-      return;
+      return {
+        ok: false,
+        status: 400,
+        body: {
+          error:
+            `unsupported file type "${ext || name}" — resume-ai accepts PDF/image uploads only ` +
+            "(.pdf .png .jpg .jpeg .webp); .txt/.md resumes go through POST /api/onboard/resume",
+        },
+      };
     }
 
     let bytes;
     try {
       bytes = await readRawBodyCapped(req, RESUME_AI_MAX_BYTES);
     } catch (err) {
-      sendJson(res, err.status || 400, { error: err.message });
-      return;
+      return { ok: false, status: err.status || 400, body: { error: err.message } };
     }
     if (!bytes.length) {
-      sendJson(res, 400, { error: "request body is empty" });
-      return;
+      return { ok: false, status: 400, body: { error: "request body is empty" } };
     }
 
     const savedRelPath = `workspace/intake/resume-uploads/${Date.now()}-${sanitizeUploadFilename(name)}`;
@@ -1484,6 +1361,40 @@ export function mountOnboardRoutes({
     // and would corrupt binary data.
     writeFileSync(savedPath, bytes);
 
+    return { ok: true, savedRelPath, savedPath };
+  }
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/resume-ai?name=<filename> — raw PDF/image bytes.
+  //
+  // Frozen M8 contract: the request body IS the file (no JSON envelope,
+  // unlike every other route in this file) — `name` travels as a query
+  // param purely so the server knows the original filename/extension.
+  // Saves via saveResumeAiUpload() above (shared with the SSE sibling
+  // below), then runs the resume-extract skill one-shot via
+  // runResumeExtractBounded() (a hoisted function declaration defined right
+  // after these two routes — JS hoists these to the top of
+  // mountOnboardRoutes' scope, so the call site here is valid; it's
+  // positioned there rather than above so the file's own retained-runtime
+  // classification tests keep scoping the AI-touching literals to the
+  // resume-ai route's slice rather than this deterministic-by-default one).
+  // The response shape uses the common bounded envelope.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/resume-ai", async (req, res) => {
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+    const name = (requestUrl.searchParams.get("name") || "").trim();
+    if (!name) {
+      sendJson(res, 400, { error: "?name=<filename> is required" });
+      return;
+    }
+
+    const upload = await saveResumeAiUpload(req, name);
+    if (!upload.ok) {
+      sendJson(res, upload.status, upload.body);
+      return;
+    }
+    const { savedRelPath, savedPath } = upload;
+
     const outcome = await runResumeExtractBounded({ savedPath });
 
     if (!outcome.body.ok) {
@@ -1492,10 +1403,12 @@ export function mountOnboardRoutes({
     }
 
     const extracted = outcome.body.data || {};
-    const resumeDocument = extracted.resume_document;
-    const fullText =
-      normalizeDocxResumeText(extracted.full_text || "") ||
-      resumeDocumentToPlainText(resumeDocument);
+    // full_text is required by config/resume-extract.schema.json, and the
+    // bounded validator above already enforced its presence — no
+    // resume_document-derived fallback needed here anymore (that
+    // recomposable object was dropped from the extract contract for speed;
+    // see resume-extract SKILL.md's own note).
+    const fullText = normalizeDocxResumeText(extracted.full_text || "");
     const claims = (extracted.claims || []).map((c, i) => ({
       id: `resume-${String(i + 1).padStart(3, "0")}`,
       claim: String(c?.claim ?? ""),
@@ -1513,7 +1426,6 @@ export function mountOnboardRoutes({
           savedAt: new Date().toISOString(),
           source: "resume-ai",
           text: fullText,
-          resumeDocument,
         },
       });
     } else {
@@ -1527,7 +1439,6 @@ export function mountOnboardRoutes({
       ...outcome.body,
       data: {
         fullText,
-        resumeDocument,
         profileSeed: { candidate: extracted.candidate || {} },
         evidenceSeed: { claims },
         sections: extracted.sections || {},
@@ -1538,16 +1449,192 @@ export function mountOnboardRoutes({
     });
   });
 
-  // Shared by the two routes above: POST /api/onboard/resume-ai (PDF/image,
-  // over the saved upload itself) and POST /api/onboard/resume-docx's AI
-  // upgrade (over a converted markdown sidecar). Runs the resume-extract
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/resume-ai-stream?name=<filename> — SSE sibling of
+  // POST /api/onboard/resume-ai above: identical upload validation/limits/
+  // save path (via saveResumeAiUpload()), but streams resume-extract's
+  // progress back over Server-Sent Events instead of buffering into one big
+  // response — a real PDF extraction call can take ~2 minutes with nothing
+  // else on the wire; this route gives the client something to show
+  // throughout that wait. FROZEN CONTRACT — the wizard's ResumeStep client
+  // is built against this exact frame shape; do not change it casually.
+  //
+  // Frames — each a standard SSE `data: <json>\n\n` (no `event:` line; the
+  // `type` field inside the JSON carries that):
+  //   {"type":"saved","savedPath":...}           right after the upload saves
+  //   {"type":"activity","message":...}          short human progress lines
+  //   {"type":"json","chunk":...}                each assistant text block, verbatim
+  //   {"type":"restart"}                         bounded helper moved to its
+  //                                               correction retry — client resets
+  //   {"type":"done","data":{...}}                same `data` shape the buffered
+  //                                               route returns (fullText, profileSeed,
+  //                                               evidenceSeed, sections, targetingSeed,
+  //                                               source:"ai", savedPath); the
+  //                                               source-resume artifact is registered
+  //                                               first, exactly like the buffered route
+  //   {"type":"error","message":...,"status":n}  terminal failure, safe message only
+  // Heartbeat: a `: ping\n\n` comment frame every 10s while the run is in
+  // flight. Headers flush immediately once the upload is saved — everything
+  // from that point on is committed to the stream, so any failure can only
+  // be reported in-band (an {"type":"error"} frame), never a second
+  // writeHead/sendJson.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/resume-ai-stream", async (req, res) => {
+    const requestUrl = new URL(req.url, "http://127.0.0.1");
+    const name = (requestUrl.searchParams.get("name") || "").trim();
+    if (!name) {
+      sendJson(res, 400, { error: "?name=<filename> is required" });
+      return;
+    }
+
+    const upload = await saveResumeAiUpload(req, name);
+    if (!upload.ok) {
+      sendJson(res, upload.status, upload.body);
+      return;
+    }
+    const { savedRelPath, savedPath } = upload;
+
+    // Client-disconnect guard: `res.on("close")`, not `req.on("close")` —
+    // see skill-run-route.mjs's own comment on this exact choice (req's own
+    // "close" fires as soon as its body finishes being read, which is
+    // unrelated to whether the client is still connected). The upload body
+    // here has already been fully read by saveResumeAiUpload() above, so
+    // req's "close" would be doubly misleading by this point.
+    let closed = false;
+    res.on("close", () => {
+      closed = true;
+    });
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store",
+      Connection: "keep-alive",
+    });
+    res.flushHeaders?.();
+
+    function emit(payload) {
+      if (closed) return;
+      try {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        closed = true;
+      }
+    }
+
+    emit({ type: "saved", savedPath: savedRelPath });
+
+    const heartbeat = setInterval(() => {
+      if (closed) return;
+      try {
+        res.write(": ping\n\n");
+      } catch {
+        closed = true;
+      }
+    }, 10000);
+
+    try {
+      const outcome = await runResumeExtractBounded({
+        savedPath,
+        originalName: name,
+        onProgress: emit,
+      });
+
+      if (!outcome.body.ok) {
+        emit({
+          type: "error",
+          message: outcome.body.error?.message || "Resume extraction failed.",
+          status: outcome.status,
+        });
+        return;
+      }
+
+      const extracted = outcome.body.data || {};
+      const fullText = normalizeDocxResumeText(extracted.full_text || "");
+      const claims = (extracted.claims || []).map((c, i) => ({
+        id: `resume-${String(i + 1).padStart(3, "0")}`,
+        claim: String(c?.claim ?? ""),
+        evidence: String(c?.evidence ?? ""),
+      }));
+
+      if (dbExists(pathCtx)) {
+        candidateArtifactPut({
+          ...pathCtx,
+          id: "source-resume",
+          kind: "source-resume",
+          data: {
+            path: savedRelPath,
+            filename: sanitizeUploadFilename(name),
+            savedAt: new Date().toISOString(),
+            source: "resume-ai",
+            text: fullText,
+          },
+        });
+      } else {
+        const entry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
+        const dest = userPath(pathCtx, entry.candidatePath);
+        mkdirSync(dirname(dest), { recursive: true });
+        atomicWriteFile(dest, fullText);
+      }
+
+      emit({
+        type: "done",
+        data: {
+          fullText,
+          profileSeed: { candidate: extracted.candidate || {} },
+          evidenceSeed: { claims },
+          sections: extracted.sections || {},
+          targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
+          source: "ai",
+          savedPath: savedRelPath,
+        },
+      });
+    } catch {
+      // Never relay a raw caught error message here — an exception this
+      // late is an unexpected bug, not a scrubbed provider failure, so its
+      // message could contain anything (a file path, a stack fragment). The
+      // known failure shapes (schema-invalid, no AI route, provider error)
+      // are all handled above via outcome.body, already scrubbed by
+      // bounded-ai.mjs's own error normalization.
+      emit({ type: "error", message: "Resume extraction failed unexpectedly.", status: 500 });
+    } finally {
+      clearInterval(heartbeat);
+      if (!closed) {
+        try {
+          res.end();
+        } catch {
+          // client already gone
+        }
+      }
+    }
+  });
+
+  // Shared by all three resume-extract callers: POST /api/onboard/resume-ai
+  // (PDF/image, over the saved upload itself), its SSE sibling
+  // POST /api/onboard/resume-ai-stream above, and POST /api/onboard/resume-docx's
+  // AI upgrade (over a converted markdown sidecar). Runs the resume-extract
   // skill one-shot against `savedPath`, Read-only tool surface, buffers the
   // assistant's text reply, and validates/retries it via the shared
-  // bounded-AI fallback helper. Lifted out of the resume-ai route body
-  // unchanged — same labels, same schema, same retry contract — so both
-  // callers get identical AI behavior.
-  async function runResumeExtractBounded({ savedPath }) {
+  // bounded-AI fallback helper. `originalName`/`onProgress` are optional —
+  // the two buffered callers omit them (byte-identical to before this
+  // change), while the SSE route above passes both to narrate the run.
+  async function runResumeExtractBounded({ savedPath, originalName, onProgress } = {}) {
     const schema = JSON.parse(readFileSync(join(repoRoot, RESUME_EXTRACT_SCHEMA_PATH), "utf8"));
+
+    // Speed: résumé extraction is a well-bounded transcription+classification
+    // task a fast/cheap model handles reliably, and — now that the extract
+    // contract no longer asks for a resume_document duplicate — output size
+    // is small enough that model choice, not payload size, is what
+    // dominates wall-clock time. The FIRST attempt runs on that fast model;
+    // a correction retry (the bounded helper's second pass, triggered only
+    // when the first attempt's reply failed schema validation) falls back
+    // to the server's normally-configured default model instead — the
+    // quality net for whatever tripped the fast model up the first time.
+    const fastModel = env.ROLESTER_RESUME_EXTRACT_MODEL || "claude-haiku-4-5-20251001";
+
+    // Scoped per run (per call to runResumeExtractBounded), not per attempt
+    // — "the first time" a system event batch arrives, across the whole
+    // run including any correction retry, not once per attempt.
+    let sawSystemEvent = false;
 
     // One attempt of the one-shot skill run: Read-only tool surface, the
     // saved file's path as input (a corrective addendum on a retry — see
@@ -1555,9 +1642,13 @@ export function mountOnboardRoutes({
     // here is deliberately NOT caught inside runStructuredOneshot). Buffers
     // every `assistant` event's text blocks in order, exactly like
     // skill-runtime.mjs's own header comment describes for a driven
-    // (non-SSE-passthrough) run.
+    // (non-SSE-passthrough) run — and, when `onProgress` is given, narrates
+    // the same event stream as short activity lines plus verbatim JSON
+    // chunks for the SSE route above.
     async function invokeResumeExtract({ correction }) {
       let rawText = "";
+      // Reset every attempt — "at most once per attempt".
+      let emittedThinking = false;
       await runSkillStream({
         skill: "resume-extract",
         action: RESUME_AI_LABELS.action,
@@ -1566,13 +1657,39 @@ export function mountOnboardRoutes({
           ? `Read the file at this exact path: ${savedPath}\n\n${correction}`
           : { path: savedPath },
         repoRoot,
-        env,
+        // Only the first (non-correction) attempt gets the fast-model env
+        // override — a retry runs with the unmodified env, i.e. whatever
+        // model this server is normally configured for.
+        env: correction ? env : { ...env, ANTHROPIC_MODEL: fastModel },
         tools: ["Read"],
         onEvent: (evt) => {
+          if (onProgress) {
+            if (evt.type === "system") {
+              // Too chatty to narrate individually — suppress every one
+              // except the very first, which tells the user we're actually
+              // reading their file.
+              if (!sawSystemEvent) {
+                sawSystemEvent = true;
+                onProgress({ type: "activity", message: `Reading ${originalName}…` });
+              }
+              return;
+            }
+            if (evt.type === "tool_use" && evt.data?.name === "Read") {
+              const toolPath = String(evt.data?.input?.file_path || evt.data?.input?.path || "");
+              if (toolPath) {
+                onProgress({ type: "activity", message: `Reading ${basename(toolPath)}…` });
+              }
+              return;
+            }
+          }
           if (evt.type !== "assistant") return;
           for (const block of evt.data?.message?.content ?? []) {
             if (block?.type === "text" && typeof block.text === "string") {
               rawText += block.text;
+              onProgress?.({ type: "json", chunk: block.text });
+            } else if (onProgress && block?.type === "thinking" && !emittedThinking) {
+              emittedThinking = true;
+              onProgress({ type: "activity", message: "Analyzing your resume…" });
             }
           }
         },
@@ -1580,13 +1697,18 @@ export function mountOnboardRoutes({
       return rawText;
     }
 
+    onProgress?.({ type: "activity", message: "Warming up the reader…" });
+
     return runBoundedAI({
       labels: RESUME_AI_LABELS,
       schema,
       manual: RESUME_AI_MANUAL,
       structuredMode: "fallback",
       maxRetries: 1,
-      invoke: invokeResumeExtract,
+      invoke: async ({ correction }) => {
+        if (correction && onProgress) onProgress({ type: "restart" });
+        return invokeResumeExtract({ correction });
+      },
     });
   }
 

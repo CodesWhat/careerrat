@@ -1185,25 +1185,6 @@ describe("POST /api/onboard/resume-docx", () => {
     const fullText = "AI-derived source resume text.";
     const aiReply = JSON.stringify({
       full_text: fullText,
-      resume_document: {
-        contact: {
-          full_name: "Resume Candidate",
-          email: "candidate@example.test",
-          phone: null,
-          location: null,
-          linkedin: "https://www.linkedin.com/in/profile-handle",
-          github: "https://github.com/profile-handle",
-          portfolio: null,
-        },
-        headline: "Platform engineer",
-        summary: null,
-        experience: [],
-        education: [],
-        skills: [{ category: null, items: ["JavaScript"] }],
-        projects: [],
-        certifications: [],
-        other_sections: [],
-      },
       candidate: {
         full_name: "Resume Candidate",
         email: "candidate@example.test",
@@ -1257,7 +1238,9 @@ describe("POST /api/onboard/resume-docx", () => {
       assert.equal(artifact.source, "docx");
       assert.equal(artifact.extraction, "ai");
       assert.equal(artifact.text, fullText);
-      assert.equal(artifact.resumeDocument.headline, "Platform engineer");
+      // resume_document was dropped from the extract contract for speed —
+      // the persisted artifact must not carry it either.
+      assert.equal(artifact.resumeDocument, undefined);
     } finally {
       closeAll();
     }
@@ -1380,35 +1363,6 @@ describe("POST /api/onboard/resume-ai", () => {
   ].join("\n");
   const VALID_REPLY = JSON.stringify({
     full_text: VALID_FULL_TEXT,
-    resume_document: {
-      contact: {
-        full_name: "Jane Doe",
-        email: "jane.doe@example.com",
-        phone: null,
-        location: null,
-        linkedin: null,
-        github: null,
-        portfolio: null,
-      },
-      headline: "Engineering leader",
-      summary: "Engineering leader focused on platform teams.",
-      experience: [
-        {
-          company: "Acme",
-          title: "Engineering Manager",
-          location: null,
-          start_date: "2021",
-          end_date: "Present",
-          bullets: ["Led a team of 5 engineers."],
-          raw_text: "Engineering Manager — Acme\n2021 - Present\nLed a team of 5 engineers.",
-        },
-      ],
-      education: [],
-      skills: [{ category: null, items: ["JavaScript", "SQLite"] }],
-      projects: [],
-      certifications: [],
-      other_sections: [],
-    },
     candidate: { full_name: "Jane Doe", email: "jane.doe@example.com" },
     claims: [{ claim: "Led a team of 5 engineers.", evidence: "Resume, Experience section." }],
     sections: { experience: 1, education: 0, skills: 2, projects: 0, other: 0 },
@@ -1457,12 +1411,9 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(body.profileSeed, undefined);
       assert.equal(body.data.source, "ai");
       assert.equal(body.data.fullText, VALID_FULL_TEXT);
-      assert.equal(body.data.resumeDocument.headline, "Engineering leader");
-      assert.equal(body.data.resumeDocument.experience[0].company, "Acme");
-      assert.equal(body.data.resumeDocument.experience[0].title, "Engineering Manager");
-      assert.deepEqual(body.data.resumeDocument.experience[0].bullets, [
-        "Led a team of 5 engineers.",
-      ]);
+      // resume_document was dropped from the extract contract for speed —
+      // the response must not carry it either.
+      assert.equal(body.data.resumeDocument, undefined);
       assert.match(body.data.savedPath, /^workspace\/intake\/resume-uploads\/\d+-resume\.pdf$/);
       assert.equal(body.data.profileSeed.candidate.full_name, "Jane Doe");
       assert.equal(body.data.profileSeed.candidate.email, "jane.doe@example.com");
@@ -1536,7 +1487,7 @@ describe("POST /api/onboard/resume-ai", () => {
     }
   });
 
-  it("falls back to composing readable source text from resume_document when full_text is blank", async () => {
+  it("passes a blank full_text straight through with no resume_document-derived fallback", async () => {
     const repoRoot = buildTempRoot();
     const sparseReply = JSON.stringify({ ...JSON.parse(VALID_REPLY), full_text: "   " });
     const runSkillStream = fakeRunSkillStream([
@@ -1546,9 +1497,7 @@ describe("POST /api/onboard/resume-ai", () => {
     try {
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
       assert.equal(status, 200);
-      assert.match(body.data.fullText, /Jane Doe/);
-      assert.match(body.data.fullText, /Engineering Manager — Acme/);
-      assert.match(body.data.fullText, /Led a team of 5 engineers/);
+      assert.equal(body.data.fullText, "");
     } finally {
       await closeServer(server);
     }

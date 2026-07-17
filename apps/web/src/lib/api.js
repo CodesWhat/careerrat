@@ -145,6 +145,77 @@ export async function extractResumeAi(file) {
   return body;
 }
 
+// POST /api/onboard/resume-ai-stream's frozen contract: same raw-bytes-as-
+// body / filename-as-query convention as extractResumeAi above, but the
+// response is text/event-stream instead of buffered JSON. Frames are
+// `data: <json>\n\n`, plus bare `: ping` heartbeat comment lines the server
+// sends to keep the connection alive (skipped, never handed to onEvent).
+// Unlike sse.js's postSSE (event:<name>/data:<json> pairs), there is no
+// separate `event:` line here — each frame's parsed JSON payload carries its
+// own "type" field (saved/activity/json/restart/done/error), so onEvent gets
+// the parsed payload object directly rather than a (type, data) pair.
+// Tolerates a frame (or even a single "data:" line) split across two chunk
+// reads by buffering any trailing partial frame between reader.read() calls.
+// Throws (with .status, once known) on a non-200 response or a body-less
+// response so callers can fall back to the buffered extractResumeAi — same
+// as a static-preview build, which has no streaming route at all and throws
+// immediately below rather than faking an SSE sequence.
+export async function streamResumeAi(file, { onEvent, signal } = {}) {
+  if (isStaticPreviewApi()) {
+    throw new ApiError(501, { error: "resume-ai-stream is unavailable in static preview" });
+  }
+
+  const res = await fetch(`/api/onboard/resume-ai-stream?name=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    let body = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { raw: text };
+      }
+    }
+    throw new ApiError(res.status, body);
+  }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  function emitFrame(frame) {
+    for (const line of frame.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith(":") || !trimmed.startsWith("data:")) continue;
+      const raw = trimmed.slice(5).trim();
+      if (!raw) continue;
+      try {
+        onEvent?.(JSON.parse(raw));
+      } catch {
+        /* malformed frame — skip it rather than aborting the whole stream */
+      }
+    }
+  }
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const frames = buffer.split("\n\n");
+    buffer = frames.pop() ?? "";
+    for (const frame of frames) {
+      if (frame.trim()) emitFrame(frame);
+    }
+  }
+  // A stream that ends without one final trailing blank line still leaves
+  // its last frame sitting in `buffer` — flush it rather than dropping it.
+  if (buffer.trim()) emitFrame(buffer);
+}
+
 export async function extractResumeDocx(file) {
   if (isStaticPreviewApi()) return staticPreviewResumeSeed(file?.name);
 

@@ -7,6 +7,7 @@ const apiMocks = vi.hoisted(() => ({
   parseResumeText: vi.fn(),
   saveCandidateFile: vi.fn(async () => ({ ok: true })),
   saveEvidenceSeed: vi.fn(async () => ({ ok: true })),
+  streamResumeAi: vi.fn(),
 }));
 
 vi.mock("../../lib/api.js", () => apiMocks);
