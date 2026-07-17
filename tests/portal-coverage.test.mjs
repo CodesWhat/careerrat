@@ -413,10 +413,35 @@ test("buildSearchSources: Wellfound entry absent when domain is non-tech (financ
   assert.equal(wf.length, 0, "Wellfound must not appear for non-tech domain");
 });
 
-test("buildSearchSources: Wellfound entry absent when domain is absent", () => {
+test("buildSearchSources: Wellfound entry absent when domain and titles are both non-tech", () => {
+  // `targeting`'s titles ("Forward Deployed Engineer", "Applied AI Engineer")
+  // now read as tech-shaped under generate-search-sources.mjs's title-
+  // inference fallback for an absent domain, so this uses its own non-tech
+  // titles to keep testing the actual "nothing tech-shaped at all" case.
+  const nonTechTargeting = {
+    role_buckets: [
+      { name: "Primary", priority: "primary", titles: ["Registered Nurse", "Nurse Practitioner"] },
+    ],
+    keep_signals: [],
+    cut_signals: [],
+  };
+  const result = buildSearchSources(nonTechTargeting, baseNoDomainProfile);
+  const wf = result.searches.filter((s) => s.provider === "Wellfound");
+  assert.equal(
+    wf.length,
+    0,
+    "Wellfound must not appear when domain is absent and titles aren't tech-shaped"
+  );
+});
+
+test("buildSearchSources: Wellfound entry appears when domain is absent but titles look tech", () => {
   const result = buildSearchSources(targeting, baseNoDomainProfile);
   const wf = result.searches.filter((s) => s.provider === "Wellfound");
-  assert.equal(wf.length, 0, "Wellfound must not appear when domain is absent");
+  assert.equal(
+    wf.length,
+    1,
+    "Wellfound must appear when domain is absent and a majority of titles look tech"
+  );
 });
 
 // ---------------------------------------------------------------------------

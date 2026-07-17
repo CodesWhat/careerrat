@@ -27,6 +27,7 @@ const CANDIDATE_FIELDS = [
   "linkedin",
   "github",
   "portfolio",
+  "domain",
 ];
 const SECTION_FIELDS = ["experience", "education", "skills", "projects", "other"];
 

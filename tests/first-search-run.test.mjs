@@ -8,6 +8,7 @@ import {
   candidateArtifactPut,
   candidateConfigPatch,
   candidateSetupInitialize,
+  companyBoardResolutionUpsert,
   sourceConfigGet,
   sourceConfigPut,
   sourcingRunLatest,
@@ -54,6 +55,52 @@ function markSearchReady(repoRoot, { domain = "software engineering" } = {}) {
       location: { home: "New York, NY", remote: true, hybrid: true, onsite: false },
     },
   });
+}
+
+function setTrackedCompanies(repoRoot, trackedCompanies) {
+  candidateConfigPatch({
+    repoRoot,
+    name: "targeting",
+    patch: { tracked_companies: trackedCompanies },
+  });
+}
+
+function aiRouteEnv() {
+  return { ANTHROPIC_API_KEY: "test-key" };
+}
+
+function domainHintResponse(companies) {
+  return {
+    content: [{ type: "text", text: JSON.stringify({ companies }) }],
+    model: "domain-hint-test",
+  };
+}
+
+function cachedSupportedBoard(name, slug) {
+  const now = new Date().toISOString();
+  return {
+    company_key: name
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, ""),
+    company_name: name,
+    company_domain: "jobs.lever.co",
+    careers_url: `https://jobs.lever.co/${slug}`,
+    job_board_url: `https://jobs.lever.co/${slug}`,
+    ats_provider: "lever",
+    api_url: `https://api.lever.co/v0/postings/${slug}`,
+    confidence: "high",
+    provenance: [],
+    first_resolved_at: now,
+    last_verified_at: now,
+    last_scan_result: { status: "resolved" },
+    failure_count: 0,
+    zero_job_count: 0,
+    next_refresh_reason: null,
+    status: "supported_ats",
+    proposed_action: "approve-supported-ats",
+    promotable: true,
+  };
 }
 
 function seedNoDeterministicSources(repoRoot) {
@@ -130,6 +177,215 @@ test("prepareFirstSearchSources writes merged SQLite search-sources without comp
     true,
     "generated DB source entries must be merged in"
   );
+});
+
+test("prepareFirstSearchSources only re-syncs stored entries owned by the domain gate", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  const storedRemoteOk = {
+    provider: "remoteok",
+    label: "Stored RemoteOK label",
+    source_type: "board",
+    url: "https://remoteok.com/api",
+    enabled: false,
+    enabled_reason: "domain-gate",
+    stored_only: "preserve me",
+  };
+  const storedUserOwned = {
+    provider: "remotive",
+    label: "Stored Remotive label",
+    source_type: "board",
+    url: "https://remotive.com/api/remote-jobs",
+    enabled: false,
+    stored_only: "user choice",
+  };
+  const orphanedMarker = {
+    provider: "custom",
+    label: "Retired domain-gated board",
+    source_type: "board",
+    url: "https://boards.example.test/retired",
+    enabled: false,
+    enabled_reason: "domain-gate",
+    stored_only: "no generated counterpart",
+  };
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      title_filter: {},
+      location_filter: null,
+      searches: [storedRemoteOk, storedUserOwned, orphanedMarker],
+      tracked_companies: [],
+      source_catalog: {},
+    },
+  });
+
+  await prepareFirstSearchSources({ repoRoot, env: {} });
+
+  const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches;
+  assert.deepEqual(
+    stored.find((source) => source.url === storedRemoteOk.url),
+    { ...storedRemoteOk, enabled: true },
+    "the generated tech gate may update enabled but must preserve every other stored field"
+  );
+  assert.deepEqual(
+    stored.find((source) => source.url === storedUserOwned.url),
+    storedUserOwned,
+    "an unmarked entry is user-owned and must stay disabled"
+  );
+  assert.deepEqual(
+    stored.find((source) => source.url === orphanedMarker.url),
+    orphanedMarker,
+    "a marked entry without a generated counterpart must stay untouched"
+  );
+});
+
+test("prepareFirstSearchSources uses AI domain hints to promote a bare tracked company", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  setTrackedCompanies(repoRoot, ["Neutral Labs"]);
+  const calls = [];
+  const fetchCalls = [];
+  const fetchImpl = async (url) => {
+    fetchCalls.push(url);
+    return new Response(
+      '<html><a href="https://203.0.113.11/jobs.lever.co/neutral-labs">Jobs</a></html>'
+    );
+  };
+
+  const result = await prepareFirstSearchSources({
+    repoRoot,
+    env: aiRouteEnv(),
+    fetchImpl,
+    call: async (options) => {
+      calls.push(options);
+      return domainHintResponse([
+        { name: "Neutral Labs", domain_hint: "https://203.0.113.10/careers" },
+      ]);
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(fetchCalls, ["https://203.0.113.10/careers"]);
+  assert.deepEqual(result.companyBoardResolution.aiHintFill, {
+    requested: 1,
+    hinted: 1,
+    resolved: 1,
+  });
+  assert.equal(result.companyBoardResolution.promoted, 1);
+  assert.deepEqual(result.sourcedScan.tracked_companies, [
+    {
+      name: "Neutral Labs",
+      careers_url: "https://203.0.113.11/jobs.lever.co/neutral-labs",
+    },
+  ]);
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies,
+    result.sourcedScan.tracked_companies
+  );
+});
+
+test("prepareFirstSearchSources skips AI rescue after a cache-hinted company attempt", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  setTrackedCompanies(repoRoot, ["Cached Board Co", "Bare Name Co"]);
+  companyBoardResolutionUpsert({
+    repoRoot,
+    resolution: cachedSupportedBoard("Cached Board Co", "cached-board-co"),
+  });
+  let aiCalled = false;
+
+  const result = await prepareFirstSearchSources({
+    repoRoot,
+    env: aiRouteEnv(),
+    fetchImpl: async () => {
+      throw new Error("fresh cached board must not fetch");
+    },
+    call: async () => {
+      aiCalled = true;
+      return domainHintResponse([]);
+    },
+  });
+
+  assert.equal(aiCalled, false);
+  assert.equal(result.companyBoardResolution.attempted, 1);
+  assert.equal(result.companyBoardResolution.aiHintFill, undefined);
+});
+
+test("prepareFirstSearchSources skips AI rescue when no companies are tracked", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  let aiCalled = false;
+
+  const result = await prepareFirstSearchSources({
+    repoRoot,
+    env: aiRouteEnv(),
+    call: async () => {
+      aiCalled = true;
+      return domainHintResponse([]);
+    },
+  });
+
+  assert.equal(aiCalled, false);
+  assert.deepEqual(result.companyBoardResolution, { attempted: 0, resolved: 0, promoted: 0 });
+});
+
+test("prepareFirstSearchSources degrades gracefully when AI domain-hint fill fails", async () => {
+  for (const [label, response] of [
+    ["throws", new Error("provider unavailable")],
+    ["returns garbage", "not-json"],
+  ]) {
+    const repoRoot = tempRepo();
+    markSearchReady(repoRoot);
+    setTrackedCompanies(repoRoot, [`${label} Co`]);
+
+    const result = await prepareFirstSearchSources({
+      repoRoot,
+      env: aiRouteEnv(),
+      fetchImpl: async () => {
+        throw new Error("no hinted company should reach the resolver");
+      },
+      call: async () => {
+        if (response instanceof Error) throw response;
+        return response;
+      },
+    });
+
+    assert.deepEqual(result.companyBoardResolution.aiHintFill, {
+      requested: 1,
+      hinted: 0,
+      resolved: 0,
+    });
+    assert.equal(result.companyBoardResolution.promoted, 0);
+    assert.deepEqual(result.sourcedScan.tracked_companies, []);
+  }
+});
+
+test("prepareFirstSearchSources caps the AI rescue prompt at 20 bare company names", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  setTrackedCompanies(
+    repoRoot,
+    Array.from({ length: 25 }, (_, index) => `Candidate Company ${index + 1}`)
+  );
+  const calls = [];
+
+  const result = await prepareFirstSearchSources({
+    repoRoot,
+    env: aiRouteEnv(),
+    call: async (options) => {
+      calls.push(options);
+      return domainHintResponse([]);
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(result.companyBoardResolution.aiHintFill.requested, 20);
+  const prompt = calls[0].messages[0].content;
+  const promptInput = JSON.parse(prompt.slice(prompt.indexOf("{")));
+  assert.equal(promptInput.companies.length, 20);
+  assert.equal(promptInput.companies.at(-1), "Candidate Company 20");
+  assert.equal(promptInput.companies.includes("Candidate Company 21"), false);
 });
 
 test("countDeterministicSources counts RSS, supported boards, and ATS while skipping other enabled searches", () => {

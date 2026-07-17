@@ -5,10 +5,16 @@ import { buildWellfoundUrl } from "../providers/wellfound.mjs";
 
 // ---------------------------------------------------------------------------
 // Domain board registry
-// Tech boards (RemoteVibeCodingJobs) are included ONLY when the candidate's
-// domain is explicitly configured as a tech domain.  When candidate.domain is
-// absent or empty, only general aggregators (HiringCafe / LinkedIn / Google
-// Jobs) are generated — no tech-specific boards are assumed.
+// Tech boards (RemoteVibeCodingJobs) are included when the candidate's domain
+// is explicitly configured as a tech domain. An explicit NON-tech domain is
+// authoritative and is never overridden by title inference below. Only when
+// candidate.domain is absent or empty (resume extraction commonly leaves it
+// blank — see .agents/skills/resume-extract/SKILL.md) do we fall back to
+// inferTechFromTargeting(): a keyword heuristic over the candidate's OWN
+// configured targeting titles (never a hardcoded personal/tech default —
+// see the repo's domain-neutrality rule). Only when NEITHER an explicit
+// tech domain NOR tech-shaped titles are present do we generate general
+// aggregators only (HiringCafe / LinkedIn / Google Jobs).
 // ---------------------------------------------------------------------------
 
 const TECH_DOMAINS = new Set([
@@ -19,6 +25,13 @@ const TECH_DOMAINS = new Set([
   "technology",
 ]);
 
+// Keyword heuristic for role_buckets[].titles — deliberately broad (covers
+// engineering, data, ML/AI, and infra-adjacent titles) since it only decides
+// whether to seed tech-only boards as enabled-by-default, never whether to
+// omit/include general aggregators.
+const TECH_TITLE_RE =
+  /\b(engineer(ing)?|developer|software|devops|sre|data|machine learning|ml|ai|cloud|platform|infrastructure|systems?|architect)\b/i;
+
 function isTechDomain(domain = "") {
   const lower = String(domain || "")
     .toLowerCase()
@@ -27,6 +40,24 @@ function isTechDomain(domain = "") {
   if (!lower) return false;
   // Exact match or starts-with for compound domains like "software engineering / data"
   return TECH_DOMAINS.has(lower) || lower.startsWith("software") || lower.startsWith("tech");
+}
+
+// Fallback used only when candidate.domain is absent/empty: collect every
+// title across every role bucket (duplicates count — a title repeated across
+// buckets is a stronger signal, not noise) and require a strict MAJORITY
+// (more than half, and at least one title total) to look tech-shaped before
+// defaulting tech-only boards on. Zero titles configured → false, same as
+// the empty-domain case this replaces.
+function inferTechFromTargeting(targeting) {
+  const titles = [];
+  for (const bucket of targeting?.role_buckets ?? []) {
+    for (const title of bucket?.titles ?? []) {
+      if (typeof title === "string" && title) titles.push(title);
+    }
+  }
+  if (titles.length === 0) return false;
+  const techMatches = titles.filter((title) => TECH_TITLE_RE.test(title)).length;
+  return techMatches > titles.length / 2;
 }
 
 function generatedRecency(targeting) {
@@ -100,7 +131,11 @@ export function buildSearchSources(targeting, profile) {
   // HiringCafe is a general aggregator included for all domains.
   // RemoteVibeCodingJobs is a tech-specific aggregator included only for tech domains.
   const domain = profile.candidate?.domain ?? "";
-  const techDomain = isTechDomain(domain);
+  const hasExplicitDomain = String(domain || "").trim().length > 0;
+  // Explicit domain always decides (including an explicit non-tech domain —
+  // never overridden by title inference); only an absent/empty domain falls
+  // back to reading the candidate's own configured titles.
+  const techDomain = hasExplicitDomain ? isTechDomain(domain) : inferTechFromTargeting(targeting);
 
   // One HiringCafe entry per deduplicated title (order-preserved across buckets).
   const searches = [];
@@ -174,6 +209,12 @@ export function buildSearchSources(targeting, profile) {
   // title_filter/location_filter narrow the broad feed the same way they
   // narrow every other sourced-scan lane. `provider` values are lowercase to
   // match sourced-scanner.mjs's BOARD_PROVIDERS registry keys exactly.
+  // `enabled_reason: "domain-gate"` marks these three as machine-set by this
+  // domain/title gate (not a user's own toggle) — first-search-run.mjs's
+  // mergeSearchSources reads that marker to re-sync `enabled` from a fresh
+  // regeneration even when a stored copy already exists on disk, so a stale
+  // enabled:false from an earlier run (e.g. before candidate.domain/titles
+  // told this gate to turn tech boards on) doesn't shadow it forever.
   const boardAggregators = [
     { provider: "remoteok", label: "RemoteOK", url: "https://remoteok.com/api" },
     { provider: "remotive", label: "Remotive", url: "https://remotive.com/api/remote-jobs" },
@@ -190,6 +231,7 @@ export function buildSearchSources(targeting, profile) {
       label: board.label,
       url: board.url,
       enabled: techDomain,
+      enabled_reason: "domain-gate",
     });
   }
 

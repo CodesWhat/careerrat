@@ -72,6 +72,7 @@ const PROFILE_FIELDS = [
   "linkedin",
   "github",
   "portfolio",
+  "domain",
 ];
 const SECTION_KEYS = ["experience", "education", "skills", "projects", "other"];
 

@@ -25,7 +25,8 @@
         "location": { "type": ["string", "null"] },
         "linkedin": { "type": ["string", "null"] },
         "github": { "type": ["string", "null"] },
-        "portfolio": { "type": ["string", "null"] }
+        "portfolio": { "type": ["string", "null"] },
+        "domain": { "type": "string" }
       }
     },
     "claims": {

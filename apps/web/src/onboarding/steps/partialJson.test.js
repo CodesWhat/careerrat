@@ -72,6 +72,18 @@ describe("parsePartialResumeJson", () => {
 });
 
 describe("extractProgressiveSeed", () => {
+  it("surfaces candidate domain from a streaming partial JSON preview", () => {
+    const partial = parsePartialResumeJson(
+      '{"candidate":{"full_name":"Jane Doe","domain":"industrial design'
+    );
+
+    expect(extractProgressiveSeed(partial)).toEqual({
+      candidate: { full_name: "Jane Doe", domain: "industrial design" },
+      claims: [],
+      sections: null,
+    });
+  });
+
   it("maps candidate, claims, and only section keys present so far", () => {
     const result = extractProgressiveSeed({
       candidate: {

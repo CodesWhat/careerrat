@@ -77,7 +77,8 @@ today's callers:
     "location": null,
     "linkedin": null,
     "github": null,
-    "portfolio": null
+    "portfolio": null,
+    "domain": "software engineering"
   },
   "claims": [
     { "claim": "Led a team of 6 engineers shipping the payments platform rewrite", "evidence": "Source: resume (Experience — Acme Corp)." }
@@ -112,7 +113,14 @@ today's callers:
   rewrite, omit sections, or add facts. If part of the document is illegible, include
   the legible text only; never invent missing content. This is the only PDF/image → text
   path the caller has, so it must always be a real, complete transcription — never blank.
-- `candidate.*` — contact fields only, each `null` when absent from the document.
+- `candidate.*` — contact fields only, each `null` when absent from the document,
+  except `candidate.domain`: one short lowercase phrase naming the candidate's
+  professional domain (e.g. `"software engineering"`, `"nursing"`, `"finance"`),
+  inferred from the visible roles/skills/employers rather than read verbatim off
+  the page. This feeds downstream tech-vs-general board selection
+  (`generate-search-sources.mjs`), so use `""` — never `null` — when the resume
+  genuinely doesn't give enough signal to infer one; do not guess to fill the
+  field.
 - `claims[]` — one entry per genuine accomplishment line (a past-tense achievement
   verb, a metric/number, or a clearly scoped deliverable) drawn from experience or
   project sections — mirrors what `deriveEvidenceSeed()` extracts from plain-text

@@ -114,6 +114,24 @@ test("buildMinimalPdf: escapes parens and backslashes in body text so the conten
   assert.match(bytes.toString("latin1"), /\\\(unbalanced paren/);
 });
 
+test("resume-extract schema accepts an empty candidate domain but rejects null", () => {
+  const schema = JSON.parse(
+    readFileSync(join(REAL_ROOT, "config/resume-extract.schema.json"), "utf8")
+  );
+  const payload = {
+    full_text: "",
+    candidate: { domain: "" },
+    claims: [],
+    sections: { experience: 0, education: 0, skills: 0, projects: 0, other: 0 },
+    targeting_suggestions: { role_buckets: [], keep_signals: [], tracked_companies: [] },
+  };
+
+  assert.equal(validate(payload, schema).valid, true);
+  const invalid = validate({ ...payload, candidate: { domain: null } }, schema);
+  assert.equal(invalid.valid, false);
+  assert.ok(invalid.errors.some((error) => error.path === "candidate.domain"));
+});
+
 // ---------------------------------------------------------------------------
 // INTEGRATION (skipped without ANTHROPIC_API_KEY) — the real skill, over the
 // real embedded runtime, against the fixture PDF above.

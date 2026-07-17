@@ -184,7 +184,10 @@ function domainFillPrompt({ context, names, now }) {
 // resolve to a board downstream (resolveCompanyBoard throws without a URL or
 // domain hint). One batched lookup call fills in what it confidently can;
 // everything else degrades to the seeds exactly as normalized, never thrown.
-async function fillManualDomainHints({ repoRoot, env, context, seeds, call, now }) {
+// Exported so other bounded-AI-gated callers (first-search-run.mjs's
+// company-board backfill rescue) can reuse this exact batched call instead
+// of duplicating the prompt/schema.
+export async function fillManualDomainHints({ repoRoot, env, context, seeds, call, now }) {
   const hintless = seeds.filter((seed) => !seed.domain_hint);
   if (hintless.length === 0) return { seeds, ai: { used: false } };
   if (resolveAIRoute(env).type === "none") return { seeds, ai: { used: false } };

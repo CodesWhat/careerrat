@@ -9,6 +9,7 @@ import {
   sourcingRunStart,
 } from "../db/verbs/sourcing-runs.mjs";
 import { normalizeCompanyKey, resolveCompanyBoard } from "../discovery/company-board-resolver.mjs";
+import { fillManualDomainHints } from "../discovery/company-seeds.mjs";
 import { buildSearchSources } from "../profile/generate-search-sources.mjs";
 import { inferProvider, isBoardProviderSupported } from "../scoring/sourced-scanner.mjs";
 
@@ -21,11 +22,20 @@ import { inferProvider, isBoardProviderSupported } from "../scoring/sourced-scan
 // (cached in company_board_resolutions) without the confirm-first gate ever
 // promoting it into sourced-scan. This backfill promotes only those already-
 // resolved, high-confidence boards — it never invents a domain from a bare
-// name (no slugify(name)+".com" guessing), so a name with no prior
-// resolution is simply left for the user/discover-companies to resolve.
+// name by itself (no slugify(name)+".com" guessing). A name with no prior
+// resolution is normally just left for the user/discover-companies to
+// resolve — UNLESS this run would otherwise attempt zero companies, in which
+// case the bounded AI rescue below (LAYER 3) makes one batched domain-hint
+// attempt before giving up; see aiRescueHintlessCompanies's own comment.
 const COMPANY_BOARD_BACKFILL_BUDGET_MS = 5000;
 const COMPANY_BOARD_BACKFILL_CONCURRENCY = 4;
 const COMPANY_BOARD_BACKFILL_TIMEOUT_MS = 3000;
+// Separate budget for the AI domain-hint rescue call itself, which runs
+// outside (before) the resolution budget above — a bare-name company list
+// has no cached hint to resolve against yet, so there is nothing for the
+// resolution budget to bound until the AI call returns one.
+const COMPANY_BOARD_AI_HINT_TIMEOUT_MS = 8000;
+const COMPANY_BOARD_AI_HINT_MAX_NAMES = 20;
 
 const NO_DETERMINISTIC_SOURCES = Object.freeze({
   code: "NO_DETERMINISTIC_SOURCES",
@@ -136,13 +146,45 @@ function mergeSourceCatalog(existing = {}, generated = {}) {
   return merged;
 }
 
+// mergeEntries above always keeps the EXISTING stored entry on a key
+// collision (never clobbering a user's other edits to that entry) — which
+// means an `enabled:false` seeded by an earlier run (e.g. before
+// candidate.domain/titles told generate-search-sources.mjs's domain gate
+// these tech-only boards should default on) would otherwise shadow a freshly
+// generated `enabled:true` forever. Entries generate-search-sources.mjs
+// marks `enabled_reason: "domain-gate"` are machine-set by that gate, not a
+// user's own toggle, so this post-pass re-syncs ONLY `enabled` (nothing
+// else on the entry) from the freshly generated copy whenever the merged
+// entry still carries that marker. Nothing clears the marker today; a
+// future settings-UI toggle that lets a user pin a board on/off by hand
+// would need to delete `enabled_reason` at that point so this re-sync stops
+// overriding the user's explicit choice.
+function resyncDomainGatedEntries(mergedEntries, generatedEntries, keyForEntry) {
+  const generatedByKey = new Map();
+  for (const entry of Array.isArray(generatedEntries) ? generatedEntries : []) {
+    const key = keyForEntry(entry);
+    if (key) generatedByKey.set(key, entry);
+  }
+  return mergedEntries.map((entry) => {
+    if (entry?.enabled_reason !== "domain-gate") return entry;
+    const key = keyForEntry(entry);
+    const generated = key ? generatedByKey.get(key) : null;
+    if (!generated || generated.enabled === entry.enabled) return entry;
+    return { ...entry, enabled: generated.enabled };
+  });
+}
+
 function mergeSearchSources(existing = {}, generated = {}) {
   return {
     ...generated,
     ...existing,
     title_filter: mergeFilterObject(existing.title_filter, generated.title_filter),
     location_filter: mergeFilterObject(existing.location_filter, generated.location_filter),
-    searches: mergeEntries(existing.searches, generated.searches, sourceEntryKey),
+    searches: resyncDomainGatedEntries(
+      mergeEntries(existing.searches, generated.searches, sourceEntryKey),
+      generated.searches,
+      sourceEntryKey
+    ),
     tracked_companies: mergeEntries(
       existing.tracked_companies,
       generated.tracked_companies,
@@ -217,7 +259,118 @@ function cachedBoardHint({ repoRoot, env, name }) {
   return String(cached?.job_board_url || cached?.careers_url || "").trim();
 }
 
-async function backfillCompanyBoards({ repoRoot, env, fetchImpl, candidateConfig, sourcedScan }) {
+// Shared by both the cache-hinted pass and the AI-rescue pass below: resolve
+// one company name against a URL/domain hint and, on a supported ATS match,
+// promote it into sourced-scan exactly the same way either path found it.
+async function resolveAndPromoteCompanyBoard({ repoRoot, env, fetchImpl, name, hint, timeoutMs }) {
+  try {
+    const result = await resolveCompanyBoard({
+      repoRoot,
+      env,
+      seed: { name, job_board_url: hint },
+      fetchImpl,
+      timeoutMs,
+    });
+    if (result?.status !== "supported_ats") return { resolved: false, promoted: false };
+    let promoted = false;
+    if (result.promotable && result.careersUrl) {
+      companyAtsUpsert({
+        repoRoot,
+        env,
+        entry: { name: result.companyName || name, careers_url: result.careersUrl },
+      });
+      promoted = true;
+    }
+    return { resolved: true, promoted };
+  } catch {
+    // One company's resolution failure/timeout never sinks the batch — it
+    // just stays unresolved until a later first/manual search retries it.
+    return { resolved: false, promoted: false };
+  }
+}
+
+// LAYER 3 rescue: without this, a tracked company with no cached board
+// resolution (the common case for a fresh/legacy install whose companies are
+// just typed/extracted names — see this file's header comment) can never be
+// promoted, so an install with tech titles but no resolvable companies and
+// no enabled RSS/board searches stays permanently stuck on
+// NO_DETERMINISTIC_SOURCES. This makes ONE batched runBoundedAI call (via
+// company-seeds.mjs's fillManualDomainHints — same call discover-companies'
+// manual-seed domain fill already makes; reused here rather than duplicated)
+// to guess a domain for up to COMPANY_BOARD_AI_HINT_MAX_NAMES hintless
+// names, then resolves+promotes whatever came back exactly like the
+// cache-hinted pass above. Gated on the caller only invoking this when the
+// cache-hinted pass attempted nothing AND there is a hintless set to try
+// (backfillCompanyBoards' "otherwise doomed" precondition) — no gating is
+// invented beyond that plus fillManualDomainHints' own resolveAIRoute
+// availability check (it returns { ai: { used: false } } untouched when no
+// AI route is configured, so this degrades to a no-op automatically). The
+// call itself only ever runs inside a user-initiated search run:
+// prepareFirstSearchSources is reached from startSearchRun's
+// search-ready/manual-search/first-search-retry triggers, each starting
+// from an explicit user action (finishing onboarding or clicking search),
+// never a background poll — see AGENTS.md's "no AI spend without intent"
+// rule.
+async function aiRescueHintlessCompanies({ repoRoot, env, call, fetchImpl, names }) {
+  const requested = Math.min(names.length, COMPANY_BOARD_AI_HINT_MAX_NAMES);
+  const seeds = names.slice(0, requested).map((name) => ({ name, domain_hint: "" }));
+
+  let timer;
+  const timedOut = Symbol("ai-hint-timeout");
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(timedOut), COMPANY_BOARD_AI_HINT_TIMEOUT_MS);
+  });
+  let filled;
+  try {
+    const outcome = await Promise.race([
+      fillManualDomainHints({ repoRoot, env, seeds, call }),
+      timeout,
+    ]);
+    filled = outcome === timedOut ? null : outcome;
+  } catch {
+    filled = null;
+  } finally {
+    clearTimeout(timer);
+  }
+
+  const hintedSeeds = filled ? filled.seeds.filter((seed) => seed.domain_hint) : [];
+  const outcome = { requested, hinted: hintedSeeds.length, attempted: 0, resolved: 0, promoted: 0 };
+  if (!hintedSeeds.length) return outcome;
+
+  const deadline = Date.now() + COMPANY_BOARD_BACKFILL_BUDGET_MS;
+  let cursor = 0;
+  async function worker() {
+    while (cursor < hintedSeeds.length) {
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) return;
+      const seed = hintedSeeds[cursor++];
+      outcome.attempted += 1;
+      const result = await resolveAndPromoteCompanyBoard({
+        repoRoot,
+        env,
+        fetchImpl,
+        name: seed.name,
+        hint: seed.domain_hint,
+        timeoutMs: Math.min(COMPANY_BOARD_BACKFILL_TIMEOUT_MS, remaining),
+      });
+      if (result.resolved) outcome.resolved += 1;
+      if (result.promoted) outcome.promoted += 1;
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(COMPANY_BOARD_BACKFILL_CONCURRENCY, hintedSeeds.length) }, worker)
+  );
+  return outcome;
+}
+
+async function backfillCompanyBoards({
+  repoRoot,
+  env,
+  fetchImpl,
+  call,
+  candidateConfig,
+  sourcedScan,
+}) {
   const summary = { attempted: 0, resolved: 0, promoted: 0 };
   const known = knownCompanyNames(sourcedScan);
   const pending = trackedCompanyNames(candidateConfig).filter(
@@ -225,6 +378,7 @@ async function backfillCompanyBoards({ repoRoot, env, fetchImpl, candidateConfig
   );
   if (!pending.length) return summary;
 
+  const hintless = [];
   const deadline = Date.now() + COMPANY_BOARD_BACKFILL_BUDGET_MS;
   let cursor = 0;
 
@@ -234,36 +388,49 @@ async function backfillCompanyBoards({ repoRoot, env, fetchImpl, candidateConfig
       if (remaining <= 0) return;
       const name = pending[cursor++];
       const hint = cachedBoardHint({ repoRoot, env, name });
-      if (!hint) continue;
-      summary.attempted += 1;
-      try {
-        const result = await resolveCompanyBoard({
-          repoRoot,
-          env,
-          seed: { name, job_board_url: hint },
-          fetchImpl,
-          timeoutMs: Math.min(COMPANY_BOARD_BACKFILL_TIMEOUT_MS, remaining),
-        });
-        if (result?.status !== "supported_ats") continue;
-        summary.resolved += 1;
-        if (result.promotable && result.careersUrl) {
-          companyAtsUpsert({
-            repoRoot,
-            env,
-            entry: { name: result.companyName || name, careers_url: result.careersUrl },
-          });
-          summary.promoted += 1;
-        }
-      } catch {
-        // One company's resolution failure/timeout never sinks the batch —
-        // it just stays unresolved until a later first/manual search retries it.
+      if (!hint) {
+        hintless.push(name);
+        continue;
       }
+      summary.attempted += 1;
+      const result = await resolveAndPromoteCompanyBoard({
+        repoRoot,
+        env,
+        fetchImpl,
+        name,
+        hint,
+        timeoutMs: Math.min(COMPANY_BOARD_BACKFILL_TIMEOUT_MS, remaining),
+      });
+      if (result.resolved) summary.resolved += 1;
+      if (result.promoted) summary.promoted += 1;
     }
   }
 
   await Promise.all(
     Array.from({ length: Math.min(COMPANY_BOARD_BACKFILL_CONCURRENCY, pending.length) }, worker)
   );
+
+  // This run is "otherwise doomed" on the company-board axis: the
+  // cache-hinted pass above attempted nothing, but there are hintless names
+  // it never got to try. One bounded AI rescue attempt before giving up.
+  if (summary.attempted === 0 && hintless.length > 0) {
+    const rescue = await aiRescueHintlessCompanies({
+      repoRoot,
+      env,
+      call,
+      fetchImpl,
+      names: hintless,
+    });
+    summary.attempted += rescue.attempted;
+    summary.resolved += rescue.resolved;
+    summary.promoted += rescue.promoted;
+    summary.aiHintFill = {
+      requested: rescue.requested,
+      hinted: rescue.hinted,
+      resolved: rescue.resolved,
+    };
+  }
+
   return summary;
 }
 
@@ -364,6 +531,11 @@ export async function prepareFirstSearchSources({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
+  // Optional AI-call override, threaded down to the LAYER 3 rescue's
+  // fillManualDomainHints call — same override shape company-seeds.mjs's own
+  // callers (and its tests) already use. Production callers omit it and
+  // runBoundedAI falls back to the default callAI.
+  call,
   config = null,
 } = {}) {
   const pathCtx = { repoRoot, env };
@@ -378,6 +550,7 @@ export async function prepareFirstSearchSources({
     repoRoot,
     env,
     fetchImpl,
+    call,
     candidateConfig,
     sourcedScan,
   });
