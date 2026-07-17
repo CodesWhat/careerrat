@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, it } from "node:test";
 import {
+  AUTH_FLOW_USER_AGENT,
+  buildAuthUaFilterPatterns,
   choosePreferredPort,
   DEFAULT_PACKAGED_PORT,
   decideExternalOpen,
@@ -266,6 +268,56 @@ describe("desktop external URL decisions", () => {
         url: "javascript:alert(1)",
       }
     );
+  });
+});
+
+describe("desktop authentication request overrides", () => {
+  it("builds the default auth-host URL patterns when no override is configured", () => {
+    for (const env of [{}, { UNRELATED_SETTING: "ignored" }]) {
+      const patterns = buildAuthUaFilterPatterns(env);
+
+      assert.ok(patterns.includes("https://accounts.google.com/*"));
+      assert.ok(patterns.includes("https://*.clerk.accounts.dev/*"));
+    }
+  });
+
+  it("maps configured exact and suffix auth hosts to Electron URL patterns", () => {
+    const patterns = buildAuthUaFilterPatterns({
+      ROLESTER_AUTH_HOSTS: "login.example.test,.oauth.example.test",
+    });
+
+    assert.ok(patterns.includes("https://login.example.test/*"));
+    assert.ok(patterns.includes("https://*.oauth.example.test/*"));
+  });
+
+  it("drops malformed configured auth hosts while retaining valid entries", () => {
+    const patterns = buildAuthUaFilterPatterns({
+      ROLESTER_AUTH_HOSTS: "login.example.test, bad host, ://bad host, , ., .oauth.example.test",
+    });
+
+    assert.ok(patterns.includes("https://login.example.test/*"));
+    assert.ok(patterns.includes("https://*.oauth.example.test/*"));
+    assert.equal(
+      patterns.some((pattern) => pattern.includes("bad host")),
+      false
+    );
+    assert.equal(
+      patterns.some((pattern) => pattern.includes("://://")),
+      false
+    );
+    assert.equal(patterns.includes("https://*./*"), false);
+  });
+
+  it("uses a Firefox user agent without Chrome or Electron branding", () => {
+    assert.ok(AUTH_FLOW_USER_AGENT.includes("Firefox/"));
+    assert.equal(AUTH_FLOW_USER_AGENT.includes("Chrome"), false);
+    assert.equal(AUTH_FLOW_USER_AGENT.includes("Electron"), false);
+  });
+
+  it("builds default auth-host URL patterns when called without an env argument", () => {
+    assert.doesNotThrow(() => buildAuthUaFilterPatterns());
+    assert.ok(buildAuthUaFilterPatterns().includes("https://accounts.google.com/*"));
+    assert.ok(buildAuthUaFilterPatterns().includes("https://*.clerk.accounts.dev/*"));
   });
 });
 
