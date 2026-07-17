@@ -211,6 +211,22 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
         manualCompanySeeds: true,
         chatHandoffs: chatSkills.some((skill) => DISCOVERY_CHAT_HANDOFF_SKILLS.has(skill)),
       },
+      // The Jobs page's "AI Web Search" lane (src/core/search/ai-web-search.mjs,
+      // mounted at POST /api/search/ai-web-search/run in search-route.mjs)
+      // runs search-jobs via its OWN scoped per-call env override (see that
+      // file's buildAiWebSearchEnv), NOT via search-jobs sitting in this
+      // route's own `skills` allowlist above — DEFAULT_RUNTIME_SKILLS
+      // deliberately excludes search-jobs (see skill-runtime.mjs's own
+      // comment), so gating this flag on `skills.includes("search-jobs")`
+      // would misreport the lane unavailable on every normal install.
+      // Available whenever an AI route is configured AND the operator
+      // hasn't explicitly locked the embedded runtime down
+      // (ROLESTER_RUNTIME_SKILLS === "" — resolveSkillAllowlist's own "empty
+      // means nothing is allowed" contract, which ai-web-search.mjs's own
+      // scoped override respects too rather than punching through it).
+      aiWebSearch: {
+        available: route.type !== "none" && env.ROLESTER_RUNTIME_SKILLS !== "",
+      },
       // Electron's main.mjs sets ROLESTER_DESKTOP_SHELL=1 before booting the
       // embedded server (see apps/desktop/main.mjs's boot()) — this is the
       // only signal the SPA has that it's running inside the desktop shell,

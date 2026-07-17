@@ -12,6 +12,7 @@ vi.mock("../lib/api.js", () => ({
   getApplication: vi.fn(async () => ({ data: null })),
   getCommunications: vi.fn(async () => ({ data: [] })),
   getDashboard: vi.fn(async () => ({ setup: null })),
+  getRuntimeConfig: vi.fn(async () => ({ aiWebSearch: { available: true } })),
   getSearchSources: vi.fn(async () => ({ ready: true })),
   logoImageUrl: ({ domain, name }) => `/logo/${domain || name}`,
   appendCommMessage: vi.fn(async () => ({})),
@@ -22,6 +23,7 @@ vi.mock("../lib/api.js", () => ({
   setAppFields: vi.fn(async () => ({})),
   setAppStatus: vi.fn(async () => ({})),
   startSearchRun: vi.fn(async () => ({ run: { status: "running" } })),
+  runAiWebSearchStream: vi.fn(async () => {}),
 }));
 
 import { JobsPage } from "./JobsPage.jsx";
@@ -375,5 +377,14 @@ describe("JobsPage", () => {
     expect(html).toContain("Mkt P50");
     expect(html).toContain("Your ask");
     expect(html).toContain("$238K");
+  });
+
+  it("renders the wired AI web-search lane instead of the coming-soon stub", () => {
+    const html = renderJobsPage({ route: "/jobs?tab=search" });
+
+    expect(html).toContain("AI Web Search Unavailable");
+    expect(html).toContain("Run AI Web Search");
+    expect(html).toContain("Configure an AI key in Settings to enable this lane.");
+    expect(html).not.toContain("Coming soon");
   });
 });

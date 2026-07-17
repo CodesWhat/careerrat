@@ -9,6 +9,23 @@ tier_2_inputs: [per-source scan results, per-role JD bodies]
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
+## AI Web Search mode
+
+Activated when the kickoff input is JSON containing `"mode": "ai-web-search"` (a `prompts: [{id, text}]` array and a `candidate` context object arrive alongside it in that same input). When this mode is active, run this section instead of STEP 0 through STEP 8 above — it is a separate, read-only execution path through the same skill, not a variant of the file-writing sweep.
+
+**Tool surface is restricted to Read, Glob, Grep, WebFetch, WebSearch, and Skill.** No Bash, no Write, no Edit, no session browser, and no `rolester`/npm CLI commands are available in this mode — the embedded runtime enforces this at the tool-allowlist level, so do not attempt any of them. Everything STEP 0-8 above does through a CLI command, a file write, or the session browser is out of scope here; see "Skip" below.
+
+For each entry in `prompts`, run one or more `WebSearch` calls using that prompt's text (or a close paraphrase) as the query. For every promising result — a real job-posting URL, not an aggregator/search-results page — run `WebFetch` on the URL to pull the actual JD text. Prefer postings you can read directly; drop a result rather than guessing at a JD you couldn't fetch.
+
+Score every posting you keep using the **STEP 3 — Coarse triage** rules above, verbatim — the same `fitScore`/`fitBucket`/`fitBasis`/`ruleFlags`/one-line-reason shape, no new rules invented here. Score against the `candidate` context object in the kickoff input (role buckets with their fit/down signals, excluded companies, comp floor, location posture, work authorization) rather than reading `candidate/targeting.yml` directly — the tracker, application-limits, company-history, and learnings inputs STEP 3 also lists are not reachable in this mode (no CLI, no tracker read). Flags that depend on that unreachable data (`company-history-*`, `app-limit-*`, `oe-candidate`) only apply if you can confirm the underlying condition from the posting itself and the given `candidate` context (e.g. `oe-candidate`'s remote+comp-band+priority conditions); otherwise omit the flag rather than guessing.
+
+**Skip:** everything that writes. No `workspace/jobs/*.md`, no `config/search-sources.yml` watermark, no `rolester activity append`, no tracker write, no `evaluate-job` handoff. The server that invoked this run validates your JSON reply and persists survivors itself — this mode never touches disk or the tracker directly.
+
+Finish with **exactly one** fenced ` ```json ` block matching `config/ai-web-search.schema.json` and nothing else — no prose before or after the fence, since the server is a machine reading exactly that one block. Shape:
+
+- `roles[]` — one entry per posting kept, each with `company`, `title`, `url`, `fit_score`, `fit_bucket`, `fit_basis`, `rule_flags`, `source_evidence` (required), plus whichever of `location`, `comp_text`, `posted_at`, `body_text`, `body_partial` you actually have.
+- `queries_run[]` — `{prompt_id, query}` for every `WebSearch` call you actually ran, so the server can report search coverage back to the user.
+
 ## STEP 0 — Prerequisites
 
 Read all gate files before touching anything else:

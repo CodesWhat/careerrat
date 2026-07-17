@@ -1,8 +1,43 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { streamResumeAi } from "./api.js";
+import { runAiWebSearchStream, streamResumeAi } from "./api.js";
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("runAiWebSearchStream", () => {
+  it("uses the shared split-frame/comment parser for AI lane events", async () => {
+    const encoder = new TextEncoder();
+    const body = new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(": ping\n\nda"));
+        controller.enqueue(
+          encoder.encode(
+            'ta: {"type":"activity","message":"Searching"}\n\n' +
+              'data: {"type":"done","data":{"searched":1,"found":1,"new":1,"duplicates":0,"errors":[]}}'
+          )
+        );
+        controller.close();
+      },
+    });
+    const fetchMock = vi.fn(async () => new Response(body, { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const events = [];
+
+    await runAiWebSearchStream({ onEvent: (event) => events.push(event) });
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/search/ai-web-search/run", {
+      method: "POST",
+      signal: undefined,
+    });
+    expect(events).toEqual([
+      { type: "activity", message: "Searching" },
+      {
+        type: "done",
+        data: { searched: 1, found: 1, new: 1, duplicates: 0, errors: [] },
+      },
+    ]);
+  });
 });
 
 describe("streamResumeAi", () => {

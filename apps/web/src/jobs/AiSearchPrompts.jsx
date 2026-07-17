@@ -38,7 +38,14 @@ function errorMessage(err, fallback) {
   return err instanceof Error ? err.message : fallback;
 }
 
-export function AiSearchPrompts() {
+// `onPromptsState` is an optional callback for the Search tab's AI Web
+// Search launcher card (JobsPage.jsx) — it has no other way to know how many
+// saved (non-blank) prompts exist or whether there are unsaved edits, and
+// duplicating the getSearchPrompts() fetch there would just race this
+// component's own copy. Fired after every rows/dirty/loading change; pass a
+// referentially-stable callback (e.g. via useCallback) to avoid re-firing on
+// every parent render.
+export function AiSearchPrompts({ onPromptsState } = {}) {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
@@ -46,6 +53,14 @@ export function AiSearchPrompts() {
   const [dirty, setDirty] = useState(false);
   const [error, setError] = useState(null);
   const [aiEnabled, setAiEnabled] = useState(false);
+
+  useEffect(() => {
+    onPromptsState?.({
+      count: rows.filter((row) => row.text.trim()).length,
+      dirty,
+      loading,
+    });
+  }, [rows, dirty, loading, onPromptsState]);
 
   useEffect(() => {
     let cancelled = false;

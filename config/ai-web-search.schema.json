@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://rolester.local/schemas/ai-web-search.schema.json",
+  "title": "Rolester search-jobs skill AI Web Search mode output",
+  "type": "object",
+  "required": ["roles", "queries_run"],
+  "additionalProperties": false,
+  "properties": {
+    "roles": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "company",
+          "title",
+          "url",
+          "fit_score",
+          "fit_bucket",
+          "fit_basis",
+          "rule_flags",
+          "source_evidence"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "company": { "type": "string" },
+          "title": { "type": "string" },
+          "url": { "type": "string" },
+          "location": { "type": ["string", "null"] },
+          "comp_text": { "type": ["string", "null"] },
+          "posted_at": { "type": ["string", "null"] },
+          "body_text": { "type": ["string", "null"] },
+          "body_partial": { "type": "boolean" },
+          "fit_score": { "type": "integer", "minimum": 0, "maximum": 100 },
+          "fit_bucket": { "type": "string", "enum": ["high", "med", "stretch"] },
+          "fit_basis": { "type": "string" },
+          "rule_flags": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "source_evidence": { "type": "string" }
+        }
+      }
+    },
+    "queries_run": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["prompt_id", "query"],
+        "additionalProperties": false,
+        "properties": {
+          "prompt_id": { "type": "string" },
+          "query": { "type": "string" }
+        }
+      }
+    }
+  }
+}

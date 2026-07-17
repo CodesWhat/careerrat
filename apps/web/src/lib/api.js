@@ -145,45 +145,18 @@ export async function extractResumeAi(file) {
   return body;
 }
 
-// POST /api/onboard/resume-ai-stream's frozen contract: same raw-bytes-as-
-// body / filename-as-query convention as extractResumeAi above, but the
-// response is text/event-stream instead of buffered JSON. Frames are
-// `data: <json>\n\n`, plus bare `: ping` heartbeat comment lines the server
-// sends to keep the connection alive (skipped, never handed to onEvent).
-// Unlike sse.js's postSSE (event:<name>/data:<json> pairs), there is no
-// separate `event:` line here — each frame's parsed JSON payload carries its
-// own "type" field (saved/activity/json/restart/done/error), so onEvent gets
-// the parsed payload object directly rather than a (type, data) pair.
-// Tolerates a frame (or even a single "data:" line) split across two chunk
-// reads by buffering any trailing partial frame between reader.read() calls.
-// Throws (with .status, once known) on a non-200 response or a body-less
-// response so callers can fall back to the buffered extractResumeAi — same
-// as a static-preview build, which has no streaming route at all and throws
-// immediately below rather than faking an SSE sequence.
-export async function streamResumeAi(file, { onEvent, signal } = {}) {
-  if (isStaticPreviewApi()) {
-    throw new ApiError(501, { error: "resume-ai-stream is unavailable in static preview" });
-  }
-
-  const res = await fetch(`/api/onboard/resume-ai-stream?name=${encodeURIComponent(file.name)}`, {
-    method: "POST",
-    body: file,
-    signal,
-  });
-  if (!res.ok || !res.body) {
-    const text = await res.text().catch(() => "");
-    let body = {};
-    if (text) {
-      try {
-        body = JSON.parse(text);
-      } catch {
-        body = { raw: text };
-      }
-    }
-    throw new ApiError(res.status, body);
-  }
-
-  const reader = res.body.getReader();
+// Shared SSE-over-fetch frame parser: frames are `data: <json>\n\n`, plus
+// bare `: ping` heartbeat comment lines the sender uses to keep the
+// connection alive (skipped, never handed to onEvent). Unlike sse.js's
+// postSSE (event:<name>/data:<json> pairs), there is no separate `event:`
+// line here — each frame's parsed JSON payload carries its own "type" field,
+// so onEvent gets the parsed payload object directly rather than a (type,
+// data) pair. Tolerates a frame (or even a single "data:" line) split across
+// two chunk reads by buffering any trailing partial frame between
+// reader.read() calls. `body` is a ReadableStream (a Response's `.body`) —
+// callers own checking `res.ok`/`res.body` before handing it in here.
+async function parseSseStream(body, { onEvent } = {}) {
+  const reader = body.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
 
@@ -214,6 +187,77 @@ export async function streamResumeAi(file, { onEvent, signal } = {}) {
   // A stream that ends without one final trailing blank line still leaves
   // its last frame sitting in `buffer` — flush it rather than dropping it.
   if (buffer.trim()) emitFrame(buffer);
+}
+
+// POST /api/onboard/resume-ai-stream's frozen contract: same raw-bytes-as-
+// body / filename-as-query convention as extractResumeAi above, but the
+// response is text/event-stream instead of buffered JSON, parsed by
+// parseSseStream above (frame payloads carry their own "type" field:
+// saved/activity/json/restart/done/error). Throws (with .status, once known)
+// on a non-200 response or a body-less response so callers can fall back to
+// the buffered extractResumeAi — same as a static-preview build, which has
+// no streaming route at all and throws immediately below rather than faking
+// an SSE sequence.
+export async function streamResumeAi(file, { onEvent, signal } = {}) {
+  if (isStaticPreviewApi()) {
+    throw new ApiError(501, { error: "resume-ai-stream is unavailable in static preview" });
+  }
+
+  const res = await fetch(`/api/onboard/resume-ai-stream?name=${encodeURIComponent(file.name)}`, {
+    method: "POST",
+    body: file,
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    let body = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { raw: text };
+      }
+    }
+    throw new ApiError(res.status, body);
+  }
+
+  await parseSseStream(res.body, { onEvent });
+}
+
+// POST /api/search/ai-web-search/run — the Jobs > Search tab's AI web-search
+// lane. Same `data: <json>\n\n` frame / `: ping` heartbeat contract as
+// resume-ai-stream above (parsed by the same parseSseStream), but this
+// route's own payload shapes: {type:"activity", message} progress lines,
+// {type:"done", data:{searched, found, new, duplicates, errors}}, and
+// {type:"error", message}. No request body — the server reads the saved
+// search prompts itself (see getSearchPrompts/saveSearchPrompts above).
+// Pre-stream failures are ordinary ApiError throws: 409 while a run is
+// already in flight, other 4xx/5xx for no-AI/no-prompts/lean-downshift with
+// the API's standard error shape. Static preview has no run route at all —
+// same immediate-throw contract as streamResumeAi above.
+export async function runAiWebSearchStream({ onEvent, signal } = {}) {
+  if (isStaticPreviewApi()) {
+    throw new ApiError(501, { error: "ai-web-search run is unavailable in static preview" });
+  }
+
+  const res = await fetch("/api/search/ai-web-search/run", {
+    method: "POST",
+    signal,
+  });
+  if (!res.ok || !res.body) {
+    const text = await res.text().catch(() => "");
+    let body = {};
+    if (text) {
+      try {
+        body = JSON.parse(text);
+      } catch {
+        body = { raw: text };
+      }
+    }
+    throw new ApiError(res.status, body);
+  }
+
+  await parseSseStream(res.body, { onEvent });
 }
 
 export async function extractResumeDocx(file) {

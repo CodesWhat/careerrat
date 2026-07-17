@@ -103,7 +103,7 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
     {
       repoRoot,
       env: {
-        ROLESTER_RUNTIME_SKILLS: "evaluate-job,answer-question",
+        ROLESTER_RUNTIME_SKILLS: "evaluate-job,answer-question,search-jobs",
         ROLESTER_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies,search-jobs",
         ANTHROPIC_API_KEY: "sk-ant-test",
       },
@@ -116,7 +116,7 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
     assert.match(res.headers.get("cache-control") || "", /no-store/);
     const body = await res.json();
     assert.deepEqual(body, {
-      skills: ["evaluate-job", "answer-question"],
+      skills: ["evaluate-job", "answer-question", "search-jobs"],
       chatSkills: ["ingest-profile", "research-boards", "discover-companies", "search-jobs"],
       ai: { available: true, route: "byok" },
       runtime: {
@@ -132,6 +132,7 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
         manualCompanySeeds: true,
         chatHandoffs: true,
       },
+      aiWebSearch: { available: true },
       desktop: { authAvailable: false },
     });
     assert.doesNotMatch(JSON.stringify(body), /sk-ant-test|ANTHROPIC_API_KEY|APPLE|PASSWORD/);
@@ -172,6 +173,7 @@ test("GET /api/runtime/config: reports no AI route and no discovery chat handoff
         manualCompanySeeds: true,
         chatHandoffs: false,
       },
+      aiWebSearch: { available: false },
       desktop: { authAvailable: false },
     });
   } finally {

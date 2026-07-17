@@ -70,6 +70,13 @@ export function discoverSkillDirs(repoRoot) {
 // string explicitly set in env means "nothing is allowed" — only an
 // *unset* env var falls back to the default, so an operator can
 // deliberately lock the runtime down.
+//
+// search-jobs is deliberately NOT in this default: unlike the skills above,
+// it's a WebSearch-capable lane (see runtime-tools.mjs's "chat" profile) —
+// letting an operator's blanket ROLESTER_RUNTIME_SKILLS opt-in reach it
+// would hand every one-shot run open-ended web access it never asked for.
+// Only the Jobs page's AI Web Search lane may run it, via a scoped per-call
+// env override — see ai-web-search.mjs's own call into runSkillStream.
 const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question,tailor-application,resume-extract";
 
 // Shared allowlist-resolution shape both the one-shot embedded runtime

@@ -55,6 +55,7 @@ export const USAGE_OPERATIONS = {
   "research:companies": { lean: "skip", standard: "run", full: "run" },
   "interview:packet:deep": { lean: "downshift", standard: "run", full: "run" },
   "search:sweep:broad": { lean: "downshift", standard: "run", full: "run" },
+  "search:ai-web": { lean: "downshift", standard: "run", full: "run" },
   "agent:fanout": { lean: "downshift", standard: "run", full: "run" },
 };
 

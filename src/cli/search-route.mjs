@@ -30,15 +30,27 @@
 //   PUT  /api/search/prompts   { prompts:[{id?, text}] } — validates non-empty
 //                              text, persists (mints ids for new rows), and
 //                              returns the stored list.
+//   POST /api/search/ai-web-search/run
+//                              { promptIds?: string[] } — runs the search-jobs
+//                              skill's AI Web Search mode via the embedded
+//                              runtime (src/core/search/ai-web-search.mjs) and
+//                              streams progress as SSE (activity/done/error
+//                              frames, 10s ping heartbeat — see that route's
+//                              own comment below for the full frame
+//                              contract). 409 while a run is already in
+//                              flight; 501/422 pre-stream if no AI route is
+//                              configured / there are no saved prompts to run.
 //
 // `fetchImpl` is dependency-injected (defaults to the real global `fetch`)
 // the same way `runSkillStream` is in skill-run-route.mjs, so tests can drive
 // a scan against a stub network instead of hitting real ATS APIs.
 
 import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
+import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
 import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
 import { countDeterministicSources } from "../core/onboarding/first-search-run.mjs";
+import { runAiWebSearch as defaultRunAiWebSearch } from "../core/search/ai-web-search.mjs";
 import {
   generateSearchPrompts,
   getSearchPrompts,
@@ -89,11 +101,20 @@ function toSearchResultOffer(row = {}) {
   };
 }
 
-export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetchImpl = fetch }) {
+export function mountSearchRoutes({
+  addRoute,
+  repoRoot,
+  env = process.env,
+  fetchImpl = fetch,
+  runAiWebSearch = defaultRunAiWebSearch,
+}) {
   const pathCtx = { repoRoot, env };
 
   // A single in-module flag is enough here — see the header comment.
   let scanning = false;
+  // Same reasoning, separate flag: the deterministic sweep and the AI web
+  // search lane are independent operations and may legitimately overlap.
+  let aiWebSearchRunning = false;
 
   // -------------------------------------------------------------------------
   // POST /api/search/scan
@@ -285,6 +306,157 @@ export function mountSearchRoutes({ addRoute, repoRoot, env = process.env, fetch
       sendJson(res, 200, { ok: true, data: { prompts: saved.prompts } });
     } catch (err) {
       sendSearchPromptsError(res, err);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // POST /api/search/ai-web-search/run — { promptIds?: string[] }
+  //
+  // Runs the search-jobs skill's AI Web Search mode (see that SKILL.md's own
+  // section) via the embedded one-shot runtime, streaming progress as
+  // Server-Sent Events — the same `data: <json>\n\n` framing, 10s `: ping`
+  // heartbeat, and res.on("close") close-guard as
+  // POST /api/onboard/resume-ai-stream (see onboard-route.mjs's own header
+  // comment on that exact mechanics), but a narrower frame set: there's no
+  // upload step here, so no "saved" frame; the model's reply is buffered and
+  // validated entirely server-side (runAiWebSearch), so no "json"/"restart"
+  // frame either.
+  //
+  //   {"type":"activity","message":...}          short human progress lines
+  //   {"type":"done","data":{searched,found,new,duplicates,errors}}
+  //                                               terminal — the exact shape
+  //                                               runAiWebSearch() returns
+  //   {"type":"error","message":...,"status":n}  terminal, an unexpected
+  //                                               failure (not the normal
+  //                                               "model produced nothing
+  //                                               usable" case, which comes
+  //                                               back as a "done" frame with
+  //                                               a non-empty errors[])
+  //
+  // Unlike resume-ai-stream, "no AI route configured" and "no saved prompts"
+  // are both zero-AI-call checks (an env read and a DB read) resolvable
+  // BEFORE opening the SSE response, so they come back as a real HTTP status
+  // (501 / 422) here rather than an in-band error frame. The per-mode prompt
+  // cap (modes.mjs's "search:ai-web" op — lean=1, standard=3, full=5) is
+  // NOT a rejection: the op table never returns "skip" for it, only
+  // "downshift" (lean) or "run" — lean mode narrows how many saved prompts
+  // run, it never blocks the feature outright, so there's no corresponding
+  // pre-stream failure for it; runAiWebSearch() applies the cap itself and
+  // narrates it as the first "activity" frame once the stream is open.
+  //
+  // Single-concurrent-run guard: a second call while one is in flight gets a
+  // 409, the same shape as POST /api/search/scan's own `scanning` guard
+  // above.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/search/ai-web-search/run", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { ok: false, error: { message: err.message } });
+      return;
+    }
+
+    const promptIds = Array.isArray(body?.promptIds)
+      ? body.promptIds.map((id) => String(id)).filter(Boolean)
+      : undefined;
+
+    if (aiWebSearchRunning) {
+      sendJson(res, 409, {
+        ok: false,
+        error: { message: "an AI web search is already running" },
+      });
+      return;
+    }
+
+    const route = resolveAIRoute(env);
+    if (route.type === "none") {
+      sendJson(res, 501, { ok: false, error: { message: route.error } });
+      return;
+    }
+
+    let storedPrompts;
+    try {
+      storedPrompts = getSearchPrompts({ repoRoot, env }).prompts;
+    } catch (err) {
+      sendSearchPromptsError(res, err);
+      return;
+    }
+    const requested = promptIds?.length
+      ? storedPrompts.filter((p) => promptIds.includes(p.id))
+      : storedPrompts;
+    if (!requested.length) {
+      sendJson(res, 422, {
+        ok: false,
+        error: { message: "No saved AI search prompts to run — generate or add some first." },
+      });
+      return;
+    }
+
+    // Client-disconnect guard: `res.on("close")`, not `req.on("close")` —
+    // see skill-run-route.mjs's own comment on this exact choice. The
+    // AbortController's signal is threaded into runAiWebSearch (and from
+    // there into runSkillStream's own SDK-query abort) so a disconnect
+    // actually stops the underlying model call instead of just silencing
+    // the now-unreachable SSE writes below.
+    let closed = false;
+    const controller = new AbortController();
+    res.on("close", () => {
+      closed = true;
+      controller.abort();
+    });
+
+    res.writeHead(200, {
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "Cache-Control": "no-store",
+      Connection: "keep-alive",
+    });
+    res.flushHeaders?.();
+
+    function emit(payload) {
+      if (closed) return;
+      try {
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      } catch {
+        closed = true;
+      }
+    }
+
+    const heartbeat = setInterval(() => {
+      if (closed) return;
+      try {
+        res.write(": ping\n\n");
+      } catch {
+        closed = true;
+      }
+    }, 10000);
+
+    aiWebSearchRunning = true;
+    try {
+      const result = await runAiWebSearch({
+        repoRoot,
+        env,
+        promptIds,
+        onProgress: emit,
+        signal: controller.signal,
+      });
+      emit({ type: "done", data: result });
+    } catch (err) {
+      emit({
+        type: "error",
+        message: err?.message || "AI web search failed unexpectedly.",
+        status: err?.code === "NO_DATABASE" ? 409 : err?.code === "NO_SAVED_PROMPTS" ? 422 : 500,
+      });
+    } finally {
+      aiWebSearchRunning = false;
+      clearInterval(heartbeat);
+      if (!closed) {
+        try {
+          res.end();
+        } catch {
+          // client already gone
+        }
+      }
     }
   });
 }
