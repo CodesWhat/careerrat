@@ -96,7 +96,7 @@ test("buildSearchSources: location_filter.always_allow and block are empty array
   assert.deepEqual(result.location_filter.block, []);
 });
 
-test("buildSearchSources: every searches item has provider, label, enabled===true, and a query", () => {
+test("buildSearchSources: every searches item has provider, label, and a query/url/rssUrl; non-board items are enabled by default", () => {
   const result = buildSearchSources(targeting, profile);
   for (const item of result.searches) {
     assert.ok(
@@ -107,7 +107,12 @@ test("buildSearchSources: every searches item has provider, label, enabled===tru
       typeof item.label === "string" && item.label.length > 0,
       `missing label: ${JSON.stringify(item)}`
     );
-    assert.equal(item.enabled, true, `enabled must be true: ${JSON.stringify(item)}`);
+    // Board-wide aggregator entries (RemoteOK/Remotive/Working Nomads) are seeded
+    // present-but-disabled for non-tech domains (this fixture has no candidate.domain)
+    // so any domain can flip them on later; every other generated entry stays enabled.
+    if (item.source_type !== "board") {
+      assert.equal(item.enabled, true, `enabled must be true: ${JSON.stringify(item)}`);
+    }
     // Every item must satisfy anyOf: query, url, or rssUrl.
     const hasSource = "query" in item || "url" in item || "rssUrl" in item;
     assert.ok(hasSource, `item missing query/url/rssUrl: ${JSON.stringify(item)}`);
@@ -136,6 +141,40 @@ test("buildSearchSources: exactly one RemoteVibeCodingJobs entry with rssUrl whe
   assert.ok(
     typeof rvEntries[0].rssUrl === "string" && rvEntries[0].rssUrl.length > 0,
     "rssUrl must be a non-empty string"
+  );
+});
+
+test("buildSearchSources: seeds exactly three enabled lowercase board providers for tech", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    candidate: { ...profile.candidate, domain: "software engineering" },
+  });
+  const boards = result.searches.filter((source) => source.source_type === "board");
+
+  assert.deepEqual(
+    boards.map(({ provider, source_type, enabled }) => ({ provider, source_type, enabled })),
+    [
+      { provider: "remoteok", source_type: "board", enabled: true },
+      { provider: "remotive", source_type: "board", enabled: true },
+      { provider: "workingnomads", source_type: "board", enabled: true },
+    ]
+  );
+});
+
+test("buildSearchSources: seeds the same three boards disabled for healthcare", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    candidate: { ...profile.candidate, domain: "nursing and healthcare" },
+  });
+  const boards = result.searches.filter((source) => source.source_type === "board");
+
+  assert.deepEqual(
+    boards.map(({ provider, source_type, enabled }) => ({ provider, source_type, enabled })),
+    [
+      { provider: "remoteok", source_type: "board", enabled: false },
+      { provider: "remotive", source_type: "board", enabled: false },
+      { provider: "workingnomads", source_type: "board", enabled: false },
+    ]
   );
 });
 

@@ -109,7 +109,12 @@ function runFromTargeting() {
     return 1;
   }
   const baseline = buildSearchSources(targeting, profile);
-  if (!Array.isArray(baseline.searches) || baseline.searches.length === 0) {
+  // Board-wide aggregator entries (RemoteOK/Remotive/Working Nomads) are seeded
+  // unconditionally by buildSearchSources — even for an unfinished onboarding
+  // with no role_buckets — so they alone must not satisfy this "targeting has
+  // role titles" guard; only role-derived entries count.
+  const roleDerivedSearches = (baseline.searches ?? []).filter((s) => s.source_type !== "board");
+  if (roleDerivedSearches.length === 0) {
     return failFromTargeting(
       "No role titles found in candidate targeting; finish onboarding before generating search sources."
     );

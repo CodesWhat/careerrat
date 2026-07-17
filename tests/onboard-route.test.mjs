@@ -745,6 +745,7 @@ describe("GET /api/onboard/state", () => {
       assert.deepEqual(body.deterministicSources, {
         attempted: 1,
         rss: 1,
+        boards: 0,
         supportedAtsCompanies: 0,
         skipped: 0,
       });
@@ -792,6 +793,7 @@ describe("GET /api/onboard/state", () => {
       assert.deepEqual(body.deterministicSources, {
         attempted: 0,
         rss: 0,
+        boards: 0,
         supportedAtsCompanies: 0,
         skipped: 2,
       });
@@ -826,6 +828,7 @@ describe("GET /api/onboard/state", () => {
       assert.deepEqual(body.deterministicSources, {
         attempted: 1,
         rss: 0,
+        boards: 0,
         supportedAtsCompanies: 1,
         skipped: 0,
       });

@@ -3,11 +3,31 @@ import { setTimeout as delay } from "node:timers/promises";
 
 import { userPath } from "../paths/workspace.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
+import { fetchRemoteOk } from "../providers/remoteok.mjs";
+import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
+import { fetchWorkingNomads } from "../providers/workingnomads.mjs";
 import { classifyRoleFamily } from "../tracker/outcome-analysis.mjs";
 import { normalizeCompanyRoleKey } from "../tracker/tracker-data.mjs";
 
 export { normalizeCompanyRoleKey };
+
+// --- Board-wide aggregator feed registry ------------------------------------
+// Board sources (config/search-sources.yml entries with source_type:"board") are
+// broad, unauthenticated job-board feeds — unlike tracked_companies (one company's
+// ATS) or rss sources (one saved search's feed), a board entry returns the whole
+// board and relies on the entry's title_filter/location_filter to narrow it. Kept
+// as a small registry (rather than inline in scanBoards) so countDeterministicSources
+// in first-search-run.mjs can check provider support without duplicating the list.
+const BOARD_PROVIDERS = {
+  remoteok: fetchRemoteOk,
+  remotive: fetchRemotive,
+  workingnomads: fetchWorkingNomads,
+};
+
+export function isBoardProviderSupported(provider) {
+  return Boolean(BOARD_PROVIDERS[String(provider || "").toLowerCase()]);
+}
 
 // --- Cold-family down-weight (outcome-aware scoring) ---------------------------
 // The coarse scanner scores on title/keep-signal matching and is otherwise blind
@@ -525,6 +545,31 @@ export async function scanSearchSources(searchSources, { fetchImpl = fetch } = {
       );
     } catch (error) {
       errors.push({ company: source.label || source.provider || "rss", error: error.message });
+    }
+  }
+  return { offers: results, errors };
+}
+
+// Scan the enabled board-wide aggregator sources (source_type:"board" with a
+// supported `provider`) from a parsed config/search-sources.yml. Sibling of
+// scanSearchSources — same run path, same enabled-filter/error-isolation shape —
+// but dispatches to BOARD_PROVIDERS instead of the RSS parser. Offers are tagged
+// `source: "<provider>-board"`, mirroring scanCompanies' `"<provider>-api"` tag.
+export async function scanBoards(searchSources, { fetchImpl = fetch } = {}) {
+  const sources = (searchSources?.sources || searchSources?.searches || [])
+    .filter((s) => s && s.enabled !== false)
+    .filter((s) => s.source_type === "board" && isBoardProviderSupported(s.provider));
+
+  const results = [];
+  const errors = [];
+  for (const source of sources) {
+    const providerId = String(source.provider || "").toLowerCase();
+    const provider = BOARD_PROVIDERS[providerId];
+    try {
+      const offers = await provider(source, fetchImpl);
+      results.push(...offers.map((offer) => ({ ...offer, source: `${providerId}-board` })));
+    } catch (error) {
+      errors.push({ company: source.label || providerId, error: error.message });
     }
   }
   return { offers: results, errors };

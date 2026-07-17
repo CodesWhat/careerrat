@@ -55,7 +55,9 @@ import {
   buildTitleFilter,
   computeFamilyOutcomes,
   filterAndDedupeOffers,
+  isBoardProviderSupported,
   loadScannerConfig,
+  scanBoards,
   scanCompanies,
   scanSearchSources,
   scoreSourcedOffer,
@@ -118,7 +120,9 @@ function searchListKey(config) {
 }
 
 function isFetchableSearchSource(source) {
-  return source && source.enabled !== false && (source.source_type === "rss" || source.rssUrl);
+  if (!source || source.enabled === false) return false;
+  if (source.source_type === "rss" || source.rssUrl) return true;
+  return source.source_type === "board" && isBoardProviderSupported(source.provider);
 }
 
 function stampSearchSourceWatermarks(config, savedAt) {
@@ -228,18 +232,26 @@ export async function runSourcedScan({
 
   const scanned = await scanCompanies(config, { fetchImpl, companyFilter });
 
-  // Also scan the RSS-bearing sources from config/search-sources.yml (the
-  // file setup-searches writes). This wires the search-sources pipeline into
-  // the sweep; browser/auth source types (HiringCafe, Wellfound, authenticated
-  // LinkedIn/Indeed) are agent-driven per the Browser Automation Contract and
-  // not fetched here.
+  // Also scan the RSS-bearing and board-wide-aggregator sources from
+  // config/search-sources.yml (the file setup-searches writes). This wires the
+  // search-sources pipeline into the sweep; browser/auth source types
+  // (HiringCafe, Wellfound, authenticated LinkedIn/Indeed) are agent-driven
+  // per the Browser Automation Contract and not fetched here.
   let sourcedFromSearches = { offers: [], errors: [] };
   let searchSources = null;
   if (!companyFilter && !standaloneConfigMode) {
     try {
       searchSources = loadSearchSourcesForRun(pathCtx);
-      if (searchSources)
-        sourcedFromSearches = await scanSearchSources(searchSources, { fetchImpl });
+      if (searchSources) {
+        const [rssResult, boardResult] = await Promise.all([
+          scanSearchSources(searchSources, { fetchImpl }),
+          scanBoards(searchSources, { fetchImpl }),
+        ]);
+        sourcedFromSearches = {
+          offers: [...rssResult.offers, ...boardResult.offers],
+          errors: [...rssResult.errors, ...boardResult.errors],
+        };
+      }
     } catch (error) {
       sourcedFromSearches.errors.push({ company: "search-sources.yml", error: error.message });
     }

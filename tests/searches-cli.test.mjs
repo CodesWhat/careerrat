@@ -109,3 +109,14 @@ test("rolester searches --from-targeting writes generated DB source config witho
   assert.ok(stored.data.searches.length > 0);
   assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
 });
+
+test("rolester searches --from-targeting rejects a generated baseline containing only boards", () => {
+  const home = tempHome();
+  assert.equal(runData(["init"], home).status, 0);
+
+  const generated = runSearches(["--from-targeting", "--json"], home);
+
+  assert.equal(generated.status, 1);
+  assert.match(generated.stderr || generated.stdout, /no role titles/i);
+  assert.equal(sourceConfig(home).stored, false);
+});

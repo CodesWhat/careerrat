@@ -165,6 +165,34 @@ export function buildSearchSources(targeting, profile) {
     });
   }
 
+  // Board-wide aggregator feeds (RemoteOK / Remotive / Working Nomads): unlike
+  // RemoteVibeCodingJobs/Wellfound above (tech-only, omitted entirely for other
+  // domains), these three are seeded for EVERY domain so a fresh install always
+  // has at least one working deterministic source (see AGENTS.md's
+  // deterministic-first-search contract) — just enabled by default only for
+  // tech domains. Any domain can flip one on in config/search-sources.yml;
+  // title_filter/location_filter narrow the broad feed the same way they
+  // narrow every other sourced-scan lane. `provider` values are lowercase to
+  // match sourced-scanner.mjs's BOARD_PROVIDERS registry keys exactly.
+  const boardAggregators = [
+    { provider: "remoteok", label: "RemoteOK", url: "https://remoteok.com/api" },
+    { provider: "remotive", label: "Remotive", url: "https://remotive.com/api/remote-jobs" },
+    {
+      provider: "workingnomads",
+      label: "Working Nomads",
+      url: "https://www.workingnomads.com/api/exposed_jobs/",
+    },
+  ];
+  for (const board of boardAggregators) {
+    searches.push({
+      provider: board.provider,
+      source_type: "board",
+      label: board.label,
+      url: board.url,
+      enabled: techDomain,
+    });
+  }
+
   // --- source_catalog (fixed reference) ---
   const source_catalog = {
     aggregators: ["HiringCafe", "RemoteVibeCodingJobs", "Wellfound", "LinkedIn", "Google Jobs"],

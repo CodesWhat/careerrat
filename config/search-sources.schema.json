@@ -23,7 +23,7 @@
           "provider": { "type": "string" },
           "source_type": {
             "type": "string",
-            "enum": ["url-query", "rss", "ats", "aggregator", "manual-auth", "browser"]
+            "enum": ["url-query", "rss", "ats", "aggregator", "manual-auth", "browser", "board"]
           },
           "auth": {
             "type": "boolean",

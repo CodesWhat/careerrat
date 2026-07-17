@@ -132,7 +132,7 @@ test("prepareFirstSearchSources writes merged SQLite search-sources without comp
   );
 });
 
-test("countDeterministicSources separates fetchable RSS and supported ATS from skipped sources", () => {
+test("countDeterministicSources counts RSS, supported boards, and ATS while skipping other enabled searches", () => {
   const counts = countDeterministicSources({
     searchSources: {
       searches: [
@@ -140,6 +140,9 @@ test("countDeterministicSources separates fetchable RSS and supported ATS from s
         { source_type: "browser", url: "https://hiring.cafe/search?q=ai", enabled: true },
         { source_type: "auth", url: "https://www.linkedin.com/jobs/search", enabled: true },
         { url: "https://example.test/jobs?query=ai", enabled: true },
+        { source_type: "board", provider: "RemoteOK", enabled: true },
+        { source_type: "board", provider: "remotive", enabled: false },
+        { source_type: "board", provider: "unknown", enabled: true },
         { source_type: "rss", rssUrl: "https://example.test/off.xml", enabled: false },
       ],
     },
@@ -152,10 +155,30 @@ test("countDeterministicSources separates fetchable RSS and supported ATS from s
   });
 
   assert.deepEqual(counts, {
-    attempted: 3,
+    attempted: 4,
     rss: 1,
+    boards: 1,
     supportedAtsCompanies: 2,
-    skipped: 3,
+    skipped: 4,
+  });
+});
+
+test("countDeterministicSources accepts sources as the search list key", () => {
+  const counts = countDeterministicSources({
+    searchSources: {
+      sources: [
+        { source_type: "board", provider: "workingnomads", enabled: true },
+        { source_type: "rss", rssUrl: "https://example.test/jobs.xml", enabled: true },
+      ],
+    },
+  });
+
+  assert.deepEqual(counts, {
+    attempted: 2,
+    rss: 1,
+    boards: 1,
+    supportedAtsCompanies: 0,
+    skipped: 0,
   });
 });
 

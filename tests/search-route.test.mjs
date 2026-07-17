@@ -529,6 +529,7 @@ test("GET /api/search/sources: reports deterministic attempted source counts sep
     assert.deepEqual(body.deterministicSources, {
       attempted: 3,
       rss: 1,
+      boards: 0,
       supportedAtsCompanies: 2,
       skipped: 3,
     });

@@ -419,6 +419,94 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
   }
 });
 
+test("DB mode merges board offers, filters their titles, and stamps board watermarks", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: ["Director of IT", "Applied AI"], negative: [] },
+        location_filter: null,
+        tracked_companies: [
+          { name: "Example Systems", careers_url: "https://jobs.lever.co/example" },
+        ],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "remoteok",
+            source_type: "board",
+            label: "RemoteOK",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl: async (url) => {
+        if (String(url).includes("api.lever.co")) {
+          return new Response(
+            JSON.stringify([
+              {
+                text: "Director of IT",
+                hostedUrl: "https://jobs.lever.co/example/director-it",
+                categories: { location: "Remote" },
+              },
+            ]),
+            { status: 200 }
+          );
+        }
+        if (String(url) === "https://remoteok.com/api") {
+          return [
+            { last_updated: 1_720_000_000, legal: "metadata" },
+            {
+              position: "Applied AI Engineer",
+              url: "https://jobs.example.test/applied-ai",
+              company: "Example Labs",
+              location: "Remote",
+            },
+            {
+              position: "Sales Manager",
+              url: "https://jobs.example.test/sales",
+              company: "Example Sales",
+              location: "Remote",
+            },
+          ];
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+      write: true,
+      intake: false,
+    });
+
+    assert.equal(summary.scanned, 3);
+    assert.equal(summary.new, 2);
+    assert.equal(summary.filteredTitle, 1);
+    assert.deepEqual(
+      summary.offers.map(({ title, source }) => ({ title, source })),
+      [
+        { title: "Director of IT", source: "lever-api" },
+        { title: "Applied AI Engineer", source: "remoteok-board" },
+      ]
+    );
+
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.match(stored.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("explicit config mode in a DB workspace captures output without mutating DB product state", async () => {
   const repoRoot = tempRepo();
   try {

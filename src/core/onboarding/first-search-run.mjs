@@ -10,7 +10,7 @@ import {
 } from "../db/verbs/sourcing-runs.mjs";
 import { normalizeCompanyKey, resolveCompanyBoard } from "../discovery/company-board-resolver.mjs";
 import { buildSearchSources } from "../profile/generate-search-sources.mjs";
-import { inferProvider } from "../scoring/sourced-scanner.mjs";
+import { inferProvider, isBoardProviderSupported } from "../scoring/sourced-scanner.mjs";
 
 // Bounded backfill for automatic company-board resolution ahead of the first
 // search: on a fresh install, targeting.tracked_companies is just a list of
@@ -164,6 +164,12 @@ function isEnabled(entry = {}) {
 
 function isFetchableRss(entry = {}) {
   return isEnabled(entry) && (entry.source_type === "rss" || Boolean(entry.rssUrl));
+}
+
+function isFetchableBoard(entry = {}) {
+  return (
+    isEnabled(entry) && entry.source_type === "board" && isBoardProviderSupported(entry.provider)
+  );
 }
 
 function supportedAtsCompanies(sourcedScan = {}) {
@@ -342,11 +348,13 @@ async function startSearchRun({
 export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
   const enabledSearches = searchList(searchSources).filter(isEnabled);
   const rss = enabledSearches.filter(isFetchableRss).length;
+  const boards = enabledSearches.filter(isFetchableBoard).length;
   const supportedAts = supportedAtsCompanies(sourcedScan).length;
-  const skipped = enabledSearches.length - rss;
+  const skipped = enabledSearches.length - rss - boards;
   return {
-    attempted: rss + supportedAts,
+    attempted: rss + boards + supportedAts,
     rss,
+    boards,
     supportedAtsCompanies: supportedAts,
     skipped,
   };
