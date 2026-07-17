@@ -19,13 +19,24 @@
 // comment) — print "SMOKE OK <url>" and exit 0 (no interaction) once both
 // pass. The scripted verification path for `npx electron . --smoke`.
 
-import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell } from "electron";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  Menu,
+  nativeImage,
+  nativeTheme,
+  session,
+  shell,
+} from "electron";
 import { existsSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
 import {
+  AUTH_FLOW_USER_AGENT,
+  buildAuthUaFilterPatterns,
   choosePreferredPort,
   decideExternalOpen,
   resolveDesktopRuntimePaths,
@@ -399,6 +410,32 @@ async function waitForClientMount(wc, timeoutMs = 5000, intervalMs = 100) {
 }
 
 app.whenReady().then(async () => {
+  // Stripping the Rolester/Electron tokens above isn't enough on its own:
+  // Chromium still sends Client Hints (Sec-CH-UA etc.) that let Google's
+  // embedded-browser detector cross-check the UA against the real engine and
+  // catch the mismatch, which is what actually trips "This browser or app
+  // may not be secure". Firefox sends no client hints, so there's nothing to
+  // cross-check — rewrite the User-Agent to Firefox's, but only for requests
+  // to the OAuth-chain hosts (never the app's own origin or the rest of the
+  // web). Must run before any window/webContents makes a request, i.e.
+  // before boot()/createWindow() below.
+  const authUaFilterPatterns = buildAuthUaFilterPatterns(process.env);
+  if (authUaFilterPatterns.length > 0) {
+    session.defaultSession.webRequest.onBeforeSendHeaders(
+      { urls: authUaFilterPatterns },
+      (details, callback) => {
+        // Chromium attaches Sec-CH-UA client-hint headers independently of
+        // the User-Agent header — a Firefox UA alongside Chromium brand
+        // hints is itself the mismatch Google detects, so drop them here.
+        for (const header of Object.keys(details.requestHeaders)) {
+          if (/^sec-ch-ua/i.test(header)) delete details.requestHeaders[header];
+        }
+        details.requestHeaders["User-Agent"] = AUTH_FLOW_USER_AGENT;
+        callback({ requestHeaders: details.requestHeaders });
+      }
+    );
+  }
+
   // Dev dock icon (macOS). The packaged app gets its icon from the baked
   // .icns (electron-builder mac.icon), but an unpackaged `electron .` run shows
   // the default Electron icon unless we set it here. build/ isn't bundled into
