@@ -62,7 +62,9 @@ function parseEnvLines(text) {
       entries.push({ raw: line });
       continue;
     }
-    entries.push({ key, value });
+    // Keep the raw line too so writers can round-trip unrelated entries
+    // byte-for-byte (export prefixes, spacing) instead of re-serializing.
+    entries.push({ key, value, raw: line });
   }
   return entries;
 }
@@ -129,7 +131,9 @@ export function writeLocalAiKey({ repoRoot, apiKey, env = process.env } = {}) {
   mkdirSync(dirname(path), { recursive: true });
 
   const existingText = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const entries = parseEnvLines(existingText);
+  // An absent or empty file parses to one empty line — start from nothing
+  // instead so a fresh write doesn't lead with a blank line.
+  const entries = existingText ? parseEnvLines(existingText) : [];
 
   let replaced = false;
   const nextLines = entries.map((entry) => {
@@ -201,7 +205,9 @@ export function writeManagedProxyEnv({ repoRoot, proxyUrl, token, env = process.
   mkdirSync(dirname(path), { recursive: true });
 
   const existingText = existsSync(path) ? readFileSync(path, "utf8") : "";
-  const entries = parseEnvLines(existingText);
+  // An absent or empty file parses to one empty line — start from nothing
+  // instead so a fresh write doesn't lead with a blank line.
+  const entries = existingText ? parseEnvLines(existingText) : [];
 
   let urlReplaced = false;
   let tokenReplaced = false;

@@ -1,5 +1,14 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const api = vi.hoisted(() => ({
+  connectManagedAi: vi.fn(),
+}));
+
+vi.mock("../../lib/api.js", async (importOriginal) => ({
+  ...(await importOriginal()),
+  connectManagedAi: api.connectManagedAi,
+}));
 
 const clerkState = vi.hoisted(() => ({
   signedIn: false,
@@ -99,13 +108,13 @@ describe("Account step", () => {
     expect(html).toContain("onboarding-nav-button--next");
     expect(html).not.toContain(">Continue<");
     expect(html).not.toContain("Save key");
-    expect(html).not.toContain("API key");
+    expect(html).not.toContain('type="password"');
     expect(html).not.toContain("Connected (BYOK)");
     expect(html).not.toContain("Seven quick steps");
     expect(html).toContain('aria-label="Continue"');
     expect(html).toContain('disabled=""');
     expect(html).toContain(
-      "Rolester needs AI to work — sign in or add your Anthropic key to continue."
+      "Sign in and AI connects automatically, or paste your own Anthropic API key."
     );
   });
 
@@ -115,11 +124,11 @@ describe("Account step", () => {
     expect(html).toContain('aria-label="Continue"');
     expect(html).not.toContain('disabled=""');
     expect(html).not.toContain(
-      "Rolester needs AI to work — sign in or add your Anthropic key to continue."
+      "Sign in and AI connects automatically, or paste your own Anthropic API key."
     );
   });
 
-  it("unlocks continue and shows the signed-in identity after Clerk signs in", () => {
+  it("keeps Continue disabled after sign-in until managed AI is available", () => {
     clerkState.signedIn = true;
 
     const html = renderKeyStep();
@@ -147,6 +156,204 @@ describe("Account step", () => {
     expect(html).not.toContain("onboarding-account__signed-in-header");
     expect(html).toContain('data-clerk="user-button"');
     expect(html).not.toContain("Create account");
+    expect(html).toContain('disabled=""');
+  });
+
+  it("enables Continue for a signed-in account once managed AI is available", () => {
+    clerkState.signedIn = true;
+
+    const html = renderKeyStep({ aiAvailable: true });
+
     expect(html).not.toContain('disabled=""');
+  });
+});
+
+function createHookRenderer(Component, props, onRuntime) {
+  const slots = [];
+  const cleanups = [];
+  let hookIndex = 0;
+  let output;
+  let rendering = false;
+  let rerenderRequested = false;
+  let mounted = true;
+
+  function sameDeps(left, right) {
+    return (
+      Array.isArray(left) &&
+      Array.isArray(right) &&
+      left.length === right.length &&
+      left.every((value, index) => Object.is(value, right[index]))
+    );
+  }
+
+  const runtime = {
+    useState(initialValue) {
+      const index = hookIndex++;
+      if (!(index in slots)) {
+        slots[index] = typeof initialValue === "function" ? initialValue() : initialValue;
+      }
+      return [
+        slots[index],
+        (nextValue) => {
+          slots[index] = typeof nextValue === "function" ? nextValue(slots[index]) : nextValue;
+          if (!mounted) return;
+          if (rendering) rerenderRequested = true;
+          else render();
+        },
+      ];
+    },
+    useRef(initialValue) {
+      const index = hookIndex++;
+      if (!(index in slots)) slots[index] = { current: initialValue };
+      return slots[index];
+    },
+    useCallback(callback, deps) {
+      const index = hookIndex++;
+      const prior = slots[index];
+      if (!prior || !sameDeps(prior.deps, deps)) slots[index] = { value: callback, deps };
+      return slots[index].value;
+    },
+    useEffect(effect, deps) {
+      const index = hookIndex++;
+      const prior = slots[index];
+      if (prior && sameDeps(prior.deps, deps)) return;
+      slots[index] = { deps };
+      cleanups[index]?.();
+      cleanups[index] = effect();
+    },
+  };
+  onRuntime?.(runtime);
+
+  function render() {
+    rendering = true;
+    do {
+      rerenderRequested = false;
+      hookIndex = 0;
+      output = Component(props);
+    } while (rerenderRequested);
+    rendering = false;
+  }
+
+  render();
+  return {
+    get output() {
+      return output;
+    },
+    runtime,
+    unmount() {
+      mounted = false;
+      for (const cleanup of cleanups) cleanup?.();
+    },
+  };
+}
+
+function visitElements(value, visitor) {
+  if (Array.isArray(value)) {
+    for (const child of value) visitElements(child, visitor);
+    return;
+  }
+  if (!value || typeof value !== "object") return;
+  visitor(value);
+  visitElements(value.props?.children, visitor);
+}
+
+function renderedText(value) {
+  if (Array.isArray(value)) return value.map(renderedText).join("");
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (!value || typeof value !== "object") return "";
+  return renderedText(value.props?.children);
+}
+
+async function mountManagedProvision({ getToken, reload }) {
+  vi.resetModules();
+  let runtime;
+  vi.doMock("react", async (importOriginal) => ({
+    ...(await importOriginal()),
+    useCallback: (...args) => runtime.useCallback(...args),
+    useEffect: (...args) => runtime.useEffect(...args),
+    useRef: (...args) => runtime.useRef(...args),
+    useState: (...args) => runtime.useState(...args),
+  }));
+  vi.doMock("../../auth/clerkControls.jsx", () => ({
+    RolesterSignInButton: ({ children }) => children,
+    RolesterSignUpButton: ({ children }) => children,
+    RolesterUserButton: () => <span data-user-button />,
+    useRolesterUser: () => ({
+      isLoaded: true,
+      isSignedIn: true,
+      user: clerkState.user,
+      desktopAuthAvailable: false,
+      getToken,
+    }),
+  }));
+  vi.doMock("../../lib/api.js", () => api);
+  const { KeyStep: InteractiveKeyStep } = await import("./KeyStep.jsx");
+  return createHookRenderer(
+    InteractiveKeyStep,
+    {
+      goNext: vi.fn(),
+      goBack: vi.fn(),
+      runtimeCapabilities: { aiAvailable: false },
+      reload,
+    },
+    (value) => {
+      runtime = value;
+    }
+  );
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.clearAllMocks();
+  vi.doUnmock("react");
+  vi.doUnmock("../../auth/clerkControls.jsx");
+  vi.doUnmock("../../lib/api.js");
+});
+
+describe("managed AI auto-provisioning", () => {
+  it("auto-connects exactly once per mount and shows the pending state", async () => {
+    let resolveToken;
+    const getToken = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          resolveToken = resolve;
+        })
+    );
+    const reload = vi.fn(async () => {});
+    api.connectManagedAi.mockResolvedValue({ ok: true });
+    const renderer = await mountManagedProvision({ getToken, reload });
+
+    expect(renderedText(renderer.output)).toContain("Connecting AI…");
+    expect(getToken).toHaveBeenCalledOnce();
+
+    resolveToken("obviously-fake-jwt");
+    await vi.waitFor(() => expect(api.connectManagedAi).toHaveBeenCalledOnce());
+    await vi.waitFor(() => expect(reload).toHaveBeenCalledOnce());
+    expect(api.connectManagedAi).toHaveBeenCalledWith("obviously-fake-jwt");
+    expect(getToken).toHaveBeenCalledOnce();
+    renderer.unmount();
+  });
+
+  it("shows an error after two failures and Try again starts a fresh retry flow", async () => {
+    vi.useFakeTimers();
+    const getToken = vi.fn(async () => "obviously-fake-jwt");
+    api.connectManagedAi.mockRejectedValue(new Error("simulated exchange failure"));
+    const renderer = await mountManagedProvision({ getToken, reload: vi.fn() });
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.connectManagedAi).toHaveBeenCalledTimes(2);
+    expect(renderedText(renderer.output)).toContain("Could not connect managed AI automatically.");
+
+    let tryAgain;
+    visitElements(renderer.output, (element) => {
+      if (renderedText(element) === "Try again") tryAgain = element;
+    });
+    expect(tryAgain).toBeTruthy();
+    tryAgain.props.onClick();
+    await vi.waitFor(() => expect(api.connectManagedAi).toHaveBeenCalledTimes(3));
+
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(api.connectManagedAi).toHaveBeenCalledTimes(4);
+    renderer.unmount();
   });
 });

@@ -79,15 +79,28 @@ describe("OnboardingPage goNext prerequisites", () => {
     timeout.mockRestore();
   });
 
-  it("advances the account step when signed in or AI is available", async () => {
-    for (const auth of [
-      { isSignedIn: true, aiAvailable: false },
-      { isSignedIn: false, aiAvailable: true },
-    ]) {
+  it("blocks signed-in accounts until AI is available, then advances regardless of sign-in", async () => {
+    const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation(() => 0);
+    const blocked = await mountGoNextHarness({
+      stepIndex: 1,
+      state: { sourceResumePresent: true },
+      isSignedIn: true,
+      aiAvailable: false,
+    });
+
+    blocked.goNext();
+    expect(blocked.setters[4]).not.toHaveBeenCalled();
+    expect(blocked.setters[6]).toHaveBeenCalledWith({
+      message: "Rolester needs AI to work — sign in or add your Anthropic key to continue",
+      tone: "error",
+    });
+
+    for (const isSignedIn of [false, true]) {
       const { goNext, setters } = await mountGoNextHarness({
         stepIndex: 1,
         state: { sourceResumePresent: true },
-        ...auth,
+        isSignedIn,
+        aiAvailable: true,
       });
       goNext();
       await vi.waitFor(() => expect(setters[4]).toHaveBeenCalled());
@@ -95,6 +108,7 @@ describe("OnboardingPage goNext prerequisites", () => {
       expect(advance(1)).toBe(2);
       expect(setters[6]).not.toHaveBeenCalled();
     }
+    timeout.mockRestore();
   });
 
   it("blocks the resume step and shows an error toast without a source resume", async () => {

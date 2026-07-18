@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const clerkProps = vi.hoisted(() => ({
   provider: null,
+  getToken: vi.fn(async () => "obviously-fake-jwt"),
 }));
 
 vi.mock("@clerk/react", () => ({
@@ -13,10 +14,20 @@ vi.mock("@clerk/react", () => ({
   SignInButton: ({ children }) => <span data-clerk="sign-in">{children}</span>,
   SignUpButton: ({ children }) => <span data-clerk="sign-up">{children}</span>,
   UserButton: () => <span data-clerk="user-button" />,
+  useAuth: () => ({ getToken: clerkProps.getToken }),
   useUser: () => ({ isLoaded: true, isSignedIn: false, user: null }),
 }));
 
-import { ROLESTER_CLERK_APPEARANCE, RolesterClerkProvider } from "./clerkControls.jsx";
+import {
+  ROLESTER_CLERK_APPEARANCE,
+  RolesterClerkProvider,
+  useRolesterUser,
+} from "./clerkControls.jsx";
+
+function AuthStateProbe() {
+  const { getToken } = useRolesterUser();
+  return <span data-has-get-token={getToken === clerkProps.getToken ? "yes" : "no"} />;
+}
 
 function colorMixPercentage(value) {
   const match = value.match(/color-mix\([^,]+,\s*var\(--[^)]+\)\s+([\d.]+)%/i);
@@ -95,5 +106,15 @@ describe("RolesterClerkProvider", () => {
       expect(value, path).toMatch(/var\(--[^)]+\)/);
       expect(value, path).not.toMatch(/#[\da-f]{3,8}\b/i);
     }
+  });
+
+  it("exposes Clerk getToken through the Rolester auth context", () => {
+    const html = renderToStaticMarkup(
+      <RolesterClerkProvider publishableKey="pk_test_rolester">
+        <AuthStateProbe />
+      </RolesterClerkProvider>
+    );
+
+    expect(html).toContain('data-has-get-token="yes"');
   });
 });
