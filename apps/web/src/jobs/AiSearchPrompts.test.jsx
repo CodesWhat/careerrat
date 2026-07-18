@@ -25,7 +25,7 @@ const apiMocks = vi.hoisted(() => ({
   saveSearchPrompts: vi.fn(),
 }));
 
-const captured = vi.hoisted(() => ({ buttons: [], textAreas: [] }));
+const captured = vi.hoisted(() => ({ buttons: [], iconButtons: [], textAreas: [] }));
 
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal();
@@ -68,11 +68,14 @@ vi.mock("../components/Button.jsx", () => ({
       </button>
     );
   },
-  IconButton: (props) => (
-    <button type="button" aria-label={props.label} onClick={props.onClick}>
-      {props.children}
-    </button>
-  ),
+  IconButton: (props) => {
+    captured.iconButtons.push(props);
+    return (
+      <button type="button" aria-label={props.label} onClick={props.onClick}>
+        {props.children}
+      </button>
+    );
+  },
 }));
 
 vi.mock("../components/form.jsx", () => ({
@@ -109,6 +112,7 @@ function findElements(node, predicate, matches = []) {
 function renderPrompts(onPromptsState) {
   hookHarness.reset();
   captured.buttons = [];
+  captured.iconButtons = [];
   captured.textAreas = [];
   const tree = AiSearchPrompts({ onPromptsState });
   const html = renderToStaticMarkup(tree);
@@ -129,9 +133,33 @@ function capturedButton(label, occurrence = 0) {
   return buttons[occurrence];
 }
 
+function capturedIconButton(label) {
+  const button = captured.iconButtons.find((props) => props.label === label);
+  expect(button).toBeDefined();
+  return button;
+}
+
+async function loadPrompts(onPromptsState) {
+  renderPrompts(onPromptsState);
+  await flushEffects();
+  const rendered = renderPrompts(onPromptsState);
+  await flushEffects();
+  return rendered;
+}
+
+function modalTree(rendered) {
+  const modal = findElements(
+    rendered.tree,
+    (node) => typeof node.type === "function" && node.type.name === "AiSearchPromptsModal"
+  )[0];
+  expect(modal).toBeDefined();
+  return modal.type(modal.props);
+}
+
 beforeEach(() => {
   hookHarness.clear();
   captured.buttons = [];
+  captured.iconButtons = [];
   captured.textAreas = [];
   vi.clearAllMocks();
   apiMocks.getSearchPrompts.mockResolvedValue({ data: { prompts: SAVED_PROMPTS } });
@@ -146,85 +174,140 @@ beforeEach(() => {
   }));
 });
 
-describe("AiSearchPrompts embedded prompt editor", () => {
-  it("renders one two-line chip surface per saved prompt", async () => {
+describe("AiSearchPrompts manager", () => {
+  it("labels the only card control for zero, loaded, and dirty prompt states", async () => {
+    apiMocks.getSearchPrompts.mockResolvedValueOnce({ data: { prompts: [] } });
     const onPromptsState = vi.fn();
+    let rendered = await loadPrompts(onPromptsState);
+
+    expect(rendered.html).toContain(">AI prompts</button>");
+    expect(rendered.html).not.toContain("AI prompts (0)");
+    expect(captured.buttons).toHaveLength(1);
+    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 0, dirty: false, loading: false });
+
+    hookHarness.clear();
+    vi.clearAllMocks();
+    apiMocks.getSearchPrompts.mockResolvedValue({ data: { prompts: SAVED_PROMPTS } });
+    apiMocks.getRuntimeConfig.mockResolvedValue({ ai: { available: true } });
+    rendered = await loadPrompts(onPromptsState);
+
+    expect(rendered.html).toContain(">AI prompts (2)</button>");
+    expect(captured.buttons).toHaveLength(1);
+    capturedButton("AI prompts (2)").onClick();
     renderPrompts(onPromptsState);
+    captured.textAreas[0].onChange("Edited first prompt");
+    rendered = renderPrompts(onPromptsState);
     await flushEffects();
 
-    const { html } = renderPrompts(onPromptsState);
-    await flushEffects();
-
-    expect((html.match(/class="jobs__ai-prompt-chip"/g) || []).length).toBe(2);
-    expect((html.match(/class="jobs__ai-prompt-chip-text"/g) || []).length).toBe(2);
-    expect(html).toContain(SAVED_PROMPTS[0].text);
-    expect(html).toContain(SAVED_PROMPTS[1].text);
-    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 2, dirty: false, loading: false });
+    expect(rendered.html).toContain(">AI prompts (2) •</button>");
+    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 2, dirty: true, loading: false });
   });
 
-  it("opens a chip modal and keeps modal Save local until the footer Save persists", async () => {
+  it("opens the overlay with one textarea per prompt and preserves unsaved edits across close", async () => {
     const onPromptsState = vi.fn();
-    renderPrompts(onPromptsState);
-    await flushEffects();
-    let rendered = renderPrompts(onPromptsState);
-    await flushEffects();
+    let rendered = await loadPrompts(onPromptsState);
 
-    const chips = findElements(
-      rendered.tree,
-      (node) => node.type === "button" && node.props.className === "jobs__ai-prompt-chip"
-    );
-    expect(chips).toHaveLength(2);
-    chips[0].props.onClick();
-
+    capturedButton("AI prompts (2)").onClick();
     rendered = renderPrompts(onPromptsState);
-    expect(rendered.html).toContain('role="dialog"');
+
     expect(rendered.html).toContain('class="packet-viewer-overlay"');
-    expect(captured.textAreas).toHaveLength(1);
-    captured.textAreas[0].onChange("Updated local prompt text");
-    renderPrompts(onPromptsState);
-    capturedButton("Save", 1).onClick();
+    expect(rendered.html).toContain('role="dialog"');
+    expect(rendered.html).toContain('class="packet-viewer__title">AI search prompts</strong>');
+    expect(rendered.html).toContain(">Regenerate</button>");
+    expect(rendered.html).toContain('aria-label="Close"');
+    expect(rendered.html).toContain(">Add prompt</button>");
+    expect(rendered.html).toContain(">Save</button>");
+    expect(captured.textAreas).toHaveLength(2);
+    expect(captured.textAreas.map((row) => row.value)).toEqual(
+      SAVED_PROMPTS.map((prompt) => prompt.text)
+    );
 
+    captured.textAreas[0].onChange("Unsaved prompt edit");
     rendered = renderPrompts(onPromptsState);
     await flushEffects();
-    expect(rendered.html).not.toContain('role="dialog"');
-    expect(rendered.html).toContain("Updated local prompt text");
-    expect(apiMocks.saveSearchPrompts).not.toHaveBeenCalled();
     expect(onPromptsState).toHaveBeenLastCalledWith({ count: 2, dirty: true, loading: false });
 
-    capturedButton("Save", 0).onClick();
-    await Promise.resolve();
-    expect(apiMocks.saveSearchPrompts).toHaveBeenCalledTimes(1);
-    expect(apiMocks.saveSearchPrompts).toHaveBeenCalledWith([
-      { id: "prompt-1", text: "Updated local prompt text" },
-      { id: "prompt-2", text: SAVED_PROMPTS[1].text },
-    ]);
+    capturedIconButton("Close").onClick();
+    rendered = renderPrompts(onPromptsState);
+    expect(rendered.html).not.toContain('role="dialog"');
+    expect(rendered.html).toContain(">AI prompts (2) •</button>");
+    expect(apiMocks.saveSearchPrompts).not.toHaveBeenCalled();
+
+    capturedButton("AI prompts (2) •").onClick();
+    rendered = renderPrompts(onPromptsState);
+    expect(captured.textAreas).toHaveLength(2);
+    expect(captured.textAreas[0].value).toBe("Unsaved prompt edit");
+    expect(apiMocks.saveSearchPrompts).not.toHaveBeenCalled();
   });
 
-  it("opens Add prompt as a blank local row and reports count, dirty, and loading transitions", async () => {
+  it("adds blank rows, removes individual rows, and reports nonblank count transitions", async () => {
     const onPromptsState = vi.fn();
-    renderPrompts(onPromptsState);
+    let rendered = await loadPrompts(onPromptsState);
+
+    capturedButton("AI prompts (2)").onClick();
+    rendered = renderPrompts(onPromptsState);
+    const removeButtons = findElements(
+      modalTree(rendered),
+      (node) => node.type === "button" && node.props["aria-label"] === "Remove prompt"
+    );
+    expect(removeButtons).toHaveLength(2);
+    removeButtons[0].props.onClick();
+
+    rendered = renderPrompts(onPromptsState);
     await flushEffects();
-    renderPrompts(onPromptsState);
-    await flushEffects();
+    expect(captured.textAreas).toHaveLength(1);
+    expect(captured.textAreas[0].value).toBe(SAVED_PROMPTS[1].text);
+    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 1, dirty: true, loading: false });
 
     capturedButton("Add prompt").onClick();
-    let rendered = renderPrompts(onPromptsState);
+    rendered = renderPrompts(onPromptsState);
     await flushEffects();
+    expect(captured.textAreas).toHaveLength(2);
+    expect(captured.textAreas[1].value).toBe("");
+    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 1, dirty: true, loading: false });
 
-    expect(rendered.html).toContain('role="dialog"');
-    expect(captured.textAreas).toHaveLength(1);
-    expect(captured.textAreas[0].value).toBe("");
+    captured.textAreas[1].onChange("New nonblank prompt");
+    rendered = renderPrompts(onPromptsState);
+    await flushEffects();
+    expect(rendered.html).toContain(">AI prompts (2) •</button>");
     expect(onPromptsState).toHaveBeenLastCalledWith({ count: 2, dirty: true, loading: false });
+  });
 
-    captured.textAreas[0].onChange("A third prompt");
+  it("persists all nonblank rows from the modal footer Save and clears dirty state", async () => {
+    let resolveSave;
+    apiMocks.saveSearchPrompts.mockImplementationOnce(
+      (prompts) =>
+        new Promise((resolve) => {
+          resolveSave = () => resolve({ data: { prompts } });
+        })
+    );
+    const onPromptsState = vi.fn();
+    let rendered = await loadPrompts(onPromptsState);
+
+    expect(onPromptsState).toHaveBeenCalledWith({ count: 0, dirty: false, loading: true });
+    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 2, dirty: false, loading: false });
+
+    capturedButton("AI prompts (2)").onClick();
     renderPrompts(onPromptsState);
-    capturedButton("Save", 1).onClick();
+    captured.textAreas[0].onChange("Persist this edit");
+    renderPrompts(onPromptsState);
+    const savePromise = capturedButton("Save").onClick();
+
+    expect(apiMocks.saveSearchPrompts).toHaveBeenCalledTimes(1);
+    expect(apiMocks.saveSearchPrompts).toHaveBeenCalledWith([
+      { id: "prompt-1", text: "Persist this edit" },
+      { id: "prompt-2", text: SAVED_PROMPTS[1].text },
+    ]);
+    rendered = renderPrompts(onPromptsState);
+    expect(rendered.html).toContain(">Saving…</button>");
+
+    resolveSave();
+    await savePromise;
     rendered = renderPrompts(onPromptsState);
     await flushEffects();
 
-    expect(rendered.html).toContain("A third prompt");
-    expect(apiMocks.saveSearchPrompts).not.toHaveBeenCalled();
-    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 3, dirty: true, loading: false });
-    expect(onPromptsState).toHaveBeenCalledWith({ count: 0, dirty: false, loading: true });
+    expect(rendered.html).toContain(">AI prompts (2)</button>");
+    expect(rendered.html).not.toContain("AI prompts (2) •");
+    expect(onPromptsState).toHaveBeenLastCalledWith({ count: 2, dirty: false, loading: false });
   });
 });
