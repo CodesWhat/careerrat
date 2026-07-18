@@ -1,4 +1,11 @@
-import { ClerkProvider, SignInButton, SignUpButton, UserButton, useUser } from "@clerk/react";
+import {
+  ClerkProvider,
+  SignInButton,
+  SignUpButton,
+  UserButton,
+  useAuth,
+  useUser,
+} from "@clerk/react";
 import { createContext, useContext, useEffect, useState } from "react";
 import { getRuntimeConfig } from "../lib/api.js";
 import { getStaticPreviewAuthState, isStaticPreviewApi } from "../preview/staticPreviewApi.js";
@@ -11,6 +18,11 @@ const DEFAULT_AUTH_STATE = {
   // Electron desktop shell only — see RolesterClerkProvider below and
   // src/cli/desktop-auth-route.mjs. Always false on plain web.
   desktopAuthAvailable: false,
+  // KeyStep's managed-AI auto-provision needs a Clerk session JWT to hand
+  // the local server (see useAuth().getToken() in ClerkStateBridge below).
+  // Outside a ClerkProvider (no publishableKey configured, or the static
+  // preview build) there is no session to mint one from.
+  getToken: async () => null,
 };
 
 const RolesterAuthContext = createContext(DEFAULT_AUTH_STATE);
@@ -173,6 +185,7 @@ export function RolesterAuthStateProvider({ value = {}, children }) {
 
 function ClerkStateBridge({ desktopAuthAvailable, children }) {
   const clerkUser = useUser();
+  const { getToken } = useAuth();
 
   // Defensive net for the desktop sign-in handoff (useDesktopGoogleSignIn.js
   // navigates here with ?__clerk_db_jwt=<jwt> via window.location.replace).
@@ -191,7 +204,7 @@ function ClerkStateBridge({ desktopAuthAvailable, children }) {
 
   return (
     <RolesterAuthStateProvider
-      value={{ ...clerkUser, hasClerkProvider: true, desktopAuthAvailable }}
+      value={{ ...clerkUser, hasClerkProvider: true, desktopAuthAvailable, getToken }}
     >
       {children}
     </RolesterAuthStateProvider>

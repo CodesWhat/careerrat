@@ -829,3 +829,14 @@ export function claimDesktopSignIn(nonce) {
     body: JSON.stringify({ nonce }),
   });
 }
+
+// src/cli/ai-provision-route.mjs — automatic managed-AI provisioning. `jwt`
+// is the caller's Clerk session token (from useAuth().getToken()); the
+// response never carries the minted proxy token itself, only {ok, route} —
+// see that route file's own privacy invariant.
+export function connectManagedAi(jwt) {
+  return apiFetch("/api/settings/ai-managed/connect", {
+    method: "POST",
+    body: JSON.stringify({ jwt }),
+  });
+}

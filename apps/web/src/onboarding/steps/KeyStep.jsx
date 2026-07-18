@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   RolesterSignInButton,
   RolesterSignUpButton,
@@ -6,7 +7,12 @@ import {
 } from "../../auth/clerkControls.jsx";
 import { useDesktopGoogleSignIn } from "../../auth/useDesktopGoogleSignIn.js";
 import { Button } from "../../components/Button.jsx";
+import { connectManagedAi } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
+
+// After the auto-provision effect's first attempt fails, one silent retry
+// before surfacing an error — see useManagedAiAutoProvision below.
+const AUTO_PROVISION_RETRY_DELAY_MS = 2000;
 
 const ACCOUNT_AVATAR_SIZE = "96px";
 const ACCOUNT_USER_BUTTON_APPEARANCE = {
@@ -103,17 +109,92 @@ function DesktopGoogleSignIn() {
   );
 }
 
+// Auto-provisions managed AI the instant Clerk sign-in completes: hands the
+// Clerk session JWT to src/cli/ai-provision-route.mjs, which exchanges it
+// server-to-server for a minted proxy token (see that route's own header
+// comment for the full flow and privacy invariant — the raw JWT and token
+// never linger anywhere this hook can see past the in-flight call). Runs at
+// most once per mount (firedRef), independent of React's render count;
+// `reload` re-fetches GET /api/runtime/config so a successful connect flips
+// runtimeCapabilities.aiAvailable without a page refresh.
+function useManagedAiAutoProvision({ isLoaded, isSignedIn, aiAvailable, getToken, reload }) {
+  const [status, setStatus] = useState("idle"); // idle | connecting | error
+  const firedRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const attempt = useCallback(
+    async (isRetry) => {
+      setStatus("connecting");
+      try {
+        const jwt = await getToken?.();
+        if (!jwt) throw new Error("no session token available");
+        const result = await connectManagedAi(jwt);
+        if (!result?.ok) throw new Error("managed AI connect failed");
+        if (!mountedRef.current) return;
+        await reload?.();
+        if (!mountedRef.current) return;
+        setStatus("idle");
+      } catch {
+        if (!mountedRef.current) return;
+        if (!isRetry) {
+          // One silent retry before surfacing anything to the user — most
+          // failures here are transient (a cold local server, a slow
+          // exchange round trip), not a real problem worth an error state.
+          setTimeout(() => {
+            if (mountedRef.current) void attempt(true);
+          }, AUTO_PROVISION_RETRY_DELAY_MS);
+          return;
+        }
+        setStatus("error");
+      }
+    },
+    [getToken, reload]
+  );
+
+  useEffect(() => {
+    if (!isLoaded || !isSignedIn || aiAvailable) return;
+    if (firedRef.current) return;
+    firedRef.current = true;
+    void attempt(false);
+  }, [isLoaded, isSignedIn, aiAvailable, attempt]);
+
+  // "Try again" re-fires the same flow (attempt + its own silent retry),
+  // not just a single bare call — see the header comment above.
+  const retry = useCallback(() => {
+    void attempt(false);
+  }, [attempt]);
+
+  return { status, retry };
+}
+
 // Step 1 — Account. Clerk identifies the user for durable free-tier tracking,
-// billing, and future hosted usage metering. AI credentials are no longer part
-// of v1 onboarding; inference is routed through the product backend.
-export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities }) {
-  const { isLoaded, isSignedIn, user, desktopAuthAvailable } = useRolesterUser();
+// billing, and future hosted usage metering. Signing in auto-provisions
+// managed AI (useManagedAiAutoProvision above); pasting an Anthropic key on
+// the Settings page remains the manual fallback for anyone who'd rather not
+// use it.
+export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities, reload }) {
+  const { isLoaded, isSignedIn, user, desktopAuthAvailable, getToken } = useRolesterUser();
   const aiAvailable = runtimeCapabilities?.aiAvailable === true;
-  // Rolester needs AI to work: Continue unlocks once Clerk state has loaded
-  // AND either the user is signed in or managed AI is already available
-  // without sign-in (see OnboardingPage's goNext structural guard, which
-  // enforces this same rule server-side of the click).
-  const canContinue = isLoaded && (isSignedIn || aiAvailable);
+  const { status: aiConnectStatus, retry: retryAiConnect } = useManagedAiAutoProvision({
+    isLoaded,
+    isSignedIn,
+    aiAvailable,
+    getToken,
+    reload,
+  });
+  // GATE CHANGE (product owner): sign-in alone no longer unlocks Continue —
+  // managed AI must actually be live. Provisioning normally flips
+  // runtimeCapabilities.aiAvailable within seconds of sign-in; see
+  // OnboardingPage's goNext structural guard, which enforces this same rule
+  // server-side of the click.
+  const canContinue = isLoaded && aiAvailable;
   const blockedReason = !isSignedIn && !aiAvailable;
 
   return (
@@ -171,7 +252,7 @@ export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities 
                 <AccountFinePrint />
                 {blockedReason ? (
                   <p className="onboarding-account__fine-print">
-                    Rolester needs AI to work — sign in or add your Anthropic key to continue.
+                    Sign in and AI connects automatically, or paste your own Anthropic API key.
                   </p>
                 ) : null}
               </div>
@@ -201,6 +282,24 @@ export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities 
                   </div>
                 </div>
                 <AccountFinePrint />
+                {!aiAvailable ? (
+                  <div className="onboarding-account__panel">
+                    <p className="onboarding-account__fine-print">
+                      {aiConnectStatus === "error"
+                        ? "Could not connect managed AI automatically."
+                        : "Connecting AI…"}
+                    </p>
+                    {aiConnectStatus === "error" ? (
+                      <Button
+                        variant="secondary"
+                        className="onboarding-account__cta"
+                        onClick={retryAiConnect}
+                      >
+                        Try again
+                      </Button>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </div>

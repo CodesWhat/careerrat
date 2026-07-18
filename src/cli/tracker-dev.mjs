@@ -48,6 +48,7 @@ import {
   resolvePort,
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
+import { mountAiProvisionRoutes } from "./ai-provision-route.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountBoardsRoutes } from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
@@ -241,6 +242,15 @@ export function createDevServer({
   // the client's decision to show the "Continue with Google" affordance is
   // gated on GET /api/runtime/config's desktop.authAvailable flag below.
   mountDesktopAuthRoutes({ addRoute, repoRoot, env });
+
+  // The desktop app's automatic managed-AI provisioning surface (see
+  // src/cli/ai-provision-route.mjs's own header comment): after Clerk
+  // sign-in, the renderer hands its session JWT here to be exchanged
+  // server-to-server for a minted proxy token, persisted to
+  // .internal/ai.env the same way the BYOK key step above does. Mounted
+  // unconditionally, same posture as mountDesktopAuthRoutes — the route
+  // itself is inert plumbing until the renderer actually calls it.
+  mountAiProvisionRoutes({ addRoute, repoRoot, env });
 
   // M8 — the /app/onboarding SPA wizard's AI-assist surface: server-side
   // prompt templates for the Targeting step's "Roland-suggest" chips
@@ -749,6 +759,7 @@ Local app APIs:
   POST /api/discovery/next              Start/reuse the current next discovery chat
   POST /api/settings/ai-key             Store a BYOK Anthropic key in .internal/ai.env
   GET  /api/settings/ai                 { route, keyPresent } — never the key value
+  POST /api/settings/ai-managed/connect Exchange a Clerk session JWT for a managed proxy token
   POST /api/chat/start                  Start (or find the live) ingest-profile chat session (M2)
   GET  /api/chat/events                 SSE transcript stream for a chat session (?id=<chatId>)
   POST /api/chat/message                Send the human's next turn to a chat session

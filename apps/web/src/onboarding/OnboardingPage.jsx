@@ -265,7 +265,10 @@ export function OnboardingPage() {
     // regardless of what a step component's own Continue button did or
     // didn't check — a step-local disabled button is UX, this is the gate.
     const currentStepKey = STEPS[stepIndex].key;
-    if (currentStepKey === "account" && !isSignedIn && !runtimeCapabilities.aiAvailable) {
+    // GATE CHANGE (product owner): sign-in alone no longer unlocks Continue —
+    // managed AI must actually be live (see KeyStep.jsx's auto-provision
+    // effect and its own matching canContinue check).
+    if (currentStepKey === "account" && !runtimeCapabilities.aiAvailable) {
       showToast(
         "Rolester needs AI to work — sign in or add your Anthropic key to continue",
         "error"

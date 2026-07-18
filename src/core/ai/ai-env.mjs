@@ -154,3 +154,82 @@ export function writeLocalAiKey({ repoRoot, apiKey, env = process.env } = {}) {
   env.ANTHROPIC_API_KEY = key;
   return { ok: true, path };
 }
+
+// ---------------------------------------------------------------------------
+// writeManagedProxyEnv
+// ---------------------------------------------------------------------------
+
+// https, or an explicit loopback override for local dev against a
+// non-deployed proxy (e.g. `vercel dev` on a plain :3000 http:// origin).
+const MANAGED_PROXY_URL_RE = /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)(:\d+)?(\/|$))/i;
+
+/**
+ * Validate and persist the desktop app's automatically-provisioned managed-AI
+ * proxy credentials (ROLESTER_AI_PROXY_URL + ROLESTER_AI_PROXY_TOKEN) to the
+ * logical `.internal/ai.env` path, chmod'd 0600, preserving any unrelated
+ * existing lines in the file — same round-trip discipline as
+ * writeLocalAiKey() above, applied to two keys instead of one. Sets both onto
+ * `env` immediately so the current process's resolveAIRoute() (call-ai.mjs)
+ * picks up the managed route without a restart.
+ *
+ * Called after src/cli/ai-provision-route.mjs exchanges a Clerk session JWT
+ * for a minted proxy token server-to-server — this function itself never
+ * sees a JWT, only the already-minted `token`.
+ *
+ * NEVER touches ANTHROPIC_API_KEY: an existing BYOK line is round-tripped
+ * verbatim (untouched, unreordered) exactly like any other unrelated line —
+ * see loadLocalAiEnv's own "env always wins" comment for why BYOK and managed
+ * proxy creds are meant to coexist in this same file without one clobbering
+ * the other's line.
+ *
+ * @param {{ repoRoot: string, proxyUrl: string, token: string, env?: object }} options
+ * @returns {{ ok: true, path: string }}
+ * @throws {Error} if proxyUrl isn't https (or a loopback dev override), or if
+ *   token is empty/not a string.
+ */
+export function writeManagedProxyEnv({ repoRoot, proxyUrl, token, env = process.env } = {}) {
+  const url = typeof proxyUrl === "string" ? proxyUrl.trim() : "";
+  if (!MANAGED_PROXY_URL_RE.test(url)) {
+    throw new Error("proxyUrl must be https, or http://127.0.0.1/localhost for local dev");
+  }
+  const tok = typeof token === "string" ? token.trim() : "";
+  if (!tok) {
+    throw new Error("token must be a non-empty string");
+  }
+
+  const path = userPath({ repoRoot, env }, AI_ENV_RELPATH);
+  mkdirSync(dirname(path), { recursive: true });
+
+  const existingText = existsSync(path) ? readFileSync(path, "utf8") : "";
+  const entries = parseEnvLines(existingText);
+
+  let urlReplaced = false;
+  let tokenReplaced = false;
+  const nextLines = entries.map((entry) => {
+    if (entry.key === "ROLESTER_AI_PROXY_URL") {
+      urlReplaced = true;
+      return `ROLESTER_AI_PROXY_URL=${url}`;
+    }
+    if (entry.key === "ROLESTER_AI_PROXY_TOKEN") {
+      tokenReplaced = true;
+      return `ROLESTER_AI_PROXY_TOKEN=${tok}`;
+    }
+    return entry.raw !== undefined ? entry.raw : `${entry.key}=${entry.value}`;
+  });
+  if (!urlReplaced) nextLines.push(`ROLESTER_AI_PROXY_URL=${url}`);
+  if (!tokenReplaced) nextLines.push(`ROLESTER_AI_PROXY_TOKEN=${tok}`);
+
+  // Trim trailing blank lines from the round-tripped content, then end with
+  // exactly one newline.
+  while (nextLines.length > 0 && nextLines[nextLines.length - 1] === "") {
+    nextLines.pop();
+  }
+  const text = `${nextLines.join("\n")}\n`;
+
+  writeFileSync(path, text, "utf8");
+  chmodSync(path, 0o600);
+
+  env.ROLESTER_AI_PROXY_URL = url;
+  env.ROLESTER_AI_PROXY_TOKEN = tok;
+  return { ok: true, path };
+}

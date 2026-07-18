@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import modesSchema from "../../../../config/modes.schema.json";
 import profileSchema from "../../../../config/profile.schema.json";
+import { useRolesterUser } from "../auth/clerkControls.jsx";
 import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 import { Field, NumberField, Select, TextArea, TextField, Toggle } from "../components/form.jsx";
@@ -8,6 +9,7 @@ import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
 import {
   ApiError,
+  connectManagedAi,
   getAiSettings,
   getOnboardState,
   getUsageSummary,
@@ -98,6 +100,7 @@ function get(obj, path, fallback) {
 }
 
 export function SettingsPage() {
+  const { getToken } = useRolesterUser();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -255,6 +258,32 @@ export function SettingsPage() {
     }
   }
 
+  // src/cli/ai-provision-route.mjs — the same exchange KeyStep.jsx's
+  // sign-in auto-provision uses, callable again here for a device that
+  // signed in before managed AI existed, or whose provisioned token needs
+  // refreshing. Minting a new token replaces the previous one server-side
+  // (one active AI connection per account) — see this card's own copy below.
+  async function handleReconnectManagedAi() {
+    setSaving((s) => ({ ...s, aiManaged: true }));
+    setSectionBanner((b) => ({ ...b, aiManaged: null }));
+    try {
+      const jwt = await getToken?.();
+      if (!jwt) throw new Error("Sign in to connect managed AI.");
+      const result = await connectManagedAi(jwt);
+      if (!result?.ok) throw new Error("Could not connect managed AI.");
+      showToast("Managed AI connected.");
+      const ai = await getAiSettings();
+      setAiStatus(ai);
+    } catch (err) {
+      setSectionBanner((b) => ({
+        ...b,
+        aiManaged: err instanceof Error ? err.message : "Reconnect failed",
+      }));
+    } finally {
+      setSaving((s) => ({ ...s, aiManaged: false }));
+    }
+  }
+
   const errorsFor = (section) => fieldErrors[section] ?? {};
 
   const aiBadgeLabel = useMemo(() => AI_ROUTE_LABEL[aiStatus.route] ?? "Unknown", [aiStatus.route]);
@@ -311,6 +340,22 @@ export function SettingsPage() {
         <div>
           <Button onClick={handleSaveAiKey} disabled={saving.ai || !aiKeyInput.trim()}>
             {saving.ai ? "Saving…" : "Save key"}
+          </Button>
+        </div>
+
+        {sectionBanner.aiManaged ? <InlineAlert message={sectionBanner.aiManaged} /> : null}
+        <p className="field__hint" style={{ margin: 0 }}>
+          Managed AI (no key of your own) connects automatically at sign-in. Reconnecting here mints
+          a fresh connection and replaces the previous one — one AI connection is active per account
+          at a time.
+        </p>
+        <div>
+          <Button
+            variant="secondary"
+            onClick={handleReconnectManagedAi}
+            disabled={saving.aiManaged}
+          >
+            {saving.aiManaged ? "Connecting…" : "Reconnect managed AI"}
           </Button>
         </div>
       </Card>
