@@ -77,7 +77,10 @@ function DesktopSignInAuthPage() {
     try {
       await clerk.client.signIn.authenticateWithRedirect({
         strategy: "oauth_google",
-        redirectUrl: `${origin}/app/desktop-sign-in/sso-callback`,
+        // nonce rides along so the sso-callback page can route the
+        // first-time-user transfer (sign-in -> sign-up) to the handoff too —
+        // Clerk does not honor redirectUrlComplete on that path.
+        redirectUrl: `${origin}/app/desktop-sign-in/sso-callback?nonce=${encodeURIComponent(nonce)}`,
         redirectUrlComplete: handoffUrl,
       });
       // On success the browser navigates away to Google — nothing else to do.

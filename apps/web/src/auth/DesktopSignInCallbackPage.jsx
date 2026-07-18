@@ -1,15 +1,19 @@
 // DesktopSignInCallbackPage.jsx — the OAuth redirect target
-// (redirectUrl="/app/desktop-sign-in/sso-callback" from DesktopSignInPage.jsx's
-// authenticateWithRedirect call). Loaded in the same system-browser tab as
-// DesktopSignInPage.jsx, after Google hands control back to Clerk's frontend
-// API. <AuthenticateWithRedirectCallback /> completes the sign-in (including
-// the sign-in<->sign-up "transfer" case for first-time Google users — see its
-// `transferable` prop, left at its Clerk-default `true` here on purpose) and
-// then navigates the browser on to redirectUrlComplete
-// (GET /api/desktop-auth/handoff, set by DesktopSignInPage.jsx) — this
-// component's own render is only ever visible for an instant while that
-// finishes.
+// (redirectUrl="/app/desktop-sign-in/sso-callback?nonce=…" from
+// DesktopSignInPage.jsx's authenticateWithRedirect call). Loaded in the same
+// system-browser tab as DesktopSignInPage.jsx, after Google hands control
+// back to Clerk's frontend API. <AuthenticateWithRedirectCallback />
+// completes the sign-in and navigates on to redirectUrlComplete
+// (GET /api/desktop-auth/handoff) — EXCEPT for first-time Google users,
+// where Clerk "transfers" the sign-in into a sign-up and completes that via
+// the sign-UP redirect props instead, ignoring redirectUrlComplete. That
+// transfer case is why the nonce rides the callback URL: with it we can
+// point the sign-up redirect at the same handoff, so brand-new users finish
+// exactly like returning ones (the handoff's cookie-fallback page covers a
+// dev instance not appending __clerk_db_jwt to this URL). Without a nonce
+// (stale/hand-typed link) the sign-up path falls back to the error page.
 import { AuthenticateWithRedirectCallback } from "@clerk/react";
+import { useSearchParams } from "react-router-dom";
 import { useRolesterUser } from "./clerkControls.jsx";
 
 const PAGE_STYLE = {
@@ -46,18 +50,27 @@ function DesktopSignInUnavailable() {
 // already know one is present — same defensive split as
 // DesktopSignInPage.jsx's DesktopSignInAuthPage/DesktopSignInUnavailable.
 function DesktopSignInCallbackAuthPage() {
+  const [searchParams] = useSearchParams();
+  const nonce = (searchParams.get("nonce") || "").trim();
+  const handoffUrl = nonce ? `/api/desktop-auth/handoff?nonce=${encodeURIComponent(nonce)}` : null;
+  const errorUrl = nonce
+    ? `/app/desktop-sign-in/error?nonce=${encodeURIComponent(nonce)}`
+    : "/app/desktop-sign-in/error";
   return (
     <div style={PAGE_STYLE}>
       <div style={CARD_STYLE}>
         <strong>Rolester</strong>
         <p>Finishing sign-in…</p>
       </div>
-      {/* signInFallbackRedirectUrl/signUpFallbackRedirectUrl are a defensive
-          net only — the normal path never reaches them, since
-          DesktopSignInPage.jsx always sets redirectUrlComplete explicitly. */}
+      {/* The sign-UP force redirect is the load-bearing one: Clerk's
+          first-time-user transfer completes as a sign-up and ignores
+          redirectUrlComplete, so without this a new Google account dead-ends
+          on the error page. Returning users still ride redirectUrlComplete;
+          the fallbacks stay as the defensive net. */}
       <AuthenticateWithRedirectCallback
-        signInFallbackRedirectUrl="/app/desktop-sign-in/error"
-        signUpFallbackRedirectUrl="/app/desktop-sign-in/error"
+        signUpForceRedirectUrl={handoffUrl || errorUrl}
+        signInFallbackRedirectUrl={handoffUrl || errorUrl}
+        signUpFallbackRedirectUrl={handoffUrl || errorUrl}
       />
     </div>
   );

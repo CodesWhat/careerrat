@@ -29,18 +29,23 @@ const CARD_STYLE = {
 export function DesktopSignInErrorPage() {
   const [searchParams] = useSearchParams();
   const nonce = (searchParams.get("nonce") || "").trim();
-  const retryPath = nonce
-    ? `/desktop-sign-in?nonce=${encodeURIComponent(nonce)}`
-    : "/desktop-sign-in";
 
+  // Without a nonce a retry can't complete the desktop handoff (the sign-in
+  // page would just dead-end on its own missing-session-token error), so
+  // don't offer a Try again loop that can never work — send the user back to
+  // the app's Sign in button, which mints a fresh nonce.
   return (
     <div style={PAGE_STYLE}>
       <div style={CARD_STYLE}>
         <strong>Rolester</strong>
         <p>Something went wrong finishing Google sign-in.</p>
-        <Link to={retryPath}>
-          <Button variant="primary">Try again</Button>
-        </Link>
+        {nonce ? (
+          <Link to={`/desktop-sign-in?nonce=${encodeURIComponent(nonce)}`}>
+            <Button variant="primary">Try again</Button>
+          </Link>
+        ) : (
+          <p>Return to the Rolester app and click Sign in again.</p>
+        )}
       </div>
     </div>
   );
