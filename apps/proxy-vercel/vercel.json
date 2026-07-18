@@ -5,5 +5,8 @@
       "maxDuration": 300
     }
   },
-  "rewrites": [{ "source": "/v1/:path*", "destination": "/api/v1/:path*" }]
+  "rewrites": [
+    { "source": "/v1/:path*", "destination": "/api/v1/:path*" },
+    { "source": "/auth/exchange", "destination": "/api/auth/exchange" }
+  ]
 }

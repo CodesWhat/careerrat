@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import {
   applyNonStreamUsage,
@@ -9,16 +10,20 @@ import {
   buildTokenEntries,
   buildUpstreamHeaders,
   buildUsageRow,
+  hashProxyToken,
+  looksLikeMintedToken,
+  mintProxyToken,
   newUsageAccumulator,
   parseProxyTokensEnv,
   parseUpstreamHeadersEnv,
   parseUserCapsEnv,
   parseUserCapUsdEnv,
   reportingUserId,
+  reportingUserIdForClerk,
   resolveUserCap,
 } from "../src/cli/proxy-core.mjs";
 
-test("authenticate accepts the map + legacy token union in Bearer and x-api-key forms", () => {
+test("authenticate accepts the map + legacy token union in Bearer and x-api-key forms", async () => {
   const entries = buildTokenEntries(" legacy-token ", {
     alice: " alice-token ",
     empty: " ",
@@ -27,17 +32,92 @@ test("authenticate accepts the map + legacy token union in Bearer and x-api-key 
     { label: "default", token: "legacy-token" },
     { label: "alice", token: "alice-token" },
   ]);
-  assert.deepEqual(authenticate({ authorization: "Bearer legacy-token" }, entries), {
+  assert.deepEqual(await authenticate({ authorization: "Bearer legacy-token" }, entries), {
     label: "default",
     token: "legacy-token",
+    clerkUserId: null,
   });
-  assert.deepEqual(authenticate({ "x-api-key": "alice-token" }, entries), {
+  assert.deepEqual(await authenticate({ "x-api-key": "alice-token" }, entries), {
     label: "alice",
     token: "alice-token",
+    clerkUserId: null,
   });
-  assert.equal(authenticate({}, entries), null);
-  assert.equal(authenticate({ authorization: "Bearer wrong" }, entries), null);
-  assert.equal(authenticate({ "x-api-key": "wrong" }, entries), null);
+  assert.equal(await authenticate({}, entries), null);
+  assert.equal(await authenticate({ authorization: "Bearer wrong" }, entries), null);
+  assert.equal(await authenticate({ "x-api-key": "wrong" }, entries), null);
+});
+
+test("minted token helpers produce strict token, digest, and Clerk reporting shapes", () => {
+  const token = mintProxyToken();
+  assert.match(token, /^rlp_[0-9a-f]{64}$/);
+  assert.equal(looksLikeMintedToken(token), true);
+  assert.equal(looksLikeMintedToken(`rlp_${"g".repeat(64)}`), false);
+  assert.equal(looksLikeMintedToken(`rlp_${"a".repeat(63)}`), false);
+  assert.equal(hashProxyToken(token), createHash("sha256").update(token, "utf8").digest("hex"));
+  assert.equal(
+    reportingUserIdForClerk("user_123"),
+    createHash("sha256").update("clerk:user_123", "utf8").digest("hex").slice(0, 12)
+  );
+});
+
+test("authenticate returns a static match without consulting minted-token storage", async () => {
+  let lookups = 0;
+  const token = `rlp_${"a".repeat(64)}`;
+  const result = await authenticate(
+    { authorization: `Bearer ${token}` },
+    [{ label: "static", token }],
+    { lookupMintedToken: async () => (lookups += 1) }
+  );
+  assert.deepEqual(result, {
+    label: "static",
+    token,
+    clerkUserId: null,
+  });
+  assert.equal(lookups, 0);
+});
+
+test("authenticate hashes minted tokens before lookup and maps the stored identity", async () => {
+  const token = `rlp_${"b".repeat(64)}`;
+  const calls = [];
+  const result = await authenticate({ authorization: `Bearer ${token}` }, [], {
+    lookupMintedToken: async (tokenHash) => {
+      calls.push(tokenHash);
+      return { label: "beta", clerkUserId: "user_123", revokedAt: null };
+    },
+  });
+  assert.deepEqual(calls, [hashProxyToken(token)]);
+  assert.equal(calls.includes(token), false);
+  assert.deepEqual(result, { label: "beta", token, clerkUserId: "user_123" });
+});
+
+test("authenticate rejects revoked, missing, and unconfigured minted tokens", async () => {
+  const token = `rlp_${"c".repeat(64)}`;
+  assert.equal(
+    await authenticate({ "x-api-key": token }, [], {
+      lookupMintedToken: async () => ({
+        label: "beta",
+        clerkUserId: "user_123",
+        revokedAt: "2026-07-18T00:00:00Z",
+      }),
+    }),
+    null
+  );
+  assert.equal(
+    await authenticate({ "x-api-key": token }, [], { lookupMintedToken: async () => null }),
+    null
+  );
+  assert.equal(await authenticate({ "x-api-key": token }, []), null);
+});
+
+test("authenticate never looks up non-minted garbage", async () => {
+  let lookups = 0;
+  assert.equal(
+    await authenticate({ authorization: "Bearer not-a-minted-token" }, [], {
+      lookupMintedToken: async () => (lookups += 1),
+    }),
+    null
+  );
+  assert.equal(lookups, 0);
 });
 
 test("header pipeline strips transport, auth, and Rolester labels and gates attribution", () => {

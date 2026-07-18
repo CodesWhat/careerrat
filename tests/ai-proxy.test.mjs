@@ -21,6 +21,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createProxyServer } from "../src/cli/ai-proxy.mjs";
+import {
+  hashProxyToken,
+  reportingUserId,
+  reportingUserIdForClerk,
+} from "../src/cli/proxy-core.mjs";
 import { computeCost, readUsageEvents, usageLogAbsPath } from "../src/core/ai/usage-log.mjs";
 
 function tempRoot() {
@@ -207,7 +212,7 @@ async function startProxy(opts) {
   };
 }
 
-function startMockMeterDb({ aggregateRows = [], postStatus = 201 } = {}) {
+function startMockMeterDb({ aggregateRows = [], tokenRows = [], postStatus = 201 } = {}) {
   const requests = [];
   const server = createServer((req, res) => {
     const chunks = [];
@@ -217,7 +222,9 @@ function startMockMeterDb({ aggregateRows = [], postStatus = 201 } = {}) {
       requests.push({ method: req.method, url: req.url, headers: { ...req.headers }, bodyText });
       if (req.method === "GET") {
         res.writeHead(200, { "content-type": "application/json" });
-        res.end(JSON.stringify(aggregateRows));
+        res.end(
+          JSON.stringify(req.url.startsWith("/rest/v1/proxy_tokens") ? tokenRows : aggregateRows)
+        );
         return;
       }
       res.writeHead(postStatus, { "content-type": "application/json" });
@@ -511,6 +518,66 @@ test("proxy: usage attributes distinct token hashes and labels without persistin
   } finally {
     proxy.close();
     upstream.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("proxy: minted and static tokens meter the same path under Clerk and token identities", async () => {
+  const upstream = await startMockUpstream();
+  const meterDb = await startMockMeterDb({
+    tokenRows: [{ clerk_user_id: "user_metered_123", label: "beta", revoked_at: null }],
+  });
+  const root = tempRoot();
+  const mintedToken = `rlp_${"e".repeat(64)}`;
+  const staticToken = "fake-static-meter-token";
+  const proxy = await startProxy({
+    proxyToken: staticToken,
+    upstreamKey: "sk-fake-upstream",
+    upstreamUrl: upstream.url,
+    meterRoot: root,
+    meterDbUrl: meterDb.url,
+    meterDbKey: "fake-db-key",
+  });
+  try {
+    await proxy.dbHydration;
+    for (const token of [mintedToken, staticToken]) {
+      const res = await fetch(`${proxy.url}/v1/messages`, {
+        method: "POST",
+        headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+        body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
+      });
+      assert.equal(res.status, 200);
+      await res.text();
+    }
+    await waitFor(
+      () => meterDb.requests.filter((entry) => entry.method === "POST").length === 2,
+      "both usage rows were not written"
+    );
+
+    const lookup = meterDb.requests.find(
+      (entry) => entry.method === "GET" && entry.url.startsWith("/rest/v1/proxy_tokens")
+    );
+    assert.ok(lookup);
+    assert.equal(
+      new URL(lookup.url, meterDb.url).searchParams.get("token_hash"),
+      `eq.${hashProxyToken(mintedToken)}`
+    );
+    assert.equal(lookup.url.includes(mintedToken), false);
+    const rows = meterDb.requests
+      .filter((entry) => entry.method === "POST")
+      .map((entry) => JSON.parse(entry.bodyText));
+    assert.deepEqual(
+      rows.map((row) => row.user_id),
+      [reportingUserIdForClerk("user_metered_123"), reportingUserId(staticToken)]
+    );
+    assert.deepEqual(
+      rows.map((row) => row.user_label),
+      ["beta", "default"]
+    );
+  } finally {
+    proxy.close();
+    upstream.close();
+    meterDb.close();
     rmSync(root, { recursive: true, force: true });
   }
 });

@@ -67,7 +67,7 @@
 
 import { extractSSEEvents } from "../../../../src/core/ai/call-ai.mjs";
 import { canonicalizeUsageEvent } from "../../../../src/core/ai/usage-log.mjs";
-import { createDbMeter } from "../../../../src/cli/meter-db.mjs";
+import { createDbMeter, createTokenStore } from "../../../../src/cli/meter-db.mjs";
 import {
   applyNonStreamUsage,
   applySSEUsageEvent,
@@ -87,6 +87,7 @@ import {
   parseUserCapsEnv,
   parseUserCapUsdEnv,
   reportingUserId,
+  reportingUserIdForClerk,
   resolveUpstreamHost,
   resolveUserCap,
   shouldMeterRequest,
@@ -216,13 +217,23 @@ async function webHandler(request, context) {
     return jsonResponse(500, { error: "proxy_misconfigured" });
   }
 
-  const auth = authenticate(headers, tokenEntries);
+  // Minted beta-tester tokens (apps/proxy-vercel/api/auth/exchange.mjs) live
+  // in the same Supabase project as the usage ledger, so the token store is
+  // always available here — ROLESTER_METER_DB_URL/_KEY are already required
+  // above in serverless mode (no JSONL fallback to fall back to).
+  const tokenStore = createTokenStore({ url: meterDbUrl, serviceKey: meterDbKey });
+
+  const auth = await authenticate(headers, tokenEntries, {
+    lookupMintedToken: tokenStore.lookupByHash,
+  });
   if (!auth) return jsonResponse(401, { error: "unauthorized" });
 
   const dbMeter = createDbMeter({ url: meterDbUrl, serviceKey: meterDbKey, table: meterDbTable });
   const base = normalizeUpstreamBase(upstreamUrl);
   const upstreamHost = resolveUpstreamHost(base);
-  const userId = reportingUserId(auth.token);
+  const userId = auth.clerkUserId
+    ? reportingUserIdForClerk(auth.clerkUserId)
+    : reportingUserId(auth.token);
   const userLabel = auth.label;
   const shouldMeter = shouldMeterRequest(path, method);
   const waitUntil =

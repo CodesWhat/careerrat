@@ -49,3 +49,31 @@ create index if not exists usage_events_user_id_idx on usage_events (user_id);
 -- RLS entirely. Enabling RLS with zero policies just means an anon/
 -- authenticated key (if one ever leaked) reads and writes nothing here.
 alter table usage_events enable row level security;
+
+-- ---------------------------------------------------------------------------
+-- Beta-tester Clerk-session -> minted-proxy-token exchange
+-- (apps/proxy-vercel/api/auth/exchange.mjs, src/cli/meter-db.mjs's
+-- createTokenStore()). One row per Clerk user; a reissue overwrites
+-- token_hash/label/last_issued_at and clears revoked_at rather than adding a
+-- new row, so token rotation never splits a user's spend history (the
+-- pseudonymous id fed to the meter is derived from clerk_user_id, not from
+-- the token — see proxy-core.mjs's reportingUserIdForClerk()).
+--
+--   PRIVACY INVARIANT — same as usage_events above: token_hash is a SHA-256
+--   digest of the minted token (proxy-core.mjs's hashProxyToken()), never
+--   the raw token itself.
+-- ---------------------------------------------------------------------------
+
+create table if not exists proxy_tokens (
+  clerk_user_id text primary key,
+  token_hash text unique not null,
+  label text,
+  created_at timestamptz not null default now(),
+  last_issued_at timestamptz not null default now(),
+  revoked_at timestamptz,
+  expires_at timestamptz
+);
+
+-- Same posture as usage_events: RLS enabled, no policies — the exchange
+-- endpoint only ever talks to this table with the service-role key.
+alter table proxy_tokens enable row level security;

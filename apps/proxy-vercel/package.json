@@ -6,5 +6,8 @@
   "description": "Vercel serverless front end for the Rolester managed-AI proxy — see README.md.",
   "engines": {
     "node": ">=24"
+  },
+  "dependencies": {
+    "@clerk/backend": "^3.11.7"
   }
 }

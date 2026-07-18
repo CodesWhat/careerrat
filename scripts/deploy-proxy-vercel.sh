@@ -17,6 +17,13 @@ rm -rf "$stage"
 mkdir -p "$stage/src"
 cp -R "$repo/apps/proxy-vercel/api" "$stage/api"
 cp "$repo/apps/proxy-vercel/vercel.json" "$repo/apps/proxy-vercel/package.json" "$stage/"
+# package-lock.json (apps/proxy-vercel now has its own install — @clerk/backend,
+# for api/auth/exchange.mjs) isn't guaranteed to exist yet on every checkout;
+# carry it along when it does so the deployed build's install is reproducible
+# instead of re-resolving the caret range fresh on every deploy.
+if [ -f "$repo/apps/proxy-vercel/package-lock.json" ]; then
+  cp "$repo/apps/proxy-vercel/package-lock.json" "$stage/"
+fi
 cp -R "$repo/src/cli" "$repo/src/core" "$stage/src/"
 
 # Flat layout puts the handler two levels below root, not four.

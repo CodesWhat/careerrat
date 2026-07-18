@@ -4,6 +4,11 @@ import { createServer } from "node:http";
 import { Writable } from "node:stream";
 import { test } from "node:test";
 import handler from "../apps/proxy-vercel/api/v1/[...path].mjs";
+import {
+  hashProxyToken,
+  reportingUserId,
+  reportingUserIdForClerk,
+} from "../src/cli/proxy-core.mjs";
 
 const TOKEN = "fake-proxy-token";
 const KEY = "fake-upstream-key";
@@ -35,7 +40,7 @@ function close(server) {
   return new Promise((resolve) => server.close(resolve));
 }
 
-async function harness({ spent = 0 } = {}) {
+async function harness({ spent = 0, tokenRows = [] } = {}) {
   const upstreamRequests = [];
   const upstream = createServer((req, res) => {
     const chunks = [];
@@ -69,9 +74,9 @@ async function harness({ spent = 0 } = {}) {
       const body = Buffer.concat(chunks).toString("utf8");
       dbRequests.push({ method: req.method, url: req.url, headers: { ...req.headers }, body });
       res.writeHead(req.method === "POST" ? 201 : 200, { "content-type": "application/json" });
-      res.end(
-        req.method === "POST" ? "" : JSON.stringify([{ user_id: "ignored", sum: String(spent) }])
-      );
+      if (req.method === "POST") res.end("");
+      else if (req.url.startsWith("/rest/v1/proxy_tokens")) res.end(JSON.stringify(tokenRows));
+      else res.end(JSON.stringify([{ user_id: "ignored", sum: String(spent) }]));
     });
   });
   const upstreamUrl = await listen(upstream);
@@ -259,6 +264,46 @@ test("under-cap non-stream POST is byte-identical and meters through context.wai
     assert.equal(row.tokens_out, 25);
     assert.equal(row.cache_read_tokens, 5);
     assert.equal(row.cache_creation_tokens, 2);
+  } finally {
+    await h.stop();
+  }
+});
+
+test("minted and static tokens meter the same path under Clerk and token identities respectively", async () => {
+  const mintedToken = `rlp_${"d".repeat(64)}`;
+  const clerkUserId = "user_metered_123";
+  const h = await harness({
+    tokenRows: [{ clerk_user_id: clerkUserId, label: "beta", revoked_at: null }],
+  });
+  setEnv(h);
+  try {
+    for (const token of [mintedToken, TOKEN]) {
+      const res = await handler(request("/v1/messages", { token }), {});
+      assert.equal(res.status, 200);
+      await res.text();
+    }
+
+    const lookup = h.dbRequests.find(
+      (entry) => entry.method === "GET" && entry.url.startsWith("/rest/v1/proxy_tokens")
+    );
+    assert.ok(lookup);
+    assert.equal(
+      new URL(lookup.url, h.dbUrl).searchParams.get("token_hash"),
+      `eq.${hashProxyToken(mintedToken)}`
+    );
+    assert.equal(lookup.url.includes(mintedToken), false);
+
+    const rows = h.dbRequests
+      .filter((entry) => entry.method === "POST" && entry.url.startsWith("/rest/v1/usage_events"))
+      .map((entry) => JSON.parse(entry.body));
+    assert.deepEqual(
+      rows.map((row) => row.user_id),
+      [reportingUserIdForClerk(clerkUserId), reportingUserId(TOKEN)]
+    );
+    assert.deepEqual(
+      rows.map((row) => row.user_label),
+      ["beta", "default"]
+    );
   } finally {
     await h.stop();
   }

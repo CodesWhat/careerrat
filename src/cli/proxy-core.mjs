@@ -21,7 +21,7 @@
 // env is always an explicit parameter) so both front ends, and their tests,
 // can drive this module directly without a live server.
 
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 export const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -116,13 +116,53 @@ export function buildTokenEntries(proxyToken, proxyTokens) {
   return entries;
 }
 
+// ---------------------------------------------------------------------------
+// Minted proxy tokens — the beta Clerk-session exchange
+// (apps/proxy-vercel/api/auth/exchange.mjs) mints one of these per Clerk
+// user and stores only its hash (meter-db.mjs's createTokenStore()), never
+// the raw token. The "rlp_" prefix lets authenticate() below cheaply tell a
+// minted token from a static ROLESTER_PROXY_TOKEN(S) value before paying for
+// a DB round trip.
+// ---------------------------------------------------------------------------
+
+export const MINTED_TOKEN_PREFIX = "rlp_";
+const MINTED_TOKEN_RE = /^rlp_[0-9a-f]{64}$/;
+
+export function looksLikeMintedToken(token) {
+  return MINTED_TOKEN_RE.test(String(token ?? ""));
+}
+
+// "rlp_" + 64 hex chars (32 random bytes) — long enough to be unguessable,
+// distinct enough from operator-issued static tokens to route straight to
+// the DB lookup path in authenticate() below.
+export function mintProxyToken() {
+  return MINTED_TOKEN_PREFIX + randomBytes(32).toString("hex");
+}
+
+// Full SHA-256 hex of the token string — this, never the token itself, is
+// what's persisted (proxy_tokens.token_hash) and looked up on every request.
+export function hashProxyToken(token) {
+  return createHash("sha256")
+    .update(String(token ?? ""), "utf8")
+    .digest("hex");
+}
+
 // Checks the presented token against every configured (label, token) pair —
 // never breaks early on a match, so auth timing doesn't vary with how many
-// testers are configured or which one matched. Pure: returns the matched
-// entry's label + the raw provided token (for reportingUserId() and the cap
-// check downstream), or null on failure — writing the 401 response is each
-// front end's own job.
-export function authenticate(headers, tokenEntries) {
+// testers are configured or which one matched. That static check is the
+// FIRST thing this function does, unchanged and synchronous internally, so
+// the common case (a static ROLESTER_PROXY_TOKEN(S) match) never pays for an
+// awaited DB lookup. Only when there's no static match, the presented token
+// looks like a minted token (see looksLikeMintedToken above), and a caller
+// injected `lookupMintedToken` (the front end's token store, when a meter DB
+// is configured) does this fall through to an async minted-token lookup —
+// hashProxyToken(token), never the raw token, is what's looked up. A missing
+// row or one with revokedAt set is a rejection. Returns the matched entry's
+// label + the raw provided token (for reportingUserId()/reportingUserIdForClerk()
+// and the cap check downstream) plus clerkUserId (null for a static token,
+// the Clerk user id for a minted one), or null on failure — writing the 401
+// response is each front end's own job. Never logs the token.
+export async function authenticate(headers, tokenEntries, { lookupMintedToken } = {}) {
   const provided = extractProvidedToken(headers);
   let matchedLabel = null;
   if (provided) {
@@ -130,8 +170,15 @@ export function authenticate(headers, tokenEntries) {
       if (tokensMatch(provided, token)) matchedLabel = label;
     }
   }
-  if (!matchedLabel) return null;
-  return { label: matchedLabel, token: provided };
+  if (matchedLabel) return { label: matchedLabel, token: provided, clerkUserId: null };
+
+  if (provided && looksLikeMintedToken(provided) && lookupMintedToken) {
+    const row = await lookupMintedToken(hashProxyToken(provided));
+    if (!row || row.revokedAt) return null;
+    return { label: row.label, token: provided, clerkUserId: row.clerkUserId };
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -143,6 +190,20 @@ export function authenticate(headers, tokenEntries) {
 // being reversible or colliding across a realistic number of proxy tokens.
 export function reportingUserId(token) {
   return createHash("sha256").update(String(token), "utf8").digest("hex").slice(0, 12);
+}
+
+// The same 12-hex pseudonymization contract as reportingUserId() above, but
+// keyed off a Clerk user id instead of a proxy token — so a beta tester's
+// spend history stays attributed to the same stable id across a minted
+// token's rotation/reissue (each reissue gets a fresh token, and thus a
+// fresh reportingUserId(token), but the same Clerk user always folds to the
+// same reportingUserIdForClerk(clerkUserId)). The "clerk:" prefix keeps this
+// id space disjoint from reportingUserId()'s token-keyed hashes.
+export function reportingUserIdForClerk(clerkUserId) {
+  return createHash("sha256")
+    .update(`clerk:${String(clerkUserId ?? "")}`, "utf8")
+    .digest("hex")
+    .slice(0, 12);
 }
 
 // "skill:x,action:y" from the x-rolester-* labels, or null when neither is
