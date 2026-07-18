@@ -1,4 +1,4 @@
-import { runAiWebSearchStream, startSearchRun } from "../lib/api.js";
+import { getSourcingRun, runAiWebSearchStream, startSearchRun } from "../lib/api.js";
 
 export function hasDbSourceSetup(sourceSetup) {
   if (!sourceSetup || typeof sourceSetup !== "object") return false;
@@ -34,11 +34,100 @@ function describeJobsPageSearchError(error) {
   );
 }
 
-export async function runJobsPageSearch({
-  startSearchRun: startSearchRunFn = startSearchRun,
+// Resolves after `ms`, or immediately if `signal` aborts first — the poll
+// loop's sleep step, kept local rather than pulled in as a dependency.
+function sleep(ms, signal) {
+  return new Promise((resolve) => {
+    if (signal?.aborted) {
+      resolve();
+      return;
+    }
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener?.(
+      "abort",
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true }
+    );
+  });
+}
+
+// The start request (POST /api/sourcing/search/start) returns immediately
+// with a point-in-time "running" run row while the scan itself runs detached
+// server-side (src/cli/sourcing-route.mjs -> runFirstSearchInBackground).
+// Without this loop the caller stores that "running" snapshot forever and
+// the button spins indefinitely even after the run completes. Polls
+// GET /api/sourcing/runs/latest (via getSourcingRunFn) until the run reaches
+// a terminal status, times out, or the caller aborts.
+async function pollManualSearchRun({
+  getSourcingRunFn,
   refetch,
   setSearchError,
   setSearchRun,
+  signal,
+  pollIntervalMs,
+  pollTimeoutMs,
+}) {
+  const deadline = Date.now() + pollTimeoutMs;
+  let misses = 0;
+
+  for (;;) {
+    await sleep(pollIntervalMs, signal);
+    if (signal?.aborted) return { ok: false, aborted: true };
+
+    if (Date.now() >= deadline) {
+      setSearchRun?.(null);
+      setSearchError?.(
+        "Search is still running in the background — reload the page later to see results."
+      );
+      return { ok: false, timedOut: true };
+    }
+
+    let polledRun = null;
+    let pollError = null;
+    try {
+      polledRun = unwrapRun(await getSourcingRunFn({ purpose: "manual-search" }));
+    } catch (error) {
+      pollError = error;
+    }
+
+    if (!polledRun) {
+      misses += 1;
+      if (misses < 3) continue;
+      if (signal?.aborted) return { ok: false, aborted: true };
+      setSearchRun?.(null);
+      setSearchError?.("Couldn't read search status. Reload the page to see results.");
+      return { ok: false, error: pollError || new Error("No sourcing run returned") };
+    }
+    misses = 0;
+
+    if (polledRun.status === "running") continue;
+
+    if (signal?.aborted) return { ok: false, aborted: true };
+    setSearchRun?.(polledRun);
+    if (polledRun.status === "failed") {
+      const message =
+        polledRun.error?.message ||
+        "Search failed. Add an RSS source or supported public ATS company, then retry.";
+      setSearchError?.(message);
+      return { ok: false, error: message, run: polledRun };
+    }
+    await refetch?.();
+    return { ok: true, run: polledRun };
+  }
+}
+
+export async function runJobsPageSearch({
+  startSearchRun: startSearchRunFn = startSearchRun,
+  getSourcingRun: getSourcingRunFn = getSourcingRun,
+  refetch,
+  setSearchError,
+  setSearchRun,
+  signal,
+  pollIntervalMs = 2500,
+  pollTimeoutMs = 10 * 60 * 1000,
 } = {}) {
   try {
     setSearchError?.(null);
@@ -51,6 +140,17 @@ export async function runJobsPageSearch({
         "Search failed. Add an RSS source or supported public ATS company, then retry.";
       setSearchError?.(message);
       return { ok: false, error: message, run };
+    }
+    if (run?.status === "running") {
+      return await pollManualSearchRun({
+        getSourcingRunFn,
+        refetch,
+        setSearchError,
+        setSearchRun,
+        signal,
+        pollIntervalMs,
+        pollTimeoutMs,
+      });
     }
     await refetch?.();
     return result;

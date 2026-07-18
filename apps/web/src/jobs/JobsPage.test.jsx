@@ -45,7 +45,45 @@ vi.mock("../lib/api.js", () => ({
 }));
 
 import { setSourcedStatus } from "../lib/api.js";
-import { JobsPage } from "./JobsPage.jsx";
+import { describeManualRunSummary, JobsPage } from "./JobsPage.jsx";
+
+describe("describeManualRunSummary", () => {
+  it("passes preview string summaries through unchanged", () => {
+    expect(
+      describeManualRunSummary({ status: "completed", summary: "Last sweep found 3 roles." })
+    ).toBe("Last sweep found 3 roles.");
+  });
+
+  it("formats structured free-board sweep counts", () => {
+    expect(
+      describeManualRunSummary({
+        status: "completed",
+        summary: { scanned: 318, new: 312, attemptedSources: 6, errorCount: 0 },
+      })
+    ).toBe("Free-board sweep: 318 scanned, 312 new roles from 6 sources.");
+  });
+
+  it("appends structured source error counts", () => {
+    expect(
+      describeManualRunSummary({
+        status: "completed",
+        summary: { scanned: 318, new: 312, attemptedSources: 6, errorCount: 2 },
+      })
+    ).toBe("Free-board sweep: 318 scanned, 312 new roles from 6 sources. 2 source errors.");
+  });
+
+  it("describes a zero-results sweep", () => {
+    expect(describeManualRunSummary({ status: "completed", summary: { zeroResults: true } })).toBe(
+      "Free-board sweep finished — no new roles this pass."
+    );
+  });
+
+  it("omits failed runs and runs without summaries", () => {
+    expect(describeManualRunSummary({ status: "failed", summary: "should be hidden" })).toBeNull();
+    expect(describeManualRunSummary({ status: "completed" })).toBeNull();
+    expect(describeManualRunSummary(null)).toBeNull();
+  });
+});
 
 // No jsdom in this suite (vitest's default "node" environment has neither
 // `window` nor `localStorage`), but JobsPage persists explorer state via

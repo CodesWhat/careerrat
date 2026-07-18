@@ -105,6 +105,7 @@ export function JobsPage() {
   const [manualSearchError, setManualSearchError] = useState(null);
   const [manualSearchRun, setManualSearchRun] = useState(null);
   const [manualSearchPending, setManualSearchPending] = useState(false);
+  const manualSearchAbortRef = useRef(null);
   const [runtimeConfig, setRuntimeConfig] = useState(null);
   const [aiPromptsState, setAiPromptsState] = useState({ count: 0, dirty: false, loading: true });
   const [aiSearchStatus, setAiSearchStatus] = useState("idle"); // idle | running | results | error
@@ -163,6 +164,15 @@ export function JobsPage() {
   useEffect(() => {
     return () => {
       aiSearchAbortRef.current?.abort();
+    };
+  }, []);
+
+  // Same discipline for the free-board search's poll loop (see
+  // pollManualSearchRun in jobsSearch.js) — that loop can run for minutes, so
+  // navigating away mid-poll must not keep setting state on a detached page.
+  useEffect(() => {
+    return () => {
+      manualSearchAbortRef.current?.abort();
     };
   }, []);
 
@@ -269,15 +279,19 @@ export function JobsPage() {
   }
 
   async function handleManualSearch() {
+    const controller = new AbortController();
+    manualSearchAbortRef.current = controller;
     setManualSearchPending(true);
     try {
       await runJobsPageSearch({
         refetch,
         setSearchError: setManualSearchError,
         setSearchRun: setManualSearchRun,
+        signal: controller.signal,
       });
     } finally {
       setManualSearchPending(false);
+      if (manualSearchAbortRef.current === controller) manualSearchAbortRef.current = null;
     }
   }
 
@@ -965,8 +979,27 @@ function SearchModeCard({
   );
 }
 
+// A completed run's `summary` (src/cli/sourcing-route.mjs) is a structured
+// object — { attemptedSources, scanned, new, errorCount, offerCount,
+// zeroResults, deterministicSources } — not the plain string preview/demo
+// data uses. Rendering the object directly as a React child would crash, so
+// format it into a sentence here; strings pass through unchanged.
+export function describeManualRunSummary(run) {
+  const summary = run?.summary;
+  if (run?.status === "failed" || !summary) return null;
+  if (typeof summary === "string") return summary;
+  if (summary.zeroResults) return "Free-board sweep finished — no new roles this pass.";
+  const scanned = Number(summary.scanned || 0);
+  const newRoles = Number(summary.new || 0);
+  const attemptedSources = Number(summary.attemptedSources || 0);
+  const errorCount = Number(summary.errorCount || 0);
+  let text = `Free-board sweep: ${scanned} scanned, ${newRoles} new roles from ${attemptedSources} sources.`;
+  if (errorCount > 0) text += ` ${errorCount} source errors.`;
+  return text;
+}
+
 function SearchStatusStrip({ aiSearchStatusText, manualSearchRunning, model, sourceSetupReady }) {
-  const runSummary = model.manualSearchRun?.summary;
+  const runSummary = describeManualRunSummary(model.manualSearchRun);
   const sourceSummary = sourceSetupSummary(model.sourceSetup, sourceSetupReady);
   const statusText =
     aiSearchStatusText || (manualSearchRunning ? "Finding roles…" : runSummary || sourceSummary);
