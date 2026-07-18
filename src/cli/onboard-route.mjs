@@ -71,6 +71,7 @@ import {
 import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
 import {
   countDeterministicSources,
+  healSearchSourceConfig,
   latestSourcingRunForUi,
   runFirstSearchInBackground,
   startFirstSearchRun,
@@ -494,16 +495,22 @@ function dbSourceResumePresent(pathCtx) {
   }
 }
 
-function dbDeterministicSourceCounts(pathCtx) {
+// Same self-heal-on-read as search-route.mjs's GET /api/search/sources (see
+// healSearchSourceConfig's header comment in first-search-run.mjs) — this is
+// the identical countDeterministicSources computation, just feeding
+// GET /api/onboard/state's FinishStep readiness display instead of the Jobs
+// page. Only attempts the (no-AI) heal when the stored count is 0.
+function dbDeterministicSourceCounts(pathCtx, config) {
   const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
   const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
-  return countDeterministicSources({ searchSources, sourcedScan });
+  const counts = countDeterministicSources({ searchSources, sourcedScan });
+  if (counts.attempted > 0) return counts;
+  const healed = healSearchSourceConfig({ ...pathCtx, config });
+  return healed.healed ? healed.deterministicSources : counts;
 }
 
-function dbSearchSourcesPresent(pathCtx) {
-  const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
-  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
-  return countDeterministicSources({ searchSources, sourcedScan }).attempted > 0;
+function dbSearchSourcesPresent(pathCtx, config) {
+  return dbDeterministicSourceCounts(pathCtx, config).attempted > 0;
 }
 
 function exportCandidateCompatibilityFiles(pathCtx, config) {
@@ -900,7 +907,7 @@ export function mountOnboardRoutes({
           env,
           purpose: "first-search",
         });
-        const deterministicSources = dbDeterministicSourceCounts(pathCtx);
+        const deterministicSources = dbDeterministicSourceCounts(pathCtx, config);
         const deepIngest = buildDeepIngestViewModel({ repoRoot, env });
         sendJson(res, 200, {
           ok: true,
@@ -924,7 +931,7 @@ export function mountOnboardRoutes({
             dbSourceResumePresent(pathCtx) ||
             existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md")),
           keyConfigured: resolveAIRoute(env).type !== "none",
-          searchSourcesPresent: dbSearchSourcesPresent(pathCtx),
+          searchSourcesPresent: dbSearchSourcesPresent(pathCtx, config),
           logoImageTokenConfigured: !!(integrations.logo_dev_token || publishableToken),
           logoSearchTokenConfigured: !!(integrations.logo_dev_secret_key || secretKey),
           publicSyncPreference: publicSyncPreferenceGet(pathCtx).preference,

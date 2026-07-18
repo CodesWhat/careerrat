@@ -97,14 +97,17 @@ test("Jobs page manual search uses the deterministic sourcing endpoint", () => {
   // (hasDbSourceSetup/runJobsPageSearch) — startSearchRun/purpose now live
   // there instead of inline on the page, and the setup-needed copy changed
   // from "Finish Search setup before running a job search." to "Finish
-  // Search Setup" / "Add company boards first.".
+  // Search Setup" / an actionable source-setup instruction.
   const jobsPage = stripJavaScriptComments(source("apps/web/src/jobs/JobsPage.jsx"));
   assert.match(jobsPage, /\bgetSearchSources\b/);
   assert.match(jobsPage, /\brunJobsPageSearch\b/);
   assert.match(jobsPage, /\bhasDbSourceSetup\b/);
   assert.match(jobsPage, /Search jobs/);
   assert.match(jobsPage, /Searching…/);
-  assert.match(jobsPage, /Add company boards first\./);
+  assert.match(
+    jobsPage,
+    /Add tracked companies or a job board in Settings or\s+Onboarding, then reload this page\./
+  );
   assert.doesNotMatch(jobsPage, /\bstartFirstSearchRun\b/);
   assertNoForbiddenRuntime(jobsPage, "Jobs page manual search");
 
@@ -149,8 +152,13 @@ test("finish step persists cadence before starting the local first search", () =
 
 test("DB-backed search readiness comes from source config, not generated YAML", () => {
   const onboardRoute = stripJavaScriptComments(source("src/cli/onboard-route.mjs"));
+  const dbCounts = functionBlock(onboardRoute, "function dbDeterministicSourceCounts");
   const dbReady = functionBlock(onboardRoute, "function dbSearchSourcesPresent");
-  assert.match(dbReady, /sourceConfigGet\(\{ \.\.\.pathCtx, name: "search-sources" \}\)/);
+  assert.match(dbCounts, /sourceConfigGet\(\{ \.\.\.pathCtx, name: "search-sources" \}\)/);
+  assert.match(dbCounts, /sourceConfigGet\(\{ \.\.\.pathCtx, name: "sourced-scan" \}\)/);
+  assert.match(dbCounts, /\bcountDeterministicSources\b/);
+  assert.match(dbCounts, /\bhealSearchSourceConfig\b/);
+  assert.match(dbReady, /dbDeterministicSourceCounts\(pathCtx, config\)\.attempted > 0/);
   assert.doesNotMatch(dbReady, /config\/search-sources\.yml|existsSync/);
 
   const dbStateBranch = sliceBetween(
@@ -159,7 +167,7 @@ test("DB-backed search readiness comes from source config, not generated YAML", 
     "\n    const load = loadCandidate",
     "DB state branch"
   );
-  assert.match(dbStateBranch, /searchSourcesPresent: dbSearchSourcesPresent\(pathCtx\)/);
+  assert.match(dbStateBranch, /searchSourcesPresent: dbSearchSourcesPresent\(pathCtx, config\)/);
   assert.doesNotMatch(dbStateBranch, /config\/search-sources\.yml/);
 
   const searchRoute = stripJavaScriptComments(source("src/cli/search-route.mjs"));

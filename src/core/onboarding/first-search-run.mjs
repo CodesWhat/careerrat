@@ -527,6 +527,46 @@ export function countDeterministicSources({ searchSources, sourcedScan } = {}) {
   };
 }
 
+// healSearchSourceConfig — the NO-AI, read-path companion to
+// prepareFirstSearchSources below. Readiness (countDeterministicSources
+// above) is computed by re-reading the STORED search-sources/sourced-scan
+// config, but a pre-6de6fa6b install can have a search-sources doc that was
+// seeded with zero deterministic sources (company boards seeded
+// `enabled:false`, no tech RSS, no `enabled_reason: "domain-gate"` marker
+// yet) — the only thing that ever repaired that doc was
+// prepareFirstSearchSources's generate + mergeSearchSources (which folds in
+// resyncDomainGatedEntries) pass, and that only ever runs inside an actual
+// search run. That's a deadlock: the config can't heal because a search
+// can't run because the config isn't healed. Callers on the readiness READ
+// path (GET /api/search/sources, GET /api/onboard/state) call this whenever
+// the stored count is 0, so readiness can flip true from a page load alone —
+// no search run, and (unlike backfillCompanyBoards' LAYER 3 above) ZERO AI
+// calls: this only regenerates+merges the search-sources doc itself, never
+// touching sourced-scan's tracked-company board resolution (that stays
+// search-time-only, per AGENTS.md's "no AI spend without intent"). Idempotent:
+// re-running against an already-healed doc finds nothing left to merge and
+// returns `healed: false` without writing.
+export function healSearchSourceConfig({ repoRoot, env = process.env, config = null } = {}) {
+  const pathCtx = { repoRoot, env };
+  const candidateConfig = config || candidateConfigGet(pathCtx);
+  const generated = buildSearchSources(candidateConfig.targeting, candidateConfig.profile);
+  const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+  const merged = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
+  const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+
+  const before = countDeterministicSources({ searchSources: current.data, sourcedScan });
+  const after = countDeterministicSources({ searchSources: merged, sourcedScan });
+  const changed =
+    after.attempted > before.attempted || JSON.stringify(merged) !== JSON.stringify(current.data);
+
+  if (!changed) {
+    return { healed: false, searchSources: current.data, deterministicSources: before };
+  }
+
+  const written = sourceConfigPut({ ...pathCtx, name: "search-sources", data: merged });
+  return { healed: true, searchSources: written.data, deterministicSources: after };
+}
+
 export async function prepareFirstSearchSources({
   repoRoot,
   env = process.env,

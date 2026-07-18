@@ -49,7 +49,10 @@ import { runSourcedScan } from "../../scripts/scan-sourced.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { readDbScannerRows } from "../core/db/scan-context.mjs";
 import { sourceConfigGet } from "../core/db/verbs/source-config.mjs";
-import { countDeterministicSources } from "../core/onboarding/first-search-run.mjs";
+import {
+  countDeterministicSources,
+  healSearchSourceConfig,
+} from "../core/onboarding/first-search-run.mjs";
 import { runAiWebSearch as defaultRunAiWebSearch } from "../core/search/ai-web-search.mjs";
 import {
   generateSearchPrompts,
@@ -197,8 +200,21 @@ export function mountSearchRoutes({
   // -------------------------------------------------------------------------
   addRoute("GET", "/api/search/sources", (_req, res) => {
     try {
-      const searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
+      let searchSources = sourceConfigGet({ ...pathCtx, name: "search-sources" }).data;
       const sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+      let deterministicSources = countDeterministicSources({ searchSources, sourcedScan });
+      // Self-heal on the read path (see healSearchSourceConfig's own header
+      // comment): a pre-6de6fa6b install can be stuck at zero deterministic
+      // sources forever otherwise, since the only repair path used to be
+      // search-time-only. Only attempted when the stored count is already 0
+      // — never on every load — and it makes no AI calls.
+      if (deterministicSources.attempted === 0) {
+        const healed = healSearchSourceConfig({ repoRoot, env });
+        if (healed.healed) {
+          searchSources = healed.searchSources;
+          deterministicSources = healed.deterministicSources;
+        }
+      }
       const list = Array.isArray(searchSources.searches) ? searchSources.searches : [];
       const tracked = Array.isArray(sourcedScan.tracked_companies)
         ? sourcedScan.tracked_companies
@@ -209,7 +225,7 @@ export function mountSearchRoutes({
           total: list.length,
         },
         trackedCompanies: tracked.length,
-        deterministicSources: countDeterministicSources({ searchSources, sourcedScan }),
+        deterministicSources,
       });
     } catch (err) {
       if (sendDbError(res, err)) return;

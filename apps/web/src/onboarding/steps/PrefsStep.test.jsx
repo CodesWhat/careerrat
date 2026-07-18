@@ -179,6 +179,58 @@ describe("PrefsStep shell layout", () => {
     expect(html).not.toContain("https://github.com/...");
     expect(html).not.toContain("https://...");
   });
+
+  it("renders the Remote, Hybrid, and On-site work-mode pills", () => {
+    const html = renderPrefsStep();
+
+    expect(html).toContain('aria-label="Work mode"');
+    expect(html).toContain(">Remote</button>");
+    expect(html).toContain(">Hybrid</button>");
+    expect(html).toContain(">On-site</button>");
+  });
+
+  it("prefills home base from profile.location.home before candidate.location", () => {
+    const html = renderPrefsStep({
+      state: {
+        ...BASE_STATE,
+        data: {
+          ...BASE_STATE.data,
+          profile: {
+            ...BASE_STATE.data.profile,
+            location: { home: "Brooklyn, NY" },
+            candidate: {
+              ...BASE_STATE.data.profile.candidate,
+              location: "Queens, NY",
+            },
+          },
+        },
+      },
+    });
+
+    expect(html).toContain('id="quick-facts-home-base"');
+    expect(html).toContain('value="Brooklyn, NY"');
+    expect(html).not.toContain('value="Queens, NY"');
+  });
+
+  it("falls back to candidate.location when profile.location.home is absent", () => {
+    const html = renderPrefsStep({
+      state: {
+        ...BASE_STATE,
+        data: {
+          ...BASE_STATE.data,
+          profile: {
+            ...BASE_STATE.data.profile,
+            candidate: {
+              ...BASE_STATE.data.profile.candidate,
+              location: "Queens, NY",
+            },
+          },
+        },
+      },
+    });
+
+    expect(html).toContain('value="Queens, NY"');
+  });
 });
 
 describe("quick facts data shaping", () => {
@@ -239,6 +291,44 @@ describe("quick facts data shaping", () => {
     expect(payload.formDefaults).not.toHaveProperty("current_employer");
     expect(payload.formDefaults).not.toHaveProperty("current_title");
     expect(payload.formDefaults).not.toHaveProperty("expected_base");
+  });
+
+  it("includes the exact location patch only when location signals are present", () => {
+    const payload = buildQuickFactsSavePayload({
+      workModes: ["remote", "hybrid", "onsite"],
+      homeBase: " New York, NY ",
+      relocationList: [" Boston, MA ", ""],
+    });
+
+    expect(payload.profile.location).toEqual({
+      remote: true,
+      home: "New York, NY",
+      relocation: ["Boston, MA"],
+    });
+  });
+
+  it("omits profile.location entirely when all location signals are empty", () => {
+    const payload = buildQuickFactsSavePayload({
+      workModes: [],
+      homeBase: " ",
+      relocationList: [""],
+    });
+
+    expect(payload.profile).not.toHaveProperty("location");
+  });
+
+  it("backfills candidate.location from home base only while the candidate value is empty", () => {
+    const emptyCandidate = buildQuickFactsSavePayload({
+      homeBase: "New York, NY",
+      existingCandidateLocation: "",
+    });
+    const existingCandidate = buildQuickFactsSavePayload({
+      homeBase: "New York, NY",
+      existingCandidateLocation: "Jersey City, NJ",
+    });
+
+    expect(emptyCandidate.profile.candidate.location).toBe("New York, NY");
+    expect(existingCandidate.profile.candidate).not.toHaveProperty("location");
   });
 });
 

@@ -1,9 +1,21 @@
 import { useState } from "react";
-import { Field, NumberField, TextField } from "../../components/form.jsx";
+import { ChipInput, Field, NumberField, TextField } from "../../components/form.jsx";
 import { GitHubIcon, GlobeIcon, LinkedInIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import { saveCandidateFile } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
+
+// Location gate (search-shaping): work mode is a multi-select (a candidate
+// can be open to more than one) but only the "remote" pick is a real signal
+// downstream — src/core/profile/generate-search-sources.mjs's location_filter
+// only reads profile.location.{remote,home,relocation}; hybrid vs. onsite
+// makes no difference to search generation today, so it stays local UI state
+// rather than a persisted field (no parallel shape invented on profile.location).
+const WORK_MODE_OPTIONS = [
+  { value: "remote", label: "Remote" },
+  { value: "hybrid", label: "Hybrid" },
+  { value: "onsite", label: "On-site" },
+];
 
 const DEFAULT_MODES = {
   usage_mode: "standard",
@@ -138,19 +150,53 @@ function authorizationPatch(authChoice) {
   return {};
 }
 
+// profile.location shape mirrors EXACTLY what generate-search-sources.mjs
+// reads (loc.remote / loc.home / loc.relocation, ~lines 115-127 there) — no
+// extra fields. Lenient like compensationPatch/authorizationPatch above: any
+// signal (a work mode pick, a home base, or a relocation city) is enough to
+// write the object; all-empty means nothing to say yet, so skip the patch
+// rather than stomping a previously-saved value with zeros.
+function locationPatch({ workModes = [], homeBase = "", relocationList = [] } = {}) {
+  const remote = Array.isArray(workModes) && workModes.includes("remote");
+  const home = String(homeBase || "").trim();
+  const relocation = (Array.isArray(relocationList) ? relocationList : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (!remote && !home && !relocation.length) return {};
+  return { location: { remote, home, relocation } };
+}
+
+// The resume-header location string (candidate.location) only gets filled in
+// from the onboarding home-base field when it's genuinely empty — never
+// overwritten once the resume (or a prior save) already set it.
+function candidateLocationPatch({ homeBase = "", existingCandidateLocation = "" } = {}) {
+  const home = String(homeBase || "").trim();
+  const existing = String(existingCandidateLocation || "").trim();
+  if (!home || existing) return {};
+  return { location: home };
+}
+
 export function buildQuickFactsSavePayload({
   links = {},
   modesData = {},
   formDefaultsData = {},
   minimumBase = null,
   authChoice = null,
+  workModes = [],
+  homeBase = "",
+  relocationList = [],
+  existingCandidateLocation = "",
 } = {}) {
   const cleanedLinks = cleanLinkFields(links);
   return {
     profile: {
-      candidate: cleanedLinks,
+      candidate: {
+        ...cleanedLinks,
+        ...candidateLocationPatch({ homeBase, existingCandidateLocation }),
+      },
       ...compensationPatch(minimumBase),
       ...authorizationPatch(authChoice),
+      ...locationPatch({ workModes, homeBase, relocationList }),
     },
     modes: {
       usage_mode: modesData.usage_mode ?? DEFAULT_MODES.usage_mode,
@@ -313,8 +359,30 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
     return null;
   });
 
+  // Location gate. Only `remote` round-trips from a saved value (see
+  // WORK_MODE_OPTIONS' comment) — hybrid/onsite start unselected on reload.
+  // Home base prefers a previously saved profile.location.home, falling back
+  // to the resume-extracted candidate.location header field.
+  const [workModes, setWorkModes] = useState(() =>
+    profileData.location?.remote ? ["remote"] : []
+  );
+  const [homeBase, setHomeBase] = useState(() =>
+    String(profileData.location?.home || profileData.candidate?.location || "").trim()
+  );
+  const [relocationList, setRelocationList] = useState(() =>
+    Array.isArray(profileData.location?.relocation)
+      ? profileData.location.relocation.filter(Boolean)
+      : []
+  );
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+
+  function toggleWorkMode(mode) {
+    setWorkModes((current) =>
+      current.includes(mode) ? current.filter((value) => value !== mode) : [...current, mode]
+    );
+  }
 
   async function handleSaveAndNext() {
     setSaving(true);
@@ -326,6 +394,10 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
         formDefaultsData,
         minimumBase,
         authChoice,
+        workModes,
+        homeBase,
+        relocationList,
+        existingCandidateLocation: profileData.candidate?.location,
       });
       await saveCandidateFile("profile", payload.profile);
       await saveCandidateFile("modes", payload.modes);
@@ -472,6 +544,51 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
                   </div>
                   <span className="field__hint">Optional.</span>
                 </div>
+                <div className="field">
+                  <span className="field__label">Work mode</span>
+                  <fieldset className="onboarding-quick-facts__pill-row" aria-label="Work mode">
+                    {WORK_MODE_OPTIONS.map((option) => {
+                      const selected = workModes.includes(option.value);
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          className={`onboarding-targeting__priority-choice${selected ? " onboarding-targeting__priority-choice--active" : ""}`}
+                          aria-pressed={selected}
+                          onClick={() => toggleWorkMode(option.value)}
+                        >
+                          {option.label}
+                        </button>
+                      );
+                    })}
+                  </fieldset>
+                  <span className="field__hint">Pick every mode you'd take. Optional.</span>
+                </div>
+                <Field
+                  label="Home base"
+                  htmlFor="quick-facts-home-base"
+                  hint="City, state, or country. Helps match hybrid and on-site roles near you."
+                >
+                  <TextField
+                    id="quick-facts-home-base"
+                    value={homeBase}
+                    onChange={setHomeBase}
+                    placeholder="City, state or country"
+                  />
+                </Field>
+                <Field
+                  label="Open to relocating"
+                  htmlFor="quick-facts-relocation"
+                  hint="Press Enter or comma to add another city."
+                  className="onboarding-custom-entry"
+                >
+                  <ChipInput
+                    id="quick-facts-relocation"
+                    values={relocationList}
+                    onChange={setRelocationList}
+                    placeholder="e.g. Austin, TX"
+                  />
+                </Field>
               </div>
 
               <div className="onboarding-quick-facts__add-area">

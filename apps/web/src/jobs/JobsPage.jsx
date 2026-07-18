@@ -872,6 +872,7 @@ function SearchView({
           actionLabel={aiSearch.actionLabel}
           disabled={aiSearch.disabled}
           eyebrow="AI web search"
+          extra={<AiSearchPrompts onPromptsState={onPromptsState} />}
           meta={aiSearch.meta}
           onAction={aiSearch.onAction}
           title={aiSearch.title}
@@ -882,11 +883,10 @@ function SearchView({
 
       {!sourceSetupReady ? (
         <section className="jobs__setup-inline" aria-live="polite">
-          Add company boards first.
+          No search sources set up yet. Add tracked companies or a job board in Settings or
+          Onboarding, then reload this page.
         </section>
       ) : null}
-
-      <AiSearchPrompts onPromptsState={onPromptsState} />
 
       <section className="jobs__panel">
         <PanelHeader
@@ -939,7 +939,16 @@ function SearchView({
   );
 }
 
-function SearchModeCard({ actionLabel, children, disabled, eyebrow, meta, onAction, title }) {
+function SearchModeCard({
+  actionLabel,
+  children,
+  disabled,
+  eyebrow,
+  extra,
+  meta,
+  onAction,
+  title,
+}) {
   return (
     <article className="jobs__search-mode">
       <div className="jobs__search-mode-head">
@@ -948,6 +957,7 @@ function SearchModeCard({ actionLabel, children, disabled, eyebrow, meta, onActi
       </div>
       <h2>{title}</h2>
       <p>{children}</p>
+      {extra}
       <Button className="jobs__search-button" disabled={disabled} onClick={onAction}>
         {actionLabel}
       </Button>

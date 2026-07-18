@@ -4424,6 +4424,9 @@ button {
   display: flex;
   gap: 6px;
   flex-wrap: wrap;
+  margin: 0;
+  padding: 0;
+  border: 0;
 }
 
 .onboarding-targeting__signal-panel h2 {
@@ -8729,46 +8732,92 @@ button {
   background: rgba(47, 158, 143, 0.2);
 }
 
+/* AI search prompts, embedded in the AI Web Search SearchModeCard (Jobs >
+   Search) rather than a standalone panel below it — generation control +
+   compact prompt chips live on the card itself, each chip opening
+   AiSearchPromptModal (below) for the full view/edit/save/remove surface. */
+.jobs__ai-prompts-embedded {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.jobs__ai-prompts-embedded-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.jobs__ai-prompts-embedded-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
 .jobs__ai-prompts-hint {
   margin: 0;
-  padding: 12px 18px 0;
   color: var(--ink-soft);
   font-size: 12px;
   font-weight: 700;
 }
 
-.jobs__ai-prompts-list {
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px 18px 0;
-}
-
-.jobs__ai-prompts-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-}
-
-.jobs__ai-prompts-row .text-area {
-  flex: 1 1 auto;
-  min-width: 0;
-  width: 100%;
-}
-
-.jobs__ai-prompts-remove {
-  flex: 0 0 auto;
-  margin-top: 8px;
-  border: 0;
-  background: transparent;
+.jobs__ai-prompts-empty {
+  padding: 8px 10px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
   color: var(--ink-soft);
   font-size: 12px;
-  font-weight: 800;
-  cursor: pointer;
+  font-weight: 750;
 }
 
-.jobs__ai-prompts-remove:hover {
-  color: var(--coral);
+.jobs__ai-prompts-chips {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.jobs__ai-prompt-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(var(--rgb-line), 0.1);
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
+
+.jobs__ai-prompt-chip:hover {
+  border-color: rgba(var(--rgb-line), 0.22);
+}
+
+.jobs__ai-prompt-chip-text {
+  overflow: hidden;
+  display: -webkit-box;
+  min-width: 0;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.jobs__ai-prompt-chip-action {
+  display: flex;
+  flex: 0 0 auto;
+  color: var(--ink-soft);
 }
 
 .jobs__ai-prompts-actions {
@@ -8776,7 +8825,55 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 16px 18px 18px;
+}
+
+/* AiSearchPromptModal — reuses ArtifactViewerModal's overlay/toolbar/close
+   scaffold (.packet-viewer-overlay, .packet-viewer__toolbar/__title/__close,
+   including the close button's -webkit-app-region: no-drag — see that
+   component's own header comment for the Electron drag-region gotcha) with a
+   right-sized dialog box instead of the full-viewport document viewer. */
+.jobs__ai-prompt-modal {
+  -webkit-app-region: no-drag;
+  display: flex;
+  width: min(560px, calc(100vw - 48px));
+  max-height: calc(100vh - 96px);
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(var(--rgb-line), 0.14);
+  border-radius: 8px;
+  background: var(--paper-surface);
+  box-shadow: 0 28px 72px rgba(var(--rgb-line), 0.24);
+}
+
+.jobs__ai-prompt-modal-body .text-area {
+  width: 100%;
+}
+
+.jobs__ai-prompt-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.jobs__ai-prompt-modal-buttons {
+  display: flex;
+  gap: 8px;
+}
+
+.jobs__ai-prompt-modal-remove {
+  border: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.jobs__ai-prompt-modal-remove:hover {
+  color: var(--coral);
 }
 
 @media (max-width: 1120px) {
