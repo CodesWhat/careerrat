@@ -64,8 +64,16 @@ export function appIdExists(db, id) {
 // comment) — once a real write stamps them, they're genuinely present, not a
 // legacy fixture's gap to preserve on the next export.
 export function bumpMeta(db, at = nowIso()) {
-  const current = db.prepare("SELECT extra FROM meta WHERE id = 1").get();
+  const current = db.prepare("SELECT last_updated_at, extra FROM meta WHERE id = 1").get();
   const extra = current?.extra ? JSON.parse(current.extra) : {};
+  // The stamp must STRICTLY advance on every bump (consumers poll it as the
+  // freshness signal), but ISO stamps only carry millisecond resolution — two
+  // verbs landing in the same millisecond would otherwise produce version N
+  // and N+1 with an identical lastUpdatedAt. Same-format ISO strings compare
+  // lexicographically, so string <= is a correct ordering check here.
+  if (current?.last_updated_at && at <= current.last_updated_at) {
+    at = new Date(Date.parse(current.last_updated_at) + 1).toISOString();
+  }
   if (Array.isArray(extra.__absentMetaKeys) && extra.__absentMetaKeys.length) {
     extra.__absentMetaKeys = extra.__absentMetaKeys.filter(
       (key) => key !== "version" && key !== "lastUpdatedAt"
