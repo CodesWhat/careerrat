@@ -108,6 +108,19 @@ async function mountSettings({ getToken }) {
   vi.resetModules();
   let runtime;
   vi.doMock("react", () => ({
+    // createContext is a static stub, not routed through `runtime` —
+    // SettingsPage.jsx now pulls in GuardrailsStep.jsx/PrefsStep.jsx (for
+    // their exported chip presets and buildQuickFactsSavePayload()), which
+    // transitively import OnboardingShell.jsx. That file calls
+    // createContext(null) once at module-eval time to build
+    // OnboardingCompletionContext — never rendered from this page, so the
+    // real Provider/Consumer/useContext behavior is never exercised here;
+    // this stub only needs to exist so that top-level call doesn't throw.
+    createContext: (defaultValue) => ({
+      Provider: ({ children }) => children,
+      Consumer: () => null,
+      _currentValue: defaultValue,
+    }),
     useEffect: (...args) => runtime.useEffect(...args),
     useMemo: (...args) => runtime.useMemo(...args),
     useState: (...args) => runtime.useState(...args),

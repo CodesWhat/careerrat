@@ -185,8 +185,11 @@ const CANDIDATE_ROUTE_ENTRIES = [
 // settings/SettingsPage.jsx) reads and writes. GET /api/onboard/state below
 // includes parsed data for exactly these files — see that route's own
 // comment for why this extends the existing state read instead of adding a
-// new route.
-const SETTINGS_DATA_FILES = ["profile", "targeting", "form-defaults", "modes"];
+// new route. "honesty" was added for the Settings Honesty boundaries card — the
+// write route (POST /api/onboard/candidate/honesty) already existed and
+// already validated against config/honesty.schema.json; only this read-side
+// prefill list was missing it.
+const SETTINGS_DATA_FILES = ["profile", "targeting", "form-defaults", "modes", "honesty"];
 const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
   enabled: true,
   source: "default",
@@ -917,6 +920,7 @@ export function mountOnboardRoutes({
             targeting: config.targeting,
             "form-defaults": config["form-defaults"],
             modes: config.modes,
+            honesty: config.honesty,
             setup: config.setup,
             deepIngest,
             sourcing: {

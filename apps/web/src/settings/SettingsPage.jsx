@@ -4,7 +4,15 @@ import profileSchema from "../../../../config/profile.schema.json";
 import { useRolesterUser } from "../auth/clerkControls.jsx";
 import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
-import { Field, NumberField, Select, TextArea, TextField, Toggle } from "../components/form.jsx";
+import {
+  ChipInput,
+  Field,
+  NumberField,
+  Select,
+  TextArea,
+  TextField,
+  Toggle,
+} from "../components/form.jsx";
 import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
 import {
@@ -16,6 +24,20 @@ import {
   saveCandidateFile,
   validateAndSaveAiKey,
 } from "../lib/api.js";
+import {
+  GUARDRAIL_PRESETS,
+  GUARDRAIL_SUGGESTIONS,
+  isGuardrailSelected,
+  normalizeSignals,
+  toggleGuardrailSignal,
+} from "../onboarding/steps/GuardrailsStep.jsx";
+// buildQuickFactsSavePayload is the only exported patch-builder here — the
+// individual pure helpers it composes (compensationPatch, authorizationPatch,
+// locationPatch, candidateLocationPatch, cleanLinkFields) are module-private
+// to PrefsStep.jsx. Calling the composite and reading its `.profile` slice
+// reuses the exact same tested shaping logic without re-deriving it or
+// widening PrefsStep.jsx's export surface.
+import { buildQuickFactsSavePayload } from "../onboarding/steps/PrefsStep.jsx";
 import { mapErrors } from "./error-map.js";
 import {
   formatTokenCount,
@@ -42,6 +64,22 @@ const TOOLCHAIN_OPTIONS = profileSchema.properties.candidate.properties.toolchai
   value: v,
   label: v,
 }));
+const AGENT_VOICE_OPTIONS = modesSchema.properties.agent_voice.enum.map((v) => ({
+  value: v,
+  label: v,
+}));
+
+// Work mode choices for the Profile card's location fields. Not schema-driven
+// (profile.schema.json's location object has no enum here) — mirrors
+// PrefsStep.jsx's own WORK_MODE_OPTIONS constant, which isn't exported.
+// Same caveat as PrefsStep's own comment: only the "remote" pick round-trips
+// to a real signal (generate-search-sources.mjs only reads
+// profile.location.remote); hybrid/onsite stay local UI state.
+const WORK_MODE_OPTIONS = [
+  { value: "remote", label: "Remote" },
+  { value: "hybrid", label: "Hybrid" },
+  { value: "onsite", label: "On-site" },
+];
 
 const AI_ROUTE_LABEL = {
   byok: "Connected (BYOK)",
@@ -64,20 +102,41 @@ const EMPTY_USAGE_SUMMARY = {
 const MODES_FIELD_MAP = {
   usage_mode: "modes-usage_mode",
   application_mode: "modes-application_mode",
+  agent_voice: "modes-agent_voice",
 };
 const PROFILE_FIELD_MAP = {
   "candidate.domain": "profile-domain",
   "candidate.toolchain": "profile-toolchain",
+  "candidate.linkedin": "profile-linkedin",
+  "candidate.github": "profile-github",
+  "candidate.portfolio": "profile-portfolio",
   "compensation.expected_base": "profile-expected_base",
   "compensation.oe_min_base": "profile-oe_min_base",
   "compensation.oe_max_base": "profile-oe_max_base",
   "compensation.relo_package_needs": "profile-relo_package_needs",
+  "authorization.work_authorized": "profile-authorization",
+  "authorization.requires_sponsorship": "profile-authorization",
+  "location.remote": "profile-work_mode",
+  "location.home": "profile-home_base",
+  "location.relocation": "profile-relocation",
 };
 const TARGETING_FIELD_MAP = {
   "fit_bands.high_min": "targeting-high_min",
   "fit_bands.med_min": "targeting-med_min",
   "reevaluation.rejection_total": "targeting-rejection_total",
   "reevaluation.rejection_per_family": "targeting-rejection_per_family",
+  cut_signals: "targeting-cut_signals",
+  keep_signals: "targeting-keep_signals",
+  excluded_companies: "targeting-excluded_companies",
+  tracked_companies: "targeting-tracked_companies",
+};
+const HONESTY_FIELD_MAP = {
+  "education.highest_degree": "honesty-highest_degree",
+  "education.add_education_section": "honesty-add_education_section",
+  "tools.confirmed": "honesty-tools_confirmed",
+  "tools.adjacent": "honesty-tools_adjacent",
+  "tools.do_not_claim": "honesty-tools_do_not_claim",
+  "claims.do_not_fabricate": "honesty-do_not_fabricate",
 };
 const FORM_DEFAULTS_FIELD_MAP = {
   auto_submit: "form-defaults-auto_submit",
@@ -112,6 +171,7 @@ export function SettingsPage() {
   const [modesForm, setModesForm] = useState({
     usage_mode: "standard",
     application_mode: "balanced",
+    agent_voice: "standard",
   });
   const [profileForm, setProfileForm] = useState({
     domain: "",
@@ -120,12 +180,35 @@ export function SettingsPage() {
     oe_min_base: null,
     oe_max_base: null,
     relo_package_needs: "",
+    linkedin: "",
+    github: "",
+    portfolio: "",
+    // Not rendered as a field — read-only pass-through so
+    // candidateLocationPatch() (via buildQuickFactsSavePayload) never
+    // overwrites the resume-header location string with a home-base edit.
+    candidateLocation: "",
+    authChoice: null,
+    workModes: [],
+    homeBase: "",
+    relocationList: [],
   });
   const [targetingForm, setTargetingForm] = useState({
     high_min: null,
     med_min: null,
     rejection_total: null,
     rejection_per_family: null,
+    cut_signals: [],
+    keep_signals: [],
+    excluded_companies: [],
+    tracked_companies: [],
+  });
+  const [honestyForm, setHonestyForm] = useState({
+    highest_degree: "",
+    add_education_section: false,
+    tools_confirmed: [],
+    tools_adjacent: [],
+    tools_do_not_claim: [],
+    do_not_fabricate: [],
   });
   const [formDefaultsForm, setFormDefaultsForm] = useState({
     auto_submit: false,
@@ -158,6 +241,7 @@ export function SettingsPage() {
       setModesForm({
         usage_mode: modes.usage_mode ?? "standard",
         application_mode: modes.application_mode ?? "balanced",
+        agent_voice: modes.agent_voice ?? "standard",
       });
 
       const profile = state.data?.profile ?? {};
@@ -168,6 +252,21 @@ export function SettingsPage() {
         oe_min_base: get(profile, "compensation.oe_min_base", null),
         oe_max_base: get(profile, "compensation.oe_max_base", null),
         relo_package_needs: get(profile, "compensation.relo_package_needs", ""),
+        linkedin: get(profile, "candidate.linkedin", ""),
+        github: get(profile, "candidate.github", ""),
+        portfolio: get(profile, "candidate.portfolio", ""),
+        candidateLocation: get(profile, "candidate.location", ""),
+        authChoice:
+          profile.authorization?.work_authorized === true
+            ? "authorized"
+            : profile.authorization?.requires_sponsorship === true
+              ? "sponsorship"
+              : null,
+        workModes: profile.location?.remote ? ["remote"] : [],
+        homeBase: String(profile.location?.home || profile.candidate?.location || "").trim(),
+        relocationList: Array.isArray(profile.location?.relocation)
+          ? profile.location.relocation.filter(Boolean)
+          : [],
       });
 
       const targeting = state.data?.targeting ?? {};
@@ -176,6 +275,28 @@ export function SettingsPage() {
         med_min: get(targeting, "fit_bands.med_min", null),
         rejection_total: get(targeting, "reevaluation.rejection_total", null),
         rejection_per_family: get(targeting, "reevaluation.rejection_per_family", null),
+        cut_signals: normalizeSignals(targeting.cut_signals),
+        keep_signals: normalizeSignals(targeting.keep_signals),
+        excluded_companies: Array.isArray(targeting.excluded_companies)
+          ? targeting.excluded_companies
+          : [],
+        tracked_companies: Array.isArray(targeting.tracked_companies)
+          ? targeting.tracked_companies
+          : [],
+      });
+
+      const honesty = state.data?.honesty ?? {};
+      setHonestyForm({
+        highest_degree: get(honesty, "education.highest_degree", "") ?? "",
+        add_education_section: !!get(honesty, "education.add_education_section", false),
+        tools_confirmed: Array.isArray(honesty.tools?.confirmed) ? honesty.tools.confirmed : [],
+        tools_adjacent: Array.isArray(honesty.tools?.adjacent) ? honesty.tools.adjacent : [],
+        tools_do_not_claim: Array.isArray(honesty.tools?.do_not_claim)
+          ? honesty.tools.do_not_claim
+          : [],
+        do_not_fabricate: Array.isArray(honesty.claims?.do_not_fabricate)
+          ? honesty.claims.do_not_fabricate
+          : [],
       });
 
       const formDefaults = state.data?.["form-defaults"] ?? {};
@@ -235,6 +356,47 @@ export function SettingsPage() {
     } finally {
       setSaving((s) => ({ ...s, [section]: false }));
     }
+  }
+
+  // Composes the Profile card's links/authorization/location fields via
+  // PrefsStep.jsx's own buildQuickFactsSavePayload() rather than
+  // re-deriving that trimming/omit-if-empty logic, then drops
+  // additional_links — this card has no UI for that onboarding-only list,
+  // and including it here would replace-wholesale it back to [] on every
+  // save (arrays replace, never merge), silently deleting anything the
+  // onboarding wizard saved. `current_base` is never read or sent — this
+  // patch only ever touches expected_base/oe_min_base/oe_max_base/
+  // relo_package_needs, the fields this card already owned.
+  function buildProfileSavePatch() {
+    const quickFacts = buildQuickFactsSavePayload({
+      links: {
+        linkedin: profileForm.linkedin,
+        github: profileForm.github,
+        portfolio: profileForm.portfolio,
+      },
+      authChoice: profileForm.authChoice,
+      workModes: profileForm.workModes,
+      homeBase: profileForm.homeBase,
+      relocationList: profileForm.relocationList,
+      existingCandidateLocation: profileForm.candidateLocation,
+    }).profile;
+    const { additional_links: _additionalLinks, ...linkFields } = quickFacts.candidate;
+
+    return {
+      candidate: {
+        domain: profileForm.domain,
+        toolchain: profileForm.toolchain,
+        ...linkFields,
+      },
+      compensation: {
+        expected_base: profileForm.expected_base,
+        oe_min_base: profileForm.oe_min_base,
+        oe_max_base: profileForm.oe_max_base,
+        relo_package_needs: profileForm.relo_package_needs,
+      },
+      ...(quickFacts.authorization ? { authorization: quickFacts.authorization } : {}),
+      ...(quickFacts.location ? { location: quickFacts.location } : {}),
+    };
   }
 
   async function handleSaveAiKey() {
@@ -434,6 +596,19 @@ export function SettingsPage() {
               options={APPLICATION_MODE_OPTIONS}
             />
           </Field>
+          <Field
+            label="Agent voice"
+            htmlFor="modes-agent_voice"
+            error={errorsFor("modes")["modes-agent_voice"]}
+            hint="Changes how the agent talks to you in chat — it does not change the tone of generated résumés or cover letters (that's Writing voice, in Library)."
+          >
+            <Select
+              id="modes-agent_voice"
+              value={modesForm.agent_voice}
+              onChange={(v) => setModesForm((f) => ({ ...f, agent_voice: v }))}
+              options={AGENT_VOICE_OPTIONS}
+            />
+          </Field>
         </div>
         <div>
           <Button
@@ -441,7 +616,11 @@ export function SettingsPage() {
             onClick={() =>
               handleSectionSave(
                 "modes",
-                { usage_mode: modesForm.usage_mode, application_mode: modesForm.application_mode },
+                {
+                  usage_mode: modesForm.usage_mode,
+                  application_mode: modesForm.application_mode,
+                  agent_voice: modesForm.agent_voice,
+                },
                 MODES_FIELD_MAP
               )
             }
@@ -525,24 +704,149 @@ export function SettingsPage() {
             onChange={(v) => setProfileForm((f) => ({ ...f, relo_package_needs: v }))}
           />
         </Field>
+        <div className="field-row">
+          <Field
+            label="LinkedIn"
+            htmlFor="profile-linkedin"
+            error={errorsFor("profile")["profile-linkedin"]}
+          >
+            <TextField
+              id="profile-linkedin"
+              value={profileForm.linkedin}
+              onChange={(v) => setProfileForm((f) => ({ ...f, linkedin: v }))}
+              placeholder="https://linkedin.com/in/your-slug"
+            />
+          </Field>
+          <Field
+            label="GitHub"
+            htmlFor="profile-github"
+            error={errorsFor("profile")["profile-github"]}
+          >
+            <TextField
+              id="profile-github"
+              value={profileForm.github}
+              onChange={(v) => setProfileForm((f) => ({ ...f, github: v }))}
+              placeholder="https://github.com/username"
+            />
+          </Field>
+          <Field
+            label="Portfolio"
+            htmlFor="profile-portfolio"
+            error={errorsFor("profile")["profile-portfolio"]}
+          >
+            <TextField
+              id="profile-portfolio"
+              value={profileForm.portfolio}
+              onChange={(v) => setProfileForm((f) => ({ ...f, portfolio: v }))}
+              placeholder="https://your-site.com"
+            />
+          </Field>
+        </div>
+        <div className="field">
+          <span className="field__label">Work authorization</span>
+          <div
+            className="onboarding-quick-facts__pill-row"
+            role="radiogroup"
+            aria-label="Work authorization"
+          >
+            <button
+              type="button"
+              className={`onboarding-targeting__priority-choice${profileForm.authChoice === "authorized" ? " onboarding-targeting__priority-choice--active" : ""}`}
+              aria-pressed={profileForm.authChoice === "authorized"}
+              onClick={() =>
+                setProfileForm((f) => ({
+                  ...f,
+                  authChoice: f.authChoice === "authorized" ? null : "authorized",
+                }))
+              }
+            >
+              Authorized to work
+            </button>
+            <button
+              type="button"
+              className={`onboarding-targeting__priority-choice${profileForm.authChoice === "sponsorship" ? " onboarding-targeting__priority-choice--active" : ""}`}
+              aria-pressed={profileForm.authChoice === "sponsorship"}
+              onClick={() =>
+                setProfileForm((f) => ({
+                  ...f,
+                  authChoice: f.authChoice === "sponsorship" ? null : "sponsorship",
+                }))
+              }
+            >
+              Need sponsorship
+            </button>
+          </div>
+          {errorsFor("profile")["profile-authorization"] ? (
+            <span className="field__error">{errorsFor("profile")["profile-authorization"]}</span>
+          ) : (
+            <span className="field__hint">Optional.</span>
+          )}
+        </div>
+        <div className="field">
+          <span className="field__label">Work mode</span>
+          <fieldset className="onboarding-quick-facts__pill-row" aria-label="Work mode">
+            {WORK_MODE_OPTIONS.map((option) => {
+              const selected = profileForm.workModes.includes(option.value);
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`onboarding-targeting__priority-choice${selected ? " onboarding-targeting__priority-choice--active" : ""}`}
+                  aria-pressed={selected}
+                  onClick={() =>
+                    setProfileForm((f) => ({
+                      ...f,
+                      workModes: f.workModes.includes(option.value)
+                        ? f.workModes.filter((v) => v !== option.value)
+                        : [...f.workModes, option.value],
+                    }))
+                  }
+                >
+                  {option.label}
+                </button>
+              );
+            })}
+          </fieldset>
+          {errorsFor("profile")["profile-work_mode"] ? (
+            <span className="field__error">{errorsFor("profile")["profile-work_mode"]}</span>
+          ) : (
+            <span className="field__hint">
+              Pick every mode you'd take. Only "Remote" is used in search matching today.
+            </span>
+          )}
+        </div>
+        <div className="field-row">
+          <Field
+            label="Home base"
+            htmlFor="profile-home_base"
+            error={errorsFor("profile")["profile-home_base"]}
+            hint="City, state, or country. Helps match hybrid and on-site roles near you."
+          >
+            <TextField
+              id="profile-home_base"
+              value={profileForm.homeBase}
+              onChange={(v) => setProfileForm((f) => ({ ...f, homeBase: v }))}
+              placeholder="City, state or country"
+            />
+          </Field>
+          <Field
+            label="Open to relocating"
+            htmlFor="profile-relocation"
+            error={errorsFor("profile")["profile-relocation"]}
+            hint="Press Enter or comma to add another city."
+          >
+            <ChipInput
+              id="profile-relocation"
+              values={profileForm.relocationList}
+              onChange={(v) => setProfileForm((f) => ({ ...f, relocationList: v }))}
+              placeholder="e.g. Austin, TX"
+            />
+          </Field>
+        </div>
         <div>
           <Button
             disabled={saving.profile}
-            onClick={() =>
-              handleSectionSave(
-                "profile",
-                {
-                  candidate: { domain: profileForm.domain, toolchain: profileForm.toolchain },
-                  compensation: {
-                    expected_base: profileForm.expected_base,
-                    oe_min_base: profileForm.oe_min_base,
-                    oe_max_base: profileForm.oe_max_base,
-                    relo_package_needs: profileForm.relo_package_needs,
-                  },
-                },
-                PROFILE_FIELD_MAP
-              )
-            }
+            onClick={() => handleSectionSave("profile", buildProfileSavePatch(), PROFILE_FIELD_MAP)}
           >
             {saving.profile ? "Saving…" : "Save profile"}
           </Button>
@@ -600,6 +904,92 @@ export function SettingsPage() {
             />
           </Field>
         </div>
+
+        <h4 style={{ margin: "12px 0 4px" }}>Guardrails</h4>
+        <div className="onboarding-guardrails__presets">
+          <div className="onboarding-guardrails__preset-header">
+            <span>Pick common guardrails</span>
+          </div>
+          <section className="onboarding-guardrails__preset-grid" aria-label="Common guardrails">
+            {GUARDRAIL_PRESETS.map((preset) => {
+              const selected = isGuardrailSelected(targetingForm.cut_signals, preset.value);
+              return (
+                <button
+                  key={preset.value}
+                  type="button"
+                  className={`onboarding-guardrails__preset ${selected ? "onboarding-guardrails__preset--selected" : ""}`.trim()}
+                  aria-pressed={selected}
+                  onClick={() =>
+                    setTargetingForm((f) => ({
+                      ...f,
+                      cut_signals: toggleGuardrailSignal(f.cut_signals, preset.value),
+                    }))
+                  }
+                >
+                  <span aria-hidden="true">{preset.emoji}</span>
+                  {preset.label}
+                </button>
+              );
+            })}
+          </section>
+        </div>
+        <Field
+          label="Cut signals"
+          htmlFor="targeting-cut_signals"
+          error={errorsFor("targeting")["targeting-cut_signals"]}
+          hint="Press Enter or comma to add another guardrail. Presets above are suggestions only — nothing saves until you press Save targeting."
+        >
+          <ChipInput
+            id="targeting-cut_signals"
+            values={targetingForm.cut_signals}
+            onChange={(v) => setTargetingForm((f) => ({ ...f, cut_signals: v }))}
+            placeholder="e.g. heavy travel"
+            suggestions={GUARDRAIL_SUGGESTIONS}
+            suggestionLimit={8}
+          />
+        </Field>
+        <Field
+          label="Keep signals"
+          htmlFor="targeting-keep_signals"
+          error={errorsFor("targeting")["targeting-keep_signals"]}
+          hint="Signals that strengthen a fit. Press Enter or comma to add."
+        >
+          <ChipInput
+            id="targeting-keep_signals"
+            values={targetingForm.keep_signals}
+            onChange={(v) => setTargetingForm((f) => ({ ...f, keep_signals: v }))}
+            placeholder="e.g. developer tools"
+          />
+        </Field>
+
+        <h4 style={{ margin: "12px 0 4px" }}>Company lists</h4>
+        <Field
+          label="Excluded companies"
+          htmlFor="targeting-excluded_companies"
+          error={errorsFor("targeting")["targeting-excluded_companies"]}
+          hint="Companies to never surface. Press Enter or comma to add."
+        >
+          <ChipInput
+            id="targeting-excluded_companies"
+            values={targetingForm.excluded_companies}
+            onChange={(v) => setTargetingForm((f) => ({ ...f, excluded_companies: v }))}
+            placeholder="e.g. Acme Corp"
+          />
+        </Field>
+        <Field
+          label="Tracked companies"
+          htmlFor="targeting-tracked_companies"
+          error={errorsFor("targeting")["targeting-tracked_companies"]}
+          hint="Companies to prioritize sourcing from. Press Enter or comma to add."
+        >
+          <ChipInput
+            id="targeting-tracked_companies"
+            values={targetingForm.tracked_companies}
+            onChange={(v) => setTargetingForm((f) => ({ ...f, tracked_companies: v }))}
+            placeholder="e.g. Acme Corp"
+          />
+        </Field>
+
         <div>
           <Button
             disabled={saving.targeting}
@@ -612,12 +1002,131 @@ export function SettingsPage() {
                     rejection_total: targetingForm.rejection_total,
                     rejection_per_family: targetingForm.rejection_per_family,
                   },
+                  cut_signals: targetingForm.cut_signals,
+                  keep_signals: targetingForm.keep_signals,
+                  excluded_companies: targetingForm.excluded_companies,
+                  tracked_companies: targetingForm.tracked_companies,
                 },
                 TARGETING_FIELD_MAP
               )
             }
           >
             {saving.targeting ? "Saving…" : "Save targeting"}
+          </Button>
+        </div>
+      </Card>
+
+      {/* Honesty boundaries ------------------------------------------------ */}
+      <Card title="Honesty boundaries">
+        {sectionBanner.honesty ? <InlineAlert message={sectionBanner.honesty} /> : null}
+        <p className="field__hint" style={{ margin: 0 }}>
+          Enforced on every tailored résumé, cover letter, and answer.
+        </p>
+        <div className="field-row">
+          {/* honesty.schema.json's education.highest_degree has no enum
+              (type: ["string", "null"], free text) — a plain TextField,
+              not a schema-driven Select like the other enum-backed fields
+              on this page. */}
+          <Field
+            label="Highest degree"
+            htmlFor="honesty-highest_degree"
+            error={errorsFor("honesty")["honesty-highest_degree"]}
+          >
+            <TextField
+              id="honesty-highest_degree"
+              value={honestyForm.highest_degree}
+              onChange={(v) => setHonestyForm((f) => ({ ...f, highest_degree: v }))}
+              placeholder="e.g. B.S. Computer Science"
+            />
+          </Field>
+        </div>
+        <Field label="Add education section" htmlFor="honesty-add_education_section">
+          <Toggle
+            id="honesty-add_education_section"
+            checked={honestyForm.add_education_section}
+            onChange={(v) => setHonestyForm((f) => ({ ...f, add_education_section: v }))}
+            label={
+              honestyForm.add_education_section
+                ? "Include an education section"
+                : "Omit the education section"
+            }
+          />
+        </Field>
+        <Field
+          label="Confirmed tools"
+          htmlFor="honesty-tools_confirmed"
+          error={errorsFor("honesty")["honesty-tools_confirmed"]}
+          hint="Tools you can honestly claim hands-on experience with. Press Enter or comma to add."
+        >
+          <ChipInput
+            id="honesty-tools_confirmed"
+            values={honestyForm.tools_confirmed}
+            onChange={(v) => setHonestyForm((f) => ({ ...f, tools_confirmed: v }))}
+            placeholder="e.g. PostgreSQL"
+          />
+        </Field>
+        <Field
+          label="Adjacent tools"
+          htmlFor="honesty-tools_adjacent"
+          error={errorsFor("honesty")["honesty-tools_adjacent"]}
+          hint="Tools you've been near but shouldn't claim as core skills. Press Enter or comma to add."
+        >
+          <ChipInput
+            id="honesty-tools_adjacent"
+            values={honestyForm.tools_adjacent}
+            onChange={(v) => setHonestyForm((f) => ({ ...f, tools_adjacent: v }))}
+            placeholder="e.g. Kubernetes"
+          />
+        </Field>
+        <Field
+          label="Do not claim"
+          htmlFor="honesty-tools_do_not_claim"
+          error={errorsFor("honesty")["honesty-tools_do_not_claim"]}
+          hint="Tools to never claim. Press Enter or comma to add."
+        >
+          <ChipInput
+            id="honesty-tools_do_not_claim"
+            values={honestyForm.tools_do_not_claim}
+            onChange={(v) => setHonestyForm((f) => ({ ...f, tools_do_not_claim: v }))}
+            placeholder="e.g. Rust"
+          />
+        </Field>
+        <Field
+          label="Never fabricate"
+          htmlFor="honesty-do_not_fabricate"
+          error={errorsFor("honesty")["honesty-do_not_fabricate"]}
+          hint="Categories of claim that must never be invented. Press Enter or comma to add."
+        >
+          <ChipInput
+            id="honesty-do_not_fabricate"
+            values={honestyForm.do_not_fabricate}
+            onChange={(v) => setHonestyForm((f) => ({ ...f, do_not_fabricate: v }))}
+            placeholder="e.g. security clearances"
+          />
+        </Field>
+        <div>
+          <Button
+            disabled={saving.honesty}
+            onClick={() =>
+              handleSectionSave(
+                "honesty",
+                {
+                  education: {
+                    highest_degree: honestyForm.highest_degree.trim() || null,
+                    add_education_section: honestyForm.add_education_section,
+                  },
+                  tools: {
+                    confirmed: honestyForm.tools_confirmed,
+                    adjacent: honestyForm.tools_adjacent,
+                    do_not_claim: honestyForm.tools_do_not_claim,
+                  },
+                  claims: { do_not_fabricate: honestyForm.do_not_fabricate },
+                },
+                HONESTY_FIELD_MAP
+              )
+            }
+          >
+            {saving.honesty ? "Saving…" : "Save honesty boundaries"}
           </Button>
         </div>
       </Card>
