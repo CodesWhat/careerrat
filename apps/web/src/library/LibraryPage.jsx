@@ -370,9 +370,13 @@ function asStringArray(value) {
 
 function buildLibraryModel(library, filters) {
   const typeOptions = typeOptionsForLibrary(library);
+  // `id` becomes a synthetic display id when the snapshot row had none (keys,
+  // open-card deep links) — `storedId` stays null in that case so Edit/Delete
+  // only ever target a real persisted row, never a fabricated id.
   const cards = asArray(library?.cards).map((card, index) => ({
     ...card,
     id: cardId(card, index),
+    storedId: card?.id ? String(card.id) : null,
   }));
   const filteredCards = filterLibraryCards(cards, filters);
 
@@ -495,22 +499,22 @@ export function LibraryPage() {
     return runWrite(`save-${card.id}`, async () => {
       if (card.kind === "evidence") {
         await saveCandidateFile("evidence", {
-          claims: [{ ...card.metadata?.raw, ...values, id: card.id }],
+          claims: [{ ...card.metadata?.raw, ...values, id: card.storedId }],
         });
         return;
       }
       const lane = CARD_LANE_BY_KIND[card.kind];
-      await updateDeepIngestConfirmedItem({ lane, id: card.id, ...values });
+      await updateDeepIngestConfirmedItem({ lane, id: card.storedId, ...values });
     });
   }
 
   function deleteCard(card) {
     return runWrite(`delete-${card.id}`, async () => {
       if (card.kind === "evidence") {
-        await removeEvidenceClaim(card.id);
+        await removeEvidenceClaim(card.storedId);
       } else {
         const lane = CARD_LANE_BY_KIND[card.kind];
-        await removeDeepIngestConfirmedItem({ lane, id: card.id });
+        await removeDeepIngestConfirmedItem({ lane, id: card.storedId });
       }
       closeDrawer();
     });
@@ -840,10 +844,11 @@ function LibraryDrawer({
   }, [onClose]);
 
   // Legacy (non-DB) mode's singular writing-voice card is a derived summary
-  // with no candidate_evidence_claims/deep_ingest_* row behind it — no id,
-  // nothing for Save/Delete to target — so the affordance stays hidden
-  // rather than posting a made-up id that can only 404.
-  const editable = Boolean(card.id);
+  // with no candidate_evidence_claims/deep_ingest_* row behind it — no
+  // stored row for Save/Delete to target — so the affordance stays hidden
+  // rather than posting a made-up id that can only 404. Gate on storedId,
+  // not id: buildLibraryModel assigns every card a synthetic display id.
+  const editable = Boolean(card.storedId);
   const editFields = editable ? CARD_EDIT_FIELDS[card.kind] || [] : [];
   const savingKey = `save-${card.id}`;
   const deletingKey = `delete-${card.id}`;
