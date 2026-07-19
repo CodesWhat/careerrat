@@ -11,6 +11,7 @@ import {
 } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { DASHBOARD_PREVIEW } from "./dashboardPreviewData.js";
+import { SetupReadinessCard } from "./SetupReadinessCard.jsx";
 
 // The lower-grid panels show three rows and scroll the rest inside the card, so
 // they carry a real queue rather than a truncated top-N with nothing behind it.
@@ -24,7 +25,7 @@ const FOCUS_TONE_CLASS = {
 };
 
 export function DashboardPage() {
-  const { data, loading, error, noDatabase } = useDashboardSnapshot();
+  const { data, setup, loading, error, noDatabase } = useDashboardSnapshot();
   const dashboard = data ? dashboardForPage(data) : null;
   const model = buildDashboardModel(dashboard);
 
@@ -47,6 +48,8 @@ export function DashboardPage() {
 
       {error ? <InlineAlert message={error} /> : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
+
+      <SetupReadinessCard setup={setup} />
 
       {dashboard ? (
         <>

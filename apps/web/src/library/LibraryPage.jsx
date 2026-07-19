@@ -30,6 +30,7 @@ import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button, IconButton } from "../components/Button.jsx";
 import { PaperclipIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
+import { getDeepIngestState } from "../lib/api.js";
 import { PREVIEW_DOCUMENTS, PREVIEW_LIBRARY } from "./libraryPreviewData.js";
 import "./LibraryPage.css";
 
@@ -122,6 +123,20 @@ function hasLibraryContent(library) {
 function libraryForPage(library) {
   if (hasLibraryContent(library)) return library;
   return import.meta.env.DEV ? PREVIEW_LIBRARY : library;
+}
+
+// Re-entry nudge for the hero: mirrors the terminalCount/requiredCount shape
+// evaluateDeepIngestReadiness() returns (src/core/deep-ingest/readiness.mjs),
+// the same fields DeepIngestPage's own lane-progress header reads off
+// getDeepIngestState(). Returns null once readiness.ready is true (or the
+// state shape is missing/empty) so the pill simply doesn't render — no
+// separate "hide" flag needed.
+function deepIngestProgressFromState(state) {
+  const readiness = state?.readiness;
+  if (!readiness || readiness.ready) return null;
+  const requiredCount = Number(readiness.requiredCount) || 0;
+  if (!requiredCount) return null;
+  return { terminalCount: Number(readiness.terminalCount) || 0, requiredCount };
 }
 
 function isDeepIngestLibrary(metrics) {
@@ -266,6 +281,24 @@ export function LibraryPage() {
   const [copied, setCopied] = useState(false);
   const [docQuery, setDocQuery] = useState("");
   const [docKind, setDocKind] = useState("all");
+  const [deepIngestProgress, setDeepIngestProgress] = useState(null);
+
+  // Client-side read only, no new endpoint. Never surfaces an error — a
+  // failed fetch just leaves the pill un-rendered, same as an already-complete
+  // deep ingest.
+  useEffect(() => {
+    let cancelled = false;
+    getDeepIngestState()
+      .then((next) => {
+        if (!cancelled) setDeepIngestProgress(deepIngestProgressFromState(next));
+      })
+      .catch(() => {
+        if (!cancelled) setDeepIngestProgress(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const library = libraryForPage(data?.library);
   const typeOptions = typeOptionsForLibrary(library);
@@ -331,7 +364,12 @@ export function LibraryPage() {
 
   return (
     <div className="library">
-      <LibraryHero preview={model.preview} setTab={setTab} tab={tab} />
+      <LibraryHero
+        deepIngestProgress={deepIngestProgress}
+        preview={model.preview}
+        setTab={setTab}
+        tab={tab}
+      />
 
       {error && !model.preview ? <InlineAlert message={error} /> : null}
       {loading && !data ? <p className="dashboard-home__loading">Loading…</p> : null}
@@ -372,26 +410,34 @@ export function LibraryPage() {
   );
 }
 
-function LibraryHero({ preview, setTab, tab }) {
+function LibraryHero({ deepIngestProgress, preview, setTab, tab }) {
   return (
     <header className="library__hero">
       <div className="library__title-block">
         <span className="library__eyebrow">{preview ? "Preview data" : "Reusable bank"}</span>
         <h1 className="library__title">Story &amp; evidence bank</h1>
       </div>
-      <div aria-label="Library mode" className="jobs__tabs" role="tablist">
-        {TAB_OPTIONS.map((option) => (
-          <button
-            aria-selected={tab === option.key}
-            className={`jobs__tab${tab === option.key ? " jobs__tab--active" : ""}`}
-            key={option.key}
-            onClick={() => setTab(option.key)}
-            role="tab"
-            type="button"
-          >
-            {option.label}
-          </button>
-        ))}
+      <div className="library__hero-actions">
+        {deepIngestProgress ? (
+          <Link className="btn btn--secondary" to="/deep-ingest">
+            Continue deep dive ({deepIngestProgress.terminalCount}/
+            {deepIngestProgress.requiredCount})
+          </Link>
+        ) : null}
+        <div aria-label="Library mode" className="jobs__tabs" role="tablist">
+          {TAB_OPTIONS.map((option) => (
+            <button
+              aria-selected={tab === option.key}
+              className={`jobs__tab${tab === option.key ? " jobs__tab--active" : ""}`}
+              key={option.key}
+              onClick={() => setTab(option.key)}
+              role="tab"
+              type="button"
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
       </div>
     </header>
   );
@@ -498,8 +544,9 @@ function EmptyLibraryState() {
     <div className="library__empty-state">
       <h2>No reusable material yet</h2>
       <p>
-        Finish onboarding or deep ingest to capture evidence, STAR stories, and writing voice so
-        Rolester has a durable bank to browse here.
+        Finish <Link to="/onboarding">onboarding</Link> or{" "}
+        <Link to="/deep-ingest">deep ingest</Link> to capture evidence, STAR stories, and writing
+        voice so Rolester has a durable bank to browse here.
       </p>
     </div>
   );

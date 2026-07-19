@@ -38,6 +38,24 @@ const STATIC_PREVIEW_VIEW_MODEL =
       }
     : null;
 
+// A complete-looking readiness shape (every flag true, nothing missing) so
+// preview mode never surfaces SetupReadinessCard — it self-hides once
+// isComplete(setup) is true, same as a real fully-onboarded candidate.
+const STATIC_PREVIEW_SETUP = {
+  readiness: {
+    search_ready: true,
+    gate_ready: true,
+    apply_ready: true,
+    deep_ingest_complete: true,
+  },
+  missing: {
+    search_ready: [],
+    gate_ready: [],
+    apply_ready: [],
+    deep_ingest_complete: [],
+  },
+};
+
 export function DashboardProvider({ children }) {
   if (STATIC_PREVIEW_VIEW_MODEL) {
     return <StaticDashboardProvider>{children}</StaticDashboardProvider>;
@@ -51,6 +69,7 @@ function StaticDashboardProvider({ children }) {
     <DashboardCtx.Provider
       value={{
         data: STATIC_PREVIEW_VIEW_MODEL,
+        setup: STATIC_PREVIEW_SETUP,
         error: null,
         loading: false,
         noDatabase: false,
@@ -64,6 +83,7 @@ function StaticDashboardProvider({ children }) {
 
 function LiveDashboardProvider({ children }) {
   const [data, setData] = useState(null);
+  const [setup, setSetup] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [noDatabase, setNoDatabase] = useState(false);
@@ -73,8 +93,9 @@ function LiveDashboardProvider({ children }) {
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      const { data: viewModel } = await getDashboard();
+      const { data: viewModel, setup: setupPayload } = await getDashboard();
       setData(viewModel);
+      setSetup(setupPayload ?? null);
       setError(null);
       setNoDatabase(false);
     } catch (err) {
@@ -111,7 +132,7 @@ function LiveDashboardProvider({ children }) {
   }, [load]);
 
   return (
-    <DashboardCtx.Provider value={{ data, loading, error, noDatabase, refetch: load }}>
+    <DashboardCtx.Provider value={{ data, setup, loading, error, noDatabase, refetch: load }}>
       {children}
     </DashboardCtx.Provider>
   );

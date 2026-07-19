@@ -784,6 +784,20 @@ export async function uploadDeepIngestFile(file, { targetShape } = {}) {
   return body?.data ?? body;
 }
 
+// POST /api/deep-ingest/proposals — runs the target lane's AI proposal
+// builder against an already-scanned source's chunks and persists the
+// resulting review rows (evidence/story/honesty/writing_voice/role_signal/
+// gap; `targetShape` defaults server-side to the source's own targetShape
+// when omitted). Explicit, button-click-only call — deep-ingest never fires
+// this itself after a scan (intent-gated AI spend, same rule as every other
+// AI-spend surface in this app).
+export function buildDeepIngestProposals(payload = {}) {
+  return apiFetch("/api/deep-ingest/proposals", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
 // POST /api/deep-ingest/proposal-decisions — `decision` is "confirm" (routes
 // to deepIngestConfirmProposal) or one of deepIngestProposalDecision's verbs
 // ("save_edits" | "defer" | "mark_not_available" | "reject" | "reopen" |

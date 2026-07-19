@@ -399,7 +399,16 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
       actions={
         <>
           <OnboardingNavButton direction="back" label="Back" onClick={goBack} />
-          <OnboardingNavButton direction="next" label="Finish" onClick={handleFinish} />
+          <OnboardingNavButton
+            direction="next"
+            label="Finish"
+            onClick={handleFinish}
+            // !state.sourceResumePresent = no résumé imported yet — same hard
+            // block as ResumeStep's own Continue button. Without this, the exit
+            // nav would work even while the body panel above shows "Résumé
+            // required", stranding the user in an empty app.
+            disabled={!state?.sourceResumePresent}
+          />
         </>
       }
     >

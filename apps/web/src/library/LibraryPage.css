@@ -56,6 +56,13 @@
   text-wrap: balance;
 }
 
+.library__hero-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 /* ---------- Top toggle: Internal | External ----------
  * Reuses the Jobs Next .jobs__tabs/.jobs__tab recipe from app.css directly
  * (global stylesheet, loaded on every route) so the two "Next" pages share
@@ -336,6 +343,12 @@
   color: var(--ink-soft);
   font-size: 13px;
   line-height: 1.5;
+}
+
+.library__empty-state a {
+  color: var(--m-secondary);
+  font-weight: 700;
+  text-decoration: underline;
 }
 
 .library__empty-state--compact {

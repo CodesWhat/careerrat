@@ -20,6 +20,7 @@ import { TextArea, TextField } from "../components/form.jsx";
 import { ListIcon, UploadIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
+  buildDeepIngestProposals,
   decideDeepIngestProposal,
   getDeepIngestState,
   submitDeepIngestSource,
@@ -157,6 +158,23 @@ function asArray(value) {
   return Array.isArray(value) ? value : [];
 }
 
+// deepIngestConfirmProposal/deepIngestProposalDecision (src/core/db/verbs/
+// deep-ingest.mjs) only ever read `edits.items` — an array of per-item rows —
+// never a flat {title, summary, supportingQuote} object. This wraps the
+// editor's three fields (the only ones this page exposes, regardless of
+// lane) into that one-item array, falling back to the proposal's own values
+// for anything the reviewer hasn't touched. `sourceId` rides along so the
+// grounding/evidence-claim extraction on the backend has it even if a lane's
+// row shape doesn't already carry it.
+function proposalEditItem(proposal, edits) {
+  return {
+    sourceId: proposal.sourceId,
+    title: edits.title ?? proposal.title,
+    summary: edits.summary ?? proposal.summary,
+    supportingQuote: edits.supportingQuote ?? proposal.supportingQuote,
+  };
+}
+
 export function DeepIngestPage({ initialState = null }) {
   const [state, setState] = useState(initialState);
   const [loading, setLoading] = useState(!initialState);
@@ -292,11 +310,7 @@ export function DeepIngestPage({ initialState = null }) {
         proposalId: proposal.id,
         expectedVersion: proposal.version,
         decision: "save_edits",
-        edits: {
-          title: edits.title ?? proposal.title,
-          summary: edits.summary ?? proposal.summary,
-          supportingQuote: edits.supportingQuote ?? proposal.supportingQuote,
-        },
+        edits: { items: [proposalEditItem(proposal, edits)] },
       });
       await refresh();
     } catch (err) {
@@ -314,6 +328,7 @@ export function DeepIngestPage({ initialState = null }) {
         proposalId: proposal.id,
         expectedVersion: proposal.version,
         decision: "confirm",
+        edits: { items: [proposalEditItem(proposal, edits)] },
       });
       await refresh();
       setEdits({});
@@ -321,6 +336,19 @@ export function DeepIngestPage({ initialState = null }) {
       setError(errorMessage(err, "Could not confirm that proposal."));
     } finally {
       setBusyProposalAction(false);
+    }
+  }
+
+  async function handleGenerateProposals(source) {
+    setBusySourceId(source.id);
+    setError(null);
+    try {
+      await buildDeepIngestProposals({ sourceId: source.id, targetShape: source.targetShape });
+      await refresh();
+    } catch (err) {
+      setError(errorMessage(err, "Could not generate proposals for that source."));
+    } finally {
+      setBusySourceId(null);
     }
   }
 
@@ -498,6 +526,7 @@ export function DeepIngestPage({ initialState = null }) {
                   onSelect={() => selectSource(source.id)}
                   onEnterManually={() => handleEnterManually(source)}
                   onRetry={() => handleRetrySource(source)}
+                  onGenerateProposals={() => handleGenerateProposals(source)}
                 />
               ))}
             </div>
@@ -637,7 +666,15 @@ function LaneRow({ lane, busy, onAction }) {
   );
 }
 
-function SourceRow({ source, selected, busy, onSelect, onEnterManually, onRetry }) {
+function SourceRow({
+  source,
+  selected,
+  busy,
+  onSelect,
+  onEnterManually,
+  onRetry,
+  onGenerateProposals,
+}) {
   return (
     <article
       className={`deep-ingest__source-row${selected ? " deep-ingest__source-row--active" : ""}`}
@@ -660,9 +697,14 @@ function SourceRow({ source, selected, busy, onSelect, onEnterManually, onRetry 
         </span>
         <div className="deep-ingest__source-actions">
           {source.status === "proposal_ready" ? (
-            <Button variant="secondary" onClick={onSelect}>
-              Review proposals
-            </Button>
+            <>
+              <Button variant="secondary" onClick={onSelect}>
+                Review proposals
+              </Button>
+              <Button variant="secondary" disabled={busy} onClick={onGenerateProposals}>
+                {busy ? "Generating…" : "Generate proposals"}
+              </Button>
+            </>
           ) : null}
           {source.status === "manual_fallback" ? (
             <>

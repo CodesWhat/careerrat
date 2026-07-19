@@ -3,10 +3,10 @@ import { Card } from "../components/Card.jsx";
 import { CheckCircleIcon, ClockIcon } from "../components/icons.jsx";
 
 const READINESS_ROWS = [
-  { key: "search_ready", label: "Search" },
-  { key: "gate_ready", label: "Gate" },
-  { key: "apply_ready", label: "Apply" },
-  { key: "deep_ingest_complete", label: "Deep ingest" },
+  { key: "search_ready", label: "Search", to: "/onboarding" },
+  { key: "gate_ready", label: "Gate", to: "/onboarding" },
+  { key: "apply_ready", label: "Apply", to: "/onboarding" },
+  { key: "deep_ingest_complete", label: "Deep ingest", to: "/deep-ingest" },
 ];
 
 const FIRST_SEARCH = {
@@ -118,7 +118,12 @@ export function SetupReadinessCard({ setup, firstSearchRun }) {
           const Icon = ready ? CheckCircleIcon : ClockIcon;
           const color = ready ? "var(--teal)" : "var(--mustard)";
           return (
-            <div className="chip chip--readiness" key={row.key} style={{ color }}>
+            <Link
+              className="chip chip--readiness"
+              key={row.key}
+              to={row.to}
+              style={{ color, textDecoration: "none" }}
+            >
               <Icon style={iconStyle} />
               <span style={{ minWidth: 0 }}>
                 <span style={{ display: "block" }}>{row.label}</span>
@@ -126,7 +131,7 @@ export function SetupReadinessCard({ setup, firstSearchRun }) {
                   {ready ? "Ready" : missingHint(missing[row.key])}
                 </span>
               </span>
-            </div>
+            </Link>
           );
         })}
         {firstSearch ? (
