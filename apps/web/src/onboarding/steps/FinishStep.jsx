@@ -4,7 +4,9 @@ import { useDashboardSnapshot } from "../../app-shell/DashboardContext.jsx";
 import { Button } from "../../components/Button.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import {
+  getOnboardingDraft as defaultGetOnboardingDraft,
   saveCandidateFile as defaultSaveCandidateFile,
+  saveOnboardingDraft as defaultSaveOnboardingDraft,
   startFirstSearchRun as defaultStartFirstSearchRun,
 } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
@@ -256,6 +258,24 @@ export async function retryFirstSearch({
   return result;
 }
 
+// Marks the wizard as deliberately completed — the desktop app's launch-route
+// rule reads this flag, not stepIndex, to stop re-landing a finished
+// candidate on onboarding. Best-effort: a failed stamp must never block the
+// caller from navigating away from Finish.
+export async function stampOnboardingFinished({
+  getOnboardingDraft = defaultGetOnboardingDraft,
+  saveOnboardingDraft = defaultSaveOnboardingDraft,
+  now = () => new Date().toISOString(),
+} = {}) {
+  try {
+    const draftEnvelope = await getOnboardingDraft();
+    const draft = draftEnvelope?.draft ?? draftEnvelope;
+    await saveOnboardingDraft({ ...draft, finishedAt: now() });
+  } catch {
+    /* best-effort durability; navigation must proceed regardless */
+  }
+}
+
 // Compact, three-state summary line for the auto-triggered first search.
 // Never surfaces raw server text on failure — see FIRST_SEARCH_FAILURE_COPY.
 function firstSearchStatusView({ quickStarting, task, triggerError }) {
@@ -387,8 +407,14 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
     }
   }
 
-  function handleFinish() {
+  async function handleFinish() {
+    await stampOnboardingFinished();
     navigate("/");
+  }
+
+  async function handleStartDeepIngest() {
+    await stampOnboardingFinished();
+    navigate("/deep-ingest");
   }
 
   return (
@@ -475,7 +501,7 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
                     stronger.
                   </p>
                   <div className="onboarding-step-card__action-group">
-                    <Button onClick={() => navigate("/deep-ingest")}>Start deep ingest</Button>
+                    <Button onClick={handleStartDeepIngest}>Start deep ingest</Button>
                     <button type="button" className="onboarding-inline-link" onClick={handleFinish}>
                       I'll do it later — finish
                     </button>

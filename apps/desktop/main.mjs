@@ -170,6 +170,7 @@ async function boot() {
   const { resolveUserPaths, userPath } = await loadEngineModule("src/core/paths/workspace.mjs");
   const { dbExists } = await loadEngineModule("src/core/db/connection.mjs");
   const { candidateConfigGet } = await loadEngineModule("src/core/db/verbs.mjs");
+  const { readOnboardingDraft } = await loadEngineModule("src/cli/onboard-route.mjs");
 
   dev = createDevServer({ repoRoot });
 
@@ -205,15 +206,15 @@ async function boot() {
   const url = `http://127.0.0.1:${port}`;
   log(`serving ${url}`);
 
-  // First-run routing: a candidate with neither legacy candidate/profile.yml
-  // nor a non-empty DB-backed profile goes to onboarding instead of an empty
-  // dashboard. Use the engine's own path resolver — the same one
-  // createDevServer() itself used above — rather than hand-rolling a join, so
-  // this always agrees with where the server actually looked for user data.
-  // First-run goes to the M8 SPA wizard (/app/onboarding — PDF/image resume
-  // drop, AI extraction), NOT the legacy /onboard page (txt/md only). The
-  // Electron window has no address bar, so landing on the wrong wizard
-  // strands the user there.
+  // First-run routing: a candidate with none of legacy candidate/profile.yml,
+  // a deliberately finished onboarding wizard, or an apply-ready DB-backed
+  // setup goes to onboarding instead of an empty dashboard. Use the engine's
+  // own path resolver — the same one createDevServer() itself used above —
+  // rather than hand-rolling a join, so this always agrees with where the
+  // server actually looked for user data. First-run goes to the M8 SPA wizard
+  // (/app/onboarding — PDF/image resume drop, AI extraction), NOT the legacy
+  // /onboard page (txt/md only). The Electron window has no address bar, so
+  // landing on the wrong wizard strands the user there.
   const pathCtx = { repoRoot };
   resolveUserPaths(pathCtx);
   const route = chooseDesktopRoute({
@@ -221,20 +222,26 @@ async function boot() {
     forceOnboarding: !app.isPackaged,
     hasCandidateSetup:
       existsSync(userPath(pathCtx, "candidate/profile.yml")) ||
+      hasOnboardingFinished({ pathCtx, readOnboardingDraft }) ||
       hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }),
   });
 
   return { url, route };
 }
 
+function hasOnboardingFinished({ pathCtx, readOnboardingDraft }) {
+  try {
+    return typeof readOnboardingDraft(pathCtx).finishedAt === "string";
+  } catch {
+    return false;
+  }
+}
+
 function hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }) {
   if (!dbExists(pathCtx)) return false;
   try {
     const config = candidateConfigGet(pathCtx);
-    const candidate = config.profile?.candidate || {};
-    return !!(
-      String(candidate.full_name || "").trim() || String(candidate.email || "").trim()
-    );
+    return config.setup?.readiness?.apply_ready === true;
   } catch {
     return false;
   }

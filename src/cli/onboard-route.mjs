@@ -360,6 +360,8 @@ export function normalizeOnboardingDraft(raw = {}) {
     completedIndexes: normalizeOnboardingCompletedIndexes(raw?.completedIndexes),
     draftSeeds,
     updatedAt: typeof raw?.updatedAt === "string" && raw.updatedAt.trim() ? raw.updatedAt : null,
+    finishedAt:
+      typeof raw?.finishedAt === "string" && raw.finishedAt.trim() ? raw.finishedAt : null,
   };
 }
 
@@ -374,7 +376,7 @@ function normalizeOnboardingCompletedIndexes(values = []) {
   ).sort((a, b) => a - b);
 }
 
-function readOnboardingDraft(pathCtx) {
+export function readOnboardingDraft(pathCtx) {
   const draftPath = userPath(pathCtx, ONBOARDING_DRAFT_PATH);
   if (!existsSync(draftPath)) return normalizeOnboardingDraft();
   try {
@@ -385,7 +387,16 @@ function readOnboardingDraft(pathCtx) {
 }
 
 function writeOnboardingDraft(pathCtx, draft) {
-  const next = normalizeOnboardingDraft({ ...draft, updatedAt: new Date().toISOString() });
+  // finishedAt is a one-way completion flag consumed by desktop launch
+  // routing; wizard autosaves omit it, and an omitted key must never wipe a
+  // stamp that is already on disk.
+  const finishedAt =
+    draft?.finishedAt === undefined ? readOnboardingDraft(pathCtx).finishedAt : draft.finishedAt;
+  const next = normalizeOnboardingDraft({
+    ...draft,
+    finishedAt,
+    updatedAt: new Date().toISOString(),
+  });
   const draftPath = userPath(pathCtx, ONBOARDING_DRAFT_PATH);
   mkdirSync(dirname(draftPath), { recursive: true });
   atomicWriteFile(draftPath, `${JSON.stringify(next, null, 2)}\n`);

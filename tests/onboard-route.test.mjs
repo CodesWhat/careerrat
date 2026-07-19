@@ -981,6 +981,7 @@ describe("GET/POST /api/onboard/draft", () => {
         completedIndexes: [],
         draftSeeds: {},
         updatedAt: null,
+        finishedAt: null,
       });
 
       const saved = await postJson(server, "/api/onboard/draft", {
