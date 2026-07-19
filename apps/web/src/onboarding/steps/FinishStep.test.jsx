@@ -110,6 +110,15 @@ beforeEach(() => {
 });
 
 describe("FinishStep resume gate", () => {
+  it("disables the top-nav Finish button until a source resume exists", () => {
+    const blockedHtml = renderFinish({ ...SEARCH_READY_STATE, sourceResumePresent: false });
+    const readyHtml = renderFinish({ ...SEARCH_READY_STATE, sourceResumePresent: true });
+
+    expect(blockedHtml).toMatch(/aria-label="Finish"[^>]*disabled=""/);
+    expect(readyHtml).toContain('aria-label="Finish"');
+    expect(readyHtml).not.toMatch(/aria-label="Finish"[^>]*disabled=""/);
+  });
+
   it("renders the blocked notice and routes its action back to the Resume step", () => {
     const onProgressSelect = vi.fn();
     const html = renderFinish(

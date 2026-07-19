@@ -1,23 +1,86 @@
 import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MemoryRouter } from "react-router-dom";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const hookHarness = vi.hoisted(() => ({
+  cursor: 0,
+  states: [],
+  refs: [],
+  reset() {
+    this.cursor = 0;
+  },
+  clear() {
+    this.cursor = 0;
+    this.states = [];
+    this.refs = [];
+  },
+}));
 
 const apiMock = vi.hoisted(() => ({
   state: null,
-  submitCalls: [],
+  buildDeepIngestProposals: vi.fn(),
+  decideDeepIngestProposal: vi.fn(),
+  getDeepIngestState: vi.fn(),
+  submitDeepIngestSource: vi.fn(),
+  updateDeepIngestLaneState: vi.fn(),
+  uploadDeepIngestFile: vi.fn(),
 }));
+const captured = vi.hoisted(() => ({ buttons: [], fields: [] }));
 
-vi.mock("../lib/api.js", () => ({
-  decideDeepIngestProposal: vi.fn(async (payload) => ({ ok: true, payload })),
-  getDeepIngestState: vi.fn(async () => apiMock.state),
-  submitDeepIngestSource: vi.fn(async (payload) => {
-    apiMock.submitCalls.push(payload);
-    return { ok: true, status: "proposal_ready", proposals: [] };
-  }),
-  updateDeepIngestLaneState: vi.fn(async (payload) => ({ ok: true, payload })),
-  uploadDeepIngestFile: vi.fn(async (payload) => ({ ok: true, payload })),
-}));
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    useEffect() {},
+    useRef(initialValue) {
+      const index = hookHarness.cursor++;
+      if (!hookHarness.refs[index]) hookHarness.refs[index] = { current: initialValue };
+      return hookHarness.refs[index];
+    },
+    useState(initialValue) {
+      const index = hookHarness.cursor++;
+      if (!(index in hookHarness.states)) {
+        hookHarness.states[index] =
+          typeof initialValue === "function" ? initialValue() : initialValue;
+      }
+      const setValue = (nextValue) => {
+        hookHarness.states[index] =
+          typeof nextValue === "function" ? nextValue(hookHarness.states[index]) : nextValue;
+      };
+      return [hookHarness.states[index], setValue];
+    },
+  };
+});
+
+vi.mock("../lib/api.js", () => apiMock);
+
+vi.mock("../components/Button.jsx", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    Button: (props) => {
+      captured.buttons.push(props);
+      return actual.Button(props);
+    },
+  };
+});
+
+vi.mock("../components/form.jsx", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    TextArea: (props) => {
+      captured.fields.push(props);
+      return actual.TextArea(props);
+    },
+    TextField: (props) => {
+      captured.fields.push(props);
+      return actual.TextField(props);
+    },
+  };
+});
+
+import { DeepIngestPage } from "./DeepIngestPage.jsx";
 
 const FORBIDDEN_DEEP_INGEST_TEXT = [
   "AI interview",
@@ -94,14 +157,24 @@ function deepIngestState(overrides = {}) {
   };
 }
 
-async function renderPage(state = deepIngestState()) {
-  const { DeepIngestPage } = await import("./DeepIngestPage.jsx");
+function renderPage(state = deepIngestState()) {
   apiMock.state = state;
-  return renderToStaticMarkup(
-    <MemoryRouter initialEntries={["/deep-ingest"]}>
-      <DeepIngestPage initialState={state} />
-    </MemoryRouter>
-  );
+  hookHarness.reset();
+  captured.buttons = [];
+  captured.fields = [];
+  return renderToStaticMarkup(DeepIngestPage({ initialState: state }));
+}
+
+function capturedButton(label) {
+  const button = captured.buttons.find((props) => props.children === label);
+  expect(button).toBeDefined();
+  return button;
+}
+
+function capturedField(label) {
+  const field = captured.fields.find((props) => props["aria-label"] === label);
+  expect(field).toBeDefined();
+  return field;
 }
 
 function expectNoDeepIngestRuntimeTokens(html) {
@@ -109,6 +182,23 @@ function expectNoDeepIngestRuntimeTokens(html) {
     expect(html, `Deep ingest UI leaked ${token}`).not.toContain(token);
   }
 }
+
+beforeEach(() => {
+  hookHarness.clear();
+  captured.buttons = [];
+  captured.fields = [];
+  vi.clearAllMocks();
+  apiMock.buildDeepIngestProposals.mockResolvedValue({ ok: true });
+  apiMock.decideDeepIngestProposal.mockResolvedValue({ ok: true });
+  apiMock.getDeepIngestState.mockImplementation(async () => apiMock.state);
+  apiMock.submitDeepIngestSource.mockResolvedValue({
+    ok: true,
+    status: "proposal_ready",
+    proposals: [],
+  });
+  apiMock.updateDeepIngestLaneState.mockResolvedValue({ ok: true });
+  apiMock.uploadDeepIngestFile.mockResolvedValue({ ok: true });
+});
 
 describe("DeepIngestPage route contract", () => {
   it("registers /deep-ingest in the app route map", () => {
@@ -177,5 +267,81 @@ describe("DeepIngestPage workbench", () => {
     expect(html).toContain("Defer lane");
     expect(html).toContain("Mark not available");
     expectNoDeepIngestRuntimeTokens(html);
+  });
+
+  it("saves proposal edits through edits.items[] and falls back to untouched proposal fields", async () => {
+    const state = deepIngestState();
+    renderPage(state);
+
+    capturedField("Proposal title").onChange("Edited incident automation");
+    renderPage(state);
+    await capturedButton("Save edits").onClick();
+
+    expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith({
+      proposalId: "proposal-1",
+      expectedVersion: undefined,
+      decision: "save_edits",
+      edits: {
+        items: [
+          {
+            sourceId: "src-1",
+            title: "Edited incident automation",
+            summary: "Cut triage time from 45 minutes to 8.",
+            supportingQuote: "cut manual triage from 45 minutes to 8",
+          },
+        ],
+      },
+    });
+  });
+
+  it("confirms proposals through edits.items[] with proposal values for untouched fields", async () => {
+    const state = deepIngestState();
+    renderPage(state);
+
+    capturedField("Proposal summary").onChange("Edited measurable outcome.");
+    renderPage(state);
+    await capturedButton("Confirm proposal").onClick();
+
+    expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith({
+      proposalId: "proposal-1",
+      expectedVersion: undefined,
+      decision: "confirm",
+      edits: {
+        items: [
+          {
+            sourceId: "src-1",
+            title: "Incident automation",
+            summary: "Edited measurable outcome.",
+            supportingQuote: "cut manual triage from 45 minutes to 8",
+          },
+        ],
+      },
+    });
+  });
+
+  it("generates proposals for proposal-ready sources and refreshes server state", async () => {
+    const state = deepIngestState();
+    const html = renderPage(state);
+
+    expect(html).toContain("Generate proposals");
+    await capturedButton("Generate proposals").onClick();
+
+    expect(apiMock.buildDeepIngestProposals).toHaveBeenCalledWith({
+      sourceId: "src-1",
+      targetShape: "evidence",
+    });
+    expect(apiMock.getDeepIngestState).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders an inline error when proposal generation fails", async () => {
+    const state = deepIngestState();
+    apiMock.buildDeepIngestProposals.mockRejectedValueOnce(new Error("Proposal builder offline"));
+    renderPage(state);
+
+    await capturedButton("Generate proposals").onClick();
+    const html = renderPage(state);
+
+    expect(html).toContain("Proposal builder offline");
+    expect(apiMock.getDeepIngestState).not.toHaveBeenCalled();
   });
 });

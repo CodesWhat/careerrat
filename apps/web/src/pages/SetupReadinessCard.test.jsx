@@ -66,6 +66,19 @@ describe("SetupReadinessCard", () => {
     expect(markup).toContain("/onboarding");
   });
 
+  it("routes deep ingest to its workbench and every other readiness row to onboarding", () => {
+    const markup = renderCard(INCOMPLETE_SETUP);
+    const rowLinks = markup
+      .match(/<a\b[^>]*>[\s\S]*?<\/a>/g)
+      .filter((link) => link.includes("chip--readiness"));
+    const hrefFor = (label) => rowLinks.find((link) => link.includes(`>${label}</span>`));
+
+    expect(hrefFor("Deep ingest")).toContain('href="/deep-ingest"');
+    for (const label of ["Search", "Gate", "Apply"]) {
+      expect(hrefFor(label)).toContain('href="/onboarding"');
+    }
+  });
+
   it("shows first-search status as checklist context rather than a nag", () => {
     const markup = renderCard(INCOMPLETE_SETUP, {
       firstSearchRun: {
