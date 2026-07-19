@@ -505,7 +505,14 @@ export function evaluateGate({
   // stays the authoritative base (see role-signal-overlay.mjs contract).
   const overlay = effectiveTargetingForRole({ roleTitle: title, targeting, roleSignals });
   const effectiveTargeting = overlay.targeting;
-  const appliedRoleSignalIds = [...overlay.applied.keep, ...overlay.applied.cut].map((s) => s.id);
+  // Only callers that opt into role signals get the attribution field —
+  // legacy callers must receive a byte-identical result object.
+  const roleSignalExtras =
+    roleSignals === undefined
+      ? {}
+      : {
+          appliedRoleSignalIds: [...overlay.applied.keep, ...overlay.applied.cut].map((s) => s.id),
+        };
 
   // --- locate bucket ---
   const bucket = matchedTitleBucket(title, effectiveTargeting);
@@ -618,7 +625,7 @@ export function evaluateGate({
       legitimacy,
       action: "cut",
       reasons,
-      appliedRoleSignalIds,
+      ...roleSignalExtras,
     };
   }
 
@@ -679,7 +686,7 @@ export function evaluateGate({
           ? "hold"
           : "manual",
       reasons: reviewReasons,
-      appliedRoleSignalIds,
+      ...roleSignalExtras,
     };
   }
 
@@ -693,7 +700,7 @@ export function evaluateGate({
     legitimacy,
     action: "apply-now",
     reasons,
-    appliedRoleSignalIds,
+    ...roleSignalExtras,
   };
 }
 

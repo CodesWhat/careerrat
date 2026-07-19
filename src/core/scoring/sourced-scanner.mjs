@@ -155,9 +155,16 @@ function scoreSourcedOfferFromConfig(
     roleSignals,
   });
   const effectiveTargeting = roleSignalOverlay.targeting;
-  const roleSignalIds = [...roleSignalOverlay.applied.keep, ...roleSignalOverlay.applied.cut].map(
-    (s) => s.id
-  );
+  // Attribution only for callers that opted into role signals — legacy
+  // callers must receive a byte-identical rating object.
+  const roleSignalExtras =
+    roleSignals === undefined
+      ? {}
+      : {
+          roleSignalIds: [...roleSignalOverlay.applied.keep, ...roleSignalOverlay.applied.cut].map(
+            (s) => s.id
+          ),
+        };
 
   let score = hasBody ? 58 : 52;
   const reasons = [];
@@ -295,7 +302,7 @@ function scoreSourcedOfferFromConfig(
     gate: gateFromScoreAndFlags(clamped, flags, modes),
     ratingReason: reasons.slice(0, 5).join("; "),
     ruleFlags: flags,
-    roleSignalIds,
+    ...roleSignalExtras,
   };
 }
 

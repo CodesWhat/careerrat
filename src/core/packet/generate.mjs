@@ -294,10 +294,10 @@ function storiesForPurpose(context, purpose) {
 // validatePacketEvidenceIds); cover-letter/answers get up to 4 full stories,
 // citable via `story:<id>` scoped to that artifact's own prompt. roleSignals
 // and the confirmed-boundary projection are purpose-independent — they're
-// framing/enforcement context every surface can safely see. Every new field
-// here degrades to [] when the underlying context field is absent/empty, so
-// legacy/pre-wiring contexts see the same shape they do today plus empty
-// additions.
+// framing/enforcement context every surface can safely see. Every new key is
+// OMITTED (not emptied) when its projection has nothing, so a context with no
+// confirmed deep-ingest rows produces byte-identical prompt JSON to the
+// pre-wiring engine.
 export function buildPromptVisibleSources(
   context = {},
   questionCapture = null,
@@ -306,20 +306,22 @@ export function buildPromptVisibleSources(
   const sources = enumeratePacketSources(context, questionCapture);
   const split = splitConfirmedAndProposedPacketSources(sources);
   const forbidden = forbiddenFor(context);
+  const confirmedBoundaries = projectConfirmedBoundaries(
+    context.honestyBoundariesConfirmed,
+    forbidden
+  );
+  const roleSignals = projectRoleSignals(context.roleSignals);
+  const storyHints = storiesForPurpose(context, purpose);
   return {
     candidateProfile: sources.candidateProfile,
     sourceResume: sources.sourceResume,
     resumeFacts: sources.resumeFacts,
     writingVoice: sources.writingVoice,
-    honestyBoundaries: {
-      ...sources.honestyBoundaries,
-      confirmedBoundaries: projectConfirmedBoundaries(
-        context.honestyBoundariesConfirmed,
-        forbidden
-      ),
-    },
-    roleSignals: projectRoleSignals(context.roleSignals),
-    storyHints: storiesForPurpose(context, purpose),
+    honestyBoundaries: confirmedBoundaries.length
+      ? { ...sources.honestyBoundaries, confirmedBoundaries }
+      : sources.honestyBoundaries,
+    ...(roleSignals.length ? { roleSignals } : {}),
+    ...(storyHints.length ? { storyHints } : {}),
     capturedJobBody: sources.capturedJobBody,
     capturedQuestions: sources.capturedQuestions,
     confirmedEvidence: { ...sources.confirmedEvidence, claims: split.claimableEvidence },
