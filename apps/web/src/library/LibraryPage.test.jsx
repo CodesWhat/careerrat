@@ -26,7 +26,17 @@ const dashboardContext = vi.hoisted(() => ({
 
 const apiMocks = vi.hoisted(() => ({
   getDeepIngestState: vi.fn(),
+  removeDeepIngestConfirmedItem: vi.fn(),
+  removeEvidenceClaim: vi.fn(),
+  saveCandidateFile: vi.fn(),
+  updateDeepIngestConfirmedItem: vi.fn(),
 }));
+
+const dashboardEvents = vi.hoisted(() => ({
+  emitDashboardChanged: vi.fn(),
+}));
+
+const captured = vi.hoisted(() => ({ buttons: [], fields: [] }));
 
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal();
@@ -79,6 +89,30 @@ vi.mock("react-router-dom", () => ({
 
 vi.mock("../app-shell/DashboardContext.jsx", () => dashboardContext);
 vi.mock("../lib/api.js", () => apiMocks);
+vi.mock("../lib/dashboard-events.js", () => dashboardEvents);
+vi.mock("../components/Button.jsx", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    Button: (props) => {
+      captured.buttons.push(props);
+      return actual.Button(props);
+    },
+  };
+});
+vi.mock("../components/form.jsx", async (importOriginal) => {
+  const actual = await importOriginal();
+  const capture = (Component) => (props) => {
+    captured.fields.push(props);
+    return Component(props);
+  };
+  return {
+    ...actual,
+    ChipInput: capture(actual.ChipInput),
+    TextArea: capture(actual.TextArea),
+    TextField: capture(actual.TextField),
+  };
+});
 vi.mock("./libraryPreviewData.js", () => ({
   PREVIEW_DOCUMENTS: [],
   PREVIEW_LIBRARY: { cards: [], metrics: {}, preview: false },
@@ -88,7 +122,32 @@ import { LibraryPage } from "./LibraryPage.jsx";
 
 function renderLibrary() {
   hookHarness.reset();
+  captured.buttons = [];
+  captured.fields = [];
   return renderToStaticMarkup(LibraryPage());
+}
+
+function capturedButton(label) {
+  const button = captured.buttons.find((props) => props.children === label);
+  expect(button).toBeDefined();
+  return button;
+}
+
+function capturedField(id) {
+  const field = captured.fields.find((props) => props.id === id);
+  expect(field).toBeDefined();
+  return field;
+}
+
+function showCard(card, openId = card.id) {
+  hookHarness.params = new URLSearchParams({ open: openId });
+  dashboardContext.useDashboardSnapshot.mockReturnValue({
+    data: { library: { cards: [card], metrics: {} }, jobs: { rows: [] } },
+    loading: false,
+    error: null,
+    noDatabase: false,
+    refetch: dashboardContext.refetch,
+  });
 }
 
 async function flushEffects() {
@@ -99,14 +158,22 @@ async function flushEffects() {
 
 beforeEach(() => {
   hookHarness.clear();
+  captured.buttons = [];
+  captured.fields = [];
   vi.clearAllMocks();
+  dashboardContext.refetch = vi.fn().mockResolvedValue(undefined);
   dashboardContext.useDashboardSnapshot.mockReturnValue({
     data: { library: { cards: [] }, jobs: { rows: [] } },
     loading: false,
     error: null,
     noDatabase: false,
+    refetch: dashboardContext.refetch,
   });
   apiMocks.getDeepIngestState.mockResolvedValue({ readiness: { ready: true } });
+  apiMocks.removeDeepIngestConfirmedItem.mockResolvedValue({ ok: true });
+  apiMocks.removeEvidenceClaim.mockResolvedValue({ ok: true });
+  apiMocks.saveCandidateFile.mockResolvedValue({ ok: true });
+  apiMocks.updateDeepIngestConfirmedItem.mockResolvedValue({ ok: true });
 });
 
 describe("LibraryPage", () => {
@@ -150,5 +217,141 @@ describe("LibraryPage", () => {
 
     expect(html).not.toContain("Continue deep dive");
     expect(html).not.toContain("Deep ingest unavailable");
+  });
+
+  it("spreads evidence edits over the full raw claim before saving", () => {
+    showCard({
+      id: "evidence-001",
+      kind: "evidence",
+      label: "Evidence bank",
+      title: "Built intake automation",
+      summary: "Reusable evidence",
+      note: "Source-grounded claim",
+      tags: [],
+      metadata: {
+        claim: "Built intake automation.",
+        evidence: "Project notes",
+        metrics: ["30% faster"],
+        links: [],
+        allowed_wording: ["Built intake automation."],
+        forbidden_wording: [],
+        raw: {
+          id: "evidence-001",
+          claim: "Built intake automation.",
+          evidence: "Project notes",
+          sourceId: "source-private-001",
+          role_signals: ["workflow builder"],
+        },
+      },
+    });
+    renderLibrary();
+
+    capturedButton("Edit").onClick();
+    renderLibrary();
+    capturedField("library-edit-claim").onChange("Built production intake automation.");
+    renderLibrary();
+    capturedButton("Save").onClick();
+
+    expect(apiMocks.saveCandidateFile).toHaveBeenCalledWith("evidence", {
+      claims: [
+        expect.objectContaining({
+          id: "evidence-001",
+          claim: "Built production intake automation.",
+          sourceId: "source-private-001",
+          role_signals: ["workflow builder"],
+        }),
+      ],
+    });
+  });
+
+  it("requires inline confirmation before removing an evidence claim", async () => {
+    showCard({
+      id: "evidence-delete-001",
+      kind: "evidence",
+      label: "Evidence bank",
+      title: "Delete this claim",
+      summary: "Reusable evidence",
+      note: "Source-grounded claim",
+      tags: [],
+      metadata: { raw: { id: "evidence-delete-001" } },
+    });
+    renderLibrary();
+
+    expect(apiMocks.removeEvidenceClaim).not.toHaveBeenCalled();
+    capturedButton("Remove from library").onClick();
+    const html = renderLibrary();
+
+    expect(html).toContain("Remove this from your library? This can&#x27;t be undone.");
+    expect(apiMocks.removeEvidenceClaim).not.toHaveBeenCalled();
+    await capturedButton("Confirm remove").onClick();
+    expect(apiMocks.removeEvidenceClaim).toHaveBeenCalledWith("evidence-delete-001");
+  });
+
+  it.each([
+    ["story", "story_bank", { title: "Rollout story" }],
+    ["voice", "writing_voice", { summary: "Direct writing" }],
+    ["honesty", "honesty_boundaries", { text: "Do not claim model training." }],
+    ["role_signal", "role_signals", { text: "Agent workflow builder" }],
+  ])("saves %s cards through the confirmed-item update wrapper", (kind, lane, metadata) => {
+    const id = `${kind}-edit-001`;
+    showCard({
+      id,
+      kind,
+      label: kind,
+      title: `${kind} card`,
+      summary: "Reference material",
+      note: "Reusable note",
+      tags: [],
+      metadata,
+    });
+    renderLibrary();
+
+    capturedButton("Edit").onClick();
+    renderLibrary();
+    capturedButton("Save").onClick();
+
+    expect(apiMocks.updateDeepIngestConfirmedItem).toHaveBeenCalledWith(
+      expect.objectContaining({ lane, id })
+    );
+  });
+
+  it("does not offer Edit or Delete controls for cards without a stored id", () => {
+    showCard(
+      {
+        kind: "voice",
+        label: "Writing voice",
+        title: "Legacy voice",
+        summary: "Derived compatibility summary",
+        note: "Reference only",
+        tags: [],
+        metadata: { summary: "Derived compatibility summary" },
+      },
+      "voice-legacy-voice"
+    );
+
+    const html = renderLibrary();
+
+    expect(html).toContain("Legacy voice");
+    expect(captured.buttons.some((props) => props.children === "Edit")).toBe(false);
+    expect(captured.buttons.some((props) => props.children === "Remove from library")).toBe(false);
+  });
+
+  it("labels honesty cards as reference material rather than enforced settings", () => {
+    showCard({
+      id: "honesty-disclaimer-001",
+      kind: "honesty",
+      label: "Honesty boundary",
+      title: "Do not claim model training",
+      summary: "Boundary captured from source material",
+      note: "Reference only",
+      tags: [],
+      metadata: { text: "Do not claim model training." },
+    });
+
+    const html = renderLibrary();
+
+    expect(html).toContain(
+      "Saved to your reference library — not the same as the enforced Honesty boundaries in Settings."
+    );
   });
 });

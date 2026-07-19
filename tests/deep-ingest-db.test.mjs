@@ -62,6 +62,98 @@ async function loadDeepIngestVerbs() {
   return import("../src/core/db/verbs/deep-ingest.mjs");
 }
 
+async function seedConfirmedReferenceItems(repoRoot) {
+  const { deepIngestConfirmProposal, deepIngestProposalPut, deepIngestSourceCreate } =
+    await loadDeepIngestVerbs();
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "story",
+      sourceKind: "paste",
+      text: "Led a rollout that cut review time by 30%.",
+      chunks: [
+        { id: "chunk-confirmed-edit-1", text: "Led a rollout that cut review time by 30%." },
+      ],
+    },
+  }).source;
+  const fixtures = [
+    {
+      lane: "story_bank",
+      id: "story-edit-1",
+      item: {
+        id: "story-edit-1",
+        title: "Review workflow rollout",
+        situation: "Manual review queue",
+        result: "Cut review time by 30%",
+      },
+    },
+    {
+      lane: "story_bank",
+      id: "story-keep-2",
+      item: {
+        id: "story-keep-2",
+        title: "Second rollout story",
+        situation: "A second manual queue",
+        result: "Kept the second row intact",
+      },
+    },
+    {
+      lane: "honesty_boundaries",
+      id: "honesty-edit-1",
+      item: {
+        id: "honesty-edit-1",
+        boundaryType: "do_not_claim",
+        text: "Do not claim ML training.",
+      },
+    },
+    {
+      lane: "writing_voice",
+      id: "voice-edit-1",
+      item: {
+        id: "voice-edit-1",
+        voiceStatus: "confirmed",
+        summary: "Direct, concrete, technical.",
+      },
+    },
+    {
+      lane: "role_signals",
+      id: "signal-edit-1",
+      item: {
+        id: "signal-edit-1",
+        roleFamily: "applied-ai",
+        signalType: "keep",
+        text: "Agent workflow builder",
+      },
+    },
+  ];
+
+  for (const fixture of fixtures) {
+    const item = {
+      ...fixture.item,
+      sourceId: source.id,
+      chunkId: "chunk-confirmed-edit-1",
+      supportingQuote: "Led a rollout that cut review time by 30%",
+    };
+    const proposal = deepIngestProposalPut({
+      repoRoot,
+      sourceId: source.id,
+      targetShape: "story",
+      lane: fixture.lane,
+      proposal: {
+        items: [{ ...item, validation: { status: "passed", blockedReasons: [] } }],
+      },
+    });
+    deepIngestConfirmProposal({
+      repoRoot,
+      proposalId: proposal.id,
+      expectedVersion: proposal.version,
+      edits: { items: [item] },
+    });
+  }
+
+  return fixtures;
+}
+
 function tableSql(db, name) {
   return db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(name)
     ?.sql;
@@ -933,4 +1025,160 @@ test("Library snapshot projects only confirmed Deep ingest rows from SQLite", as
   assert.doesNotMatch(body, /Deferred story must not appear/);
   assert.doesNotMatch(body, /Not available signal must not appear/);
   assert.doesNotMatch(body, /Failed source must not appear/);
+});
+
+test("deepIngestConfirmedItemUpdate partially merges edits across all four confirmed lane tables", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  await seedConfirmedReferenceItems(repoRoot);
+  const { deepIngestConfirmedItemUpdate } = await loadDeepIngestVerbs();
+
+  const cases = [
+    {
+      lane: "story_bank",
+      id: "story-edit-1",
+      fields: { title: "Edited rollout title" },
+      changed: ["title", "Edited rollout title"],
+      preserved: ["situation", "Manual review queue"],
+    },
+    {
+      lane: "honesty_boundaries",
+      id: "honesty-edit-1",
+      fields: { reason: "User clarified the boundary." },
+      changed: ["reason", "User clarified the boundary."],
+      preserved: ["text", "Do not claim ML training."],
+    },
+    {
+      lane: "writing_voice",
+      id: "voice-edit-1",
+      fields: { summary: "Edited, concise, concrete." },
+      changed: ["summary", "Edited, concise, concrete."],
+      preserved: ["voiceStatus", "confirmed"],
+    },
+    {
+      lane: "role_signals",
+      id: "signal-edit-1",
+      fields: { rationale: "Matches hands-on builder roles." },
+      changed: ["rationale", "Matches hands-on builder roles."],
+      preserved: ["text", "Agent workflow builder"],
+    },
+  ];
+
+  for (const entry of cases) {
+    const result = deepIngestConfirmedItemUpdate({
+      repoRoot,
+      lane: entry.lane,
+      id: entry.id,
+      fields: entry.fields,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(result.lane, entry.lane);
+    assert.equal(result.item.id, entry.id);
+    assert.equal(result.item[entry.changed[0]], entry.changed[1]);
+    assert.equal(result.item[entry.preserved[0]], entry.preserved[1]);
+  }
+});
+
+test("deepIngestConfirmedItemUpdate reports unknown lane/id and privacy-block reasons", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  await seedConfirmedReferenceItems(repoRoot);
+  const { deepIngestConfirmedItemUpdate } = await loadDeepIngestVerbs();
+
+  assert.throws(
+    () =>
+      deepIngestConfirmedItemUpdate({
+        repoRoot,
+        lane: "not_a_lane",
+        id: "story-edit-1",
+        fields: { title: "No-op" },
+      }),
+    (error) => {
+      assert.equal(error.code, "BAD_REQUEST");
+      assert.match(error.message, /unsupported Deep ingest lane "not_a_lane"/);
+      return true;
+    }
+  );
+  assert.throws(
+    () =>
+      deepIngestConfirmedItemUpdate({
+        repoRoot,
+        lane: "story_bank",
+        id: "missing-story",
+        fields: { title: "No-op" },
+      }),
+    (error) => {
+      assert.equal(error.code, "NOT_FOUND");
+      assert.equal(error.message, 'Deep ingest confirmed item not found: "missing-story"');
+      return true;
+    }
+  );
+  assert.throws(
+    () =>
+      deepIngestConfirmedItemUpdate({
+        repoRoot,
+        lane: "story_bank",
+        id: "story-edit-1",
+        fields: {
+          result: "My current salary is $210,000; contact me at private@example.com.",
+        },
+      }),
+    (error) => {
+      assert.equal(error.code, "PRIVACY_BLOCKED");
+      assert.equal(
+        error.message,
+        "Deep ingest confirmed item update is blocked by the privacy guard"
+      );
+      assert.deepEqual(error.reasons, ["contact_detail", "current_base"]);
+      return true;
+    }
+  );
+});
+
+test("deepIngestConfirmedItemRemove deletes one row and rejects unknown lane/id", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  await seedConfirmedReferenceItems(repoRoot);
+  const { deepIngestConfirmedItemRemove } = await loadDeepIngestVerbs();
+
+  const removed = deepIngestConfirmedItemRemove({
+    repoRoot,
+    lane: "story_bank",
+    id: "story-edit-1",
+  });
+
+  assert.deepEqual(removed, { ok: true, lane: "story_bank", removed: "story-edit-1" });
+  assert.deepEqual(
+    db
+      .prepare("SELECT id FROM deep_ingest_story_bank ORDER BY id")
+      .all()
+      .map((row) => row.id),
+    ["story-keep-2"]
+  );
+  assert.throws(
+    () =>
+      deepIngestConfirmedItemRemove({
+        repoRoot,
+        lane: "not_a_lane",
+        id: "story-keep-2",
+      }),
+    (error) => {
+      assert.equal(error.code, "BAD_REQUEST");
+      assert.match(error.message, /unsupported Deep ingest lane "not_a_lane"/);
+      return true;
+    }
+  );
+  assert.throws(
+    () =>
+      deepIngestConfirmedItemRemove({
+        repoRoot,
+        lane: "story_bank",
+        id: "missing-story",
+      }),
+    (error) => {
+      assert.equal(error.code, "NOT_FOUND");
+      assert.equal(error.message, 'Deep ingest confirmed item not found: "missing-story"');
+      return true;
+    }
+  );
 });

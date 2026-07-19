@@ -146,7 +146,7 @@ async function postDirect(routes, path, body, headers = {}) {
   const requestPath = path.split("?")[0];
   const handler = routes.get(`POST ${requestPath}`);
   assert.ok(handler, `expected mounted route for POST ${requestPath}`);
-  const req = Readable.from([body]);
+  const req = Readable.from([Buffer.isBuffer(body) ? body : Buffer.from(String(body))]);
   req.method = "POST";
   req.url = path;
   req.headers = headers;
@@ -548,6 +548,25 @@ describe("GET /api/settings/usage", () => {
 });
 
 describe("GET /api/onboard/state", () => {
+  it("includes honesty prefill data from file fallback and SQLite state", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      const fileFallback = await getDirect(routes, "/api/onboard/state");
+      assert.equal(fileFallback.status, 200);
+      assert.equal(fileFallback.body.data.honesty.education.add_education_section, false);
+      assert.deepEqual(fileFallback.body.data.honesty.tools.confirmed, ["Example Tool"]);
+
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const dbBacked = await getDirect(routes, "/api/onboard/state");
+      assert.equal(dbBacked.status, 200);
+      assert.equal(dbBacked.body.data.honesty.education.add_education_section, false);
+      assert.deepEqual(dbBacked.body.data.honesty.tools.confirmed, []);
+    } finally {
+      closeAll();
+    }
+  });
+
   it("reports every candidate file missing before init, and no key/config", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
@@ -563,6 +582,15 @@ describe("GET /api/onboard/state", () => {
       assert.equal(body.sourceResumePresent, false);
       assert.equal(body.keyConfigured, false);
       assert.equal(body.searchSourcesPresent, false);
+      assert.equal(body.data.honesty.education.add_education_section, false);
+      assert.deepEqual(body.data.honesty.claims.do_not_fabricate, [
+        "degrees",
+        "employers",
+        "metrics",
+        "tools",
+        "security clearances",
+        "work authorization",
+      ]);
     } finally {
       await closeServer(server);
     }
@@ -583,6 +611,8 @@ describe("GET /api/onboard/state", () => {
       assert.equal(body.searchSourcesPresent, false);
       assert.equal(body.data.profile.candidate.full_name, "");
       assert.deepEqual(body.data.targeting.role_buckets, []);
+      assert.equal(body.data.honesty.education.add_education_section, false);
+      assert.deepEqual(body.data.honesty.tools.confirmed, []);
       assert.equal(existsSync(candidatePath(repoRoot, "candidate/profile.yml")), false);
     } finally {
       await closeServer(server);
@@ -2206,6 +2236,43 @@ describe("POST /api/onboard/evidence-seed", () => {
       assert.match(body.error, /claims must be an array/);
     } finally {
       await closeServer(server);
+    }
+  });
+});
+
+describe("POST /api/onboard/candidate/evidence/remove", () => {
+  it("removes one evidence claim and validates the required id", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      await postJsonDirect(routes, "/api/onboard/candidate/evidence", {
+        data: {
+          claims: [
+            { id: "resume-001", claim: "Built the workflow.", evidence: "Resume" },
+            { id: "project-001", claim: "Led the rollout.", evidence: "Project notes" },
+          ],
+        },
+      });
+
+      const removed = await postJsonDirect(routes, "/api/onboard/candidate/evidence/remove", {
+        id: "resume-001",
+      });
+      assert.equal(removed.status, 200);
+      assert.equal(removed.body.ok, true);
+      assert.equal(removed.body.removed, "resume-001");
+      assert.deepEqual(
+        candidateConfigGet({ repoRoot }).evidence.claims.map((claim) => claim.id),
+        ["project-001"]
+      );
+
+      const missing = await postJsonDirect(routes, "/api/onboard/candidate/evidence/remove", {});
+      assert.deepEqual(missing, {
+        status: 400,
+        body: { ok: false, error: "body.id is required" },
+      });
+    } finally {
+      closeAll();
     }
   });
 });

@@ -139,11 +139,42 @@ async function mountSettings({ getToken }) {
   });
 }
 
+async function mountLoadedSettings(data) {
+  api.getOnboardState.mockResolvedValue({ data });
+  api.saveCandidateFile.mockResolvedValue({ ok: true });
+  const renderer = await mountSettings({ getToken: vi.fn() });
+  await vi.waitFor(() =>
+    expect(
+      findElement(
+        renderer.output,
+        (element) => renderedText(element) === "Save profile" && element.props.onClick
+      )
+    ).toBeTruthy()
+  );
+  return renderer;
+}
+
+function elementById(renderer, id) {
+  const element = findElement(renderer.output, (candidate) => candidate.props.id === id);
+  expect(element).toBeTruthy();
+  return element;
+}
+
+function actionButton(renderer, label) {
+  const button = findElement(
+    renderer.output,
+    (element) => renderedText(element) === label && element.props.onClick
+  );
+  expect(button).toBeTruthy();
+  return button;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   api.getOnboardState.mockResolvedValue({ data: {} });
   api.getAiSettings.mockResolvedValue({ route: "none", keyPresent: false });
   api.getUsageSummary.mockResolvedValue({ summary: null });
+  api.saveCandidateFile.mockResolvedValue({ ok: true });
 });
 
 afterEach(() => {
@@ -208,5 +239,126 @@ describe("SettingsPage managed AI reconnect", () => {
         (element) => element.props.message === "Could not connect managed AI."
       )
     ).toBeTruthy();
+  });
+});
+
+describe("SettingsPage edit surfaces", () => {
+  it("never includes current_base or additional_links in the profile save patch", async () => {
+    const renderer = await mountLoadedSettings({
+      profile: {
+        candidate: {
+          domain: "software engineering",
+          toolchain: "JavaScript",
+          linkedin: "https://linkedin.example/candidate",
+          additional_links: ["https://private.example/source"],
+        },
+        compensation: {
+          current_base: 175000,
+          expected_base: 225000,
+          oe_min_base: 80000,
+          oe_max_base: 120000,
+          relo_package_needs: "Full relocation",
+        },
+      },
+    });
+
+    await actionButton(renderer, "Save profile").props.onClick();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    const [name, patch] = api.saveCandidateFile.mock.calls[0];
+    expect(name).toBe("profile");
+    expect(patch.compensation).not.toHaveProperty("current_base");
+    expect(patch.candidate).not.toHaveProperty("additional_links");
+    expect(JSON.stringify(patch)).not.toContain("current_base");
+    expect(JSON.stringify(patch)).not.toContain("additional_links");
+  });
+
+  it("resends complete targeting guardrail and company arrays", async () => {
+    const renderer = await mountLoadedSettings({
+      targeting: {
+        fit_bands: { high_min: 85, med_min: 70 },
+        reevaluation: { rejection_total: 8, rejection_per_family: 4 },
+        cut_signals: ["heavy travel"],
+        keep_signals: ["customer-facing delivery"],
+        excluded_companies: ["Excluded Corp"],
+        tracked_companies: ["Tracked Corp"],
+      },
+    });
+
+    elementById(renderer, "targeting-cut_signals").props.onChange(["heavy travel", "onsite only"]);
+    await actionButton(renderer, "Save targeting").props.onClick();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "targeting",
+      expect.objectContaining({
+        cut_signals: ["heavy travel", "onsite only"],
+        keep_signals: ["customer-facing delivery"],
+        excluded_companies: ["Excluded Corp"],
+        tracked_companies: ["Tracked Corp"],
+      })
+    );
+  });
+
+  it("prefills and round-trips agent_voice through the modes save", async () => {
+    const renderer = await mountLoadedSettings({
+      modes: {
+        usage_mode: "full",
+        application_mode: "selective",
+        agent_voice: "technical",
+      },
+    });
+
+    const select = elementById(renderer, "modes-agent_voice");
+    expect(select.props.value).toBe("technical");
+    select.props.onChange("verbose");
+    await actionButton(renderer, "Save modes").props.onClick();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("modes", {
+      usage_mode: "full",
+      application_mode: "selective",
+      agent_voice: "verbose",
+    });
+  });
+
+  it("prefills honesty data and saves it through the honesty wrapper", async () => {
+    const renderer = await mountLoadedSettings({
+      honesty: {
+        education: {
+          highest_degree: "B.S. Computer Science",
+          add_education_section: true,
+        },
+        tools: {
+          confirmed: ["PostgreSQL"],
+          adjacent: ["Kubernetes"],
+          do_not_claim: ["Rust"],
+        },
+        claims: { do_not_fabricate: ["security clearances"] },
+      },
+    });
+
+    expect(elementById(renderer, "honesty-highest_degree").props.value).toBe(
+      "B.S. Computer Science"
+    );
+    expect(elementById(renderer, "honesty-add_education_section").props.checked).toBe(true);
+    expect(elementById(renderer, "honesty-tools_confirmed").props.values).toEqual(["PostgreSQL"]);
+    expect(elementById(renderer, "honesty-do_not_fabricate").props.values).toEqual([
+      "security clearances",
+    ]);
+
+    elementById(renderer, "honesty-highest_degree").props.onChange("M.S. Computer Science");
+    await actionButton(renderer, "Save honesty boundaries").props.onClick();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("honesty", {
+      education: {
+        highest_degree: "M.S. Computer Science",
+        add_education_section: true,
+      },
+      tools: {
+        confirmed: ["PostgreSQL"],
+        adjacent: ["Kubernetes"],
+        do_not_claim: ["Rust"],
+      },
+      claims: { do_not_fabricate: ["security clearances"] },
+    });
   });
 });

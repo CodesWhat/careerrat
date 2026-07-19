@@ -5,12 +5,14 @@ import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { Readable } from "node:stream";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   candidateConfigGet,
   candidateSetupInitialize,
+  deepIngestConfirmProposal,
   deepIngestLaneSetState,
   deepIngestProposalPut,
   deepIngestSourceCreate,
@@ -98,6 +100,44 @@ async function bootServer(repoRoot, opts = {}) {
     route(req, res);
   });
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
+}
+
+async function mountDirectRoutes(repoRoot, opts = {}) {
+  const { mountDeepIngestRoutes } = await import("../src/cli/deep-ingest-route.mjs");
+  const routes = new Map();
+  mountDeepIngestRoutes({
+    addRoute(method, path, handler) {
+      routes.set(`${method} ${path}`, handler);
+    },
+    repoRoot,
+    env: opts.env ?? {},
+    fetchImpl: opts.fetchImpl,
+    scanSource: opts.scanSource,
+    proposalBuilders: opts.proposalBuilders,
+  });
+  return routes;
+}
+
+async function postJsonDirect(routes, path, payload) {
+  const handler = routes.get(`POST ${path}`);
+  assert.ok(handler, `expected mounted route for POST ${path}`);
+  const req = Readable.from([Buffer.from(JSON.stringify(payload ?? {}))]);
+  req.method = "POST";
+  req.url = path;
+  req.headers = { "content-type": "application/json" };
+  let status = 200;
+  let responseBody = "";
+  const res = {
+    writeHead(nextStatus) {
+      status = nextStatus;
+      return this;
+    },
+    end(chunk = "") {
+      responseBody += String(chunk);
+    },
+  };
+  await handler(req, res);
+  return { status, body: responseBody ? JSON.parse(responseBody) : {} };
 }
 
 async function bootDeepAndOnboardServer(repoRoot, opts = {}) {
@@ -203,6 +243,48 @@ function setAllRequiredLanes(repoRoot, overrides = {}, env) {
       reason: next.reason,
     });
   }
+}
+
+function seedConfirmedRouteItem(repoRoot) {
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "story",
+      sourceKind: "paste",
+      text: "Led a route-backed rollout that cut review time by 30%.",
+      chunks: [
+        {
+          id: "chunk-route-confirmed-edit-1",
+          text: "Led a route-backed rollout that cut review time by 30%.",
+        },
+      ],
+    },
+  }).source;
+  const item = {
+    id: "story-route-edit-1",
+    title: "Route-backed rollout",
+    situation: "Manual review queue",
+    result: "Cut review time by 30%",
+    sourceId: source.id,
+    chunkId: "chunk-route-confirmed-edit-1",
+    supportingQuote: "Led a route-backed rollout that cut review time by 30%",
+  };
+  const proposal = deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "story",
+    lane: "story_bank",
+    proposal: {
+      items: [{ ...item, validation: { status: "passed", blockedReasons: [] } }],
+    },
+  });
+  deepIngestConfirmProposal({
+    repoRoot,
+    proposalId: proposal.id,
+    expectedVersion: proposal.version,
+    edits: { items: [item] },
+  });
+  return item;
 }
 
 test("GET /api/deep-ingest/state fails closed with 409 when SQLite is absent", async () => {
@@ -692,4 +774,87 @@ test("POST /api/deep-ingest/proposal-decisions returns updated state after confi
   } finally {
     await closeServer(server);
   }
+});
+
+test("POST /api/deep-ingest/confirmed/update and /remove mutate one confirmed item", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const item = seedConfirmedRouteItem(repoRoot);
+  const routes = await mountDirectRoutes(repoRoot);
+
+  const updated = await postJsonDirect(routes, "/api/deep-ingest/confirmed/update", {
+    lane: "story_bank",
+    id: item.id,
+    title: "Edited route-backed rollout",
+  });
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.ok, true);
+  assert.equal(updated.body.data.item.title, "Edited route-backed rollout");
+  assert.equal(updated.body.data.item.situation, "Manual review queue");
+
+  const removed = await postJsonDirect(routes, "/api/deep-ingest/confirmed/remove", {
+    lane: "story_bank",
+    id: item.id,
+  });
+  assert.deepEqual(removed, {
+    status: 200,
+    body: {
+      ok: true,
+      data: { ok: true, lane: "story_bank", removed: item.id },
+    },
+  });
+});
+
+test("POST confirmed-item routes reject missing id/lane payloads", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const routes = await mountDirectRoutes(repoRoot);
+
+  for (const [path, payload, message] of [
+    [
+      "/api/deep-ingest/confirmed/update",
+      { lane: "story_bank", title: "Missing id" },
+      /requires id/,
+    ],
+    [
+      "/api/deep-ingest/confirmed/update",
+      { id: "story-route-edit-1", title: "Missing lane" },
+      /unsupported Deep ingest lane "\(missing\)"/,
+    ],
+    ["/api/deep-ingest/confirmed/remove", { lane: "story_bank" }, /requires id/],
+    [
+      "/api/deep-ingest/confirmed/remove",
+      { id: "story-route-edit-1" },
+      /unsupported Deep ingest lane "\(missing\)"/,
+    ],
+  ]) {
+    const response = await postJsonDirect(routes, path, payload);
+    assert.equal(response.status, 400);
+    assert.equal(response.body.ok, false);
+    assert.match(response.body.error, message);
+  }
+});
+
+test("POST /api/deep-ingest/confirmed/update returns privacy reasons", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const item = seedConfirmedRouteItem(repoRoot);
+  const routes = await mountDirectRoutes(repoRoot);
+
+  const response = await postJsonDirect(routes, "/api/deep-ingest/confirmed/update", {
+    lane: "story_bank",
+    id: item.id,
+    result: "My current salary is $210,000; contact me at private@example.com.",
+  });
+
+  assert.deepEqual(response, {
+    status: 400,
+    body: {
+      ok: false,
+      error: "Deep ingest confirmed item update is blocked by the privacy guard",
+      reasons: ["contact_detail", "current_base"],
+    },
+  });
 });

@@ -27,6 +27,7 @@ import {
   candidateConfigGet,
   candidateConfigPatch,
   candidateEvidenceMerge,
+  candidateEvidenceRemoveOne,
   candidateSetupInitialize,
   commAppendMessage,
   commMarkSent,
@@ -1106,4 +1107,70 @@ test("candidateEvidenceMerge replaces an existing explicit id even when the clai
   assert.equal(config.evidence.claims[0].id, "resume-001");
   assert.equal(config.evidence.claims[0].claim, "Built the production version");
   assert.equal(config.evidence.claims[0].evidence, "Resume v2");
+});
+
+test("candidateEvidenceRemoveOne removes only the requested claim and rejects missing or unknown ids", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      { id: "resume-001", claim: "Built the first workflow", evidence: "Resume" },
+      { id: "project-001", claim: "Led the second rollout", evidence: "Project notes" },
+    ],
+  });
+
+  const removed = candidateEvidenceRemoveOne({ repoRoot, id: "resume-001" });
+
+  assert.equal(removed.ok, true);
+  assert.equal(removed.removed, "resume-001");
+  assert.deepEqual(
+    candidateConfigGet({ repoRoot }).evidence.claims.map((claim) => claim.id),
+    ["project-001"]
+  );
+  assert.throws(
+    () => candidateEvidenceRemoveOne({ repoRoot }),
+    (error) => {
+      assert.equal(error.code, "BAD_REQUEST");
+      assert.equal(error.message, "candidateEvidenceRemoveOne requires id");
+      return true;
+    }
+  );
+  assert.throws(
+    () => candidateEvidenceRemoveOne({ repoRoot, id: "does-not-exist" }),
+    (error) => {
+      assert.equal(error.code, "NOT_FOUND");
+      assert.equal(error.message, 'evidence claim not found: "does-not-exist"');
+      return true;
+    }
+  );
+});
+
+test("candidateEvidenceMerge rejects residual placeholders and current_base tokens with structured guard errors", () => {
+  for (const { claim, id, message } of [
+    {
+      id: "placeholder-claim",
+      claim: "Built the [Company] migration workflow.",
+      message: /unresolved placeholder \(bracket-token\).*\[Company\]/,
+    },
+    {
+      id: "private-comp-claim",
+      claim: "The current_base token must never enter evidence.",
+      message: /contains the private current_base field/,
+    },
+  ]) {
+    assert.throws(
+      () => candidateEvidenceMerge({ claims: [{ id, claim, evidence: "Resume" }] }),
+      (error) => {
+        assert.equal(error.code, "EVIDENCE_GUARD_REJECTED");
+        assert.equal(error.message, "evidence claim(s) refused by the honesty/privacy guard");
+        assert.equal(Array.isArray(error.errors), true);
+        assert.equal(error.errors.length, 1);
+        assert.equal(error.errors[0].id, id);
+        assert.match(error.errors[0].message, message);
+        return true;
+      }
+    );
+  }
 });

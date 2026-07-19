@@ -25,7 +25,7 @@ const apiMock = vi.hoisted(() => ({
   updateDeepIngestLaneState: vi.fn(),
   uploadDeepIngestFile: vi.fn(),
 }));
-const captured = vi.hoisted(() => ({ buttons: [], fields: [] }));
+const captured = vi.hoisted(() => ({ buttons: [], fields: [], nativeButtons: [] }));
 
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal();
@@ -162,7 +162,29 @@ function renderPage(state = deepIngestState()) {
   hookHarness.reset();
   captured.buttons = [];
   captured.fields = [];
-  return renderToStaticMarkup(DeepIngestPage({ initialState: state }));
+  captured.nativeButtons = [];
+  const tree = DeepIngestPage({ initialState: state });
+  const html = renderToStaticMarkup(tree);
+  const renderedButtons = captured.buttons;
+  const renderedFields = captured.fields;
+  captureNativeButtons(tree);
+  captured.buttons = renderedButtons;
+  captured.fields = renderedFields;
+  return html;
+}
+
+function captureNativeButtons(node) {
+  if (Array.isArray(node)) {
+    for (const child of node) captureNativeButtons(child);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  if (typeof node.type === "function") {
+    captureNativeButtons(node.type(node.props));
+    return;
+  }
+  if (node.type === "button") captured.nativeButtons.push(node.props);
+  captureNativeButtons(node.props?.children);
 }
 
 function capturedButton(label) {
@@ -177,6 +199,22 @@ function capturedField(label) {
   return field;
 }
 
+function childText(value) {
+  if (Array.isArray(value)) return value.map(childText).join("");
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (!value || typeof value !== "object") return "";
+  return childText(value.props?.children);
+}
+
+function capturedNativeButton(label, className = null) {
+  const button = captured.nativeButtons.find(
+    (props) =>
+      childText(props.children).includes(label) && (!className || props.className === className)
+  );
+  expect(button).toBeDefined();
+  return button;
+}
+
 function expectNoDeepIngestRuntimeTokens(html) {
   for (const token of FORBIDDEN_DEEP_INGEST_TEXT) {
     expect(html, `Deep ingest UI leaked ${token}`).not.toContain(token);
@@ -185,8 +223,10 @@ function expectNoDeepIngestRuntimeTokens(html) {
 
 beforeEach(() => {
   hookHarness.clear();
+  apiMock.state = null;
   captured.buttons = [];
   captured.fields = [];
+  captured.nativeButtons = [];
   vi.clearAllMocks();
   apiMock.buildDeepIngestProposals.mockResolvedValue({ ok: true });
   apiMock.decideDeepIngestProposal.mockResolvedValue({ ok: true });
@@ -256,6 +296,133 @@ describe("DeepIngestPage workbench", () => {
     expect(html).toContain("Confirm proposal");
     expect(html).toContain("Review proposals");
     expectNoDeepIngestRuntimeTokens(html);
+  });
+
+  it("renders proposal payload primitives as read-only chips", () => {
+    const state = deepIngestState();
+    state.proposals[0].payload = {
+      metric: "37% faster",
+      source: "portfolio",
+      nested: { hidden: true },
+    };
+
+    const html = renderPage(state);
+
+    expect(html).toContain('<span class="field__label">metric:</span> 37% faster');
+    expect(html).toContain('<span class="field__label">source:</span> portfolio');
+    expect(html).not.toContain("nested:");
+    expect(html).not.toContain('value="37% faster"');
+  });
+
+  it("shows the destination line only while a proposal is open", () => {
+    const state = deepIngestState();
+    const openHtml = renderPage(state);
+    expect(openHtml).toContain("Will: save to your Evidence");
+
+    state.proposals[0] = { ...state.proposals[0], status: "confirmed" };
+    const confirmedHtml = renderPage(state);
+
+    expect(confirmedHtml).not.toContain("Will: save to your");
+  });
+
+  it("reopens a confirmed proposal through the decision wrapper", async () => {
+    const state = deepIngestState();
+    state.proposals[0] = { ...state.proposals[0], status: "confirmed", version: 4 };
+    renderPage(state);
+
+    await capturedButton("Reopen").onClick();
+
+    expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith({
+      proposalId: "proposal-1",
+      expectedVersion: 4,
+      decision: "reopen",
+    });
+  });
+
+  it.each([
+    ["Defer lane", "deferred"],
+    ["Mark not available", "not_available"],
+  ])("reveals preset reasons for %s and requires a non-empty reason", async (action, status) => {
+    const state = deepIngestState();
+    renderPage(state);
+
+    capturedButton(action).onClick();
+    let html = renderPage(state);
+
+    expect(html).toContain("Not relevant to me");
+    expect(html).toContain("Don&#x27;t have this yet");
+    expect(html).toContain("I&#x27;ll do it later");
+    expect(capturedButton(action).disabled).toBe(true);
+
+    capturedNativeButton("I'll do it later").onClick();
+    html = renderPage(state);
+    expect(html).toContain("Skipping is fine");
+    expect(capturedButton(action).disabled).toBe(false);
+    await capturedButton(action).onClick();
+
+    expect(apiMock.updateDeepIngestLaneState).toHaveBeenCalledWith({
+      lane: "evidence_claims",
+      status,
+      reason: "I'll do it later",
+    });
+  });
+
+  it("filters the proposal queue from a lane row and restores all lanes", () => {
+    const state = deepIngestState({
+      proposals: [
+        {
+          id: "proposal-evidence",
+          lane: "evidence_claims",
+          sourceId: "src-1",
+          status: "review_needed",
+          title: "Evidence-only proposal",
+        },
+        {
+          id: "proposal-story",
+          lane: "story_bank",
+          sourceId: "src-2",
+          status: "review_needed",
+          title: "Story-only proposal",
+        },
+      ],
+      selectedProposalId: "proposal-evidence",
+    });
+    renderPage(state);
+
+    capturedNativeButton("Story", "deep-ingest__lane-main").onClick();
+    let html = renderPage(state);
+    let queueHtml = html.match(
+      /aria-label="Review queue"[\s\S]*?aria-label="Proposal editor"/
+    )?.[0];
+
+    expect(html).toContain("Filtered to Story");
+    expect(queueHtml).toContain("Story-only proposal");
+    expect(queueHtml).not.toContain("Evidence-only proposal");
+
+    capturedNativeButton("Show all lanes", "deep-ingest__clear-lane-filter").onClick();
+    html = renderPage(state);
+    queueHtml = html.match(/aria-label="Review queue"[\s\S]*?aria-label="Proposal editor"/)?.[0];
+    expect(queueHtml).toContain("Story-only proposal");
+    expect(queueHtml).toContain("Evidence-only proposal");
+    expect(html).not.toContain("Filtered to Story");
+  });
+
+  it("marks non-terminal evidence as the starting lane and renders honest payoff copy", () => {
+    const state = deepIngestState();
+    const html = renderPage(state);
+
+    expect(html).toContain("Start here");
+    expect(html).toContain(
+      "Powers every tailored résumé, cover letter, and answer you generate from here on."
+    );
+    expect(html).toContain(
+      "Saved to your Library as reference material you can browse and copy from."
+    );
+
+    state.lanes = state.lanes.map((lane) =>
+      lane.key === "evidence_claims" ? { ...lane, status: "completed" } : lane
+    );
+    expect(renderPage(state)).not.toContain("Start here");
   });
 
   it("shows explicit manual fallback and terminal lane actions for unreadable, deferred, and unavailable sources", async () => {
