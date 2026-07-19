@@ -5694,6 +5694,15 @@ button {
   padding: 0;
 }
 
+/* Strips default UA button chrome when `.chip` is used directly on a
+   <button> (e.g. Deep ingest's reason-chip picker) instead of the usual
+   read-only <span> — the pill itself is unchanged either way. */
+button.chip {
+  border: 0;
+  cursor: pointer;
+  font: inherit;
+}
+
 .chip-input-row {
   display: flex;
   gap: 8px;
@@ -10924,15 +10933,41 @@ button {
 
 .deep-ingest__lane-main {
   display: flex;
+  width: 100%;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
 }
 
 .deep-ingest__lane-label {
   color: var(--ink);
   font-size: 13px;
   font-weight: 800;
+}
+
+.deep-ingest__lane-main:hover .deep-ingest__lane-label {
+  color: var(--m-secondary);
+}
+
+.deep-ingest__lane-badges {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.deep-ingest__lane-payoff {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.4;
 }
 
 .deep-ingest__lane-reason {
@@ -10947,6 +10982,27 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.deep-ingest__lane-skip {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.deep-ingest__reason-chip--active {
+  background: color-mix(in srgb, var(--m-secondary) 18%, var(--paper-band));
+  color: var(--ink);
+}
+
+.deep-ingest__clear-lane-filter {
+  border: 0;
+  padding: 0;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
 }
 
 .deep-ingest__segmented {

@@ -140,6 +140,53 @@ const PROPOSAL_STATUS_TONE = {
   rejected: "badge--muted",
 };
 
+// Preset reasons for the lane skip picker (Defer lane / Mark not available).
+// A custom-text fallback still lives alongside these in LaneRow's reason
+// TextField — the server keeps requiring a non-empty reason for deferred/
+// not_available lane states regardless of how it was typed in.
+const REASON_CHIP_PRESETS = ["Not relevant to me", "Don't have this yet", "I'll do it later"];
+
+// Honesty-calibrated payoff copy per lane (deep-dive plan §3 item 5):
+// evidence_claims is the only lane any generated artifact reads today; the
+// other four confirmed-item lanes only feed Library. source_coverage/
+// open_gaps intentionally have no line — pure scaffolding, no real
+// downstream consumer to promise.
+const LANE_PAYOFF_LINE = {
+  evidence_claims:
+    "Powers every tailored résumé, cover letter, and answer you generate from here on.",
+  story_bank: "Saved to your Library as reference material you can browse and copy from.",
+  writing_voice: "Saved to your Library as reference material you can browse and copy from.",
+  honesty_boundaries: "Saved to your Library as reference material you can browse and copy from.",
+  role_signals: "Saved to your Library as reference material you can browse and copy from.",
+};
+
+// Reverse of source-normalize.mjs's TARGET_SHAPE_TO_LANE — clicking a lane
+// row re-points the "Add a source" segmented picker at the target shape
+// that feeds it, so the next source you add already lands in the lane you
+// just clicked. source_coverage/open_gaps have no single target shape of
+// their own (open_gaps is where unmatched auto/paste/link sources land), so
+// they're left out rather than guessed at.
+const LANE_KEY_TO_TARGET_SHAPE = {
+  evidence_claims: "evidence",
+  story_bank: "story",
+  writing_voice: "writing_voice",
+  honesty_boundaries: "honesty_boundary",
+  role_signals: "role_signal",
+};
+
+// deepIngestProposalPut always stores the full lane-table key (see
+// src/cli/deep-ingest-route.mjs's proposalLane()), but proposal builders
+// (src/core/deep-ingest/proposals/shared.mjs) internally use the shorter
+// DEEP_INGEST_PROPOSAL_LANES vocabulary — this covers both so the "Will:"
+// line's lane lookup never falls through to a raw, unlabeled key.
+const LANE_KEY_ALIASES = {
+  evidence: "evidence_claims",
+  story: "story_bank",
+  honesty: "honesty_boundaries",
+  role_signal: "role_signals",
+  gap: "open_gaps",
+};
+
 function errorMessage(err, fallback) {
   return err instanceof Error ? err.message : fallback;
 }
@@ -175,6 +222,31 @@ function proposalEditItem(proposal, edits) {
   };
 }
 
+// Verbatim reuse of IntakeCard's "Extracted entities" idiom (apps/web/src/
+// inbox/IntakeCard.jsx) — a proposal's real AI extraction lives in its
+// opaque `payload` object, which has no fixed schema (the AI decides the
+// shape per lane). Nested objects/arrays are omitted rather than rendered
+// as "[object Object]": this is a read-only preview of what got extracted,
+// not a full structured editor.
+function payloadEntries(payload) {
+  return Object.entries(payload || {}).filter(
+    ([, value]) =>
+      value !== null && value !== undefined && value !== "" && typeof value !== "object"
+  );
+}
+
+// Matches a proposal's `lane` field back to the same label already shown in
+// the Lane progress panel, so "Will: save to your {label}" never drifts
+// from the lane rows above it. Falls back to a humanized raw lane key
+// rather than throwing if a lane can't be found — this line is a
+// client-side convenience, not a server-derived guarantee.
+function laneLabelForProposal(proposal, lanes) {
+  const laneKey = LANE_KEY_ALIASES[proposal?.lane] || proposal?.lane;
+  const match = lanes.find((lane) => (lane.key || lane.lane) === laneKey);
+  if (match?.label) return match.label;
+  return String(proposal?.lane || "library").replace(/_/g, " ");
+}
+
 export function DeepIngestPage({ initialState = null }) {
   const [state, setState] = useState(initialState);
   const [loading, setLoading] = useState(!initialState);
@@ -190,7 +262,10 @@ export function DeepIngestPage({ initialState = null }) {
   const [busyLane, setBusyLane] = useState(null);
   const [busySourceId, setBusySourceId] = useState(null);
   const [busyProposalAction, setBusyProposalAction] = useState(false);
+  const [laneSkipDraft, setLaneSkipDraft] = useState(null);
+  const [laneQueueFilter, setLaneQueueFilter] = useState(null);
   const fileInputRef = useRef(null);
+  const addSourceRef = useRef(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: fetch-on-mount only when no initialState was handed in; refresh() covers every later reload
   useEffect(() => {
@@ -284,22 +359,51 @@ export function DeepIngestPage({ initialState = null }) {
     setDraft({ targetShape: source.targetShape || "auto", kind: "paste", text: "", url: "" });
   }
 
-  async function handleLaneAction(laneKey, status) {
-    let reason = null;
-    if (status === "deferred" || status === "not_available") {
-      reason = globalThis.prompt?.("Reason (required)?") || "";
-      if (!reason.trim()) return;
-    }
-    setBusyLane(laneKey);
+  // Reveals the inline reason-chip picker for a lane's Defer/Mark-not-
+  // available action instead of the old free-text globalThis.prompt() —
+  // submitLaneSkip below still sends a required, non-empty reason, same as
+  // the server has always demanded.
+  function revealLaneSkip(laneKey, status) {
+    setLaneSkipDraft({ laneKey, status, reason: "" });
+  }
+
+  function cancelLaneSkip() {
+    setLaneSkipDraft(null);
+  }
+
+  function setLaneSkipReason(reason) {
+    setLaneSkipDraft((prev) => (prev ? { ...prev, reason } : prev));
+  }
+
+  async function submitLaneSkip() {
+    const draft = laneSkipDraft;
+    if (!draft?.reason.trim()) return;
+    setBusyLane(draft.laneKey);
     setError(null);
     try {
-      await updateDeepIngestLaneState({ lane: laneKey, status, reason: reason || null });
+      await updateDeepIngestLaneState({
+        lane: draft.laneKey,
+        status: draft.status,
+        reason: draft.reason.trim(),
+      });
       await refresh();
+      setLaneSkipDraft(null);
     } catch (err) {
       setError(errorMessage(err, "Could not update that lane."));
     } finally {
       setBusyLane(null);
     }
+  }
+
+  // Re-points "Add a source" at this lane's target shape and narrows the
+  // Review queue to this lane's own proposals, then scrolls the Add-source
+  // panel into view — the simplest mechanism that actually moves the user
+  // toward the lane's next step rather than just highlighting the row.
+  function focusLane(laneKey) {
+    const targetShape = LANE_KEY_TO_TARGET_SHAPE[laneKey];
+    if (targetShape) setDraft((prev) => ({ ...prev, targetShape }));
+    setLaneQueueFilter(laneKey);
+    addSourceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
 
   async function handleSaveEdits(proposal) {
@@ -339,6 +443,29 @@ export function DeepIngestPage({ initialState = null }) {
     }
   }
 
+  // "reopen" (deepIngestProposalDecision's PROPOSAL_DECISION_TO_STATUS map,
+  // src/core/db/verbs/deep-ingest.mjs) moves a confirmed proposal back to
+  // review_needed without touching its stored payload/edits — this is the
+  // affordance the plan asks for on confirmed proposals, through the same
+  // decision endpoint save/confirm already use.
+  async function handleReopenProposal(proposal) {
+    setBusyProposalAction(true);
+    setError(null);
+    try {
+      await decideDeepIngestProposal({
+        proposalId: proposal.id,
+        expectedVersion: proposal.version,
+        decision: "reopen",
+      });
+      await refresh();
+      setEdits({});
+    } catch (err) {
+      setError(errorMessage(err, "Could not reopen that proposal."));
+    } finally {
+      setBusyProposalAction(false);
+    }
+  }
+
   async function handleGenerateProposals(source) {
     setBusySourceId(source.id);
     setError(null);
@@ -368,17 +495,26 @@ export function DeepIngestPage({ initialState = null }) {
     terminalCount: 0,
     requiredCount: lanes.length,
   };
-  const filteredProposals =
-    reviewFilter === "all" ? proposals : proposals.filter((p) => p.status === reviewFilter);
+  const filteredProposals = proposals.filter((p) => {
+    if (reviewFilter !== "all" && p.status !== reviewFilter) return false;
+    if (laneQueueFilter && p.lane !== laneQueueFilter) return false;
+    return true;
+  });
   const editorProposal = selectedProposalId
     ? proposals.find((p) => p.id === selectedProposalId) || null
     : null;
   const editorTitle = edits.title ?? editorProposal?.title ?? "";
   const editorSummary = edits.summary ?? editorProposal?.summary ?? "";
   const editorQuote = edits.supportingQuote ?? editorProposal?.supportingQuote ?? "";
+  const editorPayload = payloadEntries(editorProposal?.payload);
+  const editorLaneLabel = editorProposal ? laneLabelForProposal(editorProposal, lanes) : null;
+  const editorConfirmed = editorProposal?.status === "confirmed";
   const hasEdits = Object.keys(edits).length > 0;
   const confirmDisabled =
     !editorProposal || busyProposalAction || (editorProposal.status === "blocked" && !hasEdits);
+  const laneQueueFilterLabel = laneQueueFilter
+    ? lanes.find((lane) => (lane.key || lane.lane) === laneQueueFilter)?.label || laneQueueFilter
+    : null;
 
   return (
     <div className="deep-ingest">
@@ -409,18 +545,28 @@ export function DeepIngestPage({ initialState = null }) {
           </span>
         </header>
         <div className="card__body deep-ingest__lane-grid">
-          {lanes.map((lane) => (
-            <LaneRow
-              key={lane.key || lane.lane}
-              lane={lane}
-              busy={busyLane === (lane.key || lane.lane)}
-              onAction={handleLaneAction}
-            />
-          ))}
+          {lanes.map((lane) => {
+            const laneKey = lane.key || lane.lane;
+            return (
+              <LaneRow
+                key={laneKey}
+                lane={lane}
+                busy={busyLane === laneKey}
+                skipDraft={
+                  laneSkipDraft && laneSkipDraft.laneKey === laneKey ? laneSkipDraft : null
+                }
+                onSelectLane={() => focusLane(laneKey)}
+                onRevealSkip={(status) => revealLaneSkip(laneKey, status)}
+                onSkipReasonChange={setLaneSkipReason}
+                onSubmitSkip={submitLaneSkip}
+                onCancelSkip={cancelLaneSkip}
+              />
+            );
+          })}
         </div>
       </section>
 
-      <section className="card deep-ingest__panel" aria-label="Add a source">
+      <section className="card deep-ingest__panel" aria-label="Add a source" ref={addSourceRef}>
         <header className="card__header">
           <h2 className="card__title">
             <span className="deep-ingest__panel-icon" aria-hidden="true">
@@ -558,6 +704,19 @@ export function DeepIngestPage({ initialState = null }) {
             ))}
           </div>
 
+          {laneQueueFilter ? (
+            <p className="field__hint">
+              Filtered to {laneQueueFilterLabel} —{" "}
+              <button
+                type="button"
+                className="deep-ingest__clear-lane-filter"
+                onClick={() => setLaneQueueFilter(null)}
+              >
+                Show all lanes
+              </button>
+            </p>
+          ) : null}
+
           {filteredProposals.length ? (
             <div className="deep-ingest__proposal-list">
               {filteredProposals.map((proposal) => (
@@ -589,6 +748,16 @@ export function DeepIngestPage({ initialState = null }) {
         <div className="card__body">
           {editorProposal ? (
             <>
+              {editorPayload.length ? (
+                <div className="chip-row">
+                  {editorPayload.map(([key, value]) => (
+                    <span className="chip" key={key}>
+                      <span className="field__label">{key}:</span>&nbsp;
+                      {String(value)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
               <TextField
                 id="deep-ingest-proposal-title"
                 value={editorTitle}
@@ -609,20 +778,35 @@ export function DeepIngestPage({ initialState = null }) {
                 onChange={(value) => setEdits((prev) => ({ ...prev, supportingQuote: value }))}
                 aria-label="Supporting quote"
               />
+              {!editorConfirmed ? (
+                <p className="intake-card__dispatch">Will: save to your {editorLaneLabel}</p>
+              ) : null}
               <div className="deep-ingest__form-actions">
-                <Button
-                  variant="secondary"
-                  disabled={busyProposalAction}
-                  onClick={() => handleSaveEdits(editorProposal)}
-                >
-                  {busyProposalAction ? "Saving…" : "Save edits"}
-                </Button>
-                <Button
-                  disabled={confirmDisabled}
-                  onClick={() => handleConfirmProposal(editorProposal)}
-                >
-                  {busyProposalAction ? "Confirming…" : "Confirm proposal"}
-                </Button>
+                {editorConfirmed ? (
+                  <Button
+                    variant="secondary"
+                    disabled={busyProposalAction}
+                    onClick={() => handleReopenProposal(editorProposal)}
+                  >
+                    {busyProposalAction ? "Reopening…" : "Reopen"}
+                  </Button>
+                ) : (
+                  <>
+                    <Button
+                      variant="secondary"
+                      disabled={busyProposalAction}
+                      onClick={() => handleSaveEdits(editorProposal)}
+                    >
+                      {busyProposalAction ? "Saving…" : "Save edits"}
+                    </Button>
+                    <Button
+                      disabled={confirmDisabled}
+                      onClick={() => handleConfirmProposal(editorProposal)}
+                    >
+                      {busyProposalAction ? "Confirming…" : "Confirm proposal"}
+                    </Button>
+                  </>
+                )}
               </div>
             </>
           ) : (
@@ -636,28 +820,80 @@ export function DeepIngestPage({ initialState = null }) {
   );
 }
 
-function LaneRow({ lane, busy, onAction }) {
+function LaneRow({
+  lane,
+  busy,
+  skipDraft,
+  onSelectLane,
+  onRevealSkip,
+  onSkipReasonChange,
+  onSubmitSkip,
+  onCancelSkip,
+}) {
   const laneKey = lane.key || lane.lane;
   const terminal = laneIsTerminal(lane);
+  const showStartHere = laneKey === "evidence_claims" && !terminal;
+  const payoffLine = LANE_PAYOFF_LINE[laneKey];
   return (
     <div className="deep-ingest__lane-row">
-      <div className="deep-ingest__lane-main">
+      <button type="button" className="deep-ingest__lane-main" onClick={onSelectLane}>
         <span className="deep-ingest__lane-label">{lane.label || laneKey}</span>
-        <span className={`badge ${LANE_STATUS_TONE[lane.status] || "badge--muted"}`}>
-          {LANE_STATUS_LABEL[lane.status] || lane.status}
+        <span className="deep-ingest__lane-badges">
+          {showStartHere ? <span className="badge badge--ok">Start here</span> : null}
+          <span className={`badge ${LANE_STATUS_TONE[lane.status] || "badge--muted"}`}>
+            {LANE_STATUS_LABEL[lane.status] || lane.status}
+          </span>
         </span>
-      </div>
+      </button>
+      {payoffLine ? <p className="deep-ingest__lane-payoff">{payoffLine}</p> : null}
       {lane.reason ? <p className="deep-ingest__lane-reason">{lane.reason}</p> : null}
-      {!terminal ? (
+      {!terminal && skipDraft ? (
+        <div className="deep-ingest__lane-skip">
+          <div className="chip-row">
+            {REASON_CHIP_PRESETS.map((preset) => (
+              <button
+                type="button"
+                key={preset}
+                className={`chip${
+                  skipDraft.reason === preset ? " deep-ingest__reason-chip--active" : ""
+                }`}
+                aria-pressed={skipDraft.reason === preset}
+                onClick={() => onSkipReasonChange(preset)}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
+          <TextField
+            id={`deep-ingest-lane-skip-reason-${laneKey}`}
+            value={skipDraft.reason}
+            onChange={onSkipReasonChange}
+            placeholder="Or write your own reason…"
+            aria-label="Skip reason"
+          />
+          <p className="field__hint">
+            Skipping is fine — come back anytime from the Dashboard, Library, or this page.
+          </p>
+          <div className="deep-ingest__form-actions">
+            <Button disabled={busy || !skipDraft.reason.trim()} onClick={onSubmitSkip}>
+              {busy
+                ? "Saving…"
+                : skipDraft.status === "deferred"
+                  ? "Defer lane"
+                  : "Mark not available"}
+            </Button>
+            <Button variant="secondary" disabled={busy} onClick={onCancelSkip}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : null}
+      {!terminal && !skipDraft ? (
         <div className="deep-ingest__lane-actions">
-          <Button variant="secondary" disabled={busy} onClick={() => onAction(laneKey, "deferred")}>
+          <Button variant="secondary" disabled={busy} onClick={() => onRevealSkip("deferred")}>
             Defer lane
           </Button>
-          <Button
-            variant="secondary"
-            disabled={busy}
-            onClick={() => onAction(laneKey, "not_available")}
-          >
+          <Button variant="secondary" disabled={busy} onClick={() => onRevealSkip("not_available")}>
             Mark not available
           </Button>
         </div>
