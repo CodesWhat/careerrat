@@ -54,6 +54,14 @@ vi.mock("react", async (importOriginal) => {
 
 vi.mock("../lib/api.js", () => apiMock);
 
+vi.mock("react-router-dom", () => ({
+  Link: ({ children, to, ...props }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
 vi.mock("../components/Button.jsx", async (importOriginal) => {
   const actual = await importOriginal();
   return {
@@ -409,6 +417,11 @@ describe("DeepIngestPage workbench", () => {
 
   it("marks non-terminal evidence as the starting lane and renders honest payoff copy", () => {
     const state = deepIngestState();
+    renderPage(state);
+    // The stepper defaults to one expanded lane (Evidence, per the "Start
+    // here" ranking) — switch to "All lanes" so every lane's payoff line
+    // renders at once, same as this assertion always expected.
+    capturedNativeButton("All lanes").onClick();
     const html = renderPage(state);
 
     expect(html).toContain("Start here");

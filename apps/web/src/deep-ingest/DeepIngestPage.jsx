@@ -15,6 +15,7 @@
 // uses renderToStaticMarkup, which never runs effects.
 
 import { useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { Button } from "../components/Button.jsx";
 import { TextArea, TextField } from "../components/form.jsx";
 import { ListIcon, UploadIcon } from "../components/icons.jsx";
@@ -113,6 +114,28 @@ function laneIsTerminal(lane) {
   return true;
 }
 
+// One-lane-focus stepper: picks the lane the page should point at next. Given
+// `null` (nothing focused yet) it's also the initial-focus computation —
+// first non-terminal lane in server order, matching the "Start here" ranking.
+// Given the currently focused key it holds position while that lane is still
+// open, and only advances (wrapping past the end) once that lane has gone
+// terminal — deferred/not_available/completed all count, same as everywhere
+// else on this page. Returns null once every lane is terminal, which is the
+// completion-panel signal.
+function advanceFocusedLane(currentKey, lanes) {
+  const list = asArray(lanes);
+  if (!list.length) return currentKey;
+  const currentIndex = list.findIndex((lane) => (lane.key || lane.lane) === currentKey);
+  const current = currentIndex >= 0 ? list[currentIndex] : null;
+  if (current && !laneIsTerminal(current)) return currentKey;
+  const ordered =
+    currentIndex >= 0
+      ? [...list.slice(currentIndex + 1), ...list.slice(0, currentIndex + 1)]
+      : list;
+  const next = ordered.find((lane) => !laneIsTerminal(lane));
+  return next ? next.key || next.lane : null;
+}
+
 const SOURCE_STATUS_TONE = {
   proposal_ready: "badge--ok",
   manual_fallback: "badge--warn",
@@ -159,6 +182,18 @@ const LANE_PAYOFF_LINE = {
   honesty_boundaries: "Saved to your Library as reference material you can browse and copy from.",
   role_signals: "Saved to your Library as reference material you can browse and copy from.",
 };
+
+// Completion panel rows: one per confirmed-item lane, in the same order the
+// lane rail renders them. `countKey` matches buildDeepIngestViewModel's
+// `confirmed` payload (src/core/deep-ingest/view-model.mjs) so the counts
+// shown here are read straight off the server, never recomputed client-side.
+const COMPLETION_LANE_ROWS = [
+  { key: "evidence_claims", countKey: "evidence", noun: ["claim", "claims"] },
+  { key: "story_bank", countKey: "storyBank", noun: ["story", "stories"] },
+  { key: "writing_voice", countKey: "writingVoice", noun: ["sample", "samples"] },
+  { key: "honesty_boundaries", countKey: "honestyBoundaries", noun: ["boundary", "boundaries"] },
+  { key: "role_signals", countKey: "roleSignals", noun: ["signal", "signals"] },
+];
 
 // Reverse of source-normalize.mjs's TARGET_SHAPE_TO_LANE — clicking a lane
 // row re-points the "Add a source" segmented picker at the target shape
@@ -264,6 +299,16 @@ export function DeepIngestPage({ initialState = null }) {
   const [busyProposalAction, setBusyProposalAction] = useState(false);
   const [laneSkipDraft, setLaneSkipDraft] = useState(null);
   const [laneQueueFilter, setLaneQueueFilter] = useState(null);
+  // One-lane-focus stepper state. `focusedLaneKey` starts at the first
+  // non-terminal lane in `initialState` (null when there's no initialState
+  // yet — the mount effect below fills it in once the real fetch lands).
+  // `showAllLanes` is the "Focused"/"All lanes" escape hatch: flipping it
+  // renders every lane expanded at once, i.e. the pre-stepper flat layout,
+  // without duplicating the lane list.
+  const [focusedLaneKey, setFocusedLaneKey] = useState(() =>
+    advanceFocusedLane(null, initialState?.lanes)
+  );
+  const [showAllLanes, setShowAllLanes] = useState(false);
   const fileInputRef = useRef(null);
   const addSourceRef = useRef(null);
 
@@ -277,6 +322,7 @@ export function DeepIngestPage({ initialState = null }) {
         setState(next);
         setSelectedSourceId(next?.selectedSourceId ?? null);
         setSelectedProposalId(next?.selectedProposalId ?? null);
+        setFocusedLaneKey((prev) => (prev === null ? advanceFocusedLane(null, next?.lanes) : prev));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -294,6 +340,17 @@ export function DeepIngestPage({ initialState = null }) {
     try {
       const next = await getDeepIngestState();
       setState(next);
+      // Auto-advance: every write path re-reads state through here, so this
+      // is the one place that needs to check whether the focused lane just
+      // went terminal (last pending proposal decided, lane deferred, lane
+      // marked not available) and, if so, step to the next open lane —
+      // wrapping past the end, landing on null (completion state) once none
+      // remain. Holds position untouched while the focused lane is still open.
+      const nextFocusedLane = advanceFocusedLane(focusedLaneKey, next?.lanes);
+      if (nextFocusedLane !== focusedLaneKey) {
+        setFocusedLaneKey(nextFocusedLane);
+        setLaneQueueFilter(nextFocusedLane);
+      }
       return next;
     } catch (err) {
       setError(errorMessage(err, "Could not refresh deep ingest state."));
@@ -402,6 +459,7 @@ export function DeepIngestPage({ initialState = null }) {
   function focusLane(laneKey) {
     const targetShape = LANE_KEY_TO_TARGET_SHAPE[laneKey];
     if (targetShape) setDraft((prev) => ({ ...prev, targetShape }));
+    setFocusedLaneKey(laneKey);
     setLaneQueueFilter(laneKey);
     addSourceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -526,45 +584,81 @@ export function DeepIngestPage({ initialState = null }) {
             stories, honesty, voice, and role signals.
           </p>
         </div>
+        <p className="deep-ingest__hero-progress">
+          {readiness.terminalCount ?? 0} of {readiness.requiredCount ?? lanes.length} lanes settled
+        </p>
       </header>
 
       {error ? <InlineAlert message={error} /> : null}
       {loading ? <p className="deep-ingest__loading">Loading…</p> : null}
 
-      <section className="card deep-ingest__panel" aria-label="Lane progress">
-        <header className="card__header">
-          <h2 className="card__title">
-            <span className="deep-ingest__panel-icon" aria-hidden="true">
-              <ListIcon />
-            </span>
-            <span>Lane progress</span>
-          </h2>
-          <span className="deep-ingest__progress-text">
-            {readiness.terminalCount ?? 0} of {readiness.requiredCount ?? lanes.length} lanes
-            terminal
-          </span>
-        </header>
-        <div className="card__body deep-ingest__lane-grid">
-          {lanes.map((lane) => {
-            const laneKey = lane.key || lane.lane;
-            return (
-              <LaneRow
-                key={laneKey}
-                lane={lane}
-                busy={busyLane === laneKey}
-                skipDraft={
-                  laneSkipDraft && laneSkipDraft.laneKey === laneKey ? laneSkipDraft : null
-                }
-                onSelectLane={() => focusLane(laneKey)}
-                onRevealSkip={(status) => revealLaneSkip(laneKey, status)}
-                onSkipReasonChange={setLaneSkipReason}
-                onSubmitSkip={submitLaneSkip}
-                onCancelSkip={cancelLaneSkip}
-              />
-            );
-          })}
-        </div>
-      </section>
+      {readiness.ready ? (
+        <DeepIngestCompletionPanel lanes={lanes} confirmed={state?.confirmed} />
+      ) : (
+        <section className="card deep-ingest__panel" aria-label="Lane progress">
+          <header className="card__header">
+            <h2 className="card__title">
+              <span className="deep-ingest__panel-icon" aria-hidden="true">
+                <ListIcon />
+              </span>
+              <span>Lane progress</span>
+            </h2>
+            <div className="deep-ingest__lane-header-actions">
+              <span className="deep-ingest__progress-text">
+                {readiness.terminalCount ?? 0} of {readiness.requiredCount ?? lanes.length} lanes
+                terminal
+              </span>
+              <div className="deep-ingest__segmented" aria-label="Lane view" role="tablist">
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={!showAllLanes}
+                  className={`deep-ingest__segment${
+                    !showAllLanes ? " deep-ingest__segment--active" : ""
+                  }`}
+                  onClick={() => setShowAllLanes(false)}
+                >
+                  Focused
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={showAllLanes}
+                  className={`deep-ingest__segment${
+                    showAllLanes ? " deep-ingest__segment--active" : ""
+                  }`}
+                  onClick={() => setShowAllLanes(true)}
+                >
+                  All lanes
+                </button>
+              </div>
+            </div>
+          </header>
+          <div className="card__body deep-ingest__lane-grid">
+            {lanes.map((lane) => {
+              const laneKey = lane.key || lane.lane;
+              const focused = laneKey === focusedLaneKey;
+              return (
+                <LaneRow
+                  key={laneKey}
+                  lane={lane}
+                  expanded={showAllLanes || focused}
+                  focused={focused}
+                  busy={busyLane === laneKey}
+                  skipDraft={
+                    laneSkipDraft && laneSkipDraft.laneKey === laneKey ? laneSkipDraft : null
+                  }
+                  onSelectLane={() => focusLane(laneKey)}
+                  onRevealSkip={(status) => revealLaneSkip(laneKey, status)}
+                  onSkipReasonChange={setLaneSkipReason}
+                  onSubmitSkip={submitLaneSkip}
+                  onCancelSkip={cancelLaneSkip}
+                />
+              );
+            })}
+          </div>
+        </section>
+      )}
 
       <section className="card deep-ingest__panel" aria-label="Add a source" ref={addSourceRef}>
         <header className="card__header">
@@ -822,6 +916,8 @@ export function DeepIngestPage({ initialState = null }) {
 
 function LaneRow({
   lane,
+  expanded,
+  focused,
   busy,
   skipDraft,
   onSelectLane,
@@ -834,8 +930,15 @@ function LaneRow({
   const terminal = laneIsTerminal(lane);
   const showStartHere = laneKey === "evidence_claims" && !terminal;
   const payoffLine = LANE_PAYOFF_LINE[laneKey];
+  const rowClassName = [
+    "deep-ingest__lane-row",
+    expanded ? null : "deep-ingest__lane-row--compact",
+    focused ? "deep-ingest__lane-row--focused" : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
   return (
-    <div className="deep-ingest__lane-row">
+    <div className={rowClassName}>
       <button type="button" className="deep-ingest__lane-main" onClick={onSelectLane}>
         <span className="deep-ingest__lane-label">{lane.label || laneKey}</span>
         <span className="deep-ingest__lane-badges">
@@ -845,9 +948,9 @@ function LaneRow({
           </span>
         </span>
       </button>
-      {payoffLine ? <p className="deep-ingest__lane-payoff">{payoffLine}</p> : null}
-      {lane.reason ? <p className="deep-ingest__lane-reason">{lane.reason}</p> : null}
-      {!terminal && skipDraft ? (
+      {expanded && payoffLine ? <p className="deep-ingest__lane-payoff">{payoffLine}</p> : null}
+      {expanded && lane.reason ? <p className="deep-ingest__lane-reason">{lane.reason}</p> : null}
+      {expanded && !terminal && skipDraft ? (
         <div className="deep-ingest__lane-skip">
           <div className="chip-row">
             {REASON_CHIP_PRESETS.map((preset) => (
@@ -888,7 +991,7 @@ function LaneRow({
           </div>
         </div>
       ) : null}
-      {!terminal && !skipDraft ? (
+      {expanded && !terminal && !skipDraft ? (
         <div className="deep-ingest__lane-actions">
           <Button variant="secondary" disabled={busy} onClick={() => onRevealSkip("deferred")}>
             Defer lane
@@ -973,5 +1076,50 @@ function ProposalRow({ proposal, selected, onSelect }) {
         <p className="deep-ingest__proposal-summary">{proposal.summary}</p>
       ) : null}
     </button>
+  );
+}
+
+// Replaces the "Lane progress" stepper once readiness.ready is true. Counts
+// come straight off buildDeepIngestViewModel's `confirmed` payload (never
+// recomputed from proposals here), and copy reuses the exact LANE_PAYOFF_LINE
+// strings every lane row already shows — same calibration, just read once
+// the work is done: evidence powers generation, the rest is saved reference
+// material.
+function DeepIngestCompletionPanel({ lanes, confirmed }) {
+  return (
+    <section className="card deep-ingest__panel" aria-label="Deep ingest complete">
+      <header className="card__header">
+        <h2 className="card__title">
+          <span className="deep-ingest__panel-icon" aria-hidden="true">
+            <ListIcon />
+          </span>
+          <span>All lanes settled</span>
+        </h2>
+      </header>
+      <div className="card__body">
+        <ul className="deep-ingest__completion-list">
+          {COMPLETION_LANE_ROWS.map((row) => {
+            const label =
+              lanes.find((lane) => (lane.key || lane.lane) === row.key)?.label ||
+              row.key.replace(/_/g, " ");
+            const count = asArray(confirmed?.[row.countKey]).length;
+            const noun = count === 1 ? row.noun[0] : row.noun[1];
+            return (
+              <li key={row.key}>
+                <strong>{label}:</strong> {count} {noun} captured. {LANE_PAYOFF_LINE[row.key]}
+              </li>
+            );
+          })}
+        </ul>
+        <div className="deep-ingest__form-actions">
+          <Link className="btn btn--secondary" to="/library">
+            Browse your Library
+          </Link>
+          <Link className="btn btn--secondary" to="/">
+            Back to Dashboard
+          </Link>
+        </div>
+      </div>
+    </section>
   );
 }

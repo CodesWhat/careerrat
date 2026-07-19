@@ -10889,6 +10889,15 @@ button.chip {
   font-weight: 750;
 }
 
+.deep-ingest__hero-progress {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
 .deep-ingest__panel .card__title {
   display: inline-flex;
   align-items: center;
@@ -10916,6 +10925,13 @@ button.chip {
   text-transform: uppercase;
 }
 
+.deep-ingest__lane-header-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
 .deep-ingest__lane-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -10929,6 +10945,21 @@ button.chip {
   padding: 12px;
   border-radius: var(--row-radius);
   background: var(--paper-band);
+}
+
+/* Compact rail rows (every non-focused lane in Focused mode) drop to just
+ * the clickable label + status badges — no payoff/reason/actions — so the
+ * one expanded lane reads as the page's single focus. Tone/state still
+ * comes only from badge text/color, same no-accent-stripe rule as always. */
+.deep-ingest__lane-row--compact {
+  padding: 10px 12px;
+}
+
+/* The currently focused lane gets the same soft background tint the
+ * selected source/proposal rows already use (see
+ * .deep-ingest__source-row--active below) — never a border or edge stripe. */
+.deep-ingest__lane-row--focused {
+  background: color-mix(in srgb, var(--m-secondary) 10%, var(--paper-band));
 }
 
 .deep-ingest__lane-main {
@@ -11165,4 +11196,22 @@ button.chip {
   font-size: 12px;
   font-weight: 600;
   line-height: 1.4;
+}
+
+.deep-ingest__completion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0 0 14px;
+  padding: 0;
+  list-style: none;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.45;
+}
+
+.deep-ingest__completion-list strong {
+  color: var(--ink);
+  font-weight: 850;
 }
