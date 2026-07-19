@@ -5,7 +5,6 @@ import { appRegisterPacketArtifacts } from "../db/verbs.mjs";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import {
   buildCoverLetterScaffold,
-  buildShortAnswer,
   buildStructuredResumeMarkdown,
   forbiddenWordingFor,
   validateAtsSafe,
@@ -946,7 +945,6 @@ async function loadCaptureForGeneration({ repoRoot, env, appId, context, questio
 
 function manifestFor({
   appId,
-  context,
   questionCapture,
   answers,
   sources,
@@ -1188,7 +1186,6 @@ export async function generatePacket({
     answers.uploadReady !== false;
   const manifest = manifestFor({
     appId: id,
-    context: packetContext,
     questionCapture: capture,
     answers,
     sources: sourceMap,
