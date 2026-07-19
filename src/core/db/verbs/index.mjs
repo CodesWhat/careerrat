@@ -41,6 +41,7 @@ export {
   DEEP_INGEST_LANE_STATUSES,
   DEEP_INGEST_REQUIRED_LANES,
   DEEP_INGEST_TERMINAL_STATUSES,
+  deepIngestConfirmedForGeneration,
   deepIngestConfirmedItemRemove,
   deepIngestConfirmedItemUpdate,
   deepIngestConfirmProposal,

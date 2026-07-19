@@ -429,7 +429,7 @@ describe("DeepIngestPage workbench", () => {
       "Powers every tailored résumé, cover letter, and answer you generate from here on."
     );
     expect(html).toContain(
-      "Saved to your Library as reference material you can browse and copy from."
+      "Feeds your tailored cover letters and answers — the most job-relevant confirmed stories are pulled in automatically, and résumés use them as theme hints."
     );
 
     state.lanes = state.lanes.map((lane) =>

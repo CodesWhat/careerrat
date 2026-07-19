@@ -57,6 +57,7 @@ import { assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { markdownToHtml } from "../core/documents/export.mjs";
 import { lintArtifact } from "../core/documents/placeholder-lint.mjs";
 import { draftPacketAnswers } from "../core/packet/answers.mjs";
+import { buildPacketContext } from "../core/packet/context.mjs";
 import { exportPacketArtifacts } from "../core/packet/exports.mjs";
 import { evaluatePacketGate } from "../core/packet/gate.mjs";
 import { generatePacket } from "../core/packet/generate.mjs";
@@ -307,9 +308,23 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
     try {
+      // The standalone one-off Q&A flow (answer-page.mjs) always supplies its
+      // own ad hoc context (company/role typed by the user, no applicationId)
+      // and is left untouched here. A caller that instead identifies a real
+      // tracked application (appId/applicationId) but omits `context` was
+      // silently falling through to draftPacketAnswers' own `context = {}`
+      // default — no profile/evidence/honesty/deep-ingest lanes ever reached
+      // the draft. Build the same DB-backed context generatePacket() builds
+      // so this route gets that richness too.
+      const applicationId = body.applicationId || body.appId || null;
+      const builtContext =
+        !body.context && applicationId
+          ? buildPacketContext({ repoRoot, env, applicationId })
+          : null;
       const data = await draftPacketAnswers({
         ...pathCtx,
         ...body,
+        ...(builtContext ? { context: builtContext } : {}),
         call: packetAnswersCall,
       });
       sendJson(res, 200, { ok: true, data });

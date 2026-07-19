@@ -1,6 +1,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { setTimeout as delay } from "node:timers/promises";
 
+import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
 import { fetchRemoteOk } from "../providers/remoteok.mjs";
@@ -131,7 +132,10 @@ export function buildLocationFilter(locationFilter = null) {
   };
 }
 
-function scoreSourcedOfferFromConfig(offer = {}, { targeting, profile, modes, familyOutcomes }) {
+function scoreSourcedOfferFromConfig(
+  offer = {},
+  { targeting, profile, modes, familyOutcomes, roleSignals }
+) {
   const title = String(offer.title || "").toLowerCase();
   const company = String(offer.company || "").toLowerCase();
   const location = String(offer.location || "").toLowerCase();
@@ -139,6 +143,21 @@ function scoreSourcedOfferFromConfig(offer = {}, { targeting, profile, modes, fa
   const body = String(offer.bodyText || offer.description || "");
   const text = `${title}\n${body}`.toLowerCase();
   const hasBody = body.trim().length > 300;
+
+  // Role-signal overlay: ephemeral merge of confirmed keep/cut rows into
+  // targeting, resolved per-offer from this offer's own title, before the
+  // keep/cut arrays below are read — a matching row raises/penalizes the
+  // score exactly like a base signal. No rows (or none matching) → the
+  // effective targeting is identical to `targeting` and scoring is unchanged.
+  const roleSignalOverlay = effectiveTargetingForRole({
+    roleTitle: offer.title || "",
+    targeting,
+    roleSignals,
+  });
+  const effectiveTargeting = roleSignalOverlay.targeting;
+  const roleSignalIds = [...roleSignalOverlay.applied.keep, ...roleSignalOverlay.applied.cut].map(
+    (s) => s.id
+  );
 
   let score = hasBody ? 58 : 52;
   const reasons = [];
@@ -171,10 +190,12 @@ function scoreSourcedOfferFromConfig(offer = {}, { targeting, profile, modes, fa
   }
 
   // --- Keep shapes from targeting.keep_signals + targeting.role_buckets titles ---
-  const keepSignals = normalizeKeywordList(targeting?.keep_signals ? targeting.keep_signals : []);
+  const keepSignals = normalizeKeywordList(
+    effectiveTargeting?.keep_signals ? effectiveTargeting.keep_signals : []
+  );
   const bucketTitles = [];
-  if (targeting && Array.isArray(targeting.role_buckets)) {
-    for (const bucket of targeting.role_buckets) {
+  if (effectiveTargeting && Array.isArray(effectiveTargeting.role_buckets)) {
+    for (const bucket of effectiveTargeting.role_buckets) {
       if (bucket.title) bucketTitles.push(String(bucket.title).toLowerCase().trim());
       if (Array.isArray(bucket.titles)) {
         for (const t of bucket.titles) bucketTitles.push(String(t).toLowerCase().trim());
@@ -189,7 +210,9 @@ function scoreSourcedOfferFromConfig(offer = {}, { targeting, profile, modes, fa
   }
 
   // --- Cut signals from targeting.cut_signals ---
-  const cutSignals = normalizeKeywordList(targeting?.cut_signals ? targeting.cut_signals : []);
+  const cutSignals = normalizeKeywordList(
+    effectiveTargeting?.cut_signals ? effectiveTargeting.cut_signals : []
+  );
   for (const term of cutSignals) {
     if (keywordMatches(title, term) || keywordMatches(text, term)) {
       const kebab = term.replace(/\s+/g, "-");
@@ -272,6 +295,7 @@ function scoreSourcedOfferFromConfig(offer = {}, { targeting, profile, modes, fa
     gate: gateFromScoreAndFlags(clamped, flags, modes),
     ratingReason: reasons.slice(0, 5).join("; "),
     ruleFlags: flags,
+    roleSignalIds,
   };
 }
 

@@ -13,6 +13,7 @@ import {
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { draftPacketAnswers as draftPacketAnswersCore } from "./answers.mjs";
 import { buildPacketContext } from "./context.mjs";
+import { selectPacketStories } from "./deep-ingest-sources.mjs";
 import { loadPacketQuestionCapture } from "./questions.mjs";
 import {
   packetCoverLetterProposalSchema,
@@ -206,30 +207,126 @@ export function splitConfirmedAndProposedPacketSources(sources = {}) {
   return { claimableEvidence, claimableContext, gapContext };
 }
 
+// Confirmed honesty-boundary rows (Library) live on the packet context as
+// context.honestyBoundariesConfirmed — the FULL uncapped BoundaryRow[] the
+// deep-ingest reader verb produces (never the capped/stripped prompt-display
+// projection below; enforcement needs completeness, see
+// promotion-pipeline-design-2026-07-19.md Decision 6/9). Absent on legacy/
+// pre-wiring contexts, so this always degrades to [] (today's behavior).
+function boundaryRowsFromContext(context = {}) {
+  return Array.isArray(context.honestyBoundariesConfirmed)
+    ? context.honestyBoundariesConfirmed
+    : [];
+}
+
+function forbiddenFor(context = {}) {
+  return forbiddenWordingFor(
+    evidenceFromContext(context).claims,
+    honestyFromContext(context),
+    boundaryRowsFromContext(context)
+  );
+}
+
+const CONFIRMED_BOUNDARY_DISPLAY_CAP = 20;
+
+function normalizeForContains(value) {
+  return String(value || "").toLowerCase();
+}
+
+// Prompt-visible projection of confirmed honesty-boundary rows: most-recent
+// (rows already arrive updated_at DESC, id ASC from the reader verb) capped
+// at 20, forbiddenWording always stripped (mirrors the existing evidence-
+// claim forbidden_wording strip in splitConfirmedAndProposedPacketSources),
+// and an allowedWording value dropped when it case-insensitively contains an
+// already-enforced forbidden phrase — displaying "allowed: X" alongside an
+// enforced "never say X" would contradict the enforcement the model must obey.
+function projectConfirmedBoundaries(boundaryRows, forbidden) {
+  const rows = Array.isArray(boundaryRows) ? boundaryRows : [];
+  return rows.slice(0, CONFIRMED_BOUNDARY_DISPLAY_CAP).map((row) => {
+    const { forbiddenWording: _forbiddenWording, ...rest } = row || {};
+    const allowedWording = cleanText(rest.allowedWording);
+    const allowedConflicts =
+      allowedWording &&
+      forbidden.some((phrase) =>
+        normalizeForContains(allowedWording).includes(normalizeForContains(phrase))
+      );
+    return { ...rest, allowedWording: allowedConflicts ? "" : allowedWording };
+  });
+}
+
+// Prompt-visible projection of role-signal rows already filtered to the
+// application's own role family (selectPacketRoleSignals) — drop
+// roleFamily/updatedAt, keep only what the framing clause below needs.
+function projectRoleSignals(roleSignals) {
+  return (Array.isArray(roleSignals) ? roleSignals : []).map((row) => ({
+    id: row?.id,
+    signalType: row?.signalType,
+    text: row?.text,
+    rationale: row?.rationale,
+  }));
+}
+
+const STORY_SELECTION_PURPOSES = new Set(["resume", "cover-letter", "answers"]);
+
+// Purpose-specific story projection: context.storiesLearnings holds the full
+// claimable story set (Worker A's context wiring); the caps/shape/scoring
+// that differ per surface (résumé metadata hints vs. cover-letter/answers
+// full STAR prose) live in selectPacketStories, called here at prompt-build
+// time so each artifact's prompt only ever contains what was scored relevant
+// to THIS job. "general" (buildPromptVisibleSources's default purpose) never
+// selects stories — only the three purposes selectPacketStories understands.
+function storiesForPurpose(context, purpose) {
+  if (!STORY_SELECTION_PURPOSES.has(purpose)) return [];
+  const storyBank = Array.isArray(context.storiesLearnings) ? context.storiesLearnings : [];
+  if (!storyBank.length) return [];
+  const queryText = cleanText(context.job?.body);
+  return selectPacketStories({ storyBank, queryText, purpose }) || [];
+}
+
 // The AI-prompt-visible projection of enumeratePacketSources(): confirmed
 // evidence and reviewed context stay claimable, but raw/proposed deep-ingest
 // material and unreviewed research (gapContext) never reach the model — only
 // the source categories they came from do, as a gap listing (10-04-PLAN.md:
 // raw/proposed material is gap context only, never prompt-visible prose).
-export function buildPromptVisibleSources(context = {}, questionCapture = null) {
+//
+// `purpose` selects the deep-ingest confirmed-lane projection
+// (promotion-pipeline-design-2026-07-19.md): résumé gets story *metadata
+// hints* only (storyHints, no story ids ever citable — see
+// validatePacketEvidenceIds); cover-letter/answers get up to 4 full stories,
+// citable via `story:<id>` scoped to that artifact's own prompt. roleSignals
+// and the confirmed-boundary projection are purpose-independent — they're
+// framing/enforcement context every surface can safely see. Every new field
+// here degrades to [] when the underlying context field is absent/empty, so
+// legacy/pre-wiring contexts see the same shape they do today plus empty
+// additions.
+export function buildPromptVisibleSources(
+  context = {},
+  questionCapture = null,
+  { purpose = "general" } = {}
+) {
   const sources = enumeratePacketSources(context, questionCapture);
   const split = splitConfirmedAndProposedPacketSources(sources);
+  const forbidden = forbiddenFor(context);
   return {
     candidateProfile: sources.candidateProfile,
     sourceResume: sources.sourceResume,
     resumeFacts: sources.resumeFacts,
     writingVoice: sources.writingVoice,
-    honestyBoundaries: sources.honestyBoundaries,
+    honestyBoundaries: {
+      ...sources.honestyBoundaries,
+      confirmedBoundaries: projectConfirmedBoundaries(
+        context.honestyBoundariesConfirmed,
+        forbidden
+      ),
+    },
+    roleSignals: projectRoleSignals(context.roleSignals),
+    storyHints: storiesForPurpose(context, purpose),
     capturedJobBody: sources.capturedJobBody,
     capturedQuestions: sources.capturedQuestions,
     confirmedEvidence: { ...sources.confirmedEvidence, claims: split.claimableEvidence },
     confirmedContext: split.claimableContext,
     unconfirmedAreas: [...new Set(split.gapContext.map((item) => item.source))].sort(),
   };
-}
-
-function forbiddenFor(context = {}) {
-  return forbiddenWordingFor(evidenceFromContext(context).claims, honestyFromContext(context));
 }
 
 function privateLeakMessage(text) {
@@ -244,8 +341,25 @@ function privateLeakMessage(text) {
   return null;
 }
 
-export function validatePacketEvidenceIds({ context = {}, proposals = [] } = {}) {
-  const allowed = new Set(evidenceFromContext(context).claims.map((claim) => String(claim.id)));
+// Generalized grounding check: the allowed-id set is evidence claim ids
+// unioned with `story:<id>` ids for the stories actually selected into THAT
+// artifact's own prompt (promptStories — pass the same storyHints array that
+// went into building the prompt this proposal was drafted against). A story
+// absent from that set (e.g. cited in a cover letter but never included in
+// the answers prompt) is not citable there — grounding is artifact-specific,
+// not a global "any confirmed story anywhere" allowance. `validatePacket
+// EvidenceIds` is kept as the original exported name (alias below) — callers
+// that never pass promptStories (résumé validation never does; no story ids
+// are ever valid there) see byte-identical behavior to before this generalized.
+export function validatePacketGroundedIds({
+  context = {},
+  proposals = [],
+  promptStories = [],
+} = {}) {
+  const allowed = new Set([
+    ...evidenceFromContext(context).claims.map((claim) => String(claim.id)),
+    ...(Array.isArray(promptStories) ? promptStories : []).map((story) => `story:${story.id}`),
+  ]);
   const forbidden = forbiddenFor(context);
   const gaps = [];
 
@@ -274,12 +388,14 @@ export function validatePacketEvidenceIds({ context = {}, proposals = [] } = {})
   return { ok: gaps.length === 0, gaps };
 }
 
-function promptForCoverLetter(context = {}) {
+export const validatePacketEvidenceIds = validatePacketGroundedIds;
+
+function promptForCoverLetter(visibleSources) {
   return [
     "Draft concise cover-letter prose blocks using only confirmed local evidence.",
     "Return JSON matching packetCoverLetterProposalSchema.",
     "",
-    JSON.stringify(buildPromptVisibleSources(context), null, 2),
+    JSON.stringify(visibleSources, null, 2),
   ].join("\n");
 }
 
@@ -290,6 +406,10 @@ export async function draftCoverLetterBlocks({
   call,
   runAI = runBoundedAI,
 } = {}) {
+  // Built once so the same storyHints selection both goes into the prompt
+  // and scopes validatePacketEvidenceIds's allowed `story:<id>` set below —
+  // a story absent from THIS letter's own prompt is never citable in it.
+  const visibleSources = buildPromptVisibleSources(context, null, { purpose: "cover-letter" });
   const aiResult = await runAI({
     labels: COVER_LABELS,
     schema: packetCoverLetterProposalSchema,
@@ -300,9 +420,9 @@ export async function draftCoverLetterBlocks({
     },
     structuredMode: "native-preferred",
     call,
-    messages: [{ role: "user", content: promptForCoverLetter(context) }],
+    messages: [{ role: "user", content: promptForCoverLetter(visibleSources) }],
     system:
-      'Draft cover letter blocks. Every block must list at least one id from confirmedEvidence.claims in its evidenceIds array, and only ids from that list. If a block cannot be grounded in a listed claim, start its text with "NEEDS YOU:" and leave evidenceIds empty. Do not include private compensation or unconfirmed claims.',
+      'Draft cover letter blocks. Every block must list at least one id from confirmedEvidence.claims or storyHints (cite a story as "story:<id>") in its evidenceIds array, and only ids from those lists — never a story id outside the storyHints provided here. If a block cannot be grounded that way, start its text with "NEEDS YOU:" and leave evidenceIds empty. roleSignals are the candidate\'s confirmed framing preferences (keep = emphasize, cut = de-emphasize) and never license stating anything not already grounded in confirmedEvidence.claims or storyHints. Do not include private compensation or unconfirmed claims.',
     outputName: "packet_cover_letter_blocks",
     // A full multi-block letter plus JSON overhead regularly exceeds 1800
     // tokens; a mid-JSON max_tokens truncation parses as failure and the
@@ -332,6 +452,7 @@ export async function draftCoverLetterBlocks({
   const validation = validatePacketEvidenceIds({
     context,
     proposals: blocks.map((block) => ({ kind: "coverLetter", ...block })),
+    promptStories: visibleSources.storyHints,
   });
   // A block the model honestly marked NEEDS YOU is a confirmation gap, not a
   // contract violation — keep it (and the grounded blocks around it) inline,
@@ -363,7 +484,7 @@ function promptForResume(context = {}) {
     "Tailor the candidate's résumé to the target job using only the provided sources.",
     "Return JSON matching packetResumeProposalSchema.",
     "",
-    JSON.stringify(buildPromptVisibleSources(context), null, 2),
+    JSON.stringify(buildPromptVisibleSources(context, null, { purpose: "resume" }), null, 2),
   ].join("\n");
 }
 
@@ -518,7 +639,8 @@ export async function draftResumeProposal({
       call,
       messages,
       system:
-        "Tailor the candidate's résumé for the target job. Use ONLY facts present in sourceResume.text, candidateProfile, and confirmedEvidence.claims. Never invent or alter employers, titles, dates, numbers, or metrics. Group roles held at the same employer under one experience entry with the employer's location and overall dates; every company and title must appear verbatim in sourceResume.text. Write a summary paragraph that names the target role and company and honestly mirrors the job description's language. Select and order the material most relevant to the job description; omit weak or irrelevant bullets instead of padding. Group skills into 3-5 skillGroups whose labels echo the job description's priorities; include a certifications group only if certifications appear in the sources; every skill item must appear somewhere in the sources. Optionally include up to 3 extra sections (e.g. Open Source, Projects) only when the source material supports them. Do not include private compensation or unconfirmed claims.",
+        "Tailor the candidate's résumé for the target job. Use ONLY facts present in sourceResume.text, candidateProfile, and confirmedEvidence.claims. Never invent or alter employers, titles, dates, numbers, or metrics. Group roles held at the same employer under one experience entry with the employer's location and overall dates; every company and title must appear verbatim in sourceResume.text. Write a summary paragraph that names the target role and company and honestly mirrors the job description's language. Select and order the material most relevant to the job description; omit weak or irrelevant bullets instead of padding. Group skills into 3-5 skillGroups whose labels echo the job description's priorities; include a certifications group only if certifications appear in the sources; every skill item must appear somewhere in the sources. Optionally include up to 3 extra sections (e.g. Open Source, Projects) only when the source material supports them. Do not include private compensation or unconfirmed claims." +
+        " storyHints, roleSignals, and writingVoice are selection and style directives only — they guide what to emphasize and how to phrase it, never a source of new facts, and no résumé bullet may cite a story id. roleSignals are the candidate's confirmed framing preferences (keep = emphasize, cut = de-emphasize) and never license stating anything not already grounded in sourceResume.text, candidateProfile, or confirmedEvidence.claims.",
       outputName: "packet_resume_proposal",
       // The nested experience/roles/sections/skillGroups structure plus a full
       // bullet set regularly exceeds 8000 tokens; a mid-JSON max_tokens
@@ -674,6 +796,7 @@ function buildSourceArtifacts({
   const profile = profileFromContext(context);
   const evidence = evidenceFromContext(context);
   const honesty = honestyFromContext(context);
+  const boundaryRows = boundaryRowsFromContext(context);
   const job = {
     ...(context.job || {}),
     frontmatter: {
@@ -697,6 +820,7 @@ function buildSourceArtifacts({
       proposal: resumeProposal.proposal,
       evidence,
       honesty,
+      boundaryRows,
     });
   } catch (err) {
     const wrapped = new Error(err?.message || "resume assembly failed");
@@ -718,6 +842,7 @@ function buildSourceArtifacts({
         job,
         evidence,
         blocks: coverBlocks.map((block) => block.text),
+        boundaryRows,
       });
   assertAtsSafe("resume", resume);
   assertAtsSafe("coverLetter", coverLetterMarkdown, { allowNeedsYou: coverHasNeedsYou });
@@ -828,6 +953,7 @@ function manifestFor({
   sourceSplit,
   gaps,
   uploadReady,
+  deepIngestWarnings = [],
 }) {
   const generatedAt = new Date().toISOString();
   const artifacts = {};
@@ -865,6 +991,13 @@ function manifestFor({
       gapContextCount: sourceSplit.gapContext.length,
     },
     gaps,
+    // Advisory-only, separate from gaps[]: gaps[] gates uploadReady
+    // (generatePacket requires gaps.length === 0), so privacy-skipped/
+    // malformed deep-ingest rows (context.deepIngestDiagnostics — reader.
+    // skipped) must never be folded in there, or a stale/malformed Library
+    // row would silently block an otherwise-complete packet from ever
+    // becoming upload-ready. This field is purely informational.
+    deepIngestWarnings,
   };
 }
 
@@ -989,10 +1122,20 @@ export async function generatePacket({
     services,
     skipAnswers,
   });
-  const validation = validatePacketEvidenceIds({
+  // Grounding is artifact-specific: a story selected into the cover letter's
+  // own prompt is not automatically citable in an answer (and vice versa),
+  // so each artifact validates against its own storyHints selection rather
+  // than one pooled set — recomputed here deterministically (same context +
+  // purpose draftCoverLetterBlocks/draftPacketAnswers used to build their
+  // own prompts) rather than threaded back through their return values.
+  const coverValidation = validatePacketEvidenceIds({
     context: packetContext,
-    proposals: [
-      ...(coverLetter.blocks || []).map((block) => ({ kind: "coverLetter", ...block })),
+    proposals: (coverLetter.blocks || []).map((block) => ({ kind: "coverLetter", ...block })),
+    promptStories: storiesForPurpose(packetContext, "cover-letter"),
+  });
+  const answersValidation = validatePacketEvidenceIds({
+    context: packetContext,
+    proposals: (answers.answers || [])
       // Deterministic disclosure answers (work auth / sponsorship / salary
       // floor / notice period) are structured facts sourced from onboarding,
       // not AI claims needing an evidence citation — and a disclosure salary
@@ -1000,15 +1143,18 @@ export async function generatePacket({
       // current compensation, so it must never be run through the
       // private-leak check either. Excluding them from proposals entirely
       // covers both.
-      ...(answers.answers || [])
-        .filter((answer) => !answer.disclosure)
-        .map((answer) => ({
-          kind: "answer",
-          text: answer.answer,
-          evidenceIds: answer.evidenceIds || [],
-        })),
-    ],
+      .filter((answer) => !answer.disclosure)
+      .map((answer) => ({
+        kind: "answer",
+        text: answer.answer,
+        evidenceIds: answer.evidenceIds || [],
+      })),
+    promptStories: storiesForPurpose(packetContext, "answers"),
   });
+  const validation = {
+    ok: coverValidation.ok && answersValidation.ok,
+    gaps: [...coverValidation.gaps, ...answersValidation.gaps],
+  };
   const lintGaps = Object.entries(sources).flatMap(([kind, markdown]) =>
     lintArtifact(markdown)
       .findings.filter((finding) => finding.pattern === "needs-you-marker")
@@ -1049,6 +1195,9 @@ export async function generatePacket({
     sourceSplit,
     gaps,
     uploadReady,
+    deepIngestWarnings: Array.isArray(packetContext?.deepIngestDiagnostics)
+      ? packetContext.deepIngestDiagnostics
+      : [],
   });
 
   let artifacts = {};

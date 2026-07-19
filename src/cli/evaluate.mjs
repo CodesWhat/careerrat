@@ -11,6 +11,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { dbExists } from "../core/db/connection.mjs";
+import { deepIngestConfirmedForGeneration } from "../core/db/verbs/index.mjs";
 import { evaluateGate, parseSavedJob, renderGateBlock } from "../core/evaluate/gate.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
@@ -50,6 +52,17 @@ if (!modes.valid) {
   process.exit(1);
 }
 
+// DB-backed workspaces fold confirmed role-signal rows into the gate; YAML-only
+// workspaces are unchanged (evaluateGate treats no rows as a no-op).
+let roleSignals;
+if (dbExists({ repoRoot: root })) {
+  try {
+    roleSignals = deepIngestConfirmedForGeneration({ repoRoot: root }).roleSignals;
+  } catch {
+    roleSignals = undefined;
+  }
+}
+
 const job = parseSavedJob(readFileSync(jobPath, "utf8"));
 const result = evaluateGate({
   job,
@@ -58,6 +71,7 @@ const result = evaluateGate({
   honesty,
   modes: modes.data,
   now: new Date(),
+  roleSignals,
 });
 
 if (json) {

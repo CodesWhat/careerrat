@@ -764,6 +764,173 @@ export function deepIngestConfirmedItemRemove({ repoRoot, env, lane, id } = {}) 
   });
 }
 
+// --- deepIngestConfirmedForGeneration ---------------------------------------
+//
+// Promotion-pipeline reader (promotion-pipeline-design-2026-07-19.md): the
+// read-time source for every generate-time consumer (packet context, the
+// gate, the sourced scanner) of the four confirmed Library lanes. Never
+// materializes into stories.yml/writing-style.md/targeting/honesty YAML —
+// those stay read-only and untouched (Decision 1/2).
+
+function rowId(row) {
+  return row && typeof row === "object" && row.id != null ? String(row.id) : "";
+}
+
+function cleanScalar(value) {
+  return value == null ? "" : String(value).trim();
+}
+
+// Accepts any mix of arrays/strings (e.g. a story's role_signals vs.
+// roleSignals spelling) and folds them into one deduped, trimmed list —
+// case-insensitive dedupe, first spelling wins.
+function toStringList(...values) {
+  const seen = new Set();
+  const out = [];
+  for (const value of values) {
+    const items = Array.isArray(value) ? value : value == null || value === "" ? [] : [value];
+    for (const item of items) {
+      const text = String(item ?? "").trim();
+      if (!text) continue;
+      const key = text.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(text);
+    }
+  }
+  return out;
+}
+
+function projectStoryRow(row) {
+  return {
+    id: rowId(row),
+    // Every row here already passed the status === "confirmed" filter; the
+    // field must survive projection because the packet engine's legacy
+    // claimable/unconfirmed split keys on it (generate.mjs reviewed()) —
+    // without it, confirmed stories get prompted as "unconfirmed" material.
+    status: "confirmed",
+    title: cleanScalar(row.title),
+    situation: cleanScalar(row.situation),
+    task: cleanScalar(row.task),
+    action: cleanScalar(row.action),
+    result: cleanScalar(row.result),
+    reflection: cleanScalar(row.reflection),
+    competencies: toStringList(row.competencies),
+    roleSignals: toStringList(row.role_signals, row.roleSignals),
+    metrics: toStringList(row.metrics),
+    openQuestions: toStringList(row.open_questions, row.openQuestions),
+    supportingQuote: cleanScalar(row.supportingQuote),
+    confirmedAt: cleanScalar(row.confirmedAt),
+    updatedAt: cleanScalar(row.updatedAt),
+  };
+}
+
+function projectVoiceRow(row) {
+  return {
+    id: rowId(row),
+    summary: cleanScalar(row.summary),
+    doPhrases: toStringList(row.doPhrases),
+    avoidPhrases: toStringList(row.avoidPhrases),
+    updatedAt: cleanScalar(row.updatedAt),
+  };
+}
+
+function projectBoundaryRow(row) {
+  return {
+    id: rowId(row),
+    boundaryType: cleanScalar(row.boundaryType),
+    text: cleanScalar(row.text),
+    allowedWording: cleanScalar(row.allowedWording),
+    forbiddenWording: cleanScalar(row.forbiddenWording),
+    reason: cleanScalar(row.reason),
+    updatedAt: cleanScalar(row.updatedAt),
+  };
+}
+
+function projectRoleSignalRow(row) {
+  return {
+    id: rowId(row),
+    roleFamily: cleanScalar(row.roleFamily),
+    signalType: cleanScalar(row.signalType),
+    text: cleanScalar(row.text),
+    rationale: cleanScalar(row.rationale),
+    updatedAt: cleanScalar(row.updatedAt),
+  };
+}
+
+// Reads one confirmed lane table, keeps only `status === "confirmed"` rows,
+// re-runs the privacy guard per row (a privacy-failing row is skipped even
+// for honesty — Decision 9), and projects through the lane's field allowlist
+// (never spreads arbitrary JSON onward, so current_base can never surface).
+//
+// `failClosed` (honesty only): a malformed row throws out of this function
+// entirely instead of being caught and skipped, so a read/parse failure on
+// the honesty table fails the whole verb call — the other three lanes stay
+// best-effort and record a diagnostic instead.
+function collectConfirmedLane({ db, lane, table, projectRow, skipped, failClosed = false }) {
+  const rows = readRows(db, table, "updated_at DESC, id ASC");
+  const kept = [];
+  for (const row of rows) {
+    try {
+      if (!row || typeof row !== "object") throw new Error("row is not an object");
+      if (row.status !== "confirmed") continue;
+      const privacy = validateDeepIngestPrivacy({ proposal: { payload: row } });
+      if (!privacy.ok) {
+        skipped.push({
+          lane,
+          id: rowId(row),
+          reason: `privacy: ${privacy.blockedFields.join(", ")}`,
+        });
+        continue;
+      }
+      kept.push(projectRow(row));
+    } catch (err) {
+      if (failClosed) throw err;
+      skipped.push({ lane, id: rowId(row), reason: `malformed: ${err.message}` });
+    }
+  }
+  return kept;
+}
+
+export function deepIngestConfirmedForGeneration({ repoRoot, env } = {}) {
+  const db = requireDb({ repoRoot, env });
+  const skipped = [];
+
+  const storyBank = collectConfirmedLane({
+    db,
+    lane: "story_bank",
+    table: CONFIRMED_LANE_TABLES.story_bank,
+    projectRow: projectStoryRow,
+    skipped,
+  });
+  const writingVoice = collectConfirmedLane({
+    db,
+    lane: "writing_voice",
+    table: CONFIRMED_LANE_TABLES.writing_voice,
+    projectRow: projectVoiceRow,
+    skipped,
+  });
+  const roleSignals = collectConfirmedLane({
+    db,
+    lane: "role_signals",
+    table: CONFIRMED_LANE_TABLES.role_signals,
+    projectRow: projectRoleSignalRow,
+    skipped,
+  });
+  // Honesty fails closed (Decision 9): a read/parse failure here must throw
+  // and fail generation with the existing error surface, never silently
+  // drop boundary rows the way the other three lanes do.
+  const honestyBoundaries = collectConfirmedLane({
+    db,
+    lane: "honesty_boundaries",
+    table: CONFIRMED_LANE_TABLES.honesty_boundaries,
+    projectRow: projectBoundaryRow,
+    skipped,
+    failClosed: true,
+  });
+
+  return { storyBank, writingVoice, honestyBoundaries, roleSignals, skipped };
+}
+
 export function deepIngestLaneSetState({ repoRoot, env, lane, status, reason } = {}) {
   const transition = validateDeepIngestLaneTransition({ lane, status, reason });
   if (!transition.ok) throw makeError(transition.error);

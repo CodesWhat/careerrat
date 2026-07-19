@@ -79,15 +79,42 @@ export function mapClaimsToEvidence(claims) {
 // forbiddenWordingFor
 // ---------------------------------------------------------------------------
 
+// Confirmed honesty-boundary types the reader verb treats as restrictive
+// (candidate-confirmed "don't say this" rows) vs. informational-only types
+// (e.g. education/tool-disclosure boundaries) that stay prompt-visible but
+// never derive an enforced phrase from their free-text `text` field.
+const RESTRICTIVE_BOUNDARY_TYPES = new Set([
+  "do_not_claim",
+  "never_claim",
+  "forbidden",
+  "forbidden_wording",
+  "avoid",
+]);
+
+// Leading phrasing a candidate's own boundary text commonly uses ("Never say
+// I led the team") — stripped so the derived forbidden phrase is just the
+// claim itself ("I led the team"), not the instruction wrapped around it.
+const RESTRICTIVE_PREFIX_RE =
+  /^(?:do not|don't|never|must not)\s+(?:say|state|claim|imply|describe(?:\s+me)?\s+as)\s+/i;
+
+function derivedForbiddenPhrase(text) {
+  const trimmed = String(text ?? "").trim();
+  if (!trimmed) return "";
+  const stripped = trimmed.replace(RESTRICTIVE_PREFIX_RE, "");
+  return stripped.replace(/[.!?,;:]+$/, "").trim();
+}
+
 /**
- * Collect all forbidden phrases from claims' forbidden_wording and honesty.tools.do_not_claim.
+ * Collect all forbidden phrases from claims' forbidden_wording,
+ * honesty.tools.do_not_claim, and confirmed honesty-boundary rows.
  * Returns a deduped array (case-preserved as given, checked case-insensitively at assertion time).
  *
  * @param {Array<{ forbidden_wording?: string[] }>} claims
  * @param {{ tools?: { do_not_claim?: string[] } }} honesty
+ * @param {Array<{ boundaryType?: string, text?: string, forbiddenWording?: string }>} [boundaryRows]
  * @returns {string[]}
  */
-export function forbiddenWordingFor(claims, honesty) {
+export function forbiddenWordingFor(claims, honesty, boundaryRows = []) {
   const seen = new Set();
   const result = [];
 
@@ -107,6 +134,19 @@ export function forbiddenWordingFor(claims, honesty) {
 
   for (const phrase of honesty?.tools?.do_not_claim || []) {
     add(phrase);
+  }
+
+  for (const row of boundaryRows || []) {
+    const forbidden = String(row?.forbiddenWording ?? "").trim();
+    if (forbidden) add(forbidden);
+
+    const type = String(row?.boundaryType ?? "")
+      .trim()
+      .toLowerCase();
+    if (RESTRICTIVE_BOUNDARY_TYPES.has(type)) {
+      const derived = derivedForbiddenPhrase(row?.text);
+      if (derived) add(derived);
+    }
   }
 
   return result;
@@ -313,11 +353,18 @@ export function buildResumeMarkdown({ profile, evidence, job, honesty, summary }
  *     education?: string[]
  *   },
  *   evidence: { claims: Array<object> },
- *   honesty: { education?: { add_education_section?: boolean }, tools?: { do_not_claim?: string[] } }
+ *   honesty: { education?: { add_education_section?: boolean }, tools?: { do_not_claim?: string[] } },
+ *   boundaryRows?: Array<object>
  * }} opts
  * @returns {string}
  */
-export function buildStructuredResumeMarkdown({ profile, proposal, evidence, honesty }) {
+export function buildStructuredResumeMarkdown({
+  profile,
+  proposal,
+  evidence,
+  honesty,
+  boundaryRows = [],
+}) {
   const sections = [buildResumeHeader(profile)];
 
   // --- Summary (only if the proposal supplied one) ---
@@ -383,8 +430,9 @@ export function buildStructuredResumeMarkdown({ profile, proposal, evidence, hon
 
   // --- Honesty validation ---
   // Use ALL claims (not a signals-filtered subset) since the AI already did
-  // the selection — every claim's forbidden wording still applies.
-  const forbidden = forbiddenWordingFor(evidence.claims || [], honesty);
+  // the selection — every claim's forbidden wording still applies. Confirmed
+  // honesty-boundary rows (Library) enforce alongside evidence/honesty YAML.
+  const forbidden = forbiddenWordingFor(evidence.claims || [], honesty, boundaryRows);
   assertNoForbidden(output, forbidden);
 
   // --- Placeholder lint gate ---
@@ -418,11 +466,12 @@ export function buildStructuredResumeMarkdown({ profile, proposal, evidence, hon
  *   profile: { candidate: { full_name: string } },
  *   job: { frontmatter?: { company?: string, role?: string } },
  *   evidence: { claims: Array<object> },
- *   blocks: string[] | object
+ *   blocks: string[] | object,
+ *   boundaryRows?: Array<object>
  * }} opts
  * @returns {string}
  */
-export function buildCoverLetterScaffold({ profile, job, evidence, blocks }) {
+export function buildCoverLetterScaffold({ profile, job, evidence, blocks, boundaryRows = [] }) {
   // Normalise blocks to an array of non-empty strings
   const paragraphs = (Array.isArray(blocks) ? blocks : Object.values(blocks || {}))
     .map((b) => (b || "").trim())
@@ -463,7 +512,7 @@ export function buildCoverLetterScaffold({ profile, job, evidence, blocks }) {
 
   // --- Forbidden wording check ---
   const allClaims = Array.isArray(evidence.claims) ? evidence.claims : [];
-  const forbidden = forbiddenWordingFor(allClaims, {});
+  const forbidden = forbiddenWordingFor(allClaims, {}, boundaryRows);
   assertNoForbidden(output, forbidden);
 
   // --- ATS-safety gate ---

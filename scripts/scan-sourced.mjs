@@ -38,6 +38,7 @@ import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dbExists } from "../src/core/db/connection.mjs";
 import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
+import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -82,7 +83,21 @@ function loadCandidateConfig(pathCtx, { standaloneConfigMode = false } = {}) {
     const targeting = config?.targeting || null;
     const profile = config?.profile || null;
     if (targeting == null && profile == null) return {};
-    return { targeting, profile };
+    const result = { targeting, profile };
+
+    // DB mode only: fold confirmed role-signal rows into the scoring config so
+    // scoreSourcedOffer's per-offer overlay has something to resolve against.
+    // Standalone --config mode and legacy/non-DB workspaces stay unchanged —
+    // no rows, byte-identical scoring.
+    if (!standaloneConfigMode && dbExists(pathCtx)) {
+      try {
+        result.roleSignals = deepIngestConfirmedForGeneration(pathCtx).roleSignals;
+      } catch {
+        // best-effort — scoring falls back to no role-signal rows
+      }
+    }
+
+    return result;
   } catch {
     return {};
   }

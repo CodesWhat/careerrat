@@ -2,9 +2,20 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, normalize, relative, sep } from "node:path";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
-import { appRegisterArtifact, candidateArtifactGet, candidateConfigGet } from "../db/verbs.mjs";
+import {
+  appRegisterArtifact,
+  candidateArtifactGet,
+  candidateConfigGet,
+  deepIngestConfirmedForGeneration,
+} from "../db/verbs.mjs";
+import { resolveRoleFamily } from "../deep-ingest/role-signal-overlay.mjs";
 import { parseSavedJob } from "../evaluate/gate.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
+import {
+  composePacketWritingVoice,
+  filterClaimableStories,
+  selectPacketRoleSignals,
+} from "./deep-ingest-sources.mjs";
 
 const JOB_BODY_MIN_CHARS = 40;
 
@@ -165,6 +176,19 @@ export function buildPacketContext({
     kind: "source-resume",
   });
 
+  // Promotion-pipeline read-time wiring (promotion-pipeline-design-2026-07-19.md):
+  // the four confirmed Library lanes, read fresh on every packet build, never
+  // materialized elsewhere. With all four lanes empty, every field added below
+  // degrades to today's dead defaults ([]/"") — zero behavior change for
+  // existing installs. Honesty fails closed (Decision 9): a read/parse failure
+  // there throws out of buildPacketContext entirely, same as any other error
+  // in this function.
+  const deepIngest = deepIngestConfirmedForGeneration({ repoRoot, env });
+  const roleFamily = resolveRoleFamily({ roleTitle: app.role, targeting: config.targeting });
+  const forbiddenVoicePhrases = deepIngest.honestyBoundaries
+    .map((boundary) => boundary.forbiddenWording)
+    .filter(Boolean);
+
   return {
     applicationId,
     app: {
@@ -192,6 +216,21 @@ export function buildPacketContext({
     evidence: { claims: config.evidence?.claims || [] },
     ...(config.honesty ? { honesty: config.honesty } : {}),
     ...(sourceResume ? { sourceResume } : {}),
+    // Full claimable set — purpose-specific scoring/caps happen later, at
+    // prompt-build time, via selectPacketStories (see generate.mjs).
+    storiesLearnings: filterClaimableStories(deepIngest.storyBank),
+    writingVoice: composePacketWritingVoice({
+      writingVoice: deepIngest.writingVoice,
+      forbiddenPhrases: forbiddenVoicePhrases,
+    }),
+    // Uncapped — enforcement (forbiddenWordingFor) needs completeness; the
+    // capped/stripped prompt-display projection happens downstream.
+    honestyBoundariesConfirmed: deepIngest.honestyBoundaries,
+    roleSignals: selectPacketRoleSignals({
+      roleSignals: deepIngest.roleSignals,
+      family: roleFamily,
+    }),
+    deepIngestDiagnostics: deepIngest.skipped,
   };
 }
 

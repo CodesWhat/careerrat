@@ -40,18 +40,28 @@ function normalizeQuestions(input) {
   };
 }
 
-function evidenceIds(context) {
+// Allowed citation set for an answer's evidenceIds: confirmed evidence claim
+// ids unioned with `story:<id>` ids for the stories actually selected into
+// THIS answers batch's own prompt (storyHints) — a story absent from that
+// selection is not citable here, matching the cover-letter grounding rule.
+function evidenceIds(context, storyHints = []) {
   const claims = Array.isArray(context?.evidence?.claims) ? context.evidence.claims : [];
-  return new Set(claims.map((claim) => String(claim.id)));
+  const claimIds = claims.map((claim) => String(claim.id));
+  const storyIds = (Array.isArray(storyHints) ? storyHints : []).map(
+    (story) => `story:${story.id}`
+  );
+  return new Set([...claimIds, ...storyIds]);
 }
 
 function forbiddenForContext(context) {
   const claims = Array.isArray(context?.evidence?.claims) ? context.evidence.claims : [];
-  return forbiddenWordingFor(claims, context?.honesty || {});
+  const boundaryRows = Array.isArray(context?.honestyBoundariesConfirmed)
+    ? context.honestyBoundariesConfirmed
+    : [];
+  return forbiddenWordingFor(claims, context?.honesty || {}, boundaryRows);
 }
 
-function promptFor({ context, questions }) {
-  const safeContext = withoutPrivateFields(buildPromptVisibleSources(context));
+function promptFor({ visibleSources, questions }) {
   return [
     "Draft application form answers using only confirmed local evidence.",
     "Return JSON matching packetAnswerProposalSchema.",
@@ -60,7 +70,7 @@ function promptFor({ context, questions }) {
     JSON.stringify(questions, null, 2),
     "",
     "Context:",
-    JSON.stringify(safeContext, null, 2),
+    JSON.stringify(visibleSources, null, 2),
   ].join("\n");
 }
 
@@ -131,30 +141,45 @@ function loadFormDefaults({ repoRoot, env }) {
   }
 }
 
-function disclosureAnswerEntry(question, resolved) {
-  return {
-    questionId: String(question.id),
-    question: question.label,
-    answer: resolved.answer,
-    evidenceIds: [],
-    uploadReady: true,
-    gap: null,
-    disclosure: true,
-    source: resolved.source,
-  };
+// Deterministic disclosure answers still run through the same honesty-
+// boundary enforcement as AI-drafted answers (buildShortAnswer +
+// combined forbidden wording) — a resolved disclosure answer that conflicts
+// with a confirmed boundary converts to the literal NEEDS YOU marker rather
+// than silently bypassing enforcement just because it wasn't AI-drafted.
+function disclosureAnswerEntry(question, resolved, { honesty, forbidden } = {}) {
+  try {
+    const answer = buildShortAnswer({
+      question: question.label,
+      answer: resolved.answer,
+      honesty,
+      forbidden,
+    });
+    return {
+      questionId: String(question.id),
+      question: question.label,
+      answer,
+      evidenceIds: [],
+      uploadReady: true,
+      gap: null,
+      disclosure: true,
+      source: resolved.source,
+    };
+  } catch (err) {
+    return needsYouAnswer(question, err?.message || "confirm this disclosure answer");
+  }
 }
 
 // Split captured questions into ones answerable deterministically (work
 // authorization / sponsorship / salary floor / notice period, resolved from
 // persisted screening answers or profile facts) and everything else, which
 // still goes to the AI exactly as before.
-function partitionDisclosureQuestions({ questions, formDefaults, profile }) {
+function partitionDisclosureQuestions({ questions, formDefaults, profile, honesty, forbidden }) {
   const deterministic = [];
   const aiBatch = [];
   for (const question of questions) {
     const resolved = resolveDisclosureAnswer(question, { formDefaults, profile });
     if (resolved) {
-      deterministic.push(disclosureAnswerEntry(question, resolved));
+      deterministic.push(disclosureAnswerEntry(question, resolved, { honesty, forbidden }));
     } else {
       aiBatch.push(question);
     }
@@ -190,10 +215,17 @@ export async function draftPacketAnswers({
 
   const formDefaults = loadFormDefaults({ repoRoot, env });
   const profile = context?.profile || context?.candidate || {};
+  // Computed once, ahead of the deterministic/AI split, so deterministic
+  // disclosure answers enforce the exact same combined forbidden wording
+  // (evidence + honesty + confirmed boundaries) the AI batch does below.
+  const honesty = context?.honesty || {};
+  const forbidden = forbiddenForContext(context);
   const { deterministic, aiBatch } = partitionDisclosureQuestions({
     questions: answerable,
     formDefaults,
     profile,
+    honesty,
+    forbidden,
   });
   const deterministicMap = new Map(deterministic.map((answer) => [answer.questionId, answer]));
 
@@ -208,7 +240,13 @@ export async function draftPacketAnswers({
     };
   }
 
-  const prompt = promptFor({ context, questions: aiBatch });
+  // Built once so the same storyHints selection both goes into the prompt
+  // and scopes this batch's allowed `story:<id>` citation set below — a
+  // story absent from THIS answers prompt is never citable in an answer.
+  const visibleSources = withoutPrivateFields(
+    buildPromptVisibleSources(context, null, { purpose: "answers" })
+  );
+  const prompt = promptFor({ visibleSources, questions: aiBatch });
 
   const aiResult = await runAI({
     labels: LABELS,
@@ -222,7 +260,7 @@ export async function draftPacketAnswers({
     call,
     messages: [{ role: "user", content: prompt }],
     system:
-      "Draft short application answers. Use NEEDS YOU when evidence is missing. Do not answer demographic or EEO prompts.",
+      'Draft short application answers. Every answer must cite at least one id from confirmedEvidence.claims or storyHints (cite a story as "story:<id>") in evidenceIds, and only ids from those lists — never a story id outside the storyHints provided here. Use NEEDS YOU when evidence is missing. roleSignals are the candidate\'s confirmed framing preferences (keep = emphasize, cut = de-emphasize) and never license stating anything not already grounded in confirmedEvidence.claims or storyHints. Do not answer demographic or EEO prompts.',
     outputName: "packet_answer_proposals",
     // Sized for many-question forms: a mid-JSON max_tokens truncation parses
     // as failure and every answer degrades to NEEDS YOU.
@@ -251,8 +289,7 @@ export async function draftPacketAnswers({
   const proposals = new Map(
     (aiResult.body.data?.answers || []).map((proposal) => [String(proposal.questionId), proposal])
   );
-  const allowedEvidenceIds = evidenceIds(context);
-  const forbidden = forbiddenForContext(context);
+  const allowedEvidenceIds = evidenceIds(context, visibleSources.storyHints);
   const resolvedMap = new Map(
     aiBatch.map((question) => [
       String(question.id),

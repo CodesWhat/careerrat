@@ -139,14 +139,19 @@ const CARD_LANE_BY_KIND = {
   role_signal: "role_signals",
 };
 
-// Item 17's disclaimer copy: honesty/role_signal cards look like enforced
-// policy but are reference material only — the same distinction Settings'
-// Honesty boundaries card subtitle draws for the *actually* enforced store.
+// Item 17's disclaimer copy, updated for the promotion pipeline (see
+// .internal/promotion-pipeline-design-2026-07-19.md "UI copy"): every
+// confirmed lane is now read into live generation/scoring, not just browsed
+// here — these lines tell the candidate what changes going forward without
+// implying past documents get rewritten.
 const CARD_KIND_DISCLAIMER = {
+  story:
+    "Used automatically in future cover letters and answers (and as résumé theme hints) when job-relevant. Existing documents don't change.",
+  voice: "Shapes the tone of every future generated document. Existing documents don't change.",
   honesty:
-    "Saved to your reference library — not the same as the enforced Honesty boundaries in Settings.",
+    "Its forbidden wording is enforced on every future generated document — but education policy and confirmed tools still live only in Settings → Honesty boundaries.",
   role_signal:
-    "Saved to your reference library — not the same as the enforced role guardrails in Settings.",
+    "Applied to matching role families in fit checks, sourced-job scoring, and document framing. Existing results don't change.",
 };
 
 function asArray(value) {

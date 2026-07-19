@@ -169,18 +169,22 @@ const PROPOSAL_STATUS_TONE = {
 // not_available lane states regardless of how it was typed in.
 const REASON_CHIP_PRESETS = ["Not relevant to me", "Don't have this yet", "I'll do it later"];
 
-// Honesty-calibrated payoff copy per lane (deep-dive plan §3 item 5):
-// evidence_claims is the only lane any generated artifact reads today; the
-// other four confirmed-item lanes only feed Library. source_coverage/
-// open_gaps intentionally have no line — pure scaffolding, no real
-// downstream consumer to promise.
+// Honesty-calibrated payoff copy per lane (deep-dive plan §3 item 5, updated
+// for the promotion pipeline — see .internal/promotion-pipeline-design-2026-07-19.md
+// "UI copy"): every confirmed lane now feeds live generation/scoring at read
+// time, not just Library browsing. source_coverage/open_gaps intentionally
+// have no line — pure scaffolding, no real downstream consumer to promise.
 const LANE_PAYOFF_LINE = {
   evidence_claims:
     "Powers every tailored résumé, cover letter, and answer you generate from here on.",
-  story_bank: "Saved to your Library as reference material you can browse and copy from.",
-  writing_voice: "Saved to your Library as reference material you can browse and copy from.",
-  honesty_boundaries: "Saved to your Library as reference material you can browse and copy from.",
-  role_signals: "Saved to your Library as reference material you can browse and copy from.",
+  story_bank:
+    "Feeds your tailored cover letters and answers — the most job-relevant confirmed stories are pulled in automatically, and résumés use them as theme hints.",
+  writing_voice:
+    "Shapes the tone and phrasing of every tailored résumé, cover letter, and answer you generate from here on.",
+  honesty_boundaries:
+    "Enforced on every tailored résumé, cover letter, and answer — its forbidden wording is blocked alongside your Settings honesty boundaries.",
+  role_signals:
+    "Sharpens fit checks and sourced-job scores for matching role families, and steers what your documents lean into or away from.",
 };
 
 // Completion panel rows: one per confirmed-item lane, in the same order the

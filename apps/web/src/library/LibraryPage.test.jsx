@@ -336,7 +336,7 @@ describe("LibraryPage", () => {
     expect(captured.buttons.some((props) => props.children === "Remove from library")).toBe(false);
   });
 
-  it("labels honesty cards as reference material rather than enforced settings", () => {
+  it("labels honesty cards' forbidden wording as enforced, with education/tools still in Settings", () => {
     showCard({
       id: "honesty-disclaimer-001",
       kind: "honesty",
@@ -351,7 +351,7 @@ describe("LibraryPage", () => {
     const html = renderLibrary();
 
     expect(html).toContain(
-      "Saved to your reference library — not the same as the enforced Honesty boundaries in Settings."
+      "Its forbidden wording is enforced on every future generated document — but education policy and confirmed tools still live only in Settings → Honesty boundaries."
     );
   });
 });

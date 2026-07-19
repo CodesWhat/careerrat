@@ -961,6 +961,10 @@ export function SettingsPage() {
             placeholder="e.g. developer tools"
           />
         </Field>
+        <p className="field__hint" style={{ margin: 0 }}>
+          Base keep/cut signals apply to every role. Confirmed Library role signals layer onto
+          matching role families automatically.
+        </p>
 
         <h4 style={{ margin: "12px 0 4px" }}>Company lists</h4>
         <Field
@@ -1020,7 +1024,8 @@ export function SettingsPage() {
       <Card title="Honesty boundaries">
         {sectionBanner.honesty ? <InlineAlert message={sectionBanner.honesty} /> : null}
         <p className="field__hint" style={{ margin: 0 }}>
-          Enforced on every tailored résumé, cover letter, and answer.
+          Enforced on every tailored résumé, cover letter, and answer, together with confirmed
+          honesty items in your Library.
         </p>
         <div className="field-row">
           {/* honesty.schema.json's education.highest_degree has no enum
