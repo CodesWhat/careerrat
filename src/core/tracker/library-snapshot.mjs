@@ -122,6 +122,10 @@ function evidenceCards(claims) {
       return {
         kind: "evidence",
         label: "Evidence bank",
+        // The claim's own candidate_evidence_claims id — Library's edit-in-
+        // place Save/Delete (POST /api/onboard/candidate/evidence and
+        // .../evidence/remove) target this exact id, never a derived slug.
+        id: String(claim.id || ""),
         title: titleFromClaim(claim.claim),
         summary: compact(
           sentence(claim.claim, claim.allowed_wording?.[0] || "Reusable evidence."),
@@ -129,6 +133,24 @@ function evidenceCards(claims) {
         ),
         tags: signalTags(claim.role_signals, claim.metrics, index),
         note: sourceLinkedNote(note, claim),
+        // Raw editable fields (schema field names verbatim — see
+        // evidence-writer.mjs's CLAIM_FIELDS) for the Library drawer's Edit
+        // form, distinct from the derived title/summary/note above.
+        metadata: {
+          claim: claim.claim || "",
+          evidence: claim.evidence || "",
+          metrics: listOrEmpty(claim.metrics),
+          links: listOrEmpty(claim.links),
+          allowed_wording: listOrEmpty(claim.allowed_wording),
+          forbidden_wording: listOrEmpty(claim.forbidden_wording),
+          // The full stored claim, untouched — candidateEvidenceMerge writes
+          // whatever object it's handed as the row's new, COMPLETE data (it
+          // doesn't merge onto the previous row), so the Library drawer's
+          // Save must spread its edits onto this, not onto the curated
+          // fields above, or fields like role_signals/sourceId that aren't
+          // exposed in the Edit form would be silently dropped on save.
+          raw: { ...claim },
+        },
         ...sourceReferenceFields(claim),
       };
     });
@@ -163,6 +185,10 @@ function storyCards(stories) {
       return {
         kind: "story",
         label: "Story bank",
+        // The deep_ingest_story_bank row's own id — Library's edit-in-place
+        // Save/Delete (POST /api/deep-ingest/confirmed/update|remove,
+        // lane: "story_bank") target this exact id.
+        id: String(story.id || ""),
         title: compact(story.title || "Interview story", 80),
         summary: compact(
           `${lead}${story.result || story.situation || listOrEmpty(story.prompts)[0] || "Reusable STAR story."}`,
@@ -180,6 +206,26 @@ function storyCards(stories) {
           },
           evidenceIds: listOrEmpty(story.evidence_ids),
           source: sourceReferenceFields(story),
+          // Flat raw editable fields, keyed with the row's own field names
+          // verbatim (config/stories.schema.json's snake_case convention —
+          // the same names deep_ingest_story_bank rows are written with, see
+          // tests/deep-ingest-db.test.mjs's story_bank confirm() fixture) so
+          // the Library drawer's Edit form can post them straight back
+          // through POST /api/deep-ingest/confirmed/update unchanged. (The
+          // `star` object above stays for existing readers of that shape;
+          // these flat siblings are the source of truth for editing.)
+          title: story.title || "",
+          situation: story.situation || "",
+          task: story.task || "",
+          action: story.action || "",
+          result: story.result || "",
+          reflection: story.reflection || "",
+          metrics,
+          landed,
+          open_questions: openQuestions,
+          competencies: listOrEmpty(story.competencies),
+          role_signals: listOrEmpty(story.role_signals),
+          prompts: listOrEmpty(story.prompts),
         },
         ...sourceReferenceFields(story),
       };
@@ -230,6 +276,9 @@ function voiceCards(rows) {
   return rows.map((row) => ({
     kind: "voice",
     label: "Writing voice",
+    // The deep_ingest_writing_voice row's own id — Library's edit-in-place
+    // Save/Delete (lane: "writing_voice") target this exact id.
+    id: String(row.id || ""),
     title: compact(row.summary || row.voiceSummary || "Writing voice", 80),
     summary: compact(row.summary || row.voiceSummary || "Reusable writing voice guidance.", 156),
     tags: [tag("Concise", "plum"), tag("Technical", "sky"), tag("Confirmed", "teal")],
@@ -241,6 +290,9 @@ function voiceCards(rows) {
       doPhrases: listOrEmpty(row.doPhrases || row.do_phrases),
       avoidPhrases: listOrEmpty(row.avoidPhrases || row.avoid_phrases),
       source: sourceReferenceFields(row),
+      // Raw editable summary for the Library drawer's Edit form (doPhrases/
+      // avoidPhrases above are already raw+editable).
+      summary: row.summary || row.voiceSummary || "",
     },
     ...sourceReferenceFields(row),
   }));
@@ -250,6 +302,9 @@ function honestyCards(rows) {
   return rows.map((row) => ({
     kind: "honesty",
     label: "Honesty boundary",
+    // The deep_ingest_honesty_boundaries row's own id — Library's edit-in-
+    // place Save/Delete (lane: "honesty_boundaries") target this exact id.
+    id: String(row.id || ""),
     title: compact(
       row.text || row.forbiddenWording || row.allowedWording || "Honesty boundary",
       80
@@ -265,6 +320,11 @@ function honestyCards(rows) {
       allowedWording: row.allowedWording || null,
       forbiddenWording: row.forbiddenWording || null,
       source: sourceReferenceFields(row),
+      // Raw editable text/reason for the Library drawer's Edit form
+      // (boundaryType/allowedWording/forbiddenWording above are already
+      // raw+editable).
+      text: row.text || "",
+      reason: row.reason || "",
     },
     ...sourceReferenceFields(row),
   }));
@@ -274,6 +334,9 @@ function roleSignalCards(rows) {
   return rows.map((row) => ({
     kind: "role_signal",
     label: "Role signal",
+    // The deep_ingest_role_signals row's own id — Library's edit-in-place
+    // Save/Delete (lane: "role_signals") target this exact id.
+    id: String(row.id || ""),
     title: compact(row.text || row.roleFamily || "Role signal", 80),
     summary: compact(row.rationale || row.text || "Confirmed role signal.", 156),
     tags: [
@@ -285,6 +348,10 @@ function roleSignalCards(rows) {
       roleFamily: row.roleFamily || null,
       signalType: row.signalType || null,
       source: sourceReferenceFields(row),
+      // Raw editable text/rationale for the Library drawer's Edit form
+      // (roleFamily/signalType above are already raw+editable).
+      text: row.text || "",
+      rationale: row.rationale || "",
     },
     ...sourceReferenceFields(row),
   }));

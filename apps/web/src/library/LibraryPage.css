@@ -522,6 +522,16 @@
   line-height: 1.5;
 }
 
+/* Stacks the Edit form's Field rows (see form.jsx) with the same wrapper +
+   gap convention onboarding's edit panels use, since .field itself carries
+   no margin. */
+.library__edit-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
 @media (max-width: 720px) {
   .library__no-results {
     flex-direction: column;

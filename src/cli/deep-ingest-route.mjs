@@ -2,6 +2,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { requireDb } from "../core/db/connection.mjs";
 import {
+  deepIngestConfirmedItemRemove,
+  deepIngestConfirmedItemUpdate,
   deepIngestConfirmProposal,
   deepIngestLaneSetState,
   deepIngestProposalDecision,
@@ -56,7 +58,11 @@ function statusForError(err) {
 }
 
 function respondError(res, err) {
-  sendJson(res, statusForError(err), { ok: false, error: err?.message || String(err) });
+  sendJson(res, statusForError(err), {
+    ok: false,
+    error: err?.message || String(err),
+    reasons: err?.reasons || undefined,
+  });
 }
 
 function ensureDb(repoRoot, env) {
@@ -212,6 +218,56 @@ export function mountDeepIngestRoutes({
         lane: body?.lane,
         status: body?.status,
         reason: body?.reason,
+      });
+      sendJson(res, 200, { ok: true, data: result });
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
+  // POST /api/deep-ingest/confirmed/update — { lane, id, ...fields } edits one
+  // already-confirmed row in one of the four per-lane reference tables (Library
+  // drawer's Edit/Save affordance for story/voice/honesty/role_signal cards).
+  // Re-runs the privacy guard only (see deepIngestConfirmedItemUpdate's own
+  // comment) — never grounding/quote-matching.
+  addRoute("POST", "/api/deep-ingest/confirmed/update", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
+      ensureDb(repoRoot, env);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    try {
+      const { lane, id, ...fields } = body || {};
+      const result = deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields });
+      sendJson(res, 200, { ok: true, data: result });
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
+  // POST /api/deep-ingest/confirmed/remove — { lane, id } deletes exactly one
+  // row from the matching per-lane reference table (Library drawer's Delete
+  // affordance for story/voice/honesty/role_signal cards).
+  addRoute("POST", "/api/deep-ingest/confirmed/remove", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
+      ensureDb(repoRoot, env);
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
+
+    try {
+      const result = deepIngestConfirmedItemRemove({
+        repoRoot,
+        env,
+        lane: body?.lane,
+        id: body?.id,
       });
       sendJson(res, 200, { ok: true, data: result });
     } catch (err) {

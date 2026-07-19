@@ -21,6 +21,19 @@ const CHUNK_TABLE = "deep_ingest_source_chunks";
 const PROPOSAL_TABLE = "deep_ingest_proposals";
 const LANE_TABLE = "deep_ingest_lane_states";
 
+// The four lanes writeConfirmedLaneOutput lands in a dedicated per-lane
+// table (evidence_claims is the fifth confirmable lane, but it lands in
+// candidate_evidence_claims via writeEvidenceClaims/candidateEvidenceMerge
+// instead — see writeConfirmedLaneOutput below). Shared by
+// writeConfirmedLaneOutput and the confirmed-item update/remove verbs so the
+// two can never disagree on which table a lane writes to.
+const CONFIRMED_LANE_TABLES = {
+  story_bank: "deep_ingest_story_bank",
+  honesty_boundaries: "deep_ingest_honesty_boundaries",
+  writing_voice: "deep_ingest_writing_voice",
+  role_signals: "deep_ingest_role_signals",
+};
+
 export const DEEP_INGEST_REQUIRED_LANES = DEFAULT_DEEP_INGEST_REQUIRED_LANES;
 
 export const DEEP_INGEST_LANE_STATUSES = [
@@ -479,13 +492,7 @@ function writeConfirmedLaneOutput(db, proposal, edits, updatedAt) {
     return { evidence };
   }
 
-  const tableByLane = {
-    story_bank: "deep_ingest_story_bank",
-    honesty_boundaries: "deep_ingest_honesty_boundaries",
-    writing_voice: "deep_ingest_writing_voice",
-    role_signals: "deep_ingest_role_signals",
-  };
-  const table = tableByLane[proposal.lane];
+  const table = CONFIRMED_LANE_TABLES[proposal.lane];
   if (!table) return { written: 0 };
 
   let written = 0;
@@ -673,6 +680,87 @@ export function deepIngestConfirmProposal({
     putRow(db, PROPOSAL_TABLE, next.id, next);
     markLaneCompleted(db, current.lane, updatedAt);
     return readRow(db, PROPOSAL_TABLE, next.id);
+  });
+}
+
+// Resolve a lane name to its confirmed-item table for the update/remove
+// verbs below. normalizeLane() already rejects any string outside the full
+// DEEP_INGEST_REQUIRED_LANES set; the extra check here narrows further to
+// just the four lanes CONFIRMED_LANE_TABLES covers — evidence_claims,
+// source_coverage, and open_gaps have no dedicated per-lane table (evidence
+// claims are edited/removed via the candidate evidence verbs instead, see
+// src/core/db/verbs/candidate.mjs's candidateEvidenceMerge/
+// candidateEvidenceRemoveOne).
+function confirmedLaneTable(lane) {
+  const normalizedLane = normalizeLane(lane);
+  const table = CONFIRMED_LANE_TABLES[normalizedLane];
+  if (!table) {
+    throw makeError(
+      `Deep ingest lane "${normalizedLane}" has no confirmed reference table to edit`
+    );
+  }
+  return { lane: normalizedLane, table };
+}
+
+// Update one already-confirmed reference-library row by {lane, id}. This is
+// a plain, user-initiated edit of the user's own already-confirmed data —
+// unlike confirming a proposal, it re-runs ONLY the privacy guard
+// (validateDeepIngestPrivacy — the same comp/contact/protected-trait/
+// local-path/private-token check normalizeEditedItems runs before
+// confirmation) and never grounding/quote-matching, since a user's own later
+// edit isn't chunk-bound the way an AI-proposed item is.
+//
+// writeConfirmedLaneOutput's putRow() call above is a plain upsert-by-id
+// (INSERT ... ON CONFLICT(id) DO UPDATE SET data = excluded.data) — that's
+// what lets this verb update the row in place by reusing putRow with the
+// SAME id, rather than needing separate UPDATE SQL or any special-cased
+// upsert-vs-insert branching.
+export function deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields } = {}) {
+  const rowId = String(id || "").trim();
+  if (!rowId) throw makeError("deepIngestConfirmedItemUpdate requires id");
+  if (!fields || typeof fields !== "object" || Array.isArray(fields)) {
+    throw makeError("deepIngestConfirmedItemUpdate requires fields");
+  }
+
+  const { lane: normalizedLane, table } = confirmedLaneTable(lane);
+  const privacy = validateDeepIngestPrivacy({ proposal: { payload: fields } });
+  if (!privacy.ok) {
+    const err = makeError(
+      "Deep ingest confirmed item update is blocked by the privacy guard",
+      "PRIVACY_BLOCKED"
+    );
+    err.reasons = privacy.blockedFields;
+    throw err;
+  }
+
+  return runDeepIngestVerb({ repoRoot, env }, (db) => {
+    const current = requireRow(db, table, rowId, "Deep ingest confirmed item");
+    const updatedAt = nowIso();
+    const next = {
+      ...clone(current),
+      ...clone(fields),
+      id: rowId,
+      lane: normalizedLane,
+      updatedAt,
+    };
+    putRow(db, table, rowId, next);
+    return { ok: true, lane: normalizedLane, item: readRow(db, table, rowId) };
+  });
+}
+
+// Remove exactly one confirmed reference-library row by {lane, id}. A clean
+// NOT_FOUND on an unknown id (via requireRow), same convention as every
+// other by-id lookup in this file.
+export function deepIngestConfirmedItemRemove({ repoRoot, env, lane, id } = {}) {
+  const rowId = String(id || "").trim();
+  if (!rowId) throw makeError("deepIngestConfirmedItemRemove requires id");
+
+  const { lane: normalizedLane, table } = confirmedLaneTable(lane);
+
+  return runDeepIngestVerb({ repoRoot, env }, (db) => {
+    requireRow(db, table, rowId, "Deep ingest confirmed item");
+    db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(rowId);
+    return { ok: true, lane: normalizedLane, removed: rowId };
   });
 }
 

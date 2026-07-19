@@ -29,6 +29,8 @@
 //   POST /api/onboard/candidate/:name    merge+validate+write one candidate setup doc
 //                                        (one concrete route per known name —
 //                                        see CANDIDATE_ROUTE_ENTRIES below)
+//   POST /api/onboard/candidate/evidence/remove  delete exactly one evidence
+//                                        claim by id (Library drawer's Delete)
 //   POST /api/onboard/evidence-seed      dedupe-merge claims into evidence.yml
 //   POST /api/onboard/write-config       export compatibility candidate/source files
 //   POST /api/onboard/quick-start        search-ready DB setup -> durable local first search
@@ -62,6 +64,7 @@ import {
   candidateConfigGet,
   candidateConfigPatch,
   candidateEvidenceMerge,
+  candidateEvidenceRemoveOne,
   candidateSetupInitialize,
   publicSyncPreferenceGet,
   publicSyncPreferenceSet,
@@ -1778,6 +1781,41 @@ export function mountOnboardRoutes({
       sendJson(res, 200, { ok: true });
     });
   }
+
+  // -------------------------------------------------------------------------
+  // POST /api/onboard/candidate/evidence/remove — { id } delete exactly one
+  // evidence claim by id (new verb: candidateEvidenceRemoveOne). A clean
+  // 404-equivalent surfaces via sendCandidateError for an unknown id — same
+  // NOT_FOUND -> sendCandidateError convention every other candidate route
+  // in this file already uses.
+  // -------------------------------------------------------------------------
+  addRoute("POST", "/api/onboard/candidate/evidence/remove", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (err) {
+      sendJson(res, err.status || 400, { error: err.message });
+      return;
+    }
+
+    const id = typeof body?.id === "string" ? body.id.trim() : "";
+    if (!id) {
+      sendJson(res, 400, { ok: false, error: "body.id is required" });
+      return;
+    }
+
+    if (!dbExists(pathCtx)) {
+      sendJson(res, 409, { ok: false, error: "SQLite candidate setup is required" });
+      return;
+    }
+
+    try {
+      const result = candidateEvidenceRemoveOne({ ...pathCtx, id });
+      sendJson(res, 200, { ok: true, ...result });
+    } catch (err) {
+      sendCandidateError(res, err);
+    }
+  });
 
   // -------------------------------------------------------------------------
   // POST /api/onboard/evidence-seed — { claims: [{id?, claim, evidence}] }

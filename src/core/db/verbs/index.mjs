@@ -24,6 +24,7 @@ export {
   candidateConfigGet,
   candidateConfigPatch,
   candidateEvidenceMerge,
+  candidateEvidenceRemoveOne,
   candidateSetupInitialize,
 } from "./candidate.mjs";
 export { commAppendMessage, commMarkSent, commUpsert } from "./comm.mjs";
@@ -40,6 +41,8 @@ export {
   DEEP_INGEST_LANE_STATUSES,
   DEEP_INGEST_REQUIRED_LANES,
   DEEP_INGEST_TERMINAL_STATUSES,
+  deepIngestConfirmedItemRemove,
+  deepIngestConfirmedItemUpdate,
   deepIngestConfirmProposal,
   deepIngestLaneSetState,
   deepIngestProposalDecision,

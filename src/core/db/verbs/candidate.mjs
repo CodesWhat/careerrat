@@ -12,6 +12,8 @@ import {
   DEFAULT_DEEP_INGEST_REQUIRED_LANES,
   evaluateDeepIngestReadiness,
 } from "../../deep-ingest/readiness.mjs";
+import { lintArtifact } from "../../documents/placeholder-lint.mjs";
+import { findCurrentBaseToken } from "../../profile/comp-guard.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -685,12 +687,58 @@ export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
   });
 }
 
+// The same honesty/privacy backstop src/cli/evidence.mjs's `rolester evidence
+// add` path already enforces via evidence-writer.mjs's validateClaims()
+// (shared lintArtifact for residual placeholder text — [Company], {{x}},
+// <insert...> — and findCurrentBaseToken for the private current_base field
+// token) — reused here rather than re-derived so the CLI's dry-run/--write
+// path and every HTTP caller of candidateEvidenceMerge (the evidence merge
+// route, the evidence-seed route, and Library's future edit-in-place save)
+// share one firewall. A claim that fails this can never enter the bank
+// through any surface, not just the CLI's own guarded add.
+function assertCleanEvidenceClaims(claims) {
+  const errors = [];
+  for (const raw of Array.isArray(claims) ? claims : []) {
+    const probe = [
+      raw?.claim,
+      raw?.evidence,
+      ...(Array.isArray(raw?.metrics) ? raw.metrics : []),
+      ...(Array.isArray(raw?.allowed_wording) ? raw.allowed_wording : []),
+    ]
+      .filter(Boolean)
+      .join("\n");
+    if (!probe) continue;
+    const lint = lintArtifact(probe);
+    if (!lint.clean) {
+      const finding = lint.findings[0];
+      errors.push({
+        id: raw?.id ?? null,
+        message: `unresolved placeholder (${finding.pattern}): "${finding.text}"`,
+      });
+    }
+    const leak = findCurrentBaseToken(probe);
+    if (leak) {
+      errors.push({
+        id: raw?.id ?? null,
+        message: "contains the private current_base field — evidence must never carry it",
+      });
+    }
+  }
+  if (errors.length) {
+    const err = new Error("evidence claim(s) refused by the honesty/privacy guard");
+    err.code = "EVIDENCE_GUARD_REJECTED";
+    err.errors = errors;
+    throw err;
+  }
+}
+
 export function candidateEvidenceMerge({ repoRoot, env, claims } = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
     err.code = "BAD_REQUEST";
     throw err;
   }
+  assertCleanEvidenceClaims(claims);
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => {
     const existing = readEvidence(db).claims;
@@ -750,6 +798,32 @@ function nextClaimId(usedIds) {
     id = `seed-${String(n).padStart(3, "0")}`;
   }
   return id;
+}
+
+// Delete exactly one row from candidate_evidence_claims by id. Item 14's
+// new verb: unlike candidateEvidenceMerge (upsert-by-id), this is a pure
+// remove — a clean NOT_FOUND on an unknown id rather than a silent no-op,
+// so the Library drawer's Delete affordance can surface a real error.
+export function candidateEvidenceRemoveOne({ repoRoot, env, id } = {}) {
+  const claimId = String(id || "").trim();
+  if (!claimId) {
+    const err = new Error("candidateEvidenceRemoveOne requires id");
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const existing = db
+      .prepare("SELECT 1 FROM candidate_evidence_claims WHERE id = ?")
+      .get(claimId);
+    if (!existing) {
+      const err = new Error(`evidence claim not found: "${claimId}"`);
+      err.code = "NOT_FOUND";
+      throw err;
+    }
+    db.prepare("DELETE FROM candidate_evidence_claims WHERE id = ?").run(claimId);
+    return { ok: true, removed: claimId, data: readEvidence(db), setup: refreshCandidateSetup(db) };
+  });
 }
 
 export function candidateArtifactPut({ repoRoot, env, id, kind, data } = {}) {

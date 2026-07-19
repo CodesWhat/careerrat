@@ -28,9 +28,17 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button, IconButton } from "../components/Button.jsx";
+import { ChipInput, Field, TextArea, TextField } from "../components/form.jsx";
 import { PaperclipIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
-import { getDeepIngestState } from "../lib/api.js";
+import {
+  getDeepIngestState,
+  removeDeepIngestConfirmedItem,
+  removeEvidenceClaim,
+  saveCandidateFile,
+  updateDeepIngestConfirmedItem,
+} from "../lib/api.js";
+import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { PREVIEW_DOCUMENTS, PREVIEW_LIBRARY } from "./libraryPreviewData.js";
 import "./LibraryPage.css";
 
@@ -59,6 +67,87 @@ const DOC_KIND_OPTIONS = [
 
 const NUMBER_FORMAT = new Intl.NumberFormat("en-US");
 const TONE_NAMES = new Set(["teal", "sky", "gold", "plum", "coral"]);
+
+// Edit-in-place field maps, one per card kind — field names match the raw
+// values library-snapshot.mjs's card builders already attach at
+// `card.metadata` (evidence: evidence.schema.json's CLAIM_FIELDS; the other
+// four: the exact flat field names their own summary/title derivation reads
+// off the confirmed deep_ingest_* row). "chips" fields use the same ChipInput
+// idiom as Settings' guardrail/company-list chip editors; "textarea"/"text"
+// use TextArea/TextField exactly like JobDrawer's CompFitCard note editor.
+const EVIDENCE_EDIT_FIELDS = [
+  { key: "claim", label: "Claim", type: "textarea" },
+  { key: "evidence", label: "Evidence", type: "textarea" },
+  { key: "metrics", label: "Metrics", type: "chips" },
+  { key: "links", label: "Links", type: "chips" },
+  { key: "allowed_wording", label: "Allowed wording", type: "chips" },
+  { key: "forbidden_wording", label: "Forbidden wording", type: "chips" },
+];
+
+const STORY_EDIT_FIELDS = [
+  { key: "title", label: "Title", type: "text" },
+  { key: "situation", label: "Situation", type: "textarea" },
+  { key: "task", label: "Task", type: "textarea" },
+  { key: "action", label: "Action", type: "textarea" },
+  { key: "result", label: "Result", type: "textarea" },
+  { key: "reflection", label: "Reflection", type: "textarea" },
+  { key: "metrics", label: "Metrics", type: "chips" },
+  { key: "landed", label: "Landed", type: "chips" },
+  { key: "open_questions", label: "Open questions", type: "chips" },
+  { key: "competencies", label: "Competencies", type: "chips" },
+  { key: "role_signals", label: "Role signals", type: "chips" },
+  { key: "prompts", label: "Prompts", type: "chips" },
+];
+
+const VOICE_EDIT_FIELDS = [
+  { key: "summary", label: "Summary", type: "textarea" },
+  { key: "doPhrases", label: "Do phrases", type: "chips" },
+  { key: "avoidPhrases", label: "Avoid phrases", type: "chips" },
+];
+
+const HONESTY_EDIT_FIELDS = [
+  { key: "text", label: "Boundary text", type: "textarea" },
+  { key: "reason", label: "Reason", type: "textarea" },
+  { key: "boundaryType", label: "Boundary type", type: "text" },
+  { key: "allowedWording", label: "Allowed wording", type: "text" },
+  { key: "forbiddenWording", label: "Forbidden wording", type: "text" },
+];
+
+const ROLE_SIGNAL_EDIT_FIELDS = [
+  { key: "text", label: "Signal text", type: "textarea" },
+  { key: "roleFamily", label: "Role family", type: "text" },
+  { key: "signalType", label: "Signal type", type: "text" },
+  { key: "rationale", label: "Rationale", type: "textarea" },
+];
+
+const CARD_EDIT_FIELDS = {
+  evidence: EVIDENCE_EDIT_FIELDS,
+  story: STORY_EDIT_FIELDS,
+  voice: VOICE_EDIT_FIELDS,
+  honesty: HONESTY_EDIT_FIELDS,
+  role_signal: ROLE_SIGNAL_EDIT_FIELDS,
+};
+
+// Deep-ingest confirmed-item lane per card kind — matches the item 15
+// endpoints' {lane, id, ...fields} contract. Evidence isn't here: it saves
+// through the existing candidate evidence merge/remove routes instead (see
+// saveCard/deleteCard below).
+const CARD_LANE_BY_KIND = {
+  story: "story_bank",
+  voice: "writing_voice",
+  honesty: "honesty_boundaries",
+  role_signal: "role_signals",
+};
+
+// Item 17's disclaimer copy: honesty/role_signal cards look like enforced
+// policy but are reference material only — the same distinction Settings'
+// Honesty boundaries card subtitle draws for the *actually* enforced store.
+const CARD_KIND_DISCLAIMER = {
+  honesty:
+    "Saved to your reference library — not the same as the enforced Honesty boundaries in Settings.",
+  role_signal:
+    "Saved to your reference library — not the same as the enforced role guardrails in Settings.",
+};
 
 function asArray(value) {
   return Array.isArray(value) ? value.filter((item) => item && typeof item === "object") : [];
@@ -259,6 +348,26 @@ function filterDocuments(documents, query, kind = "all") {
   });
 }
 
+// The Edit form's starting values for one card: the raw fields listed in
+// CARD_EDIT_FIELDS, read off card.metadata (never the derived title/summary/
+// note — those are lossy one-way projections, see library-snapshot.mjs).
+// Missing fields fall back to an empty string/array per field type so every
+// controlled input always has a defined value.
+function editableValuesFromCard(card) {
+  const fields = CARD_EDIT_FIELDS[card?.kind] || [];
+  const metadata = card?.metadata || {};
+  const values = {};
+  for (const field of fields) {
+    const raw = metadata[field.key];
+    values[field.key] = field.type === "chips" ? asStringArray(raw) : String(raw || "");
+  }
+  return values;
+}
+
+function asStringArray(value) {
+  return Array.isArray(value) ? value.map((item) => String(item || "")).filter(Boolean) : [];
+}
+
 function buildLibraryModel(library, filters) {
   const typeOptions = typeOptionsForLibrary(library);
   const cards = asArray(library?.cards).map((card, index) => ({
@@ -276,12 +385,14 @@ function buildLibraryModel(library, filters) {
 }
 
 export function LibraryPage() {
-  const { data, loading, error, noDatabase } = useDashboardSnapshot();
+  const { data, loading, error, noDatabase, refetch } = useDashboardSnapshot();
   const [searchParams, setSearchParams] = useSearchParams();
   const [copied, setCopied] = useState(false);
   const [docQuery, setDocQuery] = useState("");
   const [docKind, setDocKind] = useState("all");
   const [deepIngestProgress, setDeepIngestProgress] = useState(null);
+  const [busyKey, setBusyKey] = useState(null);
+  const [actionError, setActionError] = useState(null);
 
   // Client-side read only, no new endpoint. Never surfaces an error — a
   // failed fetch just leaves the pill un-rendered, same as an already-complete
@@ -354,6 +465,57 @@ export function LibraryPage() {
     setCopied(await copyTextToClipboard(text));
   }
 
+  // Mirrors JobDrawer.jsx's runWrite: one busy key per in-flight action, a
+  // single actionError surfaced via InlineAlert, and a post-write refetch so
+  // the drawer/cards reflect server truth rather than an optimistic guess.
+  async function runWrite(key, fn) {
+    setBusyKey(key);
+    setActionError(null);
+    try {
+      await fn();
+      emitDashboardChanged();
+      await refetch();
+    } catch (err) {
+      setActionError(err?.body?.error || (err instanceof Error ? err.message : `${key} failed`));
+    } finally {
+      setBusyKey(null);
+    }
+  }
+
+  // Evidence saves through the existing candidate evidence merge route
+  // (id-match path updates in place — see candidateEvidenceMerge). It writes
+  // whatever object it's handed as the row's complete new data, so edits
+  // spread onto card.metadata.raw (the untouched stored claim), never onto
+  // the curated edit-form fields alone, or fields the form doesn't expose
+  // (role_signals, sourceId, …) would be dropped. The four deep-ingest lanes
+  // save through the item 15 confirmed-item update route instead, which
+  // merges {...current, ...fields} server-side, so only the edited fields
+  // need to be sent.
+  function saveCard(card, values) {
+    return runWrite(`save-${card.id}`, async () => {
+      if (card.kind === "evidence") {
+        await saveCandidateFile("evidence", {
+          claims: [{ ...card.metadata?.raw, ...values, id: card.id }],
+        });
+        return;
+      }
+      const lane = CARD_LANE_BY_KIND[card.kind];
+      await updateDeepIngestConfirmedItem({ lane, id: card.id, ...values });
+    });
+  }
+
+  function deleteCard(card) {
+    return runWrite(`delete-${card.id}`, async () => {
+      if (card.kind === "evidence") {
+        await removeEvidenceClaim(card.id);
+      } else {
+        const lane = CARD_LANE_BY_KIND[card.kind];
+        await removeDeepIngestConfirmedItem({ lane, id: card.id });
+      }
+      closeDrawer();
+    });
+  }
+
   if (noDatabase) {
     return (
       <div className="library">
@@ -400,10 +562,14 @@ export function LibraryPage() {
 
       {openCard ? (
         <LibraryDrawer
+          actionError={actionError}
+          busyKey={busyKey}
           card={openCard}
           copied={copied}
           onClose={closeDrawer}
           onCopy={() => copyCard(openCard)}
+          onDeleteCard={deleteCard}
+          onSaveCard={saveCard}
         />
       ) : null}
     </div>
@@ -642,7 +808,29 @@ function DocumentRow({ doc }) {
   );
 }
 
-function LibraryDrawer({ card, copied, onClose, onCopy }) {
+function LibraryDrawer({
+  actionError,
+  busyKey,
+  card,
+  copied,
+  onClose,
+  onCopy,
+  onDeleteCard,
+  onSaveCard,
+}) {
+  const [editing, setEditing] = useState(false);
+  const [values, setValues] = useState(() => editableValuesFromCard(card));
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+
+  // A new card (or a refetch after this same card's own save) always lands
+  // back in the read-only view with fresh starting values — mirrors
+  // CompFitCard's own re-sync effect on the fields it can't own locally.
+  useEffect(() => {
+    setEditing(false);
+    setConfirmingDelete(false);
+    setValues(editableValuesFromCard(card));
+  }, [card]);
+
   useEffect(() => {
     function onKeyDown(event) {
       if (event.key === "Escape") onClose();
@@ -650,6 +838,20 @@ function LibraryDrawer({ card, copied, onClose, onCopy }) {
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
   }, [onClose]);
+
+  // Legacy (non-DB) mode's singular writing-voice card is a derived summary
+  // with no candidate_evidence_claims/deep_ingest_* row behind it — no id,
+  // nothing for Save/Delete to target — so the affordance stays hidden
+  // rather than posting a made-up id that can only 404.
+  const editable = Boolean(card.id);
+  const editFields = editable ? CARD_EDIT_FIELDS[card.kind] || [] : [];
+  const savingKey = `save-${card.id}`;
+  const deletingKey = `delete-${card.id}`;
+  const disclaimer = CARD_KIND_DISCLAIMER[card.kind];
+
+  function updateValue(key, value) {
+    setValues((prev) => ({ ...prev, [key]: value }));
+  }
 
   return (
     // biome-ignore lint/a11y/noStaticElementInteractions: mouse-only backdrop; Escape is handled above
@@ -675,7 +877,10 @@ function LibraryDrawer({ card, copied, onClose, onCopy }) {
           </span>
           <h2>{card.title || "Reusable material"}</h2>
           {card.summary ? <p>{card.summary}</p> : null}
+          {disclaimer ? <p className="field__hint">{disclaimer}</p> : null}
         </div>
+
+        {actionError ? <InlineAlert message={actionError} /> : null}
 
         <section className="library__drawer-section">
           <h3>Reusable text</h3>
@@ -684,6 +889,69 @@ function LibraryDrawer({ card, copied, onClose, onCopy }) {
             {copied ? "Copied" : "Copy reusable text"}
           </Button>
         </section>
+
+        {editFields.length ? (
+          <section className="library__drawer-section">
+            <h3>Edit</h3>
+            {editing ? (
+              <>
+                <div className="library__edit-fields">
+                  {editFields.map((field) => (
+                    <Field
+                      htmlFor={`library-edit-${field.key}`}
+                      key={field.key}
+                      label={field.label}
+                    >
+                      {field.type === "chips" ? (
+                        <ChipInput
+                          id={`library-edit-${field.key}`}
+                          onChange={(next) => updateValue(field.key, next)}
+                          values={values[field.key] || []}
+                        />
+                      ) : field.type === "textarea" ? (
+                        <TextArea
+                          id={`library-edit-${field.key}`}
+                          onChange={(next) => updateValue(field.key, next)}
+                          value={values[field.key] || ""}
+                        />
+                      ) : (
+                        <TextField
+                          id={`library-edit-${field.key}`}
+                          onChange={(next) => updateValue(field.key, next)}
+                          value={values[field.key] || ""}
+                        />
+                      )}
+                    </Field>
+                  ))}
+                </div>
+                <div className="job-drawer__inline-actions">
+                  <Button
+                    disabled={busyKey === savingKey}
+                    onClick={() => {
+                      onSaveCard(card, values);
+                      setEditing(false);
+                    }}
+                  >
+                    {busyKey === savingKey ? "Saving…" : "Save"}
+                  </Button>
+                  <Button onClick={() => setEditing(false)} variant="secondary">
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button
+                onClick={() => {
+                  setValues(editableValuesFromCard(card));
+                  setEditing(true);
+                }}
+                variant="secondary"
+              >
+                Edit
+              </Button>
+            )}
+          </section>
+        ) : null}
 
         <section className="library__drawer-section">
           <h3>Tags</h3>
@@ -704,6 +972,33 @@ function LibraryDrawer({ card, copied, onClose, onCopy }) {
             )}
           </div>
         </section>
+
+        {editable ? (
+          <section className="library__drawer-section">
+            <h3>Remove</h3>
+            {confirmingDelete ? (
+              <>
+                <InlineAlert message="Remove this from your library? This can't be undone." />
+                <div className="job-drawer__inline-actions">
+                  <Button
+                    disabled={busyKey === deletingKey}
+                    onClick={() => onDeleteCard(card)}
+                    variant="secondary"
+                  >
+                    {busyKey === deletingKey ? "Removing…" : "Confirm remove"}
+                  </Button>
+                  <Button onClick={() => setConfirmingDelete(false)} variant="secondary">
+                    Cancel
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <Button onClick={() => setConfirmingDelete(true)} variant="secondary">
+                Remove from library
+              </Button>
+            )}
+          </section>
+        ) : null}
       </aside>
     </div>
   );

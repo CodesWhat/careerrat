@@ -287,6 +287,18 @@ export function saveEvidenceSeed(claims) {
   });
 }
 
+// POST /api/onboard/candidate/evidence/remove — delete exactly one evidence
+// claim by id (Library drawer's Delete affordance for evidence-kind cards).
+// Editing an existing claim reuses saveCandidateFile("evidence", {claims}) —
+// candidateEvidenceMerge's id-match path updates in place rather than
+// duplicating, so no separate "edit" wrapper is needed.
+export function removeEvidenceClaim(id) {
+  return apiFetch("/api/onboard/candidate/evidence/remove", {
+    method: "POST",
+    body: JSON.stringify({ id }),
+  });
+}
+
 export function writeConfig() {
   return apiFetch("/api/onboard/write-config", { method: "POST" });
 }
@@ -814,6 +826,28 @@ export function decideDeepIngestProposal(payload = {}) {
 // `reason` is required when `status` is "deferred" or "not_available".
 export function updateDeepIngestLaneState(payload = {}) {
   return apiFetch("/api/deep-ingest/lane-states", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+// POST /api/deep-ingest/confirmed/update — { lane, id, ...fields } edits one
+// already-confirmed row in one of the four per-lane reference tables
+// (story_bank/honesty_boundaries/writing_voice/role_signals) — Library
+// drawer's Edit/Save affordance for story/voice/honesty/role_signal cards.
+// Re-runs the privacy guard only server-side, never grounding/quote-matching.
+export function updateDeepIngestConfirmedItem(payload = {}) {
+  return apiFetch("/api/deep-ingest/confirmed/update", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+// POST /api/deep-ingest/confirmed/remove — { lane, id } deletes exactly one
+// row from the matching per-lane reference table — Library drawer's Delete
+// affordance for story/voice/honesty/role_signal cards.
+export function removeDeepIngestConfirmedItem(payload = {}) {
+  return apiFetch("/api/deep-ingest/confirmed/remove", {
     method: "POST",
     body: JSON.stringify(payload),
   });
