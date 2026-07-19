@@ -201,6 +201,68 @@ test("forbiddenWordingFor handles missing forbidden_wording on claim", () => {
   assert.deepEqual(forbidden, []);
 });
 
+test("forbiddenWordingFor appends direct confirmed-boundary forbiddenWording as-is", () => {
+  const forbidden = forbiddenWordingFor([], {}, [
+    {
+      boundaryType: "disclosure",
+      text: "Prompt-visible context only.",
+      forbiddenWording: "Exact Candidate Spelling",
+    },
+  ]);
+
+  assert.deepEqual(forbidden, ["Exact Candidate Spelling"]);
+});
+
+test("forbiddenWordingFor derives the claim phrase from restrictive instruction prefixes", () => {
+  const forbidden = forbiddenWordingFor([], {}, [
+    { boundaryType: "do_not_claim", text: "Do not claim model training." },
+  ]);
+
+  assert.deepEqual(forbidden, ["model training"]);
+});
+
+test("forbiddenWordingFor uses the whole restrictive text when no prefix is derivable", () => {
+  const forbidden = forbiddenWordingFor([], {}, [
+    { boundaryType: "avoid", text: "Keep leadership scope narrowly factual." },
+  ]);
+
+  assert.deepEqual(forbidden, ["Keep leadership scope narrowly factual"]);
+});
+
+test("forbiddenWordingFor does not derive wording from non-restrictive boundary types", () => {
+  const forbidden = forbiddenWordingFor([], {}, [
+    { boundaryType: "education_policy", text: "Do not claim model training." },
+  ]);
+
+  assert.deepEqual(forbidden, []);
+});
+
+test("forbiddenWordingFor deduplicates boundary wording case-insensitively with first spelling", () => {
+  const forbidden = forbiddenWordingFor(
+    [{ forbidden_wording: ["Model Training"] }],
+    { tools: { do_not_claim: ["model training"] } },
+    [
+      { forbiddenWording: "MODEL TRAINING" },
+      { boundaryType: "do_not_claim", text: "Do not claim model training." },
+    ]
+  );
+
+  assert.deepEqual(forbidden, ["Model Training"]);
+});
+
+test("forbiddenWordingFor never treats allowedWording as forbidden", () => {
+  const forbidden = forbiddenWordingFor([], {}, [
+    {
+      boundaryType: "disclosure",
+      text: "Use the confirmed disclosure.",
+      allowedWording: "Allowed candidate wording",
+    },
+  ]);
+
+  assert.equal(forbidden.includes("Allowed candidate wording"), false);
+  assert.deepEqual(forbidden, []);
+});
+
 // ---------------------------------------------------------------------------
 // assertNoForbidden
 // ---------------------------------------------------------------------------

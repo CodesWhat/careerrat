@@ -24,7 +24,7 @@ import { Readable } from "node:stream";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
-import { mountOnboardRoutes } from "../src/cli/onboard-route.mjs";
+import { mountOnboardRoutes, normalizeOnboardingDraft } from "../src/cli/onboard-route.mjs";
 import { appendUsageEvent } from "../src/core/ai/usage-log.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
@@ -970,6 +970,20 @@ describe("POST /api/onboard/init", () => {
 // ---------------------------------------------------------------------------
 
 describe("GET/POST /api/onboard/draft", () => {
+  it("normalizes finishedAt only when it is a nonblank string", () => {
+    const stamped = "2026-07-19T16:45:12.345Z";
+
+    assert.equal(normalizeOnboardingDraft({ finishedAt: stamped }).finishedAt, stamped);
+    assert.equal(normalizeOnboardingDraft({ finishedAt: "   " }).finishedAt, null);
+    for (const value of [undefined, null, 0, false, {}, []]) {
+      assert.equal(
+        normalizeOnboardingDraft({ finishedAt: value }).finishedAt,
+        null,
+        `expected ${JSON.stringify(value)} to normalize to null`
+      );
+    }
+  });
+
   it("persists resumable wizard step and draft seeds in the private internal data root", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
@@ -1044,6 +1058,33 @@ describe("GET/POST /api/onboard/draft", () => {
     } finally {
       await closeServer(server);
     }
+  });
+
+  it("preserves an on-disk finishedAt when POST omits the key and overwrites it when present", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    const originalFinishedAt = "2026-07-19T17:00:00.000Z";
+    const replacementFinishedAt = "2026-07-19T17:30:00.000Z";
+    const initial = await postJsonDirect(routes, "/api/onboard/draft", {
+      stepIndex: 7,
+      finishedAt: originalFinishedAt,
+    });
+    assert.equal(initial.body.draft.finishedAt, originalFinishedAt);
+
+    const omitted = await postJsonDirect(routes, "/api/onboard/draft", { stepIndex: 2 });
+    assert.equal(omitted.body.draft.finishedAt, originalFinishedAt);
+
+    const overwritten = await postJsonDirect(routes, "/api/onboard/draft", {
+      stepIndex: 3,
+      finishedAt: replacementFinishedAt,
+    });
+    assert.equal(overwritten.body.draft.finishedAt, replacementFinishedAt);
+
+    const cleared = await postJsonDirect(routes, "/api/onboard/draft", {
+      stepIndex: 4,
+      finishedAt: "",
+    });
+    assert.equal(cleared.body.draft.finishedAt, null);
   });
 });
 

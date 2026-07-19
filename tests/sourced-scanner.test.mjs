@@ -351,6 +351,77 @@ test("FDE title WITHOUT config scores neutral — no keep boost from baked-in pr
   );
 });
 
+test("confirmed keep and cut role signals adjust score and report ids outside human rule flags", () => {
+  const offer = {
+    company: "ExampleCo",
+    title: "Applied AI Engineer",
+    location: "",
+    comp: "",
+    bodyText: "Build customer prototypes with agent workflow tooling.",
+  };
+  const baseConfig = {
+    targeting: {
+      role_families: [{ name: "Applied AI", patterns: ["applied ai engineer"] }],
+      keep_signals: [],
+      cut_signals: [],
+    },
+    profile: {},
+  };
+  const baseline = scoreSourcedOffer(offer, baseConfig);
+  const keep = scoreSourcedOffer(offer, {
+    ...baseConfig,
+    roleSignals: [
+      {
+        id: "signal-keep-agent-workflow",
+        roleFamily: "applied-ai",
+        signalType: "keep",
+        text: "agent workflow",
+      },
+    ],
+  });
+  const cut = scoreSourcedOffer(offer, {
+    ...baseConfig,
+    roleSignals: [
+      {
+        id: "signal-cut-customer-prototypes",
+        roleFamily: "Applied AI",
+        signalType: "cut",
+        text: "customer prototypes",
+      },
+    ],
+  });
+
+  assert.ok(keep.score > baseline.score, `${keep.score} should exceed ${baseline.score}`);
+  assert.ok(cut.score < baseline.score, `${cut.score} should be below ${baseline.score}`);
+  assert.deepEqual(keep.roleSignalIds, ["signal-keep-agent-workflow"]);
+  assert.deepEqual(cut.roleSignalIds, ["signal-cut-customer-prototypes"]);
+  assert.equal(keep.ruleFlags.includes("signal-keep-agent-workflow"), false);
+  assert.equal(cut.ruleFlags.includes("signal-cut-customer-prototypes"), false);
+  assert.ok(cut.ruleFlags.some((flag) => flag.startsWith("cut-risk-")));
+});
+
+test("no roleSignals argument is byte-identical to the pre-promotion scanner result", () => {
+  const result = scoreSourcedOffer(
+    { company: "ExampleCo", title: "Applied AI Engineer" },
+    {
+      targeting: {
+        role_families: [{ name: "Applied AI", patterns: ["applied ai engineer"] }],
+        keep_signals: [],
+        cut_signals: [],
+      },
+      profile: {},
+    }
+  );
+
+  assert.deepEqual(result, {
+    fit: "stretch",
+    score: 52,
+    gate: "review",
+    ratingReason: "",
+    ruleFlags: ["comp-unposted"],
+  });
+});
+
 // ---------------------------------------------------------------------------
 // Structural (domain-neutral) signals still fire without config
 // ---------------------------------------------------------------------------

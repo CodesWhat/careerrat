@@ -191,11 +191,24 @@ test("rolester ingest --write-config exports DB candidate setup to compatibility
   const result = jsonCli(["src/cli/ingest.mjs", "--root", repoRoot, "--write-config", "--json"]);
 
   assert.equal(result.mode, "db");
+  assert.deepEqual(result.wrote, [
+    ".rolester/candidate/profile.yml",
+    ".rolester/candidate/targeting.yml",
+    ".rolester/candidate/evidence.yml",
+    ".rolester/candidate/honesty.yml",
+    ".rolester/candidate/form-defaults.yml",
+    ".rolester/candidate/modes.yml",
+    ".rolester/candidate/application-limits.yml",
+    ".rolester/config/search-sources.yml",
+    ".rolester/candidate/AGENTS.md",
+  ]);
   assert.ok(result.wrote.includes(".rolester/candidate/profile.yml"));
   assert.ok(result.wrote.includes(".rolester/candidate/targeting.yml"));
   assert.ok(result.wrote.includes(".rolester/candidate/application-limits.yml"));
   assert.ok(result.wrote.includes(".rolester/candidate/evidence.yml"));
   assert.ok(result.wrote.includes(".rolester/config/search-sources.yml"));
+  assert.equal(result.wrote.includes(".rolester/candidate/stories.yml"), false);
+  assert.equal(result.wrote.includes(".rolester/candidate/writing-style.md"), false);
   assert.ok(existsSync(userPath({ repoRoot }, "candidate/profile.yml")));
   assert.match(
     readFileSync(userPath({ repoRoot }, "candidate/profile.yml"), "utf8"),

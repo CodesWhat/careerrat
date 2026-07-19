@@ -2,9 +2,9 @@
 // These tests intentionally fail until the 008 migration and deep-ingest DB
 // verbs exist. They define the DB/readiness boundary for later implementation.
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
@@ -1181,4 +1181,118 @@ test("deepIngestConfirmedItemRemove deletes one row and rejects unknown lane/id"
       return true;
     }
   );
+});
+
+test("deepIngestConfirmedForGeneration projects confirmed lanes, skips privacy failures and malformed stories, and fails closed on malformed honesty", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot });
+  await seedConfirmedReferenceItems(repoRoot);
+  const { deepIngestConfirmedForGeneration } = await loadDeepIngestVerbs();
+
+  db.prepare("INSERT INTO deep_ingest_story_bank (id, data) VALUES (?, ?)").run(
+    "story-private-comp",
+    JSON.stringify({
+      id: "story-private-comp",
+      status: "confirmed",
+      title: "Private compensation note",
+      situation: "A private note was captured.",
+      task: "Keep it out of generation.",
+      action: "Recorded that my current salary is 231000 dollars.",
+      result: "The reader must skip this row.",
+      supportingQuote: "private note",
+    })
+  );
+  db.prepare("INSERT INTO deep_ingest_story_bank (id, data) VALUES (?, ?)").run(
+    "story-malformed",
+    JSON.stringify("not an object")
+  );
+
+  const result = deepIngestConfirmedForGeneration({ repoRoot });
+
+  assert.deepEqual(result.storyBank.map((row) => row.id).sort(), ["story-edit-1", "story-keep-2"]);
+  assert.ok(result.storyBank.every((row) => row.status === "confirmed"));
+  assert.deepEqual(
+    result.writingVoice.map((row) => row.id),
+    ["voice-edit-1"]
+  );
+  assert.deepEqual(
+    result.honestyBoundaries.map((row) => row.id),
+    ["honesty-edit-1"]
+  );
+  assert.deepEqual(
+    result.roleSignals.map((row) => row.id),
+    ["signal-edit-1"]
+  );
+  assert.ok(
+    result.skipped.some(
+      (row) =>
+        row.lane === "story_bank" &&
+        row.id === "story-private-comp" &&
+        /privacy: current_base/.test(row.reason)
+    )
+  );
+  assert.ok(
+    result.skipped.some(
+      (row) => row.lane === "story_bank" && /malformed: row is not an object/.test(row.reason)
+    ),
+    "a malformed story row should be diagnosed and skipped"
+  );
+
+  db.prepare("INSERT INTO deep_ingest_honesty_boundaries (id, data) VALUES (?, ?)").run(
+    "honesty-malformed",
+    JSON.stringify("not an object")
+  );
+  assert.throws(
+    () => deepIngestConfirmedForGeneration({ repoRoot }),
+    /row is not an object/,
+    "honesty parsing must fail closed instead of skipping the row"
+  );
+});
+
+test("deep-ingest confirm, edit, and remove never materialize or rewrite legacy promotion files", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const guardedFiles = new Map(
+    [
+      "candidate/stories.yml",
+      "candidate/writing-style.md",
+      "candidate/targeting.yml",
+      "candidate/honesty.yml",
+    ].map((relativePath) => [relativePath, `sentinel:${relativePath}\n`])
+  );
+  await seedConfirmedReferenceItems(repoRoot);
+  for (const relativePath of guardedFiles.keys()) {
+    assert.equal(
+      existsSync(userPath({ repoRoot }, relativePath)),
+      false,
+      `confirm must not create ${relativePath}`
+    );
+  }
+  for (const [relativePath, contents] of guardedFiles) {
+    const path = userPath({ repoRoot }, relativePath);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, contents, "utf8");
+  }
+
+  const { deepIngestConfirmedItemRemove, deepIngestConfirmedItemUpdate } =
+    await loadDeepIngestVerbs();
+  deepIngestConfirmedItemUpdate({
+    repoRoot,
+    lane: "story_bank",
+    id: "story-edit-1",
+    fields: { title: "Edited without compatibility promotion" },
+  });
+  deepIngestConfirmedItemRemove({
+    repoRoot,
+    lane: "story_bank",
+    id: "story-keep-2",
+  });
+
+  for (const [relativePath, contents] of guardedFiles) {
+    assert.equal(
+      readFileSync(userPath({ repoRoot }, relativePath), "utf8"),
+      contents,
+      `${relativePath} must remain byte-identical across confirm/edit/remove`
+    );
+  }
 });

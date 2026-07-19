@@ -111,6 +111,23 @@ const PACKET_CONTEXT = {
   },
 };
 
+const CONFIRMED_STORY = {
+  id: "story-customer-rollout",
+  title: "Customer workflow rollout",
+  situation: "A customer process depended on manual handoffs.",
+  task: "Ship a reliable workflow with visible review controls.",
+  action: "Built and deployed an observable agentic workflow with the customer team.",
+  result: "The customer adopted the workflow for daily operations.",
+  reflection: "Grounding and review controls should be designed together.",
+  competencies: ["workflow delivery"],
+  roleSignals: ["customer deployment"],
+  metrics: ["one production rollout"],
+  openQuestions: [],
+  supportingQuote: "Built and deployed an observable agentic workflow",
+  status: "confirmed",
+  updatedAt: "2026-07-19T15:00:00.000Z",
+};
+
 const CAPTURED_QUESTIONS = {
   source: "manual",
   questions: [
@@ -472,4 +489,175 @@ test("private compensation and unconfirmed claims are rejected before upload-rea
     result.gaps.map((gap) => gap.message).join("\n"),
     /private|current|unreviewed|Kubernetes/i
   );
+});
+
+test("cover-letter and answer grounding accept prompt-selected story ids and reject unknown or artifact-absent stories", async () => {
+  const { validatePacketEvidenceIds } = await loadGenerateModule();
+
+  const accepted = validatePacketEvidenceIds({
+    context: PACKET_CONTEXT,
+    promptStories: [CONFIRMED_STORY],
+    proposals: [
+      {
+        kind: "coverLetter",
+        text: "I built and deployed a customer workflow with review controls.",
+        evidenceIds: [`story:${CONFIRMED_STORY.id}`],
+      },
+      {
+        kind: "answer",
+        answer: "That customer rollout is the most relevant example.",
+        evidenceIds: [`story:${CONFIRMED_STORY.id}`],
+      },
+    ],
+  });
+  assert.deepEqual(accepted, { ok: true, gaps: [] });
+
+  const unknown = validatePacketEvidenceIds({
+    context: PACKET_CONTEXT,
+    promptStories: [CONFIRMED_STORY],
+    proposals: [
+      {
+        kind: "coverLetter",
+        text: "A supposedly grounded story.",
+        evidenceIds: ["story:unknown"],
+      },
+    ],
+  });
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.gaps[0].message, /missing evidence IDs: story:unknown/);
+
+  const absentFromAnswersPrompt = validatePacketEvidenceIds({
+    context: PACKET_CONTEXT,
+    promptStories: [{ ...CONFIRMED_STORY, id: "story-selected-for-answers" }],
+    proposals: [
+      {
+        kind: "answer",
+        answer: "Cites a confirmed story that this artifact never saw.",
+        evidenceIds: [`story:${CONFIRMED_STORY.id}`],
+      },
+    ],
+  });
+  assert.equal(absentFromAnswersPrompt.ok, false);
+  assert.match(absentFromAnswersPrompt.gaps[0].message, /story:story-customer-rollout/);
+});
+
+test("prompt-visible confirmed boundaries strip forbiddenWording and suppress conflicting allowed wording", async () => {
+  const { buildPromptVisibleSources } = await loadGenerateModule();
+  const visible = buildPromptVisibleSources({
+    ...PACKET_CONTEXT,
+    honestyBoundariesConfirmed: [
+      {
+        id: "boundary-training",
+        boundaryType: "do_not_claim",
+        text: "Do not claim model training.",
+        allowedWording: "Model training leader",
+        forbiddenWording: "model training",
+        updatedAt: "2026-07-19T16:00:00.000Z",
+      },
+    ],
+  });
+
+  const boundary = visible.honestyBoundaries.confirmedBoundaries[0];
+  assert.equal(Object.hasOwn(boundary, "forbiddenWording"), false);
+  assert.equal(boundary.allowedWording, "");
+  assert.doesNotMatch(JSON.stringify(visible), /"forbiddenWording"/);
+});
+
+test("empty deep-ingest lanes leave pre-promotion prompt bytes unchanged", async () => {
+  const {
+    buildPromptVisibleSources,
+    draftCoverLetterBlocks,
+    enumeratePacketSources,
+    splitConfirmedAndProposedPacketSources,
+  } = await loadGenerateModule();
+  const context = {
+    ...PACKET_CONTEXT,
+    storiesLearnings: [],
+    honestyBoundariesConfirmed: [],
+    roleSignals: [],
+    deepIngestDiagnostics: [],
+  };
+  const sources = enumeratePacketSources(context);
+  const split = splitConfirmedAndProposedPacketSources(sources);
+  const prePromotionPromptSources = {
+    candidateProfile: sources.candidateProfile,
+    sourceResume: sources.sourceResume,
+    resumeFacts: sources.resumeFacts,
+    writingVoice: sources.writingVoice,
+    honestyBoundaries: sources.honestyBoundaries,
+    capturedJobBody: sources.capturedJobBody,
+    capturedQuestions: sources.capturedQuestions,
+    confirmedEvidence: { ...sources.confirmedEvidence, claims: split.claimableEvidence },
+    confirmedContext: split.claimableContext,
+    unconfirmedAreas: [...new Set(split.gapContext.map((item) => item.source))].sort(),
+  };
+  let actualPrompt = null;
+  await draftCoverLetterBlocks({
+    context,
+    runAI: async (options) => {
+      actualPrompt = options.messages[0].content;
+      return {
+        body: {
+          ok: true,
+          ai: { used: true },
+          data: {
+            blocks: [{ text: "Grounded production workflow proof.", evidenceIds: ["ev-ai-001"] }],
+          },
+        },
+      };
+    },
+  });
+  const prePromotionPrompt = [
+    "Draft concise cover-letter prose blocks using only confirmed local evidence.",
+    "Return JSON matching packetCoverLetterProposalSchema.",
+    "",
+    JSON.stringify(prePromotionPromptSources, null, 2),
+  ].join("\n");
+
+  assert.equal(actualPrompt, prePromotionPrompt);
+  assert.notEqual(
+    JSON.stringify(buildPromptVisibleSources(context, null, { purpose: "cover-letter" })),
+    "",
+    "the prompt-visible helper must still produce a real payload"
+  );
+});
+
+test("manifest deepIngestWarnings are advisory and do not change gaps or upload readiness", async () => {
+  const { generatePacket } = await loadGenerateModule();
+  const generate = (deepIngestDiagnostics) =>
+    generatePacket({
+      applyIntent: true,
+      context: { ...PACKET_CONTEXT, deepIngestDiagnostics },
+      questionCapture: CAPTURED_QUESTIONS,
+      services: { buildCoverLetterScaffold, buildShortAnswer },
+      draftResumeProposal: RESUME_DRAFT,
+      draftCoverLetterBlocks: async () => ({
+        blocks: [{ text: "Grounded production workflow proof.", evidenceIds: ["ev-ai-001"] }],
+      }),
+      draftPacketAnswers: async () => ({
+        answers: [
+          {
+            questionId: "q1",
+            answer: "Acme AI maps to my confirmed production workflow experience.",
+            evidenceIds: ["ev-ai-001"],
+          },
+        ],
+        excludedQuestionIds: ["eeo-1"],
+        gaps: [],
+      }),
+    });
+
+  const clean = await generate([]);
+  const warnings = [
+    { lane: "story_bank", id: "story-private", reason: "privacy: current_base" },
+    { lane: "writing_voice", id: "voice-malformed", reason: "malformed: row is not an object" },
+  ];
+  const warned = await generate(warnings);
+
+  assert.deepEqual(clean.manifest.deepIngestWarnings, []);
+  assert.deepEqual(warned.manifest.deepIngestWarnings, warnings);
+  assert.deepEqual(warned.gaps, clean.gaps);
+  assert.equal(warned.uploadReady, clean.uploadReady);
+  assert.equal(warned.uploadReady, true);
+  assert.equal(warned.manifest.gapCount, clean.manifest.gapCount);
 });

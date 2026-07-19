@@ -223,6 +223,18 @@ function capturedNativeButton(label, className = null) {
   return button;
 }
 
+function countOccurrences(value, token) {
+  return (value.match(new RegExp(token, "g")) || []).length;
+}
+
+function expectFocusedLane(html, label) {
+  expect(html).toMatch(
+    new RegExp(
+      `<div class="deep-ingest__lane-row deep-ingest__lane-row--focused">[\\s\\S]*?<span class="deep-ingest__lane-label">${label}</span>`
+    )
+  );
+}
+
 function expectNoDeepIngestRuntimeTokens(html) {
   for (const token of FORBIDDEN_DEEP_INGEST_TEXT) {
     expect(html, `Deep ingest UI leaked ${token}`).not.toContain(token);
@@ -258,6 +270,94 @@ describe("DeepIngestPage route contract", () => {
 });
 
 describe("DeepIngestPage workbench", () => {
+  it("initially focuses the first non-terminal lane in server order", () => {
+    const html = renderPage();
+
+    expectFocusedLane(html, "Evidence");
+    expect(countOccurrences(html, "deep-ingest__lane-row--focused")).toBe(1);
+  });
+
+  it("holds a non-terminal focus, advances terminal focus, wraps, and clears focus when all lanes are terminal", async () => {
+    const initial = deepIngestState();
+    renderPage(initial);
+
+    apiMock.state = initial;
+    await capturedButton("Generate proposals").onClick();
+    expectFocusedLane(renderPage(apiMock.state), "Evidence");
+
+    apiMock.state = deepIngestState({
+      lanes: initial.lanes.map((lane) =>
+        lane.key === "evidence_claims" ? { ...lane, status: "completed" } : lane
+      ),
+    });
+    await capturedButton("Generate proposals").onClick();
+    expectFocusedLane(renderPage(apiMock.state), "Story");
+
+    capturedNativeButton("Role signal", "deep-ingest__lane-main").onClick();
+    renderPage(apiMock.state);
+    apiMock.state = deepIngestState({
+      lanes: initial.lanes.map((lane) => {
+        if (lane.key === "evidence_claims") return { ...lane, status: "review_needed" };
+        if (lane.key === "role_signals") return { ...lane, status: "completed" };
+        return { ...lane, status: "completed", reason: lane.reason || "Settled for test" };
+      }),
+    });
+    await capturedButton("Generate proposals").onClick();
+    expectFocusedLane(renderPage(apiMock.state), "Evidence");
+
+    apiMock.state = deepIngestState({
+      lanes: initial.lanes.map((lane) => ({
+        ...lane,
+        status: "completed",
+        reason: lane.reason || "Settled for test",
+      })),
+    });
+    await capturedButton("Generate proposals").onClick();
+    const allTerminalHtml = renderPage(apiMock.state);
+    expect(allTerminalHtml).not.toContain("deep-ingest__lane-row--focused");
+  });
+
+  it("renders completion counts from state.confirmed with Library and Dashboard links", () => {
+    const html = renderPage(
+      deepIngestState({
+        readiness: { ready: true, terminalCount: 7, requiredCount: 7, missing: [] },
+        confirmed: {
+          evidence: [{ id: "ev-1" }, { id: "ev-2" }],
+          storyBank: [{ id: "story-1" }],
+          writingVoice: [{ id: "voice-1" }, { id: "voice-2" }, { id: "voice-3" }],
+          honestyBoundaries: [],
+          roleSignals: [
+            { id: "signal-1" },
+            { id: "signal-2" },
+            { id: "signal-3" },
+            { id: "signal-4" },
+          ],
+        },
+      })
+    );
+
+    expect(html).toContain("All lanes settled");
+    expect(html).toContain("<strong>Evidence:</strong> 2 claims captured.");
+    expect(html).toContain("<strong>Story:</strong> 1 story captured.");
+    expect(html).toContain("<strong>Writing voice:</strong> 3 samples captured.");
+    expect(html).toContain("<strong>Honesty:</strong> 0 boundaries captured.");
+    expect(html).toContain("<strong>Role signal:</strong> 4 signals captured.");
+    expect(html).toContain('<a href="/library" class="btn btn--secondary">Browse your Library</a>');
+    expect(html).toContain('<a href="/" class="btn btn--secondary">Back to Dashboard</a>');
+    expect(html).not.toContain('aria-label="Lane progress"');
+  });
+
+  it("expands every lane row when the Lane view switches from Focused to All lanes", () => {
+    const focusedHtml = renderPage();
+    expect(countOccurrences(focusedHtml, "deep-ingest__lane-row--compact")).toBe(6);
+
+    capturedNativeButton("All lanes").onClick();
+    const allLanesHtml = renderPage();
+
+    expect(countOccurrences(allLanesHtml, "deep-ingest__lane-row--compact")).toBe(0);
+    expect(allLanesHtml).toMatch(/aria-selected="true"[^>]*>All lanes<\/button>/);
+  });
+
   it("renders the target selector, empty-state copy, and disabled ingest action until input is valid", async () => {
     const html = await renderPage(
       deepIngestState({

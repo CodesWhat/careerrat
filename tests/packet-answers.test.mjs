@@ -8,16 +8,17 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { Readable } from "node:stream";
 import { after, test } from "node:test";
+import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import {
   normalizeAshbyForm,
   normalizeGreenhouseQuestions,
   parseManualQuestions,
 } from "../src/core/apply/form-questions.mjs";
-import { closeAll } from "../src/core/db/connection.mjs";
-import { openDb } from "../src/core/db/connection.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
-import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
+import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
 
 const cleanupRoots = [];
 
@@ -94,6 +95,41 @@ function bootServer(repoRoot, opts = {}) {
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));
   });
+}
+
+function mountDirectRoutes(repoRoot, opts = {}) {
+  const routes = new Map();
+  mountPacketRoutes({
+    addRoute(method, path, handler) {
+      routes.set(`${method} ${path}`, handler);
+    },
+    repoRoot,
+    env: {},
+    ...opts,
+  });
+  return routes;
+}
+
+async function postJsonDirect(routes, path, payload) {
+  const handler = routes.get(`POST ${path}`);
+  assert.ok(handler, `expected mounted route for POST ${path}`);
+  const req = Readable.from([Buffer.from(JSON.stringify(payload ?? {}))]);
+  req.method = "POST";
+  req.url = path;
+  req.headers = { "content-type": "application/json" };
+  let status = 200;
+  let responseBody = "";
+  const res = {
+    writeHead(nextStatus) {
+      status = nextStatus;
+      return this;
+    },
+    end(chunk = "") {
+      responseBody += String(chunk);
+    },
+  };
+  await handler(req, res);
+  return { status, body: responseBody ? JSON.parse(responseBody) : {} };
 }
 
 function baseUrl(server) {
@@ -230,6 +266,23 @@ const PACKET_CONTEXT = {
   },
 };
 
+const CONFIRMED_STORY = {
+  id: "story-answer-rollout",
+  title: "Customer agent workflow rollout",
+  situation: "A customer process depended on manual handoffs.",
+  task: "Deliver a reliable workflow with visible review controls.",
+  action: "Built and deployed an observable agentic workflow with the customer team.",
+  result: "The customer adopted the workflow for daily operations.",
+  reflection: "Grounding and review controls should be designed together.",
+  competencies: ["workflow delivery"],
+  roleSignals: ["customer-facing agentic workflows"],
+  metrics: ["one production rollout"],
+  openQuestions: [],
+  supportingQuote: "Built and deployed an observable agentic workflow",
+  status: "confirmed",
+  updatedAt: "2026-07-19T15:00:00.000Z",
+};
+
 test("filterAnswerableQuestions excludes provider demographic metadata and manual self-ID prompts", async () => {
   const { classifySelfIdentificationQuestion, filterAnswerableQuestions } =
     await loadQuestionsModule();
@@ -352,6 +405,81 @@ test("draftPacketAnswers sends only non-EEO questions to bounded AI and preserve
   assert.deepEqual(result.excludedQuestionIds, ["eeo-1"]);
 });
 
+test("draftPacketAnswers accepts a story id selected into the answers prompt", async () => {
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const result = await draftPacketAnswers({
+    context: {
+      ...PACKET_CONTEXT,
+      job: {
+        body: "Build customer-facing agentic workflows and lead workflow delivery.",
+      },
+      storiesLearnings: [CONFIRMED_STORY],
+    },
+    questions: {
+      answerable: [{ id: "q-story", label: "Describe a relevant rollout.", required: true }],
+      excluded: [],
+    },
+    runAI: async () => ({
+      body: {
+        ok: true,
+        ai: { used: true },
+        data: {
+          answers: [
+            {
+              questionId: "q-story",
+              answer: "I built and deployed an observable workflow with a customer team.",
+              evidenceIds: [`story:${CONFIRMED_STORY.id}`],
+            },
+          ],
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.uploadReady, true);
+  assert.deepEqual(result.answers[0].evidenceIds, [`story:${CONFIRMED_STORY.id}`]);
+});
+
+test("a disclosure answer conflicting with a confirmed boundary degrades to the standard NEEDS YOU marker", async () => {
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const result = await draftPacketAnswers({
+    context: {
+      ...PACKET_CONTEXT,
+      profile: {
+        candidate: { full_name: "Alex Rivera" },
+        authorization: { work_authorized: true },
+      },
+      honestyBoundariesConfirmed: [
+        {
+          id: "boundary-work-auth",
+          boundaryType: "forbidden_wording",
+          forbiddenWording: "legally authorized",
+          text: "Never say legally authorized.",
+        },
+      ],
+    },
+    questions: {
+      answerable: [
+        {
+          id: "q-work-auth",
+          label: "Are you legally authorized to work in the United States?",
+          required: true,
+        },
+      ],
+      excluded: [],
+    },
+    runAI: async () => {
+      throw new Error("deterministic disclosure must not call AI");
+    },
+  });
+
+  // needsYouAnswer's reason-suffixed form IS the repo's canonical marker —
+  // every consumer detects it with /^NEEDS YOU:/ (see answers.mjs), so the
+  // contract here is the prefix plus non-upload-readiness, not a bare literal.
+  assert.match(result.answers[0].answer, /^NEEDS YOU:/);
+  assert.equal(result.answers[0].uploadReady, false);
+});
+
 test("POST /api/packet/questions persists capture before local answer drafting", async () => {
   const repoRoot = tempRepo();
   seedApp(repoRoot);
@@ -449,4 +577,64 @@ test("POST /api/packet/answers drafts only persisted non-EEO questions through l
   } finally {
     await closeServer(server);
   }
+});
+
+test("POST /api/packet/answers builds real DB context when only applicationId is supplied", async () => {
+  const repoRoot = tempRepo();
+  seedApp(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: { candidate: { full_name: "Route Context Candidate" } },
+  });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      {
+        id: "ev-route-context",
+        claim: "Built customer-facing agentic workflows from prototype to daily use.",
+        evidence: "Imported test evidence.",
+      },
+    ],
+  });
+  const seen = [];
+  const routes = mountDirectRoutes(repoRoot, {
+    packetAnswersCall: async (options) => {
+      seen.push(JSON.stringify(options));
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              answers: [
+                {
+                  questionId: "q1",
+                  answer: "My confirmed evidence covers customer-facing agentic workflows.",
+                  evidenceIds: ["ev-route-context"],
+                },
+              ],
+            }),
+          },
+        ],
+        model: "claude-test",
+      };
+    },
+  });
+  await postJsonDirect(routes, "/api/packet/questions", {
+    appId: "app-packet",
+    source: "paste",
+    manualText: "1. Why Acme AI?",
+  });
+
+  const answerResult = await postJsonDirect(routes, "/api/packet/answers", {
+    applicationId: "app-packet",
+  });
+
+  assert.equal(answerResult.status, 200);
+  assert.equal(answerResult.body.ok, true);
+  assert.equal(answerResult.body.data.answers[0].uploadReady, true);
+  assert.equal(seen.length, 1);
+  assert.match(seen[0], /Route Context Candidate/);
+  assert.match(seen[0], /ev-route-context/);
+  assert.match(seen[0], /Build customer-facing agentic workflows/i);
 });

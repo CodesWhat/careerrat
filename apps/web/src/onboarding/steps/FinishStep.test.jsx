@@ -266,6 +266,45 @@ describe("FinishStep deep-ingest hero", () => {
   });
 });
 
+describe("stampOnboardingFinished", () => {
+  it("reads the draft envelope and saves the complete draft with a current-time finish stamp", async () => {
+    const saveOnboardingDraft = vi.fn().mockResolvedValue({ ok: true });
+
+    await FinishStepModule.stampOnboardingFinished({
+      getOnboardingDraft: vi.fn().mockResolvedValue({
+        ok: true,
+        draft: {
+          stepIndex: 7,
+          completedIndexes: [0, 1, 2, 3, 4, 5, 6, 7],
+          draftSeeds: { targeting: { role_buckets: [{ name: "Applied AI" }] } },
+          updatedAt: "2026-07-19T15:00:00.000Z",
+          finishedAt: null,
+        },
+      }),
+      saveOnboardingDraft,
+      now: () => "2026-07-19T18:00:00.000Z",
+    });
+
+    expect(saveOnboardingDraft).toHaveBeenCalledWith({
+      stepIndex: 7,
+      completedIndexes: [0, 1, 2, 3, 4, 5, 6, 7],
+      draftSeeds: { targeting: { role_buckets: [{ name: "Applied AI" }] } },
+      updatedAt: "2026-07-19T15:00:00.000Z",
+      finishedAt: "2026-07-19T18:00:00.000Z",
+    });
+  });
+
+  it("swallows save failures so finishing can still navigate away", async () => {
+    await expect(
+      FinishStepModule.stampOnboardingFinished({
+        getOnboardingDraft: vi.fn().mockResolvedValue({ draft: { stepIndex: 7 } }),
+        saveOnboardingDraft: vi.fn().mockRejectedValue(new Error("disk unavailable")),
+        now: () => "2026-07-19T18:05:00.000Z",
+      })
+    ).resolves.toBeUndefined();
+  });
+});
+
 describe("FinishStep cadence row", () => {
   it("renders quiet cadence pills with a Most popular tag on Daily and no recommendation echo", () => {
     const html = renderFinish();
