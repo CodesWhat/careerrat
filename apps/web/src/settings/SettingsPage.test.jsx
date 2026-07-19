@@ -254,7 +254,7 @@ describe("SettingsPage edit surfaces", () => {
         },
         compensation: {
           current_base: 175000,
-          expected_base: 225000,
+          expected_base: 231000,
           oe_min_base: 80000,
           oe_max_base: 120000,
           relo_package_needs: "Full relocation",
