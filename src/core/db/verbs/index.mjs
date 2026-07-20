@@ -90,5 +90,6 @@ export {
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunLatest,
+  sourcingRunProgress,
   sourcingRunStart,
 } from "./sourcing-runs.mjs";

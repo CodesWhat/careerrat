@@ -224,6 +224,35 @@ export function sourcingRunComplete({ repoRoot, env, id, summary } = {}) {
   });
 }
 
+export function sourcingRunProgress({ repoRoot, env, id, progress } = {}) {
+  const runId = assertRunId(id, "sourcingRunProgress");
+  if (!progress || typeof progress !== "object" || Array.isArray(progress)) {
+    throw makeError("sourcingRunProgress requires a progress object", "BAD_REQUEST");
+  }
+  const db = requireDb({ repoRoot, env });
+  return withTransaction(db, () => {
+    const current = storedRunById(db, runId);
+    if (!current) {
+      throw makeError(`sourcing run not found: ${runId}`, "NOT_FOUND");
+    }
+    if (current.status !== SOURCING_RUN_STATUSES.RUNNING) {
+      throw makeError(`sourcing run is already ${current.status}: ${runId}`, "CONFLICT");
+    }
+    const now = nextTimestampIso(current.updated_at);
+    const next = {
+      ...clone(current),
+      updated_at: now,
+      progress: {
+        ...(current.progress && typeof current.progress === "object"
+          ? clone(current.progress)
+          : {}),
+        ...clone(progress),
+      },
+    };
+    return { ok: true, run: updateRun(db, next) };
+  });
+}
+
 export function sourcingRunFail({ repoRoot, env, id, error } = {}) {
   const runId = assertRunId(id, "sourcingRunFail");
   const db = requireDb({ repoRoot, env });

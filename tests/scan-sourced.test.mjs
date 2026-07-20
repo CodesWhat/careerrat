@@ -138,6 +138,49 @@ function rssFetchStub() {
   };
 }
 
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function leverResponse({ title, url, location = "Remote", body = "Role description." }) {
+  return new Response(
+    JSON.stringify([
+      {
+        text: title,
+        hostedUrl: url,
+        categories: { location },
+        descriptionBodyPlain: body,
+      },
+    ]),
+    { status: 200 }
+  );
+}
+
+function rssResponse({ company, title, url }) {
+  return new Response(
+    `<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>${company} jobs</title>
+    <item>
+      <title>${company} — ${title} (Remote)</title>
+      <link>${url}</link>
+      <description>Build deterministic AI and identity automation systems.</description>
+      <guid>${url}</guid>
+      <pubDate>Fri, 03 Jul 2026 12:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>`,
+    { status: 200 }
+  );
+}
+
 // ---------------------------------------------------------------------------
 // runSourcedScan()
 // ---------------------------------------------------------------------------
@@ -396,6 +439,180 @@ test("DB mode write:true persists scan offers through sourcedUpsertBatch and exp
   }
 });
 
+test("DB mode exposes the first company batch before a later company finishes", async () => {
+  const repoRoot = tempRepo();
+  const betaResponse = deferred();
+  const betaRequested = deferred();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: [], negative: [] },
+        location_filter: null,
+        tracked_companies: [
+          { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+          { name: "Beta", careers_url: "https://jobs.lever.co/beta" },
+        ],
+      },
+    });
+
+    const scanPromise = runSourcedScan({
+      repoRoot,
+      write: true,
+      intake: false,
+      fetchImpl: async (url) => {
+        if (String(url).includes("/acme")) {
+          return leverResponse({
+            title: "Applied AI Engineer",
+            url: "https://jobs.lever.co/acme/applied-ai",
+          });
+        }
+        if (String(url).includes("/beta")) {
+          betaRequested.resolve();
+          return betaResponse.promise;
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    });
+
+    await betaRequested.promise;
+
+    const db = openDb({ repoRoot });
+    const midScanRows = db
+      .prepare("SELECT data FROM sourced ORDER BY id ASC")
+      .all()
+      .map((row) => JSON.parse(row.data));
+    assert.deepEqual(
+      midScanRows.map((row) => row.company),
+      ["Acme"],
+      "the first completed company must already be visible while the second fetch is pending"
+    );
+
+    const tracker = JSON.parse(
+      readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+    );
+    assert.deepEqual(
+      tracker.sourced.map((row) => row.company),
+      ["Acme"]
+    );
+
+    betaResponse.resolve(
+      leverResponse({
+        title: "Identity Automation Engineer",
+        url: "https://jobs.lever.co/beta/identity-automation",
+      })
+    );
+    const summary = await scanPromise;
+
+    assert.equal(summary.new, 2);
+    assert.deepEqual(
+      summary.offers.map((offer) => offer.company),
+      ["Acme", "Beta"]
+    );
+  } finally {
+    betaResponse.resolve(new Response("[]", { status: 200 }));
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("incremental company batches preserve cross-batch dedup and final batch summary parity", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: ["Applied AI", "Identity"], negative: ["Sales"] },
+        location_filter: { allow: ["Remote"], block: ["India"] },
+        tracked_companies: [
+          { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+          { name: "Beta", careers_url: "https://jobs.lever.co/beta" },
+        ],
+      },
+    });
+
+    const sharedUrl = "https://jobs.lever.co/shared/duplicate-role";
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      intake: false,
+      fetchImpl: async (url) => {
+        if (String(url).includes("/acme")) {
+          return new Response(
+            JSON.stringify([
+              {
+                text: "Applied AI Engineer",
+                hostedUrl: sharedUrl,
+                categories: { location: "Remote" },
+              },
+              {
+                text: "Sales Manager",
+                hostedUrl: "https://jobs.lever.co/acme/sales",
+                categories: { location: "Remote" },
+              },
+            ]),
+            { status: 200 }
+          );
+        }
+        if (String(url).includes("/beta")) {
+          return new Response(
+            JSON.stringify([
+              {
+                text: "Applied AI Engineer",
+                hostedUrl: sharedUrl,
+                categories: { location: "Remote" },
+              },
+              {
+                text: "Identity Engineer",
+                hostedUrl: "https://jobs.lever.co/beta/identity",
+                categories: { location: "India" },
+              },
+            ]),
+            { status: 200 }
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    });
+
+    assert.deepEqual(
+      {
+        scanned: summary.scanned,
+        new: summary.new,
+        filteredTitle: summary.filteredTitle,
+        filteredLocation: summary.filteredLocation,
+        duplicates: summary.duplicates,
+        invalid: summary.invalid,
+        expired: summary.expired,
+        errors: summary.errors,
+        offers: summary.offers.map(({ company, title, url }) => ({ company, title, url })),
+      },
+      {
+        scanned: 4,
+        new: 1,
+        filteredTitle: 1,
+        filteredLocation: 1,
+        duplicates: 1,
+        invalid: 0,
+        expired: 0,
+        errors: [],
+        offers: [{ company: "Acme", title: "Applied AI Engineer", url: sharedUrl }],
+      },
+      "the ordered incremental result must match the former whole-scan filter/dedup result"
+    );
+
+    const db = openDb({ repoRoot });
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sourced").get().count, 1);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB mode write:true stamps search-source watermarks in SQLite without writing YAML", async () => {
   const repoRoot = tempRepo();
   try {
@@ -414,6 +631,85 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
     assert.match(lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
   } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("search-source watermarks advance only after each source finishes", async () => {
+  const repoRoot = tempRepo();
+  const secondResponse = deferred();
+  const secondRequested = deferred();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            label: "First RSS",
+            source_type: "rss",
+            rssUrl: "https://example.test/first.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+          {
+            label: "Second RSS",
+            source_type: "rss",
+            rssUrl: "https://example.test/second.xml",
+            enabled: true,
+            recency: { mode: "since-last-run" },
+          },
+        ],
+      },
+    });
+
+    const scanPromise = runSourcedScan({
+      repoRoot,
+      write: true,
+      intake: false,
+      fetchImpl: async (url) => {
+        if (String(url).endsWith("/first.xml")) {
+          return rssResponse({
+            company: "First Co",
+            title: "Applied AI Engineer",
+            url: "https://example.test/jobs/first",
+          });
+        }
+        if (String(url).endsWith("/second.xml")) {
+          secondRequested.resolve();
+          return secondResponse.promise;
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    });
+
+    await secondRequested.promise;
+
+    const midScan = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.match(midScan.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.equal(
+      midScan.searches[1].recency.lastRunAt,
+      undefined,
+      "a pending source must not receive a watermark"
+    );
+
+    secondResponse.resolve(
+      rssResponse({
+        company: "Second Co",
+        title: "Identity Engineer",
+        url: "https://example.test/jobs/second",
+      })
+    );
+    const summary = await scanPromise;
+    assert.equal(summary.new, 2);
+
+    const completed = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.match(completed.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.match(completed.searches[1].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    secondResponse.resolve(new Response("", { status: 200 }));
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });
   }

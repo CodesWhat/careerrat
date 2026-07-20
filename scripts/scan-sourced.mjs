@@ -6,8 +6,8 @@
 // offer against candidate/targeting.yml + candidate/profile.yml
 // (scoreSourcedOffer, cold-family down-weighted via computeFamilyOutcomes),
 // dedupes against tracker.json + workspace/jobs (buildSeenSets), and reports
-// a summary — optionally persisting it to workspace/scan-results/ and a
-// human-readable workspace/intake/*.md digest. No AI model is ever called.
+// a summary — optionally capturing kept JDs and persisting Jobs-visible sourced
+// rows in DB workspaces. No AI model is ever called.
 //
 // M3 of the paid-POC journey (the /search surface) promoted the orchestration
 // below into an exported, importable runSourcedScan() — src/cli/search-route.mjs
@@ -26,8 +26,8 @@
 // Flags:
 //   --config <path>    Override config/sourced-scan.json's default path
 //   --company <name>   Scan only tracked_companies whose name includes this (case-insensitive)
-//   --write            Persist the summary to workspace/scan-results/sourced-<date>.json
-//   --intake           Also render workspace/intake/sourced-<date>.md
+//   --write            Capture kept JDs and persist Jobs-visible sourced rows
+//   --intake           Retained for CLI compatibility; no generated digest is written
 //   --verify           Liveness-check every kept offer's URL, drop expired ones
 //   --format=tracker   Print one tracker.html-paste-ready object literal per offer
 //   --summary          Print a human-readable summary instead of raw JSON
@@ -140,27 +140,79 @@ function isFetchableSearchSource(source) {
   return source.source_type === "board" && isBoardProviderSupported(source.provider);
 }
 
-function stampSearchSourceWatermarks(config, savedAt) {
+function stampSearchSourceWatermark(config, sourceIndex, savedAt) {
   const key = searchListKey(config);
-  if (!key) return { config, stamped: 0 };
-  let stamped = 0;
+  if (!key || !isFetchableSearchSource(config[key]?.[sourceIndex])) {
+    return { config, stamped: false };
+  }
   const lastRunAt = savedAt.toISOString();
-  const searches = config[key].map((source) => {
-    if (!isFetchableSearchSource(source)) return source;
-    stamped += 1;
-    return { ...source, recency: { ...(source.recency || {}), lastRunAt } };
-  });
-  return { config: { ...config, [key]: searches }, stamped };
+  const searches = config[key].map((source, index) =>
+    index === sourceIndex
+      ? { ...source, recency: { ...(source.recency || {}), lastRunAt } }
+      : source
+  );
+  return { config: { ...config, [key]: searches }, stamped: true };
 }
 
-function persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt }) {
+function persistSearchSourceWatermark({ pathCtx, searchSources, sourceIndex, savedAt }) {
   if (!searchSources) return null;
-  const { config, stamped } = stampSearchSourceWatermarks(searchSources, savedAt);
-  if (stamped === 0) return null;
+  const { config, stamped } = stampSearchSourceWatermark(searchSources, sourceIndex, savedAt);
+  if (!stamped) return null;
   if (dbExists(pathCtx)) {
     return sourceConfigPut({ ...pathCtx, name: "search-sources", data: config });
   }
   return null;
+}
+
+function enabledCompanies(config, companyFilter) {
+  return (config.tracked_companies || [])
+    .filter((entry) => entry && entry.enabled !== false)
+    .filter(
+      (entry) => !companyFilter || entry.name.toLowerCase().includes(companyFilter.toLowerCase())
+    );
+}
+
+function searchSourceTasks(searchSources) {
+  const key = searchListKey(searchSources);
+  if (!key) return [];
+  const entries = searchSources[key];
+  const rss = [];
+  const boards = [];
+  entries.forEach((source, sourceIndex) => {
+    if (!source || source.enabled === false) return;
+    if (source.source_type === "rss" || source.rssUrl) {
+      rss.push({ kind: "rss", source, sourceIndex });
+    }
+    if (source.source_type === "board" && isBoardProviderSupported(source.provider)) {
+      boards.push({ kind: "board", source, sourceIndex });
+    }
+  });
+  // The whole-scan path concatenated RSS results before board results. Keeping
+  // that order makes cross-source dedup choose the exact same winner.
+  return [...rss, ...boards];
+}
+
+function singleSearchSourceConfig(searchSources, source) {
+  const key = searchListKey(searchSources);
+  return { ...searchSources, [key]: [source] };
+}
+
+function emptyFilteredResult() {
+  return {
+    kept: [],
+    filteredTitle: [],
+    filteredLocation: [],
+    duplicates: [],
+    possibleDuplicates: [],
+    invalid: [],
+    expired: [],
+  };
+}
+
+function appendFilteredResult(target, result) {
+  for (const key of Object.keys(target)) {
+    if (Array.isArray(result[key])) target[key].push(...result[key]);
+  }
 }
 
 function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
@@ -198,8 +250,7 @@ function emptySeenContext() {
 //
 // Returns the summary object
 // ({scanned,new,filteredTitle,filteredLocation,duplicates,invalid,expired,
-// errors,offers}) — the exact shape written to workspace/scan-results/*.json
-// and returned as POST /api/search/scan's JSON response.
+// errors,offers}) returned as POST /api/search/scan's JSON response.
 //
 // `env` is accepted (not read yet) to keep this call symmetric with the
 // route-mounting functions in src/cli/*.mjs, all of which take env even
@@ -218,6 +269,7 @@ export async function runSourcedScan({
   verify = false,
   limit = 0,
   timestamped = false,
+  onProgress,
 } = {}) {
   void intake;
   void timestamped;
@@ -245,64 +297,120 @@ export async function runSourcedScan({
   const titleFilter = buildTitleFilter(config.title_filter);
   const locationFilter = buildLocationFilter(config.location_filter);
 
-  const scanned = await scanCompanies(config, { fetchImpl, companyFilter });
-
-  // Also scan the RSS-bearing and board-wide-aggregator sources from
-  // config/search-sources.yml (the file setup-searches writes). This wires the
-  // search-sources pipeline into the sweep; browser/auth source types
-  // (HiringCafe, Wellfound, authenticated LinkedIn/Indeed) are agent-driven
-  // per the Browser Automation Contract and not fetched here.
-  let sourcedFromSearches = { offers: [], errors: [] };
+  const scanned = { offers: [], errors: [] };
+  const filtered = emptyFilteredResult();
+  const outputOffers = [];
+  const savedAt = new Date();
+  const companies = enabledCompanies(config, companyFilter);
   let searchSources = null;
   if (!companyFilter && !standaloneConfigMode) {
     try {
       searchSources = loadSearchSourcesForRun(pathCtx);
-      if (searchSources) {
-        const [rssResult, boardResult] = await Promise.all([
-          scanSearchSources(searchSources, { fetchImpl }),
-          scanBoards(searchSources, { fetchImpl }),
-        ]);
-        sourcedFromSearches = {
-          offers: [...rssResult.offers, ...boardResult.offers],
-          errors: [...rssResult.errors, ...boardResult.errors],
-        };
-      }
     } catch (error) {
-      sourcedFromSearches.errors.push({ company: "search-sources.yml", error: error.message });
+      scanned.errors.push({ company: "search-sources.yml", error: error.message });
     }
   }
-  const allOffers = [...scanned.offers, ...sourcedFromSearches.offers];
-  scanned.offers = allOffers;
-  scanned.errors = [...scanned.errors, ...sourcedFromSearches.errors];
-
-  let filtered = filterAndDedupeOffers(allOffers, {
-    seenUrls,
-    seenReqIds,
-    seenCompanyRoles,
-    titleFilter,
-    locationFilter,
-    config: candidateConfig,
-  });
-
-  if (verify && filtered.kept.length > 0) {
-    const checked = [];
-    const dropped = [];
-    for (const offer of filtered.kept) {
-      const live = await checkUrlLiveness(offer.url);
-      if (live.result === "expired") dropped.push({ ...offer, liveness: live });
-      else checked.push({ ...offer, liveness: live });
-    }
-    filtered = { ...filtered, kept: checked, expired: dropped };
+  const sourceTasks = searchSourceTasks(searchSources);
+  const totalSources = companies.length + sourceTasks.length;
+  let completedSources = 0;
+  const remainingTasksBySource = new Map();
+  const failedSourceIndexes = new Set();
+  for (const task of sourceTasks) {
+    remainingTasksBySource.set(
+      task.sourceIndex,
+      (remainingTasksBySource.get(task.sourceIndex) || 0) + 1
+    );
   }
 
-  const savedAt = new Date();
-  const keptForOutput = limit > 0 ? filtered.kept.slice(0, limit) : filtered.kept;
-  const offersForOutput = write
-    ? standaloneConfigMode
-      ? offersWithCapturedJobs({ repoRoot, env, offers: keptForOutput, savedAt })
-      : captureOffersForOutput({ repoRoot, env, offers: keptForOutput, savedAt })
-    : keptForOutput;
-  const outputOffers = offersForOutput.map((offer) => toOutputOffer(offer));
+  async function acceptBatch(result, batch) {
+    scanned.offers.push(...result.offers);
+    scanned.errors.push(...result.errors);
+
+    let batchFiltered = filterAndDedupeOffers(result.offers, {
+      seenUrls,
+      seenReqIds,
+      seenCompanyRoles,
+      titleFilter,
+      locationFilter,
+      config: candidateConfig,
+    });
+
+    if (verify && batchFiltered.kept.length > 0) {
+      const checked = [];
+      const dropped = [];
+      for (const offer of batchFiltered.kept) {
+        const live = await checkUrlLiveness(offer.url);
+        if (live.result === "expired") dropped.push({ ...offer, liveness: live });
+        else checked.push({ ...offer, liveness: live });
+      }
+      batchFiltered = { ...batchFiltered, kept: checked, expired: dropped };
+    }
+
+    appendFilteredResult(filtered, batchFiltered);
+    const remainingLimit = limit > 0 ? Math.max(0, limit - outputOffers.length) : Infinity;
+    const keptForOutput = batchFiltered.kept.slice(0, remainingLimit);
+    const offersForOutput = write
+      ? standaloneConfigMode
+        ? offersWithCapturedJobs({ repoRoot, env, offers: keptForOutput, savedAt })
+        : captureOffersForOutput({ repoRoot, env, offers: keptForOutput, savedAt })
+      : keptForOutput;
+    outputOffers.push(...offersForOutput.map((offer) => toOutputOffer(offer)));
+    completedSources += 1;
+
+    if (typeof onProgress === "function") {
+      await onProgress({
+        foundCount: filtered.kept.length,
+        offerCount: outputOffers.length,
+        scannedCount: scanned.offers.length,
+        errorCount: scanned.errors.length,
+        completedSources,
+        totalSources,
+        batch,
+      });
+    }
+  }
+
+  for (const company of companies) {
+    const result = await scanCompanies(
+      { ...config, tracked_companies: [company] },
+      { fetchImpl, companyFilter: null }
+    );
+    await acceptBatch(result, { kind: "company", label: company.name });
+  }
+
+  // Also scan RSS-bearing and board-wide sources. Processing singleton configs
+  // turns each completed fetch into an independently visible Jobs batch while
+  // retaining the former company -> RSS -> board ordering for exact dedup parity.
+  for (const task of sourceTasks) {
+    const singleton = singleSearchSourceConfig(searchSources, task.source);
+    const result =
+      task.kind === "rss"
+        ? await scanSearchSources(singleton, { fetchImpl })
+        : await scanBoards(singleton, { fetchImpl });
+    await acceptBatch(result, {
+      kind: task.kind,
+      label: task.source.label || task.source.provider || task.kind,
+    });
+
+    if (result.errors.length > 0) failedSourceIndexes.add(task.sourceIndex);
+    const remaining = (remainingTasksBySource.get(task.sourceIndex) || 1) - 1;
+    remainingTasksBySource.set(task.sourceIndex, remaining);
+    if (
+      write &&
+      !standaloneConfigMode &&
+      remaining === 0 &&
+      !failedSourceIndexes.has(task.sourceIndex)
+    ) {
+      const persisted = persistSearchSourceWatermark({
+        pathCtx,
+        searchSources,
+        sourceIndex: task.sourceIndex,
+        savedAt,
+      });
+      if (persisted?.data) searchSources = persisted.data;
+    }
+  }
+
   const summary = {
     scanned: scanned.offers.length,
     new: filtered.kept.length,
@@ -314,10 +422,6 @@ export async function runSourcedScan({
     errors: scanned.errors,
     offers: outputOffers,
   };
-
-  if (write && !standaloneConfigMode) {
-    persistSearchSourceWatermarks({ pathCtx, searchSources, savedAt });
-  }
 
   return summary;
 }

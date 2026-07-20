@@ -8,6 +8,7 @@ import {
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunLatest,
+  sourcingRunProgress,
   sourcingRunStart,
 } from "../src/core/db/verbs/sourcing-runs.mjs";
 import { candidateSetupInitialize } from "../src/core/db/verbs.mjs";
@@ -78,6 +79,42 @@ test("sourcingRunStart persists running state and complete persists summary JSON
   const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
   assert.equal(latest.status, "completed");
   assert.deepEqual(latest.run.summary, completed.run.summary);
+});
+
+test("sourcingRunProgress merges live found counts into a running run", () => {
+  const repoRoot = tempRepo();
+  const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+
+  const first = sourcingRunProgress({
+    repoRoot,
+    id: started.run.id,
+    progress: {
+      foundCount: 1,
+      offerCount: 1,
+      scannedCount: 3,
+      completedSources: 1,
+      totalSources: 2,
+    },
+  });
+  const second = sourcingRunProgress({
+    repoRoot,
+    id: started.run.id,
+    progress: { foundCount: 2, offerCount: 2, scannedCount: 5, completedSources: 2 },
+  });
+
+  assert.equal(first.run.status, "running");
+  assert.deepEqual(second.run.progress, {
+    foundCount: 2,
+    offerCount: 2,
+    scannedCount: 5,
+    completedSources: 2,
+    totalSources: 2,
+  });
+  assert.ok(Date.parse(first.run.updated_at) > Date.parse(started.run.updated_at));
+  assert.ok(Date.parse(second.run.updated_at) > Date.parse(first.run.updated_at));
+
+  const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
+  assert.deepEqual(latest.run.progress, second.run.progress);
 });
 
 test("sourcingRunFail persists actionable error JSON", () => {

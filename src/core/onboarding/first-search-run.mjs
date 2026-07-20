@@ -6,6 +6,7 @@ import {
   sourcingRunComplete,
   sourcingRunFail,
   sourcingRunLatest,
+  sourcingRunProgress,
   sourcingRunStart,
 } from "../db/verbs/sourcing-runs.mjs";
 import { normalizeCompanyKey, resolveCompanyBoard } from "../discovery/company-board-resolver.mjs";
@@ -712,7 +713,38 @@ export async function runFirstSearchInBackground({
       return sourcingRunFail({ ...pathCtx, id: runId, error: sourceSetupError() }).run;
     }
 
-    const summary = await runSourcedScan({ repoRoot, env, fetchImpl, write: true });
+    // Progress is best-effort telemetry. A failed progress write (e.g. the run
+    // was concurrently failed or retried, flipping it out of RUNNING) must never
+    // abort the scan or block completion — partial results are already persisted
+    // per batch regardless. Same convention as the detached-run .catch() callers.
+    const recordProgress = (progress) => {
+      try {
+        sourcingRunProgress({ ...pathCtx, id: runId, progress });
+      } catch {
+        /* best-effort: never let progress telemetry fail the scan */
+      }
+    };
+
+    let lastProgress = null;
+    const summary = await runSourcedScan({
+      repoRoot,
+      env,
+      fetchImpl,
+      write: true,
+      onProgress: ({ batch: _batch, ...progress }) => {
+        lastProgress = progress;
+        recordProgress(progress);
+      },
+    });
+    recordProgress({
+      completedSources: 0,
+      totalSources: deterministicSources.attempted,
+      ...(lastProgress || {}),
+      foundCount: Number(summary.new || 0),
+      offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
+      scannedCount: Number(summary.scanned || 0),
+      errorCount: Array.isArray(summary.errors) ? summary.errors.length : 0,
+    });
     return sourcingRunComplete({
       ...pathCtx,
       id: runId,

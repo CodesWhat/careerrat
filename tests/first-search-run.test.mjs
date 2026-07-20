@@ -12,9 +12,11 @@ import {
   sourceConfigGet,
   sourceConfigPut,
   sourcingRunLatest,
+  sourcingRunStart,
 } from "../src/core/db/verbs.mjs";
 import {
   countDeterministicSources,
+  latestSourcingRunForUi,
   prepareFirstSearchSources,
   runFirstSearchInBackground,
   startFirstSearchRun,
@@ -28,6 +30,30 @@ function tempRepo() {
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;
+}
+
+function deferred() {
+  let resolve;
+  let reject;
+  const promise = new Promise((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function leverResponse({ title, url }) {
+  return new Response(
+    JSON.stringify([
+      {
+        text: title,
+        hostedUrl: url,
+        categories: { location: "Remote" },
+        descriptionBodyPlain: "Build AI and identity automation systems.",
+      },
+    ]),
+    { status: 200 }
+  );
 }
 
 function markSearchReady(repoRoot, { domain = "software engineering" } = {}) {
@@ -540,4 +566,77 @@ test("zero-result scans with attempted deterministic sources complete with zero-
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
   assert.equal(latest.run.summary.deterministicSources.attempted, 1);
+});
+
+test("background first search publishes a growing found count before completion", async () => {
+  const repoRoot = tempRepo();
+  const betaResponse = deferred();
+  const betaRequested = deferred();
+  let background;
+  try {
+    sourceConfigPut({
+      repoRoot,
+      name: "sourced-scan",
+      data: {
+        title_filter: { positive: [], negative: [] },
+        location_filter: null,
+        tracked_companies: [
+          { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+          { name: "Beta", careers_url: "https://jobs.lever.co/beta" },
+        ],
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: { title_filter: {}, location_filter: null, searches: [] },
+    });
+    const started = sourcingRunStart({ repoRoot, purpose: "first-search" });
+
+    background = runFirstSearchInBackground({
+      repoRoot,
+      env: {},
+      runId: started.run.id,
+      fetchImpl: async (url) => {
+        if (String(url).includes("/acme")) {
+          return leverResponse({
+            title: "Applied AI Engineer",
+            url: "https://jobs.lever.co/acme/applied-ai",
+          });
+        }
+        if (String(url).includes("/beta")) {
+          betaRequested.resolve();
+          return betaResponse.promise;
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    });
+
+    await betaRequested.promise;
+
+    const running = latestSourcingRunForUi({ repoRoot, purpose: "first-search" }).run;
+    assert.equal(running.status, "running");
+    assert.equal(running.progress.foundCount, 1);
+    assert.equal(running.progress.offerCount, 1);
+    assert.equal(running.progress.completedSources, 1);
+    assert.equal(running.progress.totalSources, 2);
+
+    betaResponse.resolve(
+      leverResponse({
+        title: "Identity Automation Engineer",
+        url: "https://jobs.lever.co/beta/identity-automation",
+      })
+    );
+    await background;
+
+    const completed = sourcingRunLatest({ repoRoot, purpose: "first-search" }).run;
+    assert.equal(completed.status, "completed");
+    assert.equal(completed.progress.foundCount, 2);
+    assert.equal(completed.progress.foundCount, completed.summary.new);
+    assert.equal(completed.progress.offerCount, completed.summary.offerCount);
+    assert.equal(completed.progress.completedSources, 2);
+  } finally {
+    betaResponse.resolve(new Response("[]", { status: 200 }));
+    await background?.catch(() => {});
+  }
 });
