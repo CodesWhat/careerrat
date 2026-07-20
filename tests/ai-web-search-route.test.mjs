@@ -36,6 +36,7 @@ function request(body = "{}") {
   const req = Readable.from([Buffer.from(body)]);
   req.url = "/api/search/ai-web-search/run";
   req.method = "POST";
+  req.headers = { "content-type": "application/json" };
   return req;
 }
 

@@ -124,13 +124,14 @@ test("buildChildEnv: byok route sets ANTHROPIC_API_KEY/BASE_URL, no custom heade
   const childEnv = buildChildEnv({
     route: { type: "byok", apiKey: "sk-ant-real", baseUrl: "https://api.anthropic.com" },
     skill: "evaluate-job",
-    baseEnv: { PATH: "/usr/bin", SOME_OTHER: "kept" },
+    baseEnv: { PATH: "/usr/bin", SOME_OTHER: "must-not-leak", PRIVATE_TOKEN: "secret" },
   });
   assert.equal(childEnv.ANTHROPIC_API_KEY, "sk-ant-real");
   assert.equal(childEnv.ANTHROPIC_BASE_URL, "https://api.anthropic.com");
   assert.equal(childEnv.ANTHROPIC_CUSTOM_HEADERS, undefined);
   assert.equal(childEnv.PATH, "/usr/bin");
-  assert.equal(childEnv.SOME_OTHER, "kept");
+  assert.equal(childEnv.SOME_OTHER, undefined);
+  assert.equal(childEnv.PRIVATE_TOKEN, undefined);
 });
 
 test("buildChildEnv: proxy route sends the proxy TOKEN as ANTHROPIC_API_KEY and labels feature metadata", () => {
@@ -515,37 +516,40 @@ const SAMPLE_RUN = [
   },
 ];
 
-test("RUNTIME_TOOLS: app-safe default excludes mutation and shell tools", () => {
-  assert.deepEqual(RUNTIME_TOOLS, ["Read", "Glob", "Grep", "WebFetch", "Skill"]);
-  for (const broadTool of ["Write", "Edit", "Bash"]) {
+test("RUNTIME_TOOLS: app-safe default excludes network, mutation, and shell tools", () => {
+  assert.deepEqual(RUNTIME_TOOLS, ["Read", "Glob", "Grep", "Skill"]);
+  for (const broadTool of ["WebFetch", "WebSearch", "Write", "Edit", "Bash"]) {
     assert.equal(RUNTIME_TOOLS.includes(broadTool), false, `${broadTool} must not be app-safe`);
   }
 });
 
-test("runtime tool profiles: resolve app-safe, chat, and explicit tool-heavy tools", async () => {
+test("runtime tool profiles structurally separate local reads from network research", async () => {
   const {
     APP_SAFE_RUNTIME_TOOLS,
     CHAT_RUNTIME_TOOLS,
     DEFAULT_RUNTIME_TOOL_PROFILE,
-    TOOL_HEAVY_RUNTIME_TOOLS,
-    isToolHeavyProfile,
     resolveRuntimeTools,
   } = await import("../src/core/ai/runtime-tools.mjs");
 
   assert.equal(DEFAULT_RUNTIME_TOOL_PROFILE, "app-safe");
-  assert.deepEqual(APP_SAFE_RUNTIME_TOOLS, ["Read", "Glob", "Grep", "WebFetch", "Skill"]);
+  assert.deepEqual(APP_SAFE_RUNTIME_TOOLS, ["Read", "Glob", "Grep", "Skill"]);
   assert.deepEqual(resolveRuntimeTools(), APP_SAFE_RUNTIME_TOOLS);
   assert.deepEqual(resolveRuntimeTools({ toolProfile: "app-safe" }), APP_SAFE_RUNTIME_TOOLS);
-  assert.deepEqual(CHAT_RUNTIME_TOOLS, [...APP_SAFE_RUNTIME_TOOLS, "WebSearch"]);
+  assert.deepEqual(CHAT_RUNTIME_TOOLS, ["WebSearch", "WebFetch", "Skill"]);
+  assert.deepEqual(resolveRuntimeTools({ toolProfile: "chat" }), CHAT_RUNTIME_TOOLS);
+  assert.equal(CHAT_RUNTIME_TOOLS.includes("Read"), false);
+  assert.equal(APP_SAFE_RUNTIME_TOOLS.includes("WebFetch"), false);
+  assert.equal(APP_SAFE_RUNTIME_TOOLS.includes("WebSearch"), false);
 
   for (const broadTool of ["Write", "Edit", "Bash"]) {
     assert.equal(APP_SAFE_RUNTIME_TOOLS.includes(broadTool), false);
-    assert.equal(TOOL_HEAVY_RUNTIME_TOOLS.includes(broadTool), true);
+    assert.equal(CHAT_RUNTIME_TOOLS.includes(broadTool), false);
   }
 
-  assert.deepEqual(resolveRuntimeTools({ toolProfile: "tool-heavy" }), TOOL_HEAVY_RUNTIME_TOOLS);
-  assert.equal(isToolHeavyProfile("tool-heavy"), true);
-  assert.equal(isToolHeavyProfile("app-safe"), false);
+  assert.throws(
+    () => resolveRuntimeTools({ toolProfile: "tool-heavy" }),
+    /unsupported.*tool-heavy/
+  );
 
   const callerTools = ["Read"];
   const resolvedOverride = resolveRuntimeTools({ tools: callerTools, toolProfile: "tool-heavy" });
@@ -555,6 +559,7 @@ test("runtime tool profiles: resolve app-safe, chat, and explicit tool-heavy too
     callerTools,
     "explicit tools arrays must be copied before SDK use"
   );
+  assert.throws(() => resolveRuntimeTools({ tools: ["Bash"] }), /tool.*Bash.*not allowed/i);
 
   assert.throws(
     () => resolveRuntimeTools({ toolProfile: "unclassified" }),
@@ -566,7 +571,7 @@ test("runSkillStream: default caller gets app-safe runtime tools passed to query
   const { APP_SAFE_RUNTIME_TOOLS } = await import("../src/core/ai/runtime-tools.mjs");
   const repoRoot = tempRepoWithSkill("evaluate-job");
   try {
-    let seenTools = null;
+    let seenOptions = null;
     await runSkillStream({
       skill: "evaluate-job",
       feature: "job-evaluation",
@@ -578,17 +583,37 @@ test("runSkillStream: default caller gets app-safe runtime tools passed to query
       onEvent: () => {},
       loadSdk: async () => ({
         query: ({ options }) => {
-          seenTools = options.tools;
+          seenOptions = options;
           return fakeSdk(SAMPLE_RUN).query({ options });
         },
       }),
     });
-    assert.deepEqual(seenTools, APP_SAFE_RUNTIME_TOOLS);
-    for (const broadTool of ["Write", "Edit", "Bash"]) {
+    assert.deepEqual(seenOptions.tools, APP_SAFE_RUNTIME_TOOLS);
+    assert.equal(seenOptions.permissionMode, "default");
+    assert.equal(seenOptions.allowDangerouslySkipPermissions, undefined);
+    assert.equal(typeof seenOptions.canUseTool, "function");
+    assert.equal(typeof seenOptions.hooks?.PreToolUse?.[0]?.hooks?.[0], "function");
+
+    const allowedRead = await seenOptions.canUseTool(
+      "Read",
+      { file_path: join(repoRoot, "workspace/jobs/role.md") },
+      {}
+    );
+    assert.equal(allowedRead.behavior, "allow");
+    const secretRead = await seenOptions.canUseTool(
+      "Read",
+      { file_path: join(repoRoot, ".internal/ai.env") },
+      {}
+    );
+    assert.equal(secretRead.behavior, "deny");
+    const outsideRead = await seenOptions.canUseTool("Read", { file_path: "/etc/passwd" }, {});
+    assert.equal(outsideRead.behavior, "deny");
+
+    for (const broadTool of ["WebFetch", "WebSearch", "Write", "Edit", "Bash"]) {
       assert.equal(
-        seenTools.includes(broadTool),
+        seenOptions.tools.includes(broadTool),
         false,
-        `${broadTool} must require tool-heavy opt-in`
+        `${broadTool} must not be available to a local-read runtime`
       );
     }
   } finally {
@@ -620,36 +645,26 @@ test("runSkillStream: an explicit tools override (M8's resume-extract: ['Read'])
   }
 });
 
-test("runSkillStream: toolProfile 'tool-heavy' opts into mutation and shell tools", async () => {
-  const { TOOL_HEAVY_RUNTIME_TOOLS } = await import("../src/core/ai/runtime-tools.mjs");
+test("runSkillStream: toolProfile 'tool-heavy' is disabled before the SDK loads", async () => {
   const repoRoot = tempRepoWithSkill("evaluate-job");
   try {
-    let seenTools = null;
-    await runSkillStream({
-      skill: "evaluate-job",
-      feature: "job-evaluation",
-      action: "gate",
-      operation: "job.gate",
-      input: "hi",
-      repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
-      toolProfile: "tool-heavy",
-      onEvent: () => {},
-      loadSdk: async () => ({
-        query: ({ options }) => {
-          seenTools = options.tools;
-          return fakeSdk(SAMPLE_RUN).query({ options });
+    let loadSdkCalled = false;
+    await assert.rejects(
+      runSkillStream({
+        skill: "evaluate-job",
+        input: "hi",
+        repoRoot,
+        env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+        toolProfile: "tool-heavy",
+        onEvent: () => {},
+        loadSdk: async () => {
+          loadSdkCalled = true;
+          return fakeSdk(SAMPLE_RUN);
         },
       }),
-    });
-    assert.deepEqual(seenTools, TOOL_HEAVY_RUNTIME_TOOLS);
-    for (const broadTool of ["Write", "Edit", "Bash"]) {
-      assert.equal(
-        seenTools.includes(broadTool),
-        true,
-        `${broadTool} appears only by explicit profile`
-      );
-    }
+      (err) => err.code === "RUNTIME_TOOL_PROFILE_INVALID"
+    );
+    assert.equal(loadSdkCalled, false);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }

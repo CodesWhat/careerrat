@@ -7,7 +7,7 @@
 import assert from "node:assert/strict";
 import { Readable } from "node:stream";
 import { test } from "node:test";
-import { mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
+import { buildDiscoveryKickoff, mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
 
 function fakeChatRuntime() {
   const starts = [];
@@ -107,6 +107,20 @@ async function invokeJson(server, method, path, payload) {
   const body = res.rawBody ? JSON.parse(res.rawBody) : {};
   return { status: res.status, body };
 }
+
+test("buildDiscoveryKickoff includes server-selected outbound-safe candidate context", () => {
+  const kickoff = buildDiscoveryKickoff({
+    skill: "research-boards",
+    message: "Find more sources.",
+    candidateContext: {
+      role_buckets: [{ titles: ["Platform Engineer"] }],
+      location: { remote: true },
+    },
+  });
+  assert.match(kickoff, /Outbound-safe candidate context/);
+  assert.match(kickoff, /Platform Engineer/);
+  assert.match(kickoff, /"remote":true/);
+});
 
 test("POST /api/discovery/quick-start prepares sources and starts the visible research-boards chat", async () => {
   const { server, chatRuntime } = await bootServer();

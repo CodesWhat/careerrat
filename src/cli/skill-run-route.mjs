@@ -33,7 +33,6 @@ import { resolveAllowedChatSkills } from "../core/ai/chat-runtime.mjs";
 import {
   APP_SAFE_RUNTIME_TOOLS,
   DEFAULT_RUNTIME_TOOL_PROFILE,
-  isToolHeavyProfile,
   RUNTIME_TOOL_PROFILES,
 } from "../core/ai/runtime-tools.mjs";
 import { resolveAllowedSkills } from "../core/ai/skill-runtime.mjs";
@@ -45,20 +44,6 @@ const DISCOVERY_CHAT_HANDOFF_SKILLS = new Set([
   "discover-companies",
   "search-jobs",
 ]);
-const TOOL_HEAVY_RUNTIME_SKILLS = new Set([
-  "apply-job",
-  "sync-status",
-  "interview-prep",
-  "ingest-mail",
-  "ingest-messages",
-  "relationship-sourcing",
-  "calendar-sync",
-]);
-
-function allowedToolHeavySkills(skills) {
-  return skills.filter((skill) => TOOL_HEAVY_RUNTIME_SKILLS.has(skill));
-}
-
 // Exported so other route mounters (src/cli/onboard-route.mjs) reuse the
 // exact same JSON-response and capped-body-read primitives instead of
 // duplicating them — see that file's header comment.
@@ -81,6 +66,20 @@ export function sendJson(res, status, body) {
 // reject there — the socket stays intact for the response.
 export function readJsonBodyCapped(req, maxBytes) {
   return new Promise((resolve, reject) => {
+    const mediaType = String(req.headers?.["content-type"] || "")
+      .split(";", 1)[0]
+      .trim()
+      .toLowerCase();
+    // Reject declared non-JSON media types so simple text/plain browser requests
+    // cannot bypass the normal preflight and origin boundary. A missing header
+    // remains compatible with trusted local-process callers; browser traffic is
+    // separately origin/capability checked at the server boundary.
+    if (mediaType && mediaType !== "application/json" && !mediaType.endsWith("+json")) {
+      const err = new Error("content-type must be application/json");
+      err.status = 415;
+      reject(err);
+      return;
+    }
     let size = 0;
     let overflowed = false;
     const chunks = [];
@@ -161,7 +160,7 @@ function statusForRunError(err) {
   return 500;
 }
 
-function validateToolProfileRequest({ skill, toolProfile }) {
+function validateToolProfileRequest({ toolProfile }) {
   if (toolProfile === undefined || toolProfile === null || toolProfile === "") {
     return undefined;
   }
@@ -175,13 +174,6 @@ function validateToolProfileRequest({ skill, toolProfile }) {
     err.status = 400;
     throw err;
   }
-  if (isToolHeavyProfile(normalizedProfile) && !TOOL_HEAVY_RUNTIME_SKILLS.has(skill)) {
-    const err = new Error(
-      `skill "${skill}" is not classified for tool-heavy runtime profile "${normalizedProfile}"`
-    );
-    err.status = 400;
-    throw err;
-  }
   return normalizedProfile;
 }
 
@@ -190,7 +182,6 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
     const skills = resolveAllowedSkills({ repoRoot, env });
     const chatSkills = resolveAllowedChatSkills({ repoRoot, env });
     const route = resolveAIRoute(env);
-    const toolHeavySkills = allowedToolHeavySkills(skills);
     sendJson(res, 200, {
       skills,
       chatSkills,
@@ -202,8 +193,8 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
         defaultToolProfile: DEFAULT_RUNTIME_TOOL_PROFILE,
         defaultTools: [...APP_SAFE_RUNTIME_TOOLS],
         toolHeavy: {
-          available: toolHeavySkills.length > 0,
-          skills: toolHeavySkills,
+          available: false,
+          skills: [],
         },
       },
       discovery: {
@@ -257,7 +248,7 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
     const input = body?.input;
     let toolProfile;
     try {
-      toolProfile = validateToolProfileRequest({ skill, toolProfile: body?.toolProfile });
+      toolProfile = validateToolProfileRequest({ toolProfile: body?.toolProfile });
     } catch (err) {
       sendJson(res, err.status || 400, { error: err.message });
       return;

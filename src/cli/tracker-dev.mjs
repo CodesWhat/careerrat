@@ -43,11 +43,21 @@ import { reconcileOrphanedLaneCIntakeItems } from "../core/db/verbs.mjs";
 import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
 import {
+  buildContentSecurityPolicy,
+  inlineScriptsFromHtml,
+  securityHeaders,
+} from "../core/security/browser-policy.mjs";
+import {
   LIVERELOAD_SNIPPET,
   mimeFor,
   resolvePort,
   safeAssetPath,
 } from "../core/tracker/dev-server.mjs";
+import {
+  createLocalRequestSecurity,
+  resolveTrackerBindHost,
+  sendLocalSecurityError,
+} from "../core/tracker/request-security.mjs";
 import { mountAiProvisionRoutes } from "./ai-provision-route.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountBoardsRoutes } from "./boards-route.mjs";
@@ -67,6 +77,14 @@ import { mountSourcingRoutes } from "./sourcing-route.mjs";
 import { mountTrackOutcomeRoutes } from "./track-outcome-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
+const LOCAL_BROWSER_SECURITY_HEADERS = securityHeaders({
+  csp: buildContentSecurityPolicy({
+    inlineScripts: [
+      ...inlineScriptsFromHtml(CHAT_PAGE_HTML),
+      ...inlineScriptsFromHtml(LIVERELOAD_SNIPPET),
+    ],
+  }),
+});
 
 // The running package's own version is a property of the CODE, not of whichever
 // workspace/data root a given createDevServer() instance points at — read it
@@ -133,6 +151,7 @@ export function createDevServer({
   // npm pack/publish), shipped via package.json#files["apps/web/dist"].
   const APP_DIST_DIR = join(repoRoot, "apps/web/dist");
   const APP_INDEX_HTML = join(APP_DIST_DIR, "index.html");
+  const requestSecurity = createLocalRequestSecurity({ env });
 
   // SSE clients subscribed to reload/tracker-update/activity-update events.
   const clients = new Set();
@@ -352,7 +371,18 @@ export function createDevServer({
   // HTTP server
 
   const server = createServer((req, res) => {
+    for (const [name, value] of Object.entries(LOCAL_BROWSER_SECURITY_HEADERS)) {
+      res.setHeader(name, value);
+    }
     const url = (req.url || "/").split("?")[0];
+    const securityDecision = requestSecurity.authorize(req, { server, url });
+    if (!securityDecision.ok) {
+      sendLocalSecurityError(res, securityDecision);
+      return;
+    }
+    if (securityDecision.setCookie) {
+      res.setHeader("Set-Cookie", securityDecision.setCookie);
+    }
 
     const route = routes.get(`${req.method} ${url}`);
     if (route) {
@@ -674,11 +704,10 @@ async function main() {
 
   dev.startWatching();
 
-  // Loopback-only by default: this server executes skills (Bash and all, via
-  // /api/skill/run) and accepts local credential writes (/api/settings/ai-key)
-  // — it must never be reachable from the LAN unless the operator explicitly
-  // opts in with ROLESTER_TRACKER_HOST (e.g. for a trusted-network preview).
-  const host = process.env.ROLESTER_TRACKER_HOST || "127.0.0.1";
+  // This process exposes candidate data, credential writes, and bounded agent
+  // runtimes. Keep its native-client trust assumption confined to loopback;
+  // public previews are built as inert static bundles by build-demo.mjs.
+  const host = resolveTrackerBindHost(process.env);
   dev.server.listen(port, host, () => {
     const url = `http://localhost:${port}`;
     log(`serving ${url}`);

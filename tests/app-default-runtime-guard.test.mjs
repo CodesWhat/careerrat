@@ -134,7 +134,8 @@ const CLASSIFIED_RETAINED_RUNTIME_FILES = [
     classification: "retained one-shot skill runtime owner",
     patterns: [
       /\bexport async function runSkillStream\b/,
-      /\bpermissionMode:\s*"bypassPermissions"/,
+      /\bpermissionMode:\s*"default"/,
+      /\bcreateRuntimeToolPolicy\b/,
     ],
   },
   {

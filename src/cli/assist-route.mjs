@@ -138,8 +138,7 @@ export async function runBareOneshot({ prompt, repoRoot, env, labels, skillLabel
       abortController: controller,
       tools: [],
       maxTurns: 1,
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
+      permissionMode: "default",
     },
   });
 

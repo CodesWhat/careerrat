@@ -1,4 +1,7 @@
+import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
 import { APPLY_PATTERNS, classifyLiveness } from "./liveness-core.mjs";
+
+const LIVENESS_MAX_BYTES = 1024 * 1024;
 
 export function htmlToText(html = "") {
   return String(html)
@@ -14,7 +17,10 @@ export function extractApplyControlsFromHtml(html = "") {
   return APPLY_PATTERNS.some((pattern) => pattern.test(text)) ? ["Apply"] : [];
 }
 
-export async function checkUrlLiveness(url, { fetchImpl = fetch, timeoutMs = 15000 } = {}) {
+export async function checkUrlLiveness(
+  url,
+  { fetchImpl = fetch, resolveHost, timeoutMs = 15000, maxBytes = LIVENESS_MAX_BYTES } = {}
+) {
   let parsed;
   try {
     parsed = new URL(url);
@@ -30,14 +36,26 @@ export async function checkUrlLiveness(url, { fetchImpl = fetch, timeoutMs = 150
     };
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetchImpl(url, { signal: controller.signal, redirect: "follow" });
-    const html = await response.text();
+    const fetched = await fetchPublicHttpText(url, {
+      fetchImpl,
+      resolveHost,
+      timeoutMs,
+      maxBytes,
+    });
+    if (!fetched.ok) {
+      const unsafe = fetched.code === "unsafe_url" || fetched.code === "unsafe_redirect";
+      return {
+        result: "uncertain",
+        code: unsafe ? "unsafe_url" : fetched.code,
+        reason: fetched.reason,
+        url,
+      };
+    }
+    const html = fetched.rawText;
     const classified = classifyLiveness({
-      status: response.status,
-      finalUrl: response.url || url,
+      status: fetched.status,
+      finalUrl: fetched.finalUrl || url,
       bodyText: htmlToText(html),
       applyControls: extractApplyControlsFromHtml(html),
     });
@@ -56,8 +74,6 @@ export async function checkUrlLiveness(url, { fetchImpl = fetch, timeoutMs = 150
     };
   } catch (error) {
     return { result: "uncertain", code: "navigation_error", reason: error.message, url };
-  } finally {
-    clearTimeout(timeout);
   }
 }
 

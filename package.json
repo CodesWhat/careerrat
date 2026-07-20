@@ -165,7 +165,12 @@
     "lefthook@2.1.9": true,
     "sharp@0.34.5": true
   },
+  "overrides": {
+    "postcss": "^8.5.10"
+  },
   "dependencies": {
-    "mammoth": "^1.12.0"
+    "mammoth": "^1.12.0",
+    "sanitize-html": "^2.17.4",
+    "undici": "^7.28.0"
   }
 }

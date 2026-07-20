@@ -1,6 +1,6 @@
 // export.mjs — render tailored artifacts (resume, cover letter, packet) to PDF or DOCX.
-// Zero NEW runtime dependencies: PDF via Playwright Chromium (already a devDep);
-// DOCX via pandoc → soffice → hand-rolled OOXML, detected in that priority order.
+// PDF via Playwright Chromium; DOCX via pandoc → soffice → hand-rolled OOXML,
+// detected in that priority order. Preview fragments are sanitized server-side.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -8,8 +8,93 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
+import sanitizeHtml from "sanitize-html";
 
 const repoRoot = join(fileURLToPath(new URL("../../..", import.meta.url)));
+const ARTIFACT_HTML_TAGS = [
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "p",
+  "strong",
+  "em",
+  "code",
+  "a",
+  "span",
+  "ul",
+  "ol",
+  "li",
+  "hr",
+  "pre",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "blockquote",
+  "br",
+];
+
+function safeArtifactHref(value) {
+  const href = String(value || "").trim();
+  const hasAsciiControl = [...href].some((char) => {
+    const code = char.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+  if (!href || href.startsWith("//") || hasAsciiControl) return null;
+
+  const colon = href.indexOf(":");
+  if (colon === 0) return null;
+  if (colon > 0) {
+    const scheme = href.slice(0, colon);
+    // Reject encoded/entity/whitespace-obfuscated schemes before URL parsing;
+    // browsers normalize several of these into executable protocols.
+    if (/[%&\s]/.test(scheme) || !/^[a-z][a-z\d+.-]*$/i.test(scheme)) return null;
+    if (!["http", "https", "mailto"].includes(scheme.toLowerCase())) return null;
+    try {
+      const parsed = new URL(href);
+      if (!parsed.protocol) return null;
+    } catch {
+      return null;
+    }
+    return href;
+  }
+
+  if (href.includes("://")) return null;
+  try {
+    new URL(href, "https://rolester.invalid/");
+    return href;
+  } catch {
+    return null;
+  }
+}
+
+function artifactAnchorTransform(_tagName, attributes) {
+  const href = safeArtifactHref(attributes?.href);
+  if (!href) return { tagName: "span", attribs: {} };
+  if (/^https?:/i.test(href)) {
+    return {
+      tagName: "a",
+      attribs: { href, target: "_blank", rel: "noopener noreferrer" },
+    };
+  }
+  return { tagName: "a", attribs: { href } };
+}
+
+export function sanitizeArtifactHtml(html) {
+  return sanitizeHtml(String(html || ""), {
+    allowedTags: ARTIFACT_HTML_TAGS,
+    allowedAttributes: { a: ["href", "target", "rel"] },
+    allowedSchemes: ["http", "https", "mailto"],
+    allowProtocolRelative: false,
+    disallowedTagsMode: "discard",
+    transformTags: { a: artifactAnchorTransform },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // normalizeAtsText — scrub typographic glyphs before PDF/submission export
@@ -117,8 +202,13 @@ export function markdownToHtml(markdown) {
     });
     // Links [text](url) — text already html-escaped, url we escape separately
     s = s.replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_, text, href) => {
-      const safeHref = href.replace(/"/g, "&quot;");
-      return `<a href="${safeHref}">${text}</a>`;
+      const safeHref = safeArtifactHref(href);
+      if (!safeHref) return text;
+      const escapedHref = safeHref.replace(/"/g, "&quot;");
+      if (/^https?:/i.test(safeHref)) {
+        return `<a href="${escapedHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      }
+      return `<a href="${escapedHref}">${text}</a>`;
     });
     // Bold **text** or __text__
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -288,7 +378,7 @@ export function markdownToHtml(markdown) {
   closeOpenPara();
   closeAllLists();
 
-  return out.join("\n");
+  return sanitizeArtifactHtml(out.join("\n"));
 }
 
 // ---------------------------------------------------------------------------

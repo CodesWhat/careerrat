@@ -16,7 +16,7 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { suggestAssist } from "../apps/web/src/lib/api.js";
-import { buildAssistPrompt, mountAssistRoutes } from "../src/cli/assist-route.mjs";
+import { buildAssistPrompt, mountAssistRoutes, runBareOneshot } from "../src/cli/assist-route.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -146,6 +146,26 @@ test("buildAssistPrompt: kind:'titles' embeds the summary and existing titles, a
   assert.match(prompt, /Senior Software Engineer, Staff Engineer/);
   assert.match(prompt, /5-8/);
   assert.match(prompt, /```json/);
+});
+
+test("runBareOneshot uses the normal permission mode even with an empty tool surface", async () => {
+  const repoRoot = tempRepo();
+  let seenOptions = null;
+  await runBareOneshot({
+    prompt: "Return an empty object.",
+    repoRoot,
+    env: PROXY_ENV,
+    labels: { skill: "assist", action: "test", operation: "assist.test" },
+    loadSdk: async () => ({
+      query: ({ options }) => {
+        seenOptions = options;
+        return (async function* emptyQuery() {})();
+      },
+    }),
+  });
+  assert.deepEqual(seenOptions.tools, []);
+  assert.equal(seenOptions.permissionMode, "default");
+  assert.equal(seenOptions.allowDangerouslySkipPermissions, undefined);
 });
 
 test("buildAssistPrompt: kind:'keywords' embeds current keywords, asks for 5-10 suggestions", () => {

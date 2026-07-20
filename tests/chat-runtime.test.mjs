@@ -19,7 +19,7 @@ import {
   createChatRuntime,
   resolveAllowedChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
-import { CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
+import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 // ---------------------------------------------------------------------------
@@ -437,14 +437,13 @@ test("createChatRuntime.startSession: the session past maxSessions is rejected M
   }
 });
 
-test("chat-runtime source imports the explicit chat runtime profile instead of deriving from one-shot tools", () => {
+test("chat-runtime source resolves a local-read or network-only profile per skill", () => {
   const source = stripJavaScriptComments(readFileSync("src/core/ai/chat-runtime.mjs", "utf8"));
-  assert.match(source, /CHAT_RUNTIME_TOOLS/);
+  assert.match(source, /resolveChatRuntimeTools/);
   assert.doesNotMatch(source, /\bRUNTIME_TOOLS\b/);
-  assert.doesNotMatch(source, /\[\s*\.\.\.RUNTIME_TOOLS\s*,\s*"WebSearch"\s*\]/);
 });
 
-test("createChatRuntime.startSession: query() gets CHAT_RUNTIME_TOOLS from the explicit chat profile — discovery skills need WebSearch", async () => {
+test("createChatRuntime.startSession: discovery gets network-only tools while onboarding keeps local reads", async () => {
   const repoRoot = tempRepoWithSkill(["ingest-profile", "research-boards", "discover-companies"]);
   try {
     const seenToolsBySkill = new Map();
@@ -462,10 +461,14 @@ test("createChatRuntime.startSession: query() gets CHAT_RUNTIME_TOOLS from the e
       }),
     });
     try {
+      await chatRuntime.startSession({ skill: "ingest-profile" });
       await chatRuntime.startSession({ skill: "research-boards" });
       await chatRuntime.startSession({ skill: "discover-companies" });
+      assert.deepEqual(seenToolsBySkill.get("ingest-profile"), [...APP_SAFE_RUNTIME_TOOLS]);
       assert.deepEqual(seenToolsBySkill.get("research-boards"), [...CHAT_RUNTIME_TOOLS]);
       assert.deepEqual(seenToolsBySkill.get("discover-companies"), [...CHAT_RUNTIME_TOOLS]);
+      assert.equal(seenToolsBySkill.get("research-boards").includes("Read"), false);
+      assert.equal(seenToolsBySkill.get("ingest-profile").includes("WebSearch"), false);
     } finally {
       chatRuntime.shutdown();
     }

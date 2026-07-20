@@ -5,24 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" href="/assets/favicon.ico" />
     <title>Rolester</title>
-    <script>
-      // Apply the saved/preferred theme before paint to avoid a flash — same
-      // mechanism (localStorage key + prefers-color-scheme fallback) as
-      // src/core/tracker/dashboard-shell.html's own theme-init script, so a
-      // theme choice made in one surface is remembered in the other.
-      (function () {
-        try {
-          var t = localStorage.getItem("rolester-theme");
-          if (t !== "dark" && t !== "light") {
-            t =
-              window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
-                ? "dark"
-                : "light";
-          }
-          document.documentElement.setAttribute("data-theme", t);
-        } catch (e) {}
-      })();
-    </script>
+    <script src="%BASE_URL%theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

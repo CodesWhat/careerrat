@@ -15,11 +15,16 @@ import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  STATIC_EDGE_CONTENT_SECURITY_POLICY,
+  securityHeaders,
+} from "../src/core/security/browser-policy.mjs";
 
 const REPO = dirname(dirname(fileURLToPath(import.meta.url)));
 const DIST = join(REPO, "dist");
 const BUNDLE = join(DIST, "demo");
 const OUTPUT = join(DIST, ".vercel/output"); // Build Output API; sibling of the project link
+const STATIC_RESPONSE_HEADERS = securityHeaders({ csp: STATIC_EDGE_CONTENT_SECURITY_POLICY });
 
 function run(cmd, args, cwd = REPO) {
   execFileSync(cmd, args, { cwd, stdio: "inherit" });
@@ -39,8 +44,10 @@ writeFileSync(
     {
       version: 3,
       routes: [
+        { src: "/.*", headers: STATIC_RESPONSE_HEADERS, continue: true },
         { handle: "filesystem" },
         { src: "/design-v3(?:/.*)?", dest: "/design-v3/index.html" },
+        { src: "/.*", dest: "/index.html" },
       ],
     },
     null,

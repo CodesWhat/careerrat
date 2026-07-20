@@ -36,6 +36,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
+import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, resolveRuntimeTools } from "./runtime-tools.mjs";
 import { appendUsageEvent, computeCost, deriveUsageFeature } from "./usage-log.mjs";
 
@@ -130,6 +131,25 @@ const MODEL_SELECTION_ENV_VARS = [
   "CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS",
 ];
 
+const CHILD_RUNTIME_ENV_VARS = [
+  "PATH",
+  "HOME",
+  "USERPROFILE",
+  "APPDATA",
+  "LOCALAPPDATA",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "LANG",
+  "LC_ALL",
+  "LC_CTYPE",
+  "SystemRoot",
+  "WINDIR",
+  "PATHEXT",
+  "COMSPEC",
+  "ROLESTER_HOME",
+];
+
 // Pure + exported so the routing decision is unit-testable without spawning
 // the SDK: given a resolved route, what env does the child process get?
 // route.type === "none" returns null — callers must have already rejected
@@ -157,8 +177,10 @@ export function buildChildEnv({
 } = {}) {
   if (!route || route.type === "none") return null;
 
-  const shared = { ...baseEnv };
-  for (const key of MODEL_SELECTION_ENV_VARS) {
+  // Start from an allowlist so unrelated credentials in the server process
+  // are never inherited by the Agent SDK child or any tool it launches.
+  const shared = {};
+  for (const key of [...CHILD_RUNTIME_ENV_VARS, ...MODEL_SELECTION_ENV_VARS]) {
     if (baseEnv[key] !== undefined) shared[key] = baseEnv[key];
   }
 
@@ -356,8 +378,8 @@ export async function loadClaudeAgentSdk() {
 }
 
 // Backward-compatible public constant for callers/tests that import the
-// one-shot default. Broad mutation/shell tools now require an explicit
-// `toolProfile: "tool-heavy"` or a narrower per-call `tools` list.
+// one-shot default. Mutation and shell tools are intentionally unavailable
+// until an OS-level sandbox exists for the embedded runtime.
 export const RUNTIME_TOOLS = APP_SAFE_RUNTIME_TOOLS;
 
 // Posture text injected into the run's opening instruction — the one place
@@ -386,9 +408,7 @@ export function buildPrompt({ skill, input, mode = "oneshot", skillMdPath }) {
   const spec = skillMdPath
     ? `following its SKILL.md exactly — the spec file is at \`${skillMdPath}\`; Read that exact path first. `
     : "following its SKILL.md exactly. ";
-  return (
-    `Run the \`${skill}\` skill against the following input, ${spec}` + `${posture}\n\n` + body
-  );
+  return `Run the \`${skill}\` skill against the following input, ${spec}${posture}\n\n${body}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -418,8 +438,8 @@ export async function runSkillStream({
   // touching the actual @anthropic-ai/claude-agent-sdk devDependency.
   loadSdk = loadClaudeAgentSdk,
   // Optional per-call tool-surface override. Explicit `tools` arrays are
-  // copied and take precedence over named profiles; otherwise app-safe is
-  // the default and tool-heavy execution must be named by the caller.
+  // copied only when every tool belongs to a sandboxed profile; otherwise
+  // app-safe is the default.
   tools,
   toolProfile,
 } = {}) {
@@ -449,6 +469,7 @@ export async function runSkillStream({
   }
 
   const runtimeTools = resolveRuntimeTools({ tools, toolProfile });
+  const toolPolicy = createRuntimeToolPolicy({ repoRoot, skill, tools: runtimeTools });
 
   // Validate before touching the SDK so a missing devDependency is a clean
   // 501, not a crash mid-stream.
@@ -495,13 +516,12 @@ export async function runSkillStream({
       settingSources: ["project"],
       skills: [skill],
       tools: runtimeTools,
-      // Headless posture: nobody is watching a permission prompt in a
-      // server process, so a prompt would just hang the loop forever. The
-      // real safety boundary is `tools` above (what CAN be invoked at all);
-      // this only removes the interactive gate on invoking it, which the
-      // SDK requires an explicit ack for (allowDangerouslySkipPermissions).
-      permissionMode: "bypassPermissions",
-      allowDangerouslySkipPermissions: true,
+      // Headless calls use a programmatic fail-closed policy rather than
+      // bypassing permissions. The PreToolUse hook is defense-in-depth: SDK
+      // docs guarantee its denials apply even if permission behavior changes.
+      permissionMode: "default",
+      canUseTool: toolPolicy.canUseTool,
+      hooks: toolPolicy.hooks,
     },
   });
 

@@ -70,14 +70,15 @@ test("release checklist requires signed notarized desktop pilot evidence", async
   assert.doesNotMatch(release, /notarization (is )?(deferred|off|optional)/i);
 });
 
-test("architecture docs name app-safe defaults and explicit tool-heavy retained runtime", async () => {
+test("architecture docs describe the sandboxed local and network runtime profiles", async () => {
   const architecture = await readText("docs/ARCHITECTURE.md");
 
   assertIncludes(architecture, "docs/ARCHITECTURE.md", [
     /app-safe default/i,
-    /Read, Glob, Grep, WebFetch, and Skill/i,
-    /tool-heavy retained runtime/i,
-    /Write, Edit, and Bash/i,
+    /Read, Glob, Grep, and Skill/i,
+    /network research/i,
+    /WebSearch, WebFetch, and Skill/i,
+    /unsandboxed tool-heavy execution is disabled/i,
     /compatibility\/debug\/export/i,
     /not normal product UX/i,
   ]);

@@ -133,6 +133,7 @@ test("AI-suggested URL and provider remain advisory until deterministic validati
           <p>Ambiguous but reachable public careers content for model fallback.</p>
         </body></html>
       `),
+    resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
     aiCall: async () => ({
       content: [
         {

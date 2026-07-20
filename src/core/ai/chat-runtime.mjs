@@ -47,7 +47,8 @@
 
 import { randomUUID } from "node:crypto";
 import { resolveAIRoute } from "./call-ai.mjs";
-import { CHAT_RUNTIME_TOOLS } from "./runtime-tools.mjs";
+import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
+import { resolveChatRuntimeTools } from "./runtime-tools.mjs";
 import {
   buildChildEnv,
   buildPrompt,
@@ -459,6 +460,12 @@ export function createChatRuntime({
     const { query } = await loadSdk();
 
     const childEnv = buildChildEnv({ route, skill: trimmedSkill, baseEnv: env, repoRoot });
+    const runtimeTools = resolveChatRuntimeTools({ skill: trimmedSkill });
+    const toolPolicy = createRuntimeToolPolicy({
+      repoRoot,
+      skill: trimmedSkill,
+      tools: runtimeTools,
+    });
     const abortController = new AbortController();
     const pushQueue = createPushQueue();
     const id = randomUUID();
@@ -493,9 +500,10 @@ export function createChatRuntime({
         abortController,
         settingSources: ["project"],
         skills: [trimmedSkill],
-        tools: [...CHAT_RUNTIME_TOOLS],
-        permissionMode: "bypassPermissions",
-        allowDangerouslySkipPermissions: true,
+        tools: runtimeTools,
+        permissionMode: "default",
+        canUseTool: toolPolicy.canUseTool,
+        hooks: toolPolicy.hooks,
         maxTurns,
         title: `rolester chat: ${trimmedSkill}`,
       },

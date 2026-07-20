@@ -17,10 +17,12 @@ import {
   isSpaJobHost,
 } from "../liveness/job-link-checker.mjs";
 import { classifyLiveness } from "../liveness/liveness-core.mjs";
+import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import { extractReqId, fetchProvider, inferProvider } from "../scoring/sourced-scanner.mjs";
 
 const DEFAULT_TIMEOUT_MS = 15000;
+const DEFAULT_MAX_BYTES = 1024 * 1024;
 
 // resolveJobUrl(url) -> {
 //   bodyFetchStatus: "resolved" | "deferred",
@@ -28,7 +30,12 @@ const DEFAULT_TIMEOUT_MS = 15000;
 // }
 export async function resolveJobUrl(
   rawUrl,
-  { fetchImpl = fetch, timeoutMs = DEFAULT_TIMEOUT_MS } = {}
+  {
+    fetchImpl = fetch,
+    resolveHost,
+    timeoutMs = DEFAULT_TIMEOUT_MS,
+    maxBytes = DEFAULT_MAX_BYTES,
+  } = {}
 ) {
   let parsed;
   try {
@@ -67,7 +74,7 @@ export async function resolveJobUrl(
     };
   }
 
-  return resolvePlainFetch({ url: rawUrl, fetchImpl, timeoutMs, provider });
+  return resolvePlainFetch({ url: rawUrl, fetchImpl, resolveHost, timeoutMs, maxBytes, provider });
 }
 
 async function resolveViaProviderBoard({ provider, url, fetchImpl }) {
@@ -114,28 +121,28 @@ function fallbackCompanyFromUrl(url) {
   }
 }
 
-async function resolvePlainFetch({ url, fetchImpl, timeoutMs, provider }) {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
-  let response;
-  try {
-    response = await fetchImpl(url, { signal: controller.signal, redirect: "follow" });
-  } catch (error) {
+async function resolvePlainFetch({ url, fetchImpl, resolveHost, timeoutMs, maxBytes, provider }) {
+  const fetched = await fetchPublicHttpText(url, {
+    fetchImpl,
+    resolveHost,
+    timeoutMs,
+    maxBytes,
+  });
+  if (!fetched.ok) {
+    const unsafe = fetched.code === "unsafe_url" || fetched.code === "unsafe_redirect";
     return {
       bodyFetchStatus: "deferred",
       url,
       provider,
-      reason: `fetch failed: ${error.message}`,
+      reason: unsafe ? `unsafe URL: ${fetched.reason}` : fetched.reason,
     };
-  } finally {
-    clearTimeout(timeout);
   }
 
-  const html = await response.text();
+  const html = fetched.rawText;
   const bodyText = htmlToTextLiveness(html);
   const classified = classifyLiveness({
-    status: response.status,
-    finalUrl: response.url || url,
+    status: fetched.status,
+    finalUrl: fetched.finalUrl || url,
     bodyText,
     applyControls: extractApplyControlsFromHtml(html),
   });

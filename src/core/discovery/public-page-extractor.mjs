@@ -1,8 +1,8 @@
 // public-page-extractor.mjs — deterministic public careers-page metadata.
 
 import { createHash } from "node:crypto";
+import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
 import { inferProvider } from "../scoring/sourced-scanner.mjs";
-import { isPrivateOrLocalHost } from "./company-board-resolver.mjs";
 
 const TEXT_CAP = 200_000;
 const JOB_LINK_RE = /\b(careers?|jobs?|openings?|roles?|join-us|positions?)\b/i;
@@ -30,9 +30,6 @@ function parsePublicUrl(value) {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") {
     throw makeError("public careers page URL must use http or https", "BAD_REQUEST");
-  }
-  if (isPrivateOrLocalHost(url.hostname)) {
-    throw makeError("public careers page URL cannot target local/private hosts", "BAD_REQUEST");
   }
   return url;
 }
@@ -117,28 +114,42 @@ function linkRecord(url) {
   };
 }
 
-export async function extractPublicCareersPage({ url, fetchImpl = fetch, now = new Date() } = {}) {
+export async function extractPublicCareersPage({
+  url,
+  fetchImpl = fetch,
+  resolveHost,
+  timeoutMs = 15_000,
+  now = new Date(),
+} = {}) {
   const parsedUrl = parsePublicUrl(url);
   const observedAt = nowIso(now);
-  let response;
-  try {
-    response = await fetchImpl(parsedUrl.toString(), { redirect: "follow" });
-  } catch (err) {
+  const fetched = await fetchPublicHttpText(parsedUrl.toString(), {
+    fetchImpl,
+    resolveHost,
+    timeoutMs,
+    maxBytes: TEXT_CAP,
+  });
+  if (!fetched.ok) {
+    const unsafe = fetched.code === "unsafe_url" || fetched.code === "unsafe_redirect";
     return {
       ok: true,
-      extractionStatus: "blocked_fetch_failed",
+      extractionStatus: unsafe
+        ? "blocked_unsafe_url"
+        : fetched.code === "response_too_large"
+          ? "blocked_response_too_large"
+          : "blocked_fetch_failed",
       reviewRequired: false,
       aiEligible: false,
       metadata: {
         url: parsedUrl.toString(),
         inputHash: hashText(""),
         provenance: [provenance("public-page-fetch-failed", parsedUrl, observedAt)],
-        errorClass: err?.code || "FETCH_FAILED",
+        errorClass: fetched.code || "FETCH_FAILED",
       },
     };
   }
 
-  if (response.status === 401 || response.status === 403) {
+  if (fetched.status === 401 || fetched.status === 403) {
     return baseResult({
       url: parsedUrl,
       html: "",
@@ -146,7 +157,7 @@ export async function extractPublicCareersPage({ url, fetchImpl = fetch, now = n
       status: "blocked_http",
     });
   }
-  if (!response.ok) {
+  if (fetched.status < 200 || fetched.status >= 300) {
     return baseResult({
       url: parsedUrl,
       html: "",
@@ -155,7 +166,7 @@ export async function extractPublicCareersPage({ url, fetchImpl = fetch, now = n
     });
   }
 
-  const html = String(await response.text()).slice(0, TEXT_CAP);
+  const html = fetched.rawText;
   if (!html.trim()) {
     return baseResult({
       url: parsedUrl,

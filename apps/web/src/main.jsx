@@ -3,7 +3,6 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App.jsx";
 import { RolesterClerkProvider } from "./auth/clerkControls.jsx";
-import { PasswordGate } from "./preview/PasswordGate.jsx";
 import "./styles/tokens.css";
 import "./styles/app.css";
 
@@ -17,8 +16,6 @@ const app = (
 
 createRoot(document.getElementById("root")).render(
   <StrictMode>
-    <RolesterClerkProvider publishableKey={clerkPublishableKey}>
-      <PasswordGate>{app}</PasswordGate>
-    </RolesterClerkProvider>
+    <RolesterClerkProvider publishableKey={clerkPublishableKey}>{app}</RolesterClerkProvider>
   </StrictMode>
 );

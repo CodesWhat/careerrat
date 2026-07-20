@@ -198,10 +198,15 @@ drafting; `evaluate-job`, `tailor-application`, and `answer-question` remain
 explicit handoffs for agent-led workflows, broad browser work, nuanced judgment,
 and supervised submission flows.
 
-The one-shot runtime has an app-safe default tool profile: Read, Glob, Grep, WebFetch, and Skill.
-Write, Edit, and Bash are removed from that default even when the SDK runs
-headlessly. A tool-heavy retained runtime request must be explicitly classified
-at the route or skill boundary before it can use Write, Edit, and Bash.
+The one-shot runtime has an app-safe default tool profile: Read, Glob, Grep, and Skill.
+Those filesystem tools are restricted to the selected skill plus approved
+candidate, workspace, config, and template roots; credential and internal-state
+paths fail closed. Network research uses a separate profile containing WebSearch, WebFetch, and Skill
+but no local filesystem tools, so fetched prompt injection
+cannot reach candidate files. Both profiles use programmatic permission checks
+and a PreToolUse enforcement hook. Unrelated server environment variables are
+not inherited by the Agent SDK child. Unsandboxed tool-heavy execution is disabled;
+Write, Edit, and Bash are not exposed by an embedded runtime profile.
 
 Visible chat handoffs are separate from app-default actions. They are explicit
 user-selected sessions, not hidden fallbacks from local API errors.

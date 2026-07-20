@@ -8,6 +8,7 @@ import { candidateSetupInitialize } from "../src/core/db/verbs.mjs";
 
 const cleanupRoots = [];
 const NOW = new Date("2026-07-06T12:00:00.000Z");
+const publicResolver = async () => [{ address: "93.184.216.34", family: 4 }];
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-public-scanner-"));
@@ -82,6 +83,7 @@ test("deterministic custom public page extraction records metadata and skips rev
           <a href="/about">About</a>
         </body></html>
       `),
+    resolveHost: publicResolver,
     now: NOW,
   });
 
@@ -97,12 +99,31 @@ test("deterministic custom public page extraction records metadata and skips rev
     url: "https://plain.example/careers",
     fetchImpl: async () =>
       response("<html><body><h1>Careers</h1><p>No open roles.</p></body></html>"),
+    resolveHost: publicResolver,
     now: NOW,
   });
   assert.equal(cleanNoResult.ok, true);
   assert.equal(cleanNoResult.extractionStatus, "no_public_jobs_signal");
   assert.equal(cleanNoResult.reviewRequired, false);
   assert.equal(cleanNoResult.aiEligible, false);
+});
+
+test("public page extraction rejects DNS-resolved private hosts before fetch", async () => {
+  const { extractPublicCareersPage } = await extractorModule();
+  let called = false;
+  const result = await extractPublicCareersPage({
+    url: "https://careers.example.test/jobs",
+    resolveHost: async () => [{ address: "10.0.0.9", family: 4 }],
+    fetchImpl: async () => {
+      called = true;
+      throw new Error("unsafe URL must not be fetched");
+    },
+    now: NOW,
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.extractionStatus, "blocked_unsafe_url");
+  assert.equal(called, false);
 });
 
 test("empty, blocked, robots-disallowed, login-gated, and useless pages do not call AI or create review items", async () => {
@@ -134,6 +155,7 @@ test("empty, blocked, robots-disallowed, login-gated, and useless pages do not c
         provenance: [{ source: "fixture", url: `https://${name}.example` }],
       }),
       fetchImpl: async () => res,
+      resolveHost: publicResolver,
       aiCall: async () => {
         aiCalls += 1;
         return { content: [{ type: "text", text: "{}" }] };
@@ -175,6 +197,7 @@ test("ambiguous reachable public text creates review metadata before any source-
           <p>Join our team building AI workflow tools.</p>
         </body></html>
       `),
+    resolveHost: publicResolver,
     companyAtsUpsertImpl: async () => {
       companyAtsWrites += 1;
     },

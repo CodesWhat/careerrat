@@ -30,6 +30,7 @@ function htmlResponse(html, { status = 200, finalUrl = null } = {}) {
 }
 
 const LONG_ACTIVE_JD = `<html><body><h1>Staff Engineer</h1><p>${"Real job description content. ".repeat(20)}</p><button>Apply</button></body></html>`;
+const publicResolver = async () => [{ address: "93.184.216.34", family: 4 }];
 
 test("invalid URL string -> deferred, never calls fetchImpl", async () => {
   let called = false;
@@ -51,6 +52,19 @@ test("unsupported protocol -> deferred, never calls fetchImpl", async () => {
   assert.equal(called, false);
 });
 
+test("private-network URL -> deferred before any fetch", async () => {
+  let called = false;
+  const result = await resolveJobUrl("http://127.0.0.1:7777/api/data/dashboard", {
+    fetchImpl: async () => {
+      called = true;
+      throw new Error("private URL must not be fetched");
+    },
+  });
+  assert.equal(result.bodyFetchStatus, "deferred");
+  assert.match(result.reason, /private|unsafe/i);
+  assert.equal(called, false);
+});
+
 test("known ATS (Greenhouse) board fetch succeeds and finds the matching posting -> resolved, zero AI needed", async () => {
   const url = "https://job-boards.greenhouse.io/acme/jobs/123456";
   const fetchImpl = async (requestedUrl) => {
@@ -66,7 +80,7 @@ test("known ATS (Greenhouse) board fetch succeeds and finds the matching posting
       ],
     });
   };
-  const result = await resolveJobUrl(url, { fetchImpl });
+  const result = await resolveJobUrl(url, { fetchImpl, resolveHost: publicResolver });
   assert.equal(result.bodyFetchStatus, "resolved");
   assert.equal(result.provider, "greenhouse");
   assert.equal(result.title, "Staff Engineer");
@@ -89,7 +103,7 @@ test("known ATS (Greenhouse) board fetch fails -> falls through to a plain fetch
     assert.equal(requestedUrl, url);
     return htmlResponse(LONG_ACTIVE_JD, { finalUrl: url });
   };
-  const result = await resolveJobUrl(url, { fetchImpl });
+  const result = await resolveJobUrl(url, { fetchImpl, resolveHost: publicResolver });
   assert.equal(plainFetchCalled, true);
   assert.equal(result.bodyFetchStatus, "resolved");
   assert.equal(result.provider, "greenhouse");
@@ -137,6 +151,7 @@ test("non-ATS aggregator host recognized via platformForHost (LinkedIn) -> defer
 test("plain fetch: a long body with a visible apply control -> resolved, active liveness", async () => {
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-1", {
     fetchImpl: async () => htmlResponse(LONG_ACTIVE_JD),
+    resolveHost: publicResolver,
   });
   assert.equal(result.bodyFetchStatus, "resolved");
   assert.equal(result.liveness.result, "active");
@@ -146,6 +161,7 @@ test("plain fetch: a long body with a visible apply control -> resolved, active 
 test("plain fetch: short/shell body -> deferred (insufficient_content)", async () => {
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-2", {
     fetchImpl: async () => htmlResponse("<html><body>Loading…</body></html>"),
+    resolveHost: publicResolver,
   });
   assert.equal(result.bodyFetchStatus, "deferred");
   assert.match(result.reason, /insufficient content/);
@@ -155,6 +171,7 @@ test("plain fetch: bot-wall interstitial -> deferred (bot_challenge)", async () 
   const html = `<html><body>${"Checking your browser before accessing. ".repeat(10)}</body></html>`;
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-3", {
     fetchImpl: async () => htmlResponse(html),
+    resolveHost: publicResolver,
   });
   assert.equal(result.bodyFetchStatus, "deferred");
   assert.match(result.reason, /bot-wall interstitial/);
@@ -164,6 +181,7 @@ test("plain fetch: an 'expired'-classified page still returns resolved (honest s
   const html = `<html><body>${"This job posting has expired and is no longer accepting applications. ".repeat(6)}</body></html>`;
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-4", {
     fetchImpl: async () => htmlResponse(html),
+    resolveHost: publicResolver,
   });
   assert.equal(result.bodyFetchStatus, "resolved");
   assert.equal(result.liveness.result, "expired");
@@ -175,6 +193,7 @@ test("plain fetch: a network error -> deferred with the error message", async ()
     fetchImpl: async () => {
       throw new Error("ECONNRESET");
     },
+    resolveHost: publicResolver,
   });
   assert.equal(result.bodyFetchStatus, "deferred");
   assert.match(result.reason, /fetch failed: ECONNRESET/);

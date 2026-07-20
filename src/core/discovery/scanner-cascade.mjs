@@ -234,6 +234,7 @@ export async function scanPublicIntelSeed({
   env,
   seed = {},
   fetchImpl = fetch,
+  resolveHost,
   resolveCompanyBoard: resolveImpl = resolveCompanyBoard,
   aiCall,
   validateAiCandidate = defaultValidateAiCandidate,
@@ -272,7 +273,12 @@ export async function scanPublicIntelSeed({
     };
   }
 
-  const extraction = await extractPublicCareersPage({ url: targetUrl, fetchImpl, now });
+  const extraction = await extractPublicCareersPage({
+    url: targetUrl,
+    fetchImpl,
+    resolveHost,
+    now,
+  });
   if (extraction.extractionStatus === "metadata_found") {
     await persistMetadataFound({ repoRoot, env, seed, resolution, extraction, observedAt, now });
     return {
@@ -339,6 +345,7 @@ export async function scanPublicIntelSeeds({
   env,
   body = {},
   fetchImpl = fetch,
+  resolveHost,
   resolveCompanyBoard: resolveImpl = resolveCompanyBoard,
   now = new Date(),
 } = {}) {
@@ -366,6 +373,7 @@ export async function scanPublicIntelSeeds({
         env,
         seed,
         fetchImpl,
+        resolveHost,
         resolveCompanyBoard: resolveImpl,
         aiCall: body?.aiCall,
         now,

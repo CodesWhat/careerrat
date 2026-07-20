@@ -16,6 +16,7 @@ import {
 import { applyCompanyProposalDecision } from "../core/discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
 import { scanPublicIntelSeeds } from "../core/discovery/scanner-cascade.mjs";
+import { buildSearchPromptContext } from "../core/search/search-prompts.mjs";
 import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapshot.mjs";
 import { prepareQuickStartSourcing } from "./onboard-route.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
@@ -74,17 +75,36 @@ export function findActiveDiscoveryChat(chatRuntime, skillFilter = null) {
   return null;
 }
 
-export function buildDiscoveryKickoff({ skill, message, source = "Continue discovery" } = {}) {
+export function buildDiscoveryKickoff({
+  skill,
+  message,
+  source = "Continue discovery",
+  candidateContext,
+} = {}) {
   return [
     source,
     `Current next discovery skill: ${skill}.`,
     message || "Continue the Rolester discovery pipeline from the current workspace state.",
+    candidateContext && Object.keys(candidateContext).length
+      ? `Outbound-safe candidate context: ${JSON.stringify(candidateContext)}`
+      : null,
     `Pipeline order: ${DISCOVERY_PIPELINE.join(" -> ")}.`,
     DISCOVERY_STEP_NOTES[skill] || "Run only the current discovery step.",
     "Keep confirm-first prompts visible. Do not auto-approve board or company writes.",
     "Do not run evaluate-job, tailor-application, apply-job, fill forms, or submit applications from this handoff.",
     "If gate/apply setup is incomplete, stop with sourced or review items queued instead of guessing.",
-  ].join("\n\n");
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function outboundCandidateContext({ repoRoot, env }) {
+  try {
+    const config = candidateConfigGet({ repoRoot, env });
+    return buildSearchPromptContext({ repoRoot, env, config });
+  } catch {
+    return null;
+  }
 }
 
 function statusForStartError(err) {
@@ -104,7 +124,7 @@ function statusForStartError(err) {
   }
 }
 
-async function startOrReuseDiscoveryChat({ chatRuntime, guidance, source }) {
+async function startOrReuseDiscoveryChat({ chatRuntime, guidance, source, candidateContext }) {
   const normalized = normalizeDiscoveryGuidance(guidance);
   if (!normalized) {
     return {
@@ -131,6 +151,7 @@ async function startOrReuseDiscoveryChat({ chatRuntime, guidance, source }) {
         skill: normalized.nextSkill,
         message: normalized.message,
         source,
+        candidateContext,
       }),
     });
     return { chat, activeDiscoveryChat: chat, reused: false };
@@ -423,6 +444,7 @@ export function mountDiscoveryRoutes({
       const handoff = await startOrReuseDiscoveryChat({
         chatRuntime,
         guidance,
+        candidateContext: outboundCandidateContext({ repoRoot, env }),
         source: [
           "Quick Start prepared source config from DB-backed onboarding.",
           prepared.body.nextMessage,
@@ -473,6 +495,7 @@ export function mountDiscoveryRoutes({
       const handoff = await startOrReuseDiscoveryChat({
         chatRuntime,
         guidance,
+        candidateContext: outboundCandidateContext({ repoRoot, env }),
         source: "Continue discovery from the app.",
       });
       sendJson(res, 200, {
