@@ -491,23 +491,6 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
                   ) : null}
                 </p>
 
-                <section
-                  className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"
-                  aria-labelledby="finish-hero-title"
-                >
-                  <h2 id="finish-hero-title">Go deeper while Roland searches</h2>
-                  <p>
-                    A guided ingest of your work history makes packets and applications much
-                    stronger.
-                  </p>
-                  <div className="onboarding-step-card__action-group">
-                    <Button onClick={handleStartDeepIngest}>Start deep ingest</Button>
-                    <button type="button" className="onboarding-inline-link" onClick={handleFinish}>
-                      I'll do it later — finish
-                    </button>
-                  </div>
-                </section>
-
                 <section className="onboarding-step-card__section onboarding-finish__cadence">
                   <span className="field__label">Search cadence</span>
                   <div
@@ -535,6 +518,20 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
                     })}
                   </div>
                   {cadenceError ? <InlineAlert message={cadenceError} /> : null}
+                </section>
+
+                <section
+                  className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"
+                  aria-labelledby="finish-hero-title"
+                >
+                  <h2 id="finish-hero-title">Go deeper while Roland searches</h2>
+                  <p>
+                    A guided ingest of your work history makes packets and applications much
+                    stronger.
+                  </p>
+                  <div className="onboarding-step-card__action-group">
+                    <Button onClick={handleStartDeepIngest}>Start deep ingest</Button>
+                  </div>
                 </section>
               </>
             )}
