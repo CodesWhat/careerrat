@@ -88,6 +88,7 @@ function LiveDashboardProvider({ children }) {
   const [error, setError] = useState(null);
   const [noDatabase, setNoDatabase] = useState(false);
   const inFlight = useRef(false);
+  const noDatabaseRef = useRef(false);
 
   const load = useCallback(async () => {
     if (inFlight.current) return;
@@ -98,11 +99,13 @@ function LiveDashboardProvider({ children }) {
       setSetup(setupPayload ?? null);
       setError(null);
       setNoDatabase(false);
+      noDatabaseRef.current = false;
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         // Fail-closed no-DB degrade (decision 7, same contract as every other
         // /api/data/* route) — an honest hint, not a generic error banner.
         setNoDatabase(true);
+        noDatabaseRef.current = true;
         setError(null);
       } else {
         setError(err instanceof Error ? err.message : "Failed to load the dashboard");
@@ -123,7 +126,15 @@ function LiveDashboardProvider({ children }) {
     // also refetches on any intake-queue change.
     const unsubDashboard = subscribeDashboardChanged(load);
     const unsubIntake = subscribeIntakeChanged(load);
-    const interval = setInterval(load, POLL_MS);
+    // While the server reports no database (fresh install still in
+    // onboarding), a 10s poll just streams 409s into the console. Probe every
+    // 10th tick instead; events and refetch() still recover immediately.
+    let ticks = 0;
+    const interval = setInterval(() => {
+      ticks += 1;
+      if (noDatabaseRef.current && ticks % 10 !== 0) return;
+      load();
+    }, POLL_MS);
     return () => {
       unsubDashboard();
       unsubIntake();
