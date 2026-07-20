@@ -11,6 +11,7 @@ import {
   deepIngestSourceCreate,
   deepIngestStateGet,
 } from "../core/db/verbs.mjs";
+import { proposeAutoFromSource } from "../core/deep-ingest/proposals/auto.mjs";
 import { proposeEvidenceFromSource } from "../core/deep-ingest/proposals/evidence.mjs";
 import { proposeGapsFromSource } from "../core/deep-ingest/proposals/gaps.mjs";
 import { proposeHonestyFromSource } from "../core/deep-ingest/proposals/honesty.mjs";
@@ -40,7 +41,7 @@ const DEFAULT_PROPOSAL_BUILDERS = {
   writing_voice: proposeWritingVoiceFromSource,
   role_signal: proposeRoleSignalsFromSource,
   gap: proposeGapsFromSource,
-  auto: proposeGapsFromSource,
+  auto: proposeAutoFromSource,
   paste: proposeGapsFromSource,
   link: proposeGapsFromSource,
 };
@@ -368,6 +369,15 @@ function proposalRowsFromBuilt(value) {
 
 function proposalLane(row, targetShape) {
   const lane = String(row?.lane || "").trim();
+  const proposalLaneMap = {
+    evidence: "evidence_claims",
+    story: "story_bank",
+    honesty: "honesty_boundaries",
+    writing_voice: "writing_voice",
+    role_signal: "role_signals",
+    gap: "open_gaps",
+  };
+  if (proposalLaneMap[lane]) return proposalLaneMap[lane];
   return lane.endsWith("_claims") ||
     ["story_bank", "honesty_boundaries", "writing_voice", "role_signals", "open_gaps"].includes(
       lane

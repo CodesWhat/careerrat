@@ -131,6 +131,40 @@ function proposalFor(lane, overrides = {}) {
   };
 }
 
+function assertNativeObjectsAreClosed(schema, path = "$schema") {
+  if (!schema || typeof schema !== "object") return;
+  if (Array.isArray(schema)) {
+    schema.forEach((entry, index) => {
+      assertNativeObjectsAreClosed(entry, `${path}[${index}]`);
+    });
+    return;
+  }
+  if (schema.type === "object") {
+    assert.equal(
+      schema.additionalProperties,
+      false,
+      `${path} must set additionalProperties:false for Anthropic native structured output`
+    );
+  }
+  for (const [key, value] of Object.entries(schema)) {
+    if (key === "properties") {
+      for (const [property, propertySchema] of Object.entries(value || {})) {
+        assertNativeObjectsAreClosed(propertySchema, `${path}.properties.${property}`);
+      }
+      continue;
+    }
+    if (["items", "additionalProperties"].includes(key)) {
+      assertNativeObjectsAreClosed(value, `${path}.${key}`);
+      continue;
+    }
+    if (["anyOf", "allOf", "oneOf"].includes(key) && Array.isArray(value)) {
+      value.forEach((entry, index) => {
+        assertNativeObjectsAreClosed(entry, `${path}.${key}[${index}]`);
+      });
+    }
+  }
+}
+
 test("Deep ingest proposal schema pins lane-specific review rows and terminal fallback states", async () => {
   const schema = await importSchema();
 
@@ -191,6 +225,62 @@ test("lane proposal builders use strict bounded AI labels and native-preferred s
     assert.equal(result.proposals[0].lane, entry.lane);
     assertNoSecretLeak(result);
   }
+});
+
+test("lane proposal builders send only Anthropic-compatible closed object schemas", async () => {
+  const builder = await importBuilder(LANE_BUILDERS[0]);
+  let nativeSchema = null;
+
+  await builder({
+    source: SOURCE,
+    targetShape: "evidence",
+    runBoundedAI: async (options) => {
+      nativeSchema = options.schema;
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data: { proposals: [proposalFor("evidence")] },
+          ai: { used: true },
+          manual: { available: true, action: "Enter manually" },
+        },
+      };
+    },
+  });
+
+  assertNativeObjectsAreClosed(nativeSchema);
+});
+
+test("auto proposal builder classifies one source into real proposal lanes in one bounded call", async () => {
+  const { proposeAutoFromSource } = await import("../src/core/deep-ingest/proposals/auto.mjs");
+  const calls = [];
+
+  const result = await proposeAutoFromSource({
+    source: SOURCE,
+    targetShape: "auto",
+    runBoundedAI: async (options) => {
+      calls.push(options);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data: {
+            proposals: [proposalFor("evidence"), proposalFor("story", { id: "story-2" })],
+          },
+          ai: { used: true, mode: "native" },
+          manual: { available: true, action: "Enter manually" },
+        },
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].labels.operation, "deep_ingest.auto.propose");
+  assert.deepEqual(
+    result.proposals.map((proposal) => proposal.lane),
+    ["evidence", "story"]
+  );
+  assert.equal(result.gaps.length, 0);
 });
 
 test("missing AI route returns visible manual fallback without writing trusted candidate facts", async () => {
@@ -281,6 +371,31 @@ test("provider failure becomes a manual fallback without exposing source or prov
   assert.equal(result.status, "manual_fallback");
   assert.equal(result.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
   assert.equal(result.manual.available, true);
+  assertNoSecretLeak(result);
+});
+
+test("genuine provider failure persists its safe underlying reason in the fallback row", async () => {
+  const builder = await importBuilder(LANE_BUILDERS[0]);
+  const providerMessage =
+    "Structured-output schema object at properties.payload must set additionalProperties to false.";
+
+  const result = await builder({
+    source: SOURCE,
+    targetShape: "evidence",
+    call: async () => {
+      throw new Error(
+        `AI request failed: 400 Bad Request — ${JSON.stringify({
+          type: "error",
+          error: { type: "invalid_request_error", message: providerMessage },
+          request_id: "req_test",
+        })}`
+      );
+    },
+  });
+
+  assert.equal(result.status, "manual_fallback");
+  assert.equal(result.code, BOUNDED_AI_CODES.AI_PROVIDER_FAILED);
+  assert.equal(result.gaps[0].payload.reason, providerMessage);
   assertNoSecretLeak(result);
 });
 

@@ -690,6 +690,126 @@ test("POST /api/deep-ingest/proposals persists builder output as review state on
   }
 });
 
+test("POST /api/deep-ingest/proposals stores auto-classified rows in their real lanes", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "auto",
+      sourceKind: "paste",
+      text: "Built incident automation and led the migration.",
+      chunks: [
+        {
+          id: "chunk-route-auto-1",
+          text: "Built incident automation and led the migration.",
+        },
+      ],
+    },
+  }).source;
+  const routes = await mountDirectRoutes(repoRoot, {
+    proposalBuilders: {
+      auto: async ({ source: builderSource }) => ({
+        status: "proposal_ready",
+        proposals: [
+          {
+            id: "proposal-route-auto-evidence",
+            lane: "evidence",
+            sourceId: builderSource.id,
+            chunkId: "chunk-route-auto-1",
+            status: "review_needed",
+            confidence: 0.91,
+            supportingQuote: "Built incident automation",
+            payload: { claim: "Built incident automation." },
+            validation: { status: "passed", blockedReasons: [] },
+          },
+          {
+            id: "proposal-route-auto-story",
+            lane: "story",
+            sourceId: builderSource.id,
+            chunkId: "chunk-route-auto-1",
+            status: "review_needed",
+            confidence: 0.82,
+            supportingQuote: "led the migration",
+            payload: { title: "Migration leadership" },
+            validation: { status: "passed", blockedReasons: [] },
+          },
+        ],
+        gaps: [],
+        manual: null,
+      }),
+    },
+  });
+
+  const { status, body } = await postJsonDirect(routes, "/api/deep-ingest/proposals", {
+    sourceId: source.id,
+    targetShape: "auto",
+  });
+
+  assert.equal(status, 200);
+  assert.deepEqual(
+    body.data.proposals.map((proposal) => proposal.lane),
+    ["evidence_claims", "story_bank"]
+  );
+  assert.equal(
+    body.data.proposals.some((proposal) => proposal.lane === "open_gaps"),
+    false
+  );
+});
+
+test("POST /api/deep-ingest/proposals persists a genuine provider failure reason", async () => {
+  const { proposeEvidenceFromSource } = await import(
+    "../src/core/deep-ingest/proposals/evidence.mjs"
+  );
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "evidence",
+      sourceKind: "paste",
+      text: "Built a grounded provider-failure regression.",
+      chunks: [
+        {
+          id: "chunk-route-provider-failure-1",
+          text: "Built a grounded provider-failure regression.",
+        },
+      ],
+    },
+  }).source;
+  const providerReason =
+    "Structured-output schema object at properties.payload must set additionalProperties to false.";
+  const routes = await mountDirectRoutes(repoRoot, {
+    proposalBuilders: {
+      evidence: (options) =>
+        proposeEvidenceFromSource({
+          ...options,
+          call: async () => {
+            throw new Error(
+              `AI request failed: 400 Bad Request — ${JSON.stringify({
+                type: "error",
+                error: { type: "invalid_request_error", message: providerReason },
+                request_id: "req_route_test",
+              })}`
+            );
+          },
+        }),
+    },
+  });
+
+  const { status, body } = await postJsonDirect(routes, "/api/deep-ingest/proposals", {
+    sourceId: source.id,
+    targetShape: "evidence",
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.data.proposals.length, 1);
+  assert.equal(body.data.proposals[0].proposal.status, "manual_fallback");
+  assert.equal(body.data.proposals[0].proposal.payload.reason, providerReason);
+});
+
 test("POST /api/deep-ingest/proposal-decisions returns updated state after confirm and not_available", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
