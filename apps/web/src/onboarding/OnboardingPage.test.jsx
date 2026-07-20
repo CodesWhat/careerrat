@@ -43,6 +43,12 @@ async function mountGoNextHarness({ stepIndex, state, isSignedIn, aiAvailable })
     getOnboardingDraft: vi.fn(async () => ({ draft: { stepIndex, completedIndexes: [] } })),
     saveOnboardingDraft: vi.fn(async () => ({ ok: true })),
   }));
+  // Stub useSearchParams so the bare (Router-less) render doesn't invariant, and
+  // so it doesn't consume a slot from the hand-rolled useState mock above.
+  vi.doMock("react-router-dom", async () => {
+    const actual = await vi.importActual("react-router-dom");
+    return { ...actual, useSearchParams: () => [new URLSearchParams(), vi.fn()] };
+  });
 
   const { OnboardingPage } = await import("./OnboardingPage.jsx");
   renderToStaticMarkup(<OnboardingPage />);
@@ -57,6 +63,7 @@ afterEach(() => {
   vi.doUnmock("./steps/KeyStep.jsx");
   vi.doUnmock("./steps/ResumeStep.jsx");
   vi.doUnmock("../lib/api.js");
+  vi.doUnmock("react-router-dom");
 });
 
 describe("OnboardingPage goNext prerequisites", () => {
