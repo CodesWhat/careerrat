@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button } from "../components/Button.jsx";
@@ -8,7 +8,6 @@ import { Field, Select, TextField, Toggle } from "../components/form.jsx";
 import { ChevronDownIcon, ListIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { getRuntimeConfig, getSearchSources, setSourcedStatus } from "../lib/api.js";
-import { AiSearchPrompts } from "./AiSearchPrompts.jsx";
 import { FunnelSankey } from "./FunnelSankey.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
 import {
@@ -107,7 +106,6 @@ export function JobsPage() {
   const [manualSearchPending, setManualSearchPending] = useState(false);
   const manualSearchAbortRef = useRef(null);
   const [runtimeConfig, setRuntimeConfig] = useState(null);
-  const [aiPromptsState, setAiPromptsState] = useState({ count: 0, dirty: false, loading: true });
   const [aiSearchStatus, setAiSearchStatus] = useState("idle"); // idle | running | results | error
   const [aiSearchActivity, setAiSearchActivity] = useState(null);
   const [aiSearchCounts, setAiSearchCounts] = useState(null);
@@ -135,9 +133,8 @@ export function JobsPage() {
   const visibleManualSearchError =
     manualSearchError || snapshot?.sourcing?.manualSearchError || null;
   const aiWebSearchAvailable = runtimeConfig?.aiWebSearch?.available === true;
-  const aiHasSavedPrompts = aiPromptsState.count > 0;
   const aiSearchRunning = aiSearchStatus === "running";
-  const aiSearchReady = aiWebSearchAvailable && aiHasSavedPrompts;
+  const aiSearchReady = aiWebSearchAvailable;
   const aiSearchDisabled = aiSearchRunning ? false : !aiSearchReady;
   const aiSearchStatusText = describeAiSearchStatusText(
     aiSearchStatus,
@@ -313,8 +310,6 @@ export function JobsPage() {
     aiSearchAbortRef.current?.abort();
   }
 
-  const handleAiPromptsState = useCallback((state) => setAiPromptsState(state), []);
-
   function updateExplorer(patch) {
     setExplorerState((prev) => sanitizeExplorerState({ ...prev, ...patch }));
   }
@@ -406,28 +401,21 @@ export function JobsPage() {
               status: aiSearchStatus,
               activity: aiSearchActivity,
               available: aiWebSearchAvailable,
-              hasPrompts: aiHasSavedPrompts,
-              promptsDirty: aiPromptsState.dirty,
             }),
             disabled: aiSearchDisabled,
             meta: aiSearchMetaLabel({
               running: aiSearchRunning,
               available: aiWebSearchAvailable,
-              hasPrompts: aiHasSavedPrompts,
             }),
             onAction: aiSearchRunning ? handleAiWebSearchAbort : handleAiWebSearch,
             statusText: aiSearchStatusText,
-            title: aiSearchTitleLabel({
-              available: aiWebSearchAvailable,
-              hasPrompts: aiHasSavedPrompts,
-            }),
+            title: aiSearchTitleLabel({ available: aiWebSearchAvailable }),
           }}
           filter={searchFilter}
           manualSearchRunning={manualSearchRunning}
           model={model}
           onFilter={setSearchQueue}
           onOpen={openDrawer}
-          onPromptsState={handleAiPromptsState}
           onSearch={handleManualSearch}
           onSkip={handleSkipSourced}
           skippingId={skippingId}
@@ -862,7 +850,6 @@ function SearchView({
   model,
   onFilter,
   onOpen,
-  onPromptsState,
   onSearch,
   onSkip,
   skippingId,
@@ -886,7 +873,6 @@ function SearchView({
           actionLabel={aiSearch.actionLabel}
           disabled={aiSearch.disabled}
           eyebrow="AI web search"
-          extra={<AiSearchPrompts onPromptsState={onPromptsState} />}
           meta={aiSearch.meta}
           onAction={aiSearch.onAction}
           title={aiSearch.title}
@@ -1232,27 +1218,23 @@ function describeAiSearchStatusText(status, activity, counts) {
   return null;
 }
 
-function aiSearchTitleLabel({ available, hasPrompts }) {
-  if (!available) return "AI Web Search Unavailable";
-  if (!hasPrompts) return "Add Search Prompts First";
-  return "AI Web Search";
+function aiSearchTitleLabel({ available }) {
+  return available ? "AI Web Search" : "AI Web Search Unavailable";
 }
 
-function aiSearchMetaLabel({ available, hasPrompts, running }) {
+function aiSearchMetaLabel({ available, running }) {
   if (running) return "Running";
-  if (!available) return "Unavailable";
-  if (!hasPrompts) return "Prompts needed";
-  return "Ready";
+  return available ? "Ready" : "Unavailable";
 }
 
-function describeAiSearchBody({ status, activity, available, hasPrompts, promptsDirty }) {
+// Plain-English description only — no prompt-count/dirty language. What
+// prompts to run and whether they need regenerating is handled invisibly by
+// jobsSearch.js's runAiWebSearchLane before the run starts (see that file's
+// header comment); this card only ever shows Unavailable/Ready/Running.
+function describeAiSearchBody({ status, activity, available }) {
   if (status === "running") return activity || "Starting AI web search…";
   if (!available) return "Configure an AI key in Settings to enable this lane.";
-  if (!hasPrompts) return "Save at least one AI search prompt below, then run this lane.";
-  if (promptsDirty) {
-    return "Primary lane across public company pages, search results, and curated role lists. Unsaved prompt edits below won't run until you save them.";
-  }
-  return "Primary lane across public company pages, search results, and curated role lists. Uses the saved prompts below.";
+  return "Searches company career pages, search results, and curated role lists for openings that match your saved job preferences.";
 }
 
 function unwrapRun(value) {

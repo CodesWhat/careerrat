@@ -1,4 +1,11 @@
-import { getSourcingRun, runAiWebSearchStream, startSearchRun } from "../lib/api.js";
+import {
+  generateSearchPrompts,
+  getSearchPrompts,
+  getSourcingRun,
+  runAiWebSearchStream,
+  saveSearchPrompts,
+  startSearchRun,
+} from "../lib/api.js";
 
 export function hasDbSourceSetup(sourceSetup) {
   if (!sourceSetup || typeof sourceSetup !== "object") return false;
@@ -170,6 +177,93 @@ function describeAiWebSearchError(error) {
   );
 }
 
+// Non-technical, single honest message for every way the invisible prep step
+// below can fail (no targeting context to generate from, a model/provider
+// error, or no AI route configured at all) — a non-technical job seeker has
+// no use for "SEARCH_PROMPTS_NO_TARGETING" or a provider status code, only
+// somewhere to go fix it.
+const AI_SEARCH_PREP_ERROR =
+  "Couldn't figure out what to search for — finish your job preferences in Settings.";
+
+// There is no per-prompt/Regenerate UI anymore (Scott, 2026-07-20: the old
+// "AI prompts (N)" button + modal meant nothing to a non-technical job
+// seeker), so nothing ever tells this lane "the prompts are stale" — it has
+// to know on its own, the same way a cache does: no stored prompts at all is
+// always stale, and stored prompts older than the candidate's targeting are
+// stale too since they'd be searching for the wrong thing.
+export function promptsAreStale(prompts, targetingUpdatedAt) {
+  const list = Array.isArray(prompts) ? prompts : [];
+  if (!list.length) return true;
+  if (!targetingUpdatedAt) return false;
+  const targetingTime = Date.parse(targetingUpdatedAt);
+  if (!Number.isFinite(targetingTime)) return false;
+  const newestPromptTime = list.reduce((latest, prompt) => {
+    const time = Date.parse(prompt?.updatedAt || "");
+    return Number.isFinite(time) && time > latest ? time : latest;
+  }, Number.NEGATIVE_INFINITY);
+  return !Number.isFinite(newestPromptTime) || newestPromptTime < targetingTime;
+}
+
+// No route exposes the candidate_targeting singleton row's own `updated_at`
+// column yet (readTargeting()/candidateConfigGet() in
+// src/core/db/verbs/candidate.mjs return the doc's fields, not its DB
+// timestamp) — this stays a seam rather than a hardcoded "always fresh"
+// assumption, so promptsAreStale() picks up a real value the moment a route
+// exposes one, with no call site here needing to change. Until then the "no
+// stored prompts at all" branch above is the only staleness trigger that
+// fires.
+async function getTargetingUpdatedAt() {
+  return null;
+}
+
+// Invisible AI-search prep: makes sure there ARE saved search prompts, and
+// that they still reflect the candidate's current targeting, before the AI
+// web-search run itself starts. Generation is a FULL replace, never a
+// partial-preserve merge — there's no UI left to reconcile a partial edit
+// against, so the freshly generated set simply becomes the stored set.
+async function ensureFreshSearchPrompts({
+  getSearchPrompts: getSearchPromptsFn,
+  generateSearchPrompts: generateSearchPromptsFn,
+  saveSearchPrompts: saveSearchPromptsFn,
+  getTargetingUpdatedAt: getTargetingUpdatedAtFn,
+  setActivity,
+}) {
+  let stored;
+  try {
+    stored = await getSearchPromptsFn();
+  } catch (_error) {
+    return { ok: false, error: AI_SEARCH_PREP_ERROR };
+  }
+
+  const prompts = stored?.data?.prompts;
+  const targetingUpdatedAt = await getTargetingUpdatedAtFn().catch(() => null);
+
+  if (!promptsAreStale(prompts, targetingUpdatedAt)) {
+    return { ok: true, prompts };
+  }
+
+  setActivity?.("Preparing your search…");
+
+  let generated;
+  try {
+    generated = await generateSearchPromptsFn();
+  } catch (_error) {
+    return { ok: false, error: AI_SEARCH_PREP_ERROR };
+  }
+  if (!generated?.data?.prompts?.length) {
+    return { ok: false, error: AI_SEARCH_PREP_ERROR };
+  }
+
+  try {
+    const saved = await saveSearchPromptsFn(
+      generated.data.prompts.map((prompt) => ({ text: prompt.text }))
+    );
+    return { ok: true, prompts: saved?.data?.prompts || generated.data.prompts };
+  } catch (_error) {
+    return { ok: false, error: AI_SEARCH_PREP_ERROR };
+  }
+}
+
 // Runs the AI web-search lane (POST /api/search/ai-web-search/run's SSE
 // stream) — same status/error-describing shape as runJobsPageSearch above,
 // but stateful across the run's lifetime instead of a single request/
@@ -181,8 +275,20 @@ function describeAiWebSearchError(error) {
 // rather than "error". Same refetch handoff on completion as the free-board
 // lane: the dashboard/results view re-reads the latest DB state rather than
 // this function trying to merge the run's counts into it locally.
+//
+// Before any of that, ensureFreshSearchPrompts() (above) runs invisibly —
+// there's no more user-facing "AI prompts"/Regenerate control, so this lane
+// has to keep its own prompts current. A brief "Preparing your search…"
+// activity message covers that step through the same SearchStatusStrip the
+// rest of this lane's activity text renders through; a prep failure (no
+// targeting context, a model error, or no AI route) reports AI_SEARCH_PREP_ERROR
+// and returns without ever starting the stream.
 export async function runAiWebSearchLane({
   runAiWebSearchStream: runFn = runAiWebSearchStream,
+  getSearchPrompts: getSearchPromptsFn = getSearchPrompts,
+  generateSearchPrompts: generateSearchPromptsFn = generateSearchPrompts,
+  saveSearchPrompts: saveSearchPromptsFn = saveSearchPrompts,
+  getTargetingUpdatedAt: getTargetingUpdatedAtFn = getTargetingUpdatedAt,
   refetch,
   signal,
   setStatus,
@@ -194,6 +300,22 @@ export async function runAiWebSearchLane({
   setCounts?.(null);
   setActivity?.(null);
   setStatus?.("running");
+
+  const prep = await ensureFreshSearchPrompts({
+    getSearchPrompts: getSearchPromptsFn,
+    generateSearchPrompts: generateSearchPromptsFn,
+    saveSearchPrompts: saveSearchPromptsFn,
+    getTargetingUpdatedAt: getTargetingUpdatedAtFn,
+    setActivity,
+  });
+
+  if (!prep.ok) {
+    setStatus?.("error");
+    setError?.(prep.error);
+    return { ok: false, error: prep.error };
+  }
+
+  setActivity?.(null);
 
   let doneData = null;
   let sawDone = false;

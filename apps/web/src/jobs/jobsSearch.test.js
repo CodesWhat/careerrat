@@ -217,6 +217,23 @@ function stateSpies() {
   };
 }
 
+// Already-fresh stored prompts — every runAiWebSearchLane test below is
+// exercising the STREAM, not the invisible prep step in front of it (see
+// jobsSearch.js's ensureFreshSearchPrompts/promptsAreStale), so prep must
+// resolve ok on the first read without ever calling generate/save.
+function freshPromptsStub() {
+  return {
+    getSearchPrompts: vi.fn(async () => ({
+      data: {
+        prompts: [{ id: "prompt-1", text: "existing prompt", updatedAt: "2026-07-01T00:00:00Z" }],
+      },
+    })),
+    generateSearchPrompts: vi.fn(),
+    saveSearchPrompts: vi.fn(),
+    getTargetingUpdatedAt: vi.fn(async () => null),
+  };
+}
+
 describe("runAiWebSearchLane", () => {
   it("moves running to results, records activity/counts, and refetches", async () => {
     const state = stateSpies();
@@ -224,6 +241,7 @@ describe("runAiWebSearchLane", () => {
     const done = { searched: 2, found: 3, new: 2, duplicates: 1, errors: [] };
     const result = await runAiWebSearchLane({
       ...state,
+      ...freshPromptsStub(),
       refetch,
       runAiWebSearchStream: async ({ onEvent }) => {
         onEvent({ type: "activity", message: "Searching Acme…" });
@@ -243,6 +261,7 @@ describe("runAiWebSearchLane", () => {
     const refetch = vi.fn();
     const result = await runAiWebSearchLane({
       ...state,
+      ...freshPromptsStub(),
       refetch,
       runAiWebSearchStream: async ({ onEvent }) => {
         onEvent({ type: "error", message: "provider failed" });
@@ -259,6 +278,7 @@ describe("runAiWebSearchLane", () => {
     const state = stateSpies();
     const result = await runAiWebSearchLane({
       ...state,
+      ...freshPromptsStub(),
       runAiWebSearchStream: async () => {
         throw new DOMException("cancelled", "AbortError");
       },
