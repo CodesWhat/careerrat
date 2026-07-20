@@ -8,6 +8,7 @@ import {
   saveCandidateFile as defaultSaveCandidateFile,
   saveOnboardingDraft as defaultSaveOnboardingDraft,
   startFirstSearchRun as defaultStartFirstSearchRun,
+  getSourcingRun,
 } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
@@ -92,7 +93,13 @@ function firstSearchCounts(run) {
       summary.attemptedSources,
       summary.deterministicSources?.attempted
     ),
-    rolesFound: numberFrom(summary.rolesFound, summary.new, summary.offerCount),
+    rolesFound: numberFrom(
+      summary.rolesFound,
+      summary.new,
+      summary.offerCount,
+      run?.progress?.foundCount,
+      run?.progress?.offerCount
+    ),
   };
 }
 
@@ -286,9 +293,13 @@ function firstSearchStatusView({ quickStarting, task, triggerError }) {
     return { tone: "error", text: FIRST_SEARCH_FAILURE_COPY, canRetry: true };
   }
   if (task.status === "running") {
+    const rolesFound = task.counts.rolesFound;
     return {
       tone: "pending",
-      text: "First search is running — fresh roles will land in Jobs.",
+      text:
+        rolesFound > 0
+          ? `First search is running — ${rolesFound} role${rolesFound === 1 ? "" : "s"} found so far, landing in Jobs.`
+          : "First search is running — fresh roles will land in Jobs.",
       canRetry: false,
     };
   }
@@ -390,6 +401,28 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
     autoStartRequestedRef.current = true;
     void handleStartFirstSearch();
   }, []);
+
+  // Live-poll the running first search so the "N found so far" count and the
+  // eventual completion are picked up on their own, without a manual reload.
+  // This effect only observes a run already in flight — it never starts one
+  // (that's the auto-start effect above), so the two never double-fire.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: run id is a deliberate trigger so a new run resets the interval
+  useEffect(() => {
+    if (firstSearchRun?.status !== "running") return undefined;
+    let cancelled = false;
+    const intervalId = setInterval(async () => {
+      try {
+        const result = await getSourcingRun({ purpose: "first-search" });
+        if (!cancelled) setLocalFirstSearchRun(result);
+      } catch {
+        /* skip this tick; a failed poll must not surface an error or stop the search */
+      }
+    }, 3000);
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }, [firstSearchRun?.status, firstSearchRun?.id]);
 
   async function handleSelectCadence(mode) {
     if (mode === selectedCadence || savingCadence) return;

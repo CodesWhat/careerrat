@@ -209,6 +209,31 @@ describe("FinishStep first-search status line", () => {
     expect(html).not.toContain("RSS");
   });
 
+  it("shows a live found-so-far count while running, with singular grammar at 1", () => {
+    const pluralHtml = renderFinish(
+      stateWithFirstSearch({ status: "running", progress: { foundCount: 2 } })
+    );
+    expect(pluralHtml).toContain(
+      "First search is running — 2 roles found so far, landing in Jobs."
+    );
+
+    const singularHtml = renderFinish(
+      stateWithFirstSearch({ status: "running", progress: { foundCount: 1 } })
+    );
+    expect(singularHtml).toContain(
+      "First search is running — 1 role found so far, landing in Jobs."
+    );
+  });
+
+  it("keeps the generic running copy when the live count is zero", () => {
+    const html = renderFinish(
+      stateWithFirstSearch({ status: "running", progress: { foundCount: 0 } })
+    );
+
+    expect(html).toContain("First search is running — fresh roles will land in Jobs.");
+    expect(html).not.toContain("found so far");
+  });
+
   it("shows a completed line when roles were found", () => {
     const html = renderFinish(
       stateWithFirstSearch({
@@ -251,7 +276,7 @@ describe("FinishStep first-search status line", () => {
 });
 
 describe("FinishStep deep-ingest hero", () => {
-  it("renders the CTA using existing panel grammar with a primary action and a quiet finish link", () => {
+  it("renders the CTA using existing panel grammar with a primary action", () => {
     const html = renderFinish();
 
     expect(html).toContain(
@@ -262,7 +287,6 @@ describe("FinishStep deep-ingest hero", () => {
       "A guided ingest of your work history makes packets and applications much stronger."
     );
     expect(html).toContain(">Start deep ingest<");
-    expect(html).toContain("do it later");
   });
 });
 
@@ -353,6 +377,28 @@ describe("first-search API wrappers", () => {
 });
 
 describe("first-search pure helpers", () => {
+  it("reads the live progress count for a running run with no summary yet", () => {
+    const task = FinishStepModule.buildFirstSearchTask({
+      state: SEARCH_READY_STATE,
+      run: { status: "running", progress: { foundCount: 3, scannedCount: 40 } },
+    });
+
+    expect(task.counts.rolesFound).toBe(3);
+  });
+
+  it("prefers a completed run's summary count over any lingering progress", () => {
+    const task = FinishStepModule.buildFirstSearchTask({
+      state: SEARCH_READY_STATE,
+      run: {
+        status: "completed",
+        summary: { rolesFound: 5 },
+        progress: { foundCount: 1 },
+      },
+    });
+
+    expect(task.counts.rolesFound).toBe(5);
+  });
+
   it("does not enable first search when explicit deterministic source counts are zero", () => {
     const task = FinishStepModule.buildFirstSearchTask({
       state: stateWithFirstSearch(
