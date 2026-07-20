@@ -199,6 +199,7 @@ describe("PrefsStep shell layout", () => {
     expect(html).toContain(">Remote</button>");
     expect(html).toContain(">Hybrid</button>");
     expect(html).toContain(">On-site</button>");
+    expect(html).toContain("Required — pick one.");
   });
 
   it("keeps commas inside relocation cities and documents Enter as the commit key", () => {

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useRolesterUser } from "../auth/clerkControls.jsx";
 import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
@@ -186,6 +187,7 @@ export async function loadOnboardingRuntimeState({
 
 export function OnboardingPage() {
   const { isSignedIn } = useRolesterUser();
+  const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [state, setState] = useState(null);
@@ -211,7 +213,9 @@ export function OnboardingPage() {
           state: next.state,
           draft: next.onboardingDraft,
         });
-        setStepIndex(initialStepIndex);
+        const stepParam = searchParams.get("step");
+        const stepParamIndex = STEPS.findIndex((s) => s.key === stepParam);
+        setStepIndex(stepParamIndex >= 0 ? stepParamIndex : initialStepIndex);
         // Self-heal stale drafts: an older build could persist a data-step
         // index (resume/targeting/companies/guardrails) into completedIndexes
         // just from a Continue click. Drop anything outside
@@ -237,7 +241,7 @@ export function OnboardingPage() {
       setLoadError(err instanceof Error ? err.message : "Failed to load onboarding state");
       return null;
     }
-  }, [hasPositioned, isSignedIn]);
+  }, [hasPositioned, isSignedIn, searchParams]);
 
   // Mount-only initial load — `load` itself is stable via useCallback and
   // re-runs are triggered explicitly by step components calling `reload()`.

@@ -385,6 +385,12 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
   }
 
   async function handleSaveAndNext() {
+    if (authChoice !== "authorized" && authChoice !== "sponsorship") {
+      setError(
+        "Pick your work authorization to continue — the gate and every application form need it."
+      );
+      return;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -542,7 +548,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
                       Need sponsorship
                     </button>
                   </div>
-                  <span className="field__hint">Optional.</span>
+                  <span className="field__hint">Required — pick one.</span>
                 </div>
                 <div className="field">
                   <span className="field__label">Work mode</span>

@@ -33,10 +33,10 @@ const INCOMPLETE_SETUP = {
   },
 };
 
-function renderCard(setup, props = {}) {
+function renderCard(setup) {
   return renderToStaticMarkup(
     <MemoryRouter>
-      <SetupReadinessCard setup={setup} {...props} />
+      <SetupReadinessCard setup={setup} />
     </MemoryRouter>
   );
 }
@@ -50,47 +50,86 @@ describe("SetupReadinessCard", () => {
     expect(renderCard(COMPLETE_SETUP)).toBe("");
   });
 
-  it("renders compact readiness rows and missing hints when setup is incomplete", () => {
+  it("renders the setup banner with actionable todos when setup is incomplete", () => {
     const markup = renderCard(INCOMPLETE_SETUP);
 
-    expect(markup).toContain("Setup readiness");
+    expect(markup).toContain('class="setup-banner"');
+    expect(markup).toContain("🪪");
+    expect(markup).toContain("Finish setup — 4 quick things left");
     expect(markup).toContain("Searching now");
-    expect(markup).toContain("Search");
-    expect(markup).toContain("Gate");
-    expect(markup).toContain("Apply");
-    expect(markup).toContain("Deep ingest");
-    expect(markup).toContain("compensation floor");
-    expect(markup).toContain("work authorization");
-    expect(markup).toContain("evidence claims");
-    expect(markup).toContain("deeper evidence bank");
-    expect(markup).toContain("/onboarding");
+    expect(markup).toContain("Set compensation floor");
+    expect(markup).toContain("Add work authorization");
+    expect(markup).toContain("Add evidence claims");
+    expect(markup).toContain("Finish deep ingest");
+    expect(markup).not.toContain("deeper evidence bank");
+    expect(markup).not.toContain("target-company shortlist");
   });
 
-  it("routes deep ingest to its workbench and every other readiness row to onboarding", () => {
+  it("deep-links todos to the step that resolves them", () => {
     const markup = renderCard(INCOMPLETE_SETUP);
-    const rowLinks = markup
-      .match(/<a\b[^>]*>[\s\S]*?<\/a>/g)
-      .filter((link) => link.includes("chip--readiness"));
-    const hrefFor = (label) => rowLinks.find((link) => link.includes(`>${label}</span>`));
+    const todoLinks = markup.match(/<a\b[^>]*class="setup-banner__todo"[^>]*>[^<]*<\/a>/g) || [];
+    const linkFor = (label) => todoLinks.find((link) => link.endsWith(`>${label}</a>`));
 
-    expect(hrefFor("Deep ingest")).toContain('href="/deep-ingest"');
-    for (const label of ["Search", "Gate", "Apply"]) {
-      expect(hrefFor(label)).toContain('href="/onboarding"');
-    }
+    expect(linkFor("Add work authorization")).toContain('href="/onboarding?step=prefs"');
+    expect(linkFor("Finish deep ingest")).toContain('href="/deep-ingest"');
   });
 
-  it("shows first-search status as checklist context rather than a nag", () => {
-    const markup = renderCard(INCOMPLETE_SETUP, {
-      firstSearchRun: {
-        status: "running",
-        summary: { sourcesAttempted: 2, rolesFound: 0 },
+  it("deduplicates the same todo across readiness groups", () => {
+    const markup = renderCard({
+      readiness: {
+        search_ready: true,
+        gate_ready: false,
+        apply_ready: false,
+        deep_ingest_complete: true,
+      },
+      missing: {
+        search_ready: [],
+        gate_ready: ["work authorization"],
+        apply_ready: ["work authorization"],
+        deep_ingest_complete: [],
       },
     });
 
-    expect(markup).toContain("First search");
-    expect(markup).toContain("Running");
-    expect(markup).toContain("Searching deterministic public sources...");
-    expect(markup).not.toContain("Search jobs now");
-    expect(markup).not.toContain("nag");
+    expect(markup.match(/Add work authorization/g) || []).toHaveLength(1);
+  });
+
+  it("uses singular grammar when exactly one todo remains", () => {
+    const markup = renderCard({
+      readiness: {
+        search_ready: true,
+        gate_ready: false,
+        apply_ready: true,
+        deep_ingest_complete: true,
+      },
+      missing: {
+        search_ready: [],
+        gate_ready: ["work authorization"],
+        apply_ready: [],
+        deep_ingest_complete: [],
+      },
+    });
+
+    expect(markup).toContain("Finish setup — 1 quick thing left");
+    expect(markup).not.toContain("1 quick things left");
+  });
+
+  it("prompts the user to finish setup before searching when search is not ready", () => {
+    const markup = renderCard({
+      readiness: {
+        search_ready: false,
+        gate_ready: true,
+        apply_ready: true,
+        deep_ingest_complete: true,
+      },
+      missing: {
+        search_ready: ["role titles"],
+        gate_ready: [],
+        apply_ready: [],
+        deep_ingest_complete: [],
+      },
+    });
+
+    expect(markup).toContain("Finish these to start searching.");
+    expect(markup).not.toContain("Searching now. Gate and apply unlock as these fill in.");
   });
 });

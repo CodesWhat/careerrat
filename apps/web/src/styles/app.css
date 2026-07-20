@@ -36,73 +36,6 @@ button {
   font: inherit;
 }
 
-/* ── Hosted preview password gate ───────────────────────────────────────── */
-
-.preview-gate {
-  display: grid;
-  min-height: 100%;
-  place-items: center;
-  padding: 24px;
-  background: var(--paper-bg);
-}
-
-.preview-gate__panel {
-  display: flex;
-  width: min(100%, 420px);
-  flex-direction: column;
-  gap: 14px;
-  padding: 28px;
-  border: 1px solid rgba(var(--rgb-line), 0.1);
-  border-radius: var(--card-radius);
-  background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
-}
-
-.preview-gate__eyebrow {
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: var(--label-tracking);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.preview-gate h1 {
-  margin: 0;
-  color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
-  font-size: 48px;
-  font-weight: 900;
-  letter-spacing: 0;
-  line-height: 0.95;
-}
-
-.preview-gate .text-input {
-  min-height: 52px;
-  padding: 0 16px;
-  border-color: rgba(var(--rgb-line), 0.18);
-  background: var(--paper-band);
-  font-size: 16px;
-  font-weight: 750;
-}
-
-.preview-gate .btn {
-  min-height: 48px;
-  border: 0;
-  border-radius: 999px;
-  background: var(--ink);
-  color: var(--paper-surface);
-  font-size: 14px;
-  font-weight: 900;
-}
-
-.preview-gate__error {
-  margin: 0;
-  color: var(--danger);
-  font-size: 13px;
-  font-weight: 800;
-}
-
 /* ── App shell ──────────────────────────────────────────────────────────── */
 
 .app-shell {
@@ -497,6 +430,74 @@ button {
   display: flex;
   align-items: center;
   gap: 8px;
+}
+
+/* ── Setup to-do banner — no left-edge accent strip; full-fill tint only ── */
+
+.setup-banner {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  background: var(--mustard-light);
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--card-radius);
+  box-shadow: var(--card-shadow);
+  padding: 14px 18px;
+}
+
+.setup-banner__mark {
+  font-size: 22px;
+  line-height: 1;
+  flex: 0 0 auto;
+}
+
+.setup-banner__body {
+  flex: 1 1 240px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.setup-banner__title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.setup-banner__sub {
+  margin: 0;
+  font-size: 12px;
+  color: var(--ink-soft);
+}
+
+.setup-banner__todos {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.setup-banner__todo {
+  display: inline-flex;
+  align-items: center;
+  padding: 5px 12px;
+  border-radius: 999px;
+  background: var(--mustard);
+  color: var(--paper-surface);
+  font-size: 12px;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.setup-banner__todo:hover {
+  filter: brightness(0.94);
+}
+
+.setup-banner__finish {
+  margin-left: auto;
 }
 
 /* ── Product dashboard home ─────────────────────────────────────────────── */

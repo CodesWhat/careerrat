@@ -1,161 +1,100 @@
 import { Link } from "react-router-dom";
-import { Card } from "../components/Card.jsx";
-import { CheckCircleIcon, ClockIcon } from "../components/icons.jsx";
 
-const READINESS_ROWS = [
-  { key: "search_ready", label: "Search", to: "/onboarding" },
-  { key: "gate_ready", label: "Gate", to: "/onboarding" },
-  { key: "apply_ready", label: "Apply", to: "/onboarding" },
-  { key: "deep_ingest_complete", label: "Deep ingest", to: "/deep-ingest" },
-];
+const READINESS_KEYS = ["search_ready", "gate_ready", "apply_ready", "deep_ingest_complete"];
 
-const FIRST_SEARCH = {
-  not_started: {
-    label: "Not started",
-    color: "var(--mustard)",
-    detail: "No search run yet",
+// Deep-links each missing-string variant straight to the onboarding step (or
+// dedicated page) that resolves it. Keyed on the lowercased raw string from
+// setup.missing so wording drift in the backend just falls through to the
+// generic default rather than throwing.
+const SETUP_TODO_TARGETS = {
+  "source resume": { label: "Add your resume", to: "/onboarding?step=resume" },
+  "role titles": { label: "Add role titles", to: "/onboarding?step=targeting" },
+  "search location or remote posture": {
+    label: "Set location / remote",
+    to: "/onboarding?step=prefs",
   },
-  running: {
-    label: "Running",
-    color: "var(--mustard)",
-    detail: "Searching deterministic public sources...",
-  },
-  completed: {
-    label: "Completed",
-    color: "var(--teal)",
-    detail: "Search completed.",
-  },
-  failed: {
-    label: "Failed",
-    color: "var(--m-error)",
-    detail: "First search failed. Retry from onboarding.",
-  },
+  "location posture": { label: "Set location / remote", to: "/onboarding?step=prefs" },
+  "compensation floor": { label: "Set compensation floor", to: "/onboarding?step=prefs" },
+  "work authorization": { label: "Add work authorization", to: "/onboarding?step=prefs" },
+  "candidate full name": { label: "Add your name", to: "/onboarding?step=resume" },
+  "candidate email": { label: "Add your email", to: "/onboarding?step=resume" },
+  "evidence claims": { label: "Add evidence claims", to: "/onboarding?step=resume" },
 };
 
-const iconStyle = {
-  flex: "0 0 auto",
-  fontSize: 16,
-  marginTop: 1,
-};
+function isComplete(setup) {
+  const readiness = setup?.readiness || {};
+  return READINESS_KEYS.every((key) => readiness[key] === true);
+}
 
-function compactMissing(values) {
+function todoTarget(raw) {
+  const text = String(raw || "").trim();
+  return SETUP_TODO_TARGETS[text.toLowerCase()] || { label: text, to: "/onboarding" };
+}
+
+function collectMissing(missing) {
   const out = [];
-  const seen = new Set();
-  for (const value of Array.isArray(values) ? values : []) {
-    const text = String(value || "").trim();
-    const key = text.toLowerCase();
-    if (!text || seen.has(key)) continue;
-    seen.add(key);
-    out.push(text);
+  for (const key of ["search_ready", "gate_ready", "apply_ready"]) {
+    for (const value of Array.isArray(missing?.[key]) ? missing[key] : []) {
+      const text = String(value || "").trim();
+      if (text) out.push(text);
+    }
   }
   return out;
 }
 
-function missingHint(values) {
-  const missing = compactMissing(values);
-  if (!missing.length) return "Needs setup details.";
-  const shown = missing.slice(0, 2).join(", ");
-  const suffix = missing.length > 2 ? `, +${missing.length - 2} more` : "";
-  return `Needs ${shown}${suffix}.`;
+function dedupeTodos(todos) {
+  const out = [];
+  const seen = new Set();
+  for (const todo of todos) {
+    const key = todo.label.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(todo);
+  }
+  return out;
 }
 
-function isComplete(setup) {
-  const readiness = setup?.readiness || {};
-  return READINESS_ROWS.every((row) => readiness[row.key] === true);
+function buildTodos(setup) {
+  const readiness = setup.readiness || {};
+  const todos = collectMissing(setup.missing).map(todoTarget);
+  if (readiness.deep_ingest_complete !== true) {
+    todos.push({ label: "Finish deep ingest", to: "/deep-ingest" });
+  }
+  return dedupeTodos(todos);
 }
 
-function unwrapRun(value) {
-  if (!value || typeof value !== "object") return null;
-  if (value.run && typeof value.run === "object") return value.run;
-  return value;
-}
-
-function firstSearchContext(setup, firstSearchRun) {
-  const run =
-    unwrapRun(firstSearchRun) ||
-    unwrapRun(setup?.firstSearchRun) ||
-    unwrapRun(setup?.sourcing?.firstSearchRun);
-  if (!run) return null;
-  const status = FIRST_SEARCH[run.status] ? run.status : "not_started";
-  const summary = run.summary || {};
-  const sourcesAttempted = Number(summary.sourcesAttempted ?? summary.attemptedSources ?? 0);
-  const rolesFound = Number(summary.rolesFound ?? summary.new ?? summary.offerCount ?? 0);
-  const counts =
-    status === "completed" && Number.isFinite(sourcesAttempted) && Number.isFinite(rolesFound)
-      ? ` ${sourcesAttempted} sources attempted, ${rolesFound} roles found.`
-      : "";
-  return {
-    ...FIRST_SEARCH[status],
-    counts,
-  };
-}
-
-export function SetupReadinessCard({ setup, firstSearchRun }) {
+export function SetupReadinessCard({ setup }) {
   if (!setup || isComplete(setup)) return null;
 
   const readiness = setup.readiness || {};
-  const missing = setup.missing || {};
-  const searchReady = readiness.search_ready === true;
-  const firstSearch = firstSearchContext(setup, firstSearchRun);
+  const todos = buildTodos(setup);
+  const n = todos.length;
 
   return (
-    <Card
-      title="Setup readiness"
-      actions={
-        <Link className="btn btn--secondary" to="/onboarding">
+    <section className="setup-banner" role="status" aria-label="Finish setup">
+      <span className="setup-banner__mark" aria-hidden="true">
+        🪪
+      </span>
+      <div className="setup-banner__body">
+        <p className="setup-banner__title">
+          Finish setup — {n} quick thing{n === 1 ? "" : "s"} left
+        </p>
+        <p className="setup-banner__sub">
+          {readiness.search_ready
+            ? "Searching now. Gate and apply unlock as these fill in."
+            : "Finish these to start searching."}
+        </p>
+      </div>
+      <div className="setup-banner__todos">
+        {todos.map((t) => (
+          <Link key={t.label} className="setup-banner__todo" to={t.to}>
+            {t.label}
+          </Link>
+        ))}
+        <Link className="btn btn--secondary setup-banner__finish" to="/onboarding">
           Finish setup
         </Link>
-      }
-    >
-      <p className="field__hint" style={{ margin: 0 }}>
-        {searchReady
-          ? "Searching now — finish setup to unlock gating and applying."
-          : "Finish Search to start searching; Gate and Apply unlock as setup fills in."}
-      </p>
-      <div className="chip-row">
-        {READINESS_ROWS.map((row) => {
-          const ready = readiness[row.key] === true;
-          const Icon = ready ? CheckCircleIcon : ClockIcon;
-          const color = ready ? "var(--teal)" : "var(--mustard)";
-          return (
-            <Link
-              className="chip chip--readiness"
-              key={row.key}
-              to={row.to}
-              style={{ color, textDecoration: "none" }}
-            >
-              <Icon style={iconStyle} />
-              <span style={{ minWidth: 0 }}>
-                <span style={{ display: "block" }}>{row.label}</span>
-                <span className="field__hint" style={{ color, display: "block", marginTop: 3 }}>
-                  {ready ? "Ready" : missingHint(missing[row.key])}
-                </span>
-              </span>
-            </Link>
-          );
-        })}
-        {firstSearch ? (
-          <div className="chip chip--readiness" style={{ color: firstSearch.color }}>
-            <ClockIcon style={iconStyle} />
-            <span style={{ minWidth: 0 }}>
-              <span style={{ display: "block" }}>First search</span>
-              <span
-                className="field__hint"
-                style={{ color: firstSearch.color, display: "block", marginTop: 3 }}
-              >
-                {firstSearch.label}
-              </span>
-              <span
-                className="field__hint"
-                style={{ color: firstSearch.color, display: "block", marginTop: 3 }}
-              >
-                {firstSearch.detail}
-                {firstSearch.counts}
-              </span>
-            </span>
-          </div>
-        ) : null}
       </div>
-    </Card>
+    </section>
   );
 }
