@@ -1,9 +1,5 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import {
-  RolesterSignInButton,
-  RolesterUserButton,
-  useRolesterUser,
-} from "../auth/clerkControls.jsx";
+import { RolesterUserButton, useRolesterUser } from "../auth/clerkControls.jsx";
 import { IconButton } from "../components/Button.jsx";
 import { ArrowLeftIcon, ArrowRightIcon, MoonIcon, SunIcon } from "../components/icons.jsx";
 import { useTheme } from "../lib/theme.js";
@@ -131,15 +127,7 @@ export function OnboardingTopBar() {
           {theme === "dark" ? <SunIcon /> : <MoonIcon />}
         </IconButton>
         <div className="onboarding-shell__account">
-          {isSignedIn ? (
-            <RolesterUserButton afterSignOutUrl="/app/onboarding" />
-          ) : (
-            <RolesterSignInButton mode="modal">
-              <button type="button" className="onboarding-shell__login">
-                Log in
-              </button>
-            </RolesterSignInButton>
-          )}
+          {isSignedIn ? <RolesterUserButton afterSignOutUrl="/app/onboarding" /> : null}
         </div>
       </div>
     </header>
@@ -151,21 +139,28 @@ export function OnboardingNavButton({
   label,
   className = "",
   disabled = false,
+  loading = false,
   ...rest
 }) {
   const isBack = direction === "back";
   const Icon = isBack ? ArrowLeftIcon : ArrowRightIcon;
+  const workingLabel = "Working…";
 
   return (
     <button
       type="button"
-      className={`onboarding-nav-button onboarding-nav-button--${isBack ? "back" : "next"} ${className}`.trim()}
-      aria-label={label}
-      title={label}
-      disabled={disabled}
+      className={`onboarding-nav-button onboarding-nav-button--${isBack ? "back" : "next"}${loading ? " onboarding-nav-button--loading" : ""} ${className}`.trim()}
+      aria-label={loading ? workingLabel : label}
+      title={loading ? workingLabel : label}
+      disabled={loading || disabled}
+      aria-busy={loading ? "true" : undefined}
       {...rest}
     >
-      <Icon className="onboarding-nav-button__icon" />
+      {loading ? (
+        <span className="btn__spinner" aria-hidden="true" />
+      ) : (
+        <Icon className="onboarding-nav-button__icon" />
+      )}
     </button>
   );
 }

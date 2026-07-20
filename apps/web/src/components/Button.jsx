@@ -2,6 +2,8 @@ export function Button({
   variant = "primary",
   type = "button",
   disabled,
+  loading = false,
+  loadingLabel,
   className = "",
   children,
   ...rest
@@ -10,10 +12,12 @@ export function Button({
     <button
       type={type}
       className={`btn btn--${variant} ${className}`.trim()}
-      disabled={disabled}
+      disabled={disabled || loading}
+      aria-busy={loading ? "true" : undefined}
       {...rest}
     >
-      {children}
+      {loading ? <span className="btn__spinner" aria-hidden="true" /> : null}
+      {loading ? (loadingLabel ?? children) : children}
     </button>
   );
 }

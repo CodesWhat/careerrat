@@ -464,6 +464,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
             label="Continue"
             onClick={handleSaveAndNext}
             disabled={saving}
+            loading={saving}
           />
         </>
       }
@@ -491,6 +492,8 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
             {error ? <InlineAlert message={error} /> : null}
 
             <section className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-quick-facts__panel">
+              {saving && <span className="onboarding-step-status">Saving…</span>}
+
               {LINK_FIELD_META.map(({ field, label, iconClass, Icon }) => (
                 <ProfileLinkRow
                   key={field}

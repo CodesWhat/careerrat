@@ -490,6 +490,7 @@ export function CompaniesStep({
             label="Continue"
             onClick={handleSaveAndNext}
             disabled={saving}
+            loading={saving}
           />
         </>
       }
@@ -517,6 +518,8 @@ export function CompaniesStep({
 
           <div className="onboarding-step-card__content onboarding-step-card__content--dense onboarding-step-card__content--scroll onboarding-targeting__content onboarding-companies__content">
             <section className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-companies__panel">
+              {saving && <span className="onboarding-step-status">Saving your companies…</span>}
+
               {seedStatus === "loading" ? (
                 <div className="onboarding-companies__header">
                   <span className="onboarding-companies__status">Finding matches…</span>

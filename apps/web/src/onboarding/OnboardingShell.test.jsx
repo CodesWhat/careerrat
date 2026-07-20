@@ -79,8 +79,8 @@ describe("OnboardingTopBar", () => {
     expect(html).not.toContain("onboarding-shell__brand-divider");
     expect(html).not.toContain("onboarding-shell__primary-nav");
     expect(html).not.toContain("onboarding-shell__utilities");
-    expect(html).toContain("Log in");
-    expect(html).toContain('data-clerk="sign-in"');
+    expect(html).not.toContain("Log in");
+    expect(html).not.toContain('data-clerk="sign-in"');
   });
 
   it("shows the Clerk avatar control in the top right after sign-in", () => {

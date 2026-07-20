@@ -17,7 +17,7 @@ describe("WelcomeStep", () => {
     expect(html).not.toContain("Dashboard");
     expect(html).not.toContain("Jobs");
     expect(html).not.toContain("Calendar");
-    expect(html).toContain("Log in");
+    expect(html).not.toContain("Log in");
     expect(html).toContain("onboarding-shell__account");
     expect(html).toContain("Get Started");
     expect(html).toContain("onboarding-hero--wash");

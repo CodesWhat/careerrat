@@ -440,10 +440,8 @@ button {
   gap: 14px;
   flex-wrap: wrap;
   background: var(--mustard-light);
-  border: 1px solid var(--paper-edge);
-  border-radius: var(--card-radius);
-  box-shadow: var(--card-shadow);
-  padding: 14px 18px;
+  border-radius: var(--row-radius);
+  padding: 10px 14px;
 }
 
 .setup-banner__mark {
@@ -2323,6 +2321,16 @@ button {
   color: var(--m-on-error);
 }
 
+.btn__spinner {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  border-radius: 999px;
+  animation: onboarding-autosave-spin 0.86s linear infinite;
+}
+
 .icon-btn {
   display: inline-flex;
   align-items: center;
@@ -2536,25 +2544,6 @@ button {
   min-height: 36px;
 }
 
-.onboarding-shell__login {
-  min-height: 36px;
-  padding: 0 16px;
-  border: 1px solid var(--header-pill-border);
-  border-radius: 999px;
-  background: var(--header-pill-bg);
-  color: var(--ink);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-  box-shadow: var(--header-pill-shadow);
-}
-
-.onboarding-shell__login:hover {
-  background: var(--paper-surface);
-}
-
 .onboarding-shell__theme {
   width: 36px;
   height: 36px;
@@ -2695,9 +2684,31 @@ button {
   box-shadow: none;
 }
 
+/* Loading overrides the plain :disabled dimming above — the spinner needs
+   to stay clearly visible, not fade out with the rest of a disabled control.
+   Interaction is still blocked (disabled attribute + pointer-events here). */
+.onboarding-nav-button--loading {
+  cursor: wait;
+  pointer-events: none;
+}
+
+.onboarding-nav-button.onboarding-nav-button--loading:disabled {
+  border-color: var(--paper-edge-strong);
+  background: var(--paper-surface);
+  color: var(--ink);
+  opacity: 1;
+  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.07);
+}
+
 .onboarding-nav-button__icon {
   width: 21px;
   height: 21px;
+}
+
+.onboarding-nav-button .btn__spinner {
+  width: 20px;
+  height: 20px;
+  border-width: 2.5px;
 }
 
 .onboarding-hero {
@@ -4628,6 +4639,18 @@ button {
   white-space: nowrap;
 }
 
+/* In-flow step status line — a plain saving/progress note at the top of a
+   step's content, not a pill. The OnboardingShell `actions` slot is
+   position:absolute and centered, so this can't live there without
+   overlapping card content; it renders in normal document flow instead. */
+.onboarding-step-status {
+  display: block;
+  margin: 0 0 4px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
 .onboarding-companies__company-list {
   flex: 1 1 auto;
   display: flex;
@@ -4939,17 +4962,6 @@ button {
   background: rgba(255, 250, 242, 0.14);
 }
 
-[data-theme="dark"] .onboarding-shell__login {
-  border-color: var(--header-pill-border);
-  background: var(--header-pill-bg);
-  color: var(--ink);
-  box-shadow: var(--header-pill-shadow);
-}
-
-[data-theme="dark"] .onboarding-shell__login:hover {
-  background: rgba(255, 250, 242, 0.14);
-}
-
 [data-theme="dark"] .onboarding-step-card {
   border-color: rgba(255, 250, 242, 0.1);
   background: rgba(35, 31, 24, 0.96);
@@ -5005,6 +5017,14 @@ button {
   color: rgba(239, 233, 221, 0.36);
   opacity: 0.52;
   box-shadow: none;
+}
+
+[data-theme="dark"] .onboarding-nav-button.onboarding-nav-button--loading:disabled {
+  border-color: rgba(255, 250, 242, 0.13);
+  background: rgba(255, 250, 242, 0.1);
+  color: var(--ink);
+  opacity: 1;
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
 }
 
 [data-theme="dark"] .onboarding-progress__case {
@@ -5391,7 +5411,8 @@ button {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .onboarding-key__autosave-disc {
+  .onboarding-key__autosave-disc,
+  .btn__spinner {
     animation: none;
   }
 }
