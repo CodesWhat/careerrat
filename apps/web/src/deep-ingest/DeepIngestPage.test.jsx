@@ -25,6 +25,7 @@ const apiMock = vi.hoisted(() => ({
   updateDeepIngestLaneState: vi.fn(),
   uploadDeepIngestFile: vi.fn(),
 }));
+
 const captured = vi.hoisted(() => ({ buttons: [], fields: [], nativeButtons: [] }));
 
 vi.mock("react", async (importOriginal) => {
@@ -75,110 +76,98 @@ vi.mock("../components/Button.jsx", async (importOriginal) => {
 
 vi.mock("../components/form.jsx", async (importOriginal) => {
   const actual = await importOriginal();
+  const capture = (Component) => (props) => {
+    captured.fields.push(props);
+    return Component(props);
+  };
   return {
     ...actual,
-    TextArea: (props) => {
-      captured.fields.push(props);
-      return actual.TextArea(props);
-    },
-    TextField: (props) => {
-      captured.fields.push(props);
-      return actual.TextField(props);
-    },
+    TextArea: capture(actual.TextArea),
+    TextField: capture(actual.TextField),
   };
 });
 
 import { DeepIngestPage } from "./DeepIngestPage.jsx";
 
-const FORBIDDEN_DEEP_INGEST_TEXT = [
-  "AI interview",
-  "guided interview",
-  "full interview",
-  "interview transcript",
-  "/api/chat",
-  "POST /api/skill/run",
-  "/api/skill/run",
+const LANE_KEYS = [
+  "evidence_claims",
+  "story_bank",
+  "honesty_boundaries",
+  "writing_voice",
+  "role_signals",
 ];
+
+function proposalRow({
+  id,
+  lane,
+  sourceId = "deep_src_material",
+  status = "review_needed",
+  version = 1,
+  title,
+  summary,
+  supportingQuote = "Quoted source material.",
+  payload = {},
+  proposalStatus = "draft",
+  validationStatus = "valid",
+  reason,
+}) {
+  return {
+    id,
+    lane,
+    sourceId,
+    status,
+    version,
+    ...(reason ? { reason } : {}),
+    proposal: {
+      status: proposalStatus,
+      payload: {
+        ...(title ? { title } : {}),
+        ...(summary ? { summary } : {}),
+        ...payload,
+      },
+      supportingQuote,
+      validation: { status: validationStatus },
+    },
+  };
+}
 
 function deepIngestState(overrides = {}) {
   return {
-    lanes: [
-      { key: "source_coverage", label: "Source coverage", status: "completed" },
-      { key: "evidence_claims", label: "Evidence", status: "review_needed" },
-      { key: "story_bank", label: "Story", status: "gap" },
-      { key: "honesty_boundaries", label: "Honesty", status: "completed" },
-      {
-        key: "writing_voice",
-        label: "Writing voice",
-        status: "deferred",
-        reason: "No samples yet",
-      },
-      { key: "role_signals", label: "Role signal", status: "needs_source" },
-      { key: "open_gaps", label: "Open gaps", status: "not_available", reason: "No gaps known" },
-    ],
-    readiness: {
-      ready: false,
-      terminalCount: 4,
-      requiredCount: 7,
-      missing: ["Evidence needs review", "Role signal needs source"],
-    },
+    lanes: LANE_KEYS.map((key) => ({ key, status: "review_needed" })),
     sources: [
       {
-        id: "src-1",
-        title: "Portfolio paste",
-        kind: "paste",
-        targetShape: "evidence",
+        id: "deep_src_material",
+        sourceKind: "paste",
+        targetShape: "auto",
         status: "proposal_ready",
-        preview: "Built incident automation and led billing migration.",
-      },
-      {
-        id: "src-2",
-        title: "Private repo",
-        kind: "url",
-        targetShape: "story",
-        status: "manual_fallback",
-        preview: "Private or login-gated source. Enter manually or defer this lane.",
+        textPreview: "Led a billing migration with measurable results.",
       },
     ],
     proposals: [
-      {
-        id: "proposal-1",
-        lane: "evidence",
-        sourceId: "src-1",
-        status: "review_needed",
-        title: "Incident automation",
-        summary: "Cut triage time from 45 minutes to 8.",
-        supportingQuote: "cut manual triage from 45 minutes to 8",
-      },
-      {
-        id: "proposal-2",
-        lane: "story",
-        sourceId: "src-2",
-        status: "blocked",
-        title: "Manual fallback needed",
-        summary: "Login-gated source needs a manual note.",
-      },
+      proposalRow({
+        id: "deep_prop_evidence",
+        lane: "evidence_claims",
+        title: "Billing migration",
+        summary: "Led a billing migration with measurable results.",
+      }),
     ],
-    selectedSourceId: "src-1",
-    selectedProposalId: "proposal-1",
+    confirmed: {
+      evidence: [],
+      storyBank: [],
+      honestyBoundaries: [],
+      writingVoice: [],
+      roleSignals: [],
+    },
+    openGaps: [],
     ...overrides,
   };
 }
 
-function renderPage(state = deepIngestState()) {
-  apiMock.state = state;
-  hookHarness.reset();
-  captured.buttons = [];
-  captured.fields = [];
-  captured.nativeButtons = [];
-  const tree = DeepIngestPage({ initialState: state });
-  const html = renderToStaticMarkup(tree);
-  const renderedButtons = captured.buttons;
-  const renderedFields = captured.fields;
-  captureNativeButtons(tree);
-  captured.buttons = renderedButtons;
-  captured.fields = renderedFields;
-  return html;
+function childText(value) {
+  if (Array.isArray(value)) return value.map(childText).join("");
+  if (typeof value === "string" || typeof value === "number") return String(value);
+  if (!value || typeof value !== "object") return "";
+  return childText(value.props?.children);
 }
 
 function captureNativeButtons(node) {
@@ -195,8 +184,25 @@ function captureNativeButtons(node) {
   captureNativeButtons(node.props?.children);
 }
 
+function renderPage(state = apiMock.state || deepIngestState()) {
+  apiMock.state = state;
+  hookHarness.reset();
+  captured.buttons = [];
+  captured.fields = [];
+  captured.nativeButtons = [];
+
+  const tree = DeepIngestPage({ initialState: state });
+  const html = renderToStaticMarkup(tree);
+  const renderedButtons = captured.buttons;
+  const renderedFields = captured.fields;
+  captureNativeButtons(tree);
+  captured.buttons = renderedButtons;
+  captured.fields = renderedFields;
+  return html;
+}
+
 function capturedButton(label) {
-  const button = captured.buttons.find((props) => props.children === label);
+  const button = captured.buttons.find((props) => childText(props.children) === label);
   expect(button).toBeDefined();
   return button;
 }
@@ -207,38 +213,26 @@ function capturedField(label) {
   return field;
 }
 
-function childText(value) {
-  if (Array.isArray(value)) return value.map(childText).join("");
-  if (typeof value === "string" || typeof value === "number") return String(value);
-  if (!value || typeof value !== "object") return "";
-  return childText(value.props?.children);
-}
-
-function capturedNativeButton(label, className = null) {
+function capturedNativeButton(label, classNamePart = null) {
   const button = captured.nativeButtons.find(
     (props) =>
-      childText(props.children).includes(label) && (!className || props.className === className)
+      childText(props.children).includes(label) &&
+      (!classNamePart || String(props.className || "").includes(classNamePart))
   );
   expect(button).toBeDefined();
   return button;
 }
 
-function countOccurrences(value, token) {
-  return (value.match(new RegExp(token, "g")) || []).length;
+function capturedNavButton(label) {
+  const button = captured.nativeButtons.find((props) => props["aria-label"] === label);
+  expect(button).toBeDefined();
+  return button;
 }
 
-function expectFocusedLane(html, label) {
-  expect(html).toMatch(
-    new RegExp(
-      `<div class="deep-ingest__lane-row deep-ingest__lane-row--focused">[\\s\\S]*?<span class="deep-ingest__lane-label">${label}</span>`
-    )
-  );
-}
-
-function expectNoDeepIngestRuntimeTokens(html) {
-  for (const token of FORBIDDEN_DEEP_INGEST_TEXT) {
-    expect(html, `Deep ingest UI leaked ${token}`).not.toContain(token);
-  }
+function selectStep(label, state) {
+  renderPage(state);
+  capturedNativeButton(label, "wizard-rail__step").onClick();
+  return renderPage(state);
 }
 
 beforeEach(() => {
@@ -251,11 +245,7 @@ beforeEach(() => {
   apiMock.buildDeepIngestProposals.mockResolvedValue({ ok: true });
   apiMock.decideDeepIngestProposal.mockResolvedValue({ ok: true });
   apiMock.getDeepIngestState.mockImplementation(async () => apiMock.state);
-  apiMock.submitDeepIngestSource.mockResolvedValue({
-    ok: true,
-    status: "proposal_ready",
-    proposals: [],
-  });
+  apiMock.submitDeepIngestSource.mockResolvedValue({ ok: true });
   apiMock.updateDeepIngestLaneState.mockResolvedValue({ ok: true });
   apiMock.uploadDeepIngestFile.mockResolvedValue({ ok: true });
 });
@@ -269,359 +259,260 @@ describe("DeepIngestPage route contract", () => {
   });
 });
 
-describe("DeepIngestPage workbench", () => {
-  it("initially focuses the first non-terminal lane in server order", () => {
+describe("DeepIngestPage wizard", () => {
+  it("renders the seven-step rail with exactly one step card", () => {
     const html = renderPage();
 
-    expectFocusedLane(html, "Evidence");
-    expect(countOccurrences(html, "deep-ingest__lane-row--focused")).toBe(1);
-  });
-
-  it("holds a non-terminal focus, advances terminal focus, wraps, and clears focus when all lanes are terminal", async () => {
-    const initial = deepIngestState();
-    renderPage(initial);
-
-    apiMock.state = initial;
-    await capturedButton("Generate proposals").onClick();
-    expectFocusedLane(renderPage(apiMock.state), "Evidence");
-
-    apiMock.state = deepIngestState({
-      lanes: initial.lanes.map((lane) =>
-        lane.key === "evidence_claims" ? { ...lane, status: "completed" } : lane
-      ),
-    });
-    await capturedButton("Generate proposals").onClick();
-    expectFocusedLane(renderPage(apiMock.state), "Story");
-
-    capturedNativeButton("Role signal", "deep-ingest__lane-main").onClick();
-    renderPage(apiMock.state);
-    apiMock.state = deepIngestState({
-      lanes: initial.lanes.map((lane) => {
-        if (lane.key === "evidence_claims") return { ...lane, status: "review_needed" };
-        if (lane.key === "role_signals") return { ...lane, status: "completed" };
-        return { ...lane, status: "completed", reason: lane.reason || "Settled for test" };
-      }),
-    });
-    await capturedButton("Generate proposals").onClick();
-    expectFocusedLane(renderPage(apiMock.state), "Evidence");
-
-    apiMock.state = deepIngestState({
-      lanes: initial.lanes.map((lane) => ({
-        ...lane,
-        status: "completed",
-        reason: lane.reason || "Settled for test",
-      })),
-    });
-    await capturedButton("Generate proposals").onClick();
-    const allTerminalHtml = renderPage(apiMock.state);
-    expect(allTerminalHtml).not.toContain("deep-ingest__lane-row--focused");
-  });
-
-  it("renders completion counts from state.confirmed with Library and Dashboard links", () => {
-    const html = renderPage(
-      deepIngestState({
-        readiness: { ready: true, terminalCount: 7, requiredCount: 7, missing: [] },
-        confirmed: {
-          evidence: [{ id: "ev-1" }, { id: "ev-2" }],
-          storyBank: [{ id: "story-1" }],
-          writingVoice: [{ id: "voice-1" }, { id: "voice-2" }, { id: "voice-3" }],
-          honestyBoundaries: [],
-          roleSignals: [
-            { id: "signal-1" },
-            { id: "signal-2" },
-            { id: "signal-3" },
-            { id: "signal-4" },
-          ],
-        },
-      })
-    );
-
-    expect(html).toContain("All lanes settled");
-    expect(html).toContain("<strong>Evidence:</strong> 2 claims captured.");
-    expect(html).toContain("<strong>Story:</strong> 1 story captured.");
-    expect(html).toContain("<strong>Writing voice:</strong> 3 samples captured.");
-    expect(html).toContain("<strong>Honesty:</strong> 0 boundaries captured.");
-    expect(html).toContain("<strong>Role signal:</strong> 4 signals captured.");
-    expect(html).toContain('<a href="/library" class="btn btn--secondary">Browse your Library</a>');
-    expect(html).toContain('<a href="/" class="btn btn--secondary">Back to Dashboard</a>');
-    expect(html).not.toContain('aria-label="Lane progress"');
-  });
-
-  it("expands every lane row when the Lane view switches from Focused to All lanes", () => {
-    const focusedHtml = renderPage();
-    expect(countOccurrences(focusedHtml, "deep-ingest__lane-row--compact")).toBe(6);
-
-    capturedNativeButton("All lanes").onClick();
-    const allLanesHtml = renderPage();
-
-    expect(countOccurrences(allLanesHtml, "deep-ingest__lane-row--compact")).toBe(0);
-    expect(allLanesHtml).toMatch(/aria-selected="true"[^>]*>All lanes<\/button>/);
-  });
-
-  it("renders the target selector, empty-state copy, and disabled ingest action until input is valid", async () => {
-    const html = await renderPage(
-      deepIngestState({
-        sources: [],
-        proposals: [],
-        selectedSourceId: null,
-        selectedProposalId: null,
-      })
-    );
-
-    expect(html).toContain("No deep ingest sources yet");
-    expect(html).toContain(
-      "Paste, drop, or link profile material to create reviewable proposals for evidence, stories, honesty, voice, and role signals."
-    );
     for (const label of [
-      "Auto",
+      "Material",
       "Evidence",
-      "Story",
-      "Writing voice",
+      "Stories",
       "Honesty",
-      "Role signal",
-      "Paste",
-      "Link",
+      "Voice",
+      "Role signals",
+      "Done",
     ]) {
-      expect(html).toContain(label);
+      expect(html).toContain(`>${label}</span>`);
     }
-    expect(html).toMatch(/<button[^>]*disabled[^>]*>Ingest source<\/button>/);
-    expectNoDeepIngestRuntimeTokens(html);
+    expect(html.match(/class="deep-wizard__step-card"/g)).toHaveLength(1);
+    expect(html).toContain("Feed the machine");
+    expect(html).toContain('class="wizard-rail__step wizard-rail__step--active"');
   });
 
-  it("renders lane progress, review filters, source preview, and editable proposal actions", async () => {
-    const html = await renderPage();
-
-    expect(html).toContain("4 of 7 lanes terminal");
-    expect(html).toContain("Source preview");
-    expect(html).toContain("Portfolio paste");
-    expect(html).toContain("Review queue");
-    expect(html).toContain("All");
-    expect(html).toContain("Needs review");
-    expect(html).toContain("Blocked");
-    expect(html).toContain("Confirmed");
-    expect(html).toContain("Proposal editor");
-    expect(html).toContain("Save edits");
-    expect(html).toContain("Confirm proposal");
-    expect(html).toContain("Review proposals");
-    expectNoDeepIngestRuntimeTokens(html);
-  });
-
-  it("renders proposal payload primitives as read-only chips", () => {
-    const state = deepIngestState();
-    state.proposals[0].payload = {
-      metric: "37% faster",
-      source: "portfolio",
-      nested: { hidden: true },
-    };
+  it("renders human source labels and statuses without leaking enums or database ids", () => {
+    const state = deepIngestState({
+      sources: [
+        {
+          id: "deep_src_scanning",
+          sourceKind: "paste",
+          status: "scanning",
+          textPreview: "Led the billing migration and cut cycle time substantially.",
+        },
+        {
+          id: "deep_src_link",
+          sourceKind: "url",
+          status: "proposal_ready",
+          metadata: { url: "https://www.example.com/profile/person" },
+        },
+        {
+          id: "deep_src_file",
+          sourceKind: "file",
+          label: "Resume.pdf",
+          status: "manual_fallback",
+        },
+        {
+          id: "deep_src_skipped",
+          sourceKind: "paste",
+          status: "deferred",
+          textPreview: "Older notes",
+        },
+      ],
+      proposals: [
+        proposalRow({
+          id: "deep_prop_ready",
+          sourceId: "deep_src_link",
+          lane: "evidence_claims",
+          title: "Private draft title",
+          summary: "Private draft summary.",
+        }),
+      ],
+    });
 
     const html = renderPage(state);
 
-    expect(html).toContain('<span class="field__label">metric:</span> 37% faster');
-    expect(html).toContain('<span class="field__label">source:</span> portfolio');
-    expect(html).not.toContain("nested:");
-    expect(html).not.toContain('value="37% faster"');
+    expect(html).toContain("Pasted notes — Led the billing migration and cut");
+    expect(html).toContain("example.com");
+    expect(html).toContain("Resume.pdf");
+    expect(html).toContain("Reading…");
+    expect(html).toContain("Drafts ready");
+    expect(html).toContain("Couldn&#x27;t draft — needs a look");
+    expect(html).toContain("Skipped");
+    for (const rawValue of [
+      "deep_src_",
+      "deep_prop_",
+      "proposal_ready",
+      "manual_fallback",
+      "source_scanned",
+    ]) {
+      expect(html).not.toContain(rawValue);
+    }
   });
 
-  it("shows the destination line only while a proposal is open", () => {
-    const state = deepIngestState();
-    const openHtml = renderPage(state);
-    expect(openHtml).toContain("Will: save to your Evidence");
-
-    state.proposals[0] = { ...state.proposals[0], status: "confirmed" };
-    const confirmedHtml = renderPage(state);
-
-    expect(confirmedHtml).not.toContain("Will: save to your");
-  });
-
-  it("reopens a confirmed proposal through the decision wrapper", async () => {
-    const state = deepIngestState();
-    state.proposals[0] = { ...state.proposals[0], status: "confirmed", version: 4 };
-    renderPage(state);
-
-    await capturedButton("Reopen").onClick();
-
-    expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith({
-      proposalId: "proposal-1",
-      expectedVersion: 4,
-      decision: "reopen",
+  it("shows only the current lane's reviewable drafts", () => {
+    const state = deepIngestState({
+      proposals: [
+        proposalRow({
+          id: "deep_prop_real_evidence",
+          lane: "evidence_claims",
+          title: "Reviewable evidence",
+          summary: "Evidence summary.",
+        }),
+        proposalRow({
+          id: "deep_prop_blocked",
+          lane: "evidence_claims",
+          title: "Blocked evidence must stay hidden",
+          summary: "Unsupported draft.",
+          validationStatus: "blocked",
+        }),
+        proposalRow({
+          id: "deep_prop_story",
+          lane: "story_bank",
+          title: "Story lane only",
+          summary: "Story summary.",
+        }),
+        proposalRow({
+          id: "deep_prop_scan_stub",
+          lane: "open_gaps",
+          title: "Source scanned and ready for review",
+          validationStatus: "source_scanned",
+        }),
+      ],
     });
+
+    const html = selectStep("Evidence", state);
+
+    expect(html).toContain("Reviewable evidence");
+    expect(html).toContain("0 of 1 reviewed");
+    expect(html).not.toContain("Blocked evidence must stay hidden");
+    expect(html).not.toContain("Story lane only");
+    expect(html).not.toContain("Source scanned and ready for review");
+    expect(html.match(/deep-wizard__proposal-card/g)).toHaveLength(1);
+  });
+
+  it("keeps empty lanes skippable with an enabled Continue button", () => {
+    const state = deepIngestState({ proposals: [] });
+
+    const html = selectStep("Honesty", state);
+
+    expect(html).toContain(
+      "No honesty boundaries drafts from your material yet. Add more in Material, or move on."
+    );
+    expect(capturedNavButton("Continue").disabled).toBe(false);
   });
 
   it.each([
-    ["Defer lane", "deferred"],
-    ["Mark not available", "not_available"],
-  ])("reveals preset reasons for %s and requires a non-empty reason", async (action, status) => {
-    const state = deepIngestState();
-    renderPage(state);
-
-    capturedButton(action).onClick();
-    let html = renderPage(state);
-
-    expect(html).toContain("Not relevant to me");
-    expect(html).toContain("Don&#x27;t have this yet");
-    expect(html).toContain("I&#x27;ll do it later");
-    expect(capturedButton(action).disabled).toBe(true);
-
-    capturedNativeButton("I'll do it later").onClick();
-    html = renderPage(state);
-    expect(html).toContain("Skipping is fine");
-    expect(capturedButton(action).disabled).toBe(false);
-    await capturedButton(action).onClick();
-
-    expect(apiMock.updateDeepIngestLaneState).toHaveBeenCalledWith({
+    { action: "Confirm", decision: "confirm" },
+    { action: "Discard", decision: "reject" },
+  ])("auto-advances after $action resolves the last pending lane proposal", async ({
+    action,
+    decision,
+  }) => {
+    const pending = proposalRow({
+      id: "deep_prop_last",
       lane: "evidence_claims",
-      status,
-      reason: "I'll do it later",
+      title: "Last evidence draft",
+      summary: "The only pending proposal.",
+      version: 7,
     });
-  });
+    const state = deepIngestState({ proposals: [pending] });
+    selectStep("Evidence", state);
+    apiMock.state = {
+      ...state,
+      proposals: [{ ...pending, status: decision === "confirm" ? "confirmed" : "rejected" }],
+    };
 
-  it("filters the proposal queue from a lane row and restores all lanes", () => {
-    const state = deepIngestState({
-      proposals: [
-        {
-          id: "proposal-evidence",
-          lane: "evidence_claims",
-          sourceId: "src-1",
-          status: "review_needed",
-          title: "Evidence-only proposal",
-        },
-        {
-          id: "proposal-story",
-          lane: "story_bank",
-          sourceId: "src-2",
-          status: "review_needed",
-          title: "Story-only proposal",
-        },
-      ],
-      selectedProposalId: "proposal-evidence",
-    });
-    renderPage(state);
+    if (action === "Confirm") {
+      await capturedButton("Confirm").onClick();
+    } else {
+      await capturedNativeButton("Discard", "deep-wizard__quiet-link").onClick();
+    }
+    const html = renderPage(apiMock.state);
 
-    capturedNativeButton("Story", "deep-ingest__lane-main").onClick();
-    let html = renderPage(state);
-    let queueHtml = html.match(
-      /aria-label="Review queue"[\s\S]*?aria-label="Proposal editor"/
-    )?.[0];
-
-    expect(html).toContain("Filtered to Story");
-    expect(queueHtml).toContain("Story-only proposal");
-    expect(queueHtml).not.toContain("Evidence-only proposal");
-
-    capturedNativeButton("Show all lanes", "deep-ingest__clear-lane-filter").onClick();
-    html = renderPage(state);
-    queueHtml = html.match(/aria-label="Review queue"[\s\S]*?aria-label="Proposal editor"/)?.[0];
-    expect(queueHtml).toContain("Story-only proposal");
-    expect(queueHtml).toContain("Evidence-only proposal");
-    expect(html).not.toContain("Filtered to Story");
-  });
-
-  it("marks non-terminal evidence as the starting lane and renders honest payoff copy", () => {
-    const state = deepIngestState();
-    renderPage(state);
-    // The stepper defaults to one expanded lane (Evidence, per the "Start
-    // here" ranking) — switch to "All lanes" so every lane's payoff line
-    // renders at once, same as this assertion always expected.
-    capturedNativeButton("All lanes").onClick();
-    const html = renderPage(state);
-
-    expect(html).toContain("Start here");
-    expect(html).toContain(
-      "Powers every tailored résumé, cover letter, and answer you generate from here on."
+    expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith(
+      expect.objectContaining({ proposalId: "deep_prop_last", decision })
     );
-    expect(html).toContain(
-      "Feeds your tailored cover letters and answers — the most job-relevant confirmed stories are pulled in automatically, and résumés use them as theme hints."
-    );
-
-    state.lanes = state.lanes.map((lane) =>
-      lane.key === "evidence_claims" ? { ...lane, status: "completed" } : lane
-    );
-    expect(renderPage(state)).not.toContain("Start here");
+    expect(html).toContain('class="deep-wizard__step-label">Step 3');
+    expect(html).toContain("Story bank");
   });
 
-  it("shows explicit manual fallback and terminal lane actions for unreadable, deferred, and unavailable sources", async () => {
-    const html = await renderPage();
-
-    expect(html).toContain("manual_fallback");
-    expect(html).toContain("Enter manually");
-    expect(html).toContain("Retry ingest");
-    expect(html).toContain("Defer lane");
-    expect(html).toContain("Mark not available");
-    expectNoDeepIngestRuntimeTokens(html);
-  });
-
-  it("saves proposal edits through edits.items[] and falls back to untouched proposal fields", async () => {
-    const state = deepIngestState();
-    renderPage(state);
-
-    capturedField("Proposal title").onChange("Edited incident automation");
-    renderPage(state);
-    await capturedButton("Save edits").onClick();
-
-    expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith({
-      proposalId: "proposal-1",
-      expectedVersion: undefined,
-      decision: "save_edits",
-      edits: {
-        items: [
-          {
-            sourceId: "src-1",
-            title: "Edited incident automation",
-            summary: "Cut triage time from 45 minutes to 8.",
-            supportingQuote: "cut manual triage from 45 minutes to 8",
-          },
-        ],
+  it("preserves structured AI payload fields when reviewer edits are confirmed", async () => {
+    const boundary = proposalRow({
+      id: "deep_prop_boundary",
+      lane: "honesty_boundaries",
+      sourceId: "deep_src_honesty",
+      version: 4,
+      title: "Generated boundary title",
+      summary: "Do not overstate Rust experience.",
+      supportingQuote: "Built services in TypeScript and Python.",
+      payload: {
+        boundaryType: "forbidden_claim",
+        allowedWording: "Experienced with TypeScript and Python",
+        forbiddenWording: "Rust expert",
       },
     });
-  });
+    const state = deepIngestState({ proposals: [boundary] });
+    selectStep("Honesty", state);
 
-  it("confirms proposals through edits.items[] with proposal values for untouched fields", async () => {
-    const state = deepIngestState();
+    capturedNativeButton("Generated boundary title", "deep-wizard__proposal-main").onClick();
     renderPage(state);
-
-    capturedField("Proposal summary").onChange("Edited measurable outcome.");
+    capturedField("Title").onChange("Reviewer boundary title");
+    capturedField("Summary").onChange("Reviewer-calibrated summary.");
     renderPage(state);
-    await capturedButton("Confirm proposal").onClick();
+    await capturedButton("Confirm").onClick();
 
     expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith({
-      proposalId: "proposal-1",
-      expectedVersion: undefined,
+      proposalId: "deep_prop_boundary",
+      expectedVersion: 4,
       decision: "confirm",
       edits: {
         items: [
           {
-            sourceId: "src-1",
-            title: "Incident automation",
-            summary: "Edited measurable outcome.",
-            supportingQuote: "cut manual triage from 45 minutes to 8",
+            boundaryType: "forbidden_claim",
+            allowedWording: "Experienced with TypeScript and Python",
+            forbiddenWording: "Rust expert",
+            sourceId: "deep_src_honesty",
+            title: "Reviewer boundary title",
+            summary: "Reviewer-calibrated summary.",
+            supportingQuote: "Built services in TypeScript and Python.",
           },
         ],
       },
     });
   });
 
-  it("generates proposals for proposal-ready sources and refreshes server state", async () => {
-    const state = deepIngestState();
-    const html = renderPage(state);
-
-    expect(html).toContain("Generate proposals");
-    await capturedButton("Generate proposals").onClick();
-
-    expect(apiMock.buildDeepIngestProposals).toHaveBeenCalledWith({
-      sourceId: "src-1",
-      targetShape: "evidence",
+  it("reports per-lane confirmed counts and only genuine gap rows on Done", () => {
+    const state = deepIngestState({
+      confirmed: {
+        evidence: [{ id: "ev-1" }, { id: "ev-2" }],
+        storyBank: [{ id: "story-1" }],
+        honestyBoundaries: [],
+        writingVoice: [{ id: "voice-1" }, { id: "voice-2" }, { id: "voice-3" }],
+        roleSignals: [{ id: "signal-1" }, { id: "signal-2" }],
+      },
+      openGaps: [
+        proposalRow({
+          id: "deep_prop_gap",
+          lane: "open_gaps",
+          proposalStatus: "gap",
+          payload: { reason: "Missing a quantified leadership outcome." },
+        }),
+        proposalRow({
+          id: "deep_prop_provider_error",
+          lane: "open_gaps",
+          proposalStatus: "manual_fallback",
+          payload: { reason: "Provider timed out while drafting." },
+        }),
+        proposalRow({
+          id: "deep_prop_mechanical_stub",
+          lane: "open_gaps",
+          proposalStatus: "gap",
+          validationStatus: "source_scanned",
+          payload: { reason: "Mechanical scan stub." },
+        }),
+      ],
     });
-    expect(apiMock.getDeepIngestState).toHaveBeenCalledTimes(1);
-  });
 
-  it("renders an inline error when proposal generation fails", async () => {
-    const state = deepIngestState();
-    apiMock.buildDeepIngestProposals.mockRejectedValueOnce(new Error("Proposal builder offline"));
-    renderPage(state);
+    const html = selectStep("Done", state);
 
-    await capturedButton("Generate proposals").onClick();
-    const html = renderPage(state);
-
-    expect(html).toContain("Proposal builder offline");
-    expect(apiMock.getDeepIngestState).not.toHaveBeenCalled();
+    expect(html).toContain("<strong>Evidence claims</strong> — 2 confirmed.");
+    expect(html).toContain("<strong>Story bank</strong> — 1 confirmed.");
+    expect(html).toContain("<strong>Honesty boundaries</strong> — 0 confirmed.");
+    expect(html).toContain("<strong>Writing voice</strong> — 3 confirmed.");
+    expect(html).toContain("<strong>Role signals</strong> — 2 confirmed.");
+    expect(html).toContain("Still thin:");
+    expect(html).toContain("Missing a quantified leadership outcome.");
+    expect(html).not.toContain("Provider timed out while drafting.");
+    expect(html).not.toContain("Mechanical scan stub.");
+    expect(html).toContain('<a href="/" class="btn btn--primary">Back to Dashboard</a>');
   });
 });

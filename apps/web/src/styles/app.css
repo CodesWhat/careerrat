@@ -10842,201 +10842,142 @@ button.chip {
   color: var(--ink-soft);
 }
 
-/* ── Deep ingest workbench (/deep-ingest, DeepIngestPage.jsx) ─────────────
- * Layout-only classes: every panel reuses .card/.card__header/.card__title/
- * .card__body, every status pill reuses .badge/.badge--*, every button
- * reuses .btn/.btn--*, and the file dropzone reuses .dropzone/.dropzone__icon
- * (see the resume-upload dropzone in ResumeStep.jsx for the matching
- * pattern). No left-edge accent stripe on any row or card — state is always
- * conveyed via badge tone/text, per the repo's standing Card rule. */
+/* ── Deep ingest wizard (/deep-ingest, DeepIngestPage.jsx) ────────────────
+ * One-step-at-a-time rebuild (2026-07-20): visually mirrors the onboarding
+ * step-card grammar (.onboarding-step-label / .onboarding-step-card /
+ * __media / __content), reusing its tokens directly, but this page lives
+ * INSIDE the app shell (top nav stays visible) so it never touches the
+ * onboarding shell or its top bar — it builds its own root under
+ * .deep-wizard instead. .wizard-rail (progress pills) and
+ * .onboarding-nav-button (back/next) are the imported onboarding
+ * components own classes and already have CSS — nothing to add for those
+ * here. Buttons reuse .btn/.btn--*, status pills reuse .badge/.badge--*,
+ * the file dropzone reuses .dropzone/.dropzone__icon. No left-edge accent
+ * stripe on any row or card — state is always conveyed via badge
+ * tone/text, per the repo standing Card rule. */
 
-.deep-ingest {
+.deep-wizard {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 
-.deep-ingest__hero {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.deep-ingest__title {
-  margin: 0;
-  color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
-  font-size: clamp(36px, 4.4vw, 52px);
-  font-weight: 900;
-  letter-spacing: 0;
-  line-height: 0.96;
-  text-wrap: balance;
-}
-
-.deep-ingest__subtitle {
-  max-width: 640px;
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 13px;
-  font-weight: 650;
-  line-height: 1.5;
-}
-
-.deep-ingest__loading {
+.deep-wizard__loading {
   margin: 0;
   color: var(--ink-soft);
   font-size: 12px;
   font-weight: 750;
 }
 
-.deep-ingest__hero-progress {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: var(--label-tracking);
-  text-transform: uppercase;
-}
-
-.deep-ingest__panel .card__title {
-  display: inline-flex;
-  align-items: center;
-  gap: 9px;
-}
-
-.deep-ingest__panel-icon {
-  display: inline-grid;
-  place-items: center;
-  width: 20px;
-  height: 20px;
-  color: var(--coral);
-}
-
-.deep-ingest__panel-icon svg {
-  width: 17px;
-  height: 17px;
-}
-
-.deep-ingest__progress-text {
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: var(--label-tracking);
-  text-transform: uppercase;
-}
-
-.deep-ingest__lane-header-actions {
+.deep-wizard__rail {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
 }
 
-.deep-ingest__lane-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
-  gap: 10px;
-}
-
-.deep-ingest__lane-row {
+.deep-wizard__stack {
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 12px;
-  border-radius: var(--row-radius);
-  background: var(--paper-band);
 }
 
-/* Compact rail rows (every non-focused lane in Focused mode) drop to just
- * the clickable label + status badges — no payoff/reason/actions — so the
- * one expanded lane reads as the page's single focus. Tone/state still
- * comes only from badge text/color, same no-accent-stripe rule as always. */
-.deep-ingest__lane-row--compact {
-  padding: 10px 12px;
-}
-
-/* The currently focused lane gets the same soft background tint the
- * selected source/proposal rows already use (see
- * .deep-ingest__source-row--active below) — never a border or edge stripe. */
-.deep-ingest__lane-row--focused {
-  background: color-mix(in srgb, var(--m-secondary) 10%, var(--paper-band));
-}
-
-.deep-ingest__lane-main {
+.deep-wizard__step-label-row {
   display: flex;
-  width: 100%;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 0;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px;
 }
 
-.deep-ingest__lane-label {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 800;
-}
-
-.deep-ingest__lane-main:hover .deep-ingest__lane-label {
-  color: var(--m-secondary);
-}
-
-.deep-ingest__lane-badges {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.deep-ingest__lane-payoff {
-  margin: 0;
-  color: var(--ink-soft);
+.deep-wizard__step-label {
+  color: var(--coral);
   font-size: 12px;
-  font-weight: 600;
-  line-height: 1.4;
+  font-weight: 800;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
 }
 
-.deep-ingest__lane-reason {
-  margin: 0;
+.deep-wizard__reviewed-count {
   color: var(--ink-soft);
   font-size: 12px;
   font-weight: 650;
-  line-height: 1.4;
 }
 
-.deep-ingest__lane-actions {
+.deep-wizard__step-card {
+  display: grid;
+  grid-template-columns: minmax(190px, 0.72fr) minmax(320px, 1fr);
+  align-items: stretch;
+  overflow: hidden;
+  border-radius: 8px;
+  background: rgba(var(--rgb-surface), 0.92);
+  box-shadow: var(--card-shadow);
+}
+
+.deep-wizard__step-card-media {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-direction: column;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 20px;
+  padding: clamp(30px, 4.5vw, 48px);
+  background:
+    radial-gradient(circle at 58% 35%, rgba(47, 111, 159, 0.16), transparent 34%),
+    radial-gradient(circle at 38% 74%, rgba(232, 85, 61, 0.12), transparent 30%),
+    linear-gradient(180deg, var(--paper-band), var(--paper-bg));
 }
 
-.deep-ingest__lane-skip {
+.deep-wizard__mark {
+  display: grid;
+  place-items: center;
+  width: 88px;
+  height: 88px;
+  border-radius: 26px;
+  background: var(--paper-surface);
+  font-size: 42px;
+  box-shadow: 0 18px 34px rgba(var(--rgb-line), 0.1);
+}
+
+.deep-wizard__media-copy {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.deep-ingest__reason-chip--active {
-  background: color-mix(in srgb, var(--m-secondary) 18%, var(--paper-band));
+.deep-wizard__media-copy h1 {
+  margin: 0;
   color: var(--ink);
+  font-family: "Fraunces", Georgia, serif;
+  font-size: clamp(28px, 3.6vw, 40px);
+  line-height: 1.05;
+  font-weight: 900;
+  letter-spacing: 0;
 }
 
-.deep-ingest__clear-lane-filter {
-  border: 0;
-  padding: 0;
-  background: transparent;
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-decoration: underline;
+.deep-wizard__media-copy p {
+  margin: 0;
+  max-width: 280px;
+  color: var(--ink-soft);
+  font-size: 15px;
+  line-height: 1.45;
 }
 
-.deep-ingest__segmented {
+.deep-wizard__step-card-content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: clamp(28px, 4.5vw, 44px);
+}
+
+.deep-wizard__nav-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: auto;
+  padding-top: 8px;
+}
+
+.deep-wizard__segmented {
   display: inline-flex;
   flex-wrap: wrap;
   align-items: center;
@@ -11046,7 +10987,7 @@ button.chip {
   background: var(--paper-band);
 }
 
-.deep-ingest__segment {
+.deep-wizard__segment {
   min-height: 32px;
   padding: 0 14px;
   border: 0;
@@ -11060,27 +11001,27 @@ button.chip {
   touch-action: manipulation;
 }
 
-.deep-ingest__segment:hover {
+.deep-wizard__segment:hover {
   color: var(--ink);
 }
 
-.deep-ingest__segment--active {
+.deep-wizard__segment--active {
   background: var(--paper-surface);
   color: var(--ink);
   box-shadow: var(--card-shadow);
 }
 
-.deep-ingest__dropzone {
-  min-height: 96px;
+.deep-wizard__dropzone {
+  min-height: 88px;
 }
 
-.deep-ingest__form-actions {
+.deep-wizard__form-actions {
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.deep-ingest__empty {
+.deep-wizard__empty {
   padding: 14px;
   border-radius: var(--row-radius);
   background: var(--paper-band);
@@ -11089,33 +11030,82 @@ button.chip {
   font-weight: 750;
 }
 
-.deep-ingest__source-list,
-.deep-ingest__proposal-list {
+.deep-wizard__source-list,
+.deep-wizard__proposal-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
-.deep-ingest__source-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: start;
+.deep-wizard__source-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
   padding: 12px;
   border-radius: var(--row-radius);
   background: var(--paper-band);
 }
 
-.deep-ingest__source-row--active {
-  background: color-mix(in srgb, var(--m-secondary) 10%, var(--paper-band));
-}
-
-.deep-ingest__source-main {
+.deep-wizard__source-main {
   display: flex;
   min-width: 0;
-  flex-direction: column;
-  gap: 4px;
+  align-items: center;
+  gap: 10px;
+}
+
+.deep-wizard__source-title {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.deep-wizard__quiet-link {
   border: 0;
+  padding: 0;
+  background: transparent;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: underline;
+}
+
+.deep-wizard__quiet-link:hover:not(:disabled) {
+  color: var(--ink);
+}
+
+.deep-wizard__quiet-link:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
+.deep-wizard__quiet-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+
+.deep-wizard__proposal-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+}
+
+.deep-wizard__proposal-main {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 6px;
+  border: 0;
+  padding: 0;
   background: transparent;
   color: inherit;
   cursor: pointer;
@@ -11123,74 +11113,13 @@ button.chip {
   text-align: left;
 }
 
-.deep-ingest__source-title {
-  overflow: hidden;
+.deep-wizard__proposal-title {
   color: var(--ink);
   font-size: 14px;
   font-weight: 850;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
-.deep-ingest__source-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px 12px;
-  color: var(--ink-soft);
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: var(--label-tracking);
-  text-transform: uppercase;
-}
-
-.deep-ingest__source-preview {
-  margin: 0;
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-  line-height: 1.45;
-}
-
-.deep-ingest__source-side {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 8px;
-}
-
-.deep-ingest__source-actions {
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
-.deep-ingest__proposal-row {
-  display: flex;
-  width: 100%;
-  flex-direction: column;
-  gap: 4px;
-  padding: 12px;
-  border: 0;
-  border-radius: var(--row-radius);
-  background: var(--paper-band);
-  color: inherit;
-  cursor: pointer;
-  font: inherit;
-  text-align: left;
-}
-
-.deep-ingest__proposal-row--active {
-  background: color-mix(in srgb, var(--m-secondary) 10%, var(--paper-band));
-}
-
-.deep-ingest__proposal-title {
-  color: var(--ink);
-  font-size: 13px;
-  font-weight: 850;
-}
-
-.deep-ingest__proposal-summary {
+.deep-wizard__proposal-summary {
   margin: 0;
   color: var(--ink-soft);
   font-size: 12px;
@@ -11198,20 +11127,82 @@ button.chip {
   line-height: 1.4;
 }
 
-.deep-ingest__completion-list {
+.deep-wizard__proposal-quote {
+  margin: 0;
+  padding: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-style: italic;
+  line-height: 1.45;
+}
+
+.deep-wizard__proposal-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-top: 4px;
+}
+
+.deep-wizard__proposal-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.deep-wizard__done-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin: 0 0 14px;
+  margin: 0;
   padding: 0;
   list-style: none;
   color: var(--ink-soft);
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 600;
   line-height: 1.45;
 }
 
-.deep-ingest__completion-list strong {
+.deep-wizard__done-list strong {
   color: var(--ink);
   font-weight: 850;
+}
+
+.deep-wizard__gaps {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.deep-wizard__gaps-label {
+  margin: 0;
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.deep-wizard__gaps ul {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+}
+
+.deep-wizard__done-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+@media (max-width: 760px) {
+  .deep-wizard__step-card {
+    grid-template-columns: 1fr;
+  }
+
+  .deep-wizard__step-card-media {
+    gap: 12px;
+    padding: 24px;
+  }
 }

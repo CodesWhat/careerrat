@@ -1,24 +1,51 @@
-// apps/web/src/deep-ingest/DeepIngestPage.jsx — the /deep-ingest workbench.
-// Reads/writes the six-endpoint surface in src/cli/deep-ingest-route.mjs
-// through the wrappers in ../lib/api.js: a source (paste, link, or file)
-// gets scanned into per-lane proposals (evidence, story, honesty, writing
-// voice, role signal, or an open gap), a reviewer works the review queue in
-// the proposal editor, and stuck lanes/sources get an explicit manual
-// fallback (enter it yourself, retry the scan, defer the lane, or mark it
-// not available) rather than silently blocking readiness. Every write here
-// re-reads getDeepIngestState() afterward instead of trying to merge a
-// partial response into local state — same "server stays the single source
-// of truth" discipline AiSearchPrompts.jsx and IntakeCard.jsx already use.
+// apps/web/src/deep-ingest/DeepIngestPage.jsx — the /deep-ingest wizard.
 //
-// `initialState` is accepted directly (not just read from an effect) so this
-// page renders every contract string synchronously — the route contract test
-// uses renderToStaticMarkup, which never runs effects.
+// One-step-at-a-time rebuild (2026-07-20 redesign, see
+// .internal/deep-ingest-wizard-redesign-2026-07-20.md): Material -> Evidence
+// -> Stories -> Honesty -> Voice -> Role signals -> Done, matching the
+// onboarding flow's visual grammar (step label / step card / media+content /
+// nav buttons / progress rail) — but rendered INSIDE the app shell (top nav
+// stays visible), so this deliberately does NOT import OnboardingShell
+// itself (it hard-wires its own full-bleed OnboardingTopBar). Only
+// OnboardingNavButton (a plain icon button, no header) and WizardRail (an
+// already-exported, already app-shell-safe pill rail — see OnboardingPage.jsx's
+// dormant non-fullBleed branch, which this page is effectively the first
+// real user of) get imported; every other piece of the look is rebuilt here
+// under a `deep-wizard__*` class namespace in app.css.
+//
+// Data plumbing is unchanged from the previous five-panel layout: same six
+// endpoints via ../lib/api.js (state read, source submit/upload, proposal
+// build, proposal decisions, lane state), same "every write re-reads
+// getDeepIngestState() afterward" discipline. What changed is what the UI
+// does with the response:
+//
+// - The proposals table stores each row as an OUTER wrapper
+//   ({id, sourceId, lane, status, version, proposal: {...}, decision,
+//   reason}) around an INNER AI-authored (or mechanically-stubbed) row. The
+//   outer `.lane` is already a full lane-table key (evidence_claims/
+//   story_bank/honesty_boundaries/writing_voice/role_signals/open_gaps) —
+//   no alias table needed to group proposals by wizard step. The inner
+//   `.proposal.payload` is genuinely schema-free (the AI decides its shape
+//   per lane; see core/deep-ingest/proposals/shared.mjs), and inner
+//   `.proposal.supportingQuote` is the one fixed-schema content field — see
+//   proposalDisplaySummary/proposalDisplayTitle/proposalQuote below for how
+//   a title/summary get derived from that instead of read off nonexistent
+//   flat fields (the previous layout read `proposal.title` directly off the
+//   OUTER row, which never existed — the literal cause of the "empty editor
+//   fields" bug this redesign fixes).
+// - A source's mechanical scan-stub proposal (created the instant a source
+//   is ingested, before any AI runs — summary "Source scanned and ready for
+//   review.") is tagged `validation.status === "source_scanned"` on the
+//   INNER row. A drafted claim the honesty/grounding check couldn't support
+//   is tagged `validation.status === "blocked"` and collapses to an empty
+//   payload. Neither is ever a reviewable card anywhere in this wizard —
+//   see isUnreviewableProposal.
 
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { Button } from "../components/Button.jsx";
 import { TextArea, TextField } from "../components/form.jsx";
-import { ListIcon, UploadIcon } from "../components/icons.jsx";
+import { UploadIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
   buildDeepIngestProposals,
@@ -28,210 +55,105 @@ import {
   updateDeepIngestLaneState,
   uploadDeepIngestFile,
 } from "../lib/api.js";
-
-// The six target lanes a source can feed. "paste"/"link" are also valid
-// DEEP_INGEST_TARGET_SHAPES server-side (they route to the open_gaps lane
-// when the candidate doesn't know which lane material belongs to yet) but
-// aren't offered here as a lane choice — "Auto" already covers that case.
-const TARGET_SHAPE_OPTIONS = [
-  { value: "auto", label: "Auto" },
-  { value: "evidence", label: "Evidence" },
-  { value: "story", label: "Story" },
-  { value: "writing_voice", label: "Writing voice" },
-  { value: "honesty_boundary", label: "Honesty" },
-  { value: "role_signal", label: "Role signal" },
-];
-
-const TARGET_SHAPE_LABEL = Object.fromEntries(
-  TARGET_SHAPE_OPTIONS.map((option) => [option.value, option.label])
-);
+import { OnboardingNavButton } from "../onboarding/OnboardingShell.jsx";
+import { WizardRail } from "../onboarding/WizardRail.jsx";
 
 const INPUT_KIND_OPTIONS = [
   { value: "paste", label: "Paste" },
   { value: "url", label: "Link" },
 ];
 
-const SOURCE_KIND_LABEL = {
-  paste: "Paste",
-  text: "Paste",
-  note: "Note",
-  url: "Link",
-  linkedin: "LinkedIn",
-  portfolio: "Portfolio",
-  project_link: "Project link",
-  file: "File",
-  repo: "Repository",
-  local_path: "Local path",
-  recruiter_context: "Recruiter context",
-  job_context: "Job context",
-};
-
-const REVIEW_FILTERS = [
-  { value: "all", label: "All" },
-  { value: "review_needed", label: "Needs review" },
-  { value: "blocked", label: "Blocked" },
-  { value: "confirmed", label: "Confirmed" },
-];
-
-const LANE_STATUS_LABEL = {
-  not_started: "Not started",
-  needs_source: "Needs source",
-  scanning: "Scanning",
-  review_needed: "Needs review",
-  gap: "Gap",
-  completed: "Completed",
-  deferred: "Deferred",
-  not_available: "Not available",
-  failed: "Failed",
-};
-
-const LANE_STATUS_TONE = {
-  completed: "badge--ok",
-  review_needed: "badge--warn",
-  gap: "badge--warn",
-  failed: "badge--error",
-  deferred: "badge--muted",
-  not_available: "badge--muted",
-  needs_source: "badge--muted",
-  scanning: "badge--muted",
-  not_started: "badge--muted",
-};
-
-// Mirrors evaluateDeepIngestReadiness()'s per-lane terminal rule
-// (src/core/deep-ingest/readiness.mjs) client-side, for lane rows that don't
-// already carry a computed `terminal` flag. buildDeepIngestViewModel sets
-// one server-side; this keeps the page correct either way rather than
-// importing a server module into the frontend bundle for a 3-value set.
-const TERMINAL_LANE_STATUSES = new Set(["completed", "deferred", "not_available"]);
-const REASON_REQUIRED_LANE_STATUSES = new Set(["deferred", "not_available"]);
-
-function laneIsTerminal(lane) {
-  if (typeof lane?.terminal === "boolean") return lane.terminal;
-  const status = lane?.status;
-  if (status === "completed") return true;
-  if (!TERMINAL_LANE_STATUSES.has(status)) return false;
-  if (REASON_REQUIRED_LANE_STATUSES.has(status)) return Boolean(lane?.reason);
-  return true;
-}
-
-// One-lane-focus stepper: picks the lane the page should point at next. Given
-// `null` (nothing focused yet) it's also the initial-focus computation —
-// first non-terminal lane in server order, matching the "Start here" ranking.
-// Given the currently focused key it holds position while that lane is still
-// open, and only advances (wrapping past the end) once that lane has gone
-// terminal — deferred/not_available/completed all count, same as everywhere
-// else on this page. Returns null once every lane is terminal, which is the
-// completion-panel signal.
-function advanceFocusedLane(currentKey, lanes) {
-  const list = asArray(lanes);
-  if (!list.length) return currentKey;
-  const currentIndex = list.findIndex((lane) => (lane.key || lane.lane) === currentKey);
-  const current = currentIndex >= 0 ? list[currentIndex] : null;
-  if (current && !laneIsTerminal(current)) return currentKey;
-  const ordered =
-    currentIndex >= 0
-      ? [...list.slice(currentIndex + 1), ...list.slice(0, currentIndex + 1)]
-      : list;
-  const next = ordered.find((lane) => !laneIsTerminal(lane));
-  return next ? next.key || next.lane : null;
-}
-
-const SOURCE_STATUS_TONE = {
-  proposal_ready: "badge--ok",
-  manual_fallback: "badge--warn",
-  gap: "badge--warn",
-  failed: "badge--error",
-  deferred: "badge--muted",
-  not_available: "badge--muted",
-};
-
-const PROPOSAL_STATUS_LABEL = {
-  review_needed: "Needs review",
-  blocked: "Blocked",
-  confirmed: "Confirmed",
-  deferred: "Deferred",
-  not_available: "Not available",
-  rejected: "Rejected",
-};
-
-const PROPOSAL_STATUS_TONE = {
-  review_needed: "badge--warn",
-  blocked: "badge--error",
-  confirmed: "badge--ok",
-  deferred: "badge--muted",
-  not_available: "badge--muted",
-  rejected: "badge--muted",
-};
-
-// Preset reasons for the lane skip picker (Defer lane / Mark not available).
-// A custom-text fallback still lives alongside these in LaneRow's reason
-// TextField — the server keeps requiring a non-empty reason for deferred/
-// not_available lane states regardless of how it was typed in.
-const REASON_CHIP_PRESETS = ["Not relevant to me", "Don't have this yet", "I'll do it later"];
-
-// Honesty-calibrated payoff copy per lane (deep-dive plan §3 item 5, updated
-// for the promotion pipeline — see .internal/promotion-pipeline-design-2026-07-19.md
-// "UI copy"): every confirmed lane now feeds live generation/scoring at read
-// time, not just Library browsing. source_coverage/open_gaps intentionally
-// have no line — pure scaffolding, no real downstream consumer to promise.
+// Honesty-calibrated payoff copy per lane — verbatim reuse of the strings
+// the previous layout's LANE_PAYOFF_LINE shipped (deep-dive plan §3 item 5 /
+// promotion-pipeline design "UI copy"), now doubling as each lane step's
+// hero one-liner.
 const LANE_PAYOFF_LINE = {
   evidence_claims:
     "Powers every tailored résumé, cover letter, and answer you generate from here on.",
   story_bank:
     "Feeds your tailored cover letters and answers — the most job-relevant confirmed stories are pulled in automatically, and résumés use them as theme hints.",
-  writing_voice:
-    "Shapes the tone and phrasing of every tailored résumé, cover letter, and answer you generate from here on.",
   honesty_boundaries:
     "Enforced on every tailored résumé, cover letter, and answer — its forbidden wording is blocked alongside your Settings honesty boundaries.",
+  writing_voice:
+    "Shapes the tone and phrasing of every tailored résumé, cover letter, and answer you generate from here on.",
   role_signals:
     "Sharpens fit checks and sourced-job scores for matching role families, and steers what your documents lean into or away from.",
 };
 
-// Completion panel rows: one per confirmed-item lane, in the same order the
-// lane rail renders them. `countKey` matches buildDeepIngestViewModel's
-// `confirmed` payload (src/core/deep-ingest/view-model.mjs) so the counts
-// shown here are read straight off the server, never recomputed client-side.
-const COMPLETION_LANE_ROWS = [
-  { key: "evidence_claims", countKey: "evidence", noun: ["claim", "claims"] },
-  { key: "story_bank", countKey: "storyBank", noun: ["story", "stories"] },
-  { key: "writing_voice", countKey: "writingVoice", noun: ["sample", "samples"] },
-  { key: "honesty_boundaries", countKey: "honestyBoundaries", noun: ["boundary", "boundaries"] },
-  { key: "role_signals", countKey: "roleSignals", noun: ["signal", "signals"] },
+// The five review lanes, in wizard order (steps 2-6). `key` matches both a
+// proposal row's outer `.lane` and a lane row's `.key`/`.lane` directly — no
+// short-vocabulary aliasing needed (see the file header comment).
+const LANE_STEPS = [
+  { key: "evidence_claims", pill: "Evidence", emoji: "🧾", heading: "Evidence claims" },
+  { key: "story_bank", pill: "Stories", emoji: "📖", heading: "Story bank" },
+  { key: "honesty_boundaries", pill: "Honesty", emoji: "🚫", heading: "Honesty boundaries" },
+  { key: "writing_voice", pill: "Voice", emoji: "✍️", heading: "Writing voice" },
+  { key: "role_signals", pill: "Role signals", emoji: "🎯", heading: "Role signals" },
 ];
 
-// Reverse of source-normalize.mjs's TARGET_SHAPE_TO_LANE — clicking a lane
-// row re-points the "Add a source" segmented picker at the target shape
-// that feeds it, so the next source you add already lands in the lane you
-// just clicked. source_coverage/open_gaps have no single target shape of
-// their own (open_gaps is where unmatched auto/paste/link sources land), so
-// they're left out rather than guessed at.
-const LANE_KEY_TO_TARGET_SHAPE = {
+// Confirmed-lane row arrays live under these keys in state.confirmed (see
+// buildDeepIngestViewModel) — evidence_claims is the odd one out (it lands
+// in candidate_evidence_claims, keyed `evidence`, not `evidence_claims`).
+const LANE_CONFIRMED_COUNT_KEY = {
   evidence_claims: "evidence",
-  story_bank: "story",
-  writing_voice: "writing_voice",
-  honesty_boundaries: "honesty_boundary",
-  role_signals: "role_signal",
+  story_bank: "storyBank",
+  honesty_boundaries: "honestyBoundaries",
+  writing_voice: "writingVoice",
+  role_signals: "roleSignals",
 };
 
-// deepIngestProposalPut always stores the full lane-table key (see
-// src/cli/deep-ingest-route.mjs's proposalLane()), but proposal builders
-// (src/core/deep-ingest/proposals/shared.mjs) internally use the shorter
-// DEEP_INGEST_PROPOSAL_LANES vocabulary — this covers both so the "Will:"
-// line's lane lookup never falls through to a raw, unlabeled key.
-const LANE_KEY_ALIASES = {
-  evidence: "evidence_claims",
-  story: "story_bank",
-  honesty: "honesty_boundaries",
-  role_signal: "role_signals",
-  gap: "open_gaps",
+const MATERIAL_STEP = {
+  id: "material",
+  pill: "Material",
+  emoji: "📥",
+  heading: "Feed the machine",
+  payoff: "Everything you give Roland here makes every application hit harder.",
+  laneKey: null,
 };
+
+const DONE_STEP = {
+  id: "done",
+  pill: "Done",
+  emoji: "✅",
+  heading: "That's the deep stuff",
+  payoff: "Confirmed material now feeds every résumé, cover letter, and answer.",
+  laneKey: null,
+};
+
+const WIZARD_STEPS = [
+  MATERIAL_STEP,
+  ...LANE_STEPS.map((lane) => ({
+    id: lane.key,
+    pill: lane.pill,
+    emoji: lane.emoji,
+    heading: lane.heading,
+    payoff: LANE_PAYOFF_LINE[lane.key],
+    laneKey: lane.key,
+  })),
+  DONE_STEP,
+];
+
+// Fixed, honest, non-placeholder reason strings for the wizard's one-click
+// skip affordances — the server still requires a non-empty reason for
+// reject/deferred/not_available, but the redesign drops the old free-text
+// reason-chip picker in favor of two quiet links doing exactly what they say.
+const PROPOSAL_DISCARD_REASON = "Not relevant to me";
+const LANE_DEFER_REASON = "Deferring this for later.";
+const LANE_NOT_AVAILABLE_REASON = "Nothing to add here.";
+
+const URL_LIKE_SOURCE_KINDS = new Set(["url", "linkedin", "portfolio", "project_link"]);
+const FILE_LIKE_SOURCE_KINDS = new Set(["file", "repo", "local_path"]);
 
 function errorMessage(err, fallback) {
   return err instanceof Error ? err.message : fallback;
 }
 
+function asArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
 function emptyDraft() {
-  return { targetShape: "auto", kind: "paste", text: "", url: "" };
+  return { kind: "paste", text: "", url: "" };
 }
 
 function draftIsValid(draft) {
@@ -240,50 +162,187 @@ function draftIsValid(draft) {
   return false;
 }
 
-function asArray(value) {
-  return Array.isArray(value) ? value : [];
+// A proposal row's mechanical scan-stub marker (source-scanner.mjs writes
+// this the instant a source is ingested, before "Draft proposals" ever
+// runs) — hard-banned from every list in the wizard per the redesign spec.
+function isMechanicalScanStub(row) {
+  return row?.proposal?.validation?.status === "source_scanned";
+}
+
+// The honesty/grounding check can block a drafted claim outright
+// (validation.status === "blocked" — the AI found something but couldn't
+// support it from the source material). The payload collapses to
+// {blocked: true}: no title, summary, or quote survive. There is nothing
+// reviewable to show and nothing meaningful to "Confirm" — same failure
+// mode as the mechanical stub (a card the user would confirm blind), so it
+// gets the same hard ban.
+function isBlockedProposal(row) {
+  return row?.proposal?.validation?.status === "blocked";
+}
+
+function isUnreviewableProposal(row) {
+  return isMechanicalScanStub(row) || isBlockedProposal(row);
+}
+
+// A "real" AI-authored draft: not a stub/blocked row, and not one of the
+// admin fallback shapes (`manual_fallback` = the AI call failed and never
+// produced content; `gap` = the AI explicitly punted this finding to manual
+// review). Used to decide whether a source shows "Drafts ready".
+function isRealDraftRow(row) {
+  if (isUnreviewableProposal(row)) return false;
+  const inner = row?.proposal;
+  if (!inner || typeof inner !== "object") return false;
+  return inner.status !== "manual_fallback" && inner.status !== "gap";
+}
+
+function sourceHasDrafts(sourceId, proposals) {
+  return proposals.some((row) => row.sourceId === sourceId && isRealDraftRow(row));
+}
+
+function sourceIsReadyToDraft(source) {
+  return source.status === "proposal_ready";
+}
+
+function domainFromUrl(url) {
+  if (!url) return null;
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return null;
+  }
+}
+
+// Human label per the redesign spec: file name for file-like sources, link
+// domain for url-like sources, "Pasted notes" + the first ~6 words of the
+// scanned preview for everything else. `textPreview` is the 240-char preview
+// the scan route persists onto every source row (see
+// src/cli/deep-ingest-route.mjs's persistScannedSource) — the only place raw
+// pasted text survives on the source itself.
+function sourceDisplayLabel(source) {
+  const kind = source.sourceKind || source.kind || "";
+  if (FILE_LIKE_SOURCE_KINDS.has(kind)) {
+    return source.label || "Uploaded file";
+  }
+  if (URL_LIKE_SOURCE_KINDS.has(kind)) {
+    return domainFromUrl(source.metadata?.url) || source.label || "Linked page";
+  }
+  const words = String(source.textPreview || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 6)
+    .join(" ");
+  return words ? `Pasted notes — ${words}` : "Pasted notes";
+}
+
+function sourceStatusMeta(source, hasDrafts) {
+  const status = source.status;
+  if (status === "captured" || status === "scanning") {
+    return { label: "Reading…", tone: "badge--muted" };
+  }
+  if (status === "manual_fallback" || status === "failed") {
+    return { label: "Couldn't draft — needs a look", tone: "badge--warn" };
+  }
+  if (hasDrafts) return { label: "Drafts ready", tone: "badge--ok" };
+  if (status === "proposal_ready") return { label: "Ready to draft", tone: "badge--muted" };
+  if (status === "deferred" || status === "not_available") {
+    return { label: "Skipped", tone: "badge--muted" };
+  }
+  return { label: "Couldn't draft — needs a look", tone: "badge--warn" };
+}
+
+function firstWords(text, count) {
+  const words = String(text || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!words.length) return "";
+  const slice = words.slice(0, count).join(" ");
+  return words.length > count ? `${slice}…` : slice;
+}
+
+function proposalPayload(row) {
+  const payload = row?.proposal?.payload;
+  return payload && typeof payload === "object" && !Array.isArray(payload) ? payload : {};
+}
+
+function proposalQuote(row) {
+  const quote = row?.proposal?.supportingQuote;
+  return typeof quote === "string" ? quote : "";
+}
+
+// payload has no fixed schema (the AI decides its shape per lane) — try the
+// field names a summary is most likely to land under, then fall back to the
+// first string-valued entry present at all, then "" (an empty card, which
+// the inline edit form lets the reviewer fill in by hand). Never renders
+// "[object Object]" — non-string payload entries are skipped outright.
+function proposalDisplaySummary(row) {
+  const payload = proposalPayload(row);
+  const preferredKeys = [
+    "summary",
+    "claim",
+    "description",
+    "boundary",
+    "signal",
+    "sample",
+    "body",
+    "text",
+  ];
+  for (const key of preferredKeys) {
+    const value = payload[key];
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  const firstString = Object.values(payload).find(
+    (value) => typeof value === "string" && value.trim()
+  );
+  return firstString ? firstString.trim() : "";
+}
+
+function proposalDisplayTitle(row, summary) {
+  const payload = proposalPayload(row);
+  if (typeof payload.title === "string" && payload.title.trim()) return payload.title.trim();
+  return firstWords(summary, 9);
 }
 
 // deepIngestConfirmProposal/deepIngestProposalDecision (src/core/db/verbs/
-// deep-ingest.mjs) only ever read `edits.items` — an array of per-item rows —
-// never a flat {title, summary, supportingQuote} object. This wraps the
-// editor's three fields (the only ones this page exposes, regardless of
-// lane) into that one-item array, falling back to the proposal's own values
-// for anything the reviewer hasn't touched. `sourceId` rides along so the
-// grounding/evidence-claim extraction on the backend has it even if a lane's
-// row shape doesn't already carry it.
-function proposalEditItem(proposal, edits) {
-  return {
-    sourceId: proposal.sourceId,
-    title: edits.title ?? proposal.title,
-    summary: edits.summary ?? proposal.summary,
-    supportingQuote: edits.supportingQuote ?? proposal.supportingQuote,
-  };
+// deep-ingest.mjs) only ever read `edits.items` — an array of per-item rows
+// — and writeConfirmedLaneOutput spreads each item's fields verbatim into
+// the confirmed row. The wizard's edit form only surfaces title/summary/
+// quote, but the AI payload carries lane-specific structure beyond that
+// (situation/task/action/result for stories, boundaryType/allowedWording/
+// forbiddenWording for honesty, roleFamily/signalType for role signals) —
+// so this starts from the full payload and layers the reviewer's edits (or
+// their AI-derived defaults) on top, instead of sending only three fields
+// and silently dropping the rest on confirm.
+function proposalEditItem(row, edits) {
+  const summary = edits.summary ?? proposalDisplaySummary(row);
+  const title = edits.title ?? proposalDisplayTitle(row, summary);
+  const supportingQuote = edits.supportingQuote ?? proposalQuote(row);
+  return { ...proposalPayload(row), sourceId: row.sourceId, title, summary, supportingQuote };
 }
 
-// Verbatim reuse of IntakeCard's "Extracted entities" idiom (apps/web/src/
-// inbox/IntakeCard.jsx) — a proposal's real AI extraction lives in its
-// opaque `payload` object, which has no fixed schema (the AI decides the
-// shape per lane). Nested objects/arrays are omitted rather than rendered
-// as "[object Object]": this is a read-only preview of what got extracted,
-// not a full structured editor.
-function payloadEntries(payload) {
-  return Object.entries(payload || {}).filter(
-    ([, value]) =>
-      value !== null && value !== undefined && value !== "" && typeof value !== "object"
-  );
+function gapDisplayText(gapRow) {
+  const inner = gapRow?.proposal || {};
+  const text = inner.payload?.reason || gapRow.reason || inner.reason || "";
+  const trimmed = String(text || "").trim();
+  return trimmed || "Needs another look.";
 }
 
-// Matches a proposal's `lane` field back to the same label already shown in
-// the Lane progress panel, so "Will: save to your {label}" never drifts
-// from the lane rows above it. Falls back to a humanized raw lane key
-// rather than throwing if a lane can't be found — this line is a
-// client-side convenience, not a server-derived guarantee.
-function laneLabelForProposal(proposal, lanes) {
-  const laneKey = LANE_KEY_ALIASES[proposal?.lane] || proposal?.lane;
-  const match = lanes.find((lane) => (lane.key || lane.lane) === laneKey);
-  if (match?.label) return match.label;
-  return String(proposal?.lane || "library").replace(/_/g, " ");
+// A lane's footer pill goes done once it's settled: an explicit lane-level
+// skip (deferred/not_available/completed), at least one confirmed item, or
+// every real (non-stub) proposal ever drafted for it has moved off
+// "review_needed". An untouched lane (no proposals, no lane-state write)
+// stays not-done — same "only real data lights up a data-step pill" rule
+// onboarding's own deriveDoneFlags uses, so the rail doesn't render all
+// green before anything's actually been reviewed.
+function isLaneSettled(laneKey, { lanes, proposals, confirmed }) {
+  const lane = lanes.find((l) => (l.key || l.lane) === laneKey);
+  if (lane && ["completed", "deferred", "not_available"].includes(lane.status)) return true;
+  const countKey = LANE_CONFIRMED_COUNT_KEY[laneKey];
+  if (countKey && asArray(confirmed?.[countKey]).length > 0) return true;
+  const laneProposals = proposals.filter((p) => p.lane === laneKey && !isUnreviewableProposal(p));
+  if (!laneProposals.length) return false;
+  return laneProposals.every((p) => p.status !== "review_needed");
 }
 
 export function DeepIngestPage({ initialState = null }) {
@@ -292,29 +351,14 @@ export function DeepIngestPage({ initialState = null }) {
   const [error, setError] = useState(null);
   const [draft, setDraft] = useState(emptyDraft);
   const [submitting, setSubmitting] = useState(false);
-  const [selectedSourceId, setSelectedSourceId] = useState(initialState?.selectedSourceId ?? null);
-  const [selectedProposalId, setSelectedProposalId] = useState(
-    initialState?.selectedProposalId ?? null
-  );
-  const [reviewFilter, setReviewFilter] = useState("all");
-  const [edits, setEdits] = useState({});
-  const [busyLane, setBusyLane] = useState(null);
   const [busySourceId, setBusySourceId] = useState(null);
-  const [busyProposalAction, setBusyProposalAction] = useState(false);
-  const [laneSkipDraft, setLaneSkipDraft] = useState(null);
-  const [laneQueueFilter, setLaneQueueFilter] = useState(null);
-  // One-lane-focus stepper state. `focusedLaneKey` starts at the first
-  // non-terminal lane in `initialState` (null when there's no initialState
-  // yet — the mount effect below fills it in once the real fetch lands).
-  // `showAllLanes` is the "Focused"/"All lanes" escape hatch: flipping it
-  // renders every lane expanded at once, i.e. the pre-stepper flat layout,
-  // without duplicating the lane list.
-  const [focusedLaneKey, setFocusedLaneKey] = useState(() =>
-    advanceFocusedLane(null, initialState?.lanes)
-  );
-  const [showAllLanes, setShowAllLanes] = useState(false);
+  const [draftingAll, setDraftingAll] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
+  const [expandedProposalIds, setExpandedProposalIds] = useState(() => new Set());
+  const [editsByProposal, setEditsByProposal] = useState({});
+  const [busyProposalId, setBusyProposalId] = useState(null);
+  const [busyLane, setBusyLane] = useState(null);
   const fileInputRef = useRef(null);
-  const addSourceRef = useRef(null);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: fetch-on-mount only when no initialState was handed in; refresh() covers every later reload
   useEffect(() => {
@@ -324,9 +368,6 @@ export function DeepIngestPage({ initialState = null }) {
       .then((next) => {
         if (cancelled) return;
         setState(next);
-        setSelectedSourceId(next?.selectedSourceId ?? null);
-        setSelectedProposalId(next?.selectedProposalId ?? null);
-        setFocusedLaneKey((prev) => (prev === null ? advanceFocusedLane(null, next?.lanes) : prev));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -344,17 +385,6 @@ export function DeepIngestPage({ initialState = null }) {
     try {
       const next = await getDeepIngestState();
       setState(next);
-      // Auto-advance: every write path re-reads state through here, so this
-      // is the one place that needs to check whether the focused lane just
-      // went terminal (last pending proposal decided, lane deferred, lane
-      // marked not available) and, if so, step to the next open lane —
-      // wrapping past the end, landing on null (completion state) once none
-      // remain. Holds position untouched while the focused lane is still open.
-      const nextFocusedLane = advanceFocusedLane(focusedLaneKey, next?.lanes);
-      if (nextFocusedLane !== focusedLaneKey) {
-        setFocusedLaneKey(nextFocusedLane);
-        setLaneQueueFilter(nextFocusedLane);
-      }
       return next;
     } catch (err) {
       setError(errorMessage(err, "Could not refresh deep ingest state."));
@@ -362,18 +392,18 @@ export function DeepIngestPage({ initialState = null }) {
     }
   }
 
-  async function handleIngestSource() {
+  async function handleAddSource() {
     setSubmitting(true);
     setError(null);
     try {
-      const payload = { targetShape: draft.targetShape, sourceKind: draft.kind };
+      const payload = { targetShape: "auto", sourceKind: draft.kind };
       if (draft.kind === "paste") payload.text = draft.text;
       if (draft.kind === "url") payload.url = draft.url;
       await submitDeepIngestSource(payload);
       await refresh();
       setDraft(emptyDraft());
     } catch (err) {
-      setError(errorMessage(err, "Could not ingest that source."));
+      setError(errorMessage(err, "Could not add that source."));
     } finally {
       setSubmitting(false);
     }
@@ -386,7 +416,7 @@ export function DeepIngestPage({ initialState = null }) {
     setSubmitting(true);
     setError(null);
     try {
-      await uploadDeepIngestFile(file, { targetShape: draft.targetShape });
+      await uploadDeepIngestFile(file, { targetShape: "auto" });
       await refresh();
     } catch (err) {
       setError(errorMessage(err, "Could not upload that file."));
@@ -416,60 +446,45 @@ export function DeepIngestPage({ initialState = null }) {
     }
   }
 
-  function handleEnterManually(source) {
-    setDraft({ targetShape: source.targetShape || "auto", kind: "paste", text: "", url: "" });
-  }
-
-  // Reveals the inline reason-chip picker for a lane's Defer/Mark-not-
-  // available action instead of the old free-text globalThis.prompt() —
-  // submitLaneSkip below still sends a required, non-empty reason, same as
-  // the server has always demanded.
-  function revealLaneSkip(laneKey, status) {
-    setLaneSkipDraft({ laneKey, status, reason: "" });
-  }
-
-  function cancelLaneSkip() {
-    setLaneSkipDraft(null);
-  }
-
-  function setLaneSkipReason(reason) {
-    setLaneSkipDraft((prev) => (prev ? { ...prev, reason } : prev));
-  }
-
-  async function submitLaneSkip() {
-    const draft = laneSkipDraft;
-    if (!draft?.reason.trim()) return;
-    setBusyLane(draft.laneKey);
+  async function handleDraftProposals() {
+    const ready = sources.filter(sourceIsReadyToDraft);
+    if (!ready.length) return;
+    setDraftingAll(true);
     setError(null);
     try {
-      await updateDeepIngestLaneState({
-        lane: draft.laneKey,
-        status: draft.status,
-        reason: draft.reason.trim(),
-      });
+      for (const source of ready) {
+        await buildDeepIngestProposals({
+          sourceId: source.id,
+          targetShape: source.targetShape || "auto",
+        });
+      }
       await refresh();
-      setLaneSkipDraft(null);
     } catch (err) {
-      setError(errorMessage(err, "Could not update that lane."));
+      setError(errorMessage(err, "Could not draft proposals for one or more sources."));
     } finally {
-      setBusyLane(null);
+      setDraftingAll(false);
     }
   }
 
-  // Re-points "Add a source" at this lane's target shape and narrows the
-  // Review queue to this lane's own proposals, then scrolls the Add-source
-  // panel into view — the simplest mechanism that actually moves the user
-  // toward the lane's next step rather than just highlighting the row.
-  function focusLane(laneKey) {
-    const targetShape = LANE_KEY_TO_TARGET_SHAPE[laneKey];
-    if (targetShape) setDraft((prev) => ({ ...prev, targetShape }));
-    setFocusedLaneKey(laneKey);
-    setLaneQueueFilter(laneKey);
-    addSourceRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  function setProposalEditField(proposalId, field, value) {
+    setEditsByProposal((prev) => ({
+      ...prev,
+      [proposalId]: { ...(prev[proposalId] || {}), [field]: value },
+    }));
   }
 
-  async function handleSaveEdits(proposal) {
-    setBusyProposalAction(true);
+  function toggleExpandedProposal(proposalId) {
+    setExpandedProposalIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(proposalId)) next.delete(proposalId);
+      else next.add(proposalId);
+      return next;
+    });
+  }
+
+  async function handleSaveProposalEdits(proposal) {
+    const edits = editsByProposal[proposal.id] || {};
+    setBusyProposalId(proposal.id);
     setError(null);
     try {
       await decideDeepIngestProposal({
@@ -480,14 +495,33 @@ export function DeepIngestPage({ initialState = null }) {
       });
       await refresh();
     } catch (err) {
-      setError(errorMessage(err, "Could not save proposal edits."));
+      setError(errorMessage(err, "Could not save those edits."));
     } finally {
-      setBusyProposalAction(false);
+      setBusyProposalId(null);
     }
   }
 
-  async function handleConfirmProposal(proposal) {
-    setBusyProposalAction(true);
+  // Auto-advance: once the lane the wizard is currently showing has zero
+  // real (non-stub) proposals left in "review_needed", the wizard owns its
+  // own step index and just moves on — no server "terminal" flag involved
+  // (confirming even one proposal already marks the underlying lane
+  // completed server-side, which would advance too eagerly if we read that
+  // instead of counting what's actually still pending here).
+  async function refreshAndMaybeAdvanceLane(laneKey) {
+    const next = await refresh();
+    if (!next) return;
+    const remaining = asArray(next.proposals).filter(
+      (row) =>
+        row.lane === laneKey && !isUnreviewableProposal(row) && row.status === "review_needed"
+    ).length;
+    if (remaining === 0) {
+      setStepIndex((i) => Math.min(i + 1, WIZARD_STEPS.length - 1));
+    }
+  }
+
+  async function handleConfirmProposal(proposal, laneKey) {
+    const edits = editsByProposal[proposal.id] || {};
+    setBusyProposalId(proposal.id);
     setError(null);
     try {
       await decideDeepIngestProposal({
@@ -496,634 +530,498 @@ export function DeepIngestPage({ initialState = null }) {
         decision: "confirm",
         edits: { items: [proposalEditItem(proposal, edits)] },
       });
-      await refresh();
-      setEdits({});
+      setEditsByProposal((prev) => {
+        const next = { ...prev };
+        delete next[proposal.id];
+        return next;
+      });
+      await refreshAndMaybeAdvanceLane(laneKey);
     } catch (err) {
       setError(errorMessage(err, "Could not confirm that proposal."));
     } finally {
-      setBusyProposalAction(false);
+      setBusyProposalId(null);
     }
   }
 
-  // "reopen" (deepIngestProposalDecision's PROPOSAL_DECISION_TO_STATUS map,
-  // src/core/db/verbs/deep-ingest.mjs) moves a confirmed proposal back to
-  // review_needed without touching its stored payload/edits — this is the
-  // affordance the plan asks for on confirmed proposals, through the same
-  // decision endpoint save/confirm already use.
-  async function handleReopenProposal(proposal) {
-    setBusyProposalAction(true);
+  async function handleDiscardProposal(proposal, laneKey) {
+    setBusyProposalId(proposal.id);
     setError(null);
     try {
       await decideDeepIngestProposal({
         proposalId: proposal.id,
         expectedVersion: proposal.version,
-        decision: "reopen",
+        decision: "reject",
+        reason: PROPOSAL_DISCARD_REASON,
       });
-      await refresh();
-      setEdits({});
+      await refreshAndMaybeAdvanceLane(laneKey);
     } catch (err) {
-      setError(errorMessage(err, "Could not reopen that proposal."));
+      setError(errorMessage(err, "Could not discard that proposal."));
     } finally {
-      setBusyProposalAction(false);
+      setBusyProposalId(null);
     }
   }
 
-  async function handleGenerateProposals(source) {
-    setBusySourceId(source.id);
+  async function handleLaneQuickSkip(laneKey, status, reason) {
+    setBusyLane(laneKey);
     setError(null);
     try {
-      await buildDeepIngestProposals({ sourceId: source.id, targetShape: source.targetShape });
+      await updateDeepIngestLaneState({ lane: laneKey, status, reason });
       await refresh();
+      setStepIndex((i) => Math.min(i + 1, WIZARD_STEPS.length - 1));
     } catch (err) {
-      setError(errorMessage(err, "Could not generate proposals for that source."));
+      setError(errorMessage(err, "Could not update that lane."));
     } finally {
-      setBusySourceId(null);
+      setBusyLane(null);
     }
   }
 
-  function selectSource(id) {
-    setSelectedSourceId(id);
+  function handleContinue() {
+    if (stepIndex === 0) {
+      setStepIndex(sources.length === 0 ? WIZARD_STEPS.length - 1 : 1);
+      return;
+    }
+    setStepIndex((i) => Math.min(i + 1, WIZARD_STEPS.length - 1));
   }
 
-  function selectProposal(id) {
-    setSelectedProposalId(id);
-    setEdits({});
+  function handleBack() {
+    setStepIndex((i) => Math.max(i - 1, 0));
   }
 
   const lanes = asArray(state?.lanes);
   const sources = asArray(state?.sources);
   const proposals = asArray(state?.proposals);
-  const readiness = state?.readiness || {
-    terminalCount: 0,
-    requiredCount: lanes.length,
-  };
-  const filteredProposals = proposals.filter((p) => {
-    if (reviewFilter !== "all" && p.status !== reviewFilter) return false;
-    if (laneQueueFilter && p.lane !== laneQueueFilter) return false;
-    return true;
+  const confirmed = state?.confirmed || {};
+  const openGaps = asArray(state?.openGaps);
+
+  const doneFlags = WIZARD_STEPS.map((step, index) => {
+    if (index === 0) return stepIndex > 0;
+    if (!step.laneKey) return false;
+    return isLaneSettled(step.laneKey, { lanes, proposals, confirmed });
   });
-  const editorProposal = selectedProposalId
-    ? proposals.find((p) => p.id === selectedProposalId) || null
-    : null;
-  const editorTitle = edits.title ?? editorProposal?.title ?? "";
-  const editorSummary = edits.summary ?? editorProposal?.summary ?? "";
-  const editorQuote = edits.supportingQuote ?? editorProposal?.supportingQuote ?? "";
-  const editorPayload = payloadEntries(editorProposal?.payload);
-  const editorLaneLabel = editorProposal ? laneLabelForProposal(editorProposal, lanes) : null;
-  const editorConfirmed = editorProposal?.status === "confirmed";
-  const hasEdits = Object.keys(edits).length > 0;
-  const confirmDisabled =
-    !editorProposal || busyProposalAction || (editorProposal.status === "blocked" && !hasEdits);
-  const laneQueueFilterLabel = laneQueueFilter
-    ? lanes.find((lane) => (lane.key || lane.lane) === laneQueueFilter)?.label || laneQueueFilter
-    : null;
+
+  const currentStep = WIZARD_STEPS[stepIndex];
+  const laneProposalsAll = currentStep.laneKey
+    ? proposals.filter((row) => row.lane === currentStep.laneKey && !isUnreviewableProposal(row))
+    : [];
+  const laneReviewedCount = laneProposalsAll.filter((row) => row.status !== "review_needed").length;
+  const lanePendingProposals = laneProposalsAll.filter((row) => row.status === "review_needed");
+  const materialContinueEnabled =
+    sources.length === 0 || sources.some((s) => sourceHasDrafts(s.id, proposals));
 
   return (
-    <div className="deep-ingest">
-      <header className="deep-ingest__hero">
-        <div className="deep-ingest__title-block">
-          <h1 className="deep-ingest__title">Deep ingest</h1>
-          <p className="deep-ingest__subtitle">
-            Paste, drop, or link profile material to create reviewable proposals for evidence,
-            stories, honesty, voice, and role signals.
-          </p>
-        </div>
-        <p className="deep-ingest__hero-progress">
-          {readiness.terminalCount ?? 0} of {readiness.requiredCount ?? lanes.length} lanes settled
-        </p>
-      </header>
-
+    <div className="deep-wizard">
       {error ? <InlineAlert message={error} /> : null}
-      {loading ? <p className="deep-ingest__loading">Loading…</p> : null}
-
-      {readiness.ready ? (
-        <DeepIngestCompletionPanel lanes={lanes} confirmed={state?.confirmed} />
+      {loading ? (
+        <p className="deep-wizard__loading">Loading…</p>
       ) : (
-        <section className="card deep-ingest__panel" aria-label="Lane progress">
-          <header className="card__header">
-            <h2 className="card__title">
-              <span className="deep-ingest__panel-icon" aria-hidden="true">
-                <ListIcon />
-              </span>
-              <span>Lane progress</span>
-            </h2>
-            <div className="deep-ingest__lane-header-actions">
-              <span className="deep-ingest__progress-text">
-                {readiness.terminalCount ?? 0} of {readiness.requiredCount ?? lanes.length} lanes
-                terminal
-              </span>
-              <div className="deep-ingest__segmented" aria-label="Lane view" role="tablist">
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={!showAllLanes}
-                  className={`deep-ingest__segment${
-                    !showAllLanes ? " deep-ingest__segment--active" : ""
-                  }`}
-                  onClick={() => setShowAllLanes(false)}
-                >
-                  Focused
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={showAllLanes}
-                  className={`deep-ingest__segment${
-                    showAllLanes ? " deep-ingest__segment--active" : ""
-                  }`}
-                  onClick={() => setShowAllLanes(true)}
-                >
-                  All lanes
-                </button>
-              </div>
+        <>
+          <div className="deep-wizard__rail">
+            <WizardRail
+              steps={WIZARD_STEPS.map((step) => ({ key: step.id, label: step.pill }))}
+              activeIndex={stepIndex}
+              doneFlags={doneFlags}
+              onSelect={setStepIndex}
+            />
+          </div>
+
+          <div className="deep-wizard__stack">
+            <div className="deep-wizard__step-label-row">
+              <span className="deep-wizard__step-label">Step {stepIndex + 1}</span>
+              {currentStep.laneKey && laneProposalsAll.length ? (
+                <span className="deep-wizard__reviewed-count">
+                  {laneReviewedCount} of {laneProposalsAll.length} reviewed
+                </span>
+              ) : null}
             </div>
-          </header>
-          <div className="card__body deep-ingest__lane-grid">
-            {lanes.map((lane) => {
-              const laneKey = lane.key || lane.lane;
-              const focused = laneKey === focusedLaneKey;
-              return (
-                <LaneRow
-                  key={laneKey}
-                  lane={lane}
-                  expanded={showAllLanes || focused}
-                  focused={focused}
-                  busy={busyLane === laneKey}
-                  skipDraft={
-                    laneSkipDraft && laneSkipDraft.laneKey === laneKey ? laneSkipDraft : null
-                  }
-                  onSelectLane={() => focusLane(laneKey)}
-                  onRevealSkip={(status) => revealLaneSkip(laneKey, status)}
-                  onSkipReasonChange={setLaneSkipReason}
-                  onSubmitSkip={submitLaneSkip}
-                  onCancelSkip={cancelLaneSkip}
-                />
-              );
-            })}
+
+            <section
+              className="deep-wizard__step-card"
+              aria-labelledby={`deep-wizard-heading-${currentStep.id}`}
+            >
+              <div className="deep-wizard__step-card-media">
+                <div className="deep-wizard__mark" aria-hidden="true">
+                  {currentStep.emoji}
+                </div>
+                <div className="deep-wizard__media-copy">
+                  <h1 id={`deep-wizard-heading-${currentStep.id}`}>{currentStep.heading}</h1>
+                  {currentStep.payoff ? <p>{currentStep.payoff}</p> : null}
+                </div>
+              </div>
+
+              <div className="deep-wizard__step-card-content">
+                {stepIndex === 0 ? (
+                  <MaterialStepContent
+                    draft={draft}
+                    setDraft={setDraft}
+                    submitting={submitting}
+                    onAddSource={handleAddSource}
+                    fileInputRef={fileInputRef}
+                    onFileChange={handleFileChange}
+                    sources={sources}
+                    proposals={proposals}
+                    busySourceId={busySourceId}
+                    onRetry={handleRetrySource}
+                    draftingAll={draftingAll}
+                    onDraftProposals={handleDraftProposals}
+                  />
+                ) : currentStep.laneKey ? (
+                  <LaneStepContent
+                    laneKey={currentStep.laneKey}
+                    laneLabel={currentStep.heading}
+                    pendingProposals={lanePendingProposals}
+                    expandedIds={expandedProposalIds}
+                    editsByProposal={editsByProposal}
+                    busyProposalId={busyProposalId}
+                    busyLane={busyLane === currentStep.laneKey}
+                    onToggleExpand={toggleExpandedProposal}
+                    onEditField={setProposalEditField}
+                    onSave={handleSaveProposalEdits}
+                    onConfirm={(row) => handleConfirmProposal(row, currentStep.laneKey)}
+                    onDiscard={(row) => handleDiscardProposal(row, currentStep.laneKey)}
+                    onDefer={() =>
+                      handleLaneQuickSkip(currentStep.laneKey, "deferred", LANE_DEFER_REASON)
+                    }
+                    onNotAvailable={() =>
+                      handleLaneQuickSkip(
+                        currentStep.laneKey,
+                        "not_available",
+                        LANE_NOT_AVAILABLE_REASON
+                      )
+                    }
+                  />
+                ) : (
+                  <DoneStepContent
+                    confirmed={confirmed}
+                    openGaps={openGaps}
+                    onAddMoreMaterial={() => setStepIndex(0)}
+                  />
+                )}
+
+                <div className="deep-wizard__nav-row">
+                  <OnboardingNavButton
+                    direction="back"
+                    label="Back"
+                    onClick={handleBack}
+                    disabled={stepIndex === 0}
+                  />
+                  {stepIndex !== WIZARD_STEPS.length - 1 ? (
+                    <OnboardingNavButton
+                      direction="next"
+                      label="Continue"
+                      onClick={handleContinue}
+                      disabled={stepIndex === 0 && !materialContinueEnabled}
+                    />
+                  ) : null}
+                </div>
+              </div>
+            </section>
           </div>
-        </section>
+        </>
       )}
+    </div>
+  );
+}
 
-      <section className="card deep-ingest__panel" aria-label="Add a source" ref={addSourceRef}>
-        <header className="card__header">
-          <h2 className="card__title">
-            <span className="deep-ingest__panel-icon" aria-hidden="true">
-              <UploadIcon />
-            </span>
-            <span>Add a source</span>
-          </h2>
-        </header>
-        <div className="card__body">
-          <div className="deep-ingest__segmented" aria-label="Target lane" role="tablist">
-            {TARGET_SHAPE_OPTIONS.map((option) => (
-              <button
-                type="button"
-                key={option.value}
-                role="tab"
-                aria-selected={draft.targetShape === option.value}
-                className={`deep-ingest__segment${
-                  draft.targetShape === option.value ? " deep-ingest__segment--active" : ""
-                }`}
-                onClick={() => setDraft((prev) => ({ ...prev, targetShape: option.value }))}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
+function MaterialStepContent({
+  draft,
+  setDraft,
+  submitting,
+  onAddSource,
+  fileInputRef,
+  onFileChange,
+  sources,
+  proposals,
+  busySourceId,
+  onRetry,
+  draftingAll,
+  onDraftProposals,
+}) {
+  const readyCount = sources.filter(sourceIsReadyToDraft).length;
 
-          <div className="deep-ingest__segmented" aria-label="Source input kind" role="tablist">
-            {INPUT_KIND_OPTIONS.map((option) => (
-              <button
-                type="button"
-                key={option.value}
-                role="tab"
-                aria-selected={draft.kind === option.value}
-                className={`deep-ingest__segment${
-                  draft.kind === option.value ? " deep-ingest__segment--active" : ""
-                }`}
-                onClick={() => setDraft((prev) => ({ ...prev, kind: option.value }))}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          {draft.kind === "paste" ? (
-            <TextArea
-              id="deep-ingest-paste"
-              rows={5}
-              value={draft.text}
-              onChange={(value) => setDraft((prev) => ({ ...prev, text: value }))}
-              placeholder="Paste profile material to ingest…"
-              aria-label="Source text"
-            />
-          ) : (
-            <TextField
-              id="deep-ingest-link"
-              type="url"
-              value={draft.url}
-              onChange={(value) => setDraft((prev) => ({ ...prev, url: value }))}
-              placeholder="https://…"
-              aria-label="Source link"
-            />
-          )}
-
+  return (
+    <>
+      <div className="deep-wizard__segmented" aria-label="Source input kind" role="tablist">
+        {INPUT_KIND_OPTIONS.map((option) => (
           <button
             type="button"
-            className="dropzone deep-ingest__dropzone"
-            onClick={() => fileInputRef.current?.click()}
+            key={option.value}
+            role="tab"
+            aria-selected={draft.kind === option.value}
+            className={`deep-wizard__segment${
+              draft.kind === option.value ? " deep-wizard__segment--active" : ""
+            }`}
+            onClick={() => setDraft((prev) => ({ ...prev, kind: option.value }))}
           >
-            <span className="dropzone__icon" aria-hidden="true">
-              <UploadIcon />
-            </span>
-            <span>Drop a file to upload</span>
-            <small>Click to select</small>
+            {option.label}
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            style={{ display: "none" }}
-            onChange={handleFileChange}
-          />
+        ))}
+      </div>
 
-          <div className="deep-ingest__form-actions">
-            <Button disabled={submitting || !draftIsValid(draft)} onClick={handleIngestSource}>
-              {submitting ? "Ingesting…" : "Ingest source"}
-            </Button>
-          </div>
+      {draft.kind === "paste" ? (
+        <TextArea
+          id="deep-wizard-paste"
+          rows={5}
+          value={draft.text}
+          onChange={(value) => setDraft((prev) => ({ ...prev, text: value }))}
+          placeholder="Paste profile material to ingest…"
+          aria-label="Source text"
+        />
+      ) : (
+        <TextField
+          id="deep-wizard-link"
+          type="url"
+          value={draft.url}
+          onChange={(value) => setDraft((prev) => ({ ...prev, url: value }))}
+          placeholder="https://…"
+          aria-label="Source link"
+        />
+      )}
+
+      <button
+        type="button"
+        className="dropzone deep-wizard__dropzone"
+        onClick={() => fileInputRef.current?.click()}
+      >
+        <span className="dropzone__icon" aria-hidden="true">
+          <UploadIcon />
+        </span>
+        <span>Drop a file to upload</span>
+        <small>Click to select</small>
+      </button>
+      <input ref={fileInputRef} type="file" style={{ display: "none" }} onChange={onFileChange} />
+
+      <div className="deep-wizard__form-actions">
+        <Button
+          variant="secondary"
+          disabled={submitting || !draftIsValid(draft)}
+          onClick={onAddSource}
+        >
+          {submitting ? "Adding…" : "Add source"}
+        </Button>
+      </div>
+
+      {sources.length ? (
+        <div className="deep-wizard__source-list">
+          {sources.map((source) => (
+            <MaterialSourceRow
+              key={source.id}
+              source={source}
+              hasDrafts={sourceHasDrafts(source.id, proposals)}
+              busy={busySourceId === source.id}
+              onRetry={() => onRetry(source)}
+            />
+          ))}
         </div>
-      </section>
+      ) : (
+        <p className="deep-wizard__empty">
+          Nothing to add right now? You can come back from Library any time.
+        </p>
+      )}
 
-      <section className="card deep-ingest__panel" aria-label="Source preview">
-        <header className="card__header">
-          <h2 className="card__title">Source preview</h2>
-        </header>
-        <div className="card__body">
-          {sources.length ? (
-            <div className="deep-ingest__source-list">
-              {sources.map((source) => (
-                <SourceRow
-                  key={source.id}
-                  source={source}
-                  selected={source.id === selectedSourceId}
-                  busy={busySourceId === source.id}
-                  onSelect={() => selectSource(source.id)}
-                  onEnterManually={() => handleEnterManually(source)}
-                  onRetry={() => handleRetrySource(source)}
-                  onGenerateProposals={() => handleGenerateProposals(source)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="deep-ingest__empty">No deep ingest sources yet</div>
-          )}
+      {sources.length ? (
+        <div className="deep-wizard__form-actions">
+          <Button disabled={draftingAll || readyCount === 0} onClick={onDraftProposals}>
+            {draftingAll ? "Drafting… usually under a minute." : "Draft proposals"}
+          </Button>
         </div>
-      </section>
+      ) : null}
+    </>
+  );
+}
 
-      <section className="card deep-ingest__panel" aria-label="Review queue">
-        <header className="card__header">
-          <h2 className="card__title">Review queue</h2>
-        </header>
-        <div className="card__body">
-          <div className="deep-ingest__segmented" aria-label="Review queue filters" role="tablist">
-            {REVIEW_FILTERS.map((option) => (
-              <button
-                type="button"
-                key={option.value}
-                role="tab"
-                aria-selected={reviewFilter === option.value}
-                className={`deep-ingest__segment${
-                  reviewFilter === option.value ? " deep-ingest__segment--active" : ""
-                }`}
-                onClick={() => setReviewFilter(option.value)}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-
-          {laneQueueFilter ? (
-            <p className="field__hint">
-              Filtered to {laneQueueFilterLabel} —{" "}
-              <button
-                type="button"
-                className="deep-ingest__clear-lane-filter"
-                onClick={() => setLaneQueueFilter(null)}
-              >
-                Show all lanes
-              </button>
-            </p>
-          ) : null}
-
-          {filteredProposals.length ? (
-            <div className="deep-ingest__proposal-list">
-              {filteredProposals.map((proposal) => (
-                <ProposalRow
-                  key={proposal.id}
-                  proposal={proposal}
-                  selected={proposal.id === selectedProposalId}
-                  onSelect={() => selectProposal(proposal.id)}
-                />
-              ))}
-            </div>
-          ) : (
-            <div className="deep-ingest__empty">No proposals match this filter.</div>
-          )}
-        </div>
-      </section>
-
-      <section className="card deep-ingest__panel" aria-label="Proposal editor">
-        <header className="card__header">
-          <h2 className="card__title">Proposal editor</h2>
-          {editorProposal ? (
-            <span
-              className={`badge ${PROPOSAL_STATUS_TONE[editorProposal.status] || "badge--muted"}`}
-            >
-              {PROPOSAL_STATUS_LABEL[editorProposal.status] || editorProposal.status}
-            </span>
-          ) : null}
-        </header>
-        <div className="card__body">
-          {editorProposal ? (
-            <>
-              {editorPayload.length ? (
-                <div className="chip-row">
-                  {editorPayload.map(([key, value]) => (
-                    <span className="chip" key={key}>
-                      <span className="field__label">{key}:</span>&nbsp;
-                      {String(value)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-              <TextField
-                id="deep-ingest-proposal-title"
-                value={editorTitle}
-                onChange={(value) => setEdits((prev) => ({ ...prev, title: value }))}
-                aria-label="Proposal title"
-              />
-              <TextArea
-                id="deep-ingest-proposal-summary"
-                rows={3}
-                value={editorSummary}
-                onChange={(value) => setEdits((prev) => ({ ...prev, summary: value }))}
-                aria-label="Proposal summary"
-              />
-              <TextArea
-                id="deep-ingest-proposal-quote"
-                rows={2}
-                value={editorQuote}
-                onChange={(value) => setEdits((prev) => ({ ...prev, supportingQuote: value }))}
-                aria-label="Supporting quote"
-              />
-              {!editorConfirmed ? (
-                <p className="intake-card__dispatch">Will: save to your {editorLaneLabel}</p>
-              ) : null}
-              <div className="deep-ingest__form-actions">
-                {editorConfirmed ? (
-                  <Button
-                    variant="secondary"
-                    disabled={busyProposalAction}
-                    onClick={() => handleReopenProposal(editorProposal)}
-                  >
-                    {busyProposalAction ? "Reopening…" : "Reopen"}
-                  </Button>
-                ) : (
-                  <>
-                    <Button
-                      variant="secondary"
-                      disabled={busyProposalAction}
-                      onClick={() => handleSaveEdits(editorProposal)}
-                    >
-                      {busyProposalAction ? "Saving…" : "Save edits"}
-                    </Button>
-                    <Button
-                      disabled={confirmDisabled}
-                      onClick={() => handleConfirmProposal(editorProposal)}
-                    >
-                      {busyProposalAction ? "Confirming…" : "Confirm proposal"}
-                    </Button>
-                  </>
-                )}
-              </div>
-            </>
-          ) : (
-            <div className="deep-ingest__empty">
-              Select a proposal from the review queue to edit it.
-            </div>
-          )}
-        </div>
-      </section>
+function MaterialSourceRow({ source, hasDrafts, busy, onRetry }) {
+  const meta = sourceStatusMeta(source, hasDrafts);
+  const canRetry = source.status === "manual_fallback" || source.status === "failed";
+  return (
+    <div className="deep-wizard__source-row">
+      <div className="deep-wizard__source-main">
+        <span className="deep-wizard__source-title">{sourceDisplayLabel(source)}</span>
+        <span className={`badge ${meta.tone}`}>{meta.label}</span>
+      </div>
+      {canRetry ? (
+        <button type="button" className="deep-wizard__quiet-link" disabled={busy} onClick={onRetry}>
+          {busy ? "Retrying…" : "Retry"}
+        </button>
+      ) : null}
     </div>
   );
 }
 
-function LaneRow({
-  lane,
+function LaneStepContent({
+  laneLabel,
+  pendingProposals,
+  expandedIds,
+  editsByProposal,
+  busyProposalId,
+  busyLane,
+  onToggleExpand,
+  onEditField,
+  onSave,
+  onConfirm,
+  onDiscard,
+  onDefer,
+  onNotAvailable,
+}) {
+  return (
+    <>
+      {pendingProposals.length ? (
+        <div className="deep-wizard__proposal-list">
+          {pendingProposals.map((row) => (
+            <ProposalCard
+              key={row.id}
+              row={row}
+              expanded={expandedIds.has(row.id)}
+              edits={editsByProposal[row.id] || {}}
+              busy={busyProposalId === row.id}
+              onToggle={() => onToggleExpand(row.id)}
+              onEditField={(field, value) => onEditField(row.id, field, value)}
+              onSave={() => onSave(row)}
+              onConfirm={() => onConfirm(row)}
+              onDiscard={() => onDiscard(row)}
+            />
+          ))}
+        </div>
+      ) : (
+        <p className="deep-wizard__empty">
+          No {laneLabel.toLowerCase()} drafts from your material yet. Add more in Material, or move
+          on.
+        </p>
+      )}
+      <div className="deep-wizard__quiet-links">
+        <button
+          type="button"
+          className="deep-wizard__quiet-link"
+          disabled={busyLane}
+          onClick={onDefer}
+        >
+          Defer this for later
+        </button>
+        <button
+          type="button"
+          className="deep-wizard__quiet-link"
+          disabled={busyLane}
+          onClick={onNotAvailable}
+        >
+          Nothing to add here
+        </button>
+      </div>
+    </>
+  );
+}
+
+function ProposalCard({
+  row,
   expanded,
-  focused,
+  edits,
   busy,
-  skipDraft,
-  onSelectLane,
-  onRevealSkip,
-  onSkipReasonChange,
-  onSubmitSkip,
-  onCancelSkip,
+  onToggle,
+  onEditField,
+  onSave,
+  onConfirm,
+  onDiscard,
 }) {
-  const laneKey = lane.key || lane.lane;
-  const terminal = laneIsTerminal(lane);
-  const showStartHere = laneKey === "evidence_claims" && !terminal;
-  const payoffLine = LANE_PAYOFF_LINE[laneKey];
-  const rowClassName = [
-    "deep-ingest__lane-row",
-    expanded ? null : "deep-ingest__lane-row--compact",
-    focused ? "deep-ingest__lane-row--focused" : null,
-  ]
-    .filter(Boolean)
-    .join(" ");
-  return (
-    <div className={rowClassName}>
-      <button type="button" className="deep-ingest__lane-main" onClick={onSelectLane}>
-        <span className="deep-ingest__lane-label">{lane.label || laneKey}</span>
-        <span className="deep-ingest__lane-badges">
-          {showStartHere ? <span className="badge badge--ok">Start here</span> : null}
-          <span className={`badge ${LANE_STATUS_TONE[lane.status] || "badge--muted"}`}>
-            {LANE_STATUS_LABEL[lane.status] || lane.status}
-          </span>
-        </span>
-      </button>
-      {expanded && payoffLine ? <p className="deep-ingest__lane-payoff">{payoffLine}</p> : null}
-      {expanded && lane.reason ? <p className="deep-ingest__lane-reason">{lane.reason}</p> : null}
-      {expanded && !terminal && skipDraft ? (
-        <div className="deep-ingest__lane-skip">
-          <div className="chip-row">
-            {REASON_CHIP_PRESETS.map((preset) => (
-              <button
-                type="button"
-                key={preset}
-                className={`chip${
-                  skipDraft.reason === preset ? " deep-ingest__reason-chip--active" : ""
-                }`}
-                aria-pressed={skipDraft.reason === preset}
-                onClick={() => onSkipReasonChange(preset)}
-              >
-                {preset}
-              </button>
-            ))}
-          </div>
-          <TextField
-            id={`deep-ingest-lane-skip-reason-${laneKey}`}
-            value={skipDraft.reason}
-            onChange={onSkipReasonChange}
-            placeholder="Or write your own reason…"
-            aria-label="Skip reason"
-          />
-          <p className="field__hint">
-            Skipping is fine — come back anytime from the Dashboard, Library, or this page.
-          </p>
-          <div className="deep-ingest__form-actions">
-            <Button disabled={busy || !skipDraft.reason.trim()} onClick={onSubmitSkip}>
-              {busy
-                ? "Saving…"
-                : skipDraft.status === "deferred"
-                  ? "Defer lane"
-                  : "Mark not available"}
-            </Button>
-            <Button variant="secondary" disabled={busy} onClick={onCancelSkip}>
-              Cancel
-            </Button>
-          </div>
-        </div>
-      ) : null}
-      {expanded && !terminal && !skipDraft ? (
-        <div className="deep-ingest__lane-actions">
-          <Button variant="secondary" disabled={busy} onClick={() => onRevealSkip("deferred")}>
-            Defer lane
-          </Button>
-          <Button variant="secondary" disabled={busy} onClick={() => onRevealSkip("not_available")}>
-            Mark not available
-          </Button>
-        </div>
-      ) : null}
-    </div>
-  );
-}
+  const summary = edits.summary ?? proposalDisplaySummary(row);
+  const title = edits.title ?? proposalDisplayTitle(row, summary);
+  const quote = edits.supportingQuote ?? proposalQuote(row);
 
-function SourceRow({
-  source,
-  selected,
-  busy,
-  onSelect,
-  onEnterManually,
-  onRetry,
-  onGenerateProposals,
-}) {
   return (
-    <article
-      className={`deep-ingest__source-row${selected ? " deep-ingest__source-row--active" : ""}`}
-    >
-      <button type="button" className="deep-ingest__source-main" onClick={onSelect}>
-        <span className="deep-ingest__source-title">
-          {source.title || source.label || source.id}
-        </span>
-        <span className="deep-ingest__source-meta">
-          <span>
-            {SOURCE_KIND_LABEL[source.kind] || SOURCE_KIND_LABEL[source.sourceKind] || source.kind}
-          </span>
-          <span>{TARGET_SHAPE_LABEL[source.targetShape] || source.targetShape}</span>
-        </span>
-        {source.preview ? <p className="deep-ingest__source-preview">{source.preview}</p> : null}
+    <article className="deep-wizard__proposal-card">
+      <button
+        type="button"
+        className="deep-wizard__proposal-main"
+        onClick={onToggle}
+        aria-expanded={expanded}
+      >
+        <span className="deep-wizard__proposal-title">{title || "Untitled draft"}</span>
+        {summary ? <p className="deep-wizard__proposal-summary">{summary}</p> : null}
+        {quote ? <blockquote className="deep-wizard__proposal-quote">“{quote}”</blockquote> : null}
       </button>
-      <div className="deep-ingest__source-side">
-        <span className={`badge ${SOURCE_STATUS_TONE[source.status] || "badge--muted"}`}>
-          {source.status}
-        </span>
-        <div className="deep-ingest__source-actions">
-          {source.status === "proposal_ready" ? (
-            <>
-              <Button variant="secondary" onClick={onSelect}>
-                Review proposals
-              </Button>
-              <Button variant="secondary" disabled={busy} onClick={onGenerateProposals}>
-                {busy ? "Generating…" : "Generate proposals"}
-              </Button>
-            </>
-          ) : null}
-          {source.status === "manual_fallback" ? (
-            <>
-              <Button variant="secondary" onClick={onEnterManually}>
-                Enter manually
-              </Button>
-              <Button variant="secondary" disabled={busy} onClick={onRetry}>
-                {busy ? "Retrying…" : "Retry ingest"}
-              </Button>
-            </>
-          ) : null}
+      {expanded ? (
+        <div className="deep-wizard__proposal-edit">
+          <TextField
+            id={`deep-wizard-proposal-title-${row.id}`}
+            value={title}
+            onChange={(value) => onEditField("title", value)}
+            aria-label="Title"
+            placeholder="Title"
+          />
+          <TextArea
+            id={`deep-wizard-proposal-summary-${row.id}`}
+            rows={3}
+            value={summary}
+            onChange={(value) => onEditField("summary", value)}
+            aria-label="Summary"
+            placeholder="Summary"
+          />
+          <TextArea
+            id={`deep-wizard-proposal-quote-${row.id}`}
+            rows={2}
+            value={quote}
+            onChange={(value) => onEditField("supportingQuote", value)}
+            aria-label="Supporting quote"
+            placeholder="Supporting quote"
+          />
+          <div className="deep-wizard__form-actions">
+            <Button variant="secondary" disabled={busy} onClick={onSave}>
+              {busy ? "Saving…" : "Save edits"}
+            </Button>
+          </div>
         </div>
+      ) : null}
+      <div className="deep-wizard__proposal-actions">
+        <Button disabled={busy} onClick={onConfirm}>
+          {busy ? "Confirming…" : "Confirm"}
+        </Button>
+        <button
+          type="button"
+          className="deep-wizard__quiet-link"
+          disabled={busy}
+          onClick={onDiscard}
+        >
+          Discard
+        </button>
       </div>
     </article>
   );
 }
 
-function ProposalRow({ proposal, selected, onSelect }) {
-  return (
-    <button
-      type="button"
-      className={`deep-ingest__proposal-row${selected ? " deep-ingest__proposal-row--active" : ""}`}
-      onClick={onSelect}
-    >
-      <span className="deep-ingest__proposal-title">{proposal.title || proposal.id}</span>
-      <span className={`badge ${PROPOSAL_STATUS_TONE[proposal.status] || "badge--muted"}`}>
-        {PROPOSAL_STATUS_LABEL[proposal.status] || proposal.status}
-      </span>
-      {proposal.summary ? (
-        <p className="deep-ingest__proposal-summary">{proposal.summary}</p>
-      ) : null}
-    </button>
+function DoneStepContent({ confirmed, openGaps, onAddMoreMaterial }) {
+  // Only genuine AI-punted gaps belong under "Still thin". manual_fallback
+  // rows in the open_gaps lane carry provider-error reasons, not content.
+  const thinGaps = openGaps.filter(
+    (row) => !isUnreviewableProposal(row) && row?.proposal?.status === "gap"
   );
-}
 
-// Replaces the "Lane progress" stepper once readiness.ready is true. Counts
-// come straight off buildDeepIngestViewModel's `confirmed` payload (never
-// recomputed from proposals here), and copy reuses the exact LANE_PAYOFF_LINE
-// strings every lane row already shows — same calibration, just read once
-// the work is done: evidence powers generation, the rest is saved reference
-// material.
-function DeepIngestCompletionPanel({ lanes, confirmed }) {
   return (
-    <section className="card deep-ingest__panel" aria-label="Deep ingest complete">
-      <header className="card__header">
-        <h2 className="card__title">
-          <span className="deep-ingest__panel-icon" aria-hidden="true">
-            <ListIcon />
-          </span>
-          <span>All lanes settled</span>
-        </h2>
-      </header>
-      <div className="card__body">
-        <ul className="deep-ingest__completion-list">
-          {COMPLETION_LANE_ROWS.map((row) => {
-            const label =
-              lanes.find((lane) => (lane.key || lane.lane) === row.key)?.label ||
-              row.key.replace(/_/g, " ");
-            const count = asArray(confirmed?.[row.countKey]).length;
-            const noun = count === 1 ? row.noun[0] : row.noun[1];
-            return (
-              <li key={row.key}>
-                <strong>{label}:</strong> {count} {noun} captured. {LANE_PAYOFF_LINE[row.key]}
-              </li>
-            );
-          })}
-        </ul>
-        <div className="deep-ingest__form-actions">
-          <Link className="btn btn--secondary" to="/library">
-            Browse your Library
-          </Link>
-          <Link className="btn btn--secondary" to="/">
-            Back to Dashboard
-          </Link>
+    <>
+      <ul className="deep-wizard__done-list">
+        {LANE_STEPS.map((lane) => {
+          const count = asArray(confirmed?.[LANE_CONFIRMED_COUNT_KEY[lane.key]]).length;
+          return (
+            <li key={lane.key}>
+              <strong>{lane.heading}</strong> — {count} confirmed.
+            </li>
+          );
+        })}
+      </ul>
+      {thinGaps.length ? (
+        <div className="deep-wizard__gaps">
+          <p className="deep-wizard__gaps-label">Still thin:</p>
+          <ul>
+            {thinGaps.map((gap) => (
+              <li key={gap.id}>{gapDisplayText(gap)}</li>
+            ))}
+          </ul>
         </div>
+      ) : null}
+      <div className="deep-wizard__done-actions">
+        <Link className="btn btn--primary" to="/">
+          Back to Dashboard
+        </Link>
+        <Button variant="secondary" onClick={onAddMoreMaterial}>
+          Add more material
+        </Button>
       </div>
-    </section>
+    </>
   );
 }
