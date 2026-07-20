@@ -32,6 +32,222 @@ const TECH_DOMAINS = new Set([
 const TECH_TITLE_RE =
   /\b(engineer(ing)?|developer|software|devops|sre|data|machine learning|ml|ai|cloud|platform|infrastructure|systems?|architect)\b/i;
 
+// General geo vocabulary used only to interpret the candidate's own location
+// strings. This is deliberately data-driven: no candidate locale is a default,
+// and adding recognition means adding a country/region row rather than branching
+// on a particular person's city.
+const COUNTRY_DEFINITIONS = [
+  {
+    name: "United States",
+    aliases: ["USA", "U.S.", "U.S.A.", "US"],
+    regions: ["North America", "Americas"],
+  },
+  { name: "Canada", aliases: [], regions: ["North America", "Americas"] },
+  { name: "Mexico", aliases: [], regions: ["North America", "Latin America", "Americas"] },
+  { name: "Brazil", aliases: [], regions: ["Latin America", "Americas"] },
+  { name: "Argentina", aliases: [], regions: ["Latin America", "Americas"] },
+  { name: "Chile", aliases: [], regions: ["Latin America", "Americas"] },
+  { name: "Colombia", aliases: [], regions: ["Latin America", "Americas"] },
+  {
+    name: "United Kingdom",
+    aliases: ["UK", "U.K.", "England", "Scotland", "Wales", "Northern Ireland"],
+    regions: ["Europe", "EMEA"],
+  },
+  { name: "Ireland", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "France", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Germany", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Spain", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Italy", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Netherlands", aliases: ["Holland"], regions: ["Europe", "EMEA"] },
+  { name: "Poland", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Portugal", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Sweden", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Norway", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Denmark", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "Switzerland", aliases: [], regions: ["Europe", "EMEA"] },
+  { name: "India", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "China", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "Japan", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "South Korea", aliases: ["Korea"], regions: ["Asia-Pacific"] },
+  { name: "Singapore", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "Taiwan", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "Philippines", aliases: ["The Philippines"], regions: ["Asia-Pacific"] },
+  { name: "Indonesia", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "Vietnam", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "Australia", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "New Zealand", aliases: [], regions: ["Asia-Pacific"] },
+  { name: "Israel", aliases: [], regions: ["Middle East", "EMEA"] },
+  { name: "United Arab Emirates", aliases: ["UAE", "U.A.E."], regions: ["Middle East", "EMEA"] },
+  { name: "Saudi Arabia", aliases: [], regions: ["Middle East", "EMEA"] },
+  { name: "South Africa", aliases: [], regions: ["Africa", "EMEA"] },
+  { name: "Nigeria", aliases: [], regions: ["Africa", "EMEA"] },
+  { name: "Kenya", aliases: [], regions: ["Africa", "EMEA"] },
+];
+
+const REGION_DEFINITIONS = [
+  { name: "North America", aliases: [] },
+  { name: "Latin America", aliases: ["LATAM"] },
+  { name: "Americas", aliases: [] },
+  { name: "Europe", aliases: ["European Union"] },
+  { name: "Asia-Pacific", aliases: ["Asia Pacific", "APAC"] },
+  { name: "Middle East", aliases: [] },
+  { name: "Africa", aliases: [] },
+  { name: "EMEA", aliases: [] },
+];
+
+const US_STATES = [
+  ["Alabama", "AL"],
+  ["Alaska", "AK"],
+  ["Arizona", "AZ"],
+  ["Arkansas", "AR"],
+  ["California", "CA"],
+  ["Colorado", "CO"],
+  ["Connecticut", "CT"],
+  ["Delaware", "DE"],
+  ["Florida", "FL"],
+  ["Georgia", "GA"],
+  ["Hawaii", "HI"],
+  ["Idaho", "ID"],
+  ["Illinois", "IL"],
+  ["Indiana", "IN"],
+  ["Iowa", "IA"],
+  ["Kansas", "KS"],
+  ["Kentucky", "KY"],
+  ["Louisiana", "LA"],
+  ["Maine", "ME"],
+  ["Maryland", "MD"],
+  ["Massachusetts", "MA"],
+  ["Michigan", "MI"],
+  ["Minnesota", "MN"],
+  ["Mississippi", "MS"],
+  ["Missouri", "MO"],
+  ["Montana", "MT"],
+  ["Nebraska", "NE"],
+  ["Nevada", "NV"],
+  ["New Hampshire", "NH"],
+  ["New Jersey", "NJ"],
+  ["New Mexico", "NM"],
+  ["New York", "NY"],
+  ["North Carolina", "NC"],
+  ["North Dakota", "ND"],
+  ["Ohio", "OH"],
+  ["Oklahoma", "OK"],
+  ["Oregon", "OR"],
+  ["Pennsylvania", "PA"],
+  ["Rhode Island", "RI"],
+  ["South Carolina", "SC"],
+  ["South Dakota", "SD"],
+  ["Tennessee", "TN"],
+  ["Texas", "TX"],
+  ["Utah", "UT"],
+  ["Vermont", "VT"],
+  ["Virginia", "VA"],
+  ["Washington", "WA"],
+  ["West Virginia", "WV"],
+  ["Wisconsin", "WI"],
+  ["Wyoming", "WY"],
+  ["District of Columbia", "DC"],
+];
+
+function compactGeoValues(values) {
+  const seen = new Set();
+  return values
+    .filter((value) => {
+      const text = String(value || "").trim();
+      const key = text.toLowerCase();
+      if (!text || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((value) => String(value).trim());
+}
+
+function normalizeGeoText(value) {
+  return ` ${String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()} `;
+}
+
+function containsGeoTerm(value, term) {
+  const needle = normalizeGeoText(term).trim();
+  return Boolean(needle) && normalizeGeoText(value).includes(` ${needle} `);
+}
+
+function hasUsState(value) {
+  const text = String(value || "");
+  return US_STATES.some(([name, abbreviation]) => {
+    if (containsGeoTerm(text, name)) return true;
+    return new RegExp(`(?:^|,\\s*)${abbreviation}(?:$|[,/\\s])`, "i").test(text);
+  });
+}
+
+function countryTerms(country) {
+  const terms = [country.name, ...country.aliases];
+  if (country.name === "United States") {
+    for (const [state, abbreviation] of US_STATES) terms.push(state, `, ${abbreviation}`);
+  }
+  return terms;
+}
+
+export function deriveLocationFilter(profile = {}) {
+  const loc = profile.location ?? {};
+  const places = compactGeoValues([loc.home, ...(loc.relocation ?? [])]);
+  const allowedCountries = new Set();
+  const allowedRegions = new Set();
+
+  for (const place of places) {
+    for (const country of COUNTRY_DEFINITIONS) {
+      if ([country.name, ...country.aliases].some((term) => containsGeoTerm(place, term))) {
+        allowedCountries.add(country.name);
+      }
+    }
+    if (hasUsState(place)) allowedCountries.add("United States");
+    for (const region of REGION_DEFINITIONS) {
+      if ([region.name, ...region.aliases].some((term) => containsGeoTerm(place, term))) {
+        allowedRegions.add(region.name);
+      }
+    }
+  }
+
+  for (const country of COUNTRY_DEFINITIONS) {
+    if (country.regions.some((region) => allowedRegions.has(region))) {
+      allowedCountries.add(country.name);
+    }
+  }
+  for (const country of COUNTRY_DEFINITIONS) {
+    if (allowedCountries.has(country.name)) {
+      for (const region of country.regions) allowedRegions.add(region);
+    }
+  }
+
+  const allow = [...places];
+  if (loc.remote) allow.push("Remote", "Worldwide", "Anywhere", "Global");
+  for (const country of COUNTRY_DEFINITIONS) {
+    if (allowedCountries.has(country.name)) allow.push(...countryTerms(country));
+  }
+  for (const region of REGION_DEFINITIONS) {
+    if (allowedRegions.has(region.name)) allow.push(region.name, ...region.aliases);
+  }
+
+  const block = [];
+  if (places.length > 0) {
+    for (const country of COUNTRY_DEFINITIONS) {
+      if (!allowedCountries.has(country.name)) block.push(...countryTerms(country));
+    }
+    for (const region of REGION_DEFINITIONS) {
+      if (!allowedRegions.has(region.name)) block.push(region.name, ...region.aliases);
+    }
+  }
+
+  return {
+    always_allow: places,
+    allow: compactGeoValues(allow),
+    block: compactGeoValues(block),
+    needs_location: places.length === 0 && !loc.remote,
+  };
+}
+
 function isTechDomain(domain = "") {
   const lower = String(domain || "")
     .toLowerCase()
@@ -113,18 +329,7 @@ export function buildSearchSources(targeting, profile) {
 
   // --- location_filter ---
   const loc = profile.location ?? {};
-  const allowSet = new Set();
-  if (loc.remote) allowSet.add("Remote");
-  if (loc.home) allowSet.add(loc.home);
-  for (const city of loc.relocation ?? []) {
-    if (city) allowSet.add(city);
-  }
-
-  const location_filter = {
-    always_allow: [],
-    allow: [...allowSet],
-    block: [],
-  };
+  const location_filter = deriveLocationFilter(profile);
 
   // --- searches ---
   // 7.2: board selection is domain-keyed.

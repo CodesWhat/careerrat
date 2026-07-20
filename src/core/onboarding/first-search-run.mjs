@@ -1,5 +1,5 @@
 import { runSourcedScan } from "../../../scripts/scan-sourced.mjs";
-import { candidateConfigGet } from "../db/verbs/candidate.mjs";
+import { candidateConfigGet, hasSearchLocation } from "../db/verbs/candidate.mjs";
 import { companyBoardResolutionGet } from "../db/verbs/company-discovery.mjs";
 import { companyAtsUpsert, sourceConfigGet, sourceConfigPut } from "../db/verbs/source-config.mjs";
 import {
@@ -44,6 +44,12 @@ const NO_DETERMINISTIC_SOURCES = Object.freeze({
   action: "Add an RSS source or supported public ATS company, then retry first search.",
 });
 
+const SEARCH_LOCATION_REQUIRED = Object.freeze({
+  code: "SEARCH_LOCATION_REQUIRED",
+  message: "Add your location or turn on Remote to start searching.",
+  action: "Add a home location or enable Remote, then retry first search.",
+});
+
 const STATUS_LABELS = Object.freeze({
   not_started: "Not started",
   running: "Running",
@@ -85,7 +91,15 @@ function mergeFilterObject(existing = {}, generated = {}) {
   const keys = new Set([...Object.keys(generated || {}), ...Object.keys(existing || {})]);
   const merged = {};
   for (const key of keys) {
-    merged[key] = compactArrayValues([...asArray(existing?.[key]), ...asArray(generated?.[key])]);
+    const existingValue = existing?.[key];
+    const generatedValue = generated?.[key];
+    if (Array.isArray(existingValue) || Array.isArray(generatedValue)) {
+      merged[key] = compactArrayValues([...asArray(existingValue), ...asArray(generatedValue)]);
+    } else if (key === "needs_location" && generatedValue !== undefined) {
+      merged[key] = generatedValue;
+    } else {
+      merged[key] = existingValue ?? generatedValue;
+    }
   }
   return merged;
 }
@@ -222,6 +236,10 @@ function supportedAtsCompanies(sourcedScan = {}) {
 
 function sourceSetupError() {
   return { ...NO_DETERMINISTIC_SOURCES };
+}
+
+function searchLocationError() {
+  return { ...SEARCH_LOCATION_REQUIRED };
 }
 
 function trackedCompanyNames(candidateConfig) {
@@ -454,8 +472,7 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
   };
 }
 
-function ensureSearchReady(pathCtx) {
-  const config = candidateConfigGet(pathCtx);
+function ensureSearchReady(pathCtx, config = candidateConfigGet(pathCtx)) {
   const setup = config.setup || {};
   if (setup.readiness?.search_ready !== true) {
     throw makeError("Candidate setup is not search-ready", "NOT_SEARCH_READY", {
@@ -475,7 +492,33 @@ async function startSearchRun({
   trigger,
 } = {}) {
   const pathCtx = { repoRoot, env };
-  const config = ensureSearchReady(pathCtx);
+  const config = candidateConfigGet(pathCtx);
+  if (!hasSearchLocation(config.profile)) {
+    return {
+      ok: true,
+      parked: true,
+      reused: false,
+      run: {
+        status: "not_started",
+        label: STATUS_LABELS.not_started,
+        error: searchLocationError(),
+      },
+      sources: {
+        searches: 0,
+        trackedCompanies: 0,
+        deterministicSources: {
+          attempted: 0,
+          rss: 0,
+          boards: 0,
+          supportedAtsCompanies: 0,
+          skipped: 0,
+        },
+      },
+      readiness: config.setup?.readiness || {},
+      missing: config.setup?.missing || {},
+    };
+  }
+  ensureSearchReady(pathCtx, config);
   const prepared = await prepareFirstSearchSources({ repoRoot, env, fetchImpl, config });
   const deterministicSources = prepared.deterministicSources;
   const start = sourcingRunStart({
@@ -584,7 +627,16 @@ export async function prepareFirstSearchSources({
   const current = sourceConfigGet({ ...pathCtx, name: "search-sources" });
   const next = current.stored === true ? mergeSearchSources(current.data, generated) : generated;
   const sources = sourceConfigPut({ ...pathCtx, name: "search-sources", data: next });
-  let sourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  const currentSourcedScan = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  let sourcedScan = sourceConfigPut({
+    ...pathCtx,
+    name: "sourced-scan",
+    data: {
+      ...currentSourcedScan,
+      title_filter: mergeFilterObject(currentSourcedScan.title_filter, next.title_filter),
+      location_filter: mergeFilterObject(currentSourcedScan.location_filter, next.location_filter),
+    },
+  }).data;
 
   const companyBoardResolution = await backfillCompanyBoards({
     repoRoot,

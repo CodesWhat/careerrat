@@ -62,16 +62,35 @@ test("title filter accepts target titles and rejects negative keywords", () => {
   assert.equal(filter("Finance Manager"), false);
 });
 
-test("location filter allows home-region multi-location jobs before applying block list", () => {
+test("location filter blocks foreign roles while allowing home, remote, and unknown-location roles", () => {
   const filter = buildLocationFilter({
-    always_allow: ["New York", "United States"],
-    allow: ["Remote", "New York"],
+    always_allow: ["New York"],
+    allow: ["Remote", "New York", "United States", "US"],
     block: ["India", "London"],
   });
 
   assert.equal(filter("Remote - India or New York"), true);
   assert.equal(filter("Remote - India"), false);
   assert.equal(filter("New York, NY"), true);
+  assert.equal(filter("Remote"), true);
+  // Providers sometimes omit location entirely. Keep those roles available for
+  // later body review rather than treating missing provider data as foreign.
+  assert.equal(filter(""), true);
+});
+
+test("location filter does not fall through to allow-all when a policy has no allow entries", () => {
+  const filter = buildLocationFilter({
+    always_allow: ["United States"],
+    allow: [],
+    block: ["India"],
+  });
+
+  assert.equal(filter("United States"), true);
+  assert.equal(filter("India"), false);
+  assert.equal(filter("France"), false);
+
+  const noPolicy = buildLocationFilter({ always_allow: [], allow: [], block: [] });
+  assert.equal(noPolicy("France"), true);
 });
 
 test("dedupe filters existing tracker roles by URL and req id, but only flags company-role matches", () => {

@@ -5,6 +5,7 @@ import test from "node:test";
 import { buildSearchSources } from "../src/core/profile/generate-search-sources.mjs";
 import { validate } from "../src/core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { buildLocationFilter } from "../src/core/scoring/sourced-scanner.mjs";
 
 // ---------------------------------------------------------------------------
 // Load the real schema
@@ -90,10 +91,51 @@ test("buildSearchSources: location_filter.allow includes Remote, home, and reloc
   assert.ok(allow.includes("San Francisco, CA"), "missing relocation city 2");
 });
 
-test("buildSearchSources: location_filter.always_allow and block are empty arrays", () => {
+test("buildSearchSources: US home derives a country-aware filter that blocks foreign roles", () => {
   const result = buildSearchSources(targeting, profile);
-  assert.deepEqual(result.location_filter.always_allow, []);
-  assert.deepEqual(result.location_filter.block, []);
+  const filter = buildLocationFilter(result.location_filter);
+
+  assert.ok(result.location_filter.always_allow.includes("Austin, TX"));
+  assert.ok(result.location_filter.allow.includes("United States"));
+  assert.ok(result.location_filter.block.includes("India"));
+  assert.equal(result.location_filter.needs_location, false);
+  assert.equal(filter("Austin, TX"), true);
+  assert.equal(filter("United States"), true);
+  assert.equal(filter("Indianapolis, Indiana, US"), true);
+  assert.equal(filter("Bangalore, India"), false);
+  assert.equal(filter("San Francisco, Chinatown, CA"), true);
+});
+
+test("buildLocationFilter preserves punctuation-led state and multi-word allow terms", () => {
+  const filter = buildLocationFilter({
+    always_allow: [],
+    allow: [", NY", "United States", "North America"],
+    block: [],
+  });
+
+  assert.equal(filter("Albany, NY"), true);
+  assert.equal(filter("Remote — United States"), true);
+  assert.equal(filter("Remote — North America"), true);
+});
+
+test("buildSearchSources: remote posture allows remote roles", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    location: { home: "", remote: true, relocation: [] },
+  });
+
+  assert.equal(result.location_filter.needs_location, false);
+  assert.equal(buildLocationFilter(result.location_filter)("Remote"), true);
+});
+
+test("buildSearchSources: no home, relocation, or remote posture needs a location", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    location: { home: "", remote: false, relocation: [] },
+  });
+
+  assert.equal(result.location_filter.needs_location, true);
+  assert.equal(buildLocationFilter(result.location_filter)("Remote"), false);
 });
 
 test("buildSearchSources: every searches item has provider, label, and a query/url/rssUrl; non-board items are enabled by default", () => {

@@ -105,11 +105,11 @@ export function buildTitleFilter(titleFilter = {}) {
 }
 
 function keywordMatches(text, term) {
-  if (!term) return false;
-  if (/^[a-z0-9.+#-]{1,3}$/.test(term)) {
-    return new RegExp(`(^|[^a-z0-9])${escapeRegExp(term)}($|[^a-z0-9])`).test(text);
-  }
-  return text.includes(term);
+  const t = String(term || "").trim();
+  if (!t) return false;
+  const left = /^[a-z0-9]/.test(t) ? "(^|[^a-z0-9])" : "";
+  const right = /[a-z0-9]$/.test(t) ? "($|[^a-z0-9])" : "";
+  return new RegExp(`${left}${escapeRegExp(t)}${right}`).test(text);
 }
 
 function escapeRegExp(value) {
@@ -118,17 +118,21 @@ function escapeRegExp(value) {
 
 export function buildLocationFilter(locationFilter = null) {
   if (!locationFilter) return () => true;
+  if (locationFilter.needs_location === true) return () => false;
   const alwaysAllow = normalizeKeywordList(locationFilter.always_allow);
   const allow = normalizeKeywordList(locationFilter.allow);
   const block = normalizeKeywordList(locationFilter.block);
+  const hasPolicy = alwaysAllow.length > 0 || allow.length > 0 || block.length > 0;
 
   return (location = "") => {
+    // A missing provider location is ambiguous, not evidence of a foreign role.
+    // Keep it for body review when the candidate otherwise has a real policy.
     if (typeof location !== "string" || location.trim() === "") return true;
+    if (!hasPolicy) return true;
     const lower = location.toLowerCase();
-    if (alwaysAllow.some((term) => lower.includes(term))) return true;
-    if (block.some((term) => lower.includes(term))) return false;
-    if (allow.length === 0) return true;
-    return allow.some((term) => lower.includes(term));
+    if (alwaysAllow.some((term) => keywordMatches(lower, term))) return true;
+    if (block.some((term) => keywordMatches(lower, term))) return false;
+    return allow.some((term) => keywordMatches(lower, term));
   };
 }
 

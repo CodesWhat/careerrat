@@ -176,6 +176,12 @@ function candidateLocationPatch({ homeBase = "", existingCandidateLocation = "" 
   return { location: home };
 }
 
+export function hasPrefsSearchLocation({ homeBase = "", workModes = [] } = {}) {
+  return Boolean(
+    String(homeBase || "").trim() || (Array.isArray(workModes) && workModes.includes("remote"))
+  );
+}
+
 export function buildQuickFactsSavePayload({
   links = {},
   modesData = {},
@@ -385,6 +391,10 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
   }
 
   async function handleSaveAndNext() {
+    if (!hasPrefsSearchLocation({ homeBase, workModes })) {
+      setError("Add your home base or turn on Remote so Roland can search the right geography.");
+      return;
+    }
     if (authChoice !== "authorized" && authChoice !== "sponsorship") {
       setError(
         "Pick your work authorization to continue — the gate and every application form need it."
@@ -585,6 +595,11 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
                     placeholder="City, state or country"
                   />
                 </Field>
+                {!hasPrefsSearchLocation({ homeBase, workModes }) ? (
+                  <span className="onboarding-step-status">
+                    Add a home base or choose Remote before continuing.
+                  </span>
+                ) : null}
                 <Field
                   label="Open to relocating"
                   htmlFor="quick-facts-relocation"

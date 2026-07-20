@@ -18,6 +18,7 @@ vi.mock("../../components/form.jsx", async (importOriginal) => {
   };
 });
 
+import * as prefsStepModule from "./PrefsStep.jsx";
 import {
   buildQuickFactsSavePayload,
   LINK_PREFIXES,
@@ -259,6 +260,19 @@ describe("PrefsStep shell layout", () => {
 });
 
 describe("quick facts data shaping", () => {
+  it("requires a home base or Remote before Continue can save", () => {
+    expect(prefsStepModule.hasPrefsSearchLocation({ homeBase: "", workModes: [] })).toBe(false);
+    expect(prefsStepModule.hasPrefsSearchLocation({ homeBase: "Lisbon", workModes: [] })).toBe(
+      true
+    );
+    expect(prefsStepModule.hasPrefsSearchLocation({ homeBase: "", workModes: ["remote"] })).toBe(
+      true
+    );
+    expect(
+      prefsStepModule.hasPrefsSearchLocation({ homeBase: "", workModes: ["hybrid", "onsite"] })
+    ).toBe(false);
+  });
+
   it("seeds links from profile before duplicated form defaults", () => {
     expect(seedQuickFactsLinks(BASE_STATE.data)).toEqual({
       linkedin: "https://linkedin.com/in/profile-source",

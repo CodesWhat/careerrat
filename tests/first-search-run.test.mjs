@@ -177,6 +177,34 @@ test("prepareFirstSearchSources writes merged SQLite search-sources without comp
     true,
     "generated DB source entries must be merged in"
   );
+  assert.deepEqual(
+    result.sourcedScan.location_filter,
+    result.searchSources.location_filter,
+    "the scanner-consumed config must receive the generated location policy"
+  );
+  assert.equal(result.sourcedScan.location_filter.block.includes("India"), true);
+});
+
+test("first search parks with an actionable location error before creating a live run", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  candidateConfigPatch({
+    repoRoot,
+    name: "profile",
+    patch: {
+      candidate: { location: "" },
+      location: { home: "", remote: false, hybrid: false, onsite: false, relocation: [] },
+    },
+  });
+
+  const result = await startFirstSearchRun({ repoRoot, env: {} });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.parked, true);
+  assert.equal(result.run.status, "not_started");
+  assert.equal(result.run.error.code, "SEARCH_LOCATION_REQUIRED");
+  assert.match(result.run.error.message, /add your location|remote/i);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "first-search" }).run, null);
 });
 
 test("prepareFirstSearchSources only re-syncs stored entries owned by the domain gate", async () => {

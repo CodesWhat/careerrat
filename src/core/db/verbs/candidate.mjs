@@ -292,7 +292,7 @@ function hasAnyTitle(targeting) {
   );
 }
 
-function hasSearchLocation(profile) {
+export function hasSearchLocation(profile) {
   const location = profile.location || {};
   const candidate = profile.candidate || {};
   return !!(
