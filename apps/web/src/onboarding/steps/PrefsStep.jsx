@@ -579,7 +579,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
                 <Field
                   label="Open to relocating"
                   htmlFor="quick-facts-relocation"
-                  hint="Press Enter or comma to add another city."
+                  hint="Press Enter to add another city."
                   className="onboarding-custom-entry"
                 >
                   <ChipInput
@@ -587,6 +587,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
                     values={relocationList}
                     onChange={setRelocationList}
                     placeholder="e.g. Austin, TX"
+                    commitOnComma={false}
                   />
                 </Field>
               </div>

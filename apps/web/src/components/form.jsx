@@ -4,7 +4,8 @@
 // a given field id). ChipInput is the M8 onboarding wizard's addition — a
 // free-text "type, press Enter/comma to add" tag editor (target titles,
 // keep/cut signals, tracked companies) rendered as a Chip row, never a
-// giant table.
+// giant table. Comma-commit is opt-out via commitOnComma={false} for fields
+// whose values can themselves contain a comma (e.g. "Austin, TX").
 
 import { useState } from "react";
 import { Chip } from "./Chip.jsx";
@@ -140,6 +141,7 @@ export function ChipInput({
   placeholder,
   suggestions = [],
   suggestionLimit = 6,
+  commitOnComma = true,
 }) {
   const [draft, setDraft] = useState("");
   const filteredSuggestions = filterChipSuggestions({
@@ -149,8 +151,16 @@ export function ChipInput({
     limit: suggestionLimit,
   });
 
-  function commit(explicitValue = draft) {
-    const trimmed = String(explicitValue || "").trim();
+  // explicitValue is only ever meant to be a string (a suggestion's value,
+  // or the current draft) — never pass this function directly as an event
+  // handler. React's onBlur/onKeyDown hand a SyntheticEvent as the first
+  // arg, and `String(event)` stringifies to the literal "[object Object]",
+  // which used to slip through as a real chip. Guard by type instead of
+  // truthiness so any non-string call falls back to the draft state, and
+  // whitespace-only drafts are ignored rather than committed.
+  function commit(explicitValue) {
+    const raw = typeof explicitValue === "string" ? explicitValue : draft;
+    const trimmed = raw.trim();
     setDraft("");
     if (!trimmed) return;
     const exists = values.some((v) => v.toLowerCase() === trimmed.toLowerCase());
@@ -159,7 +169,7 @@ export function ChipInput({
   }
 
   function handleKeyDown(e) {
-    if (e.key === "Enter" || e.key === ",") {
+    if (e.key === "Enter" || (commitOnComma && e.key === ",")) {
       e.preventDefault();
       commit();
     } else if (e.key === "Backspace" && !draft && values.length) {
@@ -186,7 +196,7 @@ export function ChipInput({
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         onKeyDown={handleKeyDown}
-        onBlur={commit}
+        onBlur={() => commit()}
         placeholder={placeholder}
       />
       {filteredSuggestions.length ? (

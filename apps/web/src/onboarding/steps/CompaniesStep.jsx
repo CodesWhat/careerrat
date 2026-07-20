@@ -16,6 +16,22 @@ const SEARCH_DEBOUNCE_MS = 350;
 const PROPOSAL_CONFLICT_MESSAGE =
   "Proposal changed. Review the refreshed proposal before deciding.";
 
+// Mirrors the server's COMPANY_DISCOVERY_BATCH_MAX
+// (src/core/discovery/company-board-resolver.mjs) — a single manualSeeds
+// create 422s past this. Kept as a local constant rather than an import:
+// that server module pulls in Node's dns/net built-ins and can't be bundled
+// into this browser app. See reconcileCompanyProposalDecisions below for why
+// chunking at this size doesn't lose any seed's mint result.
+const MANUAL_SEED_BATCH_MAX = 12;
+
+function chunkArray(list, size) {
+  const chunks = [];
+  for (let i = 0; i < list.length; i += size) {
+    chunks.push(list.slice(i, i + size));
+  }
+  return chunks;
+}
+
 function isConflictError(err) {
   return (
     err?.status === 409 || err?.body?.code === "CONFLICT" || err?.body?.error?.code === "CONFLICT"
@@ -216,37 +232,52 @@ export async function reconcileCompanyProposalDecisions({
 
   const unresolved = resolvedCompanies.filter((company) => !company.proposalId);
   if (unresolved.length) {
-    try {
-      const created = await createProposals({
-        manualSeeds: proposalSeedsFromCompanies(unresolved),
-      });
-      const batch =
-        proposalBatchFromResponse(created?.pending) ||
-        proposalBatchFromResponse(created?.created) ||
-        null;
-      const mintedByName = new Map(
-        targetsFromProposalBatch(batch).map((target) => [target.name.toLowerCase(), target])
-      );
-      resolvedCompanies = resolvedCompanies.map((company) => {
-        const minted = !company.proposalId && mintedByName.get(company.name.toLowerCase());
-        if (!minted) return company;
-        return {
-          ...company,
-          proposalId: minted.proposalId,
-          batchId: minted.batchId,
-          classification: minted.classification,
-          version: minted.version,
-        };
-      });
-      // A partial mint (some unresolved chips got a proposalId back, others
-      // didn't — e.g. no supported-ATS board found for one of them) still
-      // leaves those chips silently unresolved from here down. That's a
-      // real failure, not a fully successful save: surface the same soft
-      // warning a thrown/rejected mint would.
-      if (resolvedCompanies.some((company) => !company.proposalId)) hadFailure = true;
-    } catch {
-      hadFailure = true;
+    // A default fresh-user run pre-seeds ~17 companies — well over the
+    // server's per-create cap (MANUAL_SEED_BATCH_MAX above). Mint
+    // sequentially in chunks instead of one oversized call that 422s
+    // outright. Each createProposals() call both POSTs its chunk and
+    // re-reads the now-latest pending batch (see runCompanyProposalCreate);
+    // the server never deletes or merges older batch rows — each chunk
+    // gets its own batchId — it just stops being "latest" once a newer one
+    // exists. Awaiting each chunk before starting the next means every
+    // chunk's minted proposalIds are captured off its OWN response before
+    // the next chunk's create supersedes it as the visible pending batch,
+    // so no seed's mint result is lost.
+    const seedChunks = chunkArray(unresolved, MANUAL_SEED_BATCH_MAX);
+    const mintedByName = new Map();
+    for (const chunk of seedChunks) {
+      try {
+        const created = await createProposals({
+          manualSeeds: proposalSeedsFromCompanies(chunk),
+        });
+        const batch =
+          proposalBatchFromResponse(created?.pending) ||
+          proposalBatchFromResponse(created?.created) ||
+          null;
+        for (const target of targetsFromProposalBatch(batch)) {
+          mintedByName.set(target.name.toLowerCase(), target);
+        }
+      } catch {
+        hadFailure = true;
+      }
     }
+    resolvedCompanies = resolvedCompanies.map((company) => {
+      const minted = !company.proposalId && mintedByName.get(company.name.toLowerCase());
+      if (!minted) return company;
+      return {
+        ...company,
+        proposalId: minted.proposalId,
+        batchId: minted.batchId,
+        classification: minted.classification,
+        version: minted.version,
+      };
+    });
+    // A partial mint (some unresolved chips got a proposalId back, others
+    // didn't — e.g. no supported-ATS board found for one of them) still
+    // leaves those chips silently unresolved from here down. That's a
+    // real failure, not a fully successful save: surface the same soft
+    // warning a thrown/rejected mint would.
+    if (resolvedCompanies.some((company) => !company.proposalId)) hadFailure = true;
   }
 
   const keptSupported = resolvedCompanies.filter(

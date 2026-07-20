@@ -4,8 +4,19 @@ import { describe, expect, it, vi } from "vitest";
 const apiMocks = vi.hoisted(() => ({
   saveCandidateFile: vi.fn(async () => ({ ok: true })),
 }));
+const captured = vi.hoisted(() => ({ chipInputs: [] }));
 
 vi.mock("../../lib/api.js", () => apiMocks);
+vi.mock("../../components/form.jsx", async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    ChipInput: (props) => {
+      captured.chipInputs.push(props);
+      return actual.ChipInput(props);
+    },
+  };
+});
 
 import {
   buildQuickFactsSavePayload,
@@ -53,6 +64,7 @@ function countOccurrences(value, token) {
 }
 
 function renderPrefsStep(props = {}) {
+  captured.chipInputs = [];
   return renderToStaticMarkup(
     <PrefsStep
       state={BASE_STATE}
@@ -187,6 +199,18 @@ describe("PrefsStep shell layout", () => {
     expect(html).toContain(">Remote</button>");
     expect(html).toContain(">Hybrid</button>");
     expect(html).toContain(">On-site</button>");
+  });
+
+  it("keeps commas inside relocation cities and documents Enter as the commit key", () => {
+    const html = renderPrefsStep();
+    const relocationInput = captured.chipInputs.find(
+      (props) => props.id === "quick-facts-relocation"
+    );
+
+    expect(relocationInput).toBeDefined();
+    expect(relocationInput.commitOnComma).toBe(false);
+    expect(html).toContain("Press Enter to add another city.");
+    expect(html).not.toContain("Press Enter or comma to add another city.");
   });
 
   it("prefills home base from profile.location.home before candidate.location", () => {

@@ -616,6 +616,69 @@ describe("reconcileCompanyProposalDecisions", () => {
     ]);
   });
 
+  it("mints 17 unresolved seeds in sequential 12-and-5 chunks and resolves every proposal", async () => {
+    const companies = Array.from({ length: 17 }, (_, index) => ({
+      name: `Company ${String(index + 1).padStart(2, "0")}`,
+      domain: `company-${index + 1}.example`,
+      source: "manual",
+    }));
+    const createProposals = vi.fn(async ({ manualSeeds }) => {
+      const chunkNumber = createProposals.mock.calls.length;
+      return {
+        pending: {
+          data: {
+            batch: {
+              batchId: `batch-minted-${chunkNumber}`,
+              proposals: manualSeeds.map((seed, seedIndex) => ({
+                proposalId: `proposal-${chunkNumber}-${seedIndex + 1}`,
+                company: { name: seed.name, domain: seed.domain_hint },
+                classification: "supported_ats",
+                confidenceTier: "high-confidence",
+                version: 1,
+              })),
+            },
+          },
+        },
+      };
+    });
+    const decideProposal = vi.fn(async () => ({ conflict: false }));
+
+    await expect(
+      CompaniesStepModule.reconcileCompanyProposalDecisions({
+        companies,
+        removedProposals: [],
+        createProposals,
+        decideProposal,
+      })
+    ).resolves.toEqual({ hadFailure: false });
+
+    expect(createProposals).toHaveBeenCalledTimes(2);
+    expect(createProposals.mock.calls.map(([payload]) => payload.manualSeeds.length)).toEqual([
+      12, 5,
+    ]);
+    expect(createProposals.mock.calls.flatMap(([payload]) => payload.manualSeeds)).toEqual(
+      proposalSeedsFromCompanies(companies)
+    );
+    expect(decideProposal).toHaveBeenCalledTimes(17);
+    expect(
+      decideProposal.mock.calls.map(([payload]) => ({
+        batchId: payload.batchId,
+        name: payload.proposal.name,
+        proposalId: payload.proposal.proposalId,
+        action: payload.action,
+        userConfirmed: payload.userConfirmed,
+      }))
+    ).toEqual(
+      companies.map((company, index) => ({
+        batchId: index < 12 ? "batch-minted-1" : "batch-minted-2",
+        name: company.name,
+        proposalId: `proposal-${index < 12 ? 1 : 2}-${(index % 12) + 1}`,
+        action: "approve-supported-ats",
+        userConfirmed: true,
+      }))
+    );
+  });
+
   it("continues approving successful mints when the mint response is partial", async () => {
     const calls = [];
     const companies = [
