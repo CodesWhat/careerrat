@@ -1,6 +1,6 @@
 {
   "name": "@rolester/desktop",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Thin Electron shell over the Rolester local server (M5 paid-POC deliverable).",
