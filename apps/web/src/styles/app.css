@@ -432,70 +432,66 @@ button {
   gap: 8px;
 }
 
-/* ── Setup to-do banner — no left-edge accent strip; full-fill tint only ── */
+/* ── Deep-ingest nudge toast — no left-edge accent strip (repo standing rule);
+ * floats bottom-left, mirroring the capture assistant's bottom-right slot. ── */
 
-.setup-banner {
+.setup-toast {
+  position: fixed;
+  left: clamp(18px, 3vw, 40px);
+  bottom: clamp(18px, 3vw, 34px);
+  z-index: 50;
   display: flex;
-  align-items: center;
-  gap: 14px;
-  flex-wrap: wrap;
-  background: var(--mustard-light);
-  border-radius: var(--row-radius);
-  padding: 10px 14px;
+  align-items: flex-start;
+  gap: 8px;
+  max-width: min(360px, calc(100vw - 32px));
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(var(--rgb-surface), 0.96);
+  box-shadow:
+    0 22px 50px rgba(var(--rgb-line), 0.18),
+    0 5px 14px rgba(var(--rgb-line), 0.08);
+  backdrop-filter: blur(18px);
+  -webkit-app-region: no-drag;
 }
 
-.setup-banner__mark {
-  font-size: 22px;
-  line-height: 1;
-  flex: 0 0 auto;
-}
-
-.setup-banner__body {
-  flex: 1 1 240px;
+.setup-toast__body {
+  flex: 1 1 auto;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
 
-.setup-banner__title {
+.setup-toast__title {
   margin: 0;
   font-size: 14px;
   font-weight: 700;
   color: var(--ink);
 }
 
-.setup-banner__sub {
+.setup-toast__sub {
   margin: 0;
   font-size: 12px;
   color: var(--ink-soft);
 }
 
-.setup-banner__todos {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
+.setup-toast__cta {
+  margin-top: 8px;
 }
 
-.setup-banner__todo {
-  display: inline-flex;
-  align-items: center;
-  padding: 5px 12px;
-  border-radius: 999px;
-  background: var(--mustard);
-  color: var(--paper-surface);
-  font-size: 12px;
-  font-weight: 600;
-  text-decoration: none;
+.setup-toast__dismiss {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--ink-soft);
+  font-size: 14px;
+  line-height: 1;
+  padding: 2px;
 }
 
-.setup-banner__todo:hover {
-  filter: brightness(0.94);
-}
-
-.setup-banner__finish {
-  margin-left: auto;
+.setup-toast__dismiss:hover {
+  color: var(--ink);
 }
 
 /* ── Product dashboard home ─────────────────────────────────────────────── */
@@ -1336,6 +1332,10 @@ button {
 .dashboard__secondary-link:focus-visible {
   outline: 2px solid var(--m-secondary);
   outline-offset: 2px;
+}
+
+.dashboard__deep-ingest-nudge {
+  margin-top: 10px;
 }
 
 .dashboard__pill {

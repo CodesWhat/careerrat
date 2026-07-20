@@ -11,7 +11,11 @@ import {
 } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { DASHBOARD_PREVIEW } from "./dashboardPreviewData.js";
-import { SetupReadinessCard } from "./SetupReadinessCard.jsx";
+import {
+  DeepIngestPriorityNudge,
+  DeepIngestToast,
+  useDeepIngestNudge,
+} from "./SetupReadinessCard.jsx";
 
 // The lower-grid panels show three rows and scroll the rest inside the card, so
 // they carry a real queue rather than a truncated top-N with nothing behind it.
@@ -28,6 +32,7 @@ export function DashboardPage() {
   const { data, setup, loading, error, noDatabase } = useDashboardSnapshot();
   const dashboard = data ? dashboardForPage(data) : null;
   const model = buildDashboardModel(dashboard);
+  const deepIngest = useDeepIngestNudge(setup);
 
   if (noDatabase) {
     return (
@@ -49,12 +54,17 @@ export function DashboardPage() {
       {error ? <InlineAlert message={error} /> : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
-      <SetupReadinessCard setup={setup} />
+      {deepIngest.needed && !deepIngest.dismissed ? (
+        <DeepIngestToast onDismiss={deepIngest.dismiss} />
+      ) : null}
 
       {dashboard ? (
         <>
           <section className="dashboard__workbench">
-            <PriorityPanel focus={dashboard.focus} />
+            <PriorityPanel
+              focus={dashboard.focus}
+              showDeepIngestNudge={deepIngest.needed && deepIngest.dismissed}
+            />
             <PipelinePanel model={model} />
           </section>
 
@@ -84,22 +94,23 @@ function DashboardScoreboard({ metrics }) {
 
 // One card, one decision. `focus` is recomputed server-side on every poll, so
 // the hero advances to whatever is most important now — no queue beneath it.
-function PriorityPanel({ focus }) {
+function PriorityPanel({ focus, showDeepIngestNudge }) {
   return (
     <article className="dashboard__panel dashboard__panel--priority">
       <PanelHeader icon={<StarIcon />} title="Priority" to="/jobs" actionLabel="Open Jobs" />
-      <PriorityFocus focus={focus} />
+      <PriorityFocus focus={focus} showDeepIngestNudge={showDeepIngestNudge} />
     </article>
   );
 }
 
-function PriorityFocus({ focus }) {
+function PriorityFocus({ focus, showDeepIngestNudge }) {
   if (!focus) {
     return (
       <div className="dashboard__focus">
         <span className="dashboard__pill dashboard__pill--success">Clear</span>
         <h2>Nothing blocking</h2>
         <p>No tracked action needs attention right now.</p>
+        {showDeepIngestNudge ? <DeepIngestPriorityNudge /> : null}
       </div>
     );
   }
@@ -151,6 +162,7 @@ function PriorityFocus({ focus }) {
           <ArrowRightIcon />
         </Link>
       </div>
+      {showDeepIngestNudge ? <DeepIngestPriorityNudge /> : null}
     </div>
   );
 }
