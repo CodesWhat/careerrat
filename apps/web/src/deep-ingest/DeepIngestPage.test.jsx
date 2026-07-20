@@ -231,7 +231,7 @@ function capturedNavButton(label) {
 
 function selectStep(label, state) {
   renderPage(state);
-  capturedNativeButton(label, "wizard-rail__step").onClick();
+  capturedNativeButton(label, "onboarding-progress__case").onClick();
   return renderPage(state);
 }
 
@@ -276,7 +276,9 @@ describe("DeepIngestPage wizard", () => {
     }
     expect(html.match(/class="deep-wizard__step-card"/g)).toHaveLength(1);
     expect(html).toContain("Feed the machine");
-    expect(html).toContain('class="wizard-rail__step wizard-rail__step--active"');
+    expect(html).toContain(
+      'class="onboarding-progress__case onboarding-progress__case--clickable onboarding-progress__case--filled onboarding-progress__case--active"'
+    );
   });
 
   it("renders human source labels and statuses without leaking enums or database ids", () => {
@@ -385,7 +387,7 @@ describe("DeepIngestPage wizard", () => {
     const html = selectStep("Honesty", state);
 
     expect(html).toContain(
-      "No honesty boundaries drafts from your material yet. Add more in Material, or move on."
+      "No honesty drafts from your material yet. Add more in Material, or move on."
     );
     expect(capturedNavButton("Continue").disabled).toBe(false);
   });

@@ -3546,28 +3546,6 @@ button {
   line-height: 1.5;
 }
 
-.onboarding-resume__footnote,
-.onboarding-targeting__media-copy .onboarding-resume__footnote,
-.onboarding-step-card__content .onboarding-resume__footnote {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: 6px;
-  margin-top: -10px;
-  color: var(--ink-soft);
-  font-size: 11px;
-  line-height: 1.35;
-  font-weight: 400;
-}
-
-.onboarding-resume__footnote-marker {
-  display: inline-block;
-  margin-top: -1px;
-  color: var(--coral);
-  font-size: 12px;
-  font-weight: 800;
-  line-height: 1;
-}
-
 .onboarding-resume__paste-toggle {
   width: 100%;
 }
@@ -10848,10 +10826,13 @@ button.chip {
  * __media / __content), reusing its tokens directly, but this page lives
  * INSIDE the app shell (top nav stays visible) so it never touches the
  * onboarding shell or its top bar — it builds its own root under
- * .deep-wizard instead. .wizard-rail (progress pills) and
- * .onboarding-nav-button (back/next) are the imported onboarding
- * components own classes and already have CSS — nothing to add for those
- * here. Buttons reuse .btn/.btn--*, status pills reuse .badge/.badge--*,
+ * .deep-wizard instead. .onboarding-nav-button (back/next) is the imported
+ * onboarding component's own class and already has CSS — nothing to add for
+ * that here. The step rail (.deep-wizard__rail) reuses onboarding's
+ * .onboarding-progress/__case* pill classes verbatim (see
+ * DeepWizardRail in DeepIngestPage.jsx) instead of duplicating that look —
+ * only its in-flow wrapper is defined here, the pill classes themselves stay
+ * untouched. Buttons reuse .btn/.btn--*, status pills reuse .badge/.badge--*,
  * the file dropzone reuses .dropzone/.dropzone__icon. No left-edge accent
  * stripe on any row or card — state is always conveyed via badge
  * tone/text, per the repo standing Card rule. */
@@ -10871,6 +10852,10 @@ button.chip {
 
 .deep-wizard__rail {
   display: flex;
+  justify-content: center;
+  width: 100%;
+  max-width: 880px;
+  margin: 0 auto;
 }
 
 .deep-wizard__stack {
@@ -10880,6 +10865,34 @@ button.chip {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Wraps only the step card (not the step-label row above it) so the
+ * back/next arrows in .deep-wizard__nav-actions can be centered on the
+ * card's own height, mirroring how .onboarding-shell__actions centers on
+ * .onboarding-shell__frame. */
+.deep-wizard__stage {
+  position: relative;
+  width: 100%;
+}
+
+.deep-wizard__nav-actions {
+  position: absolute;
+  z-index: 4;
+  top: 50%;
+  left: 50%;
+  width: calc(100% + 128px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0;
+  padding: 0;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.deep-wizard__nav-actions > * {
+  pointer-events: auto;
 }
 
 .deep-wizard__step-label-row {
@@ -10968,15 +10981,6 @@ button.chip {
   padding: clamp(28px, 4.5vw, 44px);
 }
 
-.deep-wizard__nav-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: auto;
-  padding-top: 8px;
-}
-
 .deep-wizard__segmented {
   display: inline-flex;
   flex-wrap: wrap;
@@ -11050,16 +11054,29 @@ button.chip {
 .deep-wizard__source-main {
   display: flex;
   min-width: 0;
+  flex: 1 1 auto;
   align-items: center;
   gap: 10px;
 }
 
 .deep-wizard__source-title {
   overflow: hidden;
+  min-width: 0;
+  flex: 1 1 auto;
   color: var(--ink);
   font-size: 13px;
   font-weight: 800;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The status chip (.badge, e.g. "Drafts ready") must stay single-line and
+ * its own compact size — without this it's a flex sibling of the (longer,
+ * variable-length) source title and shrinks along with it, wrapping its
+ * text into an oversized two-line blob instead of letting the title
+ * ellipsize. */
+.deep-wizard__source-row .badge {
+  flex: 0 0 auto;
   white-space: nowrap;
 }
 
@@ -11204,5 +11221,18 @@ button.chip {
   .deep-wizard__step-card-media {
     gap: 12px;
     padding: 24px;
+  }
+
+  /* Same fallback onboarding uses for .onboarding-shell__actions at this
+   * width — the overflow trick that centers the arrows outside the card's
+   * edges needs room neither side has to spare on a narrow viewport, so
+   * they drop into normal flow below the card instead. */
+  .deep-wizard__nav-actions {
+    position: static;
+    width: 100%;
+    margin-top: 12px;
+    padding: 0;
+    pointer-events: auto;
+    transform: none;
   }
 }

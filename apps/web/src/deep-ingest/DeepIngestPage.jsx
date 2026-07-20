@@ -7,11 +7,11 @@
 // nav buttons / progress rail) — but rendered INSIDE the app shell (top nav
 // stays visible), so this deliberately does NOT import OnboardingShell
 // itself (it hard-wires its own full-bleed OnboardingTopBar). Only
-// OnboardingNavButton (a plain icon button, no header) and WizardRail (an
-// already-exported, already app-shell-safe pill rail — see OnboardingPage.jsx's
-// dormant non-fullBleed branch, which this page is effectively the first
-// real user of) get imported; every other piece of the look is rebuilt here
-// under a `deep-wizard__*` class namespace in app.css.
+// OnboardingNavButton (a plain icon button, no header) gets imported from
+// onboarding; the step rail and the back/next stage are rebuilt locally (the
+// rail reuses onboarding's `.onboarding-progress`/`__case*` pill classes
+// verbatim — see DeepWizardRail below); everything else lives under a
+// `deep-wizard__*` class namespace in app.css.
 //
 // Data plumbing is unchanged from the previous five-panel layout: same six
 // endpoints via ../lib/api.js (state read, source submit/upload, proposal
@@ -56,7 +56,6 @@ import {
   uploadDeepIngestFile,
 } from "../lib/api.js";
 import { OnboardingNavButton } from "../onboarding/OnboardingShell.jsx";
-import { WizardRail } from "../onboarding/WizardRail.jsx";
 
 const INPUT_KIND_OPTIONS = [
   { value: "paste", label: "Paste" },
@@ -100,6 +99,17 @@ const LANE_CONFIRMED_COUNT_KEY = {
   honesty_boundaries: "honestyBoundaries",
   writing_voice: "writingVoice",
   role_signals: "roleSignals",
+};
+
+// Short draft-noun per lane for the "No ___ drafts…" empty-state message —
+// "evidence claims drafts"/"honesty boundaries drafts" reads broken, so this
+// is deliberately not just laneLabel.toLowerCase().
+const LANE_DRAFT_NOUN = {
+  evidence_claims: "evidence",
+  story_bank: "story",
+  honesty_boundaries: "honesty",
+  writing_voice: "voice",
+  role_signals: "role-signal",
 };
 
 const MATERIAL_STEP = {
@@ -199,8 +209,13 @@ function sourceHasDrafts(sourceId, proposals) {
   return proposals.some((row) => row.sourceId === sourceId && isRealDraftRow(row));
 }
 
-function sourceIsReadyToDraft(source) {
-  return source.status === "proposal_ready";
+// A source stays "proposal_ready" even after proposals are drafted for it —
+// the server doesn't flip its status again on draft — so gating on status
+// alone leaves "Draft proposals" hot forever and a re-click appends
+// duplicate proposals for the same source. Only a source with no real drafts
+// yet is actually draftable.
+function sourceIsReadyToDraft(source, proposals) {
+  return source.status === "proposal_ready" && !sourceHasDrafts(source.id, proposals);
 }
 
 function domainFromUrl(url) {
@@ -447,7 +462,7 @@ export function DeepIngestPage({ initialState = null }) {
   }
 
   async function handleDraftProposals() {
-    const ready = sources.filter(sourceIsReadyToDraft);
+    const ready = sources.filter((source) => sourceIsReadyToDraft(source, proposals));
     if (!ready.length) return;
     setDraftingAll(true);
     setError(null);
@@ -615,15 +630,6 @@ export function DeepIngestPage({ initialState = null }) {
         <p className="deep-wizard__loading">Loading…</p>
       ) : (
         <>
-          <div className="deep-wizard__rail">
-            <WizardRail
-              steps={WIZARD_STEPS.map((step) => ({ key: step.id, label: step.pill }))}
-              activeIndex={stepIndex}
-              doneFlags={doneFlags}
-              onSelect={setStepIndex}
-            />
-          </div>
-
           <div className="deep-wizard__stack">
             <div className="deep-wizard__step-label-row">
               <span className="deep-wizard__step-label">Step {stepIndex + 1}</span>
@@ -634,90 +640,140 @@ export function DeepIngestPage({ initialState = null }) {
               ) : null}
             </div>
 
-            <section
-              className="deep-wizard__step-card"
-              aria-labelledby={`deep-wizard-heading-${currentStep.id}`}
-            >
-              <div className="deep-wizard__step-card-media">
-                <div className="deep-wizard__mark" aria-hidden="true">
-                  {currentStep.emoji}
+            <div className="deep-wizard__stage">
+              <section
+                className="deep-wizard__step-card"
+                aria-labelledby={`deep-wizard-heading-${currentStep.id}`}
+              >
+                <div className="deep-wizard__step-card-media">
+                  <div className="deep-wizard__mark" aria-hidden="true">
+                    {currentStep.emoji}
+                  </div>
+                  <div className="deep-wizard__media-copy">
+                    <h1 id={`deep-wizard-heading-${currentStep.id}`}>{currentStep.heading}</h1>
+                    {currentStep.payoff ? <p>{currentStep.payoff}</p> : null}
+                  </div>
                 </div>
-                <div className="deep-wizard__media-copy">
-                  <h1 id={`deep-wizard-heading-${currentStep.id}`}>{currentStep.heading}</h1>
-                  {currentStep.payoff ? <p>{currentStep.payoff}</p> : null}
-                </div>
-              </div>
 
-              <div className="deep-wizard__step-card-content">
-                {stepIndex === 0 ? (
-                  <MaterialStepContent
-                    draft={draft}
-                    setDraft={setDraft}
-                    submitting={submitting}
-                    onAddSource={handleAddSource}
-                    fileInputRef={fileInputRef}
-                    onFileChange={handleFileChange}
-                    sources={sources}
-                    proposals={proposals}
-                    busySourceId={busySourceId}
-                    onRetry={handleRetrySource}
-                    draftingAll={draftingAll}
-                    onDraftProposals={handleDraftProposals}
-                  />
-                ) : currentStep.laneKey ? (
-                  <LaneStepContent
-                    laneKey={currentStep.laneKey}
-                    laneLabel={currentStep.heading}
-                    pendingProposals={lanePendingProposals}
-                    expandedIds={expandedProposalIds}
-                    editsByProposal={editsByProposal}
-                    busyProposalId={busyProposalId}
-                    busyLane={busyLane === currentStep.laneKey}
-                    onToggleExpand={toggleExpandedProposal}
-                    onEditField={setProposalEditField}
-                    onSave={handleSaveProposalEdits}
-                    onConfirm={(row) => handleConfirmProposal(row, currentStep.laneKey)}
-                    onDiscard={(row) => handleDiscardProposal(row, currentStep.laneKey)}
-                    onDefer={() =>
-                      handleLaneQuickSkip(currentStep.laneKey, "deferred", LANE_DEFER_REASON)
-                    }
-                    onNotAvailable={() =>
-                      handleLaneQuickSkip(
-                        currentStep.laneKey,
-                        "not_available",
-                        LANE_NOT_AVAILABLE_REASON
-                      )
-                    }
-                  />
-                ) : (
-                  <DoneStepContent
-                    confirmed={confirmed}
-                    openGaps={openGaps}
-                    onAddMoreMaterial={() => setStepIndex(0)}
-                  />
-                )}
-
-                <div className="deep-wizard__nav-row">
-                  <OnboardingNavButton
-                    direction="back"
-                    label="Back"
-                    onClick={handleBack}
-                    disabled={stepIndex === 0}
-                  />
-                  {stepIndex !== WIZARD_STEPS.length - 1 ? (
-                    <OnboardingNavButton
-                      direction="next"
-                      label="Continue"
-                      onClick={handleContinue}
-                      disabled={stepIndex === 0 && !materialContinueEnabled}
+                <div className="deep-wizard__step-card-content">
+                  {stepIndex === 0 ? (
+                    <MaterialStepContent
+                      draft={draft}
+                      setDraft={setDraft}
+                      submitting={submitting}
+                      onAddSource={handleAddSource}
+                      fileInputRef={fileInputRef}
+                      onFileChange={handleFileChange}
+                      sources={sources}
+                      proposals={proposals}
+                      busySourceId={busySourceId}
+                      onRetry={handleRetrySource}
+                      draftingAll={draftingAll}
+                      onDraftProposals={handleDraftProposals}
                     />
-                  ) : null}
+                  ) : currentStep.laneKey ? (
+                    <LaneStepContent
+                      laneKey={currentStep.laneKey}
+                      laneLabel={currentStep.heading}
+                      pendingProposals={lanePendingProposals}
+                      expandedIds={expandedProposalIds}
+                      editsByProposal={editsByProposal}
+                      busyProposalId={busyProposalId}
+                      busyLane={busyLane === currentStep.laneKey}
+                      onToggleExpand={toggleExpandedProposal}
+                      onEditField={setProposalEditField}
+                      onSave={handleSaveProposalEdits}
+                      onConfirm={(row) => handleConfirmProposal(row, currentStep.laneKey)}
+                      onDiscard={(row) => handleDiscardProposal(row, currentStep.laneKey)}
+                      onDefer={() =>
+                        handleLaneQuickSkip(currentStep.laneKey, "deferred", LANE_DEFER_REASON)
+                      }
+                      onNotAvailable={() =>
+                        handleLaneQuickSkip(
+                          currentStep.laneKey,
+                          "not_available",
+                          LANE_NOT_AVAILABLE_REASON
+                        )
+                      }
+                    />
+                  ) : (
+                    <DoneStepContent
+                      confirmed={confirmed}
+                      openGaps={openGaps}
+                      onAddMoreMaterial={() => setStepIndex(0)}
+                    />
+                  )}
                 </div>
+              </section>
+
+              <div className="deep-wizard__nav-actions">
+                <OnboardingNavButton
+                  direction="back"
+                  label="Back"
+                  onClick={handleBack}
+                  disabled={stepIndex === 0}
+                />
+                {stepIndex !== WIZARD_STEPS.length - 1 ? (
+                  <OnboardingNavButton
+                    direction="next"
+                    label="Continue"
+                    onClick={handleContinue}
+                    disabled={stepIndex === 0 && !materialContinueEnabled}
+                  />
+                ) : null}
               </div>
-            </section>
+            </div>
+          </div>
+
+          <div className="deep-wizard__rail">
+            <DeepWizardRail
+              steps={WIZARD_STEPS}
+              activeIndex={stepIndex}
+              doneFlags={doneFlags}
+              onSelect={setStepIndex}
+            />
           </div>
         </>
       )}
+    </div>
+  );
+}
+
+// The step rail — a glanceable, always-clickable pill row (progress is
+// derived from server state, not a locked linear sequence, so a returning
+// user can jump straight back to any step, same as the rest of the wizard
+// always allowed). Reuses onboarding's own progress-footer pill grammar
+// verbatim (.onboarding-progress/__case/__case-icon/__case-label —
+// see OnboardingShell.jsx's OnboardingProgressTrail) so it looks identical,
+// but renders in normal document flow under the step card instead of
+// onboarding's viewport-fixed footer — this page scrolls inside the app
+// shell, not full-bleed.
+function DeepWizardRail({ steps, activeIndex, doneFlags, onSelect }) {
+  return (
+    <div className="onboarding-progress">
+      {steps.map((step, i) => {
+        const active = i === activeIndex;
+        const filled = !!doneFlags[i] || active;
+        const className =
+          "onboarding-progress__case onboarding-progress__case--clickable" +
+          (filled ? " onboarding-progress__case--filled" : "") +
+          (active ? " onboarding-progress__case--active" : "");
+        return (
+          <button
+            key={step.id}
+            type="button"
+            className={className}
+            aria-label={`Go to ${step.pill}`}
+            title={`Go to ${step.pill}`}
+            onClick={() => onSelect(i)}
+          >
+            <span className="onboarding-progress__case-icon" aria-hidden="true">
+              {step.emoji}
+            </span>
+            <span className="onboarding-progress__case-label">{step.pill}</span>
+          </button>
+        );
+      })}
     </div>
   );
 }
@@ -736,7 +792,7 @@ function MaterialStepContent({
   draftingAll,
   onDraftProposals,
 }) {
-  const readyCount = sources.filter(sourceIsReadyToDraft).length;
+  const readyCount = sources.filter((source) => sourceIsReadyToDraft(source, proposals)).length;
 
   return (
     <>
@@ -848,6 +904,7 @@ function MaterialSourceRow({ source, hasDrafts, busy, onRetry }) {
 }
 
 function LaneStepContent({
+  laneKey,
   laneLabel,
   pendingProposals,
   expandedIds,
@@ -883,8 +940,8 @@ function LaneStepContent({
         </div>
       ) : (
         <p className="deep-wizard__empty">
-          No {laneLabel.toLowerCase()} drafts from your material yet. Add more in Material, or move
-          on.
+          No {LANE_DRAFT_NOUN[laneKey] || laneLabel.toLowerCase()} drafts from your material yet.
+          Add more in Material, or move on.
         </p>
       )}
       <div className="deep-wizard__quiet-links">
