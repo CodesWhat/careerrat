@@ -2,50 +2,28 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   RolesterSignInButton,
   RolesterSignUpButton,
-  RolesterUserButton,
   useRolesterUser,
 } from "../../auth/clerkControls.jsx";
 import { useDesktopGoogleSignIn } from "../../auth/useDesktopGoogleSignIn.js";
 import { Button } from "../../components/Button.jsx";
-import { connectManagedAi } from "../../lib/api.js";
+import {
+  connectManagedAi,
+  getAutomationSettings,
+  getInstalledAiRuntimes,
+  openInstalledAiRuntimeTerminal,
+  probeInstalledAiRuntime,
+  saveCandidateFile,
+  selectInstalledAiRuntime,
+} from "../../lib/api.js";
+import {
+  AutomationModeChooser,
+  buildAutomationModePatch,
+} from "../../settings/AutomationControls.jsx";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
 // After the auto-provision effect's first attempt fails, one silent retry
 // before surfacing an error — see useManagedAiAutoProvision below.
 const AUTO_PROVISION_RETRY_DELAY_MS = 2000;
-
-const ACCOUNT_AVATAR_SIZE = "96px";
-const ACCOUNT_USER_BUTTON_APPEARANCE = {
-  elements: {
-    userButtonTrigger: {
-      width: ACCOUNT_AVATAR_SIZE,
-      height: ACCOUNT_AVATAR_SIZE,
-      minWidth: ACCOUNT_AVATAR_SIZE,
-      minHeight: ACCOUNT_AVATAR_SIZE,
-      padding: "0",
-      borderRadius: "999px",
-      overflow: "hidden",
-      boxShadow: "none",
-    },
-    userButtonAvatarBox: {
-      width: ACCOUNT_AVATAR_SIZE,
-      height: ACCOUNT_AVATAR_SIZE,
-      borderRadius: "999px",
-      overflow: "hidden",
-    },
-    avatarBox: {
-      width: ACCOUNT_AVATAR_SIZE,
-      height: ACCOUNT_AVATAR_SIZE,
-      borderRadius: "999px",
-      overflow: "hidden",
-    },
-    avatarImage: {
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-    },
-  },
-};
 
 function accountLabel(user) {
   return (
@@ -71,6 +49,190 @@ function AccountFinePrint() {
       <span>Signing in keeps usage tied to you.</span>
     </p>
   );
+}
+
+function runtimeStatusLabel(runtime) {
+  if (runtime.selected) return "Selected";
+  if (runtime.ready) return "Ready";
+  if (runtime.status === "authentication_required") return "Sign-in needed";
+  if (!runtime.available) return "Not installed";
+  return "Needs attention";
+}
+
+export function InstalledRuntimeChoices({
+  state,
+  onSelect,
+  onRetry,
+  onOpenTerminal,
+  busyId = null,
+  showAdvancedHint = true,
+}) {
+  const runtimes = Array.isArray(state?.runtimes) ? state.runtimes : [];
+  const installed = runtimes.filter((runtime) => runtime.available);
+
+  return (
+    <section className="onboarding-runtime" aria-labelledby="onboarding-runtime-title">
+      <div className="onboarding-runtime__heading">
+        <div>
+          <span className="onboarding-runtime__eyebrow">Recommended</span>
+          <h2 id="onboarding-runtime-title">Use an AI tool already on this computer</h2>
+        </div>
+        <span className="badge">No extra API key</span>
+      </div>
+      <p className="field__hint">
+        Rolester uses the tool's existing login and subscription. Credentials stay with that CLI.
+      </p>
+      {!state ? <p className="field__hint">Checking this computer…</p> : null}
+      {state && installed.length === 0 ? (
+        <p className="field__hint">
+          No supported signed-in AI CLI was found. Manual setup still works.
+        </p>
+      ) : null}
+      {installed.length ? (
+        <div className="onboarding-runtime__list">
+          {installed.map((runtime) => (
+            <article
+              className={`onboarding-runtime__choice${runtime.selected ? " onboarding-runtime__choice--selected" : ""}`}
+              key={runtime.id}
+            >
+              <div className="onboarding-runtime__choice-copy">
+                <strong>{runtime.name}</strong>
+                <code>{runtime.commandShape}</code>
+                {runtime.warning ? <span className="field__hint">{runtime.warning}</span> : null}
+              </div>
+              <div className="onboarding-runtime__choice-action">
+                <span className="badge">{runtimeStatusLabel(runtime)}</span>
+                {runtime.ready && !runtime.selected ? (
+                  <Button
+                    variant="secondary"
+                    disabled={busyId === runtime.id}
+                    onClick={() => onSelect?.(runtime.id)}
+                  >
+                    {busyId === runtime.id ? "Selecting…" : "Use this tool"}
+                  </Button>
+                ) : null}
+                {!runtime.ready && runtime.action === "open_terminal" ? (
+                  <>
+                    <Button
+                      variant="secondary"
+                      disabled={busyId === runtime.id}
+                      onClick={() => onOpenTerminal?.(runtime.id)}
+                    >
+                      Open Terminal to sign in
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      disabled={busyId === runtime.id}
+                      onClick={() => onRetry?.(runtime.id)}
+                    >
+                      Retry detection
+                    </Button>
+                  </>
+                ) : null}
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : null}
+      {showAdvancedHint ? (
+        <details className="onboarding-runtime__advanced">
+          <summary>Advanced · Use a provider API key instead</summary>
+          <p className="field__hint">
+            Provider keys and managed AI are optional fallbacks. Configure them later in Settings.
+          </p>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function useInstalledRuntimeInventory({ reload }) {
+  const [state, setState] = useState(null);
+  const [busyId, setBusyId] = useState(null);
+
+  const refresh = useCallback(async () => {
+    try {
+      setState(await getInstalledAiRuntimes());
+    } catch {
+      setState({ selectedId: null, providerFallback: false, runtimes: [] });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const select = useCallback(
+    async (runtimeId) => {
+      setBusyId(runtimeId);
+      try {
+        await selectInstalledAiRuntime({ runtimeId });
+        await refresh();
+        await reload?.();
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [refresh, reload]
+  );
+
+  const retry = useCallback(
+    async (runtimeId) => {
+      setBusyId(runtimeId);
+      try {
+        await probeInstalledAiRuntime(runtimeId);
+        await refresh();
+        await reload?.();
+      } finally {
+        setBusyId(null);
+      }
+    },
+    [refresh, reload]
+  );
+
+  const openTerminal = useCallback(async (runtimeId) => {
+    setBusyId(runtimeId);
+    try {
+      await openInstalledAiRuntimeTerminal(runtimeId);
+    } finally {
+      setBusyId(null);
+    }
+  }, []);
+
+  return { state, busyId, select, retry, openTerminal };
+}
+
+function useAutomationSetupMode() {
+  const [status, setStatus] = useState(null);
+  const [busy, setBusy] = useState(false);
+
+  const refresh = useCallback(async () => {
+    try {
+      setStatus(await getAutomationSettings());
+    } catch {
+      setStatus({ mode: "basic", liveCount: 0, consent: {}, capabilities: [] });
+    }
+  }, []);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  const setMode = useCallback(
+    async (mode) => {
+      if (!status) return;
+      setBusy(true);
+      try {
+        await saveCandidateFile("automation", buildAutomationModePatch(status, mode));
+        await refresh();
+      } finally {
+        setBusy(false);
+      }
+    },
+    [refresh, status]
+  );
+
+  return { status, busy, setMode };
 }
 
 // Electron desktop shell only — see useDesktopGoogleSignIn.js's header
@@ -174,11 +336,8 @@ function useManagedAiAutoProvision({ isLoaded, isSignedIn, aiAvailable, getToken
   return { status, retry };
 }
 
-// Step 1 — Account. Clerk identifies the user for durable free-tier tracking,
-// billing, and future hosted usage metering. Signing in auto-provisions
-// managed AI (useManagedAiAutoProvision above); pasting an Anthropic key on
-// the Settings page remains the manual fallback for anyone who'd rather not
-// use it.
+// Step 1 — local runtime and operating mode. A Rolester account is optional;
+// signing in auto-provisions managed AI as an Advanced fallback.
 export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities, reload }) {
   const { isLoaded, isSignedIn, user, desktopAuthAvailable, getToken } = useRolesterUser();
   const aiAvailable = runtimeCapabilities?.aiAvailable === true;
@@ -196,6 +355,8 @@ export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities,
   // server-side of the click.
   const canContinue = isLoaded && aiAvailable;
   const blockedReason = !isSignedIn && !aiAvailable;
+  const installedRuntimes = useInstalledRuntimeInventory({ reload });
+  const automationMode = useAutomationSetupMode();
 
   return (
     <OnboardingShell
@@ -225,15 +386,33 @@ export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities,
               👤
             </div>
             <div className="onboarding-targeting__media-copy">
-              <h1 id="onboarding-account-title">Your Rolester account.</h1>
+              <h1 id="onboarding-account-title">Set up Rolester.</h1>
               <p className="onboarding-account__intro">
-                Free tier forever.
-                <br />
-                No credit card required.
+                Use your existing AI subscription.
+                <br />A Rolester account is optional.
               </p>
             </div>
           </div>
           <div className="onboarding-step-card__content onboarding-key__action-side onboarding-account__action-side">
+            <InstalledRuntimeChoices
+              state={installedRuntimes.state}
+              busyId={installedRuntimes.busyId}
+              onSelect={installedRuntimes.select}
+              onRetry={installedRuntimes.retry}
+              onOpenTerminal={installedRuntimes.openTerminal}
+            />
+            <AutomationModeChooser
+              status={
+                automationMode.status || {
+                  mode: "basic",
+                  liveCount: 0,
+                  consent: {},
+                  capabilities: [],
+                }
+              }
+              busy={automationMode.busy || !automationMode.status}
+              onSetMode={automationMode.setMode}
+            />
             {!isSignedIn ? (
               <div className="onboarding-account__panel">
                 {desktopAuthAvailable ? <DesktopGoogleSignIn /> : null}
@@ -252,54 +431,42 @@ export function KeyStep({ goNext, goBack, onProgressSelect, runtimeCapabilities,
                 <AccountFinePrint />
                 {blockedReason ? (
                   <p className="onboarding-account__fine-print">
-                    Sign in and AI connects automatically, or paste your own Anthropic API key.
+                    Sign in for managed AI, or sign in to one of the detected AI tools above.
                   </p>
                 ) : null}
               </div>
             ) : null}
 
-            {isSignedIn ? (
+            {isSignedIn && !aiAvailable ? (
               <div className="onboarding-account__panel onboarding-account__panel--signed-in">
-                <span className="onboarding-account__signed-in-label">Signed in as</span>
                 <div className="onboarding-account__signed-in-main">
-                  <div className="onboarding-account__identity">
-                    <div className="onboarding-account__avatar">
-                      <RolesterUserButton
-                        afterSignOutUrl="/app/onboarding"
-                        appearance={ACCOUNT_USER_BUTTON_APPEARANCE}
-                      />
-                    </div>
-                    <div className="onboarding-account__identity-copy">
-                      <strong>{accountLabel(user)}</strong>
-                      {accountEmail(user) ? <span>{accountEmail(user)}</span> : null}
-                    </div>
+                  <div className="onboarding-account__identity-copy">
+                    <span className="onboarding-account__signed-in-label">
+                      Optional Rolester account
+                    </span>
+                    <strong>{accountLabel(user)}</strong>
+                    {accountEmail(user) ? <span>{accountEmail(user)}</span> : null}
                   </div>
                   <div className="onboarding-key__confirmation onboarding-account__confirmation">
                     <span className="onboarding-key__check" aria-hidden="true">
                       ✓
                     </span>
-                    <span>Account ready</span>
+                    <span>Signed in</span>
                   </div>
                 </div>
                 <AccountFinePrint />
-                {!aiAvailable ? (
-                  <div className="onboarding-account__panel">
-                    <p className="onboarding-account__fine-print">
-                      {aiConnectStatus === "error"
-                        ? "Could not connect managed AI automatically."
-                        : "Connecting AI…"}
-                    </p>
-                    {aiConnectStatus === "error" ? (
-                      <Button
-                        variant="secondary"
-                        className="onboarding-account__cta"
-                        onClick={retryAiConnect}
-                      >
-                        Try again
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
+                <div className="onboarding-account__managed-status">
+                  <p className="onboarding-account__fine-print">
+                    {aiConnectStatus === "error"
+                      ? "Could not connect managed AI automatically."
+                      : "Connecting managed AI…"}
+                  </p>
+                  {aiConnectStatus === "error" ? (
+                    <Button variant="secondary" onClick={retryAiConnect}>
+                      Try again
+                    </Button>
+                  ) : null}
+                </div>
               </div>
             ) : null}
           </div>

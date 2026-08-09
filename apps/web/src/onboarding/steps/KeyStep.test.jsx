@@ -3,6 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
   connectManagedAi: vi.fn(),
+  getAutomationSettings: vi.fn(),
+  getInstalledAiRuntimes: vi.fn(),
+  openInstalledAiRuntimeTerminal: vi.fn(),
+  probeInstalledAiRuntime: vi.fn(),
+  selectInstalledAiRuntime: vi.fn(),
+  saveCandidateFile: vi.fn(),
 }));
 
 vi.mock("../../lib/api.js", async (importOriginal) => ({
@@ -33,7 +39,7 @@ vi.mock("@clerk/react", () => ({
 }));
 
 import { RolesterAuthStateProvider } from "../../auth/clerkControls.jsx";
-import { KeyStep } from "./KeyStep.jsx";
+import { InstalledRuntimeChoices, KeyStep } from "./KeyStep.jsx";
 
 function renderKeyStep({ aiAvailable = false } = {}) {
   return renderToStaticMarkup(
@@ -56,22 +62,84 @@ function renderKeyStep({ aiAvailable = false } = {}) {
   );
 }
 
+function continueButtonMarkup(html) {
+  return html.match(/<button[^>]*aria-label="Continue"[^>]*>/)?.[0] || "";
+}
+
 beforeEach(() => {
   clerkState.signedIn = false;
+  api.getInstalledAiRuntimes.mockResolvedValue({
+    selectedId: null,
+    providerFallback: false,
+    runtimes: [],
+  });
+  api.getAutomationSettings.mockResolvedValue({
+    mode: "basic",
+    liveCount: 0,
+    consent: {},
+    capabilities: [],
+  });
 });
 
 describe("Account step", () => {
-  it("renders as a focused signup screen instead of an AI-key entry screen", () => {
+  it("presents installed AI tools as the primary route and provider credentials as Advanced", () => {
+    const html = renderToStaticMarkup(
+      <InstalledRuntimeChoices
+        state={{
+          selectedId: "codex",
+          providerFallback: false,
+          runtimes: [
+            {
+              id: "claude",
+              name: "Claude Code",
+              commandShape: "claude -p --output-format json",
+              available: true,
+              ready: false,
+              status: "authentication_required",
+              action: "open_terminal",
+              selected: false,
+            },
+            {
+              id: "codex",
+              name: "Codex",
+              commandShape: "codex exec --json -",
+              available: true,
+              ready: true,
+              status: "ready",
+              selected: true,
+            },
+          ],
+        }}
+        onSelect={vi.fn()}
+        onRetry={vi.fn()}
+      />
+    );
+
+    expect(html).toContain("Use an AI tool already on this computer");
+    expect(html).toContain("Claude Code");
+    expect(html).toContain("Open Terminal to sign in");
+    expect(html).toContain("Retry detection");
+    expect(html).toContain("Codex");
+    expect(html).toContain("Selected");
+    expect(html).toContain("Use a provider API key instead");
+    expect(html).toContain("Advanced");
+    expect(html).not.toContain('type="password"');
+  });
+
+  it("renders local setup first and keeps a Rolester account optional", () => {
     const html = renderKeyStep();
 
     expect(html).toContain("Rolester");
-    expect(html).toContain("Your Rolester account.");
-    expect(html).toContain("Free tier forever.");
-    expect(html).toContain("No credit card required.");
+    expect(html).toContain("Set up Rolester.");
+    expect(html).toContain("Use your existing AI subscription.");
+    expect(html).toContain("A Rolester account is optional.");
     expect(html).toContain("Create account");
     expect(html).toContain("Log in");
     expect(html).toContain("Signing in keeps usage tied to you.");
+    expect(html).toContain("How hands-on should Rolester be?");
+    expect(html).toContain("Nothing turns on automatically");
     expect(html).not.toContain("Create or log in to your Rolester account.");
+    expect(html).not.toContain("Your Rolester account.");
     expect(html).not.toContain("Free to start, no credit card required.");
     expect(html).not.toContain("Create your Rolester account.");
     expect(html).not.toContain("Get started for free. No credit card required.");
@@ -113,19 +181,15 @@ describe("Account step", () => {
     expect(html).not.toContain("Seven quick steps");
     expect(html).toContain('aria-label="Continue"');
     expect(html).toContain('disabled=""');
-    expect(html).toContain(
-      "Sign in and AI connects automatically, or paste your own Anthropic API key."
-    );
+    expect(html).toContain("sign in to one of the detected AI tools above");
   });
 
   it("enables Continue when managed AI is available without sign-in", () => {
     const html = renderKeyStep({ aiAvailable: true });
 
     expect(html).toContain('aria-label="Continue"');
-    expect(html).not.toContain('disabled=""');
-    expect(html).not.toContain(
-      "Sign in and AI connects automatically, or paste your own Anthropic API key."
-    );
+    expect(continueButtonMarkup(html)).not.toContain("disabled");
+    expect(html).not.toContain("sign in to one of the detected AI tools above");
   });
 
   it("keeps Continue disabled after sign-in until managed AI is available", () => {
@@ -135,22 +199,16 @@ describe("Account step", () => {
 
     expect(html).toContain("Test User");
     expect(html).toContain("test@rolester.test");
-    expect(html).toContain("Account ready");
+    expect(html).toContain("Optional Rolester account");
+    expect(html).toContain("Signed in");
     expect(html).toContain("Signing in keeps usage tied to you.");
     expect(html).toContain(
       'class="onboarding-account__fine-print-marker" aria-hidden="true">*</span>'
     );
     expect(html).toContain('class="onboarding-account__signed-in-label"');
-    expect(html).toContain("Signed in as");
-    expect(html).toContain('class="onboarding-account__identity"');
-    expect(html).toContain('class="onboarding-account__avatar"');
     expect(html).toContain('class="onboarding-account__identity-copy"');
-    expect(html.indexOf("Signed in as")).toBeLessThan(html.indexOf("onboarding-account__identity"));
-    expect(html.indexOf("onboarding-account__avatar")).toBeLessThan(html.indexOf("Test User"));
-    expect(html).toContain('data-trigger-width="96px"');
-    expect(html).toContain('data-trigger-height="96px"');
-    expect(html).toContain('data-avatar-width="96px"');
-    expect(html).toContain('data-avatar-height="96px"');
+    expect(html).not.toContain('class="onboarding-account__avatar"');
+    expect(html).not.toContain('data-trigger-width="96px"');
     expect(html).not.toContain('class="onboarding-account__ready-card"');
     expect(html).not.toContain('class="onboarding-account__ready-copy"');
     expect(html).not.toContain("onboarding-account__signed-in-header");
@@ -164,7 +222,7 @@ describe("Account step", () => {
 
     const html = renderKeyStep({ aiAvailable: true });
 
-    expect(html).not.toContain('disabled=""');
+    expect(continueButtonMarkup(html)).not.toContain("disabled");
   });
 });
 
@@ -323,7 +381,7 @@ describe("managed AI auto-provisioning", () => {
     api.connectManagedAi.mockResolvedValue({ ok: true });
     const renderer = await mountManagedProvision({ getToken, reload });
 
-    expect(renderedText(renderer.output)).toContain("Connecting AI…");
+    expect(renderedText(renderer.output)).toContain("Connecting managed AI…");
     expect(getToken).toHaveBeenCalledOnce();
 
     resolveToken("obviously-fake-jwt");
