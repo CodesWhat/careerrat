@@ -19,8 +19,23 @@ import {
   createChatRuntime,
   resolveAllowedChatSkills,
 } from "../src/core/ai/chat-runtime.mjs";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
+
+// Forces resolveAIRoute() to resolve route.type === "installed" deterministically
+// (no dependency on any real CLI actually being on this machine's PATH) — the
+// "custom" runtimeId short-circuits straight to a fixed { id: "custom", path:
+// customCommand } runtime (see call-ai.mjs's resolveAIRoute), same trick
+// tests/skill-runtime.test.mjs uses for its own installed-route coverage.
+function selectInstalledRuntime({ repoRoot, env }) {
+  writeInstalledRuntimeSelection({
+    repoRoot,
+    env,
+    runtimeId: "custom",
+    customCommand: "/fake/bin/custom-agent",
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -888,6 +903,295 @@ test("createChatRuntime.shutdown: closes every live session (fake close called f
     assert.equal(chatRuntime.getSession(a.chatId).state, "closed");
     assert.equal(chatRuntime.getSession(b.chatId).state, "closed");
     assert.equal(closeCount, 2);
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// route.type === "installed" — the HIGH-severity fix: a chat session must
+// run turns through the selected installed CLI, never fall into the Agent
+// SDK child (which only ever knows byok/proxy, and would otherwise silently
+// use whatever local `claude` CLI happens to be logged in).
+// ---------------------------------------------------------------------------
+
+test("createChatRuntime.startSession (installed route): runs turns through the stubbed installed runtime, never touches loadSdk, and turn 2's prompt carries the prior transcript", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+
+    const calls = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        return { text: `Reply ${calls.length}`, usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId, state } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(state, "running");
+
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((e) => e.type === "chat_state" && e.data.state === "idle").length;
+
+      await waitForPredicate(() => idleCount() >= 1);
+      assert.equal(calls.length, 1);
+      assert.equal(calls[0].runtime.id, "custom");
+      assert.doesNotMatch(calls[0].prompt, /Reply 1/); // turn 1 has no prior transcript yet
+      // Chat-appropriate closing instruction, never the one-shot
+      // buildInstalledRuntimePrompt line — that line would tell the model to
+      // dump a single final answer instead of asking one question and
+      // waiting, fighting the CONVERSATIONAL_POSTURE text baked into system.
+      assert.match(calls[0].prompt, /ask exactly one question/);
+      assert.doesNotMatch(calls[0].prompt, /return only the requested final answer/);
+
+      chatRuntime.postMessage(chatId, "answer 1");
+      await waitForPredicate(() => idleCount() >= 2);
+
+      assert.equal(calls.length, 2);
+      assert.equal(calls[1].runtime.id, "custom");
+      // Turn 2's prompt replays turn 1's reply plus the just-posted user
+      // message — the "stateless statelessly-replayed transcript" this fix
+      // requires, since the installed-runtime call itself is one-shot.
+      assert.match(calls[1].prompt, /Reply 1/);
+      assert.match(calls[1].prompt, /answer 1/);
+      assert.match(calls[1].prompt, /ask exactly one question/);
+      assert.doesNotMatch(calls[1].prompt, /return only the requested final answer/);
+
+      const assistantEvents = events.filter((e) => e.type === "assistant");
+      assert.equal(assistantEvents.length, 2);
+      assert.equal(assistantEvents[0].data.message.content[0].text, "Reply 1");
+      assert.equal(assistantEvents[1].data.message.content[0].text, "Reply 2");
+
+      assert.equal(idleCount(), 2);
+      assert.equal(chatRuntime.getSession(chatId).state, "idle");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime (installed route): a runtime failure surfaces as an error event without closing the session, and the session keeps taking turns afterward", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+
+    let callCount = 0;
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async () => {
+        callCount++;
+        if (callCount === 1) return { text: "Reply 1", usage: null, model: null };
+        if (callCount === 2) throw new Error("installed CLI exited with status 1");
+        return { text: "Reply 3", usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((e) => e.type === "chat_state" && e.data.state === "idle").length;
+
+      await waitForPredicate(() => idleCount() >= 1);
+
+      // Turn 2 fails.
+      chatRuntime.postMessage(chatId, "answer 1");
+      await waitForPredicate(() => idleCount() >= 2);
+
+      const errorEvt = events.find((e) => e.type === "error");
+      assert.ok(errorEvt, "expected an error event");
+      assert.match(errorEvt.data.message, /installed CLI exited with status 1/);
+
+      // The session state machine survives: still idle, not closed, and no
+      // "closed" chat_state was ever broadcast.
+      assert.equal(chatRuntime.getSession(chatId).state, "idle");
+      assert.equal(
+        events.some((e) => e.type === "chat_state" && e.data.state === "closed"),
+        false
+      );
+
+      // Turn 3 succeeds — proof the runtime actually keeps taking turns.
+      chatRuntime.postMessage(chatId, "answer 2");
+      await waitForPredicate(() => idleCount() >= 3);
+      assert.equal(callCount, 3);
+      const lastAssistant = events.filter((e) => e.type === "assistant").pop();
+      assert.equal(lastAssistant.data.message.content[0].text, "Reply 3");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.startSession: a byok route never touches runInstalledRuntimeImpl (SDK path unchanged)", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
+      runInstalledRuntimeImpl: async () => {
+        throw new Error("must not be called for a byok route");
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+      assert.equal(chatRuntime.getSession(chatId).state, "idle");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime (installed route): writes a usage_event per turn, mirroring runSkillStream's own installed-branch metering", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async () => ({
+        text: "Reply 1",
+        model: "custom-model",
+        usage: { input_tokens: 42, output_tokens: 7 },
+      }),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+
+      const rows = readUsageEvents({ root: repoRoot });
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].source, "installed");
+      assert.equal(rows[0].skill, "ingest-profile");
+      assert.equal(rows[0].model, "custom-model");
+      assert.equal(rows[0].upstream, "local-cli:custom");
+      assert.equal(rows[0].tokens_in, 42);
+      assert.equal(rows[0].tokens_out, 7);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime (installed route): a result with no usage payload writes no usage_event", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      runInstalledRuntimeImpl: async () => ({ text: "Reply 1", model: null, usage: null }),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      await waitForPredicate(() => chatRuntime.getSession(chatId)?.state === "idle");
+      assert.deepEqual(readUsageEvents({ root: repoRoot }), []);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime.interrupt (installed route): aborts only the in-flight turn — session returns to idle (not closed), accepts a subsequent turn, and closeSession still tears down cleanly", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+
+    const calls = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed route");
+      },
+      // Turn 1 hangs until its signal aborts, then rejects the way the real
+      // runInstalledRuntime does on cancellation (installed-runtimes.mjs's
+      // own RUNTIME_CANCELLED error). Later turns resolve normally.
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        if (calls.length === 1) {
+          await new Promise((_resolve, reject) => {
+            args.signal.addEventListener("abort", () => {
+              const err = new Error("Installed AI request was cancelled.");
+              err.code = "RUNTIME_CANCELLED";
+              reject(err);
+            });
+          });
+        }
+        return { text: `Reply ${calls.length}`, usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId, state } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      assert.equal(state, "running");
+
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((e) => e.type === "chat_state" && e.data.state === "idle").length;
+
+      await waitForPredicate(() => calls.length >= 1);
+      assert.equal(chatRuntime.getSession(chatId).state, "running");
+
+      const interruptResult = await chatRuntime.interrupt(chatId);
+      assert.equal(interruptResult.chatId, chatId);
+      await waitForPredicate(() => idleCount() >= 1);
+      assert.equal(chatRuntime.getSession(chatId).state, "idle");
+
+      const abortedResult = events.find((e) => e.type === "result" && e.data.aborted === true);
+      assert.ok(abortedResult, "expected an aborted result event, not a closed session");
+      assert.equal(
+        events.some((e) => e.type === "chat_state" && e.data.state === "closed"),
+        false
+      );
+
+      // The session accepts a subsequent turn after the interrupt.
+      chatRuntime.postMessage(chatId, "answer 1");
+      await waitForPredicate(() => idleCount() >= 2);
+      assert.equal(calls.length, 2);
+      const lastAssistant = events.filter((e) => e.type === "assistant").pop();
+      assert.equal(lastAssistant.data.message.content[0].text, "Reply 2");
+
+      // closeSession still tears down cleanly afterward.
+      const closeResult = chatRuntime.closeSession(chatId, "closed");
+      assert.equal(closeResult.state, "closed");
+      assert.equal(chatRuntime.getSession(chatId).state, "closed");
+    } finally {
+      chatRuntime.shutdown();
+    }
   } finally {
     cleanup(repoRoot);
   }

@@ -46,7 +46,9 @@
 // injected so these tests never spawn a real CLI subprocess.
 
 import { randomUUID } from "node:crypto";
+import { join } from "node:path";
 import { resolveAIRoute } from "./call-ai.mjs";
+import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import { resolveChatRuntimeTools } from "./runtime-tools.mjs";
 import {
@@ -57,6 +59,7 @@ import {
   resolveSkillAllowlist,
   writeByokUsage,
 } from "./skill-runtime.mjs";
+import { appendUsageEvent } from "./usage-log.mjs";
 
 // Default-restricted to conversational setup and confirm-first workflow skills:
 // ingest-profile (M2's original interview target), research-boards /
@@ -97,6 +100,37 @@ function buildKickoffMessage({ skill, input }) {
     message: { role: "user", content: buildChatKickoffPrompt({ skill, input }) },
     parent_tool_use_id: null,
   };
+}
+
+// ---------------------------------------------------------------------------
+// buildInstalledChatPrompt — the route.type === "installed" analog of the
+// push-queue above: since an installed-runtime call is one-shot (no child
+// process to push turns into — see runInstalledTurn's own header comment),
+// every turn flattens the system prompt + transcript into a single string.
+// Structurally the same "System instructions: / Conversation: turns" framing
+// call-ai.mjs's buildInstalledRuntimePrompt uses for callAI()'s own installed
+// route, but built locally rather than reusing that helper: its closing line
+// ("...return only the requested final answer") is written for a one-shot
+// Q&A call and fights CONVERSATIONAL_POSTURE (skill-runtime.mjs) baked into
+// `system` above it — a real interview would read that line and dump a
+// single final answer instead of asking one question and waiting. Swapped
+// here for a closing instruction that actually matches a chat turn.
+// ---------------------------------------------------------------------------
+
+function buildInstalledChatPrompt({ system, transcript }) {
+  const sections = [];
+  if (system) sections.push(`System instructions:\n${String(system).trim()}`);
+  const turns = (Array.isArray(transcript) ? transcript : []).map(
+    (turn) => `${String(turn?.role || "user").toUpperCase()}:\n${String(turn?.content ?? "")}`
+  );
+  if (turns.length) sections.push(`Conversation so far:\n${turns.join("\n\n")}`);
+  sections.push(
+    "Reply conversationally as the next assistant turn in this conversation. Do not summarize " +
+      "or restate the system instructions, and do not read or change workspace files. If the " +
+      "system instructions above say to ask one question at a time, ask exactly one question and " +
+      "then stop — never invent or assume the user's answer."
+  );
+  return sections.join("\n\n");
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +247,7 @@ export function createChatRuntime({
   repoRoot,
   env = process.env,
   loadSdk = loadClaudeAgentSdk,
+  runInstalledRuntimeImpl = runInstalledRuntime,
   now = () => Date.now(),
   idleTtlMs = envNumber(env, "ROLESTER_CHAT_IDLE_TTL_MS", 30 * 60 * 1000),
   closedTtlMs = 5 * 60 * 1000,
@@ -220,9 +255,12 @@ export function createChatRuntime({
   maxTurns = envNumber(env, "ROLESTER_CHAT_MAX_TURNS", 200),
 } = {}) {
   // id -> session record. See this file's header + the M2 design doc for the
-  // exact record shape: {id, skill, sdkSessionId, state, closeReason, query,
-  // pushQueue, events, nextEventId, listeners, abortController, createdAt,
-  // lastActivityAt, pumpDone}.
+  // exact record shape: {id, skill, route, sdkSessionId, state, closeReason,
+  // query, pushQueue, systemPrompt, transcript, turnAbortController, events,
+  // nextEventId, listeners, abortController, createdAt, lastActivityAt,
+  // pumpDone}. `route.type === "installed"` sessions leave `query`/
+  // `pushQueue` null and drive turns through `systemPrompt`/`transcript`/
+  // `turnAbortController` instead — see runInstalledTurn() below.
   const sessions = new Map();
   let sweepTimer = null;
 
@@ -340,7 +378,7 @@ export function createChatRuntime({
     }
 
     try {
-      session.pushQueue.close();
+      session.pushQueue?.close();
     } catch {
       // best-effort only
     }
@@ -358,9 +396,122 @@ export function createChatRuntime({
     session.listeners.clear();
   }
 
+  // Appends every event in `events` (recordAndBroadcast) and, per
+  // classifyChatEvent's own table, transitions + broadcasts the session's
+  // chat_state alongside it. Shared by both drivers below: the SDK path's
+  // pump() (one raw SDK message can map to several events) and the installed
+  // path's runInstalledTurn() (a synthesized assistant+result pair per turn)
+  // so the two never drift on how a "result" event ends a turn.
+  function dispatchEvents(session, events) {
+    for (const evt of events) {
+      recordAndBroadcast(session, evt);
+      const nextState = classifyChatEvent(evt);
+      if (nextState && nextState !== session.state) {
+        session.state = nextState;
+        recordAndBroadcast(session, {
+          type: "chat_state",
+          data: { chatId: session.id, state: nextState },
+        });
+      }
+    }
+  }
+
+  // Drives one turn of an "installed" chat session. Unlike the SDK path's
+  // long-lived push-queue child process, an installed-runtime call is
+  // one-shot (see installed-runtimes.mjs's runInstalledRuntime — one spawn,
+  // one stdin write, one stdout parse) — so a multi-turn chat over it has to
+  // be stateless on the runtime's side: every turn replays the session's
+  // fixed system/instructions prompt (built once in startSession) plus the
+  // session's own growing transcript, via buildInstalledChatPrompt (below —
+  // the same system+"Conversation so far" framing callAI()'s own installed
+  // route uses via call-ai.mjs's buildInstalledRuntimePrompt, but with a
+  // chat-appropriate closing instruction instead of that helper's one-shot
+  // "return only the requested final answer" line). A per-turn
+  // AbortController (`turnAbortController`) is distinct from the
+  // session-level `abortController`: interrupt() aborts only the in-flight
+  // turn (mirrors the SDK path's query.interrupt(), which ends a turn
+  // without ending the session); closeSession()'s abort of the session-level
+  // controller is chained in below so it still tears down whichever turn
+  // happens to be in flight.
+  async function runInstalledTurn(session, route) {
+    const turnController = new AbortController();
+    session.turnAbortController = turnController;
+    const onSessionAbort = () => turnController.abort();
+    session.abortController.signal.addEventListener("abort", onSessionAbort, { once: true });
+
+    try {
+      const prompt = buildInstalledChatPrompt({
+        system: session.systemPrompt,
+        transcript: session.transcript,
+      });
+      const result = await runInstalledRuntimeImpl({
+        runtime: route.runtime,
+        prompt,
+        cwd: repoRoot,
+        env,
+        signal: turnController.signal,
+        model:
+          String(env.ROLESTER_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() || undefined,
+        tools: resolveChatRuntimeTools({ skill: session.skill }),
+      });
+
+      session.transcript.push({ role: "assistant", content: result.text });
+      session.lastActivityAt = now();
+      // Metering parity with runSkillStream's own installed branch
+      // (skill-runtime.mjs) — without this, installed-route interview turns
+      // are invisible to cost tracking (byok/proxy already write one per
+      // turn: see writeByokUsage's call in pump() above / the proxy's own
+      // server-side metering). `action: "skill-run"` matches the label the
+      // SDK path's own byok chat rows already carry (writeByokUsage's
+      // default) — a chat session is still one "run" of `skill` for usage
+      // purposes, the same convention this file already keeps for byok.
+      if (result.usage) {
+        appendUsageEvent(
+          {
+            source: "installed",
+            skill: session.skill,
+            action: "skill-run",
+            model: result.model || `installed:${route.runtime.id}`,
+            upstream: `local-cli:${route.runtime.id}`,
+            tokens_in: result.usage.input_tokens,
+            tokens_out: result.usage.output_tokens,
+          },
+          { root: repoRoot, env }
+        );
+      }
+      dispatchEvents(session, [
+        {
+          type: "assistant",
+          data: { message: { content: [{ type: "text", text: result.text }] } },
+        },
+        { type: "result", data: { ok: true } },
+      ]);
+    } catch (err) {
+      if (session.abortController.signal.aborted) {
+        closeSessionInternal(session, "aborted");
+        return;
+      }
+      if (turnController.signal.aborted) {
+        // interrupt() cancelled just this turn — classifyChatEvent's own
+        // "any result -> idle" rule (see this file's header) returns the
+        // session to idle, same as the SDK path after query.interrupt().
+        dispatchEvents(session, [{ type: "result", data: { ok: false, aborted: true } }]);
+        return;
+      }
+      dispatchEvents(session, [
+        { type: "error", data: { message: err.message } },
+        { type: "result", data: { ok: false, error: err.message } },
+      ]);
+    } finally {
+      session.abortController.signal.removeEventListener("abort", onSessionAbort);
+      if (session.turnAbortController === turnController) session.turnAbortController = null;
+    }
+  }
+
   // The per-session pump: request-independent, started once by startSession
   // and left running until the query's async generator returns or throws.
-  // No request handler ever touches this loop directly.
+  // No request handler ever touches this loop directly. SDK (byok/proxy)
+  // routes only — installed routes are driven by runInstalledTurn() above.
   async function pump(session, route) {
     try {
       for await (const msg of session.query) {
@@ -369,17 +520,7 @@ export function createChatRuntime({
         }
 
         const events = mapSdkMessage(msg, { env });
-        for (const evt of events) {
-          recordAndBroadcast(session, evt);
-          const nextState = classifyChatEvent(evt);
-          if (nextState && nextState !== session.state) {
-            session.state = nextState;
-            recordAndBroadcast(session, {
-              type: "chat_state",
-              data: { chatId: session.id, state: nextState },
-            });
-          }
-        }
+        dispatchEvents(session, events);
 
         if (msg?.type === "result") {
           session.lastActivityAt = now();
@@ -460,6 +601,17 @@ export function createChatRuntime({
       throw err;
     }
 
+    // route.type === "installed": the user picked a local CLI (codex/gemini/
+    // opencode/copilot/qwen/antigravity/grok/custom/claude), not the Agent
+    // SDK. There is no long-lived child process to open a push-queue against
+    // (see runInstalledTurn's own header comment) — never call loadSdk() or
+    // build an SDK query() on this branch, so a session for this route never
+    // silently falls through to the Claude Code CLI regardless of what's
+    // logged in locally (the bug this fix closes).
+    if (route.type === "installed") {
+      return startInstalledSession({ trimmedSkill, input, route });
+    }
+
     // Validate the SDK devDependency is importable before creating any
     // session state — a missing install is a clean 501 from the route, never
     // a half-registered session sitting in the map.
@@ -480,11 +632,15 @@ export function createChatRuntime({
     const session = {
       id,
       skill: trimmedSkill,
+      route,
       sdkSessionId: null,
       state: "running",
       closeReason: null,
       query: null,
       pushQueue,
+      systemPrompt: null,
+      transcript: null,
+      turnAbortController: null,
       events: [],
       nextEventId: 1,
       listeners: new Set(),
@@ -522,6 +678,64 @@ export function createChatRuntime({
     // closes the session instead), so there's nothing to await or attach a
     // .catch to here.
     session.pumpDone = pump(session, route);
+
+    return { chatId: id, skill: trimmedSkill, state: session.state };
+  }
+
+  // startSession's route.type === "installed" branch. Skips loadSdk/
+  // buildChildEnv/createRuntimeToolPolicy entirely — those are Agent-SDK-
+  // child-process concerns that don't apply to a raw installed-CLI spawn
+  // (see installed-runtimes.mjs's runInstalledRuntime, and skill-runtime.mjs's
+  // own runSkillStream installed branch, which skips the same three for the
+  // same reason). `systemPrompt` is built once here (skillMdPath hint, same
+  // as runSkillStream's installed branch, since there's no native `skills`
+  // SDK option loading the SKILL.md for us) and replayed unchanged by every
+  // runInstalledTurn() call for this session's lifetime; only `transcript`
+  // grows turn over turn.
+  async function startInstalledSession({ trimmedSkill, input, route }) {
+    const runtimeTools = resolveChatRuntimeTools({ skill: trimmedSkill });
+    const skillMdPath = join(repoRoot, ".agents", "skills", trimmedSkill, "SKILL.md");
+    const systemPrompt =
+      `${buildPrompt({ skill: trimmedSkill, input, mode: "conversational", skillMdPath })}\n\n` +
+      `This app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope.`;
+
+    const abortController = new AbortController();
+    const id = randomUUID();
+    const createdAt = now();
+
+    const session = {
+      id,
+      skill: trimmedSkill,
+      route,
+      sdkSessionId: null,
+      state: "running",
+      closeReason: null,
+      query: null,
+      pushQueue: null,
+      systemPrompt,
+      transcript: [],
+      turnAbortController: null,
+      events: [],
+      nextEventId: 1,
+      listeners: new Set(),
+      abortController,
+      createdAt,
+      lastActivityAt: createdAt,
+      pumpDone: null,
+    };
+    sessions.set(id, session);
+
+    dispatchEvents(session, [
+      {
+        type: "system",
+        data: { subtype: "init", runtime: route.runtime.id, tools: runtimeTools },
+      },
+    ]);
+
+    // Fire-and-forget, same contract as pump()'s own call site above:
+    // runInstalledTurn() never rejects (every error path inside it emits an
+    // error/result event or closes the session instead).
+    session.pumpDone = runInstalledTurn(session, route);
 
     return { chatId: id, skill: trimmedSkill, state: session.state };
   }
@@ -566,11 +780,19 @@ export function createChatRuntime({
     }
 
     session.lastActivityAt = now();
-    session.pushQueue.push({
-      type: "user",
-      message: { role: "user", content: trimmed },
-      parent_tool_use_id: null,
-    });
+    if (session.route.type === "installed") {
+      // No push-queue/child process to feed (see runInstalledTurn's own
+      // header comment) — the transcript entry itself IS this turn's input;
+      // runInstalledTurn replays it (plus everything before it) as the next
+      // one-shot installed-runtime call, kicked off below.
+      session.transcript.push({ role: "user", content: trimmed });
+    } else {
+      session.pushQueue.push({
+        type: "user",
+        message: { role: "user", content: trimmed },
+        parent_tool_use_id: null,
+      });
+    }
 
     if (session.state !== "running") {
       session.state = "running";
@@ -578,6 +800,12 @@ export function createChatRuntime({
         type: "chat_state",
         data: { chatId: session.id, state: "running" },
       });
+    }
+
+    if (session.route.type === "installed") {
+      // Fire-and-forget, same contract as startInstalledSession's own call:
+      // runInstalledTurn() never rejects.
+      session.pumpDone = runInstalledTurn(session, session.route);
     }
 
     return { accepted: true };
@@ -594,6 +822,13 @@ export function createChatRuntime({
       const err = new Error(`chat session ${chatId} is not running`);
       err.code = "NOT_RUNNING";
       throw err;
+    }
+    if (session.route.type === "installed") {
+      // Aborts only the in-flight one-shot runtime call — the session stays
+      // open (see runInstalledTurn's own turnController handling), mirroring
+      // query.interrupt() ending a turn without ending the session below.
+      session.turnAbortController?.abort();
+      return summarize(session);
     }
     await session.query.interrupt();
     return summarize(session);
