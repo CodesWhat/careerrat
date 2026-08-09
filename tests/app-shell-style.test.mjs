@@ -59,11 +59,11 @@ describe("app shell styles", () => {
     assert.match(onboardingRight, /-webkit-app-region:\s*drag/);
     assert.match(
       css,
-      /\.app-shell__header\s+:is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\],\s*\.cl-userButtonTrigger\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
+      /\.app-shell__header\s+:is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\]\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
     );
     assert.match(
       css,
-      /\.onboarding-shell__header\s+:is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\],\s*\.cl-userButtonTrigger\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
+      /\.onboarding-shell__header\s+:is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\]\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
     );
   });
 
@@ -81,15 +81,11 @@ describe("app shell styles", () => {
   it("uses dark-mode header tokens instead of light header literals", () => {
     const header = cssRule(".app-shell__header");
     const utility = cssRule(".app-shell__utility");
-    const login = cssRule(".app-shell__login");
     const darkHeader = cssRule('[data-theme="dark"] .app-shell__header');
-    const darkControls = cssRule(
-      '[data-theme="dark"] .app-shell__utility,\n[data-theme="dark"] .app-shell__login'
-    );
+    const darkControls = cssRule('[data-theme="dark"] .app-shell__utility');
 
     assert.match(header, /background:\s*var\(--header-bar-bg\)/);
     assert.match(utility, /background:\s*var\(--header-pill-bg\)/);
-    assert.match(login, /background:\s*var\(--header-pill-bg\)/);
     assert.match(darkHeader, /box-shadow:\s*inset 0 -1px rgba\(255,\s*250,\s*242,\s*0\.06\)/);
     assert.match(darkControls, /background:\s*var\(--header-pill-bg\)/);
     assert.match(darkControls, /border-color:\s*var\(--header-pill-border\)/);
@@ -134,10 +130,6 @@ describe("app shell styles", () => {
   it("makes header utility buttons circular and avatar-sized", () => {
     const utility = cssRule(".app-shell__utility");
     const scopedUtility = cssRule(".app-shell__right .app-shell__utility");
-    const avatar = cssRule(".app-shell__avatar");
-    const clerkRoot = cssRule(
-      ".app-shell__avatar,\n.app-shell__avatar :is(.cl-rootBox, .cl-userButtonBox, .cl-userButtonTrigger)"
-    );
 
     assert.match(utility, /width:\s*38px/);
     assert.match(utility, /height:\s*38px/);
@@ -150,10 +142,6 @@ describe("app shell styles", () => {
     assert.match(scopedUtility, /aspect-ratio:\s*1 \/ 1/);
     assert.match(scopedUtility, /padding:\s*0/);
     assert.match(scopedUtility, /border-radius:\s*999px/);
-    assert.match(avatar, /width:\s*38px/);
-    assert.match(avatar, /height:\s*38px/);
-    assert.match(clerkRoot, /max-width:\s*38px/);
-    assert.match(clerkRoot, /max-height:\s*38px/);
   });
 
   it("keeps Roland launcher art contained inside the circular headshot", () => {

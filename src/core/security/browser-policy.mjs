@@ -20,20 +20,16 @@ export function buildContentSecurityPolicy({ inlineScripts = [], allowTailwindCd
     "'self'",
     ...hashes,
     ...(allowTailwindCdn ? ["https://cdn.tailwindcss.com"] : []),
-    "https://*.clerk.accounts.dev",
-    "https://*.clerk.com",
     "https://challenges.cloudflare.com",
   ];
   return [
     "default-src 'self'",
     `script-src ${scriptSources.join(" ")}`,
     "script-src-attr 'none'",
-    // Clerk's documented React integration uses runtime CSS-in-JS. Keep the
-    // exception confined to styles; script execution remains hash/host based.
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data: https:",
     "font-src 'self' data:",
-    "connect-src 'self' https://*.clerk.accounts.dev https://*.clerk.com https://clerk-telemetry.com https://*.clerk-telemetry.com",
+    "connect-src 'self'",
     "frame-src 'self' blob: https://challenges.cloudflare.com",
     "worker-src 'self' blob:",
     "media-src 'self' blob: data:",

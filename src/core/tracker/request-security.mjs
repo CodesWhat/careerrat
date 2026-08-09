@@ -79,7 +79,6 @@ function constantTimeEqual(left, right) {
 function isHtmlBootstrap(method, url) {
   if (method !== "GET") return false;
   if (url === "/" || url === "/chat" || url === "/app") return true;
-  if (url === "/CLERK-ROUTER" || url.startsWith("/CLERK-ROUTER/")) return true;
   if (!url.startsWith("/app/")) return false;
   const lastSegment = url.split("/").pop() || "";
   return !lastSegment.includes(".");

@@ -176,9 +176,9 @@ const MANAGED_PROXY_URL_RE = /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)(:\d
  * `env` immediately so the current process's resolveAIRoute() (call-ai.mjs)
  * picks up the managed route without a restart.
  *
- * Called after src/cli/ai-provision-route.mjs exchanges a Clerk session JWT
+ * Called by a managed-AI provisioning route once it has exchanged a session
  * for a minted proxy token server-to-server — this function itself never
- * sees a JWT, only the already-minted `token`.
+ * sees the session credential, only the already-minted `token`.
  *
  * NEVER touches ANTHROPIC_API_KEY: an existing BYOK line is round-tripped
  * verbatim (untouched, unreordered) exactly like any other unrelated line —

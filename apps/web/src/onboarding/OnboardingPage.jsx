@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useRolesterUser } from "../auth/clerkControls.jsx";
 import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
 import {
@@ -37,20 +36,23 @@ const STEPS = [
   { key: "finish", label: "Finish", Component: FinishStep, fullBleed: true },
 ];
 
-// Steps whose completion IS the visit — welcome, account (sign-in is
-// currently optional), quick facts, and finish never get a data-derived done
-// flag from deriveDoneFlags, so a Continue click is the only signal they have.
-// Data steps (resume, targeting, companies, guardrails) must only go green
-// when deriveDoneFlags finds real data — never merely from being visited —
-// so they are deliberately excluded here.
+// Steps whose completion IS the visit — welcome, account, quick facts, and
+// finish never get a data-derived done flag from deriveDoneFlags, so a
+// Continue click is the only signal they have. Data steps (resume,
+// targeting, companies, guardrails) must only go green when deriveDoneFlags
+// finds real data — never merely from being visited — so they are
+// deliberately excluded here.
 const VISIT_COMPLETE_STEPS = new Set([0, 1, 6, 7]);
 
-function deriveDoneFlags(state, { isSignedIn = false } = {}) {
+function deriveDoneFlags(state) {
   if (!state) return STEPS.map(() => false);
   const targeting = state.data?.targeting ?? {};
   return [
     (state.files ?? []).some((f) => f.exists),
-    !!isSignedIn,
+    // The account step has no data-derived signal (local AI setup, not a
+    // stored candidate file) — like Quick facts below, it only completes via
+    // explicit goNext (VISIT_COMPLETE_STEPS).
+    false,
     !!state.sourceResumePresent,
     (targeting.role_buckets ?? []).some((b) => (b.titles ?? []).length > 0),
     (targeting.tracked_companies ?? []).length > 0,
@@ -73,11 +75,11 @@ function doneFlagIndexes(doneFlags, { stepCount = STEPS.length } = {}) {
 // Shared by render (completionIndexesForShell) and pill-jump eligibility
 // (goToCompletedStep) so a genuinely-done data step is always reachable even
 // if it never went through goNext.
-function unionCompletedIndexes({ completedIndexes, state, isSignedIn }) {
+function unionCompletedIndexes({ completedIndexes, state }) {
   return normalizeCompletedIndexes(
     [
       ...completedIndexes,
-      ...doneFlagIndexes(deriveDoneFlags(state, { isSignedIn }), { stepCount: STEPS.length }),
+      ...doneFlagIndexes(deriveDoneFlags(state), { stepCount: STEPS.length }),
     ],
     { stepCount: STEPS.length }
   );
@@ -186,7 +188,6 @@ export async function loadOnboardingRuntimeState({
 }
 
 export function OnboardingPage() {
-  const { isSignedIn } = useRolesterUser();
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
@@ -204,7 +205,7 @@ export function OnboardingPage() {
       setState(next.state);
       setRuntimeCapabilities(next.runtimeCapabilities);
       setLoadError(next.runtimeError?.message || null);
-      const stateDoneIndexes = doneFlagIndexes(deriveDoneFlags(next.state, { isSignedIn }), {
+      const stateDoneIndexes = doneFlagIndexes(deriveDoneFlags(next.state), {
         stepCount: STEPS.length,
       });
       if (!hasPositioned) {
@@ -241,7 +242,7 @@ export function OnboardingPage() {
       setLoadError(err instanceof Error ? err.message : "Failed to load onboarding state");
       return null;
     }
-  }, [hasPositioned, isSignedIn, searchParams]);
+  }, [hasPositioned, searchParams]);
 
   // Mount-only initial load — `load` itself is stable via useCallback and
   // re-runs are triggered explicitly by step components calling `reload()`.
@@ -297,7 +298,7 @@ export function OnboardingPage() {
     setStepIndex((i) => Math.max(i - 1, 0));
   }
   function goToCompletedStep(index) {
-    const completedSet = new Set(unionCompletedIndexes({ completedIndexes, state, isSignedIn }));
+    const completedSet = new Set(unionCompletedIndexes({ completedIndexes, state }));
     setStepIndex((current) => {
       const target = Math.max(0, Math.min(Number(index) || 0, STEPS.length - 1));
       return target < current || completedSet.has(target) ? target : current;
@@ -310,7 +311,7 @@ export function OnboardingPage() {
 
   const { Component, fullBleed } = STEPS[stepIndex];
   const aiEnabled = runtimeCapabilities.aiAvailable;
-  const completionIndexesForShell = unionCompletedIndexes({ completedIndexes, state, isSignedIn });
+  const completionIndexesForShell = unionCompletedIndexes({ completedIndexes, state });
   const stepProps = {
     state,
     draftSeeds,
@@ -332,7 +333,7 @@ export function OnboardingPage() {
     );
   }
 
-  const doneFlags = deriveDoneFlags(state, { isSignedIn });
+  const doneFlags = deriveDoneFlags(state);
 
   return (
     <PageScaffold

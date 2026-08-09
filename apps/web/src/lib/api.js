@@ -978,38 +978,3 @@ export function removeDeepIngestConfirmedItem(payload = {}) {
   });
 }
 
-// src/cli/desktop-auth-route.mjs — the Electron desktop shell's
-// system-browser Google OAuth handoff. See apps/web/src/auth/
-// useDesktopGoogleSignIn.js for the client-side state machine these back.
-export function startDesktopSignIn() {
-  return apiFetch("/api/desktop-auth/start", { method: "POST" });
-}
-
-export function getDesktopSignInStatus(nonce) {
-  return apiFetch(`/api/desktop-auth/status?nonce=${encodeURIComponent(nonce)}`);
-}
-
-export function cancelDesktopSignIn(nonce) {
-  return apiFetch("/api/desktop-auth/cancel", {
-    method: "POST",
-    body: JSON.stringify({ nonce }),
-  });
-}
-
-export function claimDesktopSignIn(nonce) {
-  return apiFetch("/api/desktop-auth/claim", {
-    method: "POST",
-    body: JSON.stringify({ nonce }),
-  });
-}
-
-// src/cli/ai-provision-route.mjs — automatic managed-AI provisioning. `jwt`
-// is the caller's Clerk session token (from useAuth().getToken()); the
-// response never carries the minted proxy token itself, only {ok, route} —
-// see that route file's own privacy invariant.
-export function connectManagedAi(jwt) {
-  return apiFetch("/api/settings/ai-managed/connect", {
-    method: "POST",
-    body: JSON.stringify({ jwt }),
-  });
-}

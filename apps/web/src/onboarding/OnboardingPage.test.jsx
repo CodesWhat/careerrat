@@ -9,7 +9,7 @@ import {
   resolveInitialStep,
 } from "./OnboardingPage.jsx";
 
-async function mountGoNextHarness({ stepIndex, state, isSignedIn, aiAvailable }) {
+async function mountGoNextHarness({ stepIndex, state, aiAvailable }) {
   vi.resetModules();
   const captured = { props: null };
   const setters = Array.from({ length: 9 }, () => vi.fn());
@@ -28,9 +28,6 @@ async function mountGoNextHarness({ stepIndex, state, isSignedIn, aiAvailable })
       },
     };
   });
-  vi.doMock("../auth/clerkControls.jsx", () => ({
-    useRolesterUser: () => ({ isSignedIn }),
-  }));
   const captureStep = (props) => {
     captured.props = props;
     return null;
@@ -59,7 +56,6 @@ async function mountGoNextHarness({ stepIndex, state, isSignedIn, aiAvailable })
 afterEach(() => {
   vi.restoreAllMocks();
   vi.doUnmock("react");
-  vi.doUnmock("../auth/clerkControls.jsx");
   vi.doUnmock("./steps/KeyStep.jsx");
   vi.doUnmock("./steps/ResumeStep.jsx");
   vi.doUnmock("../lib/api.js");
@@ -67,12 +63,11 @@ afterEach(() => {
 });
 
 describe("OnboardingPage goNext prerequisites", () => {
-  it("blocks the account step and shows an error toast without sign-in or AI", async () => {
+  it("blocks the account step and shows an error toast without AI", async () => {
     const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation(() => 0);
     const { goNext, setters } = await mountGoNextHarness({
       stepIndex: 1,
       state: { sourceResumePresent: true },
-      isSignedIn: false,
       aiAvailable: false,
     });
 
@@ -87,37 +82,18 @@ describe("OnboardingPage goNext prerequisites", () => {
     timeout.mockRestore();
   });
 
-  it("blocks signed-in accounts until AI is available, then advances regardless of sign-in", async () => {
-    const timeout = vi.spyOn(globalThis, "setTimeout").mockImplementation(() => 0);
-    const blocked = await mountGoNextHarness({
+  it("advances the account step once AI is available", async () => {
+    const { goNext, setters } = await mountGoNextHarness({
       stepIndex: 1,
       state: { sourceResumePresent: true },
-      isSignedIn: true,
-      aiAvailable: false,
+      aiAvailable: true,
     });
 
-    blocked.goNext();
-    expect(blocked.setters[4]).not.toHaveBeenCalled();
-    expect(blocked.setters[6]).toHaveBeenCalledWith({
-      message:
-        "Choose a signed-in AI tool on this computer, or configure an Advanced provider fallback",
-      tone: "error",
-    });
-
-    for (const isSignedIn of [false, true]) {
-      const { goNext, setters } = await mountGoNextHarness({
-        stepIndex: 1,
-        state: { sourceResumePresent: true },
-        isSignedIn,
-        aiAvailable: true,
-      });
-      goNext();
-      await vi.waitFor(() => expect(setters[4]).toHaveBeenCalled());
-      const advance = setters[4].mock.calls.at(-1)[0];
-      expect(advance(1)).toBe(2);
-      expect(setters[6]).not.toHaveBeenCalled();
-    }
-    timeout.mockRestore();
+    goNext();
+    await vi.waitFor(() => expect(setters[4]).toHaveBeenCalled());
+    const advance = setters[4].mock.calls.at(-1)[0];
+    expect(advance(1)).toBe(2);
+    expect(setters[6]).not.toHaveBeenCalled();
   });
 
   it("blocks the resume step and shows an error toast without a source resume", async () => {
@@ -125,7 +101,6 @@ describe("OnboardingPage goNext prerequisites", () => {
     const { goNext, setters } = await mountGoNextHarness({
       stepIndex: 2,
       state: { sourceResumePresent: false },
-      isSignedIn: true,
       aiAvailable: true,
     });
 
@@ -143,7 +118,6 @@ describe("OnboardingPage goNext prerequisites", () => {
     const { goNext, setters } = await mountGoNextHarness({
       stepIndex: 2,
       state: { sourceResumePresent: true },
-      isSignedIn: true,
       aiAvailable: true,
     });
 

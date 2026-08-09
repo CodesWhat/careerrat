@@ -1,26 +1,11 @@
 import { renderToStaticMarkup } from "react-dom/server";
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { RolesterAuthStateProvider } from "../auth/clerkControls.jsx";
-
-const clerkState = vi.hoisted(() => ({
-  signedIn: false,
-}));
-
-vi.mock("@clerk/react", () => ({
-  SignInButton: ({ children }) => <span data-clerk="sign-in">{children}</span>,
-  UserButton: () => <span data-clerk="user-button" />,
-}));
-
+import { describe, expect, it, vi } from "vitest";
 import {
   getOnboardingProgressFooterClassName,
   OnboardingNavButton,
   OnboardingShell,
   OnboardingTopBar,
 } from "./OnboardingShell.jsx";
-
-beforeEach(() => {
-  clerkState.signedIn = false;
-});
 
 describe("OnboardingNavButton", () => {
   it("renders accessible arrow controls without visible text labels", () => {
@@ -44,21 +29,10 @@ describe("OnboardingNavButton", () => {
 
 describe("OnboardingTopBar", () => {
   function renderTopBar() {
-    return renderToStaticMarkup(
-      <RolesterAuthStateProvider
-        value={{
-          isLoaded: true,
-          isSignedIn: clerkState.signedIn,
-          user: clerkState.signedIn ? {} : null,
-          hasClerkProvider: true,
-        }}
-      >
-        <OnboardingTopBar />
-      </RolesterAuthStateProvider>
-    );
+    return renderToStaticMarkup(<OnboardingTopBar />);
   }
 
-  it("keeps onboarding chrome clean while offering Clerk login when signed out", () => {
+  it("keeps onboarding chrome clean with no account/sign-in affordance", () => {
     const html = renderTopBar();
 
     expect(html).toContain("onboarding-shell__header");
@@ -79,21 +53,8 @@ describe("OnboardingTopBar", () => {
     expect(html).not.toContain("onboarding-shell__brand-divider");
     expect(html).not.toContain("onboarding-shell__primary-nav");
     expect(html).not.toContain("onboarding-shell__utilities");
+    expect(html).not.toContain("onboarding-shell__account");
     expect(html).not.toContain("Log in");
-    expect(html).not.toContain('data-clerk="sign-in"');
-  });
-
-  it("shows the Clerk avatar control in the top right after sign-in", () => {
-    clerkState.signedIn = true;
-
-    const html = renderTopBar();
-
-    expect(html).toContain("onboarding-shell__account");
-    expect(html).toContain('data-clerk="user-button"');
-    expect(html).not.toContain("Log in");
-    expect(html.indexOf("onboarding-shell__theme")).toBeLessThan(
-      html.indexOf("onboarding-shell__account")
-    );
   });
 });
 

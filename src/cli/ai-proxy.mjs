@@ -99,7 +99,7 @@ import {
   computeCost,
   readUsageEvents,
 } from "../core/ai/usage-log.mjs";
-import { createDbMeter, createTokenStore } from "./meter-db.mjs";
+import { createDbMeter } from "./meter-db.mjs";
 import {
   applyNonStreamUsage,
   applySSEUsageEvent,
@@ -117,7 +117,6 @@ import {
   parseUserCapsEnv,
   parseUserCapUsdEnv,
   reportingUserId,
-  reportingUserIdForClerk,
   resolveUpstreamHost,
   resolveUserCap,
   shouldMeterRequest,
@@ -135,12 +134,9 @@ function sendJson(res, status, body) {
 
 // Checks the presented token against every configured (label, token) pair
 // (proxy-core's authenticate()) and writes the 401 response on failure — the
-// node:http-specific half of auth. lookupMintedToken is only ever passed
-// when this process has a meter DB configured (see createProxyServer below)
-// — this server may run without Supabase at all, in which case minted
-// tokens simply never authenticate here (static tokens are unaffected).
-async function requireAuth(req, res, tokenEntries, { lookupMintedToken } = {}) {
-  const auth = await authenticate(req.headers, tokenEntries, { lookupMintedToken });
+// node:http-specific half of auth.
+async function requireAuth(req, res, tokenEntries) {
+  const auth = await authenticate(req.headers, tokenEntries);
   if (!auth) {
     sendJson(res, 401, { error: "unauthorized" });
     return null;
@@ -205,17 +201,6 @@ export function createProxyServer({
           table: meterDbTable,
           fetchImpl,
         })
-      : null;
-
-  // Minted beta-tester tokens (apps/proxy-vercel/api/auth/exchange.mjs) live
-  // in the same Supabase project as the usage ledger — same enable
-  // condition as dbMeter above. When absent (this server run with no meter
-  // DB at all), lookupMintedToken is never passed to authenticate(), so a
-  // presented minted-shaped token just falls through to "no match" — static
-  // ROLESTER_PROXY_TOKEN(S) behavior is unaffected either way.
-  const tokenStore =
-    String(meterDbUrl || "").trim() && String(meterDbKey || "").trim()
-      ? createTokenStore({ url: meterDbUrl, serviceKey: meterDbKey, fetchImpl })
       : null;
 
   // Since-boot totals, seeded from any prior proxy-sourced rows in the usage
@@ -337,9 +322,7 @@ export function createProxyServer({
     const actionLabel = req.headers["x-rolester-action"];
     const operationLabel = req.headers["x-rolester-operation"];
 
-    const userId = auth.clerkUserId
-      ? reportingUserIdForClerk(auth.clerkUserId)
-      : reportingUserId(auth.token);
+    const userId = reportingUserId(auth.token);
     const userLabel = auth.label;
     const shouldMeter = shouldMeterRequest(path, req.method);
 
@@ -456,9 +439,7 @@ export function createProxyServer({
   }
 
   async function handleRequest(req, res) {
-    const auth = await requireAuth(req, res, tokenEntries, {
-      lookupMintedToken: tokenStore ? tokenStore.lookupByHash : undefined,
-    });
+    const auth = await requireAuth(req, res, tokenEntries);
     if (!auth) return;
 
     const path = (req.url || "/").split("?")[0];

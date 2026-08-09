@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import modesSchema from "../../../../config/modes.schema.json";
 import profileSchema from "../../../../config/profile.schema.json";
-import { useRolesterUser } from "../auth/clerkControls.jsx";
 import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 import {
@@ -17,7 +16,6 @@ import { PageScaffold } from "../components/PageScaffold.jsx";
 import { InlineAlert, Toast } from "../components/Toast.jsx";
 import {
   ApiError,
-  connectManagedAi,
   getAiSettings,
   getAutomationSettings,
   getInstalledAiRuntimes,
@@ -195,7 +193,6 @@ function presentNumbers(values) {
 }
 
 export function SettingsPage() {
-  const { getToken } = useRolesterUser();
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
   const [toast, setToast] = useState(null);
@@ -567,34 +564,6 @@ export function SettingsPage() {
     );
   }
 
-  // src/cli/ai-provision-route.mjs — the same exchange KeyStep.jsx's
-  // sign-in auto-provision uses, callable again here for a device that
-  // signed in before managed AI existed, or whose provisioned token needs
-  // refreshing. Minting a new token replaces the previous one server-side
-  // (one active AI connection per account) — see this card's own copy below.
-  async function handleReconnectManagedAi() {
-    setSaving((s) => ({ ...s, aiManaged: true }));
-    setSectionBanner((b) => ({ ...b, aiManaged: null }));
-    try {
-      const jwt = await getToken?.();
-      if (!jwt) throw new Error("Sign in to connect managed AI.");
-      const result = await connectManagedAi(jwt);
-      if (!result?.ok) throw new Error("Could not connect managed AI.");
-      await selectInstalledAiRuntime({ providerFallback: true });
-      showToast("Managed AI connected.");
-      const [ai, installed] = await Promise.all([getAiSettings(), getInstalledAiRuntimes()]);
-      setAiStatus(ai);
-      setInstalledAi(installed);
-    } catch (err) {
-      setSectionBanner((b) => ({
-        ...b,
-        aiManaged: err instanceof Error ? err.message : "Reconnect failed",
-      }));
-    } finally {
-      setSaving((s) => ({ ...s, aiManaged: false }));
-    }
-  }
-
   const errorsFor = (section) => fieldErrors[section] ?? {};
 
   function updateRoleBucket(index, patch) {
@@ -711,21 +680,6 @@ export function SettingsPage() {
             <div>
               <Button onClick={handleSaveAiKey} disabled={saving.ai || !aiKeyInput.trim()}>
                 {saving.ai ? "Saving…" : "Save key and use provider"}
-              </Button>
-            </div>
-
-            {sectionBanner.aiManaged ? <InlineAlert message={sectionBanner.aiManaged} /> : null}
-            <p className="field__hint" style={{ margin: 0 }}>
-              Managed AI is the account-backed provider fallback. Reconnecting mints a fresh
-              connection and replaces the previous one.
-            </p>
-            <div>
-              <Button
-                variant="secondary"
-                onClick={handleReconnectManagedAi}
-                disabled={saving.aiManaged}
-              >
-                {saving.aiManaged ? "Connecting…" : "Reconnect managed AI"}
               </Button>
             </div>
           </div>

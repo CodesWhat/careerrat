@@ -112,7 +112,7 @@ button {
   -webkit-app-region: drag;
 }
 
-.app-shell__header :is(a, button, input, select, textarea, [role="button"], .cl-userButtonTrigger) {
+.app-shell__header :is(a, button, input, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
 }
 
@@ -134,57 +134,13 @@ button {
   color: var(--ink);
 }
 
-.app-shell__account {
-  display: inline-flex;
-  align-items: center;
-  min-height: 38px;
-}
-
-.app-shell__avatar {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  overflow: hidden;
-  border-radius: 999px;
-}
-
-.app-shell__avatar > span {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  border-radius: 999px;
-  font-size: 18px;
-}
-
-.app-shell__login {
-  min-height: 36px;
-  padding: 0 16px;
-  border: 1px solid var(--header-pill-border);
-  border-radius: 999px;
-  background: var(--header-pill-bg);
-  color: var(--ink);
-  cursor: pointer;
-  font: inherit;
-  font-size: 13px;
-  font-weight: 800;
-  line-height: 1;
-  box-shadow: var(--header-pill-shadow);
-}
-
-.app-shell__login:hover {
-  background: var(--paper-surface);
-}
-
 [data-theme="dark"] .app-shell__header {
   background: var(--header-bar-bg);
   color: var(--ink);
   box-shadow: inset 0 -1px rgba(255, 250, 242, 0.06);
 }
 
-[data-theme="dark"] .app-shell__utility,
-[data-theme="dark"] .app-shell__login {
+[data-theme="dark"] .app-shell__utility {
   border-color: var(--header-pill-border);
   background: var(--header-pill-bg);
   color: var(--ink);
@@ -192,8 +148,7 @@ button {
 }
 
 [data-theme="dark"] .app-shell__utility:hover,
-[data-theme="dark"] .app-shell__utility--active,
-[data-theme="dark"] .app-shell__login:hover {
+[data-theme="dark"] .app-shell__utility--active {
   background: rgba(255, 250, 242, 0.14);
   color: var(--ink);
 }
@@ -259,10 +214,6 @@ button {
 
   .app-shell__right {
     gap: 6px;
-  }
-
-  .app-shell__login {
-    padding-inline: 12px;
   }
 
   .app-shell__content {
@@ -2378,27 +2329,6 @@ button {
   color: var(--ink);
 }
 
-.app-shell__avatar,
-.app-shell__avatar :is(.cl-rootBox, .cl-userButtonBox, .cl-userButtonTrigger) {
-  width: 38px;
-  min-width: 38px;
-  max-width: 38px;
-  height: 38px;
-  min-height: 38px;
-  max-height: 38px;
-  aspect-ratio: 1 / 1;
-}
-
-.app-shell__avatar :is(.cl-userButtonTrigger, .cl-avatarBox, .cl-userButtonAvatarBox) {
-  overflow: hidden;
-  border-radius: 999px;
-}
-
-.app-shell__avatar :is(.cl-avatarBox, .cl-userButtonAvatarBox, .cl-avatarImage) {
-  width: 38px;
-  height: 38px;
-}
-
 /* ── Toast / inline alert ───────────────────────────────────────────────── */
 
 .toast {
@@ -2533,15 +2463,8 @@ button {
   -webkit-app-region: drag;
 }
 
-.onboarding-shell__header
-  :is(a, button, input, select, textarea, [role="button"], .cl-userButtonTrigger) {
+.onboarding-shell__header :is(a, button, input, select, textarea, [role="button"]) {
   -webkit-app-region: no-drag;
-}
-
-.onboarding-shell__account {
-  display: inline-flex;
-  align-items: center;
-  min-height: 36px;
 }
 
 .onboarding-shell__theme {
@@ -3425,8 +3348,7 @@ button {
      geometrically, not by DOM nesting, so this fixed overlay's toolbar —
      which paints over that strip — must carve itself out or its close
      button gets swallowed by window-drag in the desktop app (it works in a
-     plain browser, which has no drag regions). Same for the Clerk modal
-     below. */
+     plain browser, which has no drag regions). */
   -webkit-app-region: no-drag;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
@@ -4776,14 +4698,6 @@ button {
   animation: onboarding-autosave-spin 0.86s linear infinite;
 }
 
-.onboarding-account__panel {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  width: min(360px, 100%);
-  min-height: 100%;
-}
-
 .onboarding-runtime {
   display: flex;
   flex-direction: column;
@@ -5017,30 +4931,6 @@ button {
   overflow: auto;
 }
 
-.onboarding-account__action-side .onboarding-account__panel {
-  width: min(620px, 100%);
-  min-height: 0;
-}
-
-.onboarding-account__action-side
-  .onboarding-account__panel:not(.onboarding-account__panel--signed-in) {
-  justify-content: flex-start;
-}
-
-.onboarding-account__panel:not(.onboarding-account__panel--signed-in) {
-  justify-content: center;
-}
-
-.onboarding-account__panel--signed-in {
-  width: min(620px, 100%);
-  min-height: 0;
-  gap: 8px;
-  padding: 12px 14px;
-  border: 1px solid rgba(var(--rgb-line), 0.2);
-  border-radius: 14px;
-  background: rgba(var(--rgb-surface), 0.58);
-}
-
 .onboarding-step-card__content .onboarding-account__intro {
   max-width: 340px;
   margin: 0 0 2px;
@@ -5053,142 +4943,6 @@ button {
   max-width: 300px;
   font-size: 16px;
   line-height: 1.42;
-}
-
-.onboarding-account__actions {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-}
-
-.onboarding-account__cta {
-  width: 100%;
-  justify-content: center;
-  min-height: 48px;
-  border-radius: 999px;
-}
-
-.onboarding-account__signed-in-main {
-  display: flex;
-  flex-direction: row;
-  justify-content: space-between;
-  align-items: center;
-  gap: 16px;
-  width: 100%;
-  min-height: 0;
-  flex: 0 0 auto;
-}
-
-.onboarding-account__signed-in-label {
-  align-self: flex-start;
-  color: var(--coral);
-  font-size: 11px;
-  font-weight: 900;
-  letter-spacing: var(--label-tracking);
-  line-height: 1;
-  text-transform: uppercase;
-}
-
-.onboarding-account__identity {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-}
-
-.onboarding-account__avatar {
-  display: grid;
-  place-items: center;
-  width: 128px;
-  height: 128px;
-  padding: 12px;
-  box-sizing: border-box;
-  border-radius: 999px;
-  background: rgba(var(--rgb-surface), 0.7);
-  box-shadow: 0 18px 34px rgba(var(--rgb-line), 0.1);
-}
-
-.onboarding-account__identity-copy {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  min-width: 0;
-  text-align: left;
-}
-
-.onboarding-account__identity-copy strong {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  color: var(--ink);
-  font-size: 15px;
-  line-height: 1.08;
-}
-
-.onboarding-account__identity-copy span:not(.onboarding-account__eyebrow) {
-  max-width: 100%;
-  overflow-wrap: anywhere;
-  color: var(--ink-soft);
-  font-size: 11px;
-  line-height: 1.35;
-}
-
-.onboarding-account__signed-in-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 18px;
-}
-
-.onboarding-account__confirmation {
-  align-self: center;
-  margin-top: 0;
-}
-
-.onboarding-key__confirmation {
-  animation: onboarding-confirm-pop 0.28s ease-out both;
-}
-
-.onboarding-key__confirmation {
-  align-self: flex-end;
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  width: fit-content;
-  margin-top: -8px;
-  padding: 7px 11px;
-  border-radius: 999px;
-  background: #dff3c8;
-  color: #456b17;
-  font-size: 12px;
-  font-weight: 800;
-}
-
-.onboarding-key__confirmation.onboarding-account__confirmation {
-  flex: 0 0 auto;
-  align-self: auto;
-  margin-top: 2px;
-}
-
-.onboarding-account__managed-status {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.onboarding-key__check {
-  display: inline-grid;
-  place-items: center;
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: #6ca623;
-  color: #fff;
-  font-size: 12px;
-  line-height: 1;
 }
 
 [data-theme="dark"] .onboarding-shell {
@@ -5603,46 +5357,6 @@ button {
   border-color: var(--sky);
   background: var(--sky);
   color: #101820;
-}
-
-.cl-modalBackdrop {
-  background: rgba(0, 0, 0, 0.74);
-  backdrop-filter: blur(8px);
-  /* Clerk's modal portal paints over the onboarding header's window-drag
-     strip — carve it out of the drag region or its top-edge controls (the
-     close ✕ in particular) are unclickable in the desktop app. See the
-     onboarding-resume__document-viewer rule for the full explanation of
-     this Electron drag-region gotcha. */
-  -webkit-app-region: no-drag;
-}
-
-.cl-modalContent {
-  inset: 0;
-  -webkit-app-region: no-drag;
-  display: grid;
-  place-items: center;
-  /* Clerk's own internal class sets justify-content: flex-start on this
-     grid, which parks the auto-sized track at the left edge. place-content
-     sets both justify-content and align-content, beating that at
-     equal-or-later cascade since this stylesheet loads after Clerk's. */
-  place-content: center;
-  width: 100vw;
-  min-height: 100dvh;
-  padding: 24px;
-}
-
-.cl-socialButtonsBlockButton:hover {
-  background: var(--paper-band);
-}
-
-.cl-modalContent .cl-rootBox,
-.cl-modalContent .cl-cardBox {
-  width: min(430px, calc(100vw - 48px));
-  margin: 0 auto;
-}
-
-.cl-modalContent .cl-card {
-  border-radius: 8px;
 }
 
 @keyframes onboarding-confirm-pop {

@@ -1,5 +1,4 @@
 import { createContext, useContext, useEffect, useState } from "react";
-import { RolesterUserButton, useRolesterUser } from "../auth/clerkControls.jsx";
 import { IconButton } from "../components/Button.jsx";
 import { ArrowLeftIcon, ArrowRightIcon, MoonIcon, SunIcon } from "../components/icons.jsx";
 import { useTheme } from "../lib/theme.js";
@@ -114,7 +113,6 @@ function markProgressFooterRevealSeen() {
 
 export function OnboardingTopBar() {
   const { theme, toggle } = useTheme();
-  const { isSignedIn } = useRolesterUser();
   const themeLabel = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
 
   return (
@@ -126,9 +124,6 @@ export function OnboardingTopBar() {
         <IconButton label={themeLabel} className="onboarding-shell__theme" onClick={toggle}>
           {theme === "dark" ? <SunIcon /> : <MoonIcon />}
         </IconButton>
-        <div className="onboarding-shell__account">
-          {isSignedIn ? <RolesterUserButton afterSignOutUrl="/app/onboarding" /> : null}
-        </div>
       </div>
     </header>
   );

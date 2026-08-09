@@ -85,7 +85,7 @@ workspace files:
   "file an issue": use `report-issue`. It separates a real defect from a config
   problem, assembles redacted diagnostics (no candidate PII, comp, or workspace
   contents), and — only with an explicit yes — opens a GitHub issue on the
-  upstream `CodesWhat/rolester` repo. It never auto-files.
+  upstream `CodesWhat/careerrat` repo. It never auto-files.
 
 ## Mandatory Gate
 

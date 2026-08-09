@@ -161,9 +161,8 @@ if (isSmoke) {
 }
 
 async function boot() {
-  // Desktop flag for the SPA's system-browser Google OAuth handoff (see
-  // src/cli/desktop-auth-route.mjs and GET /api/runtime/config's
-  // desktop.authAvailable field in src/cli/skill-run-route.mjs). Set before
+  // Desktop flag the engine reads to enable installed-runtime AI routing
+  // (see src/core/ai/call-ai.mjs's resolveAIRoute()). Set before
   // createDevServer() — same placement style as the ROLESTER_HOME injection
   // above, which also must land before any engine module reads process.env.
   process.env.ROLESTER_DESKTOP_SHELL = "1";
@@ -196,11 +195,11 @@ async function boot() {
   dev.startWatching();
 
   // Packaged mode listens on a stable, configurable port instead of an
-  // ephemeral one: Clerk's dev-browser sign-in state is keyed by origin
-  // (host+port), so a port that changes on every relaunch would silently
-  // sign the candidate back out each time they reopen the app. Dev/smoke
-  // keep the ephemeral port (0) unchanged. If the preferred port is already
-  // taken, fall back to an ephemeral one rather than failing to boot.
+  // ephemeral one: any future session state is keyed by origin (host+port),
+  // so a port that changes on every relaunch would silently sign the
+  // candidate back out each time they reopen the app. Dev/smoke keep the
+  // ephemeral port (0) unchanged. If the preferred port is already taken,
+  // fall back to an ephemeral one rather than failing to boot.
   const preferredPort = choosePreferredPort({ isPackaged: app.isPackaged, env: process.env });
   let port;
   try {
@@ -301,11 +300,7 @@ function createWindow(url, route, { load = true } = {}) {
 
   // External links (target=_blank) and any navigation away from our own
   // loopback origin open in the OS browser instead of inside the app window
-  // — including the Google OAuth chain now: decideExternalOpen's
-  // DESKTOP_SIGN_IN_PATH carve-out (apps/desktop/desktop-runtime.mjs) routes
-  // the desktop sign-in page itself out to the OS browser, where the whole
-  // Google/Clerk redirect chain runs and hands the finished session back
-  // through src/cli/desktop-auth-route.mjs instead of this webContents.
+  // (see decideExternalOpen in apps/desktop/desktop-runtime.mjs).
   win.webContents.setWindowOpenHandler(({ url: target }) => {
     openExternalIfAllowed(target, url);
     return { action: "deny" };

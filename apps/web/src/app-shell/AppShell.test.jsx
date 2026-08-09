@@ -50,6 +50,5 @@ describe("AppShell", () => {
     expect(html).toContain('aria-label="Settings"');
     expect(html).toContain('href="/settings"');
     expect(html).toContain('aria-label="Switch to dark mode"');
-    expect(html).toContain('class="app-shell__account"');
   });
 });

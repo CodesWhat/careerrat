@@ -180,10 +180,11 @@ function isNodeModulesElectronResourcesPath(resourcesPath) {
     .includes("/node_modules/electron/dist/Electron.app/Contents/Resources");
 }
 
-// The Clerk dev-browser cookie/localStorage state that OAuth relies on is
-// keyed by origin, which for a loopback app includes the port. In dev mode
-// an ephemeral port (0) is fine — a fresh session each launch is expected.
-// In packaged mode a stable port lets a signed-in session survive a relaunch.
+// Session state (cookies/localStorage) tied to a future auth provider would
+// be keyed by origin, which for a loopback app includes the port. In dev
+// mode an ephemeral port (0) is fine — a fresh session each launch is
+// expected. In packaged mode a stable port lets a signed-in session survive
+// a relaunch.
 export const DEFAULT_PACKAGED_PORT = 46753;
 
 export function choosePreferredPort({ isPackaged, env } = {}) {
@@ -206,15 +207,6 @@ export function isAllowedExternalUrl(target, { allowedProtocols = SAFE_EXTERNAL_
   }
 }
 
-// The system-browser Google OAuth handoff (see src/cli/desktop-auth-route.mjs's
-// header comment for the full flow). Google rejects OAuth performed inside
-// Electron's embedded Chromium (JS engine fingerprinting), so the sign-in
-// affordance deliberately navigates to this one same-origin path to hand it
-// off to the OS browser instead of completing it in-window — every other
-// same-origin navigation still stays in-window (see the same-origin check in
-// decideExternalOpen below).
-export const DESKTOP_SIGN_IN_PATH = "/app/desktop-sign-in";
-
 export function decideExternalOpen({ target, baseUrl, allowedProtocols } = {}) {
   if (!String(target || "").trim()) {
     return { action: "deny", reason: "missing-url" };
@@ -231,9 +223,6 @@ export function decideExternalOpen({ target, baseUrl, allowedProtocols } = {}) {
     try {
       const base = new URL(String(baseUrl));
       if (url.origin === base.origin) {
-        if (url.pathname === DESKTOP_SIGN_IN_PATH) {
-          return { action: "open-external", reason: "desktop-sign-in", url: url.href };
-        }
         return { action: "ignore", reason: "same-origin", url: url.href };
       }
     } catch {

@@ -151,24 +151,6 @@ describe("onboarding shell styles", () => {
     assert.match(finePrintText, /display:\s*inline/);
   });
 
-  it("keeps the optional signed-in account fallback compact and horizontally balanced", () => {
-    const panel = cssRule(".onboarding-account__panel--signed-in");
-    const main = cssRule(".onboarding-account__signed-in-main");
-    const label = cssRule(".onboarding-account__signed-in-label");
-    const confirmation = cssRule(".onboarding-key__confirmation.onboarding-account__confirmation");
-
-    assert.match(panel, /min-height:\s*0/);
-    assert.match(panel, /gap:\s*8px/);
-    assert.match(panel, /padding:\s*12px 14px/);
-    assert.match(main, /flex-direction:\s*row/);
-    assert.match(main, /justify-content:\s*space-between/);
-    assert.match(main, /align-items:\s*center/);
-    assert.match(main, /flex:\s*0 0 auto/);
-    assert.match(label, /align-self:\s*flex-start/);
-    assert.match(confirmation, /flex:\s*0 0 auto/);
-    assert.match(confirmation, /align-self:\s*auto/);
-  });
-
   it("keeps the welcome headline spans from wrapping into extra visual lines", () => {
     const headline = cssRule(".onboarding-hero__copy h1");
     const line = cssRule(".onboarding-hero__line");
@@ -327,17 +309,6 @@ describe("onboarding shell styles", () => {
     assert.match(header, /z-index:\s*21/);
     assert.match(info, /z-index:\s*22/);
     assert.match(tooltip, /z-index:\s*1000/);
-  });
-
-  it("centers and tones the Clerk modal portal", () => {
-    const modalBackdrop = cssRule(".cl-modalBackdrop");
-    const modalContent = cssRule(".cl-modalContent");
-
-    assert.match(modalBackdrop, /background:\s*rgba\(0,\s*0,\s*0,\s*0\.74\)/);
-    assert.match(modalContent, /display:\s*grid/);
-    assert.match(modalContent, /place-items:\s*center/);
-    assert.match(modalContent, /place-content:\s*center/);
-    assert.match(modalContent, /padding:\s*24px/);
   });
 
   it("frames role lanes as one card with a bottom-right add action", () => {

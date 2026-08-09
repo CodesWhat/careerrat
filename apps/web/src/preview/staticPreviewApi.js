@@ -109,20 +109,6 @@ export function isStaticPreviewApi() {
   return STATIC_PREVIEW;
 }
 
-export function getStaticPreviewAuthState() {
-  return {
-    hasClerkProvider: false,
-    isLoaded: true,
-    isSignedIn: true,
-    user: {
-      firstName: "Riley",
-      fullName: "Riley Chen",
-      id: "preview-user",
-      primaryEmailAddress: { emailAddress: "riley.chen@careerrat.dev" },
-    },
-  };
-}
-
 export async function staticPreviewApiFetch(path, options = {}) {
   const url = new URL(path, "https://preview.careerrat.local");
   const method = String(options.method || "GET").toUpperCase();

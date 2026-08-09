@@ -3,7 +3,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const api = vi.hoisted(() => ({
   addBoard: vi.fn(),
   addSearchQuery: vi.fn(),
-  connectManagedAi: vi.fn(),
   getAutomationSettings: vi.fn(),
   getAiSettings: vi.fn(),
   getInstalledAiRuntimes: vi.fn(),
@@ -116,7 +115,7 @@ function findElement(root, predicate) {
   return match;
 }
 
-async function mountSettings({ getToken }) {
+async function mountSettings() {
   vi.resetModules();
   let runtime;
   vi.doMock("react", () => ({
@@ -137,9 +136,6 @@ async function mountSettings({ getToken }) {
     useMemo: (...args) => runtime.useMemo(...args),
     useState: (...args) => runtime.useState(...args),
   }));
-  vi.doMock("../auth/clerkControls.jsx", () => ({
-    useRolesterUser: () => ({ getToken }),
-  }));
   vi.doMock("../lib/api.js", () => ({
     ApiError: class ApiError extends Error {},
     ...api,
@@ -154,7 +150,7 @@ async function mountSettings({ getToken }) {
 async function mountLoadedSettings(data) {
   api.getOnboardState.mockResolvedValue({ data });
   api.saveCandidateFile.mockResolvedValue({ ok: true });
-  const renderer = await mountSettings({ getToken: vi.fn() });
+  const renderer = await mountSettings();
   await vi.waitFor(() =>
     expect(
       findElement(
@@ -226,67 +222,7 @@ it("makes installed AI the primary Settings route and nests provider credentials
 afterEach(() => {
   vi.useRealTimers();
   vi.doUnmock("react");
-  vi.doUnmock("../auth/clerkControls.jsx");
   vi.doUnmock("../lib/api.js");
-});
-
-describe("SettingsPage managed AI reconnect", () => {
-  it("gets a Clerk token, reconnects managed AI, and surfaces success", async () => {
-    vi.useFakeTimers();
-    const getToken = vi.fn(async () => "obviously-fake-jwt");
-    api.connectManagedAi.mockResolvedValue({ ok: true, route: "proxy" });
-    api.getAiSettings
-      .mockResolvedValueOnce({ route: "none", keyPresent: false })
-      .mockResolvedValueOnce({ route: "proxy", keyPresent: false });
-    const renderer = await mountSettings({ getToken });
-    await vi.waitFor(() =>
-      expect(
-        findElement(renderer.output, (element) =>
-          renderedText(element).includes("Reconnect managed AI")
-        )
-      ).toBeTruthy()
-    );
-
-    const button = findElement(
-      renderer.output,
-      (element) => renderedText(element) === "Reconnect managed AI" && element.props.onClick
-    );
-    await button.props.onClick();
-
-    expect(getToken).toHaveBeenCalledOnce();
-    expect(api.connectManagedAi).toHaveBeenCalledWith("obviously-fake-jwt");
-    expect(api.selectInstalledAiRuntime).toHaveBeenCalledWith({ providerFallback: true });
-    expect(api.getAiSettings).toHaveBeenCalledTimes(2);
-    expect(
-      findElement(renderer.output, (element) => element.props.message === "Managed AI connected.")
-    ).toBeTruthy();
-  });
-
-  it("surfaces a reconnect failure", async () => {
-    const getToken = vi.fn(async () => "obviously-fake-jwt");
-    api.connectManagedAi.mockResolvedValue({ ok: false });
-    const renderer = await mountSettings({ getToken });
-    await vi.waitFor(() =>
-      expect(
-        findElement(renderer.output, (element) => renderedText(element) === "Reconnect managed AI")
-      ).toBeTruthy()
-    );
-
-    const button = findElement(
-      renderer.output,
-      (element) => renderedText(element) === "Reconnect managed AI" && element.props.onClick
-    );
-    await button.props.onClick();
-
-    expect(getToken).toHaveBeenCalledOnce();
-    expect(api.connectManagedAi).toHaveBeenCalledWith("obviously-fake-jwt");
-    expect(
-      findElement(
-        renderer.output,
-        (element) => element.props.message === "Could not connect managed AI."
-      )
-    ).toBeTruthy();
-  });
 });
 
 describe("SettingsPage edit surfaces", () => {

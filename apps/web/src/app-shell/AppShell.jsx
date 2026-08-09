@@ -1,49 +1,11 @@
 import { useEffect } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import {
-  RolesterSignInButton,
-  RolesterUserButton,
-  useRolesterUser,
-} from "../auth/clerkControls.jsx";
 import { IconButton } from "../components/Button.jsx";
 import { MoonIcon, SettingsIcon, SunIcon } from "../components/icons.jsx";
 import { useTheme } from "../lib/theme.js";
 import { ActivityBell } from "./ActivityBell.jsx";
 import { DashboardProvider } from "./DashboardContext.jsx";
 import { NavList } from "./NavList.jsx";
-
-const HEADER_AVATAR_SIZE = "38px";
-const HEADER_USER_BUTTON_APPEARANCE = {
-  elements: {
-    userButtonTrigger: {
-      width: HEADER_AVATAR_SIZE,
-      height: HEADER_AVATAR_SIZE,
-      minWidth: HEADER_AVATAR_SIZE,
-      minHeight: HEADER_AVATAR_SIZE,
-      padding: "0",
-      borderRadius: "999px",
-      overflow: "hidden",
-      boxShadow: "none",
-    },
-    userButtonAvatarBox: {
-      width: HEADER_AVATAR_SIZE,
-      height: HEADER_AVATAR_SIZE,
-      borderRadius: "999px",
-      overflow: "hidden",
-    },
-    avatarBox: {
-      width: HEADER_AVATAR_SIZE,
-      height: HEADER_AVATAR_SIZE,
-      borderRadius: "999px",
-      overflow: "hidden",
-    },
-    avatarImage: {
-      width: "100%",
-      height: "100%",
-      objectFit: "cover",
-    },
-  },
-};
 
 // AppShell — top product navigation + content region. Mirrors the visual language of
 // src/core/tracker/dashboard-shell.html's header chrome (translucent
@@ -100,9 +62,6 @@ export function AppShell({ children }) {
             >
               {theme === "dark" ? <SunIcon /> : <MoonIcon />}
             </IconButton>
-            <div className="app-shell__account">
-              <HeaderAccount />
-            </div>
           </div>
         </header>
         <div className="app-shell__main">
@@ -123,25 +82,4 @@ function scrollActivePrimaryNavItem() {
     item.offsetLeft - scroller.offsetLeft - (scroller.clientWidth - item.offsetWidth) / 2;
   scroller.scrollLeft = Math.max(0, Math.min(maxScroll, target));
   return true;
-}
-
-function HeaderAccount() {
-  const { isLoaded, isSignedIn } = useRolesterUser();
-
-  if (!isLoaded) return null;
-  if (isSignedIn) {
-    return (
-      <span className="app-shell__avatar">
-        <RolesterUserButton afterSignOutUrl="/app" appearance={HEADER_USER_BUTTON_APPEARANCE} />
-      </span>
-    );
-  }
-
-  return (
-    <RolesterSignInButton mode="modal">
-      <button type="button" className="app-shell__login">
-        Log in
-      </button>
-    </RolesterSignInButton>
-  );
 }

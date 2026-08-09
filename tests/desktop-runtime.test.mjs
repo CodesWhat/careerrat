@@ -6,7 +6,6 @@ import { afterEach, describe, it } from "node:test";
 import {
   choosePreferredPort,
   DEFAULT_PACKAGED_PORT,
-  DESKTOP_SIGN_IN_PATH,
   decideExternalOpen,
   isAllowedExternalUrl,
   resolveDesktopRuntimePaths,
@@ -198,22 +197,8 @@ describe("desktop external URL decisions", () => {
     );
   });
 
-  it("sends the desktop sign-in page out to the OS browser even though it's same-origin", () => {
-    assert.deepEqual(
-      decideExternalOpen({
-        baseUrl: "http://127.0.0.1:61234",
-        target: `http://127.0.0.1:61234${DESKTOP_SIGN_IN_PATH}?nonce=abc-123`,
-      }),
-      {
-        action: "open-external",
-        reason: "desktop-sign-in",
-        url: `http://127.0.0.1:61234${DESKTOP_SIGN_IN_PATH}?nonce=abc-123`,
-      }
-    );
-  });
-
-  it("keeps every other same-origin path in-window, including neighboring /app routes", () => {
-    for (const path of ["/app", "/app/onboarding", "/app/desktop-sign-in/sso-callback"]) {
+  it("keeps every same-origin path in-window, including neighboring /app routes", () => {
+    for (const path of ["/app", "/app/onboarding"]) {
       assert.deepEqual(
         decideExternalOpen({
           baseUrl: "http://127.0.0.1:61234",
@@ -228,12 +213,8 @@ describe("desktop external URL decisions", () => {
     }
   });
 
-  it("sends off-origin HTTPS targets to the OS browser, including Google's OAuth chain", () => {
-    for (const target of [
-      "https://example.com/jobs",
-      "https://accounts.google.com/o/oauth2/auth",
-      "https://rolester-dev.clerk.accounts.dev/v1/client",
-    ]) {
+  it("sends off-origin HTTPS targets to the OS browser", () => {
+    for (const target of ["https://example.com/jobs", "https://accounts.google.com/o/oauth2/auth"]) {
       assert.deepEqual(decideExternalOpen({ baseUrl: "http://127.0.0.1:61234", target }), {
         action: "open-external",
         url: target,

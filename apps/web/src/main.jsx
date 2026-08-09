@@ -2,11 +2,9 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { App } from "./App.jsx";
-import { RolesterClerkProvider } from "./auth/clerkControls.jsx";
 import "./styles/tokens.css";
 import "./styles/app.css";
 
-const clerkPublishableKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 const routerBasename = import.meta.env.VITE_ROUTER_BASENAME || "/app";
 const app = (
   <BrowserRouter basename={routerBasename}>
@@ -14,8 +12,4 @@ const app = (
   </BrowserRouter>
 );
 
-createRoot(document.getElementById("root")).render(
-  <StrictMode>
-    <RolesterClerkProvider publishableKey={clerkPublishableKey}>{app}</RolesterClerkProvider>
-  </StrictMode>
-);
+createRoot(document.getElementById("root")).render(<StrictMode>{app}</StrictMode>);

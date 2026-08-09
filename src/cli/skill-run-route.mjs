@@ -219,16 +219,6 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
       aiWebSearch: {
         available: route.type !== "none" && env.ROLESTER_RUNTIME_SKILLS !== "",
       },
-      // Electron's main.mjs sets ROLESTER_DESKTOP_SHELL=1 before booting the
-      // embedded server (see apps/desktop/main.mjs's boot()) — this is the
-      // only signal the SPA has that it's running inside the desktop shell,
-      // where the system-browser Google OAuth handoff (src/cli/desktop-auth-route.mjs)
-      // is available. Plain browser/web use of this same server never sets
-      // the env var, so authAvailable is false there and the SPA's normal
-      // Clerk modal flow is unaffected.
-      desktop: {
-        authAvailable: env.ROLESTER_DESKTOP_SHELL === "1",
-      },
     });
   });
 

@@ -17,8 +17,5 @@
     "react-router-dom": "^7.0.0",
     "vite": "^6.0.0",
     "vitest": "^3.0.0"
-  },
-  "dependencies": {
-    "@clerk/react": "^6.11.4"
   }
 }
