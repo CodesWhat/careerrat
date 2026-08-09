@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { verifySmokeHttpSurface } from "../apps/desktop/desktop-smoke.mjs";
+import * as desktopSmoke from "../apps/desktop/desktop-smoke.mjs";
+
+const { verifySmokeHttpSurface } = desktopSmoke;
 
 describe("desktop smoke HTTP surface verification", () => {
   it("checks health, the selected SPA route, and referenced built assets", async () => {
@@ -69,5 +71,29 @@ describe("desktop smoke HTTP surface verification", () => {
       route: "/app",
       assetPaths: ["/app/assets/index-def.css", "/app/assets/index-def.js"],
     });
+  });
+});
+
+describe("desktop smoke PDF renderer verification", () => {
+  it("requires Electron-backed export to produce real PDF bytes", async () => {
+    assert.equal(typeof desktopSmoke.verifySmokePdfExport, "function");
+    const writes = [];
+
+    const result = await desktopSmoke.verifySmokePdfExport({
+      outPath: "/tmp/rolester-smoke-export.pdf",
+      renderPdf: async ({ markdown, outPath }) => {
+        writes.push({ markdown, outPath });
+      },
+      readFile: () => Buffer.from("%PDF-1.7\nsmoke\n", "utf8"),
+      removeFile: () => {},
+    });
+
+    assert.deepEqual(writes, [
+      {
+        markdown: "# Rolester export smoke\n\nPackaged Electron renderer check.\n",
+        outPath: "/tmp/rolester-smoke-export.pdf",
+      },
+    ]);
+    assert.deepEqual(result, { bytes: 15 });
   });
 });

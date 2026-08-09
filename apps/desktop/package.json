@@ -8,6 +8,7 @@
   "main": "main.mjs",
   "scripts": {
     "dev": "node scripts/brand-dev-app.mjs && electron .",
+    "smoke": "node scripts/brand-dev-app.mjs && electron . --smoke",
     "stage": "node scripts/stage.mjs",
     "dist": "npm --prefix ../.. run app:build && npm run stage && electron-builder --mac dmg"
   },

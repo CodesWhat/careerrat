@@ -19,6 +19,13 @@ test("desktop dev launch brands the local Electron.app as Rolester before starti
   assert.match(dev, /node scripts\/brand-dev-app\.mjs\s*&&\s*electron \./);
 });
 
+test("desktop smoke launch repairs dev branding before starting Electron", async () => {
+  const pkg = JSON.parse(await readText("apps/desktop/package.json"));
+  const smoke = pkg.scripts?.smoke || "";
+
+  assert.match(smoke, /node scripts\/brand-dev-app\.mjs\s*&&\s*electron \. --smoke/);
+});
+
 test("desktop dev branding changes plist identity and executable name for the Dock label", () => {
   const commands = buildInfoPlistBrandCommands();
 

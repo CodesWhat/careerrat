@@ -20,7 +20,7 @@ Use it for development only.
 Scripted verification (no window interaction, exits on its own):
 
 ```
-cd apps/desktop && npx electron . --smoke
+npm --workspace apps/desktop run smoke
 ```
 
 The smoke path boots the server, hits `GET /api/health` over loopback, verifies
@@ -40,17 +40,20 @@ a signed and notarized macOS DMG. The staged runtime uses the same allowlist
 `npm pack` ships, plus its own Agent SDK install, so the packaged app does not
 reach back into the source checkout or root `node_modules`.
 
-## Data root and BYOK
+## Data root and AI runtime
 
 In packaged mode, `ROLESTER_HOME` is set before any Rolester module is
 imported. It points at Electron's per-user data directory:
 `app.getPath("userData")/data`. Candidate setup, workspace state, SQLite data,
 and `internal/ai.env` live there, outside the signed resources tree.
 
-The packaged app is BYOK only for the pilot. The onboarding key step writes the
-user's key through `src/core/ai/ai-env.mjs` into `internal/ai.env` with local
-file permissions. No managed API key or Apple credential is stored in the app
-bundle or in tracked source.
+The packaged app detects supported AI CLIs in Finder-safe install locations and
+uses an already-authenticated installed tool as its primary AI runtime. Rolester
+stores only the selected runtime id; it never copies or persists the CLI's
+credentials. A direct provider key and managed AI are explicit Advanced
+fallbacks. Provider credentials written through `src/core/ai/ai-env.mjs` live in
+`internal/ai.env` with local-only file permissions; no provider or Apple
+credential is stored in the app bundle or tracked source.
 
 ## Signing and notarization
 

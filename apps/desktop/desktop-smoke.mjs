@@ -24,6 +24,22 @@ export async function verifySmokeHttpSurface({ baseUrl, route, getOk }) {
   return { route, assetPaths };
 }
 
+export async function verifySmokePdfExport({ outPath, renderPdf, readFile, removeFile }) {
+  try {
+    await renderPdf({
+      markdown: "# Rolester export smoke\n\nPackaged Electron renderer check.\n",
+      outPath,
+    });
+    const pdf = Buffer.from(readFile(outPath));
+    if (pdf.length < 8 || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+      throw new Error("packaged export did not produce PDF bytes");
+    }
+    return { bytes: pdf.length };
+  } finally {
+    removeFile(outPath);
+  }
+}
+
 function hasSpaRoot(html) {
   return /<[^>]+\bid=["']root["'][^>]*>/i.test(html);
 }

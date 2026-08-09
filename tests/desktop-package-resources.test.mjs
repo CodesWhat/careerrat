@@ -57,6 +57,26 @@ test("electron-builder embeds every desktop main-process module imported by main
   }
 });
 
+test("ISSUE-028: desktop boots Electron's private PDF renderer before the staged engine", async () => {
+  const main = await readText("apps/desktop/main.mjs");
+  const rendererStartAt = main.indexOf("await startDesktopPdfRenderer");
+  const engineStartAt = main.indexOf("const { createDevServer } =");
+
+  assert.ok(rendererStartAt >= 0, "desktop must start its Electron-backed PDF renderer");
+  assert.ok(engineStartAt > rendererStartAt, "PDF renderer must be ready before API routes start");
+  assert.match(main, /ROLESTER_DESKTOP_PDF_RENDER_URL\s*=\s*pdfRenderer\.url/);
+  assert.match(main, /ROLESTER_DESKTOP_PDF_RENDER_TOKEN\s*=\s*pdfRenderer\.token/);
+  assert.match(
+    main,
+    /verifySmokePdfExport/,
+    "packaged smoke must prove a real PDF export, not only an app-window load"
+  );
+  assert.ok(
+    main.indexOf("await loadAndVerifySmokeWindow") < main.indexOf("await verifySmokePdfExport"),
+    "smoke must mount the app window before the temporary PDF window can trigger window-all-closed"
+  );
+});
+
 test("electron-builder embeds the full staged runtime, including hidden skill dirs and SDK node_modules", async () => {
   const config = await readText("apps/desktop/electron-builder.yml");
 

@@ -1,6 +1,141 @@
+import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
+import { createServer } from "node:http";
 import { join } from "node:path";
 
 export const SAFE_EXTERNAL_PROTOCOLS = Object.freeze(["https:", "mailto:"]);
+
+const PDF_RENDER_MAX_BODY_BYTES = 8 * 1024 * 1024;
+
+function digestToken(value) {
+  return createHash("sha256").update(String(value || ""), "utf8").digest();
+}
+
+function rendererTokensMatch(provided, expected) {
+  return timingSafeEqual(digestToken(provided), digestToken(expected));
+}
+
+function sendRendererText(res, status, message) {
+  res.writeHead(status, {
+    "content-type": "text/plain; charset=utf-8",
+    "cache-control": "no-store",
+  });
+  res.end(message);
+}
+
+async function renderHtmlWithElectron({ BrowserWindow, html }) {
+  const win = new BrowserWindow({
+    show: false,
+    webPreferences: {
+      javascript: false,
+      nodeIntegration: false,
+      contextIsolation: true,
+      sandbox: true,
+      webSecurity: true,
+      backgroundThrottling: false,
+    },
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  win.webContents.on("will-navigate", (event) => event.preventDefault());
+
+  try {
+    await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+    return await win.webContents.printToPDF({
+      pageSize: "Letter",
+      preferCSSPageSize: true,
+      printBackground: true,
+      generateTaggedPDF: true,
+    });
+  } finally {
+    if (!win.isDestroyed()) win.destroy();
+  }
+}
+
+/**
+ * Start the private PDF renderer used by the staged Node engine. Electron
+ * already ships Chromium, so the desktop build should never carry a second
+ * Playwright browser or rely on a developer cache under ~/Library.
+ */
+export async function startDesktopPdfRenderer({
+  BrowserWindow,
+  token = randomBytes(32).toString("hex"),
+  maxBodyBytes = PDF_RENDER_MAX_BODY_BYTES,
+  renderHtml = renderHtmlWithElectron,
+} = {}) {
+  if (typeof BrowserWindow !== "function") {
+    throw new TypeError("startDesktopPdfRenderer: BrowserWindow is required");
+  }
+  if (!String(token).trim()) {
+    throw new TypeError("startDesktopPdfRenderer: token must be non-empty");
+  }
+
+  const server = createServer((req, res) => {
+    if (req.method !== "POST" || req.url !== "/render") {
+      sendRendererText(res, 404, "Not found");
+      return;
+    }
+    if (!rendererTokensMatch(req.headers["x-rolester-render-token"], token)) {
+      sendRendererText(res, 401, "Unauthorized");
+      return;
+    }
+
+    const chunks = [];
+    let size = 0;
+    let rejected = false;
+    req.on("data", (chunk) => {
+      if (rejected) return;
+      size += chunk.length;
+      if (size > maxBodyBytes) {
+        rejected = true;
+        sendRendererText(res, 413, "Render request is too large");
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", async () => {
+      if (rejected) return;
+      let body;
+      try {
+        body = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+      } catch {
+        sendRendererText(res, 400, "Render request must be valid JSON");
+        return;
+      }
+      if (typeof body?.html !== "string" || !body.html.trim()) {
+        sendRendererText(res, 400, "Render request requires non-empty html");
+        return;
+      }
+
+      try {
+        const pdf = Buffer.from(await renderHtml({ BrowserWindow, html: body.html }));
+        if (pdf.length < 8 || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+          throw new Error("Electron returned invalid PDF bytes");
+        }
+        res.writeHead(200, {
+          "content-type": "application/pdf",
+          "content-length": pdf.length,
+          "cache-control": "no-store",
+        });
+        res.end(pdf);
+      } catch (err) {
+        sendRendererText(res, 500, err?.message || "Electron PDF rendering failed");
+      }
+    });
+  });
+
+  const port = await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", () => {
+      server.removeListener("error", reject);
+      resolve(server.address().port);
+    });
+  });
+
+  return {
+    url: `http://127.0.0.1:${port}/render`,
+    token,
+    close: () => new Promise((resolve) => server.close(() => resolve())),
+  };
+}
 
 export function resolveDesktopRuntimePaths({
   isPackaged,

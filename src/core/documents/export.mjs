@@ -645,16 +645,52 @@ ${body}
  * Render markdown (or pre-built HTML) to a Letter-size PDF via Playwright Chromium.
  * Always closes the browser, even on error.
  *
- * @param {{ markdown?: string, html?: string, outPath: string, title?: string, ats?: boolean }} opts
+ * @param {{ markdown?: string, html?: string, outPath: string, title?: string, ats?: boolean, env?: NodeJS.ProcessEnv|Record<string,string>, fetchImpl?: typeof fetch }} opts
  *   ats: use the ATS-safe standard font stack (no embedded Geist) for submission copies.
  * @returns {Promise<string>} outPath
- * @throws if Chromium is not installed (tells user to run `npx playwright install chromium`)
+ * @throws when neither Electron's authenticated renderer nor Playwright Chromium is available
  */
-export async function renderPdf({ markdown, html, outPath, title = "Document", ats = false }) {
+export async function renderPdf({
+  markdown,
+  html,
+  outPath,
+  title = "Document",
+  ats = false,
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+}) {
   // Normalize typographic glyphs on the markdown path so ATS text extraction
   // isn't corrupted by smart quotes / dashes / invisible chars from LLM output.
   // When the caller supplies pre-built HTML, normalization is their responsibility.
   const source = html || documentHtml(normalizeAtsText(markdown || ""), { title, ats });
+
+  const desktopRenderer = desktopPdfRendererConfig(env);
+  if (desktopRenderer) {
+    const response = await fetchImpl(desktopRenderer.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-rolester-render-token": desktopRenderer.token,
+      },
+      body: JSON.stringify({ html: source }),
+    });
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).trim();
+      const err = new Error(
+        `Desktop PDF renderer failed (${response.status})${detail ? `: ${detail}` : ""}`
+      );
+      err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+      throw err;
+    }
+    const pdf = Buffer.from(await response.arrayBuffer());
+    if (pdf.length < 8 || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+      const err = new Error("Desktop PDF renderer returned an invalid PDF response");
+      err.code = "DESKTOP_PDF_RENDERER_INVALID";
+      throw err;
+    }
+    writeFileSync(outPath, pdf);
+    return outPath;
+  }
 
   let chromium;
   try {
@@ -686,6 +722,36 @@ export async function renderPdf({ markdown, html, outPath, title = "Document", a
   }
 
   return outPath;
+}
+
+function desktopPdfRendererConfig(env) {
+  const rawUrl = String(env?.ROLESTER_DESKTOP_PDF_RENDER_URL || "").trim();
+  const token = String(env?.ROLESTER_DESKTOP_PDF_RENDER_TOKEN || "").trim();
+  if (!rawUrl && !token) return null;
+  if (!rawUrl || !token) {
+    const err = new Error("Desktop PDF renderer configuration is incomplete");
+    err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+    throw err;
+  }
+
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    const err = new Error("Desktop PDF renderer URL is invalid");
+    err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+    throw err;
+  }
+  if (
+    url.protocol !== "http:" ||
+    !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
+    url.pathname !== "/render"
+  ) {
+    const err = new Error("Desktop PDF renderer must use the loopback /render endpoint");
+    err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+    throw err;
+  }
+  return { url: url.href, token };
 }
 
 // ---------------------------------------------------------------------------

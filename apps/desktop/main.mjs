@@ -20,7 +20,7 @@
 // pass. The scripted verification path for `npx electron . --smoke`.
 
 import { app, BrowserWindow, dialog, Menu, nativeImage, nativeTheme, shell } from "electron";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -29,8 +29,9 @@ import {
   choosePreferredPort,
   decideExternalOpen,
   resolveDesktopRuntimePaths,
+  startDesktopPdfRenderer,
 } from "./desktop-runtime.mjs";
-import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
+import { verifySmokeHttpSurface, verifySmokePdfExport } from "./desktop-smoke.mjs";
 import { buildBrowserWindowOptions } from "./window-options.mjs";
 
 // --- Trap 1 -----------------------------------------------------------------
@@ -143,6 +144,7 @@ function httpGetOk(url) {
 }
 
 let dev = null;
+let pdfRenderer = null;
 let win = null;
 let shuttingDown = false;
 
@@ -165,6 +167,15 @@ async function boot() {
   // createDevServer() — same placement style as the ROLESTER_HOME injection
   // above, which also must land before any engine module reads process.env.
   process.env.ROLESTER_DESKTOP_SHELL = "1";
+
+  // ISSUE-028: the packaged staged engine deliberately does not carry
+  // Playwright or a second Chromium download. Start a token-authenticated,
+  // loopback-only bridge to Electron's already-bundled Chromium before the
+  // engine mounts packet/export routes, then let documents/export.mjs route
+  // PDF work through it. No renderer token is written to disk or logged.
+  pdfRenderer = await startDesktopPdfRenderer({ BrowserWindow });
+  process.env.ROLESTER_DESKTOP_PDF_RENDER_URL = pdfRenderer.url;
+  process.env.ROLESTER_DESKTOP_PDF_RENDER_TOKEN = pdfRenderer.token;
 
   const { createDevServer } = await loadEngineModule("src/cli/tracker-dev.mjs");
   const { resolveUserPaths, userPath } = await loadEngineModule("src/core/paths/workspace.mjs");
@@ -248,16 +259,23 @@ function hasDbCandidateSetup({ pathCtx, dbExists, candidateConfigGet }) {
 }
 
 async function shutdown() {
-  if (!dev) return;
   const active = dev;
   dev = null;
-  active.stopWatching();
-  active.closeClients();
-  // M2's chat runtime — closes every live Agent SDK session and stops the
-  // idle-sweep timer so quitting the app never leaves an orphaned `claude`
-  // CLI child running in the background.
-  await active.chatRuntime.shutdown();
-  await new Promise((resolve) => active.server.close(() => resolve()));
+  if (active) {
+    active.stopWatching();
+    active.closeClients();
+    // M2's chat runtime — closes every live Agent SDK session and stops the
+    // idle-sweep timer so quitting the app never leaves an orphaned `claude`
+    // CLI child running in the background.
+    await active.chatRuntime.shutdown();
+    await new Promise((resolve) => active.server.close(() => resolve()));
+  }
+
+  const activePdfRenderer = pdfRenderer;
+  pdfRenderer = null;
+  delete process.env.ROLESTER_DESKTOP_PDF_RENDER_URL;
+  delete process.env.ROLESTER_DESKTOP_PDF_RENDER_TOKEN;
+  if (activePdfRenderer) await activePdfRenderer.close();
 }
 
 function openExternalIfAllowed(target, baseUrl) {
@@ -449,6 +467,19 @@ app.whenReady().then(async () => {
       // create it and require the real load to succeed before declaring OK.
       const smokeWin = createWindow(url, route, { load: false });
       await loadAndVerifySmokeWindow(smokeWin, `${url}${route}`);
+
+      // Prove the exact staged documents/export.mjs path can reach Electron's
+      // bundled renderer and produce PDF bytes. This comes after the primary
+      // app window mounts: destroying a temporary renderer as Electron's only
+      // window would otherwise emit window-all-closed and stop the server.
+      const { renderPdf } = await loadEngineModule("src/core/documents/export.mjs");
+      const smokePdfPath = join(app.getPath("temp"), `rolester-export-smoke-${process.pid}.pdf`);
+      await verifySmokePdfExport({
+        outPath: smokePdfPath,
+        renderPdf,
+        readFile: readFileSync,
+        removeFile: (path) => rmSync(path, { force: true }),
+      });
 
       log(`SMOKE OK ${url}`);
       await shutdown();
