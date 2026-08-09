@@ -1,0 +1,50 @@
+Morgan Hale
+STAFF BACKEND & PLATFORM ENGINEER
+Brooklyn, NY | +1 212-555-0142 | morgan.hale@example.invalid | morgan-hale.example.invalid
+
+SUMMARY
+Hands-on staff engineer with 11+ years building distributed systems, payments infrastructure, and internal developer platforms.
+Known for reliability work, pragmatic architecture, crisp RFCs, and mentoring engineers through complex production changes.
+
+EXPERIENCE
+
+Staff Platform Engineer | Juniper Relay (fictional)
+New York, NY / Hybrid | 2022 - Present
+
+- Led technical direction for an eight-engineer platform group processing 1.8 billion events per day; remained an individual
+contributor with no direct reports.
+
+- Redesigned Kafka partitioning and backpressure controls, cutting p99 event latency from 220 ms to 78 ms while traffic
+doubled.
+
+- Co-led storage lifecycle and capacity planning with FinOps, reducing AWS infrastructure spend 31% over two quarters without
+an availability regression.
+
+- Created architecture-review office hours and an RFC rubric later adopted by four engineering teams.
+Senior Software Engineer | Northstar Ledger (fictional)
+New York, NY | 2018 - 2022
+
+- Designed replay-safe payment processing in Go and PostgreSQL after an idempotency incident; added fault-injection tests and
+runbooks for recovery workflows.
+
+- Improved API availability from 99.91% to 99.99% by isolating third-party dependencies and introducing service-level objectives
+with actionable alerts.
+
+- Built deployment standards for Kubernetes and Terraform across 22 services, reducing median production rollout time from 46
+minutes to 14 minutes.
+
+- Mentored five engineers and served as technical lead for a cross-functional ledger modernization program.
+Software Engineer | HarborSignal (fictional)
+Jersey City, NJ | 2014 - 2018
+
+- Built Python and TypeScript services for real-time logistics tracking used by 300+ customer operations teams.
+- Migrated reporting workloads from a single PostgreSQL primary to read replicas and queued exports, reducing peak query
+load 58%.
+
+TECHNICAL SKILLS
+Go, Python, TypeScript, SQL, PostgreSQL, Kafka, AWS, Kubernetes, Terraform, Docker, OpenTelemetry, distributed systems,
+event-driven architecture, incident response, technical writing
+
+EDUCATION
+B.S. Computer Science | Rutgers University | 2014
+FICTIONAL QA FIXTURE - Names, employers, contact details, and accomplishments are invented for software testing.

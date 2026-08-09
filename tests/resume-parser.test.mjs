@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   deriveEvidenceSeed,
   deriveProfileSeed,
   parseResume,
 } from "../src/core/profile/resume-parser.mjs";
+
+const TEST_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -181,6 +186,39 @@ test("captures experience as raw text blocks split on blank lines", () => {
   assert.ok(experience.length >= 2, `expected ≥2 experience blocks, got ${experience.length}`);
   // First block should contain job content.
   assert.ok(experience.some((b) => b.includes("Acme Corp") || b.includes("distributed job queue")));
+});
+
+test("ISSUE-004: groups Morgan's blank-spaced PDF text into exactly three employment records", () => {
+  const text = readFileSync(
+    join(TEST_ROOT, "tests/fixtures/resume/morgan-hale-pdftotext.txt"),
+    "utf8"
+  );
+  const { experience } = parseResume(text).sections;
+
+  assert.equal(experience.length, 3);
+  assert.match(experience[0], /^Staff Platform Engineer \| Juniper Relay/);
+  assert.match(experience[1], /^Senior Software Engineer \| Northstar Ledger/);
+  assert.match(experience[2], /^Software Engineer \| HarborSignal/);
+});
+
+test("ISSUE-004: evidence excludes employment metadata and never absorbs the next job header", () => {
+  const text = readFileSync(
+    join(TEST_ROOT, "tests/fixtures/resume/morgan-hale-pdftotext.txt"),
+    "utf8"
+  );
+  const claims = deriveEvidenceSeed(parseResume(text)).claims;
+
+  assert.equal(claims.length, 10);
+  assert.equal(
+    claims.some(({ claim }) => /New York, NY|Jersey City, NJ/.test(claim)),
+    false
+  );
+  assert.equal(
+    claims.some(({ claim }) =>
+      /Staff Platform Engineer|Senior Software Engineer|HarborSignal/.test(claim)
+    ),
+    false
+  );
 });
 
 // ---------------------------------------------------------------------------

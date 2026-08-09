@@ -35,6 +35,7 @@ const ACCOMPLISHMENT_VERBS = new Set([
   "scaled",
   "drove",
   "delivered",
+  "mentored",
 ]);
 
 // Matches http(s) URLs.
@@ -235,6 +236,70 @@ function splitBlocks(lines) {
   return blocks.filter(Boolean);
 }
 
+const EMPLOYMENT_DATE_RANGE_RE =
+  /\b(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current|now)\b/i;
+
+function stripMarkdownHeading(line) {
+  return String(line || "")
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .trim();
+}
+
+function looksLikeRoleHeader(line, nextLine = "") {
+  const raw = String(line || "").trim();
+  const text = stripMarkdownHeading(raw);
+  if (!text || isBulletLine(raw) || text.length > 180) return false;
+
+  // H3+ headings inside Experience are role headings, not top-level sections.
+  if (/^#{3,6}\s+\S/.test(raw)) return true;
+
+  const pipeParts = text.split("|").map((part) => part.trim());
+  if (pipeParts.length >= 2) {
+    const first = pipeParts[0];
+    const rest = pipeParts.slice(1).join(" | ");
+    // `New York, NY / Hybrid | 2022 - Present` is logistics, while
+    // `Staff Platform Engineer | Juniper Relay` is an employment header.
+    if (!(EMPLOYMENT_DATE_RANGE_RE.test(rest) && /,|\//.test(first))) return true;
+  }
+
+  if (/\s(?:—|–)\s/.test(text) || /\s+at\s+/i.test(text)) return true;
+
+  // Plain title/company headings are often followed by a separate date or
+  // location/date line. This also catches layouts that omit visual separators.
+  return Boolean(nextLine && EMPLOYMENT_DATE_RANGE_RE.test(String(nextLine)));
+}
+
+// Blank lines in text extracted from PDFs frequently separate every bullet.
+// Experience records are employment blocks, so once role headers are present,
+// group by those headers instead of treating visual paragraph spacing as jobs.
+function splitExperienceBlocks(lines) {
+  const nextNonEmpty = lines.map((_line, index) => {
+    for (let i = index + 1; i < lines.length; i++) {
+      if (String(lines[i]).trim()) return lines[i];
+    }
+    return "";
+  });
+  const hasRoleHeaders = lines.some((line, index) =>
+    looksLikeRoleHeader(line, nextNonEmpty[index])
+  );
+  if (!hasRoleHeaders) return splitBlocks(lines);
+
+  const blocks = [];
+  let current = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (!String(line).trim()) continue;
+    if (looksLikeRoleHeader(line, nextNonEmpty[index]) && current.length) {
+      blocks.push(current.join("\n").trim());
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length) blocks.push(current.join("\n").trim());
+  return blocks.filter(Boolean);
+}
+
 // Tokenize skills: split on commas, bullets, pipes, newlines; trim; dedupe.
 function tokenizeSkills(lines) {
   const raw = lines.join("\n");
@@ -301,7 +366,7 @@ export function parseResume(text) {
 
   // Build sections output.
   const sections = {
-    experience: splitBlocks(buckets.experience),
+    experience: splitExperienceBlocks(buckets.experience),
     education: splitBlocks(buckets.education),
     skills: tokenizeSkills(buckets.skills),
     projects: splitBlocks(buckets.projects),
@@ -386,11 +451,19 @@ function isDateRange(line) {
   return /^\d{4}\s*[-–—]\s*(\d{4}|present|current|now)$/i.test(line);
 }
 
+function isEmploymentMetadata(line) {
+  const text = stripMarkdownHeading(line);
+  if (!text) return false;
+  if (looksLikeRoleHeader(line)) return true;
+  if (isDateRange(text)) return true;
+  return EMPLOYMENT_DATE_RANGE_RE.test(text) && (/\||,|\//.test(text) || /^\d{4}/.test(text));
+}
+
 // Determine if a line qualifies as an accomplishment.
 function isAccomplishment(line) {
   const stripped = stripBullet(line);
   if (!stripped) return false;
-  if (isDateRange(stripped)) return false;
+  if (isEmploymentMetadata(stripped)) return false;
 
   // Check for a strong past-tense accomplishment verb early in the line.
   // We look at the first few words (up to 4) to find the verb.
