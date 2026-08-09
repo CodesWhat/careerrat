@@ -1,9 +1,7 @@
-// skill-runtime.mjs — Productization Phase 0, P0-4: runs a SKILL.md loop
-// *inside the server process* via the Claude Agent SDK, so POST /api/skill/run
-// never needs the user's own Claude Code session or their own API key. This is
-// the "one hard new build" of the Phase 0 spine — everything else (tracker-dev
-// as an app server, the metering proxy) already existed; this file is what
-// actually drives a skill headlessly.
+// skill-runtime.mjs — drives one allowlisted SKILL.md task headlessly. Desktop
+// uses the selected installed AI CLI first; explicit provider fallback uses the
+// Claude Agent SDK. Both paths share the same skill allowlist, bounded tool
+// surface, structured event contract, cancellation, and usage metadata.
 //
 // SHIPPED MECHANISM: native skill invocation via the SDK's `skills` option,
 // not prompt-injection. Verified against the installed
@@ -36,6 +34,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
+import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, resolveRuntimeTools } from "./runtime-tools.mjs";
 import { appendUsageEvent, computeCost, deriveUsageFeature } from "./usage-log.mjs";
@@ -109,10 +108,10 @@ export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
 }
 
 // ---------------------------------------------------------------------------
-// AI routing — mirrors call-ai.mjs's callAI() BYOK-first priority exactly
-// (same resolveAIRoute()), but here the "call" is the Agent SDK's own child
-// process rather than a fetch() we make ourselves, so the routing decision
-// has to land as env vars for that child, not request headers.
+// AI routing mirrors call-ai.mjs exactly through resolveAIRoute(). Installed
+// CLIs are invoked directly below. For BYOK/managed provider fallback, the
+// routing decision has to land as env vars for the Agent SDK child rather than
+// request headers.
 // ---------------------------------------------------------------------------
 
 // The model-selection knobs the Agent SDK's own CLI reads directly (verified
@@ -442,6 +441,9 @@ export async function runSkillStream({
   // app-safe is the default.
   tools,
   toolProfile,
+  outputSchema,
+  runtimeInventory = null,
+  runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
   if (typeof onEvent !== "function") {
     throw new TypeError("runSkillStream: onEvent callback is required");
@@ -461,7 +463,7 @@ export async function runSkillStream({
     throw err;
   }
 
-  const route = resolveAIRoute(env);
+  const route = resolveAIRoute(env, { repoRoot, runtimeInventory });
   if (route.type === "none") {
     const err = new Error(route.error);
     err.code = "NO_AI_ROUTE";
@@ -469,6 +471,68 @@ export async function runSkillStream({
   }
 
   const runtimeTools = resolveRuntimeTools({ tools, toolProfile });
+
+  if (route.type === "installed") {
+    const prompt = `${buildPrompt({
+      skill,
+      input,
+      skillMdPath: join(repoRoot, ".agents", "skills", skill, "SKILL.md"),
+    })}\n\nThis app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope.`;
+    onEvent({
+      type: "system",
+      data: {
+        subtype: "init",
+        runtime: route.runtime.id,
+        tools: runtimeTools,
+      },
+    });
+    try {
+      const result = await runInstalledRuntimeImpl({
+        runtime: route.runtime,
+        prompt,
+        cwd: repoRoot,
+        env,
+        signal,
+        model:
+          String(env.ROLESTER_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() || undefined,
+        tools: runtimeTools,
+        outputSchema,
+      });
+      if (signal?.aborted) return { ok: false, aborted: true };
+      onEvent({
+        type: "assistant",
+        data: { message: { content: [{ type: "text", text: result.text }] } },
+      });
+      const resultData = { ok: true, aborted: false };
+      onEvent({ type: "result", data: resultData });
+      if (result.usage) {
+        appendUsageEvent(
+          {
+            source: "installed",
+            feature,
+            skill,
+            action,
+            operation,
+            model: result.model || `installed:${route.runtime.id}`,
+            upstream: `local-cli:${route.runtime.id}`,
+            tokens_in: result.usage.input_tokens,
+            tokens_out: result.usage.output_tokens,
+          },
+          { root: repoRoot, env }
+        );
+      }
+      return resultData;
+    } catch (error) {
+      if (signal?.aborted || error?.code === "RUNTIME_CANCELLED") {
+        return { ok: false, aborted: true };
+      }
+      const resultData = { ok: false, error: error.message, code: error.code || undefined };
+      onEvent({ type: "error", data: { message: error.message, code: error.code || undefined } });
+      onEvent({ type: "result", data: resultData });
+      return resultData;
+    }
+  }
+
   const toolPolicy = createRuntimeToolPolicy({ repoRoot, skill, tools: runtimeTools });
 
   // Validate before touching the SDK so a missing devDependency is a clean

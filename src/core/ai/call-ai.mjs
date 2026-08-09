@@ -1,15 +1,16 @@
 // call-ai.mjs — the one seam every skill calls through to reach a model.
 //
-// Shape 2 (see docs/ARCHITECTURE.md / the Productization roadmap): all candidate
-// data stays local; the only cloud surface is a stateless metering proxy
-// (src/cli/ai-proxy.mjs), and a user who'd rather use their own Anthropic key
-// never has to touch it. resolveAIRoute() picks between the two with a fixed
-// priority so callers (and tests) never have to re-derive it:
+// All candidate state stays local. In the desktop/app runtime, the primary AI
+// route is a supported CLI already installed and authenticated on this
+// computer; Rolester invokes that executable with fixed argv and never copies
+// its credentials. Provider routes remain explicit Advanced fallbacks.
+// resolveAIRoute() applies one fixed priority so callers never re-derive it:
 //
-//   1. ANTHROPIC_API_KEY set  -> BYOK, direct to Anthropic.
-//   2. ROLESTER_AI_PROXY_URL set -> the managed-AI proxy (Bearer token +
+//   1. selected/desktop installed CLI, unless provider fallback is explicit.
+//   2. ANTHROPIC_API_KEY set -> BYOK, direct to Anthropic.
+//   3. ROLESTER_AI_PROXY_URL set -> the managed-AI proxy (Bearer token +
 //      x-rolester-skill/x-rolester-action labels the proxy meters by).
-//   3. neither -> throw, naming both options (never a silent no-op).
+//   4. none -> an actionable no-route error (manual operation stays available).
 //
 // The proxy meters server-side, so callAI() never writes a usage_event on that
 // path. On BYOK, nothing else is watching, so callAI() writes the usage_event
@@ -22,6 +23,8 @@
 // read raw Anthropic SSE agree on framing.
 
 import { resolveModelConfig } from "./ai-config.mjs";
+import { detectInstalledRuntimes, runInstalledRuntime } from "./installed-runtimes.mjs";
+import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
 
 const ANTHROPIC_VERSION = "2023-06-01";
@@ -37,7 +40,33 @@ function hostOf(url) {
   }
 }
 
-export function resolveAIRoute(env = process.env) {
+export function resolveAIRoute(
+  env = process.env,
+  { repoRoot = null, runtimeInventory = null } = {}
+) {
+  if (repoRoot) {
+    const selection = loadInstalledRuntimeSelection({ repoRoot, env });
+    const installedRuntimeEnabled =
+      selection.runtimeId !== null ||
+      env.ROLESTER_DESKTOP_SHELL === "1" ||
+      env.ROLESTER_INSTALLED_AI === "1";
+    if (installedRuntimeEnabled && !selection.providerFallback) {
+      const inventory = runtimeInventory || detectInstalledRuntimes({ env });
+      const runtime = selection.runtimeId
+        ? inventory.find(({ id, available }) => id === selection.runtimeId && available)
+        : inventory.find(({ available }) => available);
+      if (runtime) return { type: "installed", runtime };
+      if (selection.runtimeId) {
+        return {
+          type: "none",
+          error:
+            `selected installed AI runtime "${selection.runtimeId}" is unavailable; ` +
+            "re-detect it in Settings or choose the Advanced provider fallback",
+        };
+      }
+    }
+  }
+
   const apiKey = String(env.ANTHROPIC_API_KEY || "").trim();
   if (apiKey) {
     return {
@@ -61,8 +90,8 @@ export function resolveAIRoute(env = process.env) {
   return {
     type: "none",
     error:
-      "no AI route configured: set ANTHROPIC_API_KEY to call Anthropic directly (BYOK), " +
-      "or ROLESTER_AI_PROXY_URL (+ ROLESTER_AI_PROXY_TOKEN) to use the managed-AI proxy",
+      "no AI route configured: install and sign in to a supported AI CLI, or use the " +
+      "Advanced provider fallback with ANTHROPIC_API_KEY / ROLESTER_AI_PROXY_URL",
   };
 }
 
@@ -258,6 +287,98 @@ function usageRow({ source, feature, skill, action, operation, model, usage, ups
   };
 }
 
+function messageContentText(content) {
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return String(content || "");
+  return content
+    .map((part) => {
+      if (typeof part === "string") return part;
+      if (part?.type === "text") return String(part.text || "");
+      return JSON.stringify(part);
+    })
+    .join("\n");
+}
+
+export function buildInstalledRuntimePrompt({ system, messages } = {}) {
+  const sections = [];
+  if (system) sections.push(`System instructions:\n${String(system).trim()}`);
+  const turns = (Array.isArray(messages) ? messages : []).map(
+    (message) =>
+      `${String(message?.role || "user").toUpperCase()}:\n${messageContentText(message?.content)}`
+  );
+  if (turns.length) sections.push(`Conversation:\n${turns.join("\n\n")}`);
+  sections.push(
+    "Complete this request without reading or changing workspace files and return only the requested final answer."
+  );
+  return sections.join("\n\n");
+}
+
+async function runInstalledAI({
+  route,
+  system,
+  messages,
+  outputSchema,
+  signal,
+  root,
+  env,
+  feature,
+  skill,
+  action,
+  operation,
+  runInstalledRuntimeImpl,
+}) {
+  const result = await runInstalledRuntimeImpl({
+    runtime: route.runtime,
+    prompt: buildInstalledRuntimePrompt({ system, messages }),
+    outputSchema,
+    model: String(env.ROLESTER_INSTALLED_AI_MODEL || "").trim() || undefined,
+    cwd: root,
+    env,
+    signal,
+  });
+  const runtimeModel = result.model || `installed:${route.runtime.id}`;
+  if (root && result.usage) {
+    appendUsageEvent(
+      usageRow({
+        source: "installed",
+        feature,
+        skill,
+        action,
+        operation,
+        model: runtimeModel,
+        upstream: `local-cli:${route.runtime.id}`,
+        usage: result.usage,
+      }),
+      { root }
+    );
+  }
+  return { ...result, model: runtimeModel };
+}
+
+async function* streamInstalledAI(options) {
+  const result = await runInstalledAI(options);
+  yield {
+    type: "message_start",
+    message: {
+      model: result.model,
+      usage: result.usage || { input_tokens: 0, output_tokens: 0 },
+    },
+  };
+  yield { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } };
+  yield {
+    type: "content_block_delta",
+    index: 0,
+    delta: { type: "text_delta", text: result.text },
+  };
+  yield { type: "content_block_stop", index: 0 };
+  yield {
+    type: "message_delta",
+    delta: { stop_reason: "end_turn", stop_sequence: null },
+    usage: result.usage || { output_tokens: 0 },
+  };
+  yield { type: "message_stop" };
+}
+
 async function* streamAI({ res, route, model, feature, skill, action, operation, root }) {
   let inputTokens = 0;
   let cacheRead = 0;
@@ -324,9 +445,36 @@ export async function callAI({
   outputSchema,
   outputName,
   outputMode = null,
+  runtimeInventory = null,
+  runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
-  const route = resolveAIRoute(env);
+  const route = resolveAIRoute(env, { repoRoot: root, runtimeInventory });
   if (route.type === "none") throw new Error(route.error);
+
+  if (route.type === "installed") {
+    const options = {
+      route,
+      system,
+      messages,
+      outputSchema,
+      signal,
+      root,
+      env,
+      feature,
+      skill,
+      action,
+      operation,
+      runInstalledRuntimeImpl,
+    };
+    if (stream) return streamInstalledAI(options);
+    const result = await runInstalledAI(options);
+    return {
+      content: [{ type: "text", text: result.text }],
+      stopReason: "end_turn",
+      model: result.model,
+      usage: result.usage,
+    };
+  }
 
   // No-code model-swap seam (ai-config.mjs): a caller that doesn't pass a
   // model falls back to config/ai.json#model (itself already env-overridable

@@ -36,7 +36,7 @@ const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 // Gitignored runtime data, never committed — same as the activity feed.
 export const USAGE_LOG_SUBPATH = "workspace/usage-events.jsonl";
 
-export const USAGE_SOURCES = ["proxy", "byok"];
+export const USAGE_SOURCES = ["proxy", "byok", "installed"];
 
 const FEATURE_BY_OPERATION_PREFIX = [
   ["onboard.resume-ai", "onboarding.resume-ingestion"],

@@ -15,6 +15,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { callAI, extractSSEEvents, resolveAIRoute } from "../src/core/ai/call-ai.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "rolester-call-ai-"));
@@ -224,11 +225,98 @@ test("resolveAIRoute: neither set -> an actionable error naming both options", (
   assert.match(route.error, /ROLESTER_AI_PROXY_URL/);
 });
 
+test("resolveAIRoute: selected installed CLI wins in desktop even when a provider key exists", () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const route = resolveAIRoute(
+      { ROLESTER_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      {
+        repoRoot: root,
+        runtimeInventory: [
+          { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+        ],
+      }
+    );
+    assert.equal(route.type, "installed");
+    assert.equal(route.runtime.id, "codex");
+    assert.equal(route.runtime.path, "/safe/codex");
+    assert.equal(Object.hasOwn(route, "apiKey"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("resolveAIRoute: explicit Advanced provider fallback retains BYOK", () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({
+      repoRoot: root,
+      env: {},
+      runtimeId: null,
+      providerFallback: true,
+    });
+    const route = resolveAIRoute(
+      { ROLESTER_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      {
+        repoRoot: root,
+        runtimeInventory: [
+          { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+        ],
+      }
+    );
+    assert.equal(route.type, "byok");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("callAI: throws the resolveAIRoute error when no route is configured", async () => {
   await assert.rejects(
     () => callAI({ model: "claude-haiku-4-5", messages: [], maxTokens: 8, env: {} }),
     /no AI route configured/
   );
+});
+
+test("callAI: routes a structured request through the selected CLI without a provider key", async () => {
+  const root = tempRoot();
+  try {
+    writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
+    const calls = [];
+    const result = await callAI({
+      messages: [{ role: "user", content: "PROMPT_SECRET_02_07" }],
+      system: "Return a verdict.",
+      maxTokens: 32,
+      outputSchema: OUTPUT_SCHEMA,
+      outputMode: "native",
+      root,
+      env: { ROLESTER_DESKTOP_SHELL: "1" },
+      runtimeInventory: [
+        { id: "codex", name: "Codex", path: "/safe/codex", available: true },
+      ],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return {
+          text: '{"verdict":"keep","confidence":0.9}',
+          runtimeId: "codex",
+          usage: { input_tokens: 5, output_tokens: 3 },
+        };
+      },
+    });
+    assert.equal(result.content[0].text, '{"verdict":"keep","confidence":0.9}');
+    assert.equal(result.model, "installed:codex");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].runtime.id, "codex");
+    assert.match(calls[0].prompt, /PROMPT_SECRET_02_07/);
+    assert.deepEqual(calls[0].outputSchema, OUTPUT_SCHEMA);
+    assert.equal(calls[0].model, undefined);
+    const events = readUsageEvents({ root });
+    assert.equal(events.length, 1);
+    assert.equal(events[0].source, "installed");
+    assert.equal(JSON.stringify(events[0]).includes("PROMPT_SECRET_02_07"), false);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test("callAI: maps proxy cap responses to a friendly non-retryable AI_CAP_EXCEEDED error", async () => {

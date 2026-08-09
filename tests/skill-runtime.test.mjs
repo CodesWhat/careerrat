@@ -13,6 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-config.mjs";
+import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import {
   buildChildEnv,
   discoverSkillDirs,
@@ -760,6 +761,52 @@ test("runSkillStream: aborting mid-run (client disconnect) stops the loop and re
     });
     assert.deepEqual(result, { ok: false, aborted: true });
     assert.deepEqual(events, ["system"]);
+  } finally {
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
+test("runSkillStream: a selected installed CLI bypasses the Agent SDK and streams bounded events", async () => {
+  const repoRoot = tempRepoWithSkill("resume-extract");
+  const env = { ROLESTER_RUNTIME_SKILLS: "resume-extract" };
+  writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
+  try {
+    const events = [];
+    const calls = [];
+    const result = await runSkillStream({
+      skill: "resume-extract",
+      action: "extract",
+      operation: "resume.extract",
+      input: { path: "/tmp/resume.pdf" },
+      repoRoot,
+      env,
+      tools: ["Read"],
+      outputSchema: { type: "object", required: ["full_text"] },
+      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
+      runInstalledRuntimeImpl: async (input) => {
+        calls.push(input);
+        return { text: '{"full_text":"Morgan Hale"}', runtimeId: "codex", usage: null };
+      },
+      loadSdk: async () => {
+        throw new Error("Agent SDK must not load for an installed runtime");
+      },
+      onEvent: (event) => events.push(event),
+    });
+    assert.deepEqual(result, { ok: true, aborted: false });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].runtime.id, "codex");
+    assert.deepEqual(calls[0].tools, ["Read"]);
+    assert.deepEqual(calls[0].outputSchema, {
+      type: "object",
+      required: ["full_text"],
+    });
+    assert.match(calls[0].prompt, /\.agents\/skills\/resume-extract\/SKILL\.md/);
+    assert.match(calls[0].prompt, /\/tmp\/resume\.pdf/);
+    assert.deepEqual(
+      events.map(({ type }) => type),
+      ["system", "assistant", "result"]
+    );
+    assert.equal(events[1].data.message.content[0].text, '{"full_text":"Morgan Hale"}');
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
