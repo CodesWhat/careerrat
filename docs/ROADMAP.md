@@ -3,8 +3,16 @@
 Rolester is a local, skill-driven job-search workspace. You define what you
 actually want; it turns that into searches, gates jobs against the real posting
 body, tailors honest application artifacts from your own evidence, tracks
-outcomes, and prepares you for interviews — all from candidate-owned data that
-never leaves your machine.
+outcomes, and prepares you for interviews — with candidate-owned state stored
+locally. AI requests go through the runtime the candidate selects and are subject
+to that provider's privacy and retention terms.
+
+The active product direction is a conversational local app powered primarily by
+an AI CLI you already have installed and authenticated. Development and QA happen
+web-first for speed; Electron remains the eventual desktop package after the
+experience stabilizes. A managed AI service may return later as an optional
+convenience, but login, billing, and a Rolester API key are not prerequisites for
+the core first-run path.
 
 The opinionated part is the **gate**: don't spray applications, don't trust
 title/keyword matches, read the posting before tailoring, and treat comp,
@@ -227,11 +235,10 @@ nurse, a driver, and an engineer each bring their own config.
   and analytics refresh applied in a single transaction. Existing workspaces migrate only via an
   explicit `rolester data import`; the classic `tracker.json` keeps working as a generated
   export during the transition.
-- **App UI** — a bundled single-page app (`/app`) over the local server, built for clicking
-  rather than prompting: a guided onboarding wizard (drop a PDF/image resume and AI extracts
-  your profile — with a manual path whenever no AI key is configured), editable settings forms,
-  and AI-assist buttons that propose values you can edit before saving. AI suggests terms;
-  deterministic code builds search URLs.
+- **App UI** — a bundled single-page app (`/app`) over the local server with guided onboarding,
+  editable settings, AI-assisted proposals, and manual operation when no AI runtime is ready.
+  The existing wizard/forms are durable review and correction surfaces; the active redesign
+  makes conversation the primary first-run intake experience.
 - **Universal capture** — a docked capture bar plus an Inbox: paste or drop anything (a job
   description, a posting URL, a recruiter email, an interview transcript) and the intake
   pipeline classifies it, matches it against what you're already tracking, and proposes exactly
@@ -248,11 +255,12 @@ nurse, a driver, and an engineer each bring their own config.
 - **Desktop app shell** — an Electron wrapper around the same local server, so the whole thing
   runs as a native window: first run lands in the onboarding wizard, external links open in
   your OS browser, and quitting cleanly shuts down every agent session.
-- **Embedded AI runtime (bring your own key)** — the local server can drive agent skills
-  in-process over live event streams: a chat page for conversational runs, an evaluate page
-  that turns a pasted posting into a gate verdict, and packet generation. Your API key is
-  stored locally in a permission-restricted, gitignored file, is never echoed back by any
-  endpoint, and every AI feature degrades to a manual path without it.
+- **Installed AI runtime first** — onboarding and Settings detect supported coding CLIs,
+  select an already-authenticated local tool, and run bounded structured calls without
+  copying its credentials or requiring a provider key. Basic mode keeps every external
+  capability off; Advanced exposes individual platform + terms opt-ins. Direct provider
+  keys and managed AI remain explicit fallbacks, and every AI feature still degrades to a
+  manual path.
 - **Database-backed setup and sourcing** — onboarding, settings, search setup, and the
   sourcing sweep all read and write the local database first: setup readiness
   (search-ready / gate-ready / apply-ready) is computed from stored facts and gates what
@@ -273,8 +281,35 @@ nurse, a driver, and an engineer each bring their own config.
 
 ## In progress / up next
 
-The app-first surface is now the daily driver; current work is the follow-through:
+The web app is the daily development surface. Current work is re-sequenced around a
+conversation-first local product; Electron packaging and final desktop QA follow after the
+web experience and contracts stabilize:
 
+- **Conversational first ingestion** — accept a résumé, learn desired jobs and hard gates,
+  run an adaptive interview that asks only unresolved/high-value questions, then present a
+  grouped human-readable review before writing canonical profile, evidence, targeting, and
+  honesty state. Autosave raw intake locally and support resume-later.
+- **First-class Ask/Work surface** — make conversation a primary app surface rather than a
+  floating helper. Attachments, streaming progress, cancel/retry, actionable errors, structured
+  proposals, confirmation gates, and links to resulting state all use durable local sessions.
+  Onboarding is the first phase of one persistent workspace conversation, not a disposable
+  setup-only chat. Contextual buttons submit visible typed intents with entity IDs into that same
+  thread; the agent reloads fresh canonical state and invokes deterministic operations or
+  safety-isolated skill workers internally, with every result returning to the one user-facing
+  conversation. Backend foundation now persists one canonical workspace thread, replays its
+  durable history through the selected runtime, and routes interview-prep intents/results back
+  into that history; streaming, attachments, onboarding graduation, and the visual Ask surface
+  remain active work.
+- **Bring-your-own authenticated CLI** — use a supported installed agent as the normal AI
+  runtime. Be precise about which adapters are fully supported; direct provider keys are an
+  Advanced fallback and managed AI is a parked future convenience.
+- **First-day outcome** — carry a new user from résumé through targets/gates and the interview
+  into source setup and one strictly filtered search with a small, useful review queue.
+- **QA remediation, web-first** — preserve the completed candidate-truth, local-runtime,
+  consent, and strict role/location/radius sourcing fixes. Continue typed evaluation,
+  artifact, capture, relationship, communication, provenance, and reliability work as it
+  supports the new flow. Run packaged Electron and clean-device regression QA in the final
+  integration phase rather than after every ordinary web tranche.
 - **Finish migrating the writing skills to the data API** — most writing skills now go
   through the same verbs the UI buttons use; the remaining batch is mail/message ingest,
   calendar sync, interview prep, and relationship sourcing (legacy workspaces keep working
@@ -284,8 +319,9 @@ The app-first surface is now the daily driver; current work is the follow-throug
   activity/action state. The classic render path retires only once those are covered.
 - **Coaching loop** — turn a below-floor fit score from a verdict into a plan: name the gaps,
   suggest how to close them, re-ingest the new evidence, re-score.
-- **Desktop packaging polish** — signing/notarization and first-run experience for the
-  desktop shell.
+- **Desktop integration and packaging** — after web acceptance: desktop-safe runtime/path
+  discovery, filesystem ownership, navigation, exports, signing/notarization, clean-device
+  first run, restart, and packaged end-to-end QA.
 
 ## V2 Parking Lot
 
@@ -293,10 +329,9 @@ These ideas are deliberately out of the current pass. Reopen them when the core
 daily workflow has been dogfooded and the pain is real enough to justify the
 extra surface area.
 
-- **Conversational coach layer** — browser speech input/output, a dashboard chat
-  panel, and adaptive setup prompts that read existing context before asking for
-  more. This includes optional voice, voice-extended interview prep, post-interview
-  voice debriefs, and "talk to your agent from the dashboard."
+- **Voice layer** — browser speech input/output, voice-extended interview prep, and
+  post-interview voice debriefs. Text conversation and adaptive setup are now current work;
+  voice remains deferred until that interaction model is proven.
 - **Agent CLI adapters / multi-runtime skill homes** — Gemini CLI, DeepSeek, Qwen,
   Kimi, Hermes Agent, and any other runner need launch/handoff support, local
   router/context loading, skill discovery, and a smoke-test path before appearing on
