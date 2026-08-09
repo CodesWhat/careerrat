@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/assist-suggest.schema.json",
+  "$id": "https://careerrat.local/schemas/assist-suggest.schema.json",
   "title": "Rolester POST /api/assist/suggest model output",
   "type": "object",
   "required": ["suggestions"],

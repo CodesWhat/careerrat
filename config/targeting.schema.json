@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/targeting.schema.json",
+  "$id": "https://careerrat.local/schemas/targeting.schema.json",
   "title": "Rolester Targeting",
   "type": "object",
   "required": ["role_buckets", "keep_signals", "cut_signals"],

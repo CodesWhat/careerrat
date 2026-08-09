@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/evidence.schema.json",
+  "$id": "https://careerrat.local/schemas/evidence.schema.json",
   "title": "Rolester Evidence Bank",
   "type": "object",
   "required": ["claims"],

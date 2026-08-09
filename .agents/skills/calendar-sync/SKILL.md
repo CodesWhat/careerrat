@@ -6,7 +6,7 @@ description: Write tracker-derived interviews, assessments, follow-ups, prep blo
 # calendar-sync
 
 Use this skill when the user asks to add a tracked event to their real calendar,
-sync Calendar to Apple/Google/Outlook, create a calendar hold from Rolester, or
+sync Calendar to Apple/Google/Outlook, create a calendar hold from CareerRat, or
 handoff a calendar event to local automation.
 
 This builds on the no-auth Calendar export path already rendered in the

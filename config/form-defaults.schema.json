@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/form-defaults.schema.json",
+  "$id": "https://careerrat.local/schemas/form-defaults.schema.json",
   "title": "Rolester Form Defaults",
   "type": "object",
   "required": ["auto_submit"],

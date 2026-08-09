@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/honesty.schema.json",
+  "$id": "https://careerrat.local/schemas/honesty.schema.json",
   "title": "Rolester Honesty Boundaries",
   "type": "object",
   "required": ["claims"],

@@ -489,8 +489,8 @@ test("public setup docs teach the rolester binary instead of source-file invocat
 test("rolester start prompt anchors the agent to doctor and the discovery order", () => {
   const text = readFileSync(join(ROOT, "bin/rolester.mjs"), "utf8");
 
-  assert.match(text, /run rolester doctor/);
-  assert.match(text, /next unfinished Rolester skill/);
+  assert.match(text, /run careerrat doctor/);
+  assert.match(text, /next unfinished CareerRat skill/);
   assert.match(text, /setup-searches -> research-boards -> discover-companies -> search-jobs/);
 });
 
@@ -501,8 +501,8 @@ test("rolester start --no-agent prints the manual agent handoff", () => {
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /Open your agent in this folder and say:/);
-    assert.match(result.stdout, /run rolester doctor/);
-    assert.match(result.stdout, /next unfinished Rolester skill/);
+    assert.match(result.stdout, /run careerrat doctor/);
+    assert.match(result.stdout, /next unfinished CareerRat skill/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

@@ -3,10 +3,10 @@ import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 
-const APP_NAME = "Rolester";
-const DEV_BUNDLE_IDENTIFIER = "com.codeswhat.rolester.dev";
+const APP_NAME = "CareerRat";
+const DEV_BUNDLE_IDENTIFIER = "com.codeswhat.careerrat.dev";
 const ELECTRON_EXECUTABLE = "Electron";
-const APP_EXECUTABLE = "Rolester";
+const APP_EXECUTABLE = "CareerRat";
 
 export function buildInfoPlistBrandCommands({
   appName = APP_NAME,

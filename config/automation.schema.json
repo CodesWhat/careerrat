@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/automation.schema.json",
+  "$id": "https://careerrat.local/schemas/automation.schema.json",
   "title": "Rolester Browser-Automation Config",
   "description": "Opt-in authenticated browser automation. Defaults OFF — absence of this file means nothing is automated. A capability runs on a platform only if capabilities.<cap>.enabled AND capabilities.<cap>.platforms.<platform> AND consent.<platform> are all true.",
   "type": "object",

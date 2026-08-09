@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/search-sources.schema.json",
+  "$id": "https://careerrat.local/schemas/search-sources.schema.json",
   "title": "Rolester Search Sources",
   "type": "object",
   "additionalProperties": true,

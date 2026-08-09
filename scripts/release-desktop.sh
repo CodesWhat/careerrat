@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, notarize, staple, and (optionally) publish a Rolester Desktop release.
+# Build, notarize, staple, and (optionally) publish a CareerRat Desktop release.
 #
 # Usage: bash scripts/release-desktop.sh [patch|minor|none]
 #   patch/minor — bump apps/desktop/package.json semver before building
@@ -33,12 +33,12 @@ case "$BUMP" in
 esac
 
 VERSION="$(node -p "require('./$DESKTOP_DIR/package.json').version")"
-echo "Building Rolester $VERSION"
+echo "Building CareerRat $VERSION"
 
 npm run desktop:dist
 
-DMG_PATH="$DESKTOP_DIR/dist/Rolester-$VERSION-arm64.dmg"
-APP_PATH="$DESKTOP_DIR/dist/mac-arm64/Rolester.app"
+DMG_PATH="$DESKTOP_DIR/dist/CareerRat-$VERSION-arm64.dmg"
+APP_PATH="$DESKTOP_DIR/dist/mac-arm64/CareerRat.app"
 
 if [ ! -f "$DMG_PATH" ]; then
   echo "error: expected DMG not found at $DMG_PATH" >&2
@@ -98,7 +98,7 @@ if [ "${RELEASE:-}" = "1" ]; then
   fi
   echo "Creating GitHub release $TAG..."
   gh release create "$TAG" "$DMG_PATH" \
-    --title "Rolester Desktop $VERSION" \
+    --title "CareerRat Desktop $VERSION" \
     --generate-notes
   echo "Published $TAG."
 else

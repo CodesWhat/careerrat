@@ -1,6 +1,6 @@
 ---
 name: discover-companies
-description: Web-search companies LIKELY to be hiring the candidate's target roles → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to Rolester tracked-company source config, confirm-first. Upstream of search-jobs; turns a closed company set into a growing one.
+description: Web-search companies LIKELY to be hiring the candidate's target roles → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to CareerRat tracked-company source config, confirm-first. Upstream of search-jobs; turns a closed company set into a growing one.
 tier_1_inputs: [profile.candidate.domain, targeting role_buckets, targeting keep_signals, targeting excluded_companies, profile.compensation.minimum_base, STEP 0 dedup set, modes verdict]
 tier_2_inputs: [per-company WebSearch/WebFetch bodies, careers-page resolution]
 ---
@@ -9,7 +9,7 @@ tier_2_inputs: [per-company WebSearch/WebFetch bodies, careers-page resolution]
 
 Discovers **companies** likely to be hiring the candidate's target roles, resolves
 each to a careers board the scanner can sweep, screens them, and proposes adding them
-to the Rolester source config (`rolester companies`: SQLite in DB workspaces,
+to the CareerRat source config (`rolester companies`: SQLite in DB workspaces,
 legacy `config/sourced-scan.json` otherwise). Never writes a company without explicit
 user confirmation. Never duplicates a company already tracked, applied to, sourced,
 or excluded.

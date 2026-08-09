@@ -1,6 +1,6 @@
 ---
 name: tailor-application
-description: Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the Rolester gate. Reject unresolved placeholders. Use email-comms for email replies, follow-ups, thank-yous, scheduling, negotiation, and recruiter-message threads.
+description: Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. Use email-comms for email replies, follow-ups, thank-yous, scheduling, negotiation, and recruiter-message threads.
 ---
 
 # tailor-application

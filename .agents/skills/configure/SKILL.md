@@ -91,7 +91,7 @@ A capability runs on a platform only if all three conditions are true: the capab
 
 **Dry-run first.** For every CLI command above, run it once without `--write` so the user sees the exact change before it commits. Only add `--write` (and `--confirm` where required) after an explicit yes.
 
-**Mode semantics:** `usage_mode` changes compute/scope for discretionary work; it never lowers core gate/tailor/track/comms quality. `application_mode` changes what Rolester does after discovery — promote, review, apply, or hold. Discovery should remain recall-oriented by default so plausible roles are not missed; application mode gates what happens next. Neither mode relaxes honesty, privacy, comp, consent, or application-limit gates.
+**Mode semantics:** `usage_mode` changes compute/scope for discretionary work; it never lowers core gate/tailor/track/comms quality. `application_mode` changes what CareerRat does after discovery — promote, review, apply, or hold. Discovery should remain recall-oriented by default so plausible roles are not missed; application mode gates what happens next. Neither mode relaxes honesty, privacy, comp, consent, or application-limit gates.
 
 ### Settings without a dedicated CLI — route to the owning skill
 
@@ -112,7 +112,7 @@ For `ingest-profile`-owned settings: tell the user which step to target. `ingest
 
 The session browser is the Layer 3 interactive provider (`docs/BROWSER.md`). Two options:
 
-- **Extension (recommended default):** Claude-in-Chrome or equivalent. It already holds the user's logins and password store, so authenticated portals just work. No credentials are stored by Rolester.
+- **Extension (recommended default):** Claude-in-Chrome or equivalent. It already holds the user's logins and password store, so authenticated portals just work. No credentials are stored by CareerRat.
 - **Playwright (fallback):** A persistent profile at `~/.rolester/board-profiles/<platform>`. The user signs in once per platform; the session persists across runs.
 
 Switch the provider with:

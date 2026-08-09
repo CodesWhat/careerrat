@@ -232,7 +232,7 @@ If `capabilities.one_click_apply` does not show `allowed: true` for `linkedin`, 
 4. Enable for LinkedIn: `rolester automation enable one_click_apply linkedin --write`
 5. Verify: `rolester automation status --json`
 
-State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent — Rolester records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended.
+State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent — CareerRat records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended.
 
 ### Session browser + live DOM
 

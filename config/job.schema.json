@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/job.schema.json",
+  "$id": "https://careerrat.local/schemas/job.schema.json",
   "title": "Rolester Saved Job",
   "type": "object",
   "required": ["frontmatter", "body"],

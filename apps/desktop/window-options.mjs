@@ -3,7 +3,7 @@ const BASE_WINDOW_OPTIONS = {
   height: 860,
   minWidth: 960,
   minHeight: 700,
-  title: "Rolester",
+  title: "CareerRat",
   backgroundColor: "#fffaf2",
 };
 

@@ -1,4 +1,4 @@
-# Rolester — agentic job-search workspace
+# CareerRat — agentic job-search workspace
 # Zero runtime dependencies; node:24-slim is sufficient for all core CLIs.
 #
 # NOTE: playwright (used by capture scripts) is a devDependency and is NOT
@@ -8,7 +8,7 @@
 
 FROM node:24-slim
 
-LABEL org.opencontainers.image.title="rolester" \
+LABEL org.opencontainers.image.title="careerrat" \
       org.opencontainers.image.description="Agentic job-search workspace" \
       org.opencontainers.image.licenses="MIT"
 

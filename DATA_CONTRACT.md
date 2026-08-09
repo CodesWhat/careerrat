@@ -1,6 +1,6 @@
 # Data Contract
 
-Rolester separates reusable system code from private candidate data.
+CareerRat separates reusable system code from private candidate data.
 
 ## User Layer
 
@@ -33,7 +33,7 @@ confirmation.
 
 ## System Layer
 
-These files are safe for Rolester updates and public distribution.
+These files are safe for CareerRat updates and public distribution.
 
 | Path | Purpose |
 | --- | --- |

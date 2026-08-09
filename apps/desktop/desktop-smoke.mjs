@@ -1,6 +1,6 @@
 // desktop-smoke.mjs — pure HTTP checks for the Electron --smoke path.
 // BrowserWindow load events prove Chromium finished a navigation; these
-// checks prove the navigation target was the built Rolester SPA, not a server
+// checks prove the navigation target was the built CareerRat SPA, not a server
 // error page that happened to load successfully.
 
 export async function verifySmokeHttpSurface({ baseUrl, route, getOk }) {
@@ -27,7 +27,7 @@ export async function verifySmokeHttpSurface({ baseUrl, route, getOk }) {
 export async function verifySmokePdfExport({ outPath, renderPdf, readFile, removeFile }) {
   try {
     await renderPdf({
-      markdown: "# Rolester export smoke\n\nPackaged Electron renderer check.\n",
+      markdown: "# CareerRat export smoke\n\nPackaged Electron renderer check.\n",
       outPath,
     });
     const pdf = Buffer.from(readFile(outPath));

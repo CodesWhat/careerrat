@@ -9,7 +9,7 @@ describe("desktop window chrome", () => {
       height: 860,
       minWidth: 960,
       minHeight: 700,
-      title: "Rolester",
+      title: "CareerRat",
       backgroundColor: "#fffaf2",
       titleBarStyle: "hiddenInset",
       trafficLightPosition: { x: 18, y: 18 },
@@ -22,7 +22,7 @@ describe("desktop window chrome", () => {
       height: 860,
       minWidth: 960,
       minHeight: 700,
-      title: "Rolester",
+      title: "CareerRat",
       backgroundColor: "#fffaf2",
     });
   });

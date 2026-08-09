@@ -1,6 +1,6 @@
 ---
 name: report-issue
-description: When Rolester itself looks broken — a crash, stack trace, non-zero exit, or clearly-wrong output — diagnose it, assemble redacted diagnostics, and (only with the user's explicit yes) open a GitHub issue on the upstream Rolester repo.
+description: When CareerRat itself looks broken — a crash, stack trace, non-zero exit, or clearly-wrong output — diagnose it, assemble redacted diagnostics, and (only with the user's explicit yes) open a GitHub issue on the upstream CareerRat repo.
 ---
 
 # report-issue
@@ -11,7 +11,7 @@ description: When Rolester itself looks broken — a crash, stack trace, non-zer
 
 ## Core Principle
 
-When Rolester breaks, the agent's job is three things: (1) tell a real defect apart from a user-config problem, (2) assemble a useful report that is **scrubbed of all personal data**, and (3) file it upstream **only after the user says yes**. This skill never auto-files, never runs on a schedule, and never puts candidate data in a public place. The issue is authored by the user's own `gh` identity, so their GitHub username is publicly attached to it — surface that before filing.
+When CareerRat breaks, the agent's job is three things: (1) tell a real defect apart from a user-config problem, (2) assemble a useful report that is **scrubbed of all personal data**, and (3) file it upstream **only after the user says yes**. This skill never auto-files, never runs on a schedule, and never puts candidate data in a public place. The issue is authored by the user's own `gh` identity, so their GitHub username is publicly attached to it — surface that before filing.
 
 The report target is the upstream project tracker: **`CodesWhat/careerrat`**. (A fork maintainer can change this slug.)
 
@@ -19,7 +19,7 @@ The report target is the upstream project tracker: **`CodesWhat/careerrat`**. (A
 
 ## When to Use
 
-Offer this skill when something looks like a **Rolester defect**, not a user error:
+Offer this skill when something looks like a **CareerRat defect**, not a user error:
 
 - A `rolester` CLI command throws, prints a stack trace, or exits non-zero unexpectedly.
 - A skill workflow hits a tool crash, an unhandled exception, or produces clearly-wrong output (a mangled artifact, a gate that scores impossibly, a dashboard that won't render).
@@ -45,7 +45,7 @@ node --version
 - If `doctor` flags missing config or schema drift → it's a setup issue. Route to `configure` or `ingest-profile`. Not an issue.
 - If the failure is an unhandled exception, a stack trace into `src/`, or a reproducible wrong result from valid inputs → it's a real defect. Continue.
 
-State your read out loud: "this looks like a Rolester bug because `<reason>`," or "this is a config issue, here's the fix." Don't file on a hunch.
+State your read out loud: "this looks like a CareerRat bug because `<reason>`," or "this is a config issue, here's the fix." Don't file on a hunch.
 
 ---
 
@@ -55,7 +55,7 @@ Build the report from these, and **redact every one** per the rules below:
 
 | Field | Source | Redaction |
 |---|---|---|
-| Rolester version | `rolester --version` | none (safe) |
+| CareerRat version | `rolester --version` | none (safe) |
 | Node + OS | `node --version`, `process.platform` | none (safe) |
 | Install method | in-tree clone vs global npm | none (safe) |
 | Failing command | the `rolester <cmd>` that broke | strip data args (names, paths, URLs) — keep the verb + flags |
@@ -93,7 +93,7 @@ Build the title + body from this template, then **show the user the exact render
 Title: <one-line summary of the failure>
 
 ### Environment
-- Rolester: <version>
+- CareerRat: <version>
 - Node: <version>  •  OS: <platform>
 - Install: <in-tree | global npm>
 
@@ -115,7 +115,7 @@ Title: <one-line summary of the failure>
 ​```
 
 ---
-_Filed via the Rolester `report-issue` skill. Diagnostics were redacted of personal data._
+_Filed via the CareerRat `report-issue` skill. Diagnostics were redacted of personal data._
 ```
 
 Tell the user plainly: "this posts publicly to CodesWhat/careerrat under your GitHub account (`<gh username>`)." Get an explicit **yes** before filing. Nothing publishes without it.

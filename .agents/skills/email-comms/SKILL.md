@@ -1,6 +1,6 @@
 ---
 name: email-comms
-description: Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the Rolester tracker.
+description: Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the CareerRat tracker.
 ---
 
 # email-comms

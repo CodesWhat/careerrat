@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/activity-event.schema.json",
+  "$id": "https://careerrat.local/schemas/activity-event.schema.json",
   "title": "Rolester Activity Event",
   "type": "object",
   "additionalProperties": false,

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/deep-ingest-source.schema.json",
+  "$id": "https://careerrat.local/schemas/deep-ingest-source.schema.json",
   "title": "Deep ingest source submission",
   "type": "object",
   "additionalProperties": false,

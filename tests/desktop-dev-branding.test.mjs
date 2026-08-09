@@ -12,7 +12,7 @@ async function readText(relPath) {
   return readFile(join(root, relPath), "utf8");
 }
 
-test("desktop dev launch brands the local Electron.app as Rolester before starting", async () => {
+test("desktop dev launch brands the local Electron.app as CareerRat before starting", async () => {
   const pkg = JSON.parse(await readText("apps/desktop/package.json"));
   const dev = pkg.scripts?.dev || "";
 
@@ -30,15 +30,15 @@ test("desktop dev branding changes plist identity and executable name for the Do
   const commands = buildInfoPlistBrandCommands();
 
   assert.deepEqual(commands, [
-    ["Set", "CFBundleName", "Rolester"],
-    ["Set", "CFBundleDisplayName", "Rolester"],
-    ["Set", "CFBundleExecutable", "Rolester"],
-    ["Set", "CFBundleIdentifier", "com.codeswhat.rolester.dev"],
+    ["Set", "CFBundleName", "CareerRat"],
+    ["Set", "CFBundleDisplayName", "CareerRat"],
+    ["Set", "CFBundleExecutable", "CareerRat"],
+    ["Set", "CFBundleIdentifier", "com.codeswhat.careerrat.dev"],
     ["Set", "CFBundleIconFile", "electron.icns"],
   ]);
 });
 
-test("desktop dev branding launches a Rolester executable copy", () => {
+test("desktop dev branding launches a CareerRat executable copy", () => {
   const calls = [];
   const result = brandElectronDevApp({
     platform: "darwin",
@@ -62,14 +62,14 @@ test("desktop dev branding launches a Rolester executable copy", () => {
       ([kind, from, to]) =>
         kind === "copy" &&
         from.endsWith("Electron.app/Contents/MacOS/Electron") &&
-        to.endsWith("Electron.app/Contents/MacOS/Rolester")
+        to.endsWith("Electron.app/Contents/MacOS/CareerRat")
     )
   );
   assert.ok(
     calls.some(
       ([kind, target, mode]) =>
         kind === "chmod" &&
-        target.endsWith("Electron.app/Contents/MacOS/Rolester") &&
+        target.endsWith("Electron.app/Contents/MacOS/CareerRat") &&
         mode === 0o755
     )
   );
@@ -78,7 +78,7 @@ test("desktop dev branding launches a Rolester executable copy", () => {
       ([kind, target, value]) =>
         kind === "write" &&
         target.endsWith("node_modules/electron/path.txt") &&
-        value === "Electron.app/Contents/MacOS/Rolester"
+        value === "Electron.app/Contents/MacOS/CareerRat"
     )
   );
 });

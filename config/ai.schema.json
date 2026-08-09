@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/ai.schema.json",
+  "$id": "https://careerrat.local/schemas/ai.schema.json",
   "title": "Rolester AI Model Config",
   "type": "object",
   "additionalProperties": false,

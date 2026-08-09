@@ -258,6 +258,6 @@ discovery.
 - **Never fabricate sources or filters.** Only add entries the user explicitly requested or that `--from-targeting` derives from real targeting data.
 - **Preserve embedded filters** when importing a pasted URL. The `searchState` block must be written exactly as parsed from the URL — do not normalize, simplify, or drop query params.
 - **Salary floor is `compensation.minimum_base`.** Never read or surface `current_base` — it is private and must not appear in any output or log.
-- **Writes source config through Rolester helpers; reads candidate config through DB-first accessors.** In DB workspaces, `config/` and `candidate/` files are compatibility exports; never hand-edit them. Never commit candidate files.
+- **Writes source config through CareerRat helpers; reads candidate config through DB-first accessors.** In DB workspaces, `config/` and `candidate/` files are compatibility exports; never hand-edit them. Never commit candidate files.
 - **Domain-general.** No board name, aggregator, or provider is hardcoded as canonical in this skill's prose. Board selection follows `profile.candidate.domain`. The skill must execute correctly for a trucking, nursing, or finance candidate.
 - **Do not scan or gate here.** `search-jobs` owns discovery and intake. `evaluate-job` is the fit gate.

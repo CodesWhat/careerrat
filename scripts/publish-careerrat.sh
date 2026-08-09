@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Publish rolester to npm under the codeswhat org (unscoped, public).
+# Publish careerrat to npm under the codeswhat org (unscoped, public).
 # Run AFTER `npm login` and AFTER the codeswhat org exists on npmjs.com.
-# Usage:  bash scripts/publish-rolester.sh
+# Usage:  bash scripts/publish-careerrat.sh
 set -euo pipefail
 
 ORG="codeswhat"
@@ -26,16 +26,16 @@ echo "→ dry-run pack (what will ship)…"
 npm publish --dry-run
 
 echo
-read -r -p "Publish rolester@$(node -p "require('./package.json').version") public to npm? [y/N] " ok
+read -r -p "Publish careerrat@$(node -p "require('./package.json').version") public to npm? [y/N] " ok
 [[ "$ok" == "y" || "$ok" == "Y" ]] || { echo "aborted."; exit 0; }
 
 echo "→ publishing…"
 npm publish --access public
 
-echo "→ granting '$TEAM' read-write on rolester…"
-npm access grant read-write "$TEAM" rolester || echo "  (grant skipped/failed — set it in the org UI if needed)"
+echo "→ granting '$TEAM' read-write on careerrat…"
+npm access grant read-write "$TEAM" careerrat || echo "  (grant skipped/failed — set it in the org UI if needed)"
 
 echo "→ bringing portkey-admin-mcp under '$ORG' (keeps bare name, no rescope)…"
 npm access grant read-write "$TEAM" portkey-admin-mcp || echo "  (portkey grant skipped/failed — fine to do later)"
 
-echo "✓ done. Verify:  npm view rolester  &&  npm owner ls rolester"
+echo "✓ done. Verify:  npm view careerrat  &&  npm owner ls careerrat"

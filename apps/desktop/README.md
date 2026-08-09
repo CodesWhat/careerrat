@@ -1,7 +1,7 @@
-# Rolester Electron desktop
+# CareerRat Electron desktop
 
 The Electron desktop app is the pilot product shell. It boots the local
-Rolester server and opens the React app at `/app`; a first-run workspace opens
+CareerRat server and opens the React app at `/app`; a first-run workspace opens
 `/app/onboarding`. Generated tracker/static pages remain compatibility,
 debug, or export support only, not the desktop pilot UX.
 
@@ -48,7 +48,7 @@ imported. It points at Electron's per-user data directory:
 and `internal/ai.env` live there, outside the signed resources tree.
 
 The packaged app detects supported AI CLIs in Finder-safe install locations and
-uses an already-authenticated installed tool as its primary AI runtime. Rolester
+uses an already-authenticated installed tool as its primary AI runtime. CareerRat
 stores only the selected runtime id; it never copies or persists the CLI's
 credentials. A direct provider key and managed AI are explicit Advanced
 fallbacks. Provider credentials written through `src/core/ai/ai-env.mjs` live in
@@ -66,7 +66,7 @@ password, or keychain-profile value.
 Verify the app and DMG after a pilot build:
 
 ```
-codesign -dv --verbose=2 dist/mac-arm64/Rolester.app
+codesign -dv --verbose=2 dist/mac-arm64/CareerRat.app
 xcrun stapler validate dist/*.dmg
 spctl --assess --type open --context context:primary-signature dist/*.dmg
 ```
@@ -82,4 +82,4 @@ for normal `/app` buttons.
 Auto-update readiness means this package is signed/notarized and the release
 process can later attach an updater safely. The current desktop app does not
 install updates itself; users still update the open-core CLI with
-`rolester update`.
+`careerrat update`.

@@ -1,10 +1,10 @@
-# Rolester V3 UX Findings
+# CareerRat V3 UX Findings
 
-Researched July 8, 2026. This file consolidates current UI/UX research, competitor patterns, and product decisions for the next pass on the Rolester app pages: Dashboard, Calendar, Jobs, Network, and Library.
+Researched July 8, 2026. This file consolidates current UI/UX research, competitor patterns, and product decisions for the next pass on the CareerRat app pages: Dashboard, Calendar, Jobs, Network, and Library.
 
 ## Executive Summary
 
-The V2 pages helped expose the right sections, but V3 should be more disciplined: every page needs one job, a compact first viewport, believable data, and direct action controls. Rolester should not copy generic SaaS dashboards or social-network layouts. Its advantage is private, agent-led job-search memory: what changed, what needs the user, what is worth pursuing, and what evidence or artifact is ready.
+The V2 pages helped expose the right sections, but V3 should be more disciplined: every page needs one job, a compact first viewport, believable data, and direct action controls. CareerRat should not copy generic SaaS dashboards or social-network layouts. Its advantage is private, agent-led job-search memory: what changed, what needs the user, what is worth pursuing, and what evidence or artifact is ready.
 
 Global V3 rules:
 
@@ -56,7 +56,7 @@ Calendar, CRM, and library references:
 
 ## Competitor Pattern Summary
 
-| Product | Useful Pattern | What Rolester Should Borrow | What Rolester Should Avoid |
+| Product | Useful Pattern | What CareerRat Should Borrow | What CareerRat Should Avoid |
 | --- | --- | --- | --- |
 | Huntr | Visual job tracker, job cards, activity timeline, contacts, documents, metrics, packets | Job-specific packets, contact/document links, compact pipeline state | Full manual Kanban as the home page |
 | Teal | Save jobs, pipeline stages, job insights, notes, contacts, follow-up templates | Source-of-truth job records, keyword/fit diagnostics, contact linkage | Making ATS score or resume score the primary identity of a role |

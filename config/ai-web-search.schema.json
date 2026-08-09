@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/ai-web-search.schema.json",
+  "$id": "https://careerrat.local/schemas/ai-web-search.schema.json",
   "title": "Rolester search-jobs skill AI Web Search mode output",
   "type": "object",
   "required": ["roles", "queries_run"],

@@ -1,4 +1,4 @@
-# electron-builder config for the Rolester desktop shell (M5, macOS-first).
+# electron-builder config for the CareerRat desktop shell (M5, macOS-first).
 #
 # `npm run dist` runs `stage.mjs` first (builds staging/rolester, the
 # extraResources tree below) then electron-builder itself.
@@ -11,8 +11,8 @@
 # notarization credentials from the local keychain or CI environment; this
 # tracked config intentionally carries no account, team, password, or profile
 # values.
-appId: com.codeswhat.rolester
-productName: Rolester
+appId: com.codeswhat.careerrat
+productName: CareerRat
 directories:
   output: dist
 files:

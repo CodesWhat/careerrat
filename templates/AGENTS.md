@@ -1,10 +1,10 @@
-# Rolester Local Agent Instructions
+# CareerRat Local Agent Instructions
 
 Read this before touching jobs.
 
 ## Dashboard Dev Server
 
-The dashboard should be live during active Rolester work. Check
+The dashboard should be live during active CareerRat work. Check
 `http://localhost:7777`; if it is down, start `rolester tracker-dev` from the repo
 root before telling the user to use the dashboard.
 
@@ -21,7 +21,7 @@ nohup rolester tracker-dev > .internal/tracker-dev.log 2>&1 &
 echo $! > .internal/tracker-dev.pid
 ```
 
-If port 7777 is already occupied by something other than Rolester, use
+If port 7777 is already occupied by something other than CareerRat, use
 `rolester tracker-dev --port 7778` and report the actual URL. Keep the server
 running after tracker-visible changes so the page hot reloads. The dashboard is
 read-only; agents and skills write `workspace/tracker.json`.

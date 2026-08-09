@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/form-questions.schema.json",
+  "$id": "https://careerrat.local/schemas/form-questions.schema.json",
   "title": "Rolester Normalized Form Questions",
   "description": "Shared output shape of src/core/apply/form-questions.mjs — a job posting's real application-form questions, fetched deterministically (Greenhouse/Ashby) or pasted by hand.",
   "type": "object",

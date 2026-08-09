@@ -1,4 +1,4 @@
-# @rolester/web
+# @careerrat/web
 
 The M7 Vite + React app shell, mounted at `/app` by the embedded server
 (`src/cli/tracker-dev.mjs`). Private workspace — never published on its own;
@@ -35,7 +35,7 @@ npm run app:build
 
 Builds `apps/web/dist/`, which `tracker-dev.mjs` then serves at `/app/*`
 (with SPA fallback for client-side routes) whether run via
-`rolester tracker-dev`, the packaged Electron desktop app, or after
-`npm install rolester` from npm. `npm pack`/`npm publish` also run this build
+`careerrat tracker-dev`, the packaged Electron desktop app, or after
+`npm install careerrat` from npm. `npm pack`/`npm publish` also run this build
 automatically via the root `prepack` script, so a broken SPA build fails the
 publish step instead of shipping stale/missing output.

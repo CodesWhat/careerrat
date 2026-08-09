@@ -1,9 +1,9 @@
-# Rolester Claude Instructions
+# CareerRat Claude Instructions
 
 Follow [AGENTS.md](AGENTS.md). It is the source of truth for intent routing,
 the body-read gate, artifact completeness, and submit safety. If
 `candidate/AGENTS.md` exists, read it too for candidate-specific context; if the
-workspace is not set up yet, run `ingest-profile` (or `rolester ingest`) first.
+workspace is not set up yet, run `ingest-profile` (or `careerrat ingest`) first.
 
 Key rule: when the user asks to apply, run the `apply-job` workflow. `apply-job`
 must run or verify `evaluate-job` before tailoring, filling, or submitting.
@@ -33,11 +33,11 @@ provenance, persists it to the tracker, and feeds the fit score only where it
 cross-cuts a stated candidate need. Cost-gated: auto-fires at the interview stage by
 default; the rating is an internal signal and never enters an outbound artifact.
 
-When a `rolester` command crashes or behaves like it's broken, or the user asks to
+When a `careerrat` command crashes or behaves like it's broken, or the user asks to
 report a bug or file an issue, run `report-issue`. It separates a real defect from a
 config problem, assembles redacted diagnostics (never candidate PII, comp, or
 workspace contents), and only with an explicit yes opens a GitHub issue on the
-upstream `CodesWhat/rolester` repo. It never auto-files.
+upstream `CodesWhat/careerrat` repo. It never auto-files.
 
 When the user pastes an application-form or screening question and wants a drafted
 answer outside a full tailor/apply run ("how should I answer this", "the form is

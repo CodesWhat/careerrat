@@ -1,9 +1,9 @@
 {
-  "name": "@rolester/proxy-vercel",
+  "name": "@careerrat/proxy-vercel",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Vercel serverless front end for the Rolester managed-AI proxy — see README.md.",
+  "description": "Vercel serverless front end for the CareerRat managed-AI proxy — see README.md.",
   "engines": {
     "node": ">=24"
   },

@@ -1,4 +1,4 @@
-# Rolester Agent Router
+# CareerRat Agent Router
 
 This is the agent operating contract. Humans setting up: see README.md first.
 
@@ -83,7 +83,7 @@ let's get started" (or anything that isn't a specific task):
 
 ## Ongoing Next-Skill Steering
 
-Always steer toward the next useful skill. Rolester is an agentic workflow, not a
+Always steer toward the next useful skill. CareerRat is an agentic workflow, not a
 set of passive list commands: when the user asks "what now?", reports something
 changed, or seems stalled, inspect `rolester doctor`, the dashboard's Next agent
 task, and `workspace/tracker.json`, then recommend and run the owning skill.
@@ -132,21 +132,21 @@ deterministic validation, dedupe, or confirmed writes.
 ## Keeping Current
 
 Run `rolester update` to pull the latest code from npm. Source checkouts should
-run `npm link` once so the local `rolester` binary is on PATH. Rolester is
-published at `rolester@latest`; the update command does a privacy-guarded
+run `npm link` once so the local `rolester` binary is on PATH. CareerRat is
+published at `careerrat@latest`; the update command does a privacy-guarded
 tarball extract so your `candidate/` and `workspace/` data are never touched.
 
 ## Local AI Key Storage
 
 The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`.
-Path resolution follows the active Rolester home: with `ROLESTER_HOME` set, the
+Path resolution follows the active CareerRat home: with `ROLESTER_HOME` set, the
 file is `<ROLESTER_HOME>/internal/ai.env` (no dot); in legacy repo-root mode it
 is `.internal/ai.env`. The value is chmod `0600`, loaded at server boot, and
 never echoed back by the API.
 
 ## Dashboard Dev Server Contract
 
-The dashboard is part of the live Rolester workspace, not a one-off artifact. In
+The dashboard is part of the live CareerRat workspace, not a one-off artifact. In
 any active job-search session, make sure `rolester tracker-dev` is serving the
 tracker before telling the user to open the dashboard.
 
@@ -165,7 +165,7 @@ tracker before telling the user to open the dashboard.
   echo $! > .internal/tracker-dev.pid
   ```
 
-- If port 7777 is in use, verify whether it is already Rolester. If it is not,
+- If port 7777 is in use, verify whether it is already CareerRat. If it is not,
   start with another port, for example `rolester tracker-dev --port 7778`, and
   tell the user the actual URL.
 - After changing `workspace/tracker.json`, `candidate/`, dashboard source, or
@@ -735,7 +735,7 @@ than restating it.
 
 Candidate modes config is optional, private user posture. In DB workspaces it lives
 in SQLite; in legacy/export mode it may appear as `candidate/modes.yml`. If it is
-absent, Rolester uses `usage_mode: standard`, `application_mode: balanced`, and
+absent, CareerRat uses `usage_mode: standard`, `application_mode: balanced`, and
 `agent_voice: standard`.
 Use `rolester modes status`, `rolester modes allows <operation>`, and `rolester modes
 -- set <usage|application|agent_voice> <value> --write`; do not hand-edit the DB or
@@ -909,7 +909,7 @@ A nudge can show with few or zero rejections; never read the dashboard pill as
 
 ## Learning Memory
 
-Rolester compounds — it gets better at each role-track the more the user runs it.
+CareerRat compounds — it gets better at each role-track the more the user runs it.
 Durable lessons live in per-role-family learning files at
 `candidate/learnings/<family>.md` (families per `classifyRoleFamily` — fde,
 applied-ai, solutions, …; a user targeting several tracks gets one file each).
@@ -939,7 +939,7 @@ happen. They sharpen positioning; they do not fabricate it.
 
 ## Research Memory
 
-Rolester can also **go find things out** (M11). Cited findings from web search live
+CareerRat can also **go find things out** (M11). Cited findings from web search live
 under `workspace/research/`: company intel (`<slug>.md`), market comp benchmarks
 (`comp-bench-<role>-<loc>-<yyyy-mm>.md`), and an optional board-discovery log.
 
@@ -1006,7 +1006,7 @@ event at the end of that action** — the same "the writer records it" disciplin
 
   `sync-status` writes no tracker state itself — it hands transitions to `track-outcomes`,
   which logs them, so it does **not** log separately.
-- **Actor semantics.** `agent` = Rolester did it (sourced, evaluated, tailored, applied,
+- **Actor semantics.** `agent` = CareerRat did it (sourced, evaluated, tailored, applied,
   drafted, researched). `world` = something arrived or happened (a reply, a rejection, an
   interview invite, an offer). `--needs-user` is an audit annotation on the history record
   only — it does not render a CTA. Live CTAs are derived from `tracker.json` state by
@@ -1214,7 +1214,7 @@ terms. Before recording consent, surface the ToS note and get an explicit yes; r
 it once via the CLI. **Never auto-run and never run on a schedule** — every automated
 session is user-initiated with the agent in the loop.
 
-**No stored credentials.** Rolester stores no passwords. The browser session holds the
+**No stored credentials.** CareerRat stores no passwords. The browser session holds the
 logins: **prefer the Chrome extension** (Claude-in-Chrome / Codex — it already has the
 user's logins + password store), fall back to a **Playwright persistent profile** the
 user signs into once per platform (`~/.rolester/board-profiles/<platform>`, the

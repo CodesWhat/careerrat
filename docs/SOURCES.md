@@ -1,6 +1,6 @@
 # Search Sources
 
-Rolester should pull from as many practical sources as it can without turning
+CareerRat should pull from as many practical sources as it can without turning
 scanner matches into apply decisions. Sources feed intake; `evaluate-job` still
 owns the body-read gate.
 
@@ -18,7 +18,7 @@ owns the body-read gate.
 
 ## Public Company Intelligence
 
-Public company intelligence helps Rolester learn public company and careers-board
+Public company intelligence helps CareerRat learn public company and careers-board
 metadata without mixing it with candidate-specific search state. It is stored in
 dedicated `public_*` SQLite tables and can be prepared for sync-home only after
 scrub validation passes.
@@ -56,7 +56,7 @@ explicit metadata and does not silently start chat.
 
 ## HiringCafe
 
-HiringCafe keeps filters inside the `searchState` query parameter. Rolester
+HiringCafe keeps filters inside the `searchState` query parameter. CareerRat
 should build that URL directly from a search string and optional `searchState`
 filters instead of clicking through the UI to configure searches.
 
@@ -121,7 +121,7 @@ Touch these files in order, replacing `<name>` with the provider key (lowercase,
 
 ## Curated Board Registry
 
-A domain-tagged menu of the board/aggregator providers Rolester ships support for
+A domain-tagged menu of the board/aggregator providers CareerRat ships support for
 (`implemented`) or has on the roadmap (`planned`). Skills read this table to offer a filtered
 starter menu — it is NOT a universal set of defaults. The `general` tag means suitable for all
 domains; domain-specific tags (e.g. `tech/software`, `tech/AI`, `remote`) indicate narrower scope.
@@ -158,7 +158,7 @@ never written here.
 - **Domain tag(s):** `general` = all domains; `tech/software` = software engineering domain only; `tech/AI` = AI/ML/agent roles; `remote` = remote-posture candidates across domains. Combine tags with commas for entries that span multiple.
 - **Type:** `aggregator` = collects from many sources; `ATS` = company-level ATS API adapter; `niche-board` = curated domain-specific board; `RSS` = feed-only.
 - **Confidence:** `high` = real dated listings, stable URL, identifiable companies; `medium` = unvetted but reputable; `borderline` = real but with noted quality caveats.
-- **Status:** `implemented` = provider code ships with Rolester; `planned` = on roadmap, not yet implemented.
+- **Status:** `implemented` = provider code ships with CareerRat; `planned` = on roadmap, not yet implemented.
 
 > **This shipped registry lists only field-neutral provider infrastructure.** Boards you
 > discover via `research-boards` are candidate-specific (they match your domain and role

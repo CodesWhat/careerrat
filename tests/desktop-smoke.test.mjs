@@ -90,7 +90,7 @@ describe("desktop smoke PDF renderer verification", () => {
 
     assert.deepEqual(writes, [
       {
-        markdown: "# Rolester export smoke\n\nPackaged Electron renderer check.\n",
+        markdown: "# CareerRat export smoke\n\nPackaged Electron renderer check.\n",
         outPath: "/tmp/rolester-smoke-export.pdf",
       },
     ]);

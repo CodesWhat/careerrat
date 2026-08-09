@@ -1,7 +1,7 @@
-// apps/desktop/main.mjs — thin Electron shell over the existing Rolester
+// apps/desktop/main.mjs — thin Electron shell over the existing CareerRat
 // local server (M5 of the paid-POC journey). This process NEVER forks a
 // skill itself; it boots the same createDevServer() the browser-only
-// `rolester tracker-dev` uses (see src/cli/tracker-dev.mjs) and wraps it in a
+// `careerrat tracker-dev` uses (see src/cli/tracker-dev.mjs) and wraps it in a
 // native window. Every skill still runs through that one embedded Agent SDK
 // runtime — open-core discipline stays intact.
 //
@@ -55,19 +55,19 @@ const __dirname = fileURLToPath(new URL(".", import.meta.url));
 const isSmoke = process.argv.includes("--smoke");
 
 // Runtime name. The dev launcher brands Electron.app's Info.plist so the macOS
-// dock/Cmd-Tab identity is Rolester; this keeps Electron's own runtime app name
+// dock/Cmd-Tab identity is CareerRat; this keeps Electron's own runtime app name
 // aligned for menus, about panel, notifications, and window metadata. Must run
 // before app is ready, i.e. before any default menu is built.
-app.setName("Rolester");
-app.setAboutPanelOptions({ applicationName: "Rolester" });
+app.setName("CareerRat");
+app.setAboutPanelOptions({ applicationName: "CareerRat" });
 
 // Google's OAuth consent screen rejects UAs it doesn't recognize with
 // disallowed_useragent. Electron's default fallback UA tacks our own
-// " Rolester/<version> Electron/<version>" tokens on after the Chrome/Safari
+// " CareerRat/<version> Electron/<version>" tokens on after the Chrome/Safari
 // tokens Google's allowlist actually checks — strip just those two tokens so
 // the request reads as a plain Chromium browser. Must run before any
 // BrowserWindow is created; the UA is fixed at window construction.
-app.userAgentFallback = app.userAgentFallback.replace(/\s(Rolester|Electron)\/[\d.]+/g, "");
+app.userAgentFallback = app.userAgentFallback.replace(/\s(CareerRat|Electron)\/[\d.]+/g, "");
 
 // --- Trap 3 -------------------------------------------------------------
 // Data root. A packaged app's Resources/ tree is read-only (code-signed) —
@@ -443,7 +443,7 @@ app.whenReady().then(async () => {
   }
 
   // Rebuild the standard macOS menu so the bold app-menu label follows
-  // app.name ("Rolester") instead of "Electron" in dev; role-based items keep
+  // app.name ("CareerRat") instead of "Electron" in dev; role-based items keep
   // the expected copy/paste/quit/devtools/window behavior.
   if (process.platform === "darwin") {
     Menu.setApplicationMenu(
@@ -507,7 +507,7 @@ app.whenReady().then(async () => {
   log(`BOOT FAILED: ${err?.stack || err?.message || err}`);
   if (!isSmoke) {
     try {
-      dialog.showErrorBox("Rolester failed to start", String(err?.message || err));
+      dialog.showErrorBox("CareerRat failed to start", String(err?.message || err));
     } catch {
       // dialog unavailable (very early failure) — the log line above stands.
     }

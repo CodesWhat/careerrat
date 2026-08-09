@@ -1991,7 +1991,7 @@
           "at": "2026-04-12",
           "from": "angela.moss@e-corp.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Staff Software Engineer — E Corp (referral from Darlene Alderson)",
           "summary": "Angela Moss reached out via Darlene Alderson referral; flagged strong fit with AI-ops initiative, invited 30-min recruiter screen."
@@ -2000,7 +2000,7 @@
           "id": "msg-ecorp-2",
           "direction": "outbound-sent",
           "at": "2026-04-13",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "angela.moss@e-corp.example"
           ],
@@ -2013,7 +2013,7 @@
           "at": "2026-05-08",
           "from": "angela.moss@e-corp.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Next step: Hiring-manager intro w/ Tyrell Wellick | E Corp",
           "summary": "Angela confirmed strong recruiter-screen feedback; set up 45-min HM intro with Tyrell Wellick. Shared comp range: $215-255K base."
@@ -2022,7 +2022,7 @@
           "id": "msg-ecorp-4",
           "direction": "outbound-sent",
           "at": "2026-05-16",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "angela.moss@e-corp.example"
           ],
@@ -2035,7 +2035,7 @@
           "at": "2026-05-28",
           "from": "angela.moss@e-corp.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Onsite panel details — E Corp | Staff SWE",
           "summary": "Angela confirmed Scott's strong tech-screen feedback; issued virtual onsite invite for June 10. Panel: Tyrell, Scott, Susan Jacobs, Angela Moss."
@@ -2044,7 +2044,7 @@
           "id": "msg-ecorp-6",
           "direction": "outbound-sent",
           "at": "2026-05-29",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "angela.moss@e-corp.example"
           ],
@@ -2057,7 +2057,7 @@
           "at": "2026-06-20",
           "from": "angela.moss@e-corp.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "E Corp offer — Staff Software Engineer",
           "summary": "Angela extended written initial offer: $222K base, $95K/yr RSU (4-yr vest), $10K sign-on. Committee unanimous; offer expires June 30."
@@ -2066,7 +2066,7 @@
           "id": "msg-ecorp-8",
           "direction": "outbound-sent",
           "at": "2026-06-22",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "angela.moss@e-corp.example"
           ],
@@ -2079,7 +2079,7 @@
           "at": "2026-06-24",
           "from": "angela.moss@e-corp.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: E Corp offer — revised terms",
           "summary": "Angela returned with revised: $232K base (discretionary max), $90K/yr RSU, $15K sign-on matched in full. Est. Year-1 TC ~$355K."
@@ -2088,7 +2088,7 @@
           "id": "msg-ecorp-10",
           "direction": "outbound-sent",
           "at": "2026-06-25",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "angela.moss@e-corp.example"
           ],
@@ -2115,7 +2115,7 @@
           "at": "2026-05-14",
           "from": "caroline@aperturescience.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Forward Deployed Engineer — Aperture Science",
           "summary": "Caroline reached out; remote FDE role for Enrichment Center enterprise deployments. Proposed 20-min intro call."
@@ -2124,7 +2124,7 @@
           "id": "demo-msg-ap-2",
           "direction": "outbound-sent",
           "at": "2026-05-15",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "caroline@aperturescience.example"
           ],
@@ -2137,7 +2137,7 @@
           "at": "2026-06-05",
           "from": "doug.rattmann@aperturescience.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Thank you — Aperture Science FDE loop",
           "summary": "Doug Rattmann (panel lead) thanked Riley after tech deep dive; cited deployment pipeline and write-gate answers as standouts. Offer coming."
@@ -2148,7 +2148,7 @@
           "at": "2026-06-14",
           "from": "caroline@aperturescience.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Aperture Science — offer letter",
           "summary": "Aperture written offer: $182K base, 48K options, 10% bonus, $10K signing. Caroline noted below target but above midpoint. Expires June 19."
@@ -2157,7 +2157,7 @@
           "id": "demo-msg-ap-5",
           "direction": "outbound-sent",
           "at": "2026-06-15",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "caroline@aperturescience.example"
           ],
@@ -2170,7 +2170,7 @@
           "at": "2026-06-15",
           "from": "caroline@aperturescience.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Aperture Science — offer letter",
           "summary": "Aperture came back at $185K — best they can do. Door stays open if priorities change. Below the $190K floor; Riley deciding."
@@ -2179,7 +2179,7 @@
           "id": "demo-msg-ap-7",
           "direction": "outbound-sent",
           "at": "2026-06-17",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "caroline@aperturescience.example"
           ],
@@ -2206,7 +2206,7 @@
           "at": "2026-05-08",
           "from": "gary.irving@hooli.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Principal Engineer, AI Platform — Hooli (referral from Hoover)",
           "summary": "Gary Irving cites Hoover's referral and invites Riley to a 30-min intro call about the Principal Engineer, AI Platform role."
@@ -2215,7 +2215,7 @@
           "id": "msg-hooli-2",
           "direction": "outbound-sent",
           "at": "2026-05-09",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "gary.irving@hooli.example"
           ],
@@ -2228,7 +2228,7 @@
           "at": "2026-05-10",
           "from": "gary.irving@hooli.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Principal Engineer, AI Platform — Hooli (referral from Hoover)",
           "summary": "Gary confirms Thursday 5/14 11am CT and notes the posted band is $250–290K base — should align with Riley's ask."
@@ -2237,7 +2237,7 @@
           "id": "msg-hooli-4",
           "direction": "outbound-sent",
           "at": "2026-06-17",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "gary.irving@hooli.example"
           ],
@@ -2250,7 +2250,7 @@
           "at": "2026-06-19",
           "from": "gary.irving@hooli.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Thank you — Hooli Principal Eng loop",
           "summary": "Gary thanks Riley for three strong rounds; team went another direction. Warm close, Hooli keeping the profile on file."
@@ -2275,7 +2275,7 @@
           "at": "2026-05-20",
           "from": "carter.burke@weylandyutani.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Staff Engineer, Spaceframe — Weyland-Yutani (remote, $215–255K base)",
           "summary": "Carter Burke (W-Y recruiter) reached out after finding Riley's profile. HITL workflow and RAG pipeline experience flagged as strong fit. Invited to 30-min screen."
@@ -2284,7 +2284,7 @@
           "id": "msg-demo-app-4-2",
           "direction": "outbound-sent",
           "at": "2026-05-21",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "carter.burke@weylandyutani.example"
           ],
@@ -2297,7 +2297,7 @@
           "at": "2026-05-23",
           "from": "carter.burke@weylandyutani.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Staff Engineer, Spaceframe — JD + screen scheduling",
           "summary": "Carter sent the JD and booked the recruiter screen for May 24 at 10 AM CT. Pre-flagged on-call (~1 wk/quarter) and ~10% travel to confirm no blockers."
@@ -2306,7 +2306,7 @@
           "id": "msg-demo-app-4-4",
           "direction": "outbound-sent",
           "at": "2026-05-23",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "carter.burke@weylandyutani.example"
           ],
@@ -2319,7 +2319,7 @@
           "at": "2026-06-10",
           "from": "carter.burke@weylandyutani.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Weyland-Yutani Final Loop — invitation + logistics",
           "summary": "Strong feedback from tech and HM screens. Final-loop invite: Jun 14 4-panel (Meredith Vickers, Ash, David 8, Peter Weyland). Debrief by Jun 16."
@@ -2328,7 +2328,7 @@
           "id": "msg-demo-app-4-6",
           "direction": "outbound-sent",
           "at": "2026-06-11",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "carter.burke@weylandyutani.example"
           ],
@@ -2339,7 +2339,7 @@
           "id": "msg-demo-app-4-7",
           "direction": "outbound-sent",
           "at": "2026-06-14",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "carter.burke@weylandyutani.example"
           ],
@@ -2352,7 +2352,7 @@
           "at": "2026-06-19",
           "from": "carter.burke@weylandyutani.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Weyland-Yutani Final Loop — decision update",
           "summary": "Carter: no offer — narrow internal calibration on ownership scope went the other way. Panel feedback was strong across all 4 interviewers."
@@ -2379,7 +2379,7 @@
           "at": "2026-05-15",
           "from": "no-reply@cyberdyne.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Application Received — Staff ML Engineer at Cyberdyne Systems",
           "summary": "Auto-confirmation of Riley's board application. Recruiting team will follow up in 5–7 business days if there's a match."
@@ -2390,7 +2390,7 @@
           "at": "2026-05-17",
           "from": "no-reply@cyberdyne.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Staff ML Engineer at Cyberdyne — quick intro call?",
           "summary": "T-800 flagged Pulsar + Meridian as a strong fit. Disclosed hybrid SF 2 days/week and $215–255K band up front; asked for a 30-min intro call."
@@ -2399,7 +2399,7 @@
           "id": "msg-demo-app-5-3",
           "direction": "outbound-sent",
           "at": "2026-05-18",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "no-reply@cyberdyne.example"
           ],
@@ -2412,7 +2412,7 @@
           "at": "2026-05-22",
           "from": "no-reply@cyberdyne.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Staff ML Engineer — next step: technical screen with T-1000",
           "summary": "Positive screen feedback. T-800 confirmed $230K+ ask is within band; scheduled 60-min technical screen with T-1000 for May 26."
@@ -2423,7 +2423,7 @@
           "at": "2026-05-28",
           "from": "no-reply@cyberdyne.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Staff ML Engineer — next step: system design with Miles Bennett Dyson",
           "summary": "T-1000 gave strong feedback on the technical screen. Advancing to 60-min system design with Miles Bennett Dyson (Director, Neural Net Systems Division) on June 2."
@@ -2434,7 +2434,7 @@
           "at": "2026-06-22",
           "from": "no-reply@cyberdyne.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Cyberdyne final onsite — invitation for June 28",
           "summary": "Miles Bennett Dyson gave strong system design feedback. Final onsite confirmed June 28: coding, HM, system design debrief, and safety panel."
@@ -2461,7 +2461,7 @@
           "at": "2026-06-10",
           "from": "william.bell@massive-dynamic.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Staff Engineer, AI Platform — Massive Dynamic (referred by alumni)",
           "summary": "William reaches out via alumni referral; role owns LLM integration layer, team-lead duties, $215–255K base. Invited to 30-min intro call."
@@ -2470,7 +2470,7 @@
           "id": "comm-md-1-msg-2",
           "direction": "outbound-sent",
           "at": "2026-06-11",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "william.bell@massive-dynamic.example"
           ],
@@ -2483,7 +2483,7 @@
           "at": "2026-06-17",
           "from": "william.bell@massive-dynamic.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Re: Staff Engineer, AI Platform — great talking with you!",
           "summary": "Post-recruiter-screen follow-up. William confirms strong fit signal and schedules 45-min HM screen with Nina Sharp for Jun 23 at 11 AM CT."
@@ -2494,7 +2494,7 @@
           "at": "2026-06-24",
           "from": "william.bell@massive-dynamic.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Panel Interview Invitation — Massive Dynamic | 2026-07-01",
           "summary": "Nina gave strong fit signal on platform depth and FDE. Panel invite for Jul 1 (10 AM CT): Nina Sharp, Brandon Fayette, Claus Penrose."
@@ -2503,7 +2503,7 @@
           "id": "comm-md-1-msg-5",
           "direction": "outbound-sent",
           "at": "2026-06-25",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "to": [
             "william.bell@massive-dynamic.example"
           ],
@@ -2530,7 +2530,7 @@
           "at": "2026-06-10",
           "from": "no-reply@globex.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Your application for Senior Software Engineer at Globex",
           "summary": "Generic ATS notice: Globex will not be moving forward with Riley's application; no feedback provided."
@@ -2555,7 +2555,7 @@
           "at": "2026-06-10",
           "from": "no-reply@umbrellacorp.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Your application for Senior Infrastructure Engineer at Umbrella Corporation",
           "summary": "Generic ATS rejection — thanked Riley for applying, role filled with another candidate, encouraged future applications."
@@ -2580,7 +2580,7 @@
           "at": "2026-06-10",
           "from": "no-reply@initech.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Your application to Initech",
           "summary": "Generic ATS rejection — Initech thanks Riley for applying to Software Engineer but is moving forward with other candidates."
@@ -2605,7 +2605,7 @@
           "at": "2026-06-10",
           "from": "no-reply@virtucon.example",
           "to": [
-            "riley.chen@rolester.dev"
+            "riley.chen@careerrat.dev"
           ],
           "subject": "Your application — Senior Software Engineer at Virtucon",
           "summary": "Generic ATS rejection: Virtucon thanks Riley for applying but is moving forward with other candidates."
@@ -2626,7 +2626,7 @@
           "id": "msg-demo-app-7-a1",
           "direction": "outbound-sent",
           "at": "2026-05-26",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Tyrell Corporation for Senior Platform Engineer."
         },
         {
@@ -2652,7 +2652,7 @@
           "id": "msg-demo-app-8-a1",
           "direction": "outbound-sent",
           "at": "2026-05-30",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Black Mesa for Research Engineer."
         },
         {
@@ -2678,7 +2678,7 @@
           "id": "msg-demo-app-10-a1",
           "direction": "outbound-sent",
           "at": "2026-06-02",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Abstergo Industries for Senior Software Engineer."
         },
         {
@@ -2704,7 +2704,7 @@
           "id": "msg-demo-app-11-a1",
           "direction": "outbound-sent",
           "at": "2026-05-19",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Omni Consumer Products for Principal Engineer."
         },
         {
@@ -2730,7 +2730,7 @@
           "id": "msg-demo-app-13-a1",
           "direction": "outbound-sent",
           "at": "2026-05-24",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Buy n Large for Staff Engineer."
         },
         {
@@ -2756,7 +2756,7 @@
           "id": "msg-demo-app-14-a1",
           "direction": "outbound-sent",
           "at": "2026-05-12",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to CHOAM for Backend Engineer."
         },
         {
@@ -2782,7 +2782,7 @@
           "id": "msg-demo-app-15-a1",
           "direction": "outbound-sent",
           "at": "2026-06-21",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Aviato for Senior Software Engineer."
         },
         {
@@ -2808,7 +2808,7 @@
           "id": "msg-demo-app-16-a1",
           "direction": "outbound-sent",
           "at": "2026-05-28",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Nakatomi Corporation for Platform Engineer."
         },
         {
@@ -2834,7 +2834,7 @@
           "id": "msg-demo-app-17-a1",
           "direction": "outbound-sent",
           "at": "2026-05-16",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Rekall for Platform Engineer."
         },
         {
@@ -2860,7 +2860,7 @@
           "id": "msg-demo-app-18-a1",
           "direction": "outbound-sent",
           "at": "2026-06-19",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Blue Sun for Research Engineer."
         },
         {
@@ -2886,7 +2886,7 @@
           "id": "msg-demo-app-19-a1",
           "direction": "outbound-sent",
           "at": "2026-06-22",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to InGen for Senior Software Engineer."
         },
         {
@@ -2912,7 +2912,7 @@
           "id": "msg-demo-app-20-a1",
           "direction": "outbound-sent",
           "at": "2026-05-22",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to BioSyn for Backend Engineer."
         },
         {
@@ -2938,7 +2938,7 @@
           "id": "msg-demo-app-22-a1",
           "direction": "outbound-sent",
           "at": "2026-06-20",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Bachmanity for Software Engineer."
         },
         {
@@ -2964,7 +2964,7 @@
           "id": "msg-demo-app-23-a1",
           "direction": "outbound-sent",
           "at": "2026-05-09",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Encom for Software Engineer."
         },
         {
@@ -2990,7 +2990,7 @@
           "id": "msg-demo-app-24-a1",
           "direction": "outbound-sent",
           "at": "2026-05-31",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to MomCorp for Software Engineer."
         },
         {
@@ -3016,7 +3016,7 @@
           "id": "msg-demo-app-26-a1",
           "direction": "outbound-sent",
           "at": "2026-06-04",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Acme for Senior Engineer."
         },
         {
@@ -3042,7 +3042,7 @@
           "id": "msg-demo-app-27-a1",
           "direction": "outbound-sent",
           "at": "2026-05-13",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Zorg Industries for Senior Engineer."
         },
         {
@@ -3068,7 +3068,7 @@
           "id": "msg-demo-app-28-a1",
           "direction": "outbound-sent",
           "at": "2026-05-27",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Los Pollos Hermanos for Platform Engineer."
         },
         {
@@ -3094,7 +3094,7 @@
           "id": "msg-demo-app-29-a1",
           "direction": "outbound-sent",
           "at": "2026-05-20",
-          "from": "riley.chen@rolester.dev",
+          "from": "riley.chen@careerrat.dev",
           "summary": "Riley applied to Monsters Inc for Senior Engineer."
         },
         {

@@ -26,7 +26,7 @@ const DEFAULT_ONBOARD_STATE = {
     profile: {
       candidate: {
         full_name: "Riley Chen",
-        email: "riley.chen@rolester.dev",
+        email: "riley.chen@careerrat.dev",
         phone: "(555) 010-2048",
         location: "New York, NY",
         linkedin: "https://linkedin.com/in/riley-chen",
@@ -118,13 +118,13 @@ export function getStaticPreviewAuthState() {
       firstName: "Riley",
       fullName: "Riley Chen",
       id: "preview-user",
-      primaryEmailAddress: { emailAddress: "riley.chen@rolester.dev" },
+      primaryEmailAddress: { emailAddress: "riley.chen@careerrat.dev" },
     },
   };
 }
 
 export async function staticPreviewApiFetch(path, options = {}) {
-  const url = new URL(path, "https://preview.rolester.local");
+  const url = new URL(path, "https://preview.careerrat.local");
   const method = String(options.method || "GET").toUpperCase();
 
   if (url.pathname === "/api/onboard/state" && method === "GET") {
@@ -280,7 +280,7 @@ function resumeSeedFromText(_text) {
     profileSeed: {
       candidate: {
         full_name: "Riley Chen",
-        email: "riley.chen@rolester.dev",
+        email: "riley.chen@careerrat.dev",
         phone: "(555) 010-2048",
         location: "New York, NY",
         linkedin: "https://linkedin.com/in/riley-chen",

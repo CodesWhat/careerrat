@@ -2,7 +2,7 @@
 
 ## No Warranty
 
-Rolester is provided **"as is"** under the MIT License, without warranty of any
+CareerRat is provided **"as is"** under the MIT License, without warranty of any
 kind, express or implied, including but not limited to warranties of
 merchantability, fitness for a particular purpose, and non-infringement. In no
 event shall the authors or copyright holders be liable for any claim, damages,
@@ -10,14 +10,14 @@ or other liability arising from use of the software.
 
 ## User Responsibility
 
-You are **solely responsible** for every job application you submit. Rolester
+You are **solely responsible** for every job application you submit. CareerRat
 generates drafts and fills forms on your behalf; you must review and approve
 each submission. The tool is not a party to any application and accepts no
 liability for its accuracy, completeness, or consequences.
 
-**Opt-in auto-submit.** By default Rolester halts before final submission and
+**Opt-in auto-submit.** By default CareerRat halts before final submission and
 waits for your explicit confirmation. If you enable `auto_submit` in
-`candidate/form-defaults.yml`, Rolester may submit a form without per-submission
+`candidate/form-defaults.yml`, CareerRat may submit a form without per-submission
 confirmation. Before enabling that option, review every field in that file and
 confirm the pre-filled answers are accurate and complete — you are solely
 responsible for the content of submissions made in auto-submit mode.
@@ -25,14 +25,14 @@ responsible for the content of submissions made in auto-submit mode.
 ## Terms of Service Compliance
 
 Each job board, applicant tracking system, and employer site has its own Terms
-of Service. By using Rolester, you agree to comply with all applicable terms.
-Rolester is designed for individual, good-faith job searching — not for bulk
+of Service. By using CareerRat, you agree to comply with all applicable terms.
+CareerRat is designed for individual, good-faith job searching — not for bulk
 scraping, automated mass-apply spam, or any use that would violate a site's
 rules.
 
 ## No Fabrication
 
-Rolester never invents facts. It tailors language around evidence **you**
+CareerRat never invents facts. It tailors language around evidence **you**
 supply. Do not instruct it to claim qualifications, employers, degrees, metrics,
 or tools you do not possess. Misrepresentation on job applications may
 constitute fraud and is solely your responsibility.
@@ -41,7 +41,7 @@ constitute fraud and is solely your responsibility.
 
 Your candidate data (profile, evidence, compensation) is stored **locally** on
 your machine inside the `candidate/` directory, which is gitignored by default.
-Rolester does not transmit your personal data to any Rolester-operated server.
+CareerRat does not transmit your personal data to any CareerRat-operated server.
 Data may be sent to third-party AI provider APIs (e.g., via Claude Code) in the
 course of generating tailored content — review those providers' privacy policies
 before use.

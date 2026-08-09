@@ -8,7 +8,7 @@ original server-rendered calendar, V2, and V3 are all deleted. All three are rec
 
 ## The problem this replaced
 
-Rolester's calendar is a **sparse work-queue calendar**, not a personal calendar. Its events are interviews,
+CareerRat's calendar is a **sparse work-queue calendar**, not a personal calendar. Its events are interviews,
 recruiter calls, follow-ups, and deadlines. Volume is 0-4 events a day, most days empty, often a whole week
 with two events. The question a user brings to it is "what's coming up and what do I have to prepare for,"
 never "how does my month compare."

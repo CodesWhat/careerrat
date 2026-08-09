@@ -1,9 +1,9 @@
 {
-  "name": "@rolester/web",
+  "name": "@careerrat/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "M7 — Vite + React app shell for Rolester, served at /app by tracker-dev.mjs.",
+  "description": "M7 — Vite + React app shell for CareerRat, served at /app by tracker-dev.mjs.",
   "scripts": {
     "dev": "vite",
     "build": "vite build",

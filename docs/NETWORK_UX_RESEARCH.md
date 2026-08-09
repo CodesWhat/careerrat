@@ -39,7 +39,7 @@ earned them).
 
 **REDUCE — to a single people-first list. Cut the other three shapes entirely.** Not a full CUT, and not a
 KEEP of anything built so far. The evidence below supports keeping one narrow, honest surface: a short list
-of named humans Rolester already knows about, sorted by who needs a touch, with one safe-routing line each.
+of named humans CareerRat already knows about, sorted by who needs a touch, with one safe-routing line each.
 Everything else in all three current pages — the metrics heroes, the Coverage panel, the Guardrails/Memory
 prose panels, the Next Touch panel, V3's fake buttons — should go.
 
@@ -52,7 +52,7 @@ Three things drove this to REDUCE instead of CUT:
   buildable idea, distinct from the failed idea of a visual relationship graph (see Research constraints).
 - **The data is free, not manually entered.** Every comparable job-search CRM (Teal, Huntr, WayFinder, Dex —
   see Sources) makes the user type in each contact by hand, which is exactly why personal CRMs get
-  abandoned: upkeep cost that doesn't pay for itself. Rolester's network data is 100% derived from
+  abandoned: upkeep cost that doesn't pay for itself. CareerRat's network data is 100% derived from
   `ingest-mail` / `ingest-messages` / `relationship-sourcing` — nobody has to maintain it for it to exist.
   That collapses the usual cost side of the keep/cut tradeoff to near zero.
 - **A real, narrow use case sits underneath it.** The "don't over-ping one recruiter across two roles at the
@@ -83,7 +83,7 @@ work:
   clusters, centrality. A solo candidate's network is a star graph: one candidate, a handful of companies,
   1-3 named people each. There's no path structure to discover. Graph UIs are recommended specifically when
   you must *filter down* a large tangled graph to something readable ("hairballs in your knowledge graph are
-  a good thing, just don't let them anywhere near your UI") — Rolester's network never gets large enough to
+  a good thing, just don't let them anywhere near your UI") — CareerRat's network never gets large enough to
   need that filtering step, which means the interaction cost (pan/zoom/drag/layout) buys nothing at n≤6 that
   a sorted list doesn't already give for free. (Cambridge Intelligence, "How to fix hairballs")
 - **Every comparable job-search product treats this as a list/CRM, never a graph.** Teal's Networking CRM,
@@ -92,7 +92,7 @@ work:
   a real, validated pattern) and simultaneously evidence against the *graph* framing of "people map."
 - **Personal CRMs get abandoned when upkeep is manual and decoupled from where the relationship actually
   happens** (email, DMs). "Skipping integrations makes everything manual, which leads to abandonment... the
-  less effort required to maintain the system, the more likely you are to keep using it." Rolester's network
+  less effort required to maintain the system, the more likely you are to keep using it." CareerRat's network
   view is already integration-derived, not manually maintained — this specific failure mode doesn't apply
   here the way it does to Huntr/Teal, which is a real point in favor of keeping something.
 - **Referral-driven job search is real and large — 30-50% of hires, referred candidates ~4x more likely to
@@ -264,7 +264,7 @@ survey aggregation (referral share of hires, network size needed to reach a deci
 
 **Bottom line for Scott:** cut `NetworkPage.jsx` and `NetworkV3Page.jsx` outright, and cut roughly 70% of
 `NetworkV2Page.jsx` (the metrics hero, Coverage panel, Next Touch panel, Relationship Memory panel). What's
-left — a short, person-first list of the recruiters and hiring-team members Rolester already found in your
+left — a short, person-first list of the recruiters and hiring-team members CareerRat already found in your
 mail and messages, sorted by who needs a touch, with one safe-routing line each — is cheap to keep because
 none of it is hand-maintained, and it protects a real mistake (double-pinging the same recruiter across two
 roles). It is not the relationship CRM or the visual map V2/V3 gesture toward, and it shouldn't try to be —

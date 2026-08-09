@@ -40,7 +40,7 @@ stop — do not open a browser:
 5. Verify: `rolester automation status --json`
 
 State clearly: this capability is OFF by default; enabling it is a deliberate choice.
-The user must read the platform ToS themselves before recording consent — Rolester
+The user must read the platform ToS themselves before recording consent — CareerRat
 records the decision but does not make it.
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.

@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/deep-ingest-proposal.schema.json",
+  "$id": "https://careerrat.local/schemas/deep-ingest-proposal.schema.json",
   "title": "Deep ingest proposal row",
   "type": "object",
   "additionalProperties": false,

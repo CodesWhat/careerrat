@@ -372,9 +372,9 @@ After writing all comp fields: read candidate profile config and confirm `curren
 
 ---
 
-**Session browser — install the extension first.** Prefer the **Chrome extension** (Claude-in-Chrome or equivalent): it already holds the user's logins and password store, so no credentials are ever stored by Rolester. The fallback is a **Playwright persistent profile** (`~/.rolester/board-profiles/<platform>`) that the user signs into once per platform. All skill prose says "use the session browser" — specific tool names are an implementation detail. See `docs/BROWSER.md` and the Browser Automation Contract in `AGENTS.md`.
+**Session browser — install the extension first.** Prefer the **Chrome extension** (Claude-in-Chrome or equivalent): it already holds the user's logins and password store, so no credentials are ever stored by CareerRat. The fallback is a **Playwright persistent profile** (`~/.rolester/board-profiles/<platform>`) that the user signs into once per platform. All skill prose says "use the session browser" — specific tool names are an implementation detail. See `docs/BROWSER.md` and the Browser Automation Contract in `AGENTS.md`.
 
-**No credentials are ever stored by Rolester.** The browser session holds the logins.
+**No credentials are ever stored by CareerRat.** The browser session holds the logins.
 
 ---
 
@@ -389,7 +389,7 @@ rolester automation enable <capability> <platform> --write
 rolester automation status
 ```
 
-Dry-run is the default (prints the change without writing); `--write` commits. Run `rolester automation status` at the end to confirm the live verdict. Rolester records the decision; it does not make it for you. **Never auto-run and never run on a schedule** — every automated session is user-initiated.
+Dry-run is the default (prints the change without writing); `--write` commits. Run `rolester automation status` at the end to confirm the live verdict. CareerRat records the decision; it does not make it for you. **Never auto-run and never run on a schedule** — every automated session is user-initiated.
 
 After running through all capabilities the user wants: set `automationOffered: true` in `workspace/setup-state.json` and append `capabilities` to `completed[]`.
 

@@ -36,7 +36,7 @@ Read all gate files before touching anything else:
 4. `workspace/tracker.json` — existing `applications[]` and `sourced[]`. Build company-history sets now: active applications, recent rejections, prior cuts/closed sourced rows, and exact req/company-role duplicates. Company history is not the same as an application-limit block, but it must affect warnings and priority.
 5. For a classifiable role, read its learnings via `rolester learnings read "<role>"` — the helper resolves the family from targeting.yml and skips silently when no file exists. Improves triage scoring.
 6. `candidate/modes.yml` — optional. Run `rolester modes status`; absent = `usage_mode: standard`, `application_mode: balanced`.
-7. Source config — in DB mode use Rolester commands/scan output as the canonical view; in legacy mode read `config/search-sources.yml` (`searches[]`, per-source `lastRunAt` watermarks, `recency.postFilterAfter`).
+7. Source config — in DB mode use CareerRat commands/scan output as the canonical view; in legacy mode read `config/search-sources.yml` (`searches[]`, per-source `lastRunAt` watermarks, `recency.postFilterAfter`).
 
 Run `rolester doctor` and confirm it exits clean. Read the `Discovery pipeline`
 section before scanning. The post-onboarding order is:

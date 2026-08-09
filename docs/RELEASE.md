@@ -2,7 +2,7 @@
 
 ## Semantic Versioning
 
-Rolester follows [Semantic Versioning](https://semver.org/). The project is
+CareerRat follows [Semantic Versioning](https://semver.org/). The project is
 currently in **0.x** — the minor version increments for new features and the
 patch version for bug fixes. While in 0.x, **any minor bump may contain
 breaking changes**; read the release notes before upgrading.
@@ -17,7 +17,7 @@ Once 1.0.0 ships, the standard semver compatibility guarantees apply:
 Before tagging a release:
 
 1. All tests pass: `npm test`
-2. Doctor reports clean: `rolester doctor`
+2. Doctor reports clean: `careerrat doctor`
 3. Placeholder linter is clean: `npm run lint:placeholders`
 4. **Privacy/public-split check** — grep all tracked files (`git ls-files`) for
    the private origin codename and any personal identity strings — must return
@@ -39,7 +39,7 @@ For a desktop pilot release, add these checks before tagging:
 1. Build the desktop artifact with `npm run desktop:dist`.
 2. Confirm the output includes a signed and notarized macOS DMG.
 3. Verify signing and notarization evidence:
-   - `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/Rolester.app`
+   - `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app`
    - `xcrun stapler validate apps/desktop/dist/*.dmg`
    - `spctl --assess --type open --context context:primary-signature apps/desktop/dist/*.dmg`
 4. Run packaged smoke checks for a fresh workspace and an existing workspace.
@@ -59,10 +59,10 @@ All JSON schemas live in `config/*.schema.json` and carry a `$id` URL of the
 form:
 
 ```
-https://rolester.local/schemas/{schema-name}.schema.json
+https://careerrat.local/schemas/{schema-name}.schema.json
 ```
 
-Schemas are versioned implicitly by the Rolester release that ships them. A
+Schemas are versioned implicitly by the CareerRat release that ships them. A
 schema change is treated as:
 
 - **Non-breaking** if it only adds optional fields (patch or minor bump).
@@ -74,12 +74,12 @@ diff and migration instructions.
 
 ## User-Owned Files — Migration Policy
 
-`candidate/` and `workspace/` are **user-owned**. Rolester updates **never**
-overwrite files in those directories. After updating Rolester:
+`candidate/` and `workspace/` are **user-owned**. CareerRat updates **never**
+overwrite files in those directories. After updating CareerRat:
 
-1. Run `rolester doctor` — it will flag any schema mismatches or missing fields.
+1. Run `careerrat doctor` — it will flag any schema mismatches or missing fields.
 2. If new required fields were added, add them manually or re-run
-   `rolester ingest` in update mode (it prompts only for missing fields).
+   `careerrat ingest` in update mode (it prompts only for missing fields).
 3. Workspace artefacts (jobs, tailored resumes, tracker) are forward-compatible;
    old files remain readable by newer versions.
 

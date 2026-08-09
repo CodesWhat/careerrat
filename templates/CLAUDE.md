@@ -1,4 +1,4 @@
-# Rolester Claude Instructions
+# CareerRat Claude Instructions
 
 Follow `AGENTS.md`. It is the source of truth for intent routing, the body-read
 gate, artifact completeness, and submit safety.

@@ -32,7 +32,7 @@ describe("desktop runtime path resolution", () => {
     const root = tempRoot("rolester-desktop-runtime-");
     try {
       const userDataPath = join(root, "user-data");
-      const resourcesPath = join(root, "Rolester.app", "Contents", "Resources");
+      const resourcesPath = join(root, "CareerRat.app", "Contents", "Resources");
 
       const runtime = resolveDesktopRuntimePaths({
         isPackaged: true,
@@ -80,7 +80,7 @@ describe("desktop runtime path resolution", () => {
       const runtime = resolveDesktopRuntimePaths({
         isPackaged: true,
         appDir,
-        userDataPath: join(root, "Application Support", "Rolester"),
+        userDataPath: join(root, "Application Support", "CareerRat"),
         resourcesPath,
       });
 

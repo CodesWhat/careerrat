@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/application-limits.schema.json",
+  "$id": "https://careerrat.local/schemas/application-limits.schema.json",
   "title": "Rolester Application Limits",
   "type": "object",
   "required": ["companies"],

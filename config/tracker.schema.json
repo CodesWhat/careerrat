@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/tracker.schema.json",
+  "$id": "https://careerrat.local/schemas/tracker.schema.json",
   "title": "Rolester Tracker",
   "type": "object",
   "additionalProperties": true,

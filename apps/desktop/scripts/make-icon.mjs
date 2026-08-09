@@ -1,5 +1,5 @@
 // apps/desktop/scripts/make-icon.mjs — generate the macOS app icon from the
-// Rolester mascot on the brand cream background.
+// CareerRat mascot on the brand cream background.
 //
 //   node apps/desktop/scripts/make-icon.mjs
 //

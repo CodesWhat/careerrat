@@ -1,6 +1,6 @@
 # Architecture
 
-Rolester is organized around deterministic local APIs, bounded AI assists,
+CareerRat is organized around deterministic local APIs, bounded AI assists,
 explicit chat handoffs, and retained skill runtime.
 
 ## Flow

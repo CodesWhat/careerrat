@@ -69,7 +69,7 @@ Resolve the run mode from the two verdicts:
 
 State clearly: both capabilities are OFF by default; enabling either is a deliberate
 choice, and write-back is a separate switch from suggestions. The user reads the ToS
-themselves — Rolester records the decision but does not make it.
+themselves — CareerRat records the decision but does not make it.
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
