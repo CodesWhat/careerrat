@@ -28,6 +28,7 @@
 #   rolester automation revoke <platform> --write        withdraw consent
 
 version: 1
+setup_mode: basic
 
 # ── ToS consent — one-time, per platform ──────────────────────────────────────
 # Set a platform true ONLY after you've read its automation terms. Withdraw with

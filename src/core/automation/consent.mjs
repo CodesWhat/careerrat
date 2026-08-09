@@ -127,10 +127,29 @@ export function defaultAutomation() {
   }
   return {
     version: 1,
+    setup_mode: "basic",
     consent,
     capabilities,
     session: { provider: "extension", profile_root: null },
   };
+}
+
+export function automationModePatch(mode) {
+  if (mode === "advanced") return { setup_mode: "advanced" };
+  if (mode !== "basic") throw new Error('automation mode must be "basic" or "advanced"');
+  return defaultAutomation();
+}
+
+function effectiveAutomationMode(cfg) {
+  if (cfg?.setup_mode === "basic" || cfg?.setup_mode === "advanced") return cfg.setup_mode;
+  const hasLegacyOptIn =
+    Object.values(cfg?.consent || {}).some((value) => value === true) ||
+    Object.values(cfg?.capabilities || {}).some(
+      (capability) =>
+        capability?.enabled === true ||
+        Object.values(capability?.platforms || {}).some((value) => value === true)
+    );
+  return hasLegacyOptIn ? "advanced" : "basic";
 }
 
 // ---------------------------------------------------------------------------
@@ -213,6 +232,7 @@ export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {})
   }
 
   const cfg = data || loadAutomation({ root }).data;
+  const advancedMode = effectiveAutomationMode(cfg) === "advanced";
   const cap = cfg.capabilities?.[capability] || {};
   const globalOn = cap.enabled === true;
   const platformOn = !!(cap.platforms && cap.platforms[platform] === true);
@@ -231,7 +251,9 @@ export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {})
       `ToS consent for "${platform}" not recorded (record: \`rolester automation consent ${platform} --write\`)`
     );
 
-  const allowed = globalOn && platformOn && consentOn;
+  if (!advancedMode) reasons.push("Basic mode keeps every external capability disabled");
+
+  const allowed = advancedMode && globalOn && platformOn && consentOn;
   return {
     allowed,
     reasons,
@@ -281,6 +303,7 @@ export function automationStatus({ root = DEFAULT_ROOT } = {}) {
     exists: loaded.exists,
     valid: loaded.valid,
     errors: loaded.errors,
+    mode: effectiveAutomationMode(cfg),
     liveCount,
     capabilities,
     consent: Object.fromEntries(
