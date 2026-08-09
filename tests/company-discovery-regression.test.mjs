@@ -286,7 +286,7 @@ function pendingBatch({ batchId = "batch-refresh-ai", proposals = [supportedProp
   };
 }
 
-test("manual proposal create, latest pending read, approval, and sourced promotion stay local and deterministic", async () => {
+test("manual proposal create, latest pending read, and approval add only the company source", async () => {
   const repoRoot = setupRepo();
   const calls = [];
   const server = bootServer(repoRoot, {
@@ -353,9 +353,9 @@ test("manual proposal create, latest pending read, approval, and sourced promoti
   assert.equal(approved.status, 200);
   assert.equal(approved.body.ok, true);
   assert.equal(approved.body.data.sourceConfig.status, "added");
-  assert.equal(approved.body.data.sourced.rows, 1);
+  assert.equal(approved.body.data.sourced.rows, 0);
   assert.equal(calls.filter((call) => call.name === "companyAtsUpsert").length, 1);
-  assert.equal(calls.filter((call) => call.name === "sourcedUpsertBatch").length, 1);
+  assert.equal(calls.filter((call) => call.name === "sourcedUpsertBatch").length, 0);
   assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
     { name: "Local Deterministic AI", careers_url: "https://jobs.lever.co/local-deterministic-ai" },
   ]);
@@ -624,7 +624,7 @@ test("static ownership checks reject generated-file write seams and require supp
 
   const decisions = readFileSync("src/core/discovery/company-proposal-decisions.mjs", "utf8");
   assert.match(decisions, /companyAtsUpsert/);
-  assert.match(decisions, /sourcedUpsertBatch/);
+  assert.doesNotMatch(decisions, /sourcedUpsertBatch/);
   assert.doesNotMatch(decisions, /sourceConfigPut|config\/sourced-scan\.json/);
 });
 

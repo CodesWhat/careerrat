@@ -190,7 +190,7 @@ function domainFillPrompt({ context, names, now }) {
 export async function fillManualDomainHints({ repoRoot, env, context, seeds, call, now }) {
   const hintless = seeds.filter((seed) => !seed.domain_hint);
   if (hintless.length === 0) return { seeds, ai: { used: false } };
-  if (resolveAIRoute(env).type === "none") return { seeds, ai: { used: false } };
+  if (resolveAIRoute(env, { repoRoot }).type === "none") return { seeds, ai: { used: false } };
 
   const safeContext = context || buildCompanySeedContext({ repoRoot, env });
   const fillResult = await runBoundedAI({

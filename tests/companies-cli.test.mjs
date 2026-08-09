@@ -73,6 +73,8 @@ test("rolester companies writes DB source config in DB mode and does not create 
   assert.equal(list.total, 1);
   assert.equal(list.companies[0].name, "Acme");
   assert.equal(list.companies[0].provider, "lever");
+  assert.equal(list.companies[0].enabled, true);
+  assert.equal(list.companies[0].lastRunAt, null);
 
   const stored = sourceConfigGet({ repoRoot, name: "sourced-scan" });
   assert.deepEqual(stored.data.tracked_companies, [

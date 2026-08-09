@@ -38,10 +38,12 @@ import { sourceConfigGet, sourceConfigPut } from "../core/db/verbs/source-config
 import { buildHiringCafeUrl } from "../core/providers/hiringcafe.mjs";
 import { buildLinkedInSearchUrl, salaryBandForMinimumBase } from "../core/providers/linkedin.mjs";
 import {
+  addSearchFromQuery,
   addSearchFromUrl,
   listSearches,
   validateConfig,
 } from "../core/providers/search-sources.mjs";
+import { inferProvider, isBoardProviderSupported } from "../core/scoring/sourced-scanner.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other M8 route modules use.
@@ -57,12 +59,94 @@ export function writeDbSearchSources(pathCtx = {}, next) {
 }
 
 function sendSourceConfigError(res, err) {
-  const status = err?.code === "NO_DATABASE" ? 409 : 500;
+  const status = err?.code === "NO_DATABASE" ? 409 : err?.code === "BAD_REQUEST" ? 400 : 500;
   sendJson(res, status, { ok: false, error: err?.message || "source config failed" });
+}
+
+function badRequest(message) {
+  const error = new Error(message);
+  error.code = "BAD_REQUEST";
+  throw error;
+}
+
+function readIndex(body, length) {
+  const index = Number(body?.index);
+  if (!Number.isInteger(index) || index < 0 || index >= length) {
+    badRequest(`source index must be between 0 and ${Math.max(0, length - 1)}`);
+  }
+  return index;
+}
+
+function searchLegitimacy(search) {
+  if (search?.auth === true) return "consent-required";
+  if (search?.source_type === "rss" || search?.rssUrl) return "supported";
+  if (search?.source_type === "board" && isBoardProviderSupported(search.provider)) {
+    return "supported";
+  }
+  if (["HiringCafe", "Lever"].includes(String(search?.provider || ""))) return "supported";
+  return "review-needed";
+}
+
+function maintenanceView(pathCtx) {
+  const searchConfig = readDbSearchSources(pathCtx);
+  const companyConfig = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  return {
+    searches: listSearches(searchConfig).map((search) => ({
+      index: search.index,
+      provider: search.provider || "unknown",
+      label: search.label || "Untitled source",
+      target: search.target || "",
+      sourceType: search.source_type || "unknown",
+      enabled: search.enabled !== false,
+      lastRunAt: search.lastRunAt || null,
+      legitimacy: searchLegitimacy({
+        ...(searchConfig.searches?.[search.index] || {}),
+        ...search,
+      }),
+      auth: search.auth === true,
+      platform: search.platform || null,
+    })),
+    companies: (companyConfig.tracked_companies || []).map((company, index) => ({
+      index,
+      name: company.name,
+      url: company.careers_url,
+      provider: inferProvider(company) || "unsupported",
+      enabled: company.enabled !== false,
+      lastRunAt: company.lastRunAt || null,
+      legitimacy: inferProvider(company) ? "verified-ats" : "unsupported",
+    })),
+  };
+}
+
+function validateAndWriteSearchConfig(pathCtx, next) {
+  const schema = JSON.parse(
+    readFileSync(join(pathCtx.repoRoot, SEARCH_SOURCES_SCHEMA_PATH), "utf8")
+  );
+  const { valid, errors } = validateConfig(next, schema);
+  if (!valid) {
+    const error = new Error(
+      errors
+        .map((item) => item.message)
+        .filter(Boolean)
+        .join("; ") || "Invalid source config"
+    );
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  writeDbSearchSources(pathCtx, next);
+  return maintenanceView(pathCtx);
 }
 
 export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
   const pathCtx = { repoRoot, env };
+
+  addRoute("GET", "/api/boards/sources", (_req, res) => {
+    try {
+      sendJson(res, 200, maintenanceView(pathCtx));
+    } catch (err) {
+      sendSourceConfigError(res, err);
+    }
+  });
 
   // -------------------------------------------------------------------------
   // POST /api/boards/preview
@@ -177,5 +261,136 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
     }
 
     sendJson(res, 200, { ok: true, searches: listSearches(stored) });
+  });
+
+  addRoute("POST", "/api/boards/search/add", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      const query = String(body?.query || "").trim();
+      if (!query) badRequest("body.query is required");
+      const current = readDbSearchSources(pathCtx);
+      const next = addSearchFromQuery(current, {
+        query,
+        label: String(body?.label || "").trim() || undefined,
+        provider: String(body?.provider || "HiringCafe").trim() || "HiringCafe",
+      });
+      sendJson(res, 200, { ok: true, ...validateAndWriteSearchConfig(pathCtx, next) });
+    } catch (err) {
+      sendSourceConfigError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/boards/search/update", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      const current = readDbSearchSources(pathCtx);
+      const searches = Array.isArray(current.searches) ? current.searches.slice() : [];
+      const index = readIndex(body, searches.length);
+      const existing = searches[index];
+      const label = String(body?.label ?? existing.label ?? "").trim();
+      const target = String(
+        body?.target ?? existing.query ?? existing.url ?? existing.rssUrl ?? ""
+      ).trim();
+      if (!label || !target) badRequest("source label and target are required");
+      // A Settings save is an explicit user decision. Generated baseline
+      // entries carry `enabled_reason: "domain-gate"`, which lets first-search
+      // preparation re-evaluate their default on/off state as targeting
+      // changes. Leaving that marker behind would make the next search undo
+      // the user's toggle. Transfer ownership to the user on every explicit
+      // save by removing the generator marker before persisting.
+      const { enabled_reason: _generatedEnabledReason, ...userOwnedExisting } = existing;
+      const updated = { ...userOwnedExisting, label, enabled: body?.enabled !== false };
+      if (existing.rssUrl != null) updated.rssUrl = target;
+      else if (existing.query != null) updated.query = target;
+      else updated.url = target;
+      searches[index] = updated;
+      sendJson(res, 200, {
+        ok: true,
+        ...validateAndWriteSearchConfig(pathCtx, { ...current, searches }),
+      });
+    } catch (err) {
+      sendSourceConfigError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/boards/search/remove", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      const current = readDbSearchSources(pathCtx);
+      const searches = Array.isArray(current.searches) ? current.searches.slice() : [];
+      const index = readIndex(body, searches.length);
+      searches.splice(index, 1);
+      sendJson(res, 200, {
+        ok: true,
+        ...validateAndWriteSearchConfig(pathCtx, { ...current, searches }),
+      });
+    } catch (err) {
+      sendSourceConfigError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/boards/company/save", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      const name = String(body?.name || "").trim();
+      const url = String(body?.url || "").trim();
+      if (!name || !url) badRequest("company name and board URL are required");
+      const provider = inferProvider({ careers_url: url });
+      if (!provider) badRequest(`unsupported ATS host — cannot scan "${url}"`);
+      const current = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+      const companies = Array.isArray(current.tracked_companies)
+        ? current.tracked_companies.slice()
+        : [];
+      const originalName = String(body?.originalName || name)
+        .trim()
+        .toLowerCase();
+      const index = companies.findIndex(
+        (item) =>
+          String(item?.name || "")
+            .trim()
+            .toLowerCase() === originalName || String(item?.careers_url || "") === url
+      );
+      const previous = index >= 0 ? companies[index] : {};
+      const entry = {
+        ...previous,
+        name,
+        careers_url: url,
+        enabled: body?.enabled !== false,
+      };
+      if (index >= 0) companies[index] = entry;
+      else companies.push(entry);
+      sourceConfigPut({
+        ...pathCtx,
+        name: "sourced-scan",
+        data: { ...current, tracked_companies: companies },
+      });
+      sendJson(res, 200, { ok: true, ...maintenanceView(pathCtx) });
+    } catch (err) {
+      sendSourceConfigError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/boards/company/remove", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      const name = String(body?.name || "").trim();
+      if (!name) badRequest("company name is required");
+      const current = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+      const companies = (current.tracked_companies || []).filter(
+        (item) =>
+          String(item?.name || "")
+            .trim()
+            .toLowerCase() !== name.toLowerCase()
+      );
+      sourceConfigPut({
+        ...pathCtx,
+        name: "sourced-scan",
+        data: { ...current, tracked_companies: companies },
+      });
+      sendJson(res, 200, { ok: true, ...maintenanceView(pathCtx) });
+    } catch (err) {
+      sendSourceConfigError(res, err);
+    }
   });
 }

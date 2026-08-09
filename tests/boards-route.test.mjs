@@ -70,6 +70,12 @@ async function postJson(server, path, body) {
   return { status: res.status, body: json };
 }
 
+async function getJson(server, path) {
+  const res = await fetch(`${baseUrl(server)}${path}`);
+  const json = await res.json().catch(() => ({}));
+  return { status: res.status, body: json };
+}
+
 after(() => {
   closeAll();
   for (const root of cleanupRoots.splice(0)) {
@@ -239,6 +245,156 @@ test("POST /api/boards/add: appends onto an existing config rather than overwrit
     assert.equal(stored.searches[0].label, "existing");
     assert.equal(stored.searches[1].platform, "linkedin");
     assert.equal(existsSync(userPath({ repoRoot }, "config/search-sources.yml")), false);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source maintenance lists provider, watermark, legitimacy, and enabled state", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "HiringCafe",
+          source_type: "url-query",
+          label: "Staff platform",
+          query: "staff platform engineer",
+          enabled: true,
+          recency: { lastRunAt: "2026-08-09T10:00:00.000Z" },
+        },
+      ],
+    },
+  });
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      tracked_companies: [
+        {
+          name: "Acme",
+          careers_url: "https://jobs.lever.co/acme",
+          enabled: false,
+          lastRunAt: "2026-08-08T10:00:00.000Z",
+        },
+      ],
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await getJson(server, "/api/boards/sources");
+    assert.equal(status, 200);
+    assert.deepEqual(body.searches[0], {
+      index: 0,
+      provider: "HiringCafe",
+      label: "Staff platform",
+      target: "staff platform engineer",
+      sourceType: "url-query",
+      enabled: true,
+      lastRunAt: "2026-08-09T10:00:00.000Z",
+      legitimacy: "supported",
+      auth: false,
+      platform: null,
+    });
+    assert.deepEqual(body.companies[0], {
+      index: 0,
+      name: "Acme",
+      url: "https://jobs.lever.co/acme",
+      provider: "lever",
+      enabled: false,
+      lastRunAt: "2026-08-08T10:00:00.000Z",
+      legitimacy: "verified-ats",
+    });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source maintenance adds a query and edits, disables, then removes a broad source", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    let response = await postJson(server, "/api/boards/search/add", {
+      query: "staff backend engineer",
+      label: "Backend",
+      provider: "HiringCafe",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.searches.length, 1);
+
+    const generatedOwned = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        ...generatedOwned,
+        searches: generatedOwned.searches.map((source, index) =>
+          index === 0 ? { ...source, enabled_reason: "domain-gate" } : source
+        ),
+      },
+    });
+
+    response = await postJson(server, "/api/boards/search/update", {
+      index: 0,
+      label: "Backend — strict",
+      target: "staff distributed systems engineer",
+      enabled: false,
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.searches[0].label, "Backend — strict");
+    assert.equal(response.body.searches[0].target, "staff distributed systems engineer");
+    assert.equal(response.body.searches[0].enabled, false);
+    assert.equal(
+      Object.hasOwn(
+        sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches[0],
+        "enabled_reason"
+      ),
+      false,
+      "an explicit Settings save must transfer ownership away from the generated domain gate"
+    );
+
+    response = await postJson(server, "/api/boards/search/remove", { index: 0 });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.searches, []);
+    assert.deepEqual(sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches, []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source maintenance adds, edits, disables, and removes a supported company board", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    let response = await postJson(server, "/api/boards/company/save", {
+      name: "Acme",
+      url: "https://jobs.lever.co/acme",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.companies[0].provider, "lever");
+
+    response = await postJson(server, "/api/boards/company/save", {
+      originalName: "Acme",
+      name: "Acme Labs",
+      url: "https://job-boards.greenhouse.io/acmelabs",
+      enabled: false,
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(
+      response.body.companies.map((item) => item.name),
+      ["Acme Labs"]
+    );
+    assert.equal(response.body.companies[0].provider, "greenhouse");
+    assert.equal(response.body.companies[0].enabled, false);
+
+    response = await postJson(server, "/api/boards/company/remove", { name: "Acme Labs" });
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body.companies, []);
   } finally {
     await closeServer(server);
   }

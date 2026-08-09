@@ -3,11 +3,7 @@ import {
   companyProposalBatchPatchState,
 } from "../db/verbs/company-discovery.mjs";
 import { companyAtsUpsert as defaultCompanyAtsUpsert } from "../db/verbs/source-config.mjs";
-import { sourcedUpsertBatch as defaultSourcedUpsertBatch } from "../db/verbs/sourced.mjs";
-import {
-  offersWithCapturedJobs as defaultOffersWithCapturedJobs,
-  sourcedRowsFromScanOffers,
-} from "../scoring/sourced-persistence.mjs";
+import { offersWithCapturedJobs as defaultOffersWithCapturedJobs } from "../scoring/sourced-persistence.mjs";
 import { scanCompanies as defaultScanCompanies } from "../scoring/sourced-scanner.mjs";
 import {
   resolveCompanyBoard as defaultResolveCompanyBoard,
@@ -279,18 +275,6 @@ function sourceConfigSummary(result) {
   };
 }
 
-function sourcedSummary(result, rows) {
-  return {
-    created: Number(result?.created || 0),
-    updated: Number(result?.updated || 0),
-    rows: rows.length,
-  };
-}
-
-function approvalRows(proposal, decidedAt) {
-  return sourcedRowsFromScanOffers(list(proposal.capturedOffers), decidedAt);
-}
-
 function seedFromProposal(proposal) {
   return {
     name: proposal?.company?.name || "",
@@ -379,11 +363,9 @@ async function applyApproval({
   proposalIndex,
   now,
   companyAtsUpsertImpl,
-  sourcedUpsertBatchImpl,
 }) {
   const userConfirmed = request.userConfirmed === true;
   assertApprovalAllowed(proposal, { userConfirmed });
-  const decidedAt = nowIso(now);
   const sourceConfig = companyAtsUpsertImpl({
     repoRoot,
     env,
@@ -392,8 +374,10 @@ async function applyApproval({
       careers_url: proposal.jobBoardUrl,
     },
   });
-  const rows = approvalRows(proposal, decidedAt);
-  const sourced = rows.length ? sourcedUpsertBatchImpl({ repoRoot, env, rows }) : null;
+  // Approval means “track this company board”. The first-search pipeline owns
+  // job publication so every offer passes the candidate's deterministic gates.
+  // Publishing proposal scan samples here bypassed those gates and flooded Jobs.
+  const sourced = { created: 0, updated: 0, rows: 0 };
   const decision = decisionRecord({
     request,
     status: "approved",
@@ -401,7 +385,7 @@ async function applyApproval({
     extra: {
       decidedBy: userConfirmed ? "user-confirmed" : "auto-gate",
       sourceConfig: sourceConfigSummary(sourceConfig),
-      sourced: sourcedSummary(sourced, rows),
+      sourced,
     },
   });
   const nextProposal = {
@@ -424,7 +408,7 @@ async function applyApproval({
       decision,
       proposal: nextProposal,
       sourceConfig: sourceConfigSummary(sourceConfig),
-      sourced: sourcedSummary(sourced, rows),
+      sourced,
     },
     meta: { version: patched.batch.version },
   };
@@ -586,7 +570,6 @@ export async function applyCompanyProposalDecision({
   gateProposal = defaultGateProposal,
   buildSeedContext = defaultBuildSeedContext,
   companyAtsUpsertImpl = defaultCompanyAtsUpsert,
-  sourcedUpsertBatchImpl = defaultSourcedUpsertBatch,
   offersWithCapturedJobs = defaultOffersWithCapturedJobs,
 } = {}) {
   const request = normalizeDecisionBody(body);
@@ -609,7 +592,6 @@ export async function applyCompanyProposalDecision({
       proposalIndex: found.proposalIndex,
       now,
       companyAtsUpsertImpl,
-      sourcedUpsertBatchImpl,
     });
   }
 

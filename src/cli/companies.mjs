@@ -64,6 +64,8 @@ function runList() {
       name: entry.name,
       careers_url: entry.careers_url,
       provider: inferProvider(entry),
+      enabled: entry.enabled !== false,
+      lastRunAt: entry.lastRunAt || null,
     }));
     console.log(
       JSON.stringify(
@@ -93,7 +95,11 @@ function runList() {
   }
   for (const [i, entry] of companies.entries()) {
     const provider = inferProvider(entry) || "unknown";
-    console.log(`${String(i + 1).padStart(2)} ${entry.name} — ${entry.careers_url} (${provider})`);
+    const flag = entry.enabled === false ? "✗" : "✓";
+    const watermark = entry.lastRunAt ? ` last-run ${entry.lastRunAt}` : " never-run";
+    console.log(
+      `${String(i + 1).padStart(2)} ${flag} ${entry.name} — ${entry.careers_url} (${provider})${watermark}`
+    );
   }
   console.log(`\n${companies.length} tracked ${companies.length === 1 ? "company" : "companies"}.`);
   return 0;

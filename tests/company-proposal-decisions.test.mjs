@@ -7,7 +7,6 @@ import { after, test } from "node:test";
 
 import { mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 import {
   candidateSetupInitialize,
   companyAtsUpsert,
@@ -209,7 +208,7 @@ function decisionRequest(overrides = {}) {
   };
 }
 
-test("POST /api/discovery/company-proposal-decisions approves a pending supported ATS proposal and promotes captured sourced rows", async () => {
+test("POST /api/discovery/company-proposal-decisions approves a pending supported ATS proposal without publishing jobs", async () => {
   const repoRoot = setupRepo();
   const proposal = supportedProposal();
   writeJobArtifact(repoRoot, proposal.capturedOffers[0]);
@@ -221,10 +220,7 @@ test("POST /api/discovery/company-proposal-decisions approves a pending supporte
       calls.push({ name: "companyAtsUpsert", args });
       return companyAtsUpsert(args);
     },
-    sourcedUpsertBatchImpl: (args) => {
-      calls.push({ name: "sourcedUpsertBatch", args });
-      return sourcedUpsertBatch(args);
-    },
+    sourcedUpsertBatchImpl: forbidden("sourcedUpsertBatch", calls),
   });
 
   const { status, body } = await postJson(
@@ -237,24 +233,17 @@ test("POST /api/discovery/company-proposal-decisions approves a pending supporte
   assert.equal(body.ok, true);
   assert.equal(body.data.decision.action, "approve-supported-ats");
   assert.equal(body.data.sourceConfig.status, "added");
-  assert.equal(body.data.sourced.created, 1);
+  assert.deepEqual(body.data.sourced, { created: 0, updated: 0, rows: 0 });
   assert.equal(body.data.proposal.version, 2);
   assert.equal(body.meta.version, 2);
 
-  assert.deepEqual(
-    calls.map((call) => call.name),
-    ["companyAtsUpsert", "sourcedUpsertBatch"]
-  );
+  assert.deepEqual(calls.map((call) => call.name), ["companyAtsUpsert"]);
   assert.equal(calls.filter((call) => call.name === "companyAtsUpsert").length, 1);
   assert.deepEqual(calls[0].args.entry, {
     name: "Acme AI",
     careers_url: "https://jobs.lever.co/acme",
   });
-  assert.equal(calls.filter((call) => call.name === "sourcedUpsertBatch").length, 1);
-  assert.equal(
-    calls.find((call) => call.name === "sourcedUpsertBatch").args.rows[0].artifacts.jd,
-    proposal.capturedOffers[0].artifacts.jd
-  );
+  assert.equal(calls.filter((call) => call.name === "sourcedUpsertBatch").length, 0);
 
   assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
     { name: "Acme AI", careers_url: "https://jobs.lever.co/acme" },
@@ -265,16 +254,9 @@ test("POST /api/discovery/company-proposal-decisions approves a pending supporte
     .prepare("SELECT data FROM sourced ORDER BY rowid ASC")
     .all()
     .map((row) => JSON.parse(row.data));
-  assert.equal(rows.length, 1);
-  assert.equal(rows[0].company, "Acme AI");
-  assert.equal(rows[0].role, "Applied AI Engineer");
-  assert.equal(rows[0].artifacts.jd, proposal.capturedOffers[0].artifacts.jd);
+  assert.equal(rows.length, 0);
 
-  const tracker = JSON.parse(
-    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
-  );
-  assert.equal(tracker.sourced.length, 1);
-  assert.equal(tracker.sourced[0].id, rows[0].id);
+  assert.equal(existsSync(userPath({ repoRoot }, "workspace/tracker.json")), false);
 });
 
 test("reject, suppress, and escalate decisions update proposal state without confirmed writes", async () => {
@@ -756,10 +738,7 @@ test("VER-05 userConfirmed lets a user explicitly keep a borderline supported AT
       calls.push({ name: "companyAtsUpsert", args });
       return companyAtsUpsert(args);
     },
-    sourcedUpsertBatchImpl: (args) => {
-      calls.push({ name: "sourcedUpsertBatch", args });
-      return sourcedUpsertBatch(args);
-    },
+    sourcedUpsertBatchImpl: forbidden("sourcedUpsertBatch", calls),
   });
 
   // Without userConfirmed, the auto-gate bar still applies unchanged.
@@ -782,10 +761,7 @@ test("VER-05 userConfirmed lets a user explicitly keep a borderline supported AT
   assert.equal(response.body.data.decision.action, "approve-supported-ats");
   assert.equal(response.body.data.decision.decidedBy, "user-confirmed");
   assert.equal(response.body.data.sourceConfig.status, "added");
-  assert.deepEqual(
-    calls.map((call) => call.name),
-    ["companyAtsUpsert", "sourcedUpsertBatch"]
-  );
+  assert.deepEqual(calls.map((call) => call.name), ["companyAtsUpsert"]);
 
   const stored = companyProposalBatchGet({ repoRoot, batchId: "batch-acme" }).batch;
   assert.equal(stored.proposals[0].decision.decidedBy, "user-confirmed");
