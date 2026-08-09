@@ -21,7 +21,13 @@ afterEach(() => {
   roots.clear();
 });
 
-function boot({ inventory, probes, env = { ROLESTER_DESKTOP_SHELL: "1" }, openTerminalImpl }) {
+function boot({
+  inventory,
+  probes,
+  env = { ROLESTER_DESKTOP_SHELL: "1" },
+  openTerminalImpl,
+  probeCustomImpl,
+}) {
   const repoRoot = root();
   const routes = new Map();
   mountInstalledRuntimeRoutes({
@@ -31,6 +37,7 @@ function boot({ inventory, probes, env = { ROLESTER_DESKTOP_SHELL: "1" }, openTe
     detectImpl: () => inventory,
     probeImpl: (runtime) => probes[runtime.id],
     openTerminalImpl,
+    probeCustomImpl,
   });
   return { routes, repoRoot, env };
 }
@@ -179,6 +186,153 @@ test("Advanced provider fallback is explicit, durable, and reversible", async ()
     runtimeId: "claude",
   });
   assert.equal(local.status, 200);
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: "claude",
+    providerFallback: false,
+    customCommand: null,
+  });
+});
+
+test("custom/test runs the probe once and never persists anything", async () => {
+  const calls = [];
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    probeCustomImpl: async (args) => {
+      calls.push(args);
+      return { ok: true, elapsedMs: 420, output: "ack" };
+    },
+  });
+  const response = await request(server, "POST", "/api/settings/ai-runtime/custom/test", {
+    command: "~/bin/my-agent --name sonnet",
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, { ok: true, elapsedMs: 420, output: "ack" });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].command, "~/bin/my-agent --name sonnet");
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: null,
+    providerFallback: false,
+    customCommand: null,
+  });
+});
+
+test("custom/test surfaces a probe failure without persisting anything", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    probeCustomImpl: async () => ({ ok: false, error: "Exited with status 1." }),
+  });
+  const response = await request(server, "POST", "/api/settings/ai-runtime/custom/test", {
+    command: "broken-agent",
+  });
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.body, { ok: false, error: "Exited with status 1." });
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: null,
+    providerFallback: false,
+    customCommand: null,
+  });
+});
+
+test("custom/test rejects a blank command without invoking the probe", async () => {
+  const calls = [];
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {},
+    probeCustomImpl: async (args) => {
+      calls.push(args);
+      return { ok: true, elapsedMs: 1 };
+    },
+  });
+  const response = await request(server, "POST", "/api/settings/ai-runtime/custom/test", {
+    command: "   ",
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { ok: false, error: "command is required" });
+  assert.equal(calls.length, 0);
+});
+
+test("custom/select persists the custom command and it appears as the selected 'custom' entry", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "authentication_required", ready: false, action: "open_terminal" },
+      codex: { status: "ready", ready: true, action: null },
+    },
+  });
+  const select = await request(server, "POST", "/api/settings/ai-runtime/custom/select", {
+    command: "~/bin/my-agent --name sonnet",
+  });
+  assert.equal(select.status, 200);
+  assert.deepEqual(select.body, {
+    ok: true,
+    selectedId: "custom",
+    customCommand: "~/bin/my-agent --name sonnet",
+  });
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: "custom",
+    providerFallback: false,
+    customCommand: "~/bin/my-agent --name sonnet",
+  });
+
+  const inventoryResponse = await request(server, "GET", "/api/settings/ai-runtimes");
+  assert.equal(inventoryResponse.status, 200);
+  assert.equal(inventoryResponse.body.selectedId, "custom");
+  const customEntry = inventoryResponse.body.runtimes.find(({ id }) => id === "custom");
+  assert.deepEqual(customEntry, {
+    id: "custom",
+    name: "Custom command",
+    commandShape: "~/bin/my-agent --name sonnet",
+    path: "~/bin/my-agent --name sonnet",
+    available: true,
+    warning: null,
+    status: "ready_unverified",
+    ready: true,
+    action: null,
+    selected: true,
+  });
+});
+
+test("custom/select rejects a blank command without persisting anything", async () => {
+  const server = boot({ inventory: INVENTORY, probes: {} });
+  const response = await request(server, "POST", "/api/settings/ai-runtime/custom/select", {
+    command: "",
+  });
+  assert.equal(response.status, 400);
+  assert.deepEqual(response.body, { ok: false, error: "command is required" });
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: null,
+    providerFallback: false,
+    customCommand: null,
+  });
+});
+
+test("selecting a detected runtime after a custom command was chosen nulls customCommand (current intended behavior)", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "ready", ready: true, action: null },
+      codex: { status: "ready", ready: true, action: null },
+    },
+  });
+  const custom = await request(server, "POST", "/api/settings/ai-runtime/custom/select", {
+    command: "~/bin/my-agent",
+  });
+  assert.equal(custom.status, 200);
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: "custom",
+    providerFallback: false,
+    customCommand: "~/bin/my-agent",
+  });
+
+  const generic = await request(server, "POST", "/api/settings/ai-runtime/select", {
+    runtimeId: "claude",
+  });
+  assert.equal(generic.status, 200);
+  // writeInstalledRuntimeSelection() only keeps customCommand when
+  // runtimeId === "custom" — selecting any other runtime clears it, so a
+  // stale custom command never lingers behind a different active runtime.
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
     runtimeId: "claude",
     providerFallback: false,

@@ -9,6 +9,8 @@ import {
   detectInstalledRuntimes,
   INSTALLED_RUNTIME_DEFINITIONS,
   openInstalledRuntimeTerminal,
+  parseCustomCommandString,
+  probeCustomRuntimeCommand,
   probeInstalledRuntime,
   runInstalledRuntime,
   runtimeSearchDirectories,
@@ -326,6 +328,127 @@ test("installed runtime failures distinguish nonzero exit, timeout, and cancella
       }),
       (error) => error.code === "RUNTIME_CANCELLED"
     );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("parseCustomCommandString splits on whitespace and keeps quoted segments intact", () => {
+  assert.deepEqual(parseCustomCommandString("my-agent --flag value"), [
+    "my-agent",
+    "--flag",
+    "value",
+  ]);
+  assert.deepEqual(parseCustomCommandString('~/bin/my-agent --name "my agent"'), [
+    "~/bin/my-agent",
+    "--name",
+    "my agent",
+  ]);
+  assert.deepEqual(parseCustomCommandString("agent --name 'solo quoted'"), [
+    "agent",
+    "--name",
+    "solo quoted",
+  ]);
+  assert.deepEqual(parseCustomCommandString("agent \"first arg\" 'second arg'"), [
+    "agent",
+    "first arg",
+    "second arg",
+  ]);
+  assert.deepEqual(parseCustomCommandString("  agent   --flag   "), ["agent", "--flag"]);
+});
+
+test("parseCustomCommandString returns an empty argv for empty or garbage-only input", () => {
+  assert.deepEqual(parseCustomCommandString(""), []);
+  assert.deepEqual(parseCustomCommandString("   "), []);
+  assert.deepEqual(parseCustomCommandString(null), []);
+  assert.deepEqual(parseCustomCommandString(undefined), []);
+  assert.deepEqual(parseCustomCommandString('""'), [""]);
+});
+
+test("probeCustomRuntimeCommand reports ok:true with measured latency on a successful run", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "custom-agent");
+  writeFileSync(
+    executablePath,
+    '#!/bin/sh\nread ignored\nsleep 0.05\necho "ack"\nexit 0\n',
+    "utf8"
+  );
+  chmodSync(executablePath, 0o755);
+  try {
+    const result = await probeCustomRuntimeCommand({ command: executablePath });
+    assert.equal(result.ok, true);
+    assert.equal(typeof result.elapsedMs, "number");
+    assert.ok(result.elapsedMs >= 0);
+    assert.ok(result.output.includes("ack"));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("probeCustomRuntimeCommand reports ok:false with stderr diagnostic on a non-zero exit", async () => {
+  const root = tempRoot();
+  const executablePath = join(root, "failing-agent");
+  writeFileSync(executablePath, '#!/bin/sh\nread ignored\necho "boom" >&2\nexit 3\n', "utf8");
+  chmodSync(executablePath, 0o755);
+  try {
+    const result = await probeCustomRuntimeCommand({ command: executablePath });
+    assert.equal(result.ok, false);
+    assert.ok(result.error.includes("boom"));
+    assert.equal(typeof result.elapsedMs, "number");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("probeCustomRuntimeCommand reports ok:false without a latency reading on empty input", async () => {
+  const result = await probeCustomRuntimeCommand({ command: "" });
+  assert.deepEqual(result, { ok: false, error: "Enter a command to test." });
+});
+
+test("probeCustomRuntimeCommand reports ok:false when the command cannot be spawned at all", async () => {
+  const result = await probeCustomRuntimeCommand({
+    command: "totally-not-a-real-binary --flag",
+    spawnImpl() {
+      throw new Error("spawn ENOENT");
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.elapsedMs, null);
+  assert.ok(result.error.includes("totally-not-a-real-binary"));
+  assert.ok(result.error.includes("spawn ENOENT"));
+});
+
+test("probeCustomRuntimeCommand reports ok:false when the process emits an error event", async () => {
+  const { EventEmitter } = await import("node:events");
+  const result = await probeCustomRuntimeCommand({
+    command: "custom-agent",
+    spawnImpl() {
+      const child = new EventEmitter();
+      child.stdout = new EventEmitter();
+      child.stderr = new EventEmitter();
+      child.stdin = new EventEmitter();
+      child.stdin.end = () => {
+        queueMicrotask(() => child.emit("error", new Error("spawn EACCES")));
+      };
+      child.kill = () => {};
+      return child;
+    },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.elapsedMs, null);
+  assert.ok(result.error.includes("EACCES"));
+});
+
+test("probeCustomRuntimeCommand times out a hanging command using the caller-supplied timeoutMs", async () => {
+  const root = tempRoot();
+  const hangingPath = join(root, "hanging-custom-agent");
+  writeFileSync(hangingPath, "#!/bin/sh\nread ignored\nsleep 10\n", "utf8");
+  chmodSync(hangingPath, 0o755);
+  try {
+    const result = await probeCustomRuntimeCommand({ command: hangingPath, timeoutMs: 30 });
+    assert.equal(result.ok, false);
+    assert.equal(result.error, "Timed out after 15s.");
+    assert.equal(typeof result.elapsedMs, "number");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
