@@ -229,8 +229,9 @@ export default function Home() {
                     &ldquo;It reads the actual job before you chase it.&rdquo;
                   </p>
                   <p className="gate-pullquote-sub">
-                    Emits a GATE / FIT / COMP / ACTION verdict against your real
-                    constraints — not just a keyword match.
+                    Every posting gets a verdict: keep it or cut it, how well it
+                    fits, whether the money works, and what to do next. Judged
+                    against your constraints, not a keyword match.
                   </p>
                 </div>
               </div>
@@ -281,9 +282,10 @@ export default function Home() {
               </svg>
               <h3 className="step-h3">Tell it what you actually want</h3>
               <p className="step-p">
-                Walk through a friendly onboarding. Role families, comp floor,
-                location, what you&apos;ll accept, what you won&apos;t. This
-                config is yours — no black box.
+                Answer a handful of questions. The roles you want, the least
+                you&apos;ll take, where you&apos;ll work, what you won&apos;t put
+                up with. Your answers live in plain files you can read. No black
+                box.
               </p>
             </div>
 
@@ -315,9 +317,10 @@ export default function Home() {
               </svg>
               <h3 className="step-h3">It finds and vets the real jobs</h3>
               <p className="step-p">
-                Searches the boards you tell it to. Reads the full posting body.
-                Checks it against your constraints. Tells you to GATE, FIT, pass
-                on COMP, or act. No spray-and-pray.
+                Searches the boards you pick. Reads the whole posting, not the
+                headline. Weighs it against your comp floor, your location, your
+                dealbreakers — then tells you to go for it, skip it, or take a
+                closer look. No spray-and-pray.
               </p>
             </div>
 
@@ -690,9 +693,9 @@ export default function Home() {
                 The whole loop, end to end.
               </h2>
               <p className="section-sub">
-                Every capability ships together. Config-driven, not code-driven —
-                the same skills serve any field: a nurse, an engineer, a driver
-                each bring their own config.
+                It all ships together, and none of it is built for one industry.
+                A nurse, an engineer, and a driver each answer onboarding their
+                own way and get the same loop.
               </p>
               <div className="maker-note" aria-label="Note from the maker">
                 <strong>A note from the maker:</strong> I built this to solve my
@@ -704,18 +707,18 @@ export default function Home() {
             </div>
             <div className="reveal reveal-delay-2">
               <ul className="checklist" role="list">
-                <li>Tells you what it wants from you — guided onboarding</li>
+                <li>Asks what you want, once — a guided onboarding</li>
                 <li>Finds and vets real jobs from the boards you choose</li>
-                <li>Reads the full job posting body before tailoring anything</li>
-                <li>Gates every role against your actual constraints</li>
+                <li>Reads the whole posting before it writes a word</li>
+                <li>Measures every role against your actual constraints</li>
                 <li>Writes honest résumés and cover letters from your evidence</li>
                 <li>Drafts and tracks recruiter messages and follow-ups</li>
-                <li>Researches companies and benchmarks compensation</li>
+                <li>Researches companies and checks what the job should pay</li>
                 <li>Builds interview story banks and preps you for live calls</li>
-                <li>Coaches verbal comp negotiation</li>
-                <li>Tracks every outcome and learns from each run</li>
-                <li>Live read-only dashboard — you see the work, agent does it</li>
-                <li>Config-driven — same skills for any role, any field</li>
+                <li>Coaches you through the comp conversation, out loud</li>
+                <li>Remembers every outcome and gets sharper as you go</li>
+                <li>A live dashboard — the agent works, you watch it happen</li>
+                <li>Works the same for any role, in any field</li>
               </ul>
             </div>
           </div>
@@ -730,11 +733,11 @@ export default function Home() {
               <div>
                 <div className="section-label">Get Rolester</div>
                 <h2 className="section-h2" id="get-h2">
-                  Clone it. Run it. Own it.
+                  Install it. Run it. Own it.
                 </h2>
                 <p className="section-sub">
-                  Free to self-host, open source (MIT). No install wizard, no
-                  setup — clone the repo and one command does the rest.
+                  Free to self-host, open source (MIT). No wizard, no signup —
+                  two commands and the agent takes it from there.
                 </p>
                 <div style={{ marginTop: "28px" }}>
                   <div
@@ -759,9 +762,9 @@ export default function Home() {
                       lineHeight: 1.7,
                     }}
                   >
-                    <li>Node.js &gt;= 18</li>
+                    <li>Node.js 18 or newer</li>
                     <li style={{ marginTop: "8px" }}>
-                      A coding-agent CLI on your PATH:
+                      An AI coding CLI on your PATH:
                       <ul
                         style={{
                           listStyle: "none",

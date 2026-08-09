@@ -4,182 +4,145 @@
 
 # Rolester
 
-Agentic job-search workspace for finding, vetting, tailoring, tracking, and
-preparing for the right roles.
+**Find, vet, and advance the right roles.**
 
-A local, skill-driven workspace: define what you actually want, turn it into
-searches, gate jobs against the real posting, tailor honest application
-artifacts, track outcomes, and prep for interviews — all from your own data,
-which never leaves your machine.
+Rolester is a job-search workspace that runs on your own machine. You tell it
+what you're actually looking for. It reads real job postings and tells you which
+ones are worth your time, writes applications from things you've genuinely done,
+drafts your recruiter replies, preps you for interviews, and keeps track of where
+everything stands.
 
-Tagline:
+No account, no server, no telemetry. Rolester never phones home, and your files
+stay on your machine. The one thing that goes out is whatever your AI CLI sends
+to its own provider to do the work — same as any other task you'd give it. See
+[privacy](https://rolester.codeswhat.com/docs/advanced/privacy) for the details.
 
-> Find, vet, and advance the right roles.
+## Why it's different
 
-## Quickstart
+Most job tools match keywords, then spray. Rolester won't write a single line of
+a cover letter until it has read the whole posting and checked it against what
+you said you want — your comp floor, your location, your dealbreakers. Jobs that
+don't clear that bar, it tells you to skip.
 
-**Prerequisites:**
+And it won't lie for you. Every claim in a tailored résumé traces back to
+something you told it about your own work. If you didn't do it, it doesn't get
+written.
 
-- Node.js ≥ 24 — check with `node -v`
-- A coding-agent CLI on your PATH — Claude Code or Codex:
-  - Claude Code: `npm install -g @anthropic-ai/claude-code` ([claude.com/claude-code](https://claude.com/claude-code))
-  - Codex: `npm install -g @openai/codex` ([github.com/openai/codex](https://github.com/openai/codex))
+## Getting started
 
-**Get it running:**
+You'll need:
+
+- **Node.js 24 or newer** — check with `node -v`
+- **An AI coding CLI**, either one:
+  - Claude Code — `npm install -g @anthropic-ai/claude-code` ([claude.com/claude-code](https://claude.com/claude-code))
+  - Codex — `npm install -g @openai/codex` ([github.com/openai/codex](https://github.com/openai/codex))
+
+Then:
 
 ```bash
 npm install -g rolester
 rolester start claude    # or: rolester start codex
 ```
 
-Developing from a source checkout is the same command shape; link the local
-binary once:
+That sets up your workspace, opens the dashboard at `http://localhost:7777`, and
+hands you off to the agent. From there you just talk to it.
+
+## Your first hour
+
+1. **Let it onboard you.** It asks a handful of questions and builds your profile
+   from the answers: what roles you want, what you'll accept, what you won't,
+   and the real work you've done. If you'd rather kick the tires first, say
+   *"set me up with a quick sample profile."*
+2. **Paste a job posting** — a description copied from anywhere, a link, or the
+   sample in `examples/sample-jobs/` — and say *"evaluate this."* You'll get a
+   verdict: keep it or cut it, how well it fits, whether the money works, and
+   what to do next. All from an actual read of the posting.
+3. **Say "write a résumé and cover letter for this."** It builds them from your
+   own evidence and refuses to invent anything.
+4. **Paste a recruiter email** and say *"draft a reply."* It writes the reply and
+   remembers the thread.
+5. **Open `http://localhost:7777`** and watch the job appear, move through your
+   funnel, and pick up history. The dashboard is read-only on purpose — the agent
+   does the work, the dashboard shows it.
+
+**One first-run thing that looks broken but isn't:** before you've onboarded,
+`rolester doctor` will report that your setup is incomplete and list
+`candidate/*.yml` files to create. That's expected. Onboarding fills them in.
+
+## What it does
+
+- **Onboarding** — a conversation, not a form. Produces your targets, comp floor,
+  evidence bank, honesty boundaries, and writing style.
+- **Finding jobs** — builds searches from your targets, finds boards and company
+  career pages worth watching, dedupes, drops dead links, and triages what's new.
+- **Vetting jobs** — reads the full posting and judges it against your actual
+  constraints before anything gets written.
+- **Honest applications** — résumés, cover letters, and short answers built only
+  from your evidence bank, with a check that blocks anything half-finished.
+- **Applying** — fills portal forms for you, defaults to letting you hit submit,
+  pauses at CAPTCHAs.
+- **Recruiter comms** — drafts replies, follow-ups, scheduling, and negotiation,
+  and keeps the whole thread.
+- **Interview prep** — packets tailored to who you're talking to, a story bank
+  grounded in your real work, and live coaching for comp conversations.
+- **Outcome tracking** — records what happened, notices when your results say
+  your strategy needs a rethink, and tells you.
+- **Research** — company intel and comp benchmarks, kept firmly separate from
+  your résumé claims so web findings can never launder into fake credentials.
+- **Dashboard** — stat cards, funnel, active pipeline from sourced through offer,
+  per-job detail, follow-up reminders, and table / board / calendar views. Tokyo
+  Night and Gruvbox themes, light or dark.
+- **Memory** — lessons from each application compound, so it gets sharper the
+  longer you use it.
+
+Same skills for anyone. A nurse, an engineer, and a driver each answer onboarding
+their own way and get the same loop.
+
+## Everyday commands
+
+```bash
+rolester next       # the one thing worth doing next
+rolester doctor     # check your setup is healthy
+rolester update     # pull the latest code; your data is untouched
+```
+
+The dashboard comes up with `rolester start`. To run it on its own:
+
+```bash
+rolester tracker        # write a static snapshot to workspace/tracker.html
+rolester tracker-dev    # serve http://localhost:7777 with live reload
+```
+
+**Useful flags on `start`:** `--no-agent` (workspace + dashboard only),
+`--no-dashboard`, `--agent <name>` (any CLI on your PATH, e.g. `cursor`),
+`--port <n>` (default 7777).
+
+## How it works
+
+Rolester is an *agent runtime*. The CLI sets up the workspace and serves the
+dashboard, but the job-search work happens inside your agent, reading a set of
+skills that tell it how each step is done. That's why you talk to it in plain
+language instead of memorizing subcommands, and why it works with whichever AI
+CLI you already have.
+
+The rule underneath all of it: **no tailoring, no applying, until the job has
+passed a real read of the posting.** Titles and keywords are triage, not truth.
+
+## More
+
+- [Docs](https://rolester.codeswhat.com/docs) — setup, guides, and reference
+- [Architecture](docs/ARCHITECTURE.md) and [AGENTS.md](AGENTS.md) — how the skills
+  and the agent contract fit together
+- [Roadmap](docs/ROADMAP.md) · [Sources strategy](docs/SOURCES.md)
+
+## Running from source
 
 ```bash
 git clone https://github.com/CodesWhat/rolester
 cd rolester
 npm install
 npm link
-rolester start claude    # or: rolester start codex
+rolester start claude
 ```
 
-That scaffolds your workspace, installs the skills, opens the dashboard at
-`http://localhost:7777`, and hands off to your agent. Then paste a job posting and
-say "evaluate this" — or try the bundled sample under `examples/sample-jobs/`.
-Run `rolester next` any time you want the terse next agent task.
-
-**Update later:**
-
-```bash
-rolester update     # fetches the latest published code; your data is untouched
-```
-
-Nothing you enter leaves your machine. No account, no server, no build step.
-
-Rolester is an *agent runtime*: the CLI sets up the workspace and dashboard, but the
-actual job-search work happens inside your agent reading the skills.
-
-**Useful flags:** `--no-agent` (scaffold + dashboard only), `--no-dashboard`,
-`--agent <name>` (any CLI on your PATH, e.g. `cursor`), `--port <n>` (default 7777).
-
-### A 5-minute path to confirm the whole loop works
-
-Once your agent is up, use it the way a real candidate would:
-
-1. **Let it onboard you.** It builds a profile by asking a few questions. To kick
-   the tires without using real details, just say: *"set me up with a quick sample
-   profile so I can test the flow."*
-2. **Paste a job posting** (a JD copied from anywhere, a posting URL, or the bundled
-   sample in `examples/sample-jobs/`) and say *"evaluate this."* You should get a
-   `GATE / FIT / COMP / ACTION` verdict from an actual read of the posting — not a
-   keyword match.
-3. **Ask it to tailor:** *"write a resume and cover letter for this."* It builds
-   honest artifacts from the profile's evidence bank and refuses to invent facts.
-4. **Paste a recruiter email** and say *"draft a reply"* — it routes to the comms
-   flow and tracks the thread.
-5. **Open http://localhost:7777** and watch the application appear, move through the
-   funnel, and accumulate activity. The dashboard is **read-only** — the agent does
-   the work; the dashboard just shows it.
-
-If those five land, the whole stack — CLI plumbing, skills, agent reasoning, and the
-live dashboard — is working end to end.
-
-**Prefer to let the agent run the test itself?** Open `claude` or `codex` in this
-folder and say:
-
-> read the README and AGENTS.md, set yourself up, and walk me through testing
-> Rolester end to end
-
-**What's normal, not a bug:** until you onboard, `rolester doctor`
-reports that local candidate setup is incomplete and lists `candidate/*.yml` to
-create — that's the expected pre-setup state, and your agent fills it in during
-onboarding.
-
-## What It Is
-
-Rolester is built around a simple rule: do not tailor or apply until the job has
-passed a real body-read gate. Title and keyword matches are triage, not truth.
-
-The intended workflow:
-
-1. Ingest the candidate profile, resume, evidence bank, and constraints.
-2. Generate searches and source jobs into the sourced queue.
-3. Read the JD body and emit a KEEP/CUT/REVIEW decision.
-4. Tailor honest application artifacts from the evidence bank.
-5. Draft and track recruiter/hiring communications.
-6. Track applications and outcomes.
-7. Build interview packets when a role advances.
-
-## What's Built
-
-The full apply-cycle is shipped and working end-to-end:
-
-- **Guided onboarding** (`ingest-profile`) — conversational interview that
-  produces `candidate/` config: targets, comp floor, evidence bank, honesty
-  boundaries, writing-style calibration.
-- **Search & intake** (`setup-searches`, `research-boards`,
-  `discover-companies`, `search-jobs`) — build searches from your targets, find
-  boards and employer ATS sources, dedupe, liveness-check, and triage the sourced queue.
-- **Body-read gate** (`evaluate-job`) — reads the full posting; emits
-  `GATE / FIT / COMP / ACTION` against your config before any tailoring.
-- **Honest tailoring** (`tailor-application`) — résumé, cover letter, and
-  short-answer artifacts built only from your evidence bank, with placeholder
-  lint that blocks unresolved tokens.
-- **Apply assistant** (`apply-job`) — portal form-fill recipes, manual-submit
-  default, CAPTCHA pause.
-- **Communication memory** (`email-comms`) — draft and track recruiter threads,
-  follow-ups, scheduling, and negotiation.
-- **Interview prep** (`interview-prep`) — audience-segmented packets grounded in
-  your evidence; STAR+R story bank; live and written negotiation coaching.
-- **Outcome tracking & strategy** (`track-outcomes`, `reevaluate-strategy`) —
-  records results; triggers strategy review when rejection or advance thresholds
-  trip.
-- **Research loop** (`research-company`, `research-comp`, `research-boards`) —
-  company intel, comp benchmarking, and board discovery with a citation-tier
-  firewall so web findings never launder into résumé claims.
-- **Tracker dashboard** — stat cards, funnel, Active Pipeline (Sourced → Offer),
-  All-Jobs table, per-job detail, follow-up reminders; Table ⇄ Board ⇄ Calendar
-  views; Tokyo Night and Gruvbox theme families.
-- **Learning memory** — per-role-family lessons compound across loops; tailoring
-  and evaluation get sharper each time.
-
-Health check:
-
-```bash
-rolester doctor
-rolester next
-```
-
-### The dashboard
-
-`rolester start` brings the dashboard up for you. To run it on its own:
-
-```bash
-rolester tracker        # render workspace/tracker.html once — a static snapshot
-rolester tracker-dev    # serve http://localhost:7777 with live reload
-```
-
-`rolester start [agent]` starts the live server as a separate local process and
-records its PID/log at `.internal/tracker-dev.pid` and
-`.internal/tracker-dev.log`, so the dashboard keeps serving while the agent does
-the work.
-
-`rolester tracker` publishes the dashboard shell to `workspace/tracker.html`
-and its browser data adapter to `workspace/dashboard-data.js`. Use
-`rolester tracker-dev` for the live command center: it serves the shell, the adapter, and
-`workspace/tracker.json`, watches tracker data plus dashboard source, re-renders
-through the same path as `rolester tracker`, and refreshes the open page over
-Server-Sent Events.
-
-## Product Notes
-
-The roadmap lives in [docs/ROADMAP.md](docs/ROADMAP.md).
-The source strategy lives in [docs/SOURCES.md](docs/SOURCES.md).
-
-Naming decision: **Rolester**.
-
-Why: it has the Napster/Friendster feel, it is role-specific, and it avoids the
-generic "jobster" lane while still making sense for a job-search workspace.
-
-Prior candidates now treated as alternates: `Prospectr`, `Prospector`,
-`RoleRelay`, `CareerRelay`, `RoleProxy`, `See-V`, and `RoleScopeGo`.
+MIT licensed.

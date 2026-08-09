@@ -1,6 +1,14 @@
 # Keep Vercel uploads to just what the website build needs. Mirrors the
 # generated/private trees already ignored in .gitignore so a monorepo deploy
 # doesn't waste bandwidth on build output, node_modules, or candidate data.
+#
+# NOTE: this file uses .gitignore semantics — a pattern with no leading slash
+# matches at EVERY depth. A bare `src` here also matched `website/src` and
+# `docs-site/src`, so the git-integration build deleted both Next apps' source
+# and shipped a 404-only site. Every product-internal path below is anchored
+# with a leading slash for that reason. Don't un-anchor them.
+
+# Generated / installed trees — intentionally recursive.
 node_modules
 **/node_modules
 .next
@@ -11,22 +19,23 @@ out
 **/out
 **/*.tsbuildinfo
 
-# CLI / product internals — the Vercel build only needs website/.
-candidate
-workspace
-.internal
-.rolester
-.playwright-mcp
-.agents
-.claude
-bin
-src
-config
-templates
-scripts
-mockups
-examples
-tests
-docs/COMPARISON.md
-ROADMAP.md
-ROADMAP-ARCHIVE.md
+# CLI / product internals, root only — the Vercel build needs website/ and
+# docs-site/ (the latter is built by website's `prebuild` into public/docs).
+/candidate
+/workspace
+/.internal
+/.rolester
+/.playwright-mcp
+/.agents
+/.claude
+/bin
+/src
+/config
+/templates
+/scripts
+/mockups
+/examples
+/tests
+/docs/COMPARISON.md
+/ROADMAP.md
+/ROADMAP-ARCHIVE.md

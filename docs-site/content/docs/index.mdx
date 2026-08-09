@@ -23,8 +23,8 @@ rolester start claude   # or: rolester start codex
 
 That scaffolds your workspace, boots the dashboard at `http://localhost:7777`,
 and launches your agent with a starter message. Paste a job posting and say
-**"evaluate this"** — you should get a `GATE / FIT / COMP / ACTION` verdict
-within seconds.
+**"evaluate this"** — within seconds you get a verdict on whether to keep or cut
+it, how well it fits, whether the pay clears your floor, and what to do next.
 
 ## Two reading tracks
 
@@ -44,9 +44,11 @@ fresh clone through your first job evaluation in under ten minutes.
 ## Key ideas
 
 **Body-read gate.** Rolester does not tailor or apply until a job passes a real
-read of the posting. Title and keyword matches are triage, not truth. The gate
-emits a `GATE / FIT / COMP / ACTION` verdict from your personal constraints
-before any artifact is generated.
+read of the posting. Title and keyword matches are triage, not truth. Before any
+artifact is generated, the gate weighs the posting against your own constraints
+and returns a keep/cut call, a fit score, a comp check, and a recommended next
+step — printed as a `GATE / FIT / COMP / ACTION` block, with further lines added
+when the posting warrants them (a comp anchor, a legitimacy warning).
 
 **Evidence-only tailoring.** Resumes and cover letters are built exclusively from
 an evidence bank you supply during onboarding. The agent cannot invent facts. A
