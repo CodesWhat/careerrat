@@ -67,15 +67,16 @@ describe("app shell styles", () => {
     );
   });
 
-  it("uses a floating capture assistant instead of a bottom dock", () => {
-    const assistant = cssRule(".capture-assistant");
-    const launcher = cssRule(".capture-assistant__launcher");
+  it("W3: docks the ask bar bottom-center instead of the old bottom-right capture launcher", () => {
+    const askBar = cssRule(".ask-bar");
+    const shell = cssRule(".ask-bar__shell");
 
-    assert.match(assistant, /position:\s*fixed/);
-    assert.match(assistant, /right:\s*clamp/);
-    assert.match(assistant, /bottom:\s*clamp/);
-    assert.match(launcher, /border-radius:\s*999px/);
-    assert.doesNotMatch(cssText(), /\.capture-bar\s*\{[\s\S]*margin:\s*0 clamp/);
+    assert.match(askBar, /position:\s*fixed/);
+    assert.match(askBar, /left:\s*50%/);
+    assert.match(askBar, /bottom:\s*clamp/);
+    assert.match(shell, /border-radius:\s*10px/);
+    assert.match(shell, /border:\s*1px solid var\(--input-border\)/);
+    assert.doesNotMatch(cssText(), /\.capture-assistant\b/);
   });
 
   it("uses dark-mode header tokens instead of light header literals, flat (no shadow)", () => {
@@ -146,21 +147,6 @@ describe("app shell styles", () => {
     assert.match(scopedUtility, /aspect-ratio:\s*1 \/ 1/);
     assert.match(scopedUtility, /padding:\s*0/);
     assert.match(scopedUtility, /border-radius:\s*999px/);
-  });
-
-  it("keeps the capture launcher mark centered inside the circular headshot", () => {
-    const headshot = cssRule(".capture-assistant__headshot,\n.capture-assistant__mini-headshot");
-    const css = cssText();
-
-    // The launcher/panel avatar is a plain emoji glyph in a flat tinted
-    // circle now, not an <img> (no persona headshot asset) — centered via
-    // place-items/line-height, sized via font-size per circle.
-    assert.match(headshot, /display:\s*grid/);
-    assert.match(headshot, /place-items:\s*center/);
-    assert.match(headshot, /border-radius:\s*999px/);
-    assert.match(headshot, /background:\s*var\(--accent-bg\)/);
-    assert.match(css, /\.capture-assistant__headshot\s*\{[^}]*font-size:\s*28px/);
-    assert.match(css, /\.capture-assistant__mini-headshot\s*\{[^}]*font-size:\s*20px/);
   });
 
   it("gives the Jobs board a dashboard product frame instead of scaffold styling", () => {

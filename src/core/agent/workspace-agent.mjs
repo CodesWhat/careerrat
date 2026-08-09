@@ -1,4 +1,4 @@
-import { callAI } from "../ai/call-ai.mjs";
+import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { appCaptureInterviewIntake, appScheduleInterview, appSetStatus } from "../db/verbs/app.mjs";
@@ -975,6 +975,8 @@ export async function executeWorkspaceIntent({
           sent: false,
           requiresReview: true,
           draftedAt,
+          engine: response?.engine || null,
+          elapsedMs: response?.elapsedMs ?? null,
         },
         now,
       });
@@ -1315,6 +1317,52 @@ export async function captureWorkspaceIntake({
   }
 }
 
+// ---------------------------------------------------------------------------
+// Ask bar preview (classify, don't execute) — W3. Cheap, deterministic, and
+// side-effect-free: never writes to the thread, never calls the AI seam. Only
+// a phrasing this can resolve to a concrete, safe intent WITHOUT guessing at
+// a specific application/communication/sourced id is offered as an ACTION —
+// "sweep my boards"-style requests map onto search.run, whose entity is the
+// fixed workspace thread rather than a candidate-specific record. Every other
+// phrasing (including anything that would need to resolve "my top role" to a
+// real application id) previews as an ANSWER only; the free-text agent turn
+// (runWorkspaceAgentTurn) is the one path that can safely interpret an
+// arbitrary reference, since it answers in plain text rather than acting.
+// ---------------------------------------------------------------------------
+
+const ACTION_PREVIEW_RULES = [
+  {
+    test: /\b(sweep|scan|run|check|refresh|search|find|look for)\b.{0,40}\b(jobs?|roles?|postings?|boards?|sources?)\b/i,
+    label: "Run a job search sweep",
+    intent: () => ({
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "manual-search" },
+    }),
+  },
+];
+
+function previewAnswerLabel(text) {
+  const compact = text.replace(/\s+/g, " ").trim();
+  const preview = compact.length > 140 ? `${compact.slice(0, 139)}…` : compact;
+  return `Answer: “${preview}”`;
+}
+
+// `text` is never persisted or sent anywhere here — this is pure
+// classification against ACTION_PREVIEW_RULES above. `engineAvailable` lets
+// the ask bar render the NO ENGINE receipt state up front (before a turn
+// even runs) rather than only after a failed AI call.
+export function previewWorkspaceIntent({ text, repoRoot, env = process.env } = {}) {
+  const trimmed = String(text || "").trim();
+  const engineAvailable = resolveAIRoute(env, { repoRoot }).type !== "none";
+  if (!trimmed) {
+    return { action: null, answer: { label: "Ask the workspace agent." }, engineAvailable };
+  }
+  const rule = ACTION_PREVIEW_RULES.find((candidate) => candidate.test.test(trimmed));
+  const action = rule ? { label: rule.label, intent: rule.intent() } : null;
+  return { action, answer: { label: previewAnswerLabel(trimmed) }, engineAvailable };
+}
+
 export async function runWorkspaceAgentTurn({
   repoRoot,
   env = process.env,
@@ -1355,6 +1403,8 @@ export async function runWorkspaceAgentTurn({
       metadata: {
         model: response?.model || null,
         usage: response?.usage || null,
+        engine: response?.engine || null,
+        elapsedMs: response?.elapsedMs ?? null,
       },
       now,
     });

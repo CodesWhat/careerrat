@@ -388,6 +388,16 @@ export function ChevronDownIcon(props) {
   );
 }
 
+// W3 — the ask bar's send control (28px cobalt circle, up-arrow glyph).
+export function ArrowUpIcon(props) {
+  return (
+    <Svg {...props}>
+      <path d="M12 19V5" />
+      <path d="m6 11 6-6 6 6" />
+    </Svg>
+  );
+}
+
 // Keyed lookup for icon strings the server-derived view model carries
 // (dashboard-data.js row.modeIcon/sourceIcon, jobs.funnel[].icon,
 // drawer.timeline[].icon, calendar event kinds). Not every legacy icon key is

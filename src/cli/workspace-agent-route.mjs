@@ -1,6 +1,7 @@
 import {
   captureWorkspaceIntake,
   executeWorkspaceIntent,
+  previewWorkspaceIntent,
   runWorkspaceAgentTurn,
 } from "../core/agent/workspace-agent.mjs";
 import { workspaceThreadOpen } from "../core/agent/workspace-thread.mjs";
@@ -72,6 +73,7 @@ export function mountWorkspaceAgentRoutes({
   executeIntentImpl = executeWorkspaceIntent,
   runTurnImpl = runWorkspaceAgentTurn,
   captureIntakeImpl = captureWorkspaceIntake,
+  previewIntentImpl = previewWorkspaceIntent,
 } = {}) {
   addRoute("GET", "/api/workspace/thread", (_req, res) => {
     try {
@@ -85,6 +87,20 @@ export function mountWorkspaceAgentRoutes({
     try {
       const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
       const data = await runTurnImpl({ repoRoot, env, text: body?.text });
+      sendJson(res, 200, { ok: true, data });
+    } catch (error) {
+      sendError(res, error);
+    }
+  });
+
+  // Ask bar preview — classify only, never executes and never writes to the
+  // thread (see previewWorkspaceIntent's own header comment). Synchronous and
+  // side-effect free, so this never awaits anything the way every other
+  // handler here does.
+  addRoute("POST", "/api/workspace/preview", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+      const data = previewIntentImpl({ repoRoot, env, text: body?.text });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {
       sendError(res, error);

@@ -4,6 +4,7 @@ import { IconButton } from "../components/Button.jsx";
 import { MoonIcon, SettingsIcon, SunIcon } from "../components/icons.jsx";
 import { useTheme } from "../lib/theme.js";
 import { ActivityBell } from "./ActivityBell.jsx";
+import { AskBar } from "./AskBar.jsx";
 import { DashboardProvider } from "./DashboardContext.jsx";
 import { NavList } from "./NavList.jsx";
 
@@ -67,6 +68,7 @@ export function AppShell({ children }) {
         <div className="app-shell__main">
           <main className="app-shell__content">{children}</main>
         </div>
+        <AskBar />
       </div>
     </DashboardProvider>
   );

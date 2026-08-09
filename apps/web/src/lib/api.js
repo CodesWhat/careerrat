@@ -44,11 +44,52 @@ async function apiFetch(path, options = {}) {
   return body;
 }
 
-function runWorkspaceIntent(type, entity, input = {}) {
+// Exported (not just used internally below) so the ask bar (app-shell/AskBar.jsx)
+// can commit whatever typed intent POST /api/workspace/preview classified a
+// free-text query into, the same way every typed button action in this file
+// already does — see workspace-agent-route.mjs's own contract.
+export function runWorkspaceIntent(type, entity, input = {}) {
   return apiFetch("/api/workspace/intent", {
     method: "POST",
     body: JSON.stringify({ intent: { type, entity, input } }),
   });
+}
+
+// ---------------------------------------------------------------------------
+// W3 — the shell-docked ask bar (app-shell/AskBar.jsx). Same
+// src/cli/workspace-agent-route.mjs surface runWorkspaceIntent above already
+// wraps, plus the two routes that had no frontend caller before this build:
+// the free-text agent turn and the classify-only preview.
+// ---------------------------------------------------------------------------
+
+// POST /api/workspace/message — runWorkspaceAgentTurn. Committing the ANSWER
+// row: appends `text` to the one durable workspace thread and returns the
+// assistant's reply already appended (see workspace-agent.mjs's own
+// contract) — no separate poll needed to see the reply, though the ask bar
+// still polls getWorkspaceThread while an ACTION intent is in flight.
+export function sendWorkspaceMessage(text) {
+  return apiFetch("/api/workspace/message", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+// POST /api/workspace/preview — previewWorkspaceIntent. Classify-only: never
+// executes anything and never writes to the thread. Returns
+// { action: { label, intent } | null, answer: { label }, engineAvailable }.
+export function previewWorkspaceQuery(text) {
+  return apiFetch("/api/workspace/preview", {
+    method: "POST",
+    body: JSON.stringify({ text }),
+  });
+}
+
+// GET /api/workspace/thread — the same durable thread every workspace route
+// above appends to. The ask bar polls this while an ACTION intent runs in
+// the background (non-streaming — see workspace-agent-route.mjs's own
+// header comment on why this stays a poll rather than SSE).
+export function getWorkspaceThread() {
+  return apiFetch("/api/workspace/thread");
 }
 
 export function getOnboardState() {
@@ -977,4 +1018,3 @@ export function removeDeepIngestConfirmedItem(payload = {}) {
     body: JSON.stringify(payload),
   });
 }
-

@@ -287,6 +287,22 @@ function usageRow({ source, feature, skill, action, operation, model, usage, ups
   };
 }
 
+// Engine identity for the ask bar's receipt line ("AI · <ENGINE LABEL> · <N>S")
+// — derived from the resolved route, never invented. Installed CLI runtimes
+// carry their own id/display name straight from the registry
+// (installed-runtimes.mjs); the version isn't tracked anywhere today, so it's
+// omitted rather than guessed. BYOK/proxy routes have no registry entry (they
+// aren't an installed CLI), so they get a fixed, honest label for the
+// provider actually serving the request.
+export function describeAIEngine(route) {
+  if (route.type === "installed") {
+    return { id: route.runtime.id, label: route.runtime.name };
+  }
+  if (route.type === "byok") return { id: "anthropic", label: "Anthropic API" };
+  if (route.type === "proxy") return { id: "proxy", label: "Managed AI Proxy" };
+  return null;
+}
+
 function messageContentText(content) {
   if (typeof content === "string") return content;
   if (!Array.isArray(content)) return String(content || "");
@@ -327,6 +343,7 @@ async function runInstalledAI({
   operation,
   runInstalledRuntimeImpl,
 }) {
+  const startedAt = performance.now();
   const result = await runInstalledRuntimeImpl({
     runtime: route.runtime,
     prompt: buildInstalledRuntimePrompt({ system, messages }),
@@ -336,6 +353,7 @@ async function runInstalledAI({
     env,
     signal,
   });
+  const elapsedMs = Math.round(performance.now() - startedAt);
   const runtimeModel = result.model || `installed:${route.runtime.id}`;
   if (root && result.usage) {
     appendUsageEvent(
@@ -352,7 +370,7 @@ async function runInstalledAI({
       { root }
     );
   }
-  return { ...result, model: runtimeModel };
+  return { ...result, model: runtimeModel, elapsedMs, engine: describeAIEngine(route) };
 }
 
 async function* streamInstalledAI(options) {
@@ -473,6 +491,8 @@ export async function callAI({
       stopReason: "end_turn",
       model: result.model,
       usage: result.usage,
+      elapsedMs: result.elapsedMs,
+      engine: result.engine,
     };
   }
 
@@ -501,6 +521,7 @@ export async function callAI({
     outputMode,
   });
 
+  const startedAt = performance.now();
   const res = await fetch(url, { method: "POST", headers, body: JSON.stringify(body), signal });
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -538,6 +559,7 @@ export async function callAI({
   }
 
   const data = await res.json();
+  const elapsedMs = Math.round(performance.now() - startedAt);
 
   if (route.type === "byok" && root) {
     appendUsageEvent(
@@ -560,5 +582,7 @@ export async function callAI({
     stopReason: data.stop_reason,
     model: data.model,
     usage: data.usage,
+    elapsedMs,
+    engine: describeAIEngine(route),
   };
 }
