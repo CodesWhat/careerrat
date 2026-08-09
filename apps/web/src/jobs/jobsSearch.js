@@ -289,6 +289,7 @@ export async function runAiWebSearchLane({
   generateSearchPrompts: generateSearchPromptsFn = generateSearchPrompts,
   saveSearchPrompts: saveSearchPromptsFn = saveSearchPrompts,
   getTargetingUpdatedAt: getTargetingUpdatedAtFn = getTargetingUpdatedAt,
+  promptIds,
   refetch,
   signal,
   setStatus,
@@ -323,6 +324,7 @@ export async function runAiWebSearchLane({
 
   try {
     await runFn({
+      promptIds,
       signal,
       onEvent: (payload) => {
         if (!payload || typeof payload !== "object") return;
@@ -368,6 +370,23 @@ export async function runAiWebSearchLane({
     setStatus?.("error");
     setError?.(message);
     return { ok: false, error: message };
+  }
+
+  const failedPromptIds = Array.isArray(doneData?.failedPromptIds) ? doneData.failedPromptIds : [];
+  const allQueriesFailed =
+    Number(doneData?.searched || 0) > 0 &&
+    failedPromptIds.length >= Number(doneData.searched) &&
+    Number(doneData?.new || 0) === 0;
+
+  if (allQueriesFailed) {
+    const message =
+      doneData?.errors?.[0] ||
+      doneData?.queryResults?.find((item) => item?.error)?.error ||
+      "Every selected AI web-search query failed.";
+    setCounts?.(doneData);
+    setStatus?.("error");
+    setError?.(message);
+    return { ok: false, error: message, data: doneData };
   }
 
   setCounts?.(doneData);

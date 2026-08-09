@@ -256,6 +256,22 @@ describe("runAiWebSearchLane", () => {
     expect(refetch).toHaveBeenCalledOnce();
   });
 
+  it("passes only failed saved prompt ids to a retry run", async () => {
+    const state = stateSpies();
+    const run = vi.fn(async ({ onEvent }) => {
+      onEvent({ type: "done", data: { searched: 1, found: 0, new: 0, duplicates: 0, errors: [] } });
+    });
+
+    await runAiWebSearchLane({
+      ...state,
+      ...freshPromptsStub(),
+      promptIds: ["p2"],
+      runAiWebSearchStream: run,
+    });
+
+    expect(run).toHaveBeenCalledWith(expect.objectContaining({ promptIds: ["p2"] }));
+  });
+
   it("surfaces in-band errors as error state without refetching", async () => {
     const state = stateSpies();
     const refetch = vi.fn();
@@ -272,6 +288,29 @@ describe("runAiWebSearchLane", () => {
     expect(state.setStatus).toHaveBeenLastCalledWith("error");
     expect(state.setError).toHaveBeenLastCalledWith("provider failed");
     expect(refetch).not.toHaveBeenCalled();
+  });
+
+  it("turns an all-query failed done frame into retriable error state", async () => {
+    const state = stateSpies();
+    const done = {
+      searched: 1,
+      found: 0,
+      new: 0,
+      duplicates: 0,
+      errors: ["query timed out"],
+      failedPromptIds: ["p1"],
+      queryResults: [{ promptId: "p1", status: "failed", error: "query timed out" }],
+    };
+    const result = await runAiWebSearchLane({
+      ...state,
+      ...freshPromptsStub(),
+      runAiWebSearchStream: async ({ onEvent }) => onEvent({ type: "done", data: done }),
+    });
+
+    expect(result).toEqual({ ok: false, error: "query timed out", data: done });
+    expect(state.setCounts).toHaveBeenLastCalledWith(done);
+    expect(state.setStatus).toHaveBeenLastCalledWith("error");
+    expect(state.setError).toHaveBeenLastCalledWith("query timed out");
   });
 
   it("treats abort as a clean return to idle", async () => {

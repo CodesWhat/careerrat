@@ -16,14 +16,16 @@ describe("deriveJobCta", () => {
     expect(deriveJobCta(application(), null)).toEqual({ label: "Evaluate", section: "evaluate" });
   });
 
-  for (const gate of ["keep", "review"]) {
-    it(`returns Generate documents for a ${gate} gate without a resume`, () => {
-      expect(deriveJobCta(application(), { gate })).toEqual({
-        label: "Generate documents",
-        section: "documents",
-      });
+  it("returns Generate documents for a keep gate without a resume", () => {
+    expect(deriveJobCta(application(), { gate: "keep" })).toEqual({
+      label: "Generate documents",
+      section: "documents",
     });
-  }
+  });
+
+  it("does not offer tailoring for a review gate", () => {
+    expect(deriveJobCta(application(), { gate: "review" })).toBeNull();
+  });
 
   it("returns Mark applied once a pre-applied row has a resume", () => {
     const row = application({ drawer: { artifacts: [{ kind: "Resume", note: "Ready" }] } });

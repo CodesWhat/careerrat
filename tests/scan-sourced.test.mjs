@@ -347,6 +347,30 @@ test("DB mode scans sourced companies from SQLite without config/sourced-scan.js
   }
 });
 
+test("DB mode write:true stamps a successful company-board watermark", async () => {
+  const repoRoot = tempRepo();
+  try {
+    candidateSetupInitialize({ repoRoot });
+    companyAtsUpsert({
+      repoRoot,
+      entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
+    });
+
+    await runSourcedScan({
+      repoRoot,
+      fetchImpl: leverFetchStub(),
+      write: true,
+      intake: false,
+    });
+
+    const company = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies[0];
+    assert.match(company.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB mode scoring uses SQLite targeting when candidate YAML is absent", async () => {
   const repoA = tempRepo();
   const repoB = tempRepo();

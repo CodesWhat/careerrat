@@ -98,10 +98,97 @@ export function buildTitleFilter(titleFilter = {}) {
   return (title = "") => {
     const lower = title.toLowerCase();
     const hasPositive =
-      positive.length === 0 || positive.some((term) => keywordMatches(lower, term));
+      positive.length === 0 ||
+      positive.some(
+        (term) => keywordMatches(lower, term) || boundedRoleTitleEquivalent(lower, term)
+      );
     const hasNegative = negative.some((term) => keywordMatches(lower, term));
     return hasPositive && !hasNegative;
   };
+}
+
+// Full target titles are often narrower labels than employers use for the
+// same engineering lane ("Staff Platform Engineer" vs "Staff Software
+// Engineer, Infrastructure Foundations"). Exact substring matching rejects
+// those while doing nothing useful to keep Product, Sales, DevRel, or
+// Security out. This bounded fallback requires all three dimensions below:
+// compatible engineering kind, compatible seniority, and a shared domain
+// family. It only runs for full engineering/developer target titles; fragment
+// filters such as "Applied AI" retain their exact-match behavior.
+const TITLE_DOMAIN_FAMILIES = [
+  new Set([
+    "backend",
+    "cloud",
+    "compute",
+    "distributed",
+    "infrastructure",
+    "observability",
+    "platform",
+    "reliability",
+    "server",
+    "storage",
+    "systems",
+  ]),
+  new Set(["finance", "financial", "fintech", "payment", "payments"]),
+];
+const TITLE_SPECIALIZATIONS = [
+  "advocate",
+  "marketing",
+  "product",
+  "sales",
+  "security",
+  "solutions",
+  "success",
+  "support",
+];
+const TITLE_ENGINEERING_KINDS = new Set(["developer", "engineer", "engineering"]);
+const TITLE_SENIORITY_GROUPS = [
+  new Set(["staff", "principal", "lead"]),
+  new Set(["senior", "sr"]),
+];
+
+function titleTokens(value) {
+  return new Set(
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)
+  );
+}
+
+function hasAny(tokens, values) {
+  return [...values].some((value) => tokens.has(value));
+}
+
+function boundedRoleTitleEquivalent(actualTitle, targetTitle) {
+  const actual = titleTokens(actualTitle);
+  const target = titleTokens(targetTitle);
+  if (!hasAny(target, TITLE_ENGINEERING_KINDS) || !hasAny(actual, TITLE_ENGINEERING_KINDS)) {
+    return false;
+  }
+
+  // Adjacent functions with an engineering-adjacent noun are still distinct
+  // lanes unless the target explicitly names that specialization.
+  if (
+    TITLE_SPECIALIZATIONS.some(
+      (specialization) => actual.has(specialization) && !target.has(specialization)
+    )
+  ) {
+    return false;
+  }
+
+  const targetSeniority = TITLE_SENIORITY_GROUPS.find((group) => hasAny(target, group));
+  if (targetSeniority) {
+    const compatible =
+      hasAny(actual, targetSeniority) ||
+      (targetSeniority.has("senior") && hasAny(actual, TITLE_SENIORITY_GROUPS[0]));
+    if (!compatible) return false;
+  }
+
+  const targetDomains = TITLE_DOMAIN_FAMILIES.filter((family) => hasAny(target, family));
+  return targetDomains.length > 0 && targetDomains.some((family) => hasAny(actual, family));
 }
 
 function keywordMatches(text, term) {
@@ -134,6 +221,216 @@ export function buildLocationFilter(locationFilter = null) {
     if (block.some((term) => keywordMatches(lower, term))) return false;
     return allow.some((term) => keywordMatches(lower, term));
   };
+}
+
+const MANAGEMENT_TITLE_RE =
+  /\b(manager|director|head|vice president|vp|chief|people lead|engineering lead)\b/i;
+const EARLY_CAREER_TITLE_RE = /\b(intern(ship)?|junior|jr\.?|entry[ -]level|graduate)\b/i;
+const SENIOR_TITLE_RE = /\b(senior|sr\.?|staff|principal|distinguished|fellow)\b/i;
+const REMOTE_RE = /\b(remote|work from home|wfh|distributed)\b/i;
+const HYBRID_RE = /\bhybrid\b/i;
+const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based)\b/i;
+const GLOBAL_REMOTE_RE = /\b(worldwide|anywhere|global)\b/i;
+const US_REMOTE_RE =
+  /\b(united states|u\.?s\.?a?\.?|us[- ](?:only|based)|north america)\b/i;
+const FOREIGN_REMOTE_RE =
+  /\b(ireland|united kingdom|uk|europe|emea|canada|india|asia|apac|australia|new zealand|singapore|germany|france|spain|portugal|poland|netherlands|sweden|norway|denmark|switzerland|israel|brazil|mexico)\b/i;
+const NO_SPONSORSHIP_RE =
+  /\b(?:no|not|cannot|can't|unable to|do not|does not|won't|will not)\b[^.\n]{0,50}\b(?:visa )?sponsor(?:ship)?\b|\b(?:visa )?sponsorship\b[^.\n]{0,50}\b(?:not available|is unavailable)\b/i;
+const US_STATE_RE =
+  /(?:^|[,\s])(?:AL|AK|AZ|AR|CA|CO|CT|DE|FL|GA|HI|ID|IL|IN|IA|KS|KY|LA|ME|MD|MA|MI|MN|MS|MO|MT|NE|NV|NH|NJ|NM|NY|NC|ND|OH|OK|OR|PA|RI|SC|SD|TN|TX|UT|VT|VA|WA|WV|WI|WY|DC)(?:$|[,\s])/i;
+
+// Small offline centroid registry for the metro aliases most likely to differ
+// between a candidate's neighborhood and an ATS display label. Exact locality
+// matching works everywhere; these centroids make configured radii meaningful
+// without an API key. Unknown places stay reviewable, never silently pass as local.
+const LOCATION_CENTROIDS = [
+  ["brooklyn ny", 40.6782, -73.9442],
+  ["new york ny", 40.7128, -74.006],
+  ["new york city", 40.7128, -74.006],
+  ["manhattan ny", 40.7831, -73.9712],
+  ["queens ny", 40.7282, -73.7949],
+  ["jersey city nj", 40.7178, -74.0431],
+  ["newark nj", 40.7357, -74.1724],
+  ["albany ny", 42.6526, -73.7562],
+];
+
+function normalizePlace(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/\b(remote|hybrid|on[ -]?site|in[ -]?office)\b/g, " ")
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+function coordinatesForPlace(value) {
+  const normalized = normalizePlace(value);
+  if (!normalized) return null;
+  const match = LOCATION_CENTROIDS.find(([alias]) =>
+    new RegExp(`(?:^| )${escapeRegExp(alias)}(?: |$)`).test(normalized)
+  );
+  return match ? { latitude: match[1], longitude: match[2] } : null;
+}
+
+function haversineMiles(left, right) {
+  const radians = (degrees) => (degrees * Math.PI) / 180;
+  const earthRadiusMiles = 3958.8;
+  const dLat = radians(right.latitude - left.latitude);
+  const dLon = radians(right.longitude - left.longitude);
+  const lat1 = radians(left.latitude);
+  const lat2 = radians(right.latitude);
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function targetTitles(config = {}) {
+  return (Array.isArray(config?.targeting?.role_buckets) ? config.targeting.role_buckets : [])
+    .flatMap((bucket) => (Array.isArray(bucket?.titles) ? bucket.titles : []))
+    .map((title) => String(title || "").trim())
+    .filter(Boolean);
+}
+
+function seniorityEligibility(offer, config) {
+  const targets = targetTitles(config);
+  if (targets.length === 0) return { eligible: true };
+  const title = String(offer?.title || "");
+  const targetsManagement = targets.some((target) => MANAGEMENT_TITLE_RE.test(target));
+  if (MANAGEMENT_TITLE_RE.test(title) && !targetsManagement) {
+    return { eligible: false, reason: "management-track-mismatch" };
+  }
+  const targetsSenior = targets.some((target) => SENIOR_TITLE_RE.test(target));
+  if (targetsSenior && EARLY_CAREER_TITLE_RE.test(title)) {
+    return { eligible: false, reason: "seniority-below-target" };
+  }
+  return { eligible: true };
+}
+
+function homeLooksUs(home) {
+  return US_STATE_RE.test(String(home || "")) || /\bunited states|\busa\b/i.test(String(home || ""));
+}
+
+function placeMatchesAllowed(location, places) {
+  const normalized = normalizePlace(location);
+  return places.some((place) => {
+    const candidate = normalizePlace(place);
+    return candidate && (normalized.includes(candidate) || candidate.includes(normalized));
+  });
+}
+
+function commuteEligibility(location, profileLocation) {
+  const home = String(profileLocation?.home || "").trim();
+  const relocations = Array.isArray(profileLocation?.relocation)
+    ? profileLocation.relocation.filter(Boolean)
+    : [];
+  if (placeMatchesAllowed(location, [home, ...relocations])) return { eligible: true };
+
+  const radius = Number(profileLocation?.commute_radius_miles);
+  const homeCoordinates =
+    Number.isFinite(Number(profileLocation?.home_latitude)) &&
+    Number.isFinite(Number(profileLocation?.home_longitude))
+      ? {
+          latitude: Number(profileLocation.home_latitude),
+          longitude: Number(profileLocation.home_longitude),
+        }
+      : coordinatesForPlace(home);
+  const jobCoordinates = coordinatesForPlace(location);
+  if (Number.isFinite(radius) && radius > 0 && homeCoordinates && jobCoordinates) {
+    const distanceMiles = haversineMiles(homeCoordinates, jobCoordinates);
+    return {
+      eligible: distanceMiles <= radius,
+      reason: distanceMiles <= radius ? undefined : "outside-commute-radius",
+      distanceMiles: Math.round(distanceMiles * 10) / 10,
+    };
+  }
+  return { eligible: false, reason: "outside-commute-area" };
+}
+
+function locationEligibility(offer, config) {
+  const location = String(offer?.location || "").trim();
+  const title = String(offer?.title || "");
+  const profileLocation = config?.profile?.location || {};
+  const hasLocationPolicy =
+    Boolean(String(profileLocation?.home || "").trim()) ||
+    (Array.isArray(profileLocation?.relocation) && profileLocation.relocation.length > 0) ||
+    ["remote", "hybrid", "onsite"].some(
+      (mode) => typeof profileLocation?.[mode] === "boolean"
+    );
+  if (!hasLocationPolicy) return { eligible: true };
+  if (!location) return { eligible: true, unknown: "location" };
+
+  const remote = REMOTE_RE.test(`${title}\n${location}`);
+  const hybrid = HYBRID_RE.test(`${title}\n${location}`);
+  const onsite = ONSITE_RE.test(`${title}\n${location}`);
+  const hasExplicitModes = ["remote", "hybrid", "onsite"].some(
+    (mode) => typeof profileLocation?.[mode] === "boolean"
+  );
+
+  if (remote) {
+    if (hasExplicitModes && profileLocation.remote !== true) {
+      return { eligible: false, reason: "remote-not-allowed" };
+    }
+    if (GLOBAL_REMOTE_RE.test(location)) return { eligible: true };
+    if (homeLooksUs(profileLocation.home)) {
+      if (FOREIGN_REMOTE_RE.test(location) && !US_REMOTE_RE.test(location)) {
+        return { eligible: false, reason: "remote-region-mismatch" };
+      }
+      if (!US_REMOTE_RE.test(location)) return { eligible: true, unknown: "remote-region" };
+    }
+    return { eligible: true };
+  }
+
+  const modeAllowed = hybrid
+    ? profileLocation.hybrid === true
+    : onsite
+      ? profileLocation.onsite === true
+      : profileLocation.hybrid === true || profileLocation.onsite === true;
+  if (hasExplicitModes && !modeAllowed) {
+    return { eligible: false, reason: hybrid ? "hybrid-not-allowed" : "onsite-not-allowed" };
+  }
+  return commuteEligibility(location, profileLocation);
+}
+
+function maxPostingAgeDays(config = {}) {
+  const postingAge = config?.targeting?.search_preferences?.posting_age;
+  if (postingAge?.mode !== "fixed-days") return null;
+  const days = Number(postingAge.days);
+  return Number.isFinite(days) && days > 0 ? days : null;
+}
+
+function postingAgeEligibility(offer, config, now) {
+  if (offer?.postedAt === null || offer?.postedAt === undefined || offer?.postedAt === "") {
+    return { eligible: true, unknown: "postedAt" };
+  }
+  const postedAt =
+    typeof offer.postedAt === "number" ? offer.postedAt : Date.parse(String(offer.postedAt));
+  if (!Number.isFinite(postedAt)) return { eligible: true, unknown: "postedAt" };
+  const days = maxPostingAgeDays(config);
+  if (!days) return { eligible: true };
+  return postedAt >= now - days * 86400000
+    ? { eligible: true }
+    : { eligible: false, reason: "posting-too-old" };
+}
+
+function salaryEligibility(offer, config) {
+  const floor = Number(config?.profile?.compensation?.minimum_base);
+  const band = extractCompBand(
+    [offer?.comp, offer?.bodyText, offer?.description].filter(Boolean).join("\n")
+  );
+  if (!band) return { eligible: true, unknown: "compensation" };
+  if (Number.isFinite(floor) && floor > 0 && band.max < floor) {
+    return { eligible: false, reason: "comp-below-floor", band };
+  }
+  return { eligible: true };
+}
+
+function contentEligibility(offer, config) {
+  const body = String(offer?.bodyText || offer?.description || "");
+  if (config?.profile?.authorization?.requires_sponsorship === true && NO_SPONSORSHIP_RE.test(body)) {
+    return { eligible: false, reason: "sponsorship-unavailable" };
+  }
+  return { eligible: true };
 }
 
 function scoreSourcedOfferFromConfig(
@@ -427,26 +724,73 @@ export function inferProvider(entry = {}) {
 
 export function filterAndDedupeOffers(
   offers,
-  { seenUrls, seenReqIds = new Set(), seenCompanyRoles, titleFilter, locationFilter, config = {} }
+  {
+    seenUrls,
+    seenReqIds = new Set(),
+    seenCompanyRoles,
+    titleFilter,
+    locationFilter,
+    config = {},
+    now = Date.now(),
+    companyPresentationCounts = new Map(),
+    perCompanyCap = Infinity,
+  }
 ) {
   const kept = [];
   const filteredTitle = [];
+  const filteredSeniority = [];
   const filteredLocation = [];
+  const filteredAge = [];
+  const filteredSalary = [];
+  const filteredEligibility = [];
   const duplicates = [];
   const possibleDuplicates = [];
   const invalid = [];
+  const overflow = [];
+  const qualified = [];
 
-  for (const offer of offers) {
+  for (const [inputIndex, offer] of offers.entries()) {
     if (!offer.url || !offer.title || !offer.company) {
       invalid.push({ ...offer, reason: "missing url, title, or company" });
       continue;
     }
     if (!titleFilter(offer.title)) {
-      filteredTitle.push(offer);
+      filteredTitle.push({ ...offer, qualificationReason: "title-mismatch" });
       continue;
     }
-    if (!locationFilter(offer.location || "")) {
-      filteredLocation.push(offer);
+    const seniority = seniorityEligibility(offer, config);
+    if (!seniority.eligible) {
+      filteredSeniority.push({ ...offer, qualificationReason: seniority.reason });
+      continue;
+    }
+    if (!locationFilter(offer.location || "", offer.url, offer.title, offer)) {
+      filteredLocation.push({ ...offer, qualificationReason: "location-policy-mismatch" });
+      continue;
+    }
+    const qualifiedLocation = locationEligibility(offer, config);
+    if (!qualifiedLocation.eligible) {
+      filteredLocation.push({
+        ...offer,
+        qualificationReason: qualifiedLocation.reason,
+        ...(qualifiedLocation.distanceMiles == null
+          ? {}
+          : { distanceMiles: qualifiedLocation.distanceMiles }),
+      });
+      continue;
+    }
+    const age = postingAgeEligibility(offer, config, Number(now));
+    if (!age.eligible) {
+      filteredAge.push({ ...offer, qualificationReason: age.reason });
+      continue;
+    }
+    const salary = salaryEligibility(offer, config);
+    if (!salary.eligible) {
+      filteredSalary.push({ ...offer, qualificationReason: salary.reason, compBand: salary.band });
+      continue;
+    }
+    const content = contentEligibility(offer, config);
+    if (!content.eligible) {
+      filteredEligibility.push({ ...offer, qualificationReason: content.reason });
       continue;
     }
     const key = normalizeCompanyRoleKey(offer.company, offer.title);
@@ -464,16 +808,66 @@ export function filterAndDedupeOffers(
     const possibleDuplicate = seenCompanyRoles.has(key);
     if (possibleDuplicate) possibleDuplicates.push(offer);
     seenCompanyRoles.add(key);
-    kept.push({
+    const qualificationUnknowns = [qualifiedLocation.unknown, age.unknown, salary.unknown].filter(
+      Boolean
+    );
+    qualified.push({
       ...offer,
       key,
       reqId: req.id,
       possibleDuplicate,
+      qualificationUnknowns,
+      _qualificationInputIndex: inputIndex,
       ...scoreSourcedOffer(offer, config),
     });
   }
 
-  return { kept, filteredTitle, filteredLocation, duplicates, possibleDuplicates, invalid };
+  // A company board is usually newest-first, but not all providers guarantee
+  // it. Rank the already-qualified survivors before applying the presentation
+  // cap so one employer cannot fill the default inbox with weaker roles.
+  const normalizedCap = Number(perCompanyCap);
+  const cap = Number.isFinite(normalizedCap) && normalizedCap > 0 ? normalizedCap : Infinity;
+  if (Number.isFinite(cap)) {
+    qualified.sort((left, right) => {
+      const scoreDelta = Number(right.score || 0) - Number(left.score || 0);
+      if (scoreDelta) return scoreDelta;
+      const rightPosted = Date.parse(String(right.postedAt || ""));
+      const leftPosted = Date.parse(String(left.postedAt || ""));
+      if (
+        Number.isFinite(rightPosted) &&
+        Number.isFinite(leftPosted) &&
+        rightPosted !== leftPosted
+      ) {
+        return rightPosted - leftPosted;
+      }
+      return left._qualificationInputIndex - right._qualificationInputIndex;
+    });
+  }
+  for (const offer of qualified) {
+    const companyKey = String(offer.company || "").trim().toLowerCase();
+    const presented = Number(companyPresentationCounts.get(companyKey) || 0);
+    const { _qualificationInputIndex, ...cleanOffer } = offer;
+    if (presented >= cap) {
+      overflow.push({ ...cleanOffer, qualificationReason: "per-company-cap" });
+      continue;
+    }
+    companyPresentationCounts.set(companyKey, presented + 1);
+    kept.push(cleanOffer);
+  }
+
+  return {
+    kept,
+    filteredTitle,
+    filteredSeniority,
+    filteredLocation,
+    filteredAge,
+    filteredSalary,
+    filteredEligibility,
+    duplicates,
+    possibleDuplicates,
+    invalid,
+    overflow,
+  };
 }
 
 export function extractReqId(rawUrl = "") {

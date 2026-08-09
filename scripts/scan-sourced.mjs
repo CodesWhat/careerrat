@@ -164,6 +164,26 @@ function persistSearchSourceWatermark({ pathCtx, searchSources, sourceIndex, sav
   return null;
 }
 
+function persistCompanySourceWatermark({ pathCtx, companyName, savedAt }) {
+  if (!dbExists(pathCtx)) return null;
+  const current = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
+  const target = String(companyName || "")
+    .trim()
+    .toLowerCase();
+  const companies = (current.tracked_companies || []).map((company) =>
+    String(company?.name || "")
+      .trim()
+      .toLowerCase() === target
+      ? { ...company, lastRunAt: savedAt.toISOString() }
+      : company
+  );
+  return sourceConfigPut({
+    ...pathCtx,
+    name: "sourced-scan",
+    data: { ...current, tracked_companies: companies },
+  });
+}
+
 function enabledCompanies(config, companyFilter) {
   return (config.tracked_companies || [])
     .filter((entry) => entry && entry.enabled !== false)
@@ -201,11 +221,16 @@ function emptyFilteredResult() {
   return {
     kept: [],
     filteredTitle: [],
+    filteredSeniority: [],
     filteredLocation: [],
+    filteredAge: [],
+    filteredSalary: [],
+    filteredEligibility: [],
     duplicates: [],
     possibleDuplicates: [],
     invalid: [],
     expired: [],
+    overflow: [],
   };
 }
 
@@ -301,6 +326,12 @@ export async function runSourcedScan({
   const filtered = emptyFilteredResult();
   const outputOffers = [];
   const savedAt = new Date();
+  const companyPresentationCounts = new Map();
+  const configuredCompanyCap = Number(
+    candidateConfig?.targeting?.search_preferences?.presentation_cap_per_company
+  );
+  const perCompanyCap =
+    Number.isInteger(configuredCompanyCap) && configuredCompanyCap > 0 ? configuredCompanyCap : 5;
   const companies = enabledCompanies(config, companyFilter);
   let searchSources = null;
   if (!companyFilter && !standaloneConfigMode) {
@@ -333,22 +364,34 @@ export async function runSourcedScan({
       titleFilter,
       locationFilter,
       config: candidateConfig,
+      now: savedAt.getTime(),
+      companyPresentationCounts,
+      perCompanyCap,
     });
 
     if (verify && batchFiltered.kept.length > 0) {
       const checked = [];
       const dropped = [];
       for (const offer of batchFiltered.kept) {
-        const live = await checkUrlLiveness(offer.url);
+        const live = await checkUrlLiveness(offer.url, { fetchImpl });
         if (live.result === "expired") dropped.push({ ...offer, liveness: live });
         else checked.push({ ...offer, liveness: live });
       }
       batchFiltered = { ...batchFiltered, kept: checked, expired: dropped };
     }
 
-    appendFilteredResult(filtered, batchFiltered);
     const remainingLimit = limit > 0 ? Math.max(0, limit - outputOffers.length) : Infinity;
     const keptForOutput = batchFiltered.kept.slice(0, remainingLimit);
+    const limitedOverflow = batchFiltered.kept.slice(remainingLimit).map((offer) => ({
+      ...offer,
+      qualificationReason: "run-presentation-limit",
+    }));
+    batchFiltered = {
+      ...batchFiltered,
+      kept: keptForOutput,
+      overflow: [...batchFiltered.overflow, ...limitedOverflow],
+    };
+    appendFilteredResult(filtered, batchFiltered);
     const offersForOutput = write
       ? standaloneConfigMode
         ? offersWithCapturedJobs({ repoRoot, env, offers: keptForOutput, savedAt })
@@ -376,6 +419,9 @@ export async function runSourcedScan({
       { fetchImpl, companyFilter: null }
     );
     await acceptBatch(result, { kind: "company", label: company.name });
+    if (write && !standaloneConfigMode && result.errors.length === 0) {
+      persistCompanySourceWatermark({ pathCtx, companyName: company.name, savedAt });
+    }
   }
 
   // Also scan RSS-bearing and board-wide sources. Processing singleton configs
@@ -414,11 +460,42 @@ export async function runSourcedScan({
   const summary = {
     scanned: scanned.offers.length,
     new: filtered.kept.length,
+    qualified: filtered.kept.length + filtered.overflow.length,
+    presented: filtered.kept.length,
     filteredTitle: filtered.filteredTitle.length,
+    filteredSeniority: filtered.filteredSeniority.length,
     filteredLocation: filtered.filteredLocation.length,
+    filteredAge: filtered.filteredAge.length,
+    filteredSalary: filtered.filteredSalary.length,
+    filteredEligibility: filtered.filteredEligibility.length,
     duplicates: filtered.duplicates.length,
     invalid: filtered.invalid.length,
     expired: filtered.expired?.length || 0,
+    overflow: filtered.overflow.length,
+    reasonCounts: {
+      title: filtered.filteredTitle.length,
+      seniority: filtered.filteredSeniority.length,
+      location: filtered.filteredLocation.length,
+      age: filtered.filteredAge.length,
+      salary: filtered.filteredSalary.length,
+      eligibility: filtered.filteredEligibility.length,
+      duplicate: filtered.duplicates.length,
+      invalid: filtered.invalid.length,
+      expired: filtered.expired?.length || 0,
+      overflow: filtered.overflow.length,
+    },
+    reconciled:
+      filtered.kept.length +
+      filtered.filteredTitle.length +
+      filtered.filteredSeniority.length +
+      filtered.filteredLocation.length +
+      filtered.filteredAge.length +
+      filtered.filteredSalary.length +
+      filtered.filteredEligibility.length +
+      filtered.duplicates.length +
+      filtered.invalid.length +
+      (filtered.expired?.length || 0) +
+      filtered.overflow.length,
     errors: scanned.errors,
     offers: outputOffers,
   };

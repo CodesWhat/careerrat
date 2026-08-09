@@ -49,6 +49,11 @@
             "days": { "type": "number" }
           }
         },
+        "presentation_cap_per_company": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum qualified roles from one company in the default review queue per sweep. Defaults to 5."
+        },
         "cadence": {
           "type": "object",
           "additionalProperties": false,

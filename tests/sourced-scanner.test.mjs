@@ -62,6 +62,26 @@ test("title filter accepts target titles and rejects negative keywords", () => {
   assert.equal(filter("Finance Manager"), false);
 });
 
+test("title filter recognizes bounded infrastructure-title equivalents without admitting adjacent functions", () => {
+  const filter = buildTitleFilter({
+    positive: [
+      "Staff Platform Engineer",
+      "Principal Infrastructure Engineer",
+      "Staff Backend Engineer",
+      "Senior Payments Infrastructure Engineer",
+    ],
+    negative: ["Intern"],
+  });
+
+  assert.equal(filter("Staff Software Engineer, Infrastructure Foundations"), true);
+  assert.equal(filter("Senior Software Engineer, Compute (Temporal Cloud)"), true);
+  assert.equal(filter("Senior Staff Engineer, Open Source Server"), true);
+  assert.equal(filter("Staff Cloud Security Engineer"), false);
+  assert.equal(filter("Staff Product Manager, Agent Platform"), false);
+  assert.equal(filter("Principal Developer Advocate, AI"), false);
+  assert.equal(filter("Account Executive, Platform"), false);
+});
+
 test("location filter blocks foreign roles while allowing home, remote, and unknown-location roles", () => {
   const filter = buildLocationFilter({
     always_allow: ["New York"],
@@ -531,6 +551,215 @@ test("dedupe attaches fit ratings to kept offers", () => {
 
   assert.equal(Number.isFinite(result.kept[0].score), true);
   assert.ok(["high", "med", "stretch"].includes(result.kept[0].fit));
+});
+
+test("qualification gate rejects management seniority drift before scoring", () => {
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "Figma",
+        title: "Manager, Software Engineering - Billing",
+        url: "https://jobs.example.com/manager",
+        location: "New York, NY",
+        bodyText: "Lead a backend platform team building reliable distributed systems.",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+      config: {
+        targeting: {
+          role_buckets: [
+            { name: "Platform", titles: ["Staff Backend Engineer", "Principal Platform Engineer"] },
+          ],
+          cut_signals: ["pure people management"],
+        },
+        profile: {
+          location: { home: "Brooklyn, NY", remote: true, hybrid: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.kept.length, 0);
+  assert.equal(result.filteredSeniority.length, 1);
+  assert.equal(result.filteredSeniority[0].qualificationReason, "management-track-mismatch");
+});
+
+test("qualification gate enforces remote eligibility and a configured commute radius", () => {
+  const offers = [
+    {
+      company: "Temporal",
+      title: "Staff Backend Engineer",
+      url: "https://jobs.example.com/nyc",
+      location: "Hybrid - New York, NY",
+    },
+    {
+      company: "Temporal",
+      title: "Principal Platform Engineer",
+      url: "https://jobs.example.com/albany",
+      location: "Hybrid - Albany, NY",
+    },
+    {
+      company: "Temporal",
+      title: "Staff Software Engineer",
+      url: "https://jobs.example.com/remote-us",
+      location: "Remote - United States",
+    },
+    {
+      company: "Temporal",
+      title: "Staff Software Engineer",
+      url: "https://jobs.example.com/remote-ie",
+      location: "Remote - Ireland",
+    },
+    {
+      company: "Temporal",
+      title: "Staff Software Engineer",
+      url: "https://jobs.example.com/unknown",
+      location: "",
+    },
+  ];
+  const result = filterAndDedupeOffers(offers, {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    titleFilter: () => true,
+    locationFilter: () => true,
+    config: {
+      targeting: {
+        role_buckets: [{ name: "Platform", titles: ["Staff Backend Engineer"] }],
+      },
+      profile: {
+        location: {
+          home: "Brooklyn, NY",
+          remote: true,
+          hybrid: true,
+          onsite: false,
+          commute_radius_miles: 25,
+          relocation: [],
+        },
+      },
+    },
+  });
+
+  assert.deepEqual(
+    result.kept.map((offer) => offer.url),
+    [
+      "https://jobs.example.com/nyc",
+      "https://jobs.example.com/remote-us",
+      "https://jobs.example.com/unknown",
+    ]
+  );
+  assert.equal(result.filteredLocation.length, 2);
+  assert.equal(result.kept[2].qualificationUnknowns.includes("location"), true);
+});
+
+test("qualification gate filters stale, below-floor, and explicit sponsorship-conflict roles", () => {
+  const now = Date.parse("2026-08-09T12:00:00Z");
+  const result = filterAndDedupeOffers(
+    [
+      {
+        company: "OldCo",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/old",
+        location: "Remote - US",
+        postedAt: "2026-06-01T00:00:00Z",
+      },
+      {
+        company: "CheapCo",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/cheap",
+        location: "Remote - US",
+        postedAt: "2026-08-08T00:00:00Z",
+        comp: "$140,000 - $180,000 base",
+      },
+      {
+        company: "NoVisaCo",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/no-visa",
+        location: "Remote - US",
+        postedAt: "2026-08-08T00:00:00Z",
+        bodyText: "Candidates must already be authorized. We do not offer visa sponsorship.",
+      },
+      {
+        company: "UnknownCo",
+        title: "Staff Backend Engineer",
+        url: "https://jobs.example.com/unknowns",
+        location: "",
+      },
+    ],
+    {
+      seenUrls: new Set(),
+      seenReqIds: new Set(),
+      seenCompanyRoles: new Set(),
+      titleFilter: () => true,
+      locationFilter: () => true,
+      now,
+      config: {
+        targeting: {
+          role_buckets: [{ name: "Platform", titles: ["Staff Backend Engineer"] }],
+          search_preferences: { posting_age: { mode: "fixed-days", days: 30 } },
+        },
+        profile: {
+          compensation: { minimum_base: 200000 },
+          location: { home: "Brooklyn, NY", remote: true, hybrid: true },
+          authorization: { work_authorized: false, requires_sponsorship: true },
+        },
+      },
+    }
+  );
+
+  assert.equal(result.filteredAge.length, 1);
+  assert.equal(result.filteredSalary.length, 1);
+  assert.equal(result.filteredEligibility.length, 1);
+  assert.equal(result.kept.length, 1);
+  assert.deepEqual(result.kept[0].qualificationUnknowns.sort(), [
+    "compensation",
+    "location",
+    "postedAt",
+  ]);
+});
+
+test("qualification gate caps one company and reconciles every fetched offer", () => {
+  const offers = Array.from({ length: 4 }, (_, index) => ({
+    company: "FloodCo",
+    title: `Staff Backend Engineer ${index + 1}`,
+    url: `https://jobs.example.com/flood-${index + 1}`,
+    location: "Remote - US",
+    postedAt: `2026-08-0${index + 1}T00:00:00Z`,
+  }));
+  const result = filterAndDedupeOffers(offers, {
+    seenUrls: new Set(),
+    seenReqIds: new Set(),
+    seenCompanyRoles: new Set(),
+    companyPresentationCounts: new Map(),
+    perCompanyCap: 2,
+    titleFilter: () => true,
+    locationFilter: () => true,
+    config: {
+      targeting: { role_buckets: [{ titles: ["Staff Backend Engineer"] }] },
+      profile: { location: { home: "Brooklyn, NY", remote: true } },
+    },
+  });
+
+  assert.equal(result.kept.length, 2);
+  assert.equal(result.overflow.length, 2);
+  const reconciled = [
+    result.kept,
+    result.filteredTitle,
+    result.filteredSeniority,
+    result.filteredLocation,
+    result.filteredAge,
+    result.filteredSalary,
+    result.filteredEligibility,
+    result.duplicates,
+    result.invalid,
+    result.overflow,
+  ].reduce((sum, rows) => sum + rows.length, 0);
+  assert.equal(reconciled, offers.length);
 });
 
 test("maps score bands to tracker fit buckets", () => {

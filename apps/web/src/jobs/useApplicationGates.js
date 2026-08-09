@@ -25,7 +25,8 @@ export function useApplicationGates() {
       const res = await getApplications();
       const next = {};
       for (const app of res?.data || []) {
-        if (app?.id && app.packetGate) next[app.id] = app.packetGate;
+        const evaluation = app?.evaluation || app?.packetGate;
+        if (app?.id && evaluation) next[app.id] = evaluation;
       }
       setGates(next);
     } catch (_err) {
@@ -57,7 +58,7 @@ export function deriveJobCta(row, gate) {
   if (row?.source !== "application" || row.terminal) return null;
   if (!gate) return { label: "Evaluate", section: "evaluate" };
   const verdict = String(gate.gate || "").toLowerCase();
-  if ((verdict === "keep" || verdict === "review") && !hasResumeArtifact(row)) {
+  if (verdict === "keep" && !hasResumeArtifact(row)) {
     return { label: "Generate documents", section: "documents" };
   }
   if (hasResumeArtifact(row) && PRE_APPLIED_STATUSES.has(row.status)) {

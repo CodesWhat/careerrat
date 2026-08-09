@@ -7,7 +7,12 @@ import { CompanyAvatar } from "../components/CompanyAvatar.jsx";
 import { Field, Select, TextField, Toggle } from "../components/form.jsx";
 import { ChevronDownIcon, ListIcon, SearchIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
-import { getRuntimeConfig, getSearchSources, setSourcedStatus } from "../lib/api.js";
+import {
+  getRuntimeConfig,
+  getSearchSources,
+  getSourcingRun,
+  setSourcedStatus,
+} from "../lib/api.js";
 import { FunnelSankey } from "./FunnelSankey.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
 import {
@@ -142,6 +147,10 @@ export function JobsPage() {
     aiSearchCounts
   );
   const visibleAiSearchError = aiSearchStatus === "error" ? aiSearchError : null;
+  const aiRetryPromptIds = Array.isArray(aiSearchCounts?.failedPromptIds)
+    ? aiSearchCounts.failedPromptIds
+    : [];
+  const aiSearchAttached = Boolean(aiSearchAbortRef.current);
 
   useEffect(() => {
     let cancelled = false;
@@ -152,6 +161,50 @@ export function JobsPage() {
       .catch(() => {});
     return () => {
       cancelled = true;
+    };
+  }, []);
+
+  // AI-search runs live in the same durable sourcing ledger as free-board
+  // sweeps. Restore the latest terminal result after navigation/restart and
+  // briefly poll a detached running record until its server-side run settles.
+  useEffect(() => {
+    let cancelled = false;
+    let timer = null;
+
+    const loadLatest = async () => {
+      try {
+        const body = await getSourcingRun({ purpose: "ai-web-search" });
+        if (cancelled || aiSearchAbortRef.current) return;
+        const run = body?.run;
+        if (!run) return;
+        if (run.status === "running") {
+          setAiSearchStatus("running");
+          setAiSearchActivity(run.progress?.lastActivity || "AI web search is still running…");
+          timer = globalThis.setTimeout(loadLatest, 1500);
+          return;
+        }
+        if (run.status === "completed") {
+          setAiSearchCounts(run.summary || null);
+          setAiSearchStatus("results");
+          setAiSearchActivity(null);
+          return;
+        }
+        if (run.status === "failed") {
+          setAiSearchCounts(run.error || null);
+          setAiSearchError(run.error?.message || "AI web search failed.");
+          setAiSearchStatus("error");
+          setAiSearchActivity(null);
+        }
+      } catch {
+        // This restore path is advisory; runtime availability and the normal
+        // search controls remain usable when no durable ledger can be read.
+      }
+    };
+
+    void loadLatest();
+    return () => {
+      cancelled = true;
+      if (timer) globalThis.clearTimeout(timer);
     };
   }, []);
 
@@ -214,10 +267,8 @@ export function JobsPage() {
   }, [queryDraft]);
 
   useEffect(() => {
-    if (queryDraft.trim().toLowerCase() !== explorerState.query) {
-      setQueryDraft(explorerState.query);
-    }
-  }, [explorerState.query, queryDraft]);
+    setQueryDraft(explorerState.query);
+  }, [explorerState.query]);
 
   function setTab(nextTab) {
     setSearchParams((prev) => {
@@ -292,10 +343,11 @@ export function JobsPage() {
     }
   }
 
-  async function handleAiWebSearch() {
+  async function handleAiWebSearch(promptIds) {
     const controller = new AbortController();
     aiSearchAbortRef.current = controller;
     await runAiWebSearchLane({
+      promptIds: Array.isArray(promptIds) ? promptIds : undefined,
       refetch,
       signal: controller.signal,
       setStatus: setAiSearchStatus,
@@ -396,18 +448,27 @@ export function JobsPage() {
       {snapshot && tab === "search" ? (
         <SearchView
           aiSearch={{
-            actionLabel: aiSearchRunning ? "Cancel search" : "Run AI Web Search",
+            actionLabel: aiSearchRunning
+              ? aiSearchAttached
+                ? "Cancel search"
+                : "Search running…"
+              : aiRetryPromptIds.length
+                ? `Retry ${aiRetryPromptIds.length} failed ${aiRetryPromptIds.length === 1 ? "query" : "queries"}`
+                : "Run AI Web Search",
             body: describeAiSearchBody({
               status: aiSearchStatus,
               activity: aiSearchActivity,
               available: aiWebSearchAvailable,
             }),
-            disabled: aiSearchDisabled,
+            disabled: aiSearchDisabled || (aiSearchRunning && !aiSearchAttached),
+            extra: <AiSearchFailureDetails counts={aiSearchCounts} />,
             meta: aiSearchMetaLabel({
               running: aiSearchRunning,
               available: aiWebSearchAvailable,
             }),
-            onAction: aiSearchRunning ? handleAiWebSearchAbort : handleAiWebSearch,
+            onAction: aiSearchRunning
+              ? handleAiWebSearchAbort
+              : () => handleAiWebSearch(aiRetryPromptIds),
             statusText: aiSearchStatusText,
             title: aiSearchTitleLabel({ available: aiWebSearchAvailable }),
           }}
@@ -876,6 +937,7 @@ function SearchView({
           meta={aiSearch.meta}
           onAction={aiSearch.onAction}
           title={aiSearch.title}
+          extra={aiSearch.extra}
         >
           {aiSearch.body}
         </SearchModeCard>
@@ -1002,6 +1064,11 @@ function SearchStatusStrip({ aiSearchStatusText, manualSearchRunning, model, sou
 }
 
 function SearchResultRow({ row, onOpen, onSkip, skipping }) {
+  const actionable =
+    !row.terminal &&
+    !["cut", "skipped", "dismissed", "ignored", "withdrawn"].includes(
+      String(row.status || "").toLowerCase()
+    );
   return (
     <div className="jobs__row jobs__result-row">
       <CompanyAvatar name={row.company} domain={row.domain} size={38} />
@@ -1019,21 +1086,27 @@ function SearchResultRow({ row, onOpen, onSkip, skipping }) {
       </span>
       {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: labeled action-button group, not a form control group */}
       <span aria-label={`Actions for ${row.company}`} className="jobs__result-actions">
-        <Button
-          variant="primary"
-          className="jobs__result-button jobs__result-button--primary"
-          onClick={() => onOpen(row.id)}
-        >
-          Open
-        </Button>
-        <Button
-          variant="secondary"
-          className="jobs__result-button"
-          disabled={skipping}
-          onClick={() => onSkip(row.id)}
-        >
-          {skipping ? "Skipping…" : "Skip"}
-        </Button>
+        {actionable ? (
+          <>
+            <Button
+              variant="primary"
+              className="jobs__result-button jobs__result-button--primary"
+              onClick={() => onOpen(row.id)}
+            >
+              Open
+            </Button>
+            <Button
+              variant="secondary"
+              className="jobs__result-button"
+              disabled={skipping}
+              onClick={() => onSkip(row.id)}
+            >
+              {skipping ? "Skipping…" : "Skip"}
+            </Button>
+          </>
+        ) : (
+          <span className="jobs__stage-pill">Skipped</span>
+        )}
       </span>
     </div>
   );
@@ -1081,13 +1154,14 @@ function DecayPill({ row }) {
 
 function filterSearchRows(rows, filter) {
   if (filter === "all") return rows;
-  if (filter === "high") return rows.filter((row) => Number(row.fit) >= 80);
+  const active = rows.filter((row) => !row.terminal);
+  if (filter === "high") return active.filter((row) => Number(row.fit) >= 80);
   if (filter === "fresh") {
-    return rows.filter(
+    return active.filter(
       (row) => !row.stale && !row.ghosted && !["stale", "ghosted"].includes(row.decayState)
     );
   }
-  return rows.filter((row) => row.needsReview);
+  return active.filter((row) => row.needsReview);
 }
 
 function filterChips(state, stageLabel) {
@@ -1176,14 +1250,20 @@ function buildJobsModel(data, loadedSearchSources, manualSearchRun) {
   };
 }
 
-function sourceSetupSummary(sourceSetup, ready) {
+export function sourceSetupSummary(sourceSetup, ready) {
   if (!ready) return "Search is available after source setup has at least one deterministic board.";
   const searches = Number(sourceSetup?.searches?.enabled || sourceSetup?.enabledSearches || 0);
-  const companies = Number(sourceSetup?.trackedCompanies || sourceSetup?.companies || 0);
+  const companies = Number(
+    sourceSetup?.enabledTrackedCompanies ??
+      sourceSetup?.deterministicSources?.supportedAtsCompanies ??
+      sourceSetup?.trackedCompanies ??
+      sourceSetup?.companies ??
+      0
+  );
   const attempted = Number(sourceSetup?.deterministicSources?.attempted || 0);
   const parts = [];
-  if (searches) parts.push(`${searches} broad searches`);
-  if (companies) parts.push(`${companies} company boards`);
+  if (searches) parts.push(`${searches} broad ${searches === 1 ? "search" : "searches"}`);
+  if (companies) parts.push(`${companies} company ${companies === 1 ? "board" : "boards"}`);
   if (attempted && !parts.length) parts.push(`${attempted} deterministic sources`);
   return parts.length
     ? `${parts.join(" / ")} ready for the next sweep.`
@@ -1204,7 +1284,7 @@ function describeJobsSearchError(error) {
 // card itself never grows its own results panel. Returns null outside a
 // running/just-finished run so the strip falls back to its normal
 // manualSearchRunning/runSummary/sourceSummary text.
-function describeAiSearchStatusText(status, activity, counts) {
+export function describeAiSearchStatusText(status, activity, counts) {
   if (status === "running") return activity || "Running AI web search…";
   if (status === "results" && counts) {
     const parts = [
@@ -1212,10 +1292,36 @@ function describeAiSearchStatusText(status, activity, counts) {
       `${counts.new ?? 0} new`,
       `${counts.duplicates ?? 0} duplicates`,
     ];
-    if (counts.errors) parts.push(`${counts.errors} errors`);
+    const failedCount = Array.isArray(counts.failedPromptIds)
+      ? counts.failedPromptIds.length
+      : Array.isArray(counts.errors)
+        ? counts.errors.length
+        : Number(counts.errors || 0);
+    if (failedCount > 0)
+      parts.push(`${failedCount} failed ${failedCount === 1 ? "query" : "queries"}`);
     return `AI web search: ${parts.join(", ")}.`;
   }
   return null;
+}
+
+function AiSearchFailureDetails({ counts }) {
+  const failed = Array.isArray(counts?.queryResults)
+    ? counts.queryResults.filter((item) => item?.status === "failed")
+    : [];
+  if (!failed.length) return null;
+  return (
+    <div className="jobs__ai-failures" role="status">
+      <strong>Queries needing a retry</strong>
+      <ul>
+        {failed.map((item) => (
+          <li key={item.promptId}>
+            <span>{item.prompt}</span>
+            <small>{item.error || "No query coverage was reported."}</small>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
 }
 
 function aiSearchTitleLabel({ available }) {

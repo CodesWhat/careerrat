@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -27,6 +28,7 @@ vi.mock("../lib/api.js", () => ({
   getApplications: vi.fn(async () => ({ data: [] })),
   getPacket: vi.fn(async () => ({ artifacts: {} })),
   getRuntimeConfig: vi.fn(async () => ({ aiWebSearch: { available: true } })),
+  getSourcingRun: vi.fn(async () => ({ status: "not_started", run: null })),
   getSearchSources: vi.fn(async () => ({ ready: true })),
   getSearchPrompts: vi.fn(async () => ({ data: { prompts: [] } })),
   generateSearchPrompts: vi.fn(async () => ({ data: { prompts: [] } })),
@@ -48,7 +50,37 @@ vi.mock("../lib/api.js", () => ({
 }));
 
 import { setSourcedStatus } from "../lib/api.js";
-import { describeManualRunSummary, JobsPage } from "./JobsPage.jsx";
+import {
+  describeAiSearchStatusText,
+  describeManualRunSummary,
+  JobsPage,
+  sourceSetupSummary,
+} from "./JobsPage.jsx";
+import { hasDbSourceSetup } from "./jobsSearch.js";
+
+describe("describeAiSearchStatusText", () => {
+  it("uses exact error-array counts instead of stringifying the array", () => {
+    expect(
+      describeAiSearchStatusText("results", null, {
+        found: 3,
+        new: 1,
+        duplicates: 2,
+        errors: ["query one failed", "query two failed"],
+      })
+    ).toBe("AI web search: 3 found, 1 new, 2 duplicates, 2 failed queries.");
+  });
+
+  it("does not render a phantom errors suffix for an empty array", () => {
+    expect(
+      describeAiSearchStatusText("results", null, {
+        found: 0,
+        new: 0,
+        duplicates: 0,
+        errors: [],
+      })
+    ).toBe("AI web search: 0 found, 0 new, 0 duplicates.");
+  });
+});
 
 describe("describeManualRunSummary", () => {
   it("passes preview string summaries through unchanged", () => {
@@ -85,6 +117,33 @@ describe("describeManualRunSummary", () => {
     expect(describeManualRunSummary({ status: "failed", summary: "should be hidden" })).toBeNull();
     expect(describeManualRunSummary({ status: "completed" })).toBeNull();
     expect(describeManualRunSummary(null)).toBeNull();
+  });
+});
+
+describe("source readiness", () => {
+  it("counts only enabled company boards in the user-facing ready summary", () => {
+    expect(
+      sourceSetupSummary(
+        {
+          searches: { enabled: 0, total: 3 },
+          trackedCompanies: 4,
+          enabledTrackedCompanies: 1,
+          deterministicSources: { attempted: 1, supportedAtsCompanies: 1 },
+        },
+        true
+      )
+    ).toBe("1 company board ready for the next sweep.");
+  });
+
+  it("does not treat disabled tracked companies as runnable setup", () => {
+    expect(
+      hasDbSourceSetup({
+        searches: { enabled: 0, total: 3 },
+        trackedCompanies: 4,
+        enabledTrackedCompanies: 0,
+        deterministicSources: { attempted: 0 },
+      })
+    ).toBe(false);
   });
 });
 
@@ -401,6 +460,15 @@ afterEach(() => {
 });
 
 describe("JobsPage", () => {
+  it("does not restore the persisted query on every draft keystroke before debounce", () => {
+    const source = readFileSync(new URL("./JobsPage.jsx", import.meta.url), "utf8");
+
+    expect(source).not.toContain("[explorerState.query, queryDraft]");
+    expect(source).toMatch(
+      /setQueryDraft\(explorerState\.query\);\s*}\s*, \[explorerState\.query\]\)/
+    );
+  });
+
   it("renders the pipeline explorer as a sortable table by default", () => {
     const html = renderJobsPage({ storageState: { showGhosted: true } });
 
