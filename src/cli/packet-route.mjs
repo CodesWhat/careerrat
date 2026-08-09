@@ -58,10 +58,11 @@ import { markdownToHtml } from "../core/documents/export.mjs";
 import { lintArtifact } from "../core/documents/placeholder-lint.mjs";
 import { draftPacketAnswers } from "../core/packet/answers.mjs";
 import { buildPacketContext } from "../core/packet/context.mjs";
+import { evaluateAndPersistPacketGate } from "../core/packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../core/packet/exports.mjs";
-import { evaluatePacketGate } from "../core/packet/gate.mjs";
-import { generatePacket } from "../core/packet/generate.mjs";
+import { generateApplicationPacket } from "../core/packet/generate-operation.mjs";
 import { capturePacketQuestions } from "../core/packet/questions.mjs";
+import { validatePacketGateRequest } from "../core/packet/schemas/packet-schemas.mjs";
 import { resolveUserPaths } from "../core/paths/workspace.mjs";
 import { classifyStage } from "../core/tracker/dashboard.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
@@ -232,6 +233,7 @@ function statusForError(err) {
   // map its hard-failure codes to a status a caller can act on instead of a
   // blanket 500.
   if (err?.code === "NO_SOURCE_RESUME") return 409;
+  if (err?.code === "PACKET_GATE_REQUIRED") return 409;
   if (err?.code === "PACKET_AI_UNAVAILABLE") return 503;
   if (err?.code === "PACKET_RESUME_INVALID" || err?.code === "PACKET_COVER_INVALID") return 502;
   if (err?.code === "PACKET_RESUME_ERROR") return 500;
@@ -252,6 +254,7 @@ export function mountPacketRoutes({
   packetCoverLetterCall,
   packetResumeCall,
   packetExportArtifact,
+  workspaceAgentRuntime,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -275,7 +278,44 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
 
-    const result = await evaluatePacketGate({
+    if (workspaceAgentRuntime?.executeIntent) {
+      try {
+        const request = validatePacketGateRequest(body);
+        const input = {};
+        if (request.jobBody) input.jobBody = request.jobBody;
+        if (request.jobUrl) input.jobUrl = request.jobUrl;
+        const thread = await workspaceAgentRuntime.executeIntent({
+          intent: {
+            type: "job.evaluate",
+            entity: { type: "application", id: request.applicationId },
+            ...(Object.keys(input).length ? { input } : {}),
+          },
+        });
+        const evaluation = [...(thread?.messages || [])]
+          .reverse()
+          .flatMap((message) => message?.artifacts || [])
+          .find(
+            (artifact) =>
+              artifact?.kind === "job_evaluation" &&
+              artifact?.applicationId === request.applicationId
+          )?.evaluation;
+        if (!evaluation) {
+          const error = new Error("workspace evaluation completed without a typed verdict");
+          error.code = "WORKSPACE_EVALUATION_RESULT_MISSING";
+          throw error;
+        }
+        sendJson(res, 200, { ok: true, data: evaluation });
+      } catch (error) {
+        sendJson(res, statusForError(error), {
+          ok: false,
+          code: error?.code || "PACKET_GATE_ERROR",
+          error: { message: error?.message || "packet gate failed" },
+        });
+      }
+      return;
+    }
+
+    const result = await evaluateAndPersistPacketGate({
       ...pathCtx,
       body,
       invoke: packetGateInvoke,
@@ -344,9 +384,32 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
     try {
-      const data = await generatePacket({
+      const applicationId = body.applicationId || body.appId || null;
+      if (workspaceAgentRuntime?.executeIntent) {
+        const input = {
+          applyIntent: body.applyIntent === true,
+          ...(Array.isArray(body.formats) ? { formats: body.formats } : {}),
+        };
+        const thread = await workspaceAgentRuntime.executeIntent({
+          intent: {
+            type: "job.generate-documents",
+            entity: { type: "application", id: String(applicationId || "") },
+            input,
+          },
+        });
+        const data = thread?.operationResult;
+        if (!data || data.applicationId !== applicationId) {
+          const error = new Error("workspace document generation completed without a result");
+          error.code = "WORKSPACE_PACKET_RESULT_MISSING";
+          throw error;
+        }
+        sendJson(res, 200, { ok: true, data });
+        return;
+      }
+
+      const data = await generateApplicationPacket({
         ...pathCtx,
-        ...body,
+        body,
         coverLetterCall: packetCoverLetterCall,
         resumeCall: packetResumeCall,
         packetAnswersCall,
@@ -368,11 +431,27 @@ export function mountPacketRoutes({
     const body = await readPacketBody(req, res);
     if (body === null) return;
     try {
-      const data = await exportPacketArtifacts({
-        ...pathCtx,
-        ...body,
-        exportArtifact: packetExportArtifact,
-      });
+      const applicationId = String(body.applicationId || body.appId || "").trim();
+      const data = workspaceAgentRuntime
+        ? (
+            await workspaceAgentRuntime.executeIntent({
+              intent: {
+                type: "job.export-documents",
+                entity: { type: "application", id: applicationId },
+                input: { formats: Array.isArray(body.formats) ? body.formats : ["pdf"] },
+              },
+            })
+          )?.operationResult
+        : await exportPacketArtifacts({
+            ...pathCtx,
+            ...body,
+            exportArtifact: packetExportArtifact,
+          });
+      if (!data) {
+        const error = new Error("The workspace agent did not return exported packet files.");
+        error.code = "PACKET_EXPORT_ERROR";
+        throw error;
+      }
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
       sendJson(res, statusForError(err), {

@@ -31,6 +31,7 @@ const hooks = vi.hoisted(() => ({
 
 const dashboard = vi.hoisted(() => ({ refetch: vi.fn() }));
 const api = vi.hoisted(() => ({
+  applyOnSite: vi.fn(),
   appendCommMessage: vi.fn(),
   getApplication: vi.fn(),
   getCommunications: vi.fn(),
@@ -38,6 +39,7 @@ const api = vi.hoisted(() => ({
   markCommSent: vi.fn(),
   mergeNestedField: vi.fn((base, field, patch) => ({ ...(base?.[field] || {}), ...patch })),
   promoteSourced: vi.fn(),
+  recordExternalApplication: vi.fn(),
   runPacketGate: vi.fn(),
   scheduleInterview: vi.fn(),
   setAppFields: vi.fn(),
@@ -51,6 +53,7 @@ vi.mock("react", async (importOriginal) => {
     ...actual,
     useCallback: (fn) => fn,
     useEffect: (effect) => hooks.useEffect(effect),
+    useRef: (initial) => ({ current: initial }),
     useState: (initial) => hooks.useState(initial),
   };
 });
@@ -74,6 +77,7 @@ vi.mock("./ArtifactViewerModal.jsx", () => ({ ArtifactViewerModal: "artifact-vie
 vi.mock("./PacketDocumentsCard.jsx", () => ({ PacketDocumentsCard: "packet-documents-card" }));
 vi.mock("./PacketGateCard.jsx", () => ({ PacketGateCard: "packet-gate-card" }));
 
+import * as jobDrawerModule from "./JobDrawer.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
 
 const applicationRow = {
@@ -146,12 +150,41 @@ beforeEach(() => {
     data: { id: "app-1", status: "reviewed-hold", artifacts: {} },
   });
   api.promoteSourced.mockResolvedValue({});
+  api.applyOnSite.mockResolvedValue({});
+  api.recordExternalApplication.mockResolvedValue({});
   api.setSourcedStatus.mockResolvedValue({});
   api.setAppStatus.mockResolvedValue({});
   api.setAppFields.mockResolvedValue({});
 });
 
 describe("JobDrawer", () => {
+  it("wraps Tab focus inside the drawer", () => {
+    expect(typeof jobDrawerModule.trapDrawerTab).toBe("function");
+    const first = { focus: vi.fn() };
+    const last = { focus: vi.fn() };
+    const dialog = { querySelectorAll: () => [first, last] };
+    const forward = { key: "Tab", shiftKey: false, preventDefault: vi.fn() };
+    const backward = { key: "Tab", shiftKey: true, preventDefault: vi.fn() };
+
+    jobDrawerModule.trapDrawerTab({ dialog, event: forward, activeElement: last });
+    expect(forward.preventDefault).toHaveBeenCalledOnce();
+    expect(first.focus).toHaveBeenCalledOnce();
+
+    jobDrawerModule.trapDrawerTab({ dialog, event: backward, activeElement: first });
+    expect(backward.preventDefault).toHaveBeenCalledOnce();
+    expect(last.focus).toHaveBeenCalledOnce();
+  });
+
+  it("marks the drawer modal and makes it programmatically focusable", async () => {
+    renderDrawer(applicationRow);
+    await runEffects();
+    const tree = renderDrawer(applicationRow);
+    const dialog = visit(tree, (node) => node.props?.role === "dialog")[0];
+
+    expect(dialog.props["aria-modal"]).toBe("true");
+    expect(dialog.props.tabIndex).toBe(-1);
+  });
+
   it("shows Promote to pipeline and Skip for sourced rows", async () => {
     let tree = renderDrawer(sourcedRow);
     await runEffects();
@@ -161,30 +194,60 @@ describe("JobDrawer", () => {
     expect(button(tree, "Skip")).toBeTruthy();
     await button(tree, "Promote to pipeline").props.onClick();
     expect(api.promoteSourced).toHaveBeenCalledWith({ id: "source-1" });
-    await button(renderDrawer(sourcedRow), "Skip").props.onClick();
+
+    hooks.reset();
+    tree = renderDrawer(sourcedRow);
+    await runEffects();
+    tree = renderDrawer(sourcedRow);
+    await button(tree, "Skip").props.onClick();
     expect(api.setSourcedStatus).toHaveBeenCalledWith({ id: "source-1", to: "cut" });
   });
 
-  it("offers one-click Mark applied only for pre-applied applications", async () => {
+  it("derives sourced actions from status so a skipped row cannot resurrect stale CTAs", async () => {
+    const skipped = { ...sourcedRow, status: "cut", terminal: true };
+    let tree = renderDrawer(skipped);
+    await runEffects();
+    tree = renderDrawer(skipped);
+
+    expect(button(tree, "Promote to pipeline")).toBeFalsy();
+    expect(button(tree, "Skip")).toBeFalsy();
+    expect(JSON.stringify(tree)).toContain("already skipped");
+  });
+
+  it("splits user-reported applications from verified Apply on site work", async () => {
     renderDrawer(applicationRow);
     await runEffects();
     let tree = renderDrawer(applicationRow);
-    const markApplied = button(tree, "Mark applied");
-    expect(markApplied).toBeTruthy();
-    await markApplied.props.onClick();
-    expect(api.setAppStatus).toHaveBeenCalledWith({ id: "app-1", to: "applied" });
+    const reported = button(tree, "I applied elsewhere");
+    const apply = button(tree, "Apply on site");
+    expect(reported).toBeTruthy();
+    expect(apply).toBeTruthy();
+    await reported.props.onClick();
+    expect(api.recordExternalApplication).toHaveBeenCalledWith({ id: "app-1" });
+    expect(api.setAppStatus).not.toHaveBeenCalledWith({ id: "app-1", to: "applied" });
+    await apply.props.onClick();
+    expect(api.applyOnSite).toHaveBeenCalledWith({ id: "app-1" });
 
     hooks.reset();
     api.getApplication.mockResolvedValue({ data: { id: "app-1", status: "applied" } });
     renderDrawer({ ...applicationRow, status: "applied" });
     await runEffects();
     tree = renderDrawer({ ...applicationRow, status: "applied" });
-    expect(button(tree, "Mark applied")).toBeFalsy();
+    expect(button(tree, "I applied elsewhere")).toBeFalsy();
+    expect(button(tree, "Apply on site")).toBeFalsy();
   });
 
-  it("persists packetGate and evaluated fit basis after evaluation", async () => {
+  it("uses the server-persisted typed evaluation without a second client write", async () => {
     api.runPacketGate.mockResolvedValueOnce({
-      data: { gate: "keep", fit: "strong match", comp: "clear", reasons: ["Relevant scope"] },
+      data: {
+        gate: "keep",
+        fitScore: 91,
+        fitBucket: "high",
+        fitSummary: "Strong match",
+        compensation: { status: "clears-floor", summary: "$212k–$286k clears floor" },
+        fitReasons: ["Relevant scope"],
+        fitRisks: [],
+      },
     });
     renderDrawer(applicationRow);
     await runEffects();
@@ -193,24 +256,25 @@ describe("JobDrawer", () => {
     await gateCard.props.onEvaluate();
 
     expect(api.runPacketGate).toHaveBeenCalledWith({ applicationId: "app-1" });
-    expect(api.setAppFields).toHaveBeenCalledWith({
-      id: "app-1",
-      patch: {
-        packetGate: {
-          gate: "keep",
-          fit: "strong match",
-          comp: "clear",
-          reasons: ["Relevant scope"],
-          evaluatedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
-        },
-        fitBasis: "evaluated",
-      },
-    });
+    expect(api.setAppFields).not.toHaveBeenCalled();
+    expect(dashboard.refetch).toHaveBeenCalled();
   });
 
   it("renders the derived next-step CTA in the header", async () => {
     renderDrawer(applicationRow);
     await runEffects();
     expect(button(renderDrawer(applicationRow), "Evaluate")).toBeTruthy();
+  });
+
+  it("passes the persisted gate verdict into document generation", async () => {
+    api.getApplication.mockResolvedValue({
+      data: { id: "app-1", status: "reviewed-hold", artifacts: {}, evaluation: { gate: "review" } },
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    const tree = renderDrawer(applicationRow);
+    const documents = visit(tree, (node) => node.type === "packet-documents-card")[0];
+
+    expect(documents.props.gate).toBe("review");
   });
 });

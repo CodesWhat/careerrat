@@ -14,6 +14,7 @@ import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import {
   activityAppend,
   analyticsRefresh,
+  appCaptureInterviewIntake,
   appRegisterArtifact,
   appRegisterPacketArtifacts,
   appScheduleInterview,
@@ -30,7 +31,9 @@ import {
   candidateEvidenceRemoveOne,
   candidateSetupInitialize,
   commAppendMessage,
+  commCaptureInbound,
   commMarkSent,
+  commSetDraft,
   commUpsert,
   relationshipLeadSetStatus,
   relationshipLeadUpsertBatch,
@@ -208,6 +211,37 @@ test("appSetStatus: a transition that was never in the interview stage clears no
   assert.equal(app.nextInterviewAt, undefined);
 });
 
+test("chat-first interview intake atomically captures provenance and schedules a real invite", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const result = appCaptureInterviewIntake({
+    repoRoot,
+    id: "app-non-interview",
+    interviewAt: "2030-01-08T15:00:00.000Z",
+    summary: "Recruiter invited the candidate to an initial interview.",
+    artifactPath: "workspace/intake/pastes/interview-invite.md",
+    who: "Jordan Lee",
+    at: "2026-08-09T20:00:00.000Z",
+  });
+
+  assert.equal(result.scheduled, true);
+  const app = JSON.parse(
+    db.prepare("SELECT data FROM applications WHERE id = ?").get("app-non-interview").data
+  );
+  assert.equal(app.status, "interview");
+  assert.equal(app.interviewAt, "2030-01-08T15:00:00.000Z");
+  assert.match(app.interviewNote, /^Interview — /);
+  assert.equal(app.conversations.at(-1).kind, "interview");
+  assert.equal(app.conversations.at(-1).who, "Jordan Lee");
+  assert.equal(
+    app.conversations.at(-1).artifactPath,
+    "workspace/intake/pastes/interview-invite.md"
+  );
+  assert.ok(result.analytics, "moving into interview must refresh outcome analytics");
+});
+
 // ---------------------------------------------------------------------------
 // commMarkSent: "sent clears draft" hard invariant, cross-table.
 // ---------------------------------------------------------------------------
@@ -224,10 +258,96 @@ test("commMarkSent clears comm.draft AND the linked app's followUp.draft in the 
   const comm = JSON.parse(commRow.data);
   assert.equal(comm.status, "waiting");
   assert.equal(comm.draft, null);
+  assert.equal(comm.nextAction, null);
+  assert.equal(comm.nextActionDue, null);
+  assert.equal(comm.messages.at(-1).direction, "outbound-sent");
+  assert.match(comm.messages.at(-1).summary, /following up/i);
 
   const appRow = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-with-draft");
   const app = JSON.parse(appRow.data);
   assert.equal(app.followUp.draft, null);
+});
+
+test("commSetDraft stores a reviewable draft and appends its durable message history", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  commSetDraft({
+    repoRoot,
+    id: "comm-with-draft",
+    draft: {
+      subject: "Re: SRE next steps",
+      body: "Thanks for the update. Tuesday afternoon works well for me.",
+    },
+    summary: "Drafted scheduling reply for Tuesday afternoon.",
+    at: "2026-08-09T17:00:00.000Z",
+  });
+
+  const row = db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft");
+  const comm = JSON.parse(row.data);
+  assert.equal(comm.status, "drafted");
+  assert.deepEqual(comm.draft, {
+    subject: "Re: SRE next steps",
+    body: "Thanks for the update. Tuesday afternoon works well for me.",
+  });
+  assert.equal(comm.nextAction, "Review and send reply");
+  assert.equal(comm.messages.at(-1).direction, "outbound-draft");
+  assert.equal(comm.messages.at(-1).at, "2026-08-09T17:00:00.000Z");
+  assert.equal(comm.messages.at(-1).subject, "Re: SRE next steps");
+});
+
+test("ISSUE-038 commCaptureInbound opens or appends one actionable thread without losing provenance", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const first = commCaptureInbound({
+    repoRoot,
+    applicationId: "app-non-interview",
+    company: "Initech",
+    role: "Analyst",
+    channel: "email",
+    subject: "Next steps",
+    participant: { name: "Jordan Lee", email: "jordan@initech.example" },
+    summary: "Recruiter asked for availability next week.",
+    artifactPath: "workspace/intake/pastes/intake-recruiter-1.md",
+    sourceId: "intake-recruiter-1",
+    at: "2026-08-09T18:00:00.000Z",
+  });
+
+  assert.equal(first.created, true);
+  const opened = JSON.parse(
+    db.prepare("SELECT data FROM communications WHERE id = ?").get(first.id).data
+  );
+  assert.equal(opened.applicationId, "app-non-interview");
+  assert.equal(opened.status, "needs-reply");
+  assert.equal(opened.nextAction, "Review and reply");
+  assert.equal(opened.messages.length, 1);
+  assert.equal(opened.messages[0].direction, "inbound");
+  assert.equal(opened.messages[0].artifactPath, "workspace/intake/pastes/intake-recruiter-1.md");
+  assert.equal(opened.messages[0].id, "intake:intake-recruiter-1");
+
+  const second = commCaptureInbound({
+    repoRoot,
+    applicationId: "app-non-interview",
+    company: "Initech",
+    role: "Analyst",
+    channel: "email",
+    summary: "Recruiter confirmed the Tuesday time.",
+    artifactPath: "workspace/intake/pastes/intake-recruiter-2.md",
+    sourceId: "intake-recruiter-2",
+    at: "2026-08-09T19:00:00.000Z",
+  });
+
+  assert.equal(second.created, false);
+  assert.equal(second.id, first.id);
+  const appended = JSON.parse(
+    db.prepare("SELECT data FROM communications WHERE id = ?").get(first.id).data
+  );
+  assert.equal(appended.messages.length, 2);
+  assert.equal(appended.lastInboundAt, "2026-08-09T19:00:00.000Z");
+  assert.equal(appended.summary, "Recruiter confirmed the Tuesday time.");
 });
 
 // ---------------------------------------------------------------------------
@@ -317,6 +437,14 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
       },
     })
   );
+  expectOneBump("appCaptureInterviewIntake", () =>
+    appCaptureInterviewIntake({
+      repoRoot,
+      id: "app-non-interview",
+      summary: "Captured post-interview notes for review.",
+      artifactPath: "workspace/intake/pastes/interview-notes.md",
+    })
+  );
   expectOneBump("commUpsert", () =>
     commUpsert({
       repoRoot,
@@ -328,6 +456,26 @@ test("every domain-action verb bumps version by exactly 1, advances lastUpdatedA
       repoRoot,
       id: "comm-new",
       message: { direction: "outbound-sent", at: "2030-01-01T00:00:00.000Z" },
+    })
+  );
+  expectOneBump("commCaptureInbound", () =>
+    commCaptureInbound({
+      repoRoot,
+      applicationId: "app-non-interview",
+      company: "Initech",
+      role: "Analyst",
+      channel: "email",
+      summary: "Recruiter sent an update.",
+      artifactPath: "workspace/intake/pastes/intake-bump.md",
+      sourceId: "intake-bump",
+    })
+  );
+  expectOneBump("commSetDraft", () =>
+    commSetDraft({
+      repoRoot,
+      id: "comm-new",
+      draft: { body: "Draft body" },
+      summary: "Draft reply",
     })
   );
   expectOneBump("relationshipLeadUpsertBatch", () =>
@@ -1086,6 +1234,127 @@ test("candidate setup initialize is idempotent and never resets saved DB config"
   assert.equal(config.profile.candidate.full_name, "Katherine Johnson");
   assert.equal(config.profile.candidate.email, "kj@example.com");
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
+});
+
+test("candidate and evidence writes stamp Activity with user-facing outcomes", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  const db = openDb({ repoRoot });
+
+  function expectCandidateActivity(label, fn, expectedTitle, expectedOperation) {
+    const before = readMeta(db);
+    const beforeActivity = activityCount(db);
+    const result = fn();
+    const after = readMeta(db);
+
+    assert.equal(after.version, before.version + 1, `${label}: version must bump once`);
+    assert.notEqual(after.lastUpdatedAt, before.lastUpdatedAt, `${label}: timestamp must advance`);
+    assert.equal(activityCount(db), beforeActivity + 1, `${label}: activity must be complete`);
+    assert.equal(result.event.title, expectedTitle);
+    assert.ok(result.event.tags.includes(`operation:${expectedOperation}`));
+  }
+
+  expectCandidateActivity(
+    "profile",
+    () =>
+      candidateConfigPatch({
+        repoRoot,
+        name: "profile",
+        patch: { candidate: { full_name: "Katherine Johnson", email: "kj@example.com" } },
+      }),
+    "Candidate profile updated",
+    "candidate:profile-update"
+  );
+  expectCandidateActivity(
+    "targeting",
+    () =>
+      candidateConfigPatch({
+        repoRoot,
+        name: "targeting",
+        patch: {
+          role_buckets: [{ name: "Platform", priority: "primary", titles: ["Staff Engineer"] }],
+        },
+      }),
+    "Job targets updated",
+    "candidate:targeting-update"
+  );
+  expectCandidateActivity(
+    "evidence merge",
+    () =>
+      candidateEvidenceMerge({
+        repoRoot,
+        claims: [{ id: "resume-001", claim: "Led platform migration", evidence: "Resume" }],
+      }),
+    "Evidence bank updated",
+    "candidate:evidence-save"
+  );
+  expectCandidateActivity(
+    "evidence remove",
+    () => candidateEvidenceRemoveOne({ repoRoot, id: "resume-001" }),
+    "Evidence claim removed",
+    "candidate:evidence-remove"
+  );
+});
+
+test("application activity names outcomes instead of internal mutation verbs", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+
+  const status = appSetStatus({ repoRoot, id: "app-non-interview", to: "applied" });
+  assert.equal(status.event.title, "Initech — Status changed to Applied");
+  assert.equal(status.event.summary, "Previous status: Saved for review.");
+  assert.doesNotMatch(status.event.title, /status\s+reviewed-hold|→/i);
+
+  const evaluation = appSetFields({
+    repoRoot,
+    id: "app-non-interview",
+    patch: {
+      gateVerdict: "KEEP",
+      roleFit: { why: ["Strong platform fit"], risks: [] },
+      compNote: "$190k-$220k base",
+    },
+  });
+  assert.equal(evaluation.event.title, "Initech — Fit and compensation updated");
+  assert.doesNotMatch(evaluation.event.title, /fields updated/i);
+
+  const packet = appRegisterPacketArtifacts({
+    repoRoot,
+    id: "app-non-interview",
+    artifacts: {
+      resume: "workspace/tailored/initech-resume.md",
+      coverLetter: "workspace/tailored/initech-cover-letter.md",
+    },
+    manifest: {
+      applicationId: "app-non-interview",
+      generatedAt: "2026-08-09T12:00:00.000Z",
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 0,
+      artifacts: {},
+    },
+  });
+  assert.equal(packet.event.title, "Initech — Tailored application packet created");
+  assert.equal(packet.event.summary, "Created tailored résumé and cover letter.");
+  assert.doesNotMatch(packet.event.title, /registered/i);
+
+  const jobDescription = appRegisterArtifact({
+    repoRoot,
+    id: "app-non-interview",
+    kind: "jd",
+    path: "workspace/jobs/initech.md",
+  });
+  assert.equal(jobDescription.event.title, "Initech — Job description captured");
+  assert.doesNotMatch(jobDescription.event.title, /artifact registered/i);
+
+  const sourced = sourcedSetStatus({
+    repoRoot,
+    id: "sourced-promote-me",
+    to: "cut",
+    note: "Outside the target role family.",
+  });
+  assert.equal(sourced.event.title, "Umbrella — Role skipped");
+  assert.doesNotMatch(sourced.event.title, /sourced\s+sourced|→/i);
 });
 
 test("candidateEvidenceMerge replaces an existing explicit id even when the claim text changes", () => {

@@ -20,6 +20,29 @@ import {
 
 const cleanupRoots = [];
 
+function typedGateVerdict({ gate = "keep" } = {}) {
+  return {
+    gate,
+    fitScore: gate === "keep" ? 91 : 68,
+    fitSummary:
+      gate === "keep"
+        ? "Strong applied-AI workflow delivery match."
+        : "Relevant scope needs human review.",
+    compensation: {
+      status: "clears-floor",
+      currency: "USD",
+      minBase: 212000,
+      maxBase: 286000,
+      source: "job-description",
+      summary: "$212k–$286k base clears the candidate floor.",
+    },
+    action: gate === "keep" ? "generate-packet" : "resolve-review",
+    fitReasons: ["JD centers on production AI workflow delivery"],
+    fitRisks: gate === "keep" ? [] : ["Confirm customer-facing scope"],
+    confidence: "high",
+  };
+}
+
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "rolester-packet-generate-route-"));
   cleanupRoots.push(repoRoot);
@@ -54,7 +77,7 @@ function importTrackerFixture(repoRoot, applications) {
   );
 }
 
-function seedPacketReadyApp(repoRoot, { sourceResume = true } = {}) {
+function seedPacketReadyApp(repoRoot, { sourceResume = true, packetGate = "keep" } = {}) {
   const jdPath = writeWorkspaceFile(
     repoRoot,
     "jobs/acme-applied-ai-engineer.md",
@@ -107,6 +130,7 @@ function seedPacketReadyApp(repoRoot, { sourceResume = true } = {}) {
       status: "reviewed-hold",
       fitBasis: "evaluated",
       fitBucket: "high",
+      evaluation: { gate: packetGate },
       artifacts: {
         jd: jdPath,
         packetQuestionsSource: questionsPath,
@@ -337,18 +361,7 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
   const server = await bootServer(repoRoot, {
     packetGateInvoke: async ({ prompt }) => {
       seen.push(prompt);
-      return [
-        "```json",
-        JSON.stringify({
-          gate: "keep",
-          fit: "strong match for applied AI workflow delivery",
-          comp: "review",
-          action: "generate-packet",
-          reasons: ["JD mentions agentic workflow prototypes"],
-          confidence: "high",
-        }),
-        "```",
-      ].join("\n");
+      return ["```json", JSON.stringify(typedGateVerdict()), "```"].join("\n");
     },
   });
   try {
@@ -361,6 +374,10 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.data?.gate, "keep");
+    assert.equal(body.data?.fitScore, 91);
+    assert.equal(body.data?.fitBucket, "high");
+    assert.equal(body.data?.compensation?.minBase, 212000);
+    assert.match(body.data?.evaluatedAt || "", /^\d{4}-\d{2}-\d{2}T/);
     assert.equal(body.data?.manual?.required, false);
     assert.equal(seen.length, 1, "readable supplied JD should allow one bounded AI call");
 
@@ -372,6 +389,18 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
       "captured JD artifact should exist locally"
     );
     assert.match(String(app?.artifacts?.jdGeneratedAt || ""), /^\d{4}-\d{2}-\d{2}T/);
+    assert.deepEqual(app.evaluation, body.data);
+    assert.equal(app.packetGate, undefined, "typed evaluation is the sole current verdict");
+    assert.equal(app.fitScore, 91);
+    assert.equal(app.fitBucket, "high");
+    assert.equal(app.fitBasis, "evaluated");
+    assert.equal(app.base, "$212,000 - $286,000");
+    assert.equal(app.compNote, "$212k–$286k base clears the candidate floor.");
+    assert.deepEqual(app.roleFit, {
+      why: ["JD centers on production AI workflow delivery"],
+      risks: [],
+    });
+    assert.match(seen[0], /minimum_base|targeting|evidence/i);
   } finally {
     await closeServer(server);
   }
@@ -384,7 +413,7 @@ test("POST /api/packet/gate: reuses existing artifacts.jd when no body is suppli
   const server = await bootServer(repoRoot, {
     packetGateInvoke: async ({ prompt }) => {
       prompts.push(prompt);
-      return '```json\n{"gate":"review","fit":"needs human review","comp":"review","action":"review","reasons":["saved body loaded"],"confidence":"medium"}\n```';
+      return `\`\`\`json\n${JSON.stringify(typedGateVerdict({ gate: "review" }))}\n\`\`\``;
     },
   });
   try {
@@ -394,6 +423,7 @@ test("POST /api/packet/gate: reuses existing artifacts.jd when no body is suppli
     assert.equal(status, 200);
     assert.equal(body.ok, true);
     assert.equal(body.data?.gate, "review");
+    assert.equal(readApp(repoRoot, "app-packet")?.evaluation?.gate, "review");
     assert.equal(prompts.length, 1);
     assert.match(prompts[0], /Build agentic workflow prototypes/);
   } finally {
@@ -455,6 +485,57 @@ test("POST /api/packet/gate: no AI route stays reviewable and does not fabricate
     assert.equal(body.data?.manual?.required, true);
     assert.equal(body.data?.manual?.code, "NO_AI_ROUTE");
     assert.notEqual(body.data?.gate, "keep");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate delegates the Evaluate button to workspace-main when mounted", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const evaluation = typedGateVerdict();
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime: {
+      async executeIntent(input) {
+        calls.push(input);
+        return {
+          thread: { id: "workspace-main" },
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              artifacts: [
+                {
+                  kind: "job_evaluation",
+                  applicationId: "app-packet",
+                  evaluation,
+                },
+              ],
+            },
+          ],
+        };
+      },
+    },
+    packetGateInvoke: async () => {
+      throw new Error("direct packet gate must not run when workspace-main is mounted");
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true, data: evaluation });
+    assert.deepEqual(calls, [
+      {
+        intent: {
+          type: "job.evaluate",
+          entity: { type: "application", id: "app-packet" },
+        },
+      },
+    ]);
   } finally {
     await closeServer(server);
   }
@@ -523,6 +604,158 @@ test("POST /api/packet/generate: stamps packet source/export artifacts through D
       null,
       "cover-letter DOCX should not be generated by default"
     );
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/generate delegates document work to workspace-main when mounted", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const generation = {
+    appId: "app-packet",
+    applicationId: "app-packet",
+    submitted: false,
+    uploadReady: false,
+    status: "reviewable",
+    artifacts: { resume: "workspace/tailored/acme-resume.md" },
+    gaps: [{ kind: "answers", message: "Capture questions first." }],
+    manual: { required: true },
+  };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime: {
+      async executeIntent(input) {
+        calls.push(input);
+        return {
+          thread: { id: "workspace-main" },
+          operationResult: generation,
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              artifacts: [
+                {
+                  kind: "packet_generation",
+                  applicationId: "app-packet",
+                  status: "reviewable",
+                  uploadReady: false,
+                  artifacts: generation.artifacts,
+                  gaps: generation.gaps,
+                },
+              ],
+            },
+          ],
+        };
+      },
+    },
+    packetResumeCall: async () => {
+      throw new Error("direct packet generator must not run when workspace-main is mounted");
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/generate", {
+      applicationId: "app-packet",
+      applyIntent: false,
+      formats: ["pdf"],
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true, data: generation });
+    assert.deepEqual(calls, [
+      {
+        intent: {
+          type: "job.generate-documents",
+          entity: { type: "application", id: "app-packet" },
+          input: { applyIntent: false, formats: ["pdf"] },
+        },
+      },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/export delegates packaging to workspace-main when mounted", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const exported = {
+    appId: "app-packet",
+    applicationId: "app-packet",
+    formats: ["pdf"],
+    artifacts: { resumePdf: "workspace/tailored/acme-resume.pdf" },
+    userFacing: {
+      resume: [
+        {
+          format: "pdf",
+          path: "workspace/tailored/acme-resume.pdf",
+          name: "acme-resume.pdf",
+        },
+      ],
+      coverLetter: [],
+      answers: [],
+    },
+  };
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime: {
+      async executeIntent(input) {
+        calls.push(input);
+        return { operationResult: exported };
+      },
+    },
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/export", {
+      applicationId: "app-packet",
+      formats: ["pdf"],
+    });
+    assert.equal(status, 200);
+    assert.deepEqual(body, { ok: true, data: exported });
+    assert.deepEqual(calls, [
+      {
+        intent: {
+          type: "job.export-documents",
+          entity: { type: "application", id: "app-packet" },
+          input: { formats: ["pdf"] },
+        },
+      },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/generate: requires a persisted KEEP before starting AI", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot, { packetGate: "review" });
+  let resumeCalls = 0;
+  let coverCalls = 0;
+  const server = await bootServer(
+    repoRoot,
+    validPacketCalls({
+      packetResumeCall: async () => {
+        resumeCalls += 1;
+        return validPacketResumeCall();
+      },
+      packetCoverLetterCall: async () => {
+        coverCalls += 1;
+        return validPacketCoverLetterCall();
+      },
+    })
+  );
+  try {
+    const generated = await postJson(server, "/api/packet/generate", {
+      appId: "app-packet",
+      applyIntent: false,
+      formats: [],
+    });
+    assert.equal(generated.status, 409);
+    assert.equal(generated.body.code, "PACKET_GATE_REQUIRED");
+    assert.match(generated.body.error.message, /KEEP evaluation is required/i);
+    assert.equal(resumeCalls, 0);
+    assert.equal(coverCalls, 0);
   } finally {
     await closeServer(server);
   }
@@ -634,6 +867,7 @@ test("POST /api/packet/generate: no capture degrades without apply intent and sk
       company: "Northstar",
       role: "Solutions Engineer",
       status: "reviewed-hold",
+      packetGate: { gate: "keep" },
       artifacts: { jd: jdPath },
     },
   ]);
@@ -673,6 +907,7 @@ test("POST /api/packet/generate: no capture with apply intent returns BAD_QUESTI
       company: "Northstar",
       role: "Solutions Engineer",
       status: "reviewed-hold",
+      packetGate: { gate: "keep" },
       artifacts: {},
     },
   ]);

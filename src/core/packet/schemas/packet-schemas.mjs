@@ -17,14 +17,43 @@ export const packetGateRequestSchema = {
 
 export const packetGateAiVerdictSchema = {
   type: "object",
-  required: ["gate", "fit", "comp", "action", "reasons", "confidence"],
+  required: [
+    "gate",
+    "fitScore",
+    "fitSummary",
+    "compensation",
+    "action",
+    "fitReasons",
+    "fitRisks",
+    "confidence",
+  ],
   additionalProperties: false,
   properties: {
     gate: { type: "string", enum: ["keep", "review", "cut", "KEEP", "REVIEW", "CUT"] },
-    fit: { type: "string" },
-    comp: { type: "string" },
+    fitScore: { type: "number", minimum: 0, maximum: 100 },
+    fitSummary: { type: "string", maxLength: 160 },
+    compensation: {
+      type: "object",
+      additionalProperties: false,
+      required: ["status", "currency", "minBase", "maxBase", "source", "summary"],
+      properties: {
+        status: {
+          type: "string",
+          enum: ["clears-floor", "below-floor", "unknown"],
+        },
+        currency: stringOrNull,
+        minBase: { type: ["number", "null"], minimum: 0 },
+        maxBase: { type: ["number", "null"], minimum: 0 },
+        source: {
+          type: "string",
+          enum: ["job-description", "market", "unknown"],
+        },
+        summary: { type: "string", maxLength: 140 },
+      },
+    },
     action: { type: "string" },
-    reasons: { type: "array", items: { type: "string" } },
+    fitReasons: { type: "array", maxItems: 3, items: { type: "string", maxLength: 80 } },
+    fitRisks: { type: "array", maxItems: 3, items: { type: "string", maxLength: 80 } },
     confidence: { type: "string", enum: ["low", "medium", "high"] },
   },
 };

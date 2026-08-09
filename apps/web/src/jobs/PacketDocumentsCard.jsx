@@ -34,7 +34,7 @@ function describePacketError(err) {
   );
 }
 
-export function PacketDocumentsCard({ applicationId, onView }) {
+export function PacketDocumentsCard({ applicationId, gate, onView }) {
   const [packet, setPacket] = useState(null);
   const [busy, setBusy] = useState(null); // "generate" | "export" | null
   const [error, setError] = useState(null);
@@ -60,6 +60,7 @@ export function PacketDocumentsCard({ applicationId, onView }) {
   }, [loadPacket]);
 
   async function handleGenerate() {
+    if (String(gate || "").toLowerCase() !== "keep") return;
     setBusy("generate");
     setError(null);
     setNotice(null);
@@ -93,6 +94,7 @@ export function PacketDocumentsCard({ applicationId, onView }) {
   }
 
   const artifacts = packet?.artifacts || {};
+  const canGenerate = String(gate || "").toLowerCase() === "keep";
   const exportedEntries = exportedFiles
     ? Object.entries(exportedFiles).flatMap(([kind, files]) =>
         (files || []).map((file) => ({ kind, ...file }))
@@ -105,10 +107,13 @@ export function PacketDocumentsCard({ applicationId, onView }) {
         Generate a tailored resume, cover letter, and short answers, then export them for
         submission.
       </p>
+      {!canGenerate ? (
+        <p className="field__hint">A KEEP evaluation is required before tailoring documents.</p>
+      ) : null}
       {error ? <InlineAlert message={error} /> : null}
       {notice ? <p className="field__hint">{notice}</p> : null}
       <div className="job-drawer__inline-actions">
-        <Button disabled={busy === "generate"} onClick={handleGenerate}>
+        <Button disabled={!canGenerate || busy === "generate"} onClick={handleGenerate}>
           {busy === "generate" ? "Generating…" : "Generate documents"}
         </Button>
         <Button variant="secondary" disabled={busy === "export"} onClick={handleExport}>

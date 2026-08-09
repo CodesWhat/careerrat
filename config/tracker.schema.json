@@ -71,6 +71,33 @@
               "risks": { "type": ["array", "null"], "items": { "type": "string", "maxLength": 80 }, "description": "Up to 3 gaps/caveats/flags, ≤80 chars each." }
             }
           },
+          "evaluation": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "description": "Canonical typed evaluation result. This is the sole current verdict; list, drawer, compensation, packet gating, and CTA projections derive from it.",
+            "properties": {
+              "gate": { "type": "string", "enum": ["keep", "review", "cut"] },
+              "fitScore": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+              "fitBucket": { "type": ["string", "null"], "enum": ["high", "med", "stretch", null] },
+              "fitSummary": { "type": ["string", "null"], "maxLength": 160 },
+              "compensation": {
+                "type": ["object", "null"],
+                "additionalProperties": true,
+                "properties": {
+                  "status": { "type": "string", "enum": ["clears-floor", "below-floor", "unknown"] },
+                  "currency": { "type": ["string", "null"] },
+                  "minBase": { "type": ["number", "null"], "minimum": 0 },
+                  "maxBase": { "type": ["number", "null"], "minimum": 0 },
+                  "source": { "type": "string", "enum": ["job-description", "market", "unknown"] },
+                  "summary": { "type": ["string", "null"], "maxLength": 140 }
+                }
+              },
+              "fitReasons": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string", "maxLength": 80 } },
+              "fitRisks": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string", "maxLength": 80 } },
+              "confidence": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
+              "evaluatedAt": { "type": ["string", "null"] }
+            }
+          },
           "link":   { "type": ["string", "null"] },
           "domain": { "type": ["string", "null"] },
           "channel": { "type": ["string", "null"], "enum": ["board", "linkedin", "portal", "referral", "recruiter", null] },

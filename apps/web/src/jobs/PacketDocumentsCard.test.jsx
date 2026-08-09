@@ -53,9 +53,9 @@ vi.mock("../lib/api.js", () => api);
 
 import { PacketDocumentsCard } from "./PacketDocumentsCard.jsx";
 
-function renderCard() {
+function renderCard({ gate = "keep" } = {}) {
   hooks.begin();
-  return PacketDocumentsCard({ applicationId: "app-1", onView: vi.fn() });
+  return PacketDocumentsCard({ applicationId: "app-1", gate, onView: vi.fn() });
 }
 
 function materialize(node) {
@@ -101,6 +101,18 @@ beforeEach(() => {
 });
 
 describe("PacketDocumentsCard", () => {
+  it("blocks document generation until evaluation returns KEEP", async () => {
+    renderCard({ gate: "review" });
+    await runInitialEffect();
+    const tree = materialize(renderCard({ gate: "review" }));
+    const generate = buttons(tree).find((button) => textOf(button) === "Generate documents");
+
+    expect(generate.props.disabled).toBe(true);
+    await generate.props.onClick();
+    expect(api.generatePacketDocuments).not.toHaveBeenCalled();
+    expect(textOf(tree)).toContain("A KEEP evaluation is required before tailoring documents.");
+  });
+
   it("generates PDFs, refetches the packet, and renders artifact availability", async () => {
     api.getPacket.mockResolvedValueOnce({ artifacts: {} }).mockResolvedValueOnce({
       artifacts: {

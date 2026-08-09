@@ -16,9 +16,15 @@ describe("PacketGateCard", () => {
     api.runPacketGate.mockResolvedValueOnce({
       data: {
         gate: "keep",
-        fit: "strong workflow-delivery match",
-        comp: "clear",
-        reasons: ["Customer-facing implementation is central"],
+        fitScore: 91,
+        fitBucket: "high",
+        fitSummary: "Strong workflow-delivery match",
+        compensation: {
+          status: "clears-floor",
+          summary: "$212k–$286k base clears floor",
+        },
+        fitReasons: ["Customer-facing implementation is central"],
+        fitRisks: [],
       },
     });
     const response = await api.runPacketGate({ applicationId: "app-1" });
@@ -26,8 +32,9 @@ describe("PacketGateCard", () => {
 
     expect(api.runPacketGate).toHaveBeenCalledWith({ applicationId: "app-1" });
     expect(html).toContain("Keep");
-    expect(html).toContain("strong workflow-delivery match");
-    expect(html).toContain("clear");
+    expect(html).toContain("91");
+    expect(html).toContain("Strong workflow-delivery match");
+    expect(html).toContain("$212k–$286k base clears floor");
     expect(html).toContain("Customer-facing implementation is central");
   });
 

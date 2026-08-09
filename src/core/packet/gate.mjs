@@ -18,10 +18,20 @@ function reviewData({ applicationId, code, reason, ai = { used: false }, source 
     appId: applicationId,
     applicationId,
     gate: "review",
-    fit: "review",
-    comp: "review",
+    fitScore: null,
+    fitBucket: null,
+    fitSummary: "Needs manual review.",
+    compensation: {
+      status: "unknown",
+      currency: null,
+      minBase: null,
+      maxBase: null,
+      source: "unknown",
+      summary: "Compensation needs manual review.",
+    },
     action: "manual",
-    reasons: [reason],
+    fitReasons: [],
+    fitRisks: [String(reason).slice(0, 80)],
     confidence: "low",
     manual: {
       required: true,
@@ -31,24 +41,47 @@ function reviewData({ applicationId, code, reason, ai = { used: false }, source 
     },
     ai,
     source,
+    evaluatedAt: new Date().toISOString(),
   };
 }
 
 function normalizeVerdict(verdict, { applicationId, ai, source }) {
   const gate = String(verdict?.gate || "review").toLowerCase();
   const safeGate = gate === "keep" || gate === "cut" ? gate : "review";
+  const rawScore = Number(verdict?.fitScore);
+  const fitScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : 0;
+  const fitBucket = fitScore >= 85 ? "high" : fitScore >= 65 ? "med" : "stretch";
+  const rawComp = verdict?.compensation || {};
+  const minBase = Number.isFinite(Number(rawComp.minBase)) ? Number(rawComp.minBase) : null;
+  const maxBase = Number.isFinite(Number(rawComp.maxBase)) ? Number(rawComp.maxBase) : null;
+  const compensation = {
+    status: ["clears-floor", "below-floor"].includes(rawComp.status) ? rawComp.status : "unknown",
+    currency: rawComp.currency ? String(rawComp.currency).slice(0, 12) : null,
+    minBase,
+    maxBase,
+    source: ["job-description", "market"].includes(rawComp.source) ? rawComp.source : "unknown",
+    summary: String(rawComp.summary || "Compensation needs review.").slice(0, 140),
+  };
   return {
     appId: applicationId,
     applicationId,
     gate: safeGate,
-    fit: String(verdict?.fit || "review"),
-    comp: String(verdict?.comp || "review"),
+    fitScore,
+    fitBucket,
+    fitSummary: String(verdict?.fitSummary || "Fit needs review.").slice(0, 160),
+    compensation,
     action: String(verdict?.action || (safeGate === "keep" ? "generate-packet" : "manual")),
-    reasons: Array.isArray(verdict?.reasons) ? verdict.reasons.map(String) : [],
+    fitReasons: (Array.isArray(verdict?.fitReasons) ? verdict.fitReasons : [])
+      .map((value) => String(value).slice(0, 80))
+      .slice(0, 3),
+    fitRisks: (Array.isArray(verdict?.fitRisks) ? verdict.fitRisks : [])
+      .map((value) => String(value).slice(0, 80))
+      .slice(0, 3),
     confidence: String(verdict?.confidence || "medium").toLowerCase(),
     manual: { required: safeGate === "review" },
     ai,
     source,
+    evaluatedAt: new Date().toISOString(),
   };
 }
 

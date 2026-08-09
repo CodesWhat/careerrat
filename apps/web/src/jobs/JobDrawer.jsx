@@ -8,7 +8,7 @@
 // application row (getApplication) because appSetFields is a shallow
 // one-level merge (verbs/app.mjs) — patching a nested object from anything
 // less than its full current shape silently drops sibling keys.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button, IconButton } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
@@ -18,12 +18,14 @@ import { KeyIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
   appendCommMessage,
+  applyOnSite,
   getApplication,
   getCommunications,
   getPacket,
   markCommSent,
   mergeNestedField,
   promoteSourced,
+  recordExternalApplication,
   runPacketGate,
   scheduleInterview,
   setAppFields,
@@ -37,7 +39,6 @@ import { PacketGateCard } from "./PacketGateCard.jsx";
 import { deriveJobCta } from "./useApplicationGates.js";
 
 const STATUS_OPTIONS = [
-  { value: "applied", label: "Applied" },
   { value: "screen", label: "Screen" },
   { value: "interview", label: "Interview" },
   { value: "onsite", label: "Onsite" },
@@ -72,6 +73,36 @@ const VIEWABLE_ARTIFACT_KIND_BY_LABEL = { Resume: "resume", "Cover letter": "cov
 // vocabulary: reviewed-hold = "passed the evaluate-job gate; ready to
 // pursue").
 const PRE_APPLIED_STATUSES = new Set(["reviewed-hold"]);
+const DRAWER_FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+export function trapDrawerTab({ dialog, event, activeElement }) {
+  if (!dialog || event?.key !== "Tab") return;
+  const focusable = Array.from(dialog.querySelectorAll(DRAWER_FOCUSABLE)).filter(
+    (element) => element.getAttribute?.("aria-hidden") !== "true"
+  );
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const outside = typeof dialog.contains === "function" && !dialog.contains(activeElement);
+  if (event.shiftKey && (activeElement === first || outside)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (activeElement === last || outside)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
 
 function toDatetimeLocal(iso) {
   if (!iso) return "";
@@ -89,7 +120,9 @@ export function JobDrawer({ row, onClose, initialSection }) {
   const [busyKey, setBusyKey] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [sourcedResolved, setSourcedResolved] = useState(false);
   const [viewer, setViewer] = useState(null); // {title, artifact} | null
+  const drawerRef = useRef(null);
 
   const isApplication = row.source === "application";
 
@@ -107,6 +140,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setLoadError(null);
     setActionError(null);
     setNotice(null);
+    setSourcedResolved(false);
     if (!isApplication) return undefined;
     (async () => {
       try {
@@ -125,16 +159,21 @@ export function JobDrawer({ row, onClose, initialSection }) {
     };
   }, [row.id, isApplication]);
 
-  // Escape closes the drawer — the real keyboard equivalent of the
-  // click-to-close overlay/backdrop below (which stays mouse-only, same as
-  // CaptureBar.jsx's drag/drop wrapper: the drawer's own real controls,
-  // the × button included, are each independently keyboard-operable).
+  // Treat the drawer as a real modal: focus it on open, keep Tab navigation
+  // inside it, close on Escape, then restore focus to the opener on cleanup.
   useEffect(() => {
+    const dialog = drawerRef.current;
+    const previouslyFocused = document.activeElement;
+    dialog?.focus();
     function onKeyDown(e) {
       if (e.key === "Escape") onClose();
+      else trapDrawerTab({ dialog, event: e, activeElement: document.activeElement });
     }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus?.();
+    };
   }, [onClose]);
 
   // Deep-link support for the Phase D "next-step" CTA (Pipeline-tab rows and
@@ -178,6 +217,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setActionError(null);
     try {
       await fn();
+      if (!isApplication && (key === "skip" || key === "promote")) setSourcedResolved(true);
       emitDashboardChanged();
       await Promise.all([refetch(), loadRaw()]);
       if (successNote) setNotice(successNote);
@@ -189,10 +229,18 @@ export function JobDrawer({ row, onClose, initialSection }) {
   }
 
   const drawer = row.drawer || {};
+  const sourcedActionable =
+    !isApplication &&
+    !sourcedResolved &&
+    !row.terminal &&
+    !["cut", "skipped", "dismissed", "ignored", "withdrawn"].includes(
+      String(row.status || "").toLowerCase()
+    );
   // Phase D's single derived next-step CTA — pure derivation from row/gate
   // state (no stored CTA field), so it self-clears once its condition no
   // longer holds (AGENTS.md's "completed-action clears its CTA" invariant).
-  const drawerCta = deriveJobCta(row, app?.packetGate);
+  const evaluation = app?.evaluation || app?.packetGate || null;
+  const drawerCta = deriveJobCta(row, evaluation);
 
   return (
     <>
@@ -201,9 +249,12 @@ export function JobDrawer({ row, onClose, initialSection }) {
       <div className="job-drawer-overlay" onClick={onClose}>
         {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops the backdrop's click-to-close from firing; not itself an interactive control */}
         <div
+          ref={drawerRef}
           className="job-drawer"
           role="dialog"
+          aria-modal="true"
           aria-label={`${row.company} — ${row.role}`}
+          tabIndex={-1}
           onClick={(e) => e.stopPropagation()}
         >
           <IconButton label="Close" className="job-drawer__close" onClick={onClose}>
@@ -246,20 +297,13 @@ export function JobDrawer({ row, onClose, initialSection }) {
           {isApplication ? (
             <div id="drawer-section-evaluate">
               <PacketGateCard
-                verdict={app?.packetGate || null}
+                verdict={evaluation}
                 busy={busyKey === "evaluate"}
                 onEvaluate={() =>
                   runWrite(
                     "evaluate",
                     async () => {
-                      const res = await runPacketGate({ applicationId: row.id });
-                      await setAppFields({
-                        id: row.id,
-                        patch: {
-                          packetGate: { ...res.data, evaluatedAt: new Date().toISOString() },
-                          fitBasis: "evaluated",
-                        },
-                      });
+                      await runPacketGate({ applicationId: row.id });
                     },
                     "Evaluated."
                   )
@@ -273,6 +317,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
             <div id="drawer-section-documents">
               <PacketDocumentsCard
                 applicationId={row.id}
+                gate={evaluation?.gate}
                 onView={({ title, artifact }) => setViewer({ title, artifact })}
               />
             </div>
@@ -314,7 +359,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
               comms={comms}
               busyKey={busyKey}
               onSend={(commId) =>
-                runWrite(`send-${commId}`, () => markCommSent({ id: commId }), "Marked sent.")
+                runWrite(`send-${commId}`, () => markCommSent({ id: commId }), "Recorded as sent.")
               }
             />
           ) : null}
@@ -465,18 +510,33 @@ export function JobDrawer({ row, onClose, initialSection }) {
               {isApplication ? (
                 <>
                   {PRE_APPLIED_STATUSES.has(app?.status || row.status) ? (
-                    <Button
-                      disabled={busyKey === "mark-applied"}
-                      onClick={() =>
-                        runWrite(
-                          "mark-applied",
-                          () => setAppStatus({ id: row.id, to: "applied" }),
-                          "Marked applied."
-                        )
-                      }
-                    >
-                      {busyKey === "mark-applied" ? "Marking applied…" : "Mark applied"}
-                    </Button>
+                    <div className="job-drawer__inline-actions">
+                      <Button
+                        disabled={busyKey === "apply-on-site"}
+                        onClick={() =>
+                          runWrite(
+                            "apply-on-site",
+                            () => applyOnSite({ id: row.id }),
+                            "Application submitted and verified."
+                          )
+                        }
+                      >
+                        {busyKey === "apply-on-site" ? "Applying…" : "Apply on site"}
+                      </Button>
+                      <Button
+                        variant="secondary"
+                        disabled={busyKey === "record-external"}
+                        onClick={() =>
+                          runWrite(
+                            "record-external",
+                            () => recordExternalApplication({ id: row.id }),
+                            "Recorded your external application."
+                          )
+                        }
+                      >
+                        {busyKey === "record-external" ? "Recording…" : "I applied elsewhere"}
+                      </Button>
+                    </div>
                   ) : null}
                   <StatusControl
                     currentStatus={app?.status || row.status}
@@ -490,7 +550,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
                     }
                   />
                 </>
-              ) : (
+              ) : sourcedActionable ? (
                 <>
                   <p className="field__hint">
                     This role is still in Sourced — promote it to the active pipeline, or skip it.
@@ -523,6 +583,11 @@ export function JobDrawer({ row, onClose, initialSection }) {
                     </Button>
                   </div>
                 </>
+              ) : (
+                <p className="field__hint">
+                  This sourced role is already skipped or resolved. Its Promote and Skip actions are
+                  no longer available.
+                </p>
               )}
             </Card>
           </div>
@@ -595,7 +660,7 @@ function ReadyToSendCard({ comms, busyKey, onSend }) {
           {c.draft.subject ? <p className="job-drawer__draft-subject">{c.draft.subject}</p> : null}
           {c.draft.body ? <p className="job-drawer__draft-body">{c.draft.body}</p> : null}
           <Button disabled={busyKey === `send-${c.id}`} onClick={() => onSend(c.id)}>
-            {busyKey === `send-${c.id}` ? "Marking sent…" : "Mark sent"}
+            {busyKey === `send-${c.id}` ? "Recording…" : "I sent this"}
           </Button>
         </div>
       ))}
@@ -884,7 +949,7 @@ function NoteField({ field, label, max, initial, busy, onSave }) {
 
 function StatusControl({ currentStatus, busy, onSave }) {
   const [to, setTo] = useState(
-    STATUS_OPTIONS.some((o) => o.value === currentStatus) ? currentStatus : "applied"
+    STATUS_OPTIONS.some((o) => o.value === currentStatus) ? currentStatus : "screen"
   );
   const [note, setNote] = useState("");
   return (

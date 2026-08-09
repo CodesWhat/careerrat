@@ -196,6 +196,10 @@ export function buildPacketContext({
       company: app.company ?? null,
       role: app.role ?? null,
       status: app.status ?? null,
+      interviewAt: app.interviewAt ?? null,
+      nextInterviewAt: app.nextInterviewAt ?? null,
+      interviewNote: app.interviewNote ?? null,
+      conversations: Array.isArray(app.conversations) ? app.conversations : [],
       artifacts: { ...(app.artifacts || {}) },
       packetManifest: app.packetManifest || null,
     },
@@ -239,6 +243,12 @@ export function hasReadableJobBody(context) {
 }
 
 export function packetPromptFromContext(context) {
+  const candidateContext = {
+    profile: context.profile || {},
+    targeting: context.targeting || {},
+    evidence: context.evidence || { claims: [] },
+    honesty: context.honesty || {},
+  };
   return [
     `Company: ${context.app.company || ""}`,
     `Role: ${context.app.role || ""}`,
@@ -246,6 +256,9 @@ export function packetPromptFromContext(context) {
     "Job Description:",
     cleanText(context.job.body),
     "",
-    "Return a bounded packet gate JSON verdict.",
+    "Candidate context (private, local, current compensation removed):",
+    JSON.stringify(candidateContext, null, 2),
+    "",
+    "Return one typed packet-gate verdict. Base fit only on the candidate context and saved job description. Parse posted base compensation into numeric minBase/maxBase when present; otherwise use nulls and status unknown. Never invent compensation or evidence.",
   ].join("\n");
 }

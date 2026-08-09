@@ -56,6 +56,32 @@ function assertWorkspacePath(path, key) {
   }
 }
 
+function assertInterviewCapturePath(path) {
+  const value = String(path || "");
+  if (!value) return null;
+  if (!value.startsWith("workspace/") || value.includes("\0") || value.includes("../")) {
+    const err = new Error("interview intake artifact must be a workspace-relative path");
+    err.code = "BAD_INTERVIEW_ARTIFACT";
+    throw err;
+  }
+  return value;
+}
+
+function interviewLogisticsNote(at, who) {
+  const formatted = new Intl.DateTimeFormat("en-US", {
+    weekday: "short",
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).format(new Date(at));
+  const firstName = String(who || "")
+    .trim()
+    .split(/\s+/)[0];
+  return `Interview — ${formatted}${firstName ? ` with ${firstName}` : ""}`.slice(0, 60);
+}
+
 // appUpsert({row}) — full-row insert/replace (capture-intake shape): a brand
 // new application row, or a wholesale replace of an existing one by id.
 export function appUpsert({ repoRoot, env, row } = {}) {
@@ -89,9 +115,44 @@ function applyRoundCompletionClearing(app) {
   return patch;
 }
 
-// appSetStatus({id, to, note?, followUpDueAt?, clearInterview?})
-export function appSetStatus({ repoRoot, env, id, to, note, followUpDueAt, clearInterview } = {}) {
+function activityStatusLabel(status) {
+  const value = String(status || "unknown").toLowerCase();
+  const labels = {
+    "reviewed-hold": "Saved for review",
+    "manual-apply": "Manual apply needed",
+    applied: "Applied",
+    awaiting: "Awaiting response",
+    waiting: "Awaiting response",
+    interview: "Interview",
+    offer: "Offer",
+    accepted: "Accepted",
+    rejected: "Rejected",
+    withdrawn: "Withdrawn",
+    cut: "Archived",
+  };
+  return (
+    labels[value] ||
+    value.replace(/[-_]/g, " ").replace(/\b\w/g, (character) => character.toUpperCase())
+  );
+}
+
+// appSetStatus({id, to, note?, appliedAt?, followUpDueAt?, clearInterview?})
+export function appSetStatus({
+  repoRoot,
+  env,
+  id,
+  to,
+  note,
+  appliedAt,
+  followUpDueAt,
+  clearInterview,
+} = {}) {
   if (!to) throw new Error("appSetStatus: to is required");
+  if (appliedAt != null && Number.isNaN(Date.parse(appliedAt))) {
+    const error = new Error("appSetStatus: appliedAt must be an ISO date or datetime");
+    error.code = "BAD_APPLIED_AT";
+    throw error;
+  }
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
     const from = app.status;
@@ -102,6 +163,7 @@ export function appSetStatus({ repoRoot, env, id, to, note, followUpDueAt, clear
 
     const updated = { ...app, status: to };
     if (note) updated.statusNote = note;
+    if (appliedAt != null) updated.appliedAt = String(appliedAt);
     if (followUpDueAt) updated.followUp = { ...(app.followUp || {}), dueAt: followUpDueAt };
     if (willClear) Object.assign(updated, applyRoundCompletionClearing(app));
 
@@ -109,12 +171,13 @@ export function appSetStatus({ repoRoot, env, id, to, note, followUpDueAt, clear
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "status_change",
-      title: `${app.company || id} — status ${from || "unknown"} → ${to}`,
+      title: `${app.company || id} — Status changed to ${activityStatusLabel(to)}`,
+      summary: `Previous status: ${activityStatusLabel(from)}.`,
       refs: { applicationId: id, company: app.company, role: app.role },
-      tags: [`status:${to}`],
+      tags: [`status:${to}`, "operation:application:status-update"],
     });
     const analytics = refreshAnalytics(db);
-    return { id, from, to, meta, event, analytics };
+    return { id, from, to, appliedAt: updated.appliedAt || null, meta, event, analytics };
   });
 }
 
@@ -129,19 +192,52 @@ function shallowMergeOneLevel(base, patch) {
   return out;
 }
 
+function applicationFieldsActivity(patch) {
+  const keys = new Set(Object.keys(patch || {}));
+  if (
+    ["gateVerdict", "gateVerdictReason", "roleFit", "compNote", "compensation"].some((key) =>
+      keys.has(key)
+    )
+  ) {
+    return {
+      title: "Fit and compensation updated",
+      summary: "Saved the latest evaluation, fit reasons, risks, and compensation evidence.",
+    };
+  }
+  if (keys.has("followUp") || keys.has("nextAction") || keys.has("nextActionDue")) {
+    return {
+      title: "Next action updated",
+      summary: "Saved the next candidate action and follow-up timing.",
+    };
+  }
+  if (keys.has("interviewAt") || keys.has("nextInterviewAt") || keys.has("interviewNote")) {
+    return {
+      title: "Interview details updated",
+      summary: "Saved structured interview timing and logistics.",
+    };
+  }
+  return {
+    title: "Application details updated",
+    summary: "Saved changes to the tracked application.",
+  };
+}
+
 // appSetFields({id, patch}) — shallow merge (objects merge one level,
 // arrays/scalars replace). Not outcome-changing: no analytics refresh.
 export function appSetFields({ repoRoot, env, id, patch } = {}) {
   if (!patch || typeof patch !== "object") throw new Error("appSetFields: patch is required");
   return runVerb({ repoRoot, env }, (db) => {
     const app = requireApp(db, id);
+    const activity = applicationFieldsActivity(patch);
     const updated = shallowMergeOneLevel(app, patch);
     putRow(db, "applications", id, updated);
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "status_change",
-      title: `${app.company || id} — fields updated`,
+      title: `${app.company || id} — ${activity.title}`,
+      summary: activity.summary,
       refs: { applicationId: id, company: app.company, role: app.role },
+      tags: ["operation:application:details-update"],
     });
     return { id, meta, event };
   });
@@ -184,6 +280,86 @@ export function appScheduleInterview({ repoRoot, env, id, at, round, note, who }
       refs: { applicationId: id, company: app.company, role: app.role },
     });
     return { id, meta, event };
+  });
+}
+
+// Capture a confirmed interview invite/transcript from universal intake in one
+// application write. A future ISO datetime schedules the round and advances an
+// earlier-stage application; notes without a reliable future time are retained
+// as non-rung debrief context instead of inventing calendar state.
+export function appCaptureInterviewIntake({
+  repoRoot,
+  env,
+  id,
+  interviewAt,
+  summary,
+  artifactPath,
+  who,
+  at,
+} = {}) {
+  const cleanSummary = String(summary || "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleanSummary) throw new Error("appCaptureInterviewIntake: summary is required");
+  const cleanArtifactPath = assertInterviewCapturePath(artifactPath);
+  const capturedAt = at || nowIso();
+  const rawInterviewAt = String(interviewAt || "").trim();
+  if (
+    rawInterviewAt &&
+    (!rawInterviewAt.includes("T") || Number.isNaN(Date.parse(rawInterviewAt)))
+  ) {
+    const error = new Error(
+      "appCaptureInterviewIntake: interviewAt must be an ISO datetime with an explicit time"
+    );
+    error.code = "BAD_INTERVIEW_AT";
+    throw error;
+  }
+
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const referenceMs = Number.isNaN(Date.parse(capturedAt)) ? Date.now() : Date.parse(capturedAt);
+    const scheduled = Boolean(rawInterviewAt && Date.parse(rawInterviewAt) > referenceMs);
+    const conversations = Array.isArray(app.conversations) ? app.conversations.slice() : [];
+    conversations.push({
+      date: scheduled ? new Date(rawInterviewAt).toISOString() : capturedAt,
+      kind: scheduled ? "interview" : "post-round-follow-up",
+      who: String(who || "").trim() || null,
+      notes: cleanSummary.slice(0, 200),
+      ...(cleanArtifactPath ? { artifactPath: cleanArtifactPath } : {}),
+    });
+
+    const updated = { ...app, conversations };
+    let statusChanged = false;
+    let scheduledField = null;
+    let scheduledAt = null;
+    if (scheduled) {
+      scheduledAt = new Date(rawInterviewAt).toISOString();
+      const hasFutureCurrent =
+        app.interviewAt &&
+        !Number.isNaN(Date.parse(app.interviewAt)) &&
+        Date.parse(app.interviewAt) > referenceMs;
+      scheduledField = hasFutureCurrent ? "nextInterviewAt" : "interviewAt";
+      updated[scheduledField] = scheduledAt;
+      updated.interviewNote = interviewLogisticsNote(scheduledAt, who);
+      if (classifyStage(app.status).order < classifyStage("interview").order) {
+        updated.status = "interview";
+        statusChanged = updated.status !== app.status;
+      }
+    }
+
+    putRow(db, "applications", id, updated);
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "interview",
+      title: `${app.company || id} — ${scheduled ? "interview captured" : "interview notes captured"}`,
+      summary: scheduled
+        ? "Saved the confirmed interview time and its source context."
+        : "Saved interview context without inventing a schedule.",
+      refs: { applicationId: id, company: app.company, role: app.role },
+      tags: ["operation:interview:capture-intake"],
+    });
+    const analytics = statusChanged ? refreshAnalytics(db) : null;
+    return { id, scheduled, scheduledAt, scheduledField, statusChanged, meta, event, analytics };
   });
 }
 
@@ -279,12 +455,70 @@ export function appRegisterArtifact({ repoRoot, env, id, kind, path, note } = {}
     const updated = { ...app, artifacts };
     putRow(db, "applications", id, updated);
     const meta = bumpMeta(db);
+    const artifactActivity =
+      {
+        jd: "Job description captured",
+        resume: "Résumé created",
+        coverLetter: "Cover letter created",
+        interviewDossier: "Interview dossier created",
+      }[kind] || "Application document saved";
     const event = logActivityEvent(db, {
       type: "tailored",
-      title: `${app.company || id} — ${kind} artifact registered`,
+      title: `${app.company || id} — ${artifactActivity}`,
+      summary: note || "Saved the document to this application.",
       refs: { applicationId: id, company: app.company, role: app.role },
+      tags: [`artifact:${kind}`, "operation:application:artifact-save"],
     });
     return { id, meta, event };
+  });
+}
+
+// appRegisterInterviewDossier({id, dossier}) — interview-prep's typed artifact
+// write. Unlike appRegisterArtifact's string-path convention, the dashboard's
+// Focus card requires the complete object declared in tracker.schema.json so it
+// can open the dossier immediately without a second filesystem read.
+export function appRegisterInterviewDossier({ repoRoot, env, id, dossier } = {}) {
+  if (!id) throw new Error("appRegisterInterviewDossier: id is required");
+  if (!dossier || typeof dossier !== "object" || Array.isArray(dossier)) {
+    throw new Error("appRegisterInterviewDossier: dossier object is required");
+  }
+
+  const markdown = String(dossier.markdown || "").trim();
+  const path = String(dossier.path || "").trim();
+  const generatedAt = String(dossier.generatedAt || "").trim();
+  if (!markdown || !path || !generatedAt) {
+    throw new Error(
+      "appRegisterInterviewDossier: dossier markdown, path, and generatedAt are required"
+    );
+  }
+  assertWorkspacePath(path, "interviewDossier");
+  if (Number.isNaN(Date.parse(generatedAt))) {
+    const err = new Error("interview dossier generatedAt must be an ISO datetime");
+    err.code = "BAD_INTERVIEW_DOSSIER";
+    throw err;
+  }
+
+  const normalized = {
+    title: dossier.title == null ? null : String(dossier.title),
+    round: dossier.round == null ? null : String(dossier.round),
+    path,
+    generatedAt,
+    markdown,
+  };
+
+  return runVerb({ repoRoot, env }, (db) => {
+    const app = requireApp(db, id);
+    const artifacts = { ...(app.artifacts || {}), interviewDossier: normalized };
+    putRow(db, "applications", id, { ...app, artifacts });
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "interview",
+      title: `${app.company || id} — Interview dossier created`,
+      summary: `${normalized.round || "Interview"} preparation is ready to review.`,
+      refs: { applicationId: id, company: app.company, role: app.role },
+      tags: ["artifact:interviewDossier", "operation:application:interview-prep"],
+    });
+    return { id, dossier: normalized, meta, event };
   });
 }
 
@@ -386,8 +620,13 @@ export function appRegisterPacketArtifacts({
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "tailored",
-      title: `${app.company || id} — packet artifacts registered`,
+      title: `${app.company || id} — Tailored application packet created`,
+      summary:
+        updatedArtifacts.resume && updatedArtifacts.coverLetter
+          ? "Created tailored résumé and cover letter."
+          : "Created a tailored application packet for review.",
       refs: { applicationId: id, company: app.company, role: app.role },
+      tags: ["operation:application:packet-create"],
     });
     return { id, meta, event, artifacts: updatedArtifacts, packetManifest };
   });

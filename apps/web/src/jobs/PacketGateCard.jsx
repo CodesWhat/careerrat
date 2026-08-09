@@ -43,14 +43,15 @@ export function PacketGateCard({ verdict, busy, onEvaluate }) {
         <>
           <div className="chip-row">
             <GateBadge gate={verdict.gate} />
-            {verdict.fit ? (
+            {verdict.fitScore != null ? (
               <span className="chip">
-                <span className="field__label">Fit:</span>&nbsp;{verdict.fit}
+                <span className="field__label">Fit:</span>&nbsp;{verdict.fitScore} ·{" "}
+                {verdict.fitBucket}
               </span>
             ) : null}
-            {verdict.comp ? (
+            {verdict.compensation?.status ? (
               <span className="chip">
-                <span className="field__label">Comp:</span>&nbsp;{verdict.comp}
+                <span className="field__label">Comp:</span>&nbsp;{verdict.compensation.status}
               </span>
             ) : null}
             {verdict.confidence ? (
@@ -59,12 +60,24 @@ export function PacketGateCard({ verdict, busy, onEvaluate }) {
               </span>
             ) : null}
           </div>
-          {verdict.reasons?.length ? (
+          {verdict.fitSummary ? <p>{verdict.fitSummary}</p> : null}
+          {verdict.compensation?.summary ? (
+            <p className="field__hint">{verdict.compensation.summary}</p>
+          ) : null}
+          {verdict.fitReasons?.length ? (
             <ul className="job-drawer__list">
-              {verdict.reasons.map((reason, i) => (
+              {verdict.fitReasons.map((reason, i) => (
                 // reasons is a flat AI-returned string list with no stable id.
                 // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
                 <li key={i}>{reason}</li>
+              ))}
+            </ul>
+          ) : null}
+          {verdict.fitRisks?.length ? (
+            <ul className="job-drawer__list">
+              {verdict.fitRisks.map((risk, i) => (
+                // biome-ignore lint/suspicious/noArrayIndexKey: flat typed list has no stable id
+                <li key={i}>{risk}</li>
               ))}
             </ul>
           ) : null}
