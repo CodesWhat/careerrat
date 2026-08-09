@@ -436,6 +436,81 @@ test("grounding and privacy validators block unsupported or private proposal tex
   assertNoSecretLeak(privateResult);
 });
 
+test("ISSUE-012: grounding accepts source-exact text across Markdown whitespace and smart quotes", async () => {
+  const { validateDeepIngestGrounding } = await import(
+    "../src/core/deep-ingest/validators/grounding.mjs"
+  );
+  const result = validateDeepIngestGrounding({
+    proposal: {
+      chunkId: "morgan-chunk",
+      supportingQuote:
+        "The 31% infrastructure-cost reduction was measured over two quarters and was shared work with FinOps; phrase as “co-led.”",
+    },
+    chunks: [
+      {
+        id: "morgan-chunk",
+        text: [
+          "## Evidence and honesty boundaries",
+          "",
+          '- The 31% infrastructure-cost reduction was measured over two quarters and was shared work with FinOps; phrase as "co-led."',
+        ].join("\n"),
+      },
+    ],
+  });
+
+  assert.equal(result.ok, true);
+});
+
+test("ISSUE-012/014: Morgan's explicit honesty and targeting sections become reviewable proposals", async () => {
+  const { proposeAutoFromSource } = await import("../src/core/deep-ingest/proposals/auto.mjs");
+  const text = await readFile(
+    new URL("../qa/electron-2026-08-08/fixtures/morgan-hale-persona.md", import.meta.url),
+    "utf8"
+  );
+  const source = {
+    id: "deep_src_morgan",
+    targetShape: "auto",
+    kind: "paste",
+    chunks: [{ id: "morgan-chunk", text }],
+  };
+  const result = await proposeAutoFromSource({
+    source,
+    targetShape: "auto",
+    runBoundedAI: async () => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: { proposals: [], gaps: [] },
+        ai: { used: true },
+        manual: { available: true },
+      },
+    }),
+  });
+
+  const honesty = result.proposals.filter((proposal) => proposal.lane === "honesty");
+  const roleSignals = result.proposals.filter((proposal) => proposal.lane === "role_signal");
+  assert.ok(
+    honesty.some(
+      (proposal) =>
+        proposal.payload.boundaryType === "shared_ownership" &&
+        /31%/.test(proposal.supportingQuote) &&
+        /FinOps/.test(proposal.payload.text)
+    )
+  );
+  for (const signalType of ["target_roles", "compensation", "keep", "cut"]) {
+    assert.ok(
+      roleSignals.some((proposal) => proposal.payload.signalType === signalType),
+      `expected explicit ${signalType} proposal`
+    );
+  }
+  assert.equal(
+    [...honesty, ...roleSignals].every(
+      (proposal) => proposal.status === "review_needed" && proposal.validation.status === "passed"
+    ),
+    true
+  );
+});
+
 test("unsupported metrics and private/protected/local content are blocked proposal items", async () => {
   const builder = await importBuilder(LANE_BUILDERS[0]);
 

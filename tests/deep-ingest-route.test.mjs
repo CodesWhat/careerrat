@@ -608,6 +608,49 @@ test("POST /api/deep-ingest/sources/upload enforces file caps and creates a save
   }
 });
 
+test("ISSUE-015: POST /api/deep-ingest/sources/remove deletes only undrafted source state", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const source = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      id: "deep_src_route_remove",
+      targetShape: "auto",
+      sourceKind: "url",
+      text: "Example source text.",
+    },
+  }).source;
+  deepIngestProposalPut({
+    repoRoot,
+    sourceId: source.id,
+    targetShape: "auto",
+    lane: "open_gaps",
+    proposal: {
+      status: "review_needed",
+      validation: { status: "source_scanned" },
+    },
+  });
+  const server = await bootServer(repoRoot);
+  try {
+    const removed = await postJson(server, "/api/deep-ingest/sources/remove", {
+      sourceId: source.id,
+    });
+    assert.equal(removed.status, 200);
+    assert.equal(removed.body.ok, true);
+    assert.equal(removed.body.data.removedProposals, 1);
+
+    const state = await getJson(server, "/api/deep-ingest/state");
+    assert.equal(state.body.data.sources.length, 0);
+    assert.equal(state.body.data.proposals.length, 0);
+
+    const missing = await postJson(server, "/api/deep-ingest/sources/remove", {});
+    assert.equal(missing.status, 400);
+    assert.match(missing.body.error, /sourceId/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/deep-ingest/proposal-decisions rejects stale expectedVersion and requires explicit terminal reasons", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -912,18 +955,18 @@ test("POST /api/deep-ingest/confirmed/update and /remove mutate one confirmed it
   assert.equal(updated.body.ok, true);
   assert.equal(updated.body.data.item.title, "Edited route-backed rollout");
   assert.equal(updated.body.data.item.situation, "Manual review queue");
+  assert.equal(updated.body.data.event.title, "Interview story updated");
 
   const removed = await postJsonDirect(routes, "/api/deep-ingest/confirmed/remove", {
     lane: "story_bank",
     id: item.id,
   });
-  assert.deepEqual(removed, {
-    status: 200,
-    body: {
-      ok: true,
-      data: { ok: true, lane: "story_bank", removed: item.id },
-    },
-  });
+  assert.equal(removed.status, 200);
+  assert.equal(removed.body.ok, true);
+  assert.equal(removed.body.data.ok, true);
+  assert.equal(removed.body.data.lane, "story_bank");
+  assert.equal(removed.body.data.removed, item.id);
+  assert.equal(removed.body.data.event.title, "Interview story removed");
 });
 
 test("POST confirmed-item routes reject missing id/lane payloads", async () => {

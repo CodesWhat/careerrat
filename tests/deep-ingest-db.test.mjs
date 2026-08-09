@@ -336,6 +336,76 @@ test("source and proposal verbs persist reviewable state without requiring candi
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/evidence.yml")), false);
 });
 
+test("ISSUE-015: removing an undrafted source cascades its scan stub but protects drafted work", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const {
+    deepIngestProposalPut,
+    deepIngestSourceCreate,
+    deepIngestSourceRemove,
+    deepIngestStateGet,
+  } = await loadDeepIngestVerbs();
+
+  const removable = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      id: "deep_src_removable",
+      targetShape: "auto",
+      sourceKind: "url",
+      text: "Example source text.",
+    },
+  }).source;
+  deepIngestProposalPut({
+    repoRoot,
+    sourceId: removable.id,
+    targetShape: "auto",
+    lane: "open_gaps",
+    proposal: {
+      status: "review_needed",
+      validation: { status: "source_scanned" },
+    },
+  });
+
+  const removed = deepIngestSourceRemove({ repoRoot, sourceId: removable.id });
+  assert.deepEqual(removed, {
+    ok: true,
+    sourceId: removable.id,
+    removedProposals: 1,
+    removedChunks: 1,
+  });
+  assert.equal(deepIngestStateGet({ repoRoot }).sources.length, 0);
+  assert.equal(deepIngestStateGet({ repoRoot }).proposals.length, 0);
+  assert.equal(deepIngestStateGet({ repoRoot }).sourceChunks.length, 0);
+
+  const protectedSource = deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      id: "deep_src_with_drafts",
+      targetShape: "evidence",
+      sourceKind: "paste",
+      text: "Built a real system.",
+    },
+  }).source;
+  deepIngestProposalPut({
+    repoRoot,
+    sourceId: protectedSource.id,
+    targetShape: "evidence",
+    lane: "evidence_claims",
+    proposal: {
+      status: "review_needed",
+      payload: { claim: "Built a real system." },
+      supportingQuote: "Built a real system.",
+      validation: { status: "passed", blockedReasons: [] },
+    },
+  });
+
+  assert.throws(
+    () => deepIngestSourceRemove({ repoRoot, sourceId: protectedSource.id }),
+    (err) => err.code === "SOURCE_HAS_DRAFTS"
+  );
+  assert.equal(deepIngestStateGet({ repoRoot }).sources.length, 1);
+});
+
 test("proposal decisions enforce expected-version conflicts and keep unconfirmed proposals out of trusted candidate state", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -422,6 +492,8 @@ test("proposal decisions enforce expected-version conflicts and keep unconfirmed
     },
   });
   assert.equal(confirmed.status, "confirmed");
+  assert.equal(confirmed.event.title, "Evidence added from deep intake");
+  assert.ok(confirmed.event.tags.includes("operation:deep-intake:confirm"));
   assert.equal(candidateConfigGet({ repoRoot }).evidence.claims.length, beforeClaims + 1);
   assert.equal(deepIngestStateGet({ repoRoot }).laneStates.evidence_claims.status, "completed");
 });
@@ -1076,6 +1148,8 @@ test("deepIngestConfirmedItemUpdate partially merges edits across all four confi
     assert.equal(result.item.id, entry.id);
     assert.equal(result.item[entry.changed[0]], entry.changed[1]);
     assert.equal(result.item[entry.preserved[0]], entry.preserved[1]);
+    assert.match(result.event.title, /updated$/);
+    assert.ok(result.event.tags.includes("operation:library:item-update"));
   }
 });
 
@@ -1147,7 +1221,11 @@ test("deepIngestConfirmedItemRemove deletes one row and rejects unknown lane/id"
     id: "story-edit-1",
   });
 
-  assert.deepEqual(removed, { ok: true, lane: "story_bank", removed: "story-edit-1" });
+  assert.equal(removed.ok, true);
+  assert.equal(removed.lane, "story_bank");
+  assert.equal(removed.removed, "story-edit-1");
+  assert.equal(removed.event.title, "Interview story removed");
+  assert.ok(removed.event.tags.includes("operation:library:item-remove"));
   assert.deepEqual(
     db
       .prepare("SELECT id FROM deep_ingest_story_bank ORDER BY id")

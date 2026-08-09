@@ -51,6 +51,7 @@ import {
   buildDeepIngestProposals,
   decideDeepIngestProposal,
   getDeepIngestState,
+  removeDeepIngestSource,
   submitDeepIngestSource,
   updateDeepIngestLaneState,
   uploadDeepIngestFile,
@@ -155,6 +156,8 @@ const URL_LIKE_SOURCE_KINDS = new Set(["url", "linkedin", "portfolio", "project_
 const FILE_LIKE_SOURCE_KINDS = new Set(["file", "repo", "local_path"]);
 
 function errorMessage(err, fallback) {
+  const apiMessage = String(err?.body?.error || "").trim();
+  if (apiMessage) return apiMessage;
   return err instanceof Error ? err.message : fallback;
 }
 
@@ -216,6 +219,13 @@ function sourceHasDrafts(sourceId, proposals) {
 // yet is actually draftable.
 function sourceIsReadyToDraft(source, proposals) {
   return source.status === "proposal_ready" && !sourceHasDrafts(source.id, proposals);
+}
+
+function sourceNeedsReview(source, proposals) {
+  if (sourceHasDrafts(source.id, proposals)) return false;
+  return ["captured", "scanning", "proposal_ready", "manual_fallback", "failed"].includes(
+    source.status
+  );
 }
 
 function domainFromUrl(url) {
@@ -333,7 +343,14 @@ function proposalEditItem(row, edits) {
   const summary = edits.summary ?? proposalDisplaySummary(row);
   const title = edits.title ?? proposalDisplayTitle(row, summary);
   const supportingQuote = edits.supportingQuote ?? proposalQuote(row);
-  return { ...proposalPayload(row), sourceId: row.sourceId, title, summary, supportingQuote };
+  return {
+    ...proposalPayload(row),
+    ...edits,
+    sourceId: row.sourceId,
+    title,
+    summary,
+    supportingQuote,
+  };
 }
 
 function gapDisplayText(gapRow) {
@@ -456,6 +473,19 @@ export function DeepIngestPage({ initialState = null }) {
       await refresh();
     } catch (err) {
       setError(errorMessage(err, "Could not retry that source."));
+    } finally {
+      setBusySourceId(null);
+    }
+  }
+
+  async function handleRemoveSource(source) {
+    setBusySourceId(source.id);
+    setError(null);
+    try {
+      await removeDeepIngestSource({ sourceId: source.id });
+      await refresh();
+    } catch (err) {
+      setError(errorMessage(err, "Could not remove that source."));
     } finally {
       setBusySourceId(null);
     }
@@ -668,6 +698,7 @@ export function DeepIngestPage({ initialState = null }) {
                       proposals={proposals}
                       busySourceId={busySourceId}
                       onRetry={handleRetrySource}
+                      onRemove={handleRemoveSource}
                       draftingAll={draftingAll}
                       onDraftProposals={handleDraftProposals}
                     />
@@ -700,6 +731,8 @@ export function DeepIngestPage({ initialState = null }) {
                     <DoneStepContent
                       confirmed={confirmed}
                       openGaps={openGaps}
+                      sources={sources}
+                      proposals={proposals}
                       onAddMoreMaterial={() => setStepIndex(0)}
                     />
                   )}
@@ -789,6 +822,7 @@ function MaterialStepContent({
   proposals,
   busySourceId,
   onRetry,
+  onRemove,
   draftingAll,
   onDraftProposals,
 }) {
@@ -865,6 +899,7 @@ function MaterialStepContent({
               hasDrafts={sourceHasDrafts(source.id, proposals)}
               busy={busySourceId === source.id}
               onRetry={() => onRetry(source)}
+              onRemove={() => onRemove(source)}
             />
           ))}
         </div>
@@ -885,20 +920,45 @@ function MaterialStepContent({
   );
 }
 
-function MaterialSourceRow({ source, hasDrafts, busy, onRetry }) {
+function MaterialSourceRow({ source, hasDrafts, busy, onRetry, onRemove }) {
   const meta = sourceStatusMeta(source, hasDrafts);
   const canRetry = source.status === "manual_fallback" || source.status === "failed";
+  const canRemove = !hasDrafts;
   return (
     <div className="deep-wizard__source-row">
       <div className="deep-wizard__source-main">
         <span className="deep-wizard__source-title">{sourceDisplayLabel(source)}</span>
         <span className={`badge ${meta.tone}`}>{meta.label}</span>
+        <details className="deep-wizard__source-details">
+          <summary>Details</summary>
+          <span>
+            {source.sourceKind || source.kind || "source"}
+            {source.textLength ? ` · ${source.textLength} characters` : ""}
+          </span>
+        </details>
       </div>
-      {canRetry ? (
-        <button type="button" className="deep-wizard__quiet-link" disabled={busy} onClick={onRetry}>
-          {busy ? "Retrying…" : "Retry"}
-        </button>
-      ) : null}
+      <div className="deep-wizard__source-actions">
+        {canRetry ? (
+          <button
+            type="button"
+            className="deep-wizard__quiet-link"
+            disabled={busy}
+            onClick={onRetry}
+          >
+            {busy ? "Retrying…" : "Retry"}
+          </button>
+        ) : null}
+        {canRemove ? (
+          <button
+            type="button"
+            className="deep-wizard__quiet-link"
+            disabled={busy}
+            onClick={onRemove}
+          >
+            {busy ? "Removing…" : "Remove source"}
+          </button>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -980,6 +1040,17 @@ function ProposalCard({
   const summary = edits.summary ?? proposalDisplaySummary(row);
   const title = edits.title ?? proposalDisplayTitle(row, summary);
   const quote = edits.supportingQuote ?? proposalQuote(row);
+  const payload = proposalPayload(row);
+  const honestyFields =
+    row.lane === "honesty_boundaries"
+      ? [
+          { field: "boundaryType", label: "Boundary type", rows: 1 },
+          { field: "text", label: "Canonical boundary", rows: 3 },
+          { field: "allowedWording", label: "Allowed wording", rows: 2 },
+          { field: "forbiddenWording", label: "Forbidden wording", rows: 2 },
+          { field: "reason", label: "Enforcement reason", rows: 2 },
+        ]
+      : [];
 
   return (
     <article className="deep-wizard__proposal-card">
@@ -1018,6 +1089,29 @@ function ProposalCard({
             aria-label="Supporting quote"
             placeholder="Supporting quote"
           />
+          {honestyFields.map(({ field, label, rows }) => {
+            const value = edits[field] ?? payload[field] ?? "";
+            return rows === 1 ? (
+              <TextField
+                key={field}
+                id={`deep-wizard-proposal-${field}-${row.id}`}
+                value={value}
+                onChange={(next) => onEditField(field, next)}
+                aria-label={label}
+                placeholder={label}
+              />
+            ) : (
+              <TextArea
+                key={field}
+                id={`deep-wizard-proposal-${field}-${row.id}`}
+                rows={rows}
+                value={value}
+                onChange={(next) => onEditField(field, next)}
+                aria-label={label}
+                placeholder={label}
+              />
+            );
+          })}
           <div className="deep-wizard__form-actions">
             <Button variant="secondary" disabled={busy} onClick={onSave}>
               {busy ? "Saving…" : "Save edits"}
@@ -1042,12 +1136,15 @@ function ProposalCard({
   );
 }
 
-function DoneStepContent({ confirmed, openGaps, onAddMoreMaterial }) {
+function DoneStepContent({ confirmed, openGaps, sources, proposals, onAddMoreMaterial }) {
   // Only genuine AI-punted gaps belong under "Still thin". manual_fallback
   // rows in the open_gaps lane carry provider-error reasons, not content.
   const thinGaps = openGaps.filter(
     (row) => !isUnreviewableProposal(row) && row?.proposal?.status === "gap"
   );
+  const pendingSourceCount = asArray(sources).filter((source) =>
+    sourceNeedsReview(source, asArray(proposals))
+  ).length;
 
   return (
     <>
@@ -1061,6 +1158,21 @@ function DoneStepContent({ confirmed, openGaps, onAddMoreMaterial }) {
           );
         })}
       </ul>
+      {pendingSourceCount ? (
+        <div className="deep-wizard__gaps deep-wizard__pending-sources">
+          <p className="deep-wizard__gaps-label">
+            {pendingSourceCount} {pendingSourceCount === 1 ? "source" : "sources"} still needs
+            review.
+          </p>
+          <p>
+            Draft or remove {pendingSourceCount === 1 ? "it" : "them"} in Material before this
+            intake is complete.
+          </p>
+          <Button variant="secondary" onClick={onAddMoreMaterial}>
+            Review material
+          </Button>
+        </div>
+      ) : null}
       {thinGaps.length ? (
         <div className="deep-wizard__gaps">
           <p className="deep-wizard__gaps-label">Still thin:</p>

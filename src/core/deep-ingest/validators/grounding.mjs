@@ -13,7 +13,7 @@ export function validateDeepIngestGrounding({ proposal, chunks = [] } = {}) {
 
   if (!supportingQuote) {
     errors.push({ path: "supportingQuote", message: "supporting quote is required" });
-  } else if (chunk && !String(chunk.text || "").includes(supportingQuote)) {
+  } else if (chunk && !sourceContainsQuote(chunk.text, supportingQuote)) {
     errors.push({
       path: "supportingQuote",
       message: "supporting quote must appear in the referenced source chunk",
@@ -37,6 +37,25 @@ export function validateDeepIngestGrounding({ proposal, chunks = [] } = {}) {
   }
 
   return { ok: true, code: null, blockedFields: [], errors: [] };
+}
+
+function sourceContainsQuote(sourceText, supportingQuote) {
+  const source = normalizeGroundingText(sourceText);
+  const quote = normalizeGroundingText(supportingQuote);
+  return Boolean(quote && source.includes(quote));
+}
+
+function normalizeGroundingText(value) {
+  return String(value || "")
+    .normalize("NFKC")
+    .replace(/[“”]/g, '"')
+    .replace(/[‘’]/g, "'")
+    .replace(/[‐‑‒–—]/g, "-")
+    .replace(/^\s*#{1,6}\s+/gm, "")
+    .replace(/^\s*[-*+]\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
 }
 
 function stringValue(value) {

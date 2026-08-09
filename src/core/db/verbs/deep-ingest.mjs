@@ -15,6 +15,7 @@ import { validateDeepIngestLaneTransition } from "../../deep-ingest/validators/l
 import { validateDeepIngestPrivacy } from "../../deep-ingest/validators/privacy.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
+import { bumpMeta, logActivityEvent } from "./shared.mjs";
 
 const SOURCE_TABLE = "deep_ingest_sources";
 const CHUNK_TABLE = "deep_ingest_source_chunks";
@@ -32,6 +33,37 @@ const CONFIRMED_LANE_TABLES = {
   honesty_boundaries: "deep_ingest_honesty_boundaries",
   writing_voice: "deep_ingest_writing_voice",
   role_signals: "deep_ingest_role_signals",
+};
+
+const CONFIRMED_LANE_ACTIVITY = {
+  source_coverage: {
+    singular: "Source coverage",
+    confirmed: "Source coverage confirmed",
+  },
+  evidence_claims: {
+    singular: "Evidence claim",
+    confirmed: "Evidence added from deep intake",
+  },
+  story_bank: {
+    singular: "Interview story",
+    confirmed: "Interview story added",
+  },
+  honesty_boundaries: {
+    singular: "Honesty boundary",
+    confirmed: "Honesty boundary confirmed",
+  },
+  writing_voice: {
+    singular: "Writing preferences",
+    confirmed: "Writing preferences confirmed",
+  },
+  role_signals: {
+    singular: "Role signal",
+    confirmed: "Role signals confirmed",
+  },
+  open_gaps: {
+    singular: "Open gap",
+    confirmed: "Open gap reviewed",
+  },
 };
 
 export const DEEP_INGEST_REQUIRED_LANES = DEFAULT_DEEP_INGEST_REQUIRED_LANES;
@@ -117,6 +149,33 @@ function makeError(message, code = "BAD_REQUEST") {
 function runDeepIngestVerb({ repoRoot, env }, fn) {
   const db = requireDb({ repoRoot, env });
   return withTransaction(db, () => fn(db));
+}
+
+function logConfirmedCandidateActivity(db, { lane, action, count = 1 }) {
+  const labels = CONFIRMED_LANE_ACTIVITY[lane] || {
+    singular: "Deep intake item",
+    confirmed: "Deep intake item confirmed",
+  };
+  const title =
+    action === "confirm"
+      ? labels.confirmed
+      : `${labels.singular} ${action === "remove" ? "removed" : "updated"}`;
+  const meta = bumpMeta(db);
+  const event = logActivityEvent(db, {
+    type: "system",
+    title,
+    summary:
+      action === "confirm"
+        ? `Confirmed ${count} ${count === 1 ? "item" : "items"} from the deep intake review.`
+        : action === "remove"
+          ? "Removed a confirmed item from the Evidence Library."
+          : "Saved edits to a confirmed Evidence Library item.",
+    tags: [
+      `operation:${action === "confirm" ? "deep-intake:confirm" : `library:item-${action}`}`,
+      `lane:${lane}`,
+    ],
+  });
+  return { meta, event };
 }
 
 function parseRow(row) {
@@ -570,6 +629,38 @@ export function deepIngestSourceGet({ repoRoot, env, sourceId, id } = {}) {
   return { ok: true, source: readRow(db, SOURCE_TABLE, sourceId || id) };
 }
 
+export function deepIngestSourceRemove({ repoRoot, env, sourceId, id } = {}) {
+  const rowId = String(sourceId || id || "").trim();
+  if (!rowId) throw makeError("deepIngestSourceRemove requires sourceId");
+
+  return runDeepIngestVerb({ repoRoot, env }, (db) => {
+    requireRow(db, SOURCE_TABLE, rowId, "Deep ingest source");
+    const proposalRows = db
+      .prepare(`SELECT data FROM ${PROPOSAL_TABLE} WHERE source_id = ?`)
+      .all(rowId)
+      .map((row) => JSON.parse(row.data));
+    const hasDrafts = proposalRows.some(
+      (row) => row?.proposal?.validation?.status !== "source_scanned"
+    );
+    if (hasDrafts) {
+      throw makeError(
+        "Deep ingest source has drafted proposals; discard or resolve them before removing it",
+        "SOURCE_HAS_DRAFTS"
+      );
+    }
+
+    const removedProposals = db
+      .prepare(`DELETE FROM ${PROPOSAL_TABLE} WHERE source_id = ?`)
+      .run(rowId).changes;
+    const removedChunks = db
+      .prepare(`DELETE FROM ${CHUNK_TABLE} WHERE source_id = ?`)
+      .run(rowId).changes;
+    db.prepare(`DELETE FROM ${SOURCE_TABLE} WHERE id = ?`).run(rowId);
+
+    return { ok: true, sourceId: rowId, removedProposals, removedChunks };
+  });
+}
+
 export function deepIngestProposalPut({
   repoRoot,
   env,
@@ -679,7 +770,12 @@ export function deepIngestConfirmProposal({
     };
     putRow(db, PROPOSAL_TABLE, next.id, next);
     markLaneCompleted(db, current.lane, updatedAt);
-    return readRow(db, PROPOSAL_TABLE, next.id);
+    const activity = logConfirmedCandidateActivity(db, {
+      lane: current.lane,
+      action: "confirm",
+      count: items.length,
+    });
+    return { ...readRow(db, PROPOSAL_TABLE, next.id), ...activity };
   });
 }
 
@@ -744,7 +840,11 @@ export function deepIngestConfirmedItemUpdate({ repoRoot, env, lane, id, fields 
       updatedAt,
     };
     putRow(db, table, rowId, next);
-    return { ok: true, lane: normalizedLane, item: readRow(db, table, rowId) };
+    const activity = logConfirmedCandidateActivity(db, {
+      lane: normalizedLane,
+      action: "update",
+    });
+    return { ok: true, lane: normalizedLane, item: readRow(db, table, rowId), ...activity };
   });
 }
 
@@ -760,7 +860,11 @@ export function deepIngestConfirmedItemRemove({ repoRoot, env, lane, id } = {}) 
   return runDeepIngestVerb({ repoRoot, env }, (db) => {
     requireRow(db, table, rowId, "Deep ingest confirmed item");
     db.prepare(`DELETE FROM ${table} WHERE id = ?`).run(rowId);
-    return { ok: true, lane: normalizedLane, removed: rowId };
+    const activity = logConfirmedCandidateActivity(db, {
+      lane: normalizedLane,
+      action: "remove",
+    });
+    return { ok: true, lane: normalizedLane, removed: rowId, ...activity };
   });
 }
 

@@ -9,6 +9,7 @@ import {
   deepIngestProposalDecision,
   deepIngestProposalPut,
   deepIngestSourceCreate,
+  deepIngestSourceRemove,
   deepIngestStateGet,
 } from "../core/db/verbs.mjs";
 import { proposeAutoFromSource } from "../core/deep-ingest/proposals/auto.mjs";
@@ -53,7 +54,12 @@ function queryParam(req, name) {
 
 function statusForError(err) {
   if (err?.code === "NO_DATABASE") return 409;
-  if (err?.code === "VERSION_CONFLICT" || err?.code === "NOT_FOUND") return 409;
+  if (
+    err?.code === "VERSION_CONFLICT" ||
+    err?.code === "NOT_FOUND" ||
+    err?.code === "SOURCE_HAS_DRAFTS"
+  )
+    return 409;
   if (err?.status) return err.status;
   return 400;
 }
@@ -63,6 +69,7 @@ function respondError(res, err) {
     ok: false,
     error: err?.message || String(err),
     reasons: err?.reasons || undefined,
+    validation: err?.validation || undefined,
   });
 }
 
@@ -101,6 +108,21 @@ export function mountDeepIngestRoutes({
     try {
       const scanned = await scanSource({ input: body, fetchImpl });
       const data = persistScannedSource({ repoRoot, env, scanned });
+      sendJson(res, 200, { ok: true, data });
+    } catch (err) {
+      respondError(res, err);
+    }
+  });
+
+  addRoute("POST", "/api/deep-ingest/sources/remove", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, DEEP_INGEST_JSON_BODY_MAX_BYTES);
+      ensureDb(repoRoot, env);
+      const data = deepIngestSourceRemove({
+        repoRoot,
+        env,
+        sourceId: body?.sourceId,
+      });
       sendJson(res, 200, { ok: true, data });
     } catch (err) {
       respondError(res, err);

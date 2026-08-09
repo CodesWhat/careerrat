@@ -21,6 +21,7 @@ const apiMock = vi.hoisted(() => ({
   buildDeepIngestProposals: vi.fn(),
   decideDeepIngestProposal: vi.fn(),
   getDeepIngestState: vi.fn(),
+  removeDeepIngestSource: vi.fn(),
   submitDeepIngestSource: vi.fn(),
   updateDeepIngestLaneState: vi.fn(),
   uploadDeepIngestFile: vi.fn(),
@@ -245,6 +246,7 @@ beforeEach(() => {
   apiMock.buildDeepIngestProposals.mockResolvedValue({ ok: true });
   apiMock.decideDeepIngestProposal.mockResolvedValue({ ok: true });
   apiMock.getDeepIngestState.mockImplementation(async () => apiMock.state);
+  apiMock.removeDeepIngestSource.mockResolvedValue({ ok: true });
   apiMock.submitDeepIngestSource.mockResolvedValue({ ok: true });
   apiMock.updateDeepIngestLaneState.mockResolvedValue({ ok: true });
   apiMock.uploadDeepIngestFile.mockResolvedValue({ ok: true });
@@ -472,6 +474,88 @@ describe("DeepIngestPage wizard", () => {
     });
   });
 
+  it("ISSUE-013: honesty edits expose and replace the canonical enforcement semantics", async () => {
+    const boundary = proposalRow({
+      id: "deep_prop_boundary_semantics",
+      lane: "honesty_boundaries",
+      sourceId: "deep_src_honesty",
+      version: 2,
+      title: "Traffic attribution",
+      summary: "Keep the event-volume metric with the employer.",
+      supportingQuote: "The 31% cost reduction was shared work with FinOps.",
+      payload: {
+        boundaryType: "metric_attribution",
+        text: "The event-volume metric belongs to Juniper Relay.",
+        allowedWording: "Juniper Relay processed the events.",
+        forbiddenWording: "Morgan processed the events.",
+        reason: "Employer metric, not an individual metric.",
+      },
+    });
+    const state = deepIngestState({ proposals: [boundary] });
+    selectStep("Honesty", state);
+
+    capturedNativeButton("Traffic attribution", "deep-wizard__proposal-main").onClick();
+    renderPage(state);
+    capturedField("Boundary type").onChange("shared_ownership");
+    renderPage(state);
+    expect(capturedField("Boundary type").value).toBe("shared_ownership");
+    capturedField("Canonical boundary").onChange("Morgan co-led the cost reduction with FinOps.");
+    renderPage(state);
+    capturedField("Allowed wording").onChange("co-led with FinOps");
+    renderPage(state);
+    capturedField("Forbidden wording").onChange("single-handedly reduced costs");
+    renderPage(state);
+    capturedField("Enforcement reason").onChange("The source explicitly says shared work.");
+    renderPage(state);
+    expect(capturedField("Boundary type").value).toBe("shared_ownership");
+    expect(capturedField("Canonical boundary").value).toBe(
+      "Morgan co-led the cost reduction with FinOps."
+    );
+    expect(capturedField("Allowed wording").value).toBe("co-led with FinOps");
+    expect(capturedField("Forbidden wording").value).toBe("single-handedly reduced costs");
+    expect(capturedField("Enforcement reason").value).toBe(
+      "The source explicitly says shared work."
+    );
+    await capturedButton("Confirm").onClick();
+
+    const item = apiMock.decideDeepIngestProposal.mock.calls.at(-1)[0].edits.items[0];
+    expect(item).toMatchObject({
+      boundaryType: "shared_ownership",
+      text: "Morgan co-led the cost reduction with FinOps.",
+      allowedWording: "co-led with FinOps",
+      forbiddenWording: "single-handedly reduced costs",
+      reason: "The source explicitly says shared work.",
+    });
+    expect(item.text).not.toContain("event-volume");
+  });
+
+  it("ISSUE-015: unprocessed sources expose details and a real Remove action", async () => {
+    const pendingSource = {
+      id: "deep_src_pending",
+      sourceKind: "url",
+      targetShape: "auto",
+      status: "proposal_ready",
+      metadata: { url: "https://example.com" },
+      textLength: 142,
+    };
+    const scanStub = proposalRow({
+      id: "deep_prop_scan_stub",
+      sourceId: pendingSource.id,
+      lane: "open_gaps",
+      validationStatus: "source_scanned",
+    });
+    const state = deepIngestState({ sources: [pendingSource], proposals: [scanStub] });
+
+    const html = renderPage(state);
+    expect(html).toContain("Details");
+    expect(html).toContain("Remove source");
+    await capturedNativeButton("Remove source", "deep-wizard__quiet-link").onClick();
+
+    expect(apiMock.removeDeepIngestSource).toHaveBeenCalledWith({
+      sourceId: "deep_src_pending",
+    });
+  });
+
   it("reports per-lane confirmed counts and only genuine gap rows on Done", () => {
     const state = deepIngestState({
       confirmed: {
@@ -516,5 +600,28 @@ describe("DeepIngestPage wizard", () => {
     expect(html).not.toContain("Provider timed out while drafting.");
     expect(html).not.toContain("Mechanical scan stub.");
     expect(html).toContain('<a href="/" class="btn btn--primary">Back to Dashboard</a>');
+  });
+
+  it("ISSUE-015: Done reports sources that still need drafts and links back to Material", () => {
+    const pendingSource = {
+      id: "deep_src_pending",
+      sourceKind: "url",
+      targetShape: "auto",
+      status: "proposal_ready",
+      metadata: { url: "https://example.com" },
+    };
+    const scanStub = proposalRow({
+      id: "deep_prop_scan_stub",
+      sourceId: pendingSource.id,
+      lane: "open_gaps",
+      validationStatus: "source_scanned",
+    });
+    const state = deepIngestState({ sources: [pendingSource], proposals: [scanStub] });
+
+    const html = selectStep("Done", state);
+
+    expect(html).toContain("1 source still needs review");
+    expect(html).toContain("Draft or remove it in Material");
+    expect(html).toContain("Review material");
   });
 });
