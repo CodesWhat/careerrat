@@ -41,7 +41,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
-import { resolveAIRoute } from "../core/ai/call-ai.mjs";
+import { callAI, resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { buildChildEnv, mapSdkMessage, writeByokUsage } from "../core/ai/skill-runtime.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
@@ -110,16 +110,40 @@ export function buildAssistPrompt(kind, input = {}) {
 // "buffer, don't stream" rationale).
 // ---------------------------------------------------------------------------
 
-export async function runBareOneshot({ prompt, repoRoot, env, labels, skillLabel, loadSdk }) {
-  const route = resolveAIRoute(env);
+export async function runBareOneshot({
+  prompt,
+  repoRoot,
+  env,
+  labels,
+  skillLabel,
+  loadSdk,
+  call = callAI,
+}) {
+  const route = resolveAIRoute(env, { repoRoot });
   if (route.type === "none") {
     const err = new Error(route.error);
     err.code = "NO_AI_ROUTE";
     throw err;
   }
 
-  const { query } = await loadSdk();
   const usageLabels = labels || { skill: skillLabel };
+  if (route.type === "installed") {
+    const response = await call({
+      messages: [{ role: "user", content: prompt }],
+      maxTokens: 1024,
+      skill: usageLabels.skill,
+      action: usageLabels.action,
+      operation: usageLabels.operation,
+      root: repoRoot,
+      env,
+    });
+    return (response?.content || [])
+      .filter((block) => block?.type === "text")
+      .map((block) => block.text)
+      .join("");
+  }
+
+  const { query } = await loadSdk();
   const childEnv = buildChildEnv({
     route,
     skill: usageLabels.skill,

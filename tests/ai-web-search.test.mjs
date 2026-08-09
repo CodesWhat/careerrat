@@ -138,7 +138,47 @@ test("runAiWebSearch hard-dedupes batch and DB rows and assigns review/likely-cu
     runSkillStream: assistantJson({ roles, queries_run: [{ prompt_id: "p1", query: "ai jobs" }] }),
   });
 
-  assert.deepEqual(result, { searched: 3, found: 4, new: 2, duplicates: 2, errors: [] });
+  assert.deepEqual(
+    {
+      searched: result.searched,
+      found: result.found,
+      new: result.new,
+      duplicates: result.duplicates,
+      errors: result.errors,
+      failedPromptIds: result.failedPromptIds,
+      queryResults: result.queryResults,
+    },
+    {
+      searched: 3,
+      found: 4,
+      new: 2,
+      duplicates: 2,
+      errors: [],
+      failedPromptIds: ["p2", "p3"],
+      queryResults: [
+        {
+          promptId: "p1",
+          prompt: "Find role 1",
+          status: "completed",
+          queries: [{ query: "ai jobs", status: "completed", error: null }],
+        },
+        {
+          promptId: "p2",
+          prompt: "Find role 2",
+          status: "failed",
+          queries: [],
+          error: "No query coverage was reported for this saved prompt.",
+        },
+        {
+          promptId: "p3",
+          prompt: "Find role 3",
+          status: "failed",
+          queries: [],
+          error: "No query coverage was reported for this saved prompt.",
+        },
+      ],
+    }
+  );
   const added = readDbScannerRows({ repoRoot }).filter((row) => row.source === "ai-web-search");
   assert.deepEqual(added.map((row) => [row.company, row.gate]).sort(), [
     ["Acme AI", "review"],
@@ -180,6 +220,42 @@ test("runAiWebSearch retries schema-invalid output once and returns the safe err
   );
   assert.equal(failed.errors.length, 1);
   assert.match(failed.errors[0], /schema|usable|match/i);
+  assert.deepEqual(failed.failedPromptIds, ["p1", "p2", "p3"]);
+  assert.equal(failed.queryResults.length, 3);
+  assert.ok(failed.queryResults.every((item) => item.status === "failed"));
+  assert.ok(failed.queryResults.every((item) => item.queries[0].query === item.prompt));
+});
+
+test("runAiWebSearch reports exact failed saved prompts and successful queries", async () => {
+  const repoRoot = repo({ prompts: 2 });
+  const result = await runAiWebSearch({
+    repoRoot,
+    env: {},
+    runSkillStream: assistantJson({
+      roles: [],
+      queries_run: [
+        { prompt_id: "p1", query: "first query", status: "completed" },
+        { prompt_id: "p2", query: "second query", status: "failed", error: "search timed out" },
+      ],
+    }),
+  });
+
+  assert.deepEqual(result.failedPromptIds, ["p2"]);
+  assert.deepEqual(result.queryResults, [
+    {
+      promptId: "p1",
+      prompt: "Find role 1",
+      status: "completed",
+      queries: [{ query: "first query", status: "completed", error: null }],
+    },
+    {
+      promptId: "p2",
+      prompt: "Find role 2",
+      status: "failed",
+      queries: [{ query: "second query", status: "failed", error: "search timed out" }],
+      error: "search timed out",
+    },
+  ]);
 });
 
 test("runAiWebSearch throws only its documented missing-DB and missing-prompt preconditions", async () => {

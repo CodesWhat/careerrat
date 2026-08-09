@@ -8,7 +8,7 @@ import { after, test } from "node:test";
 
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
-import { candidateSetupInitialize } from "../src/core/db/verbs.mjs";
+import { candidateSetupInitialize, sourcingRunLatest } from "../src/core/db/verbs.mjs";
 import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 
 const roots = [];
@@ -21,13 +21,19 @@ function tempRepo({ prompts = 1 } = {}) {
   return repoRoot;
 }
 
-function handlerFor({ repoRoot, env = { ANTHROPIC_API_KEY: "test-key" }, runAiWebSearch }) {
+function handlerFor({
+  repoRoot,
+  env = { ANTHROPIC_API_KEY: "test-key" },
+  runAiWebSearch,
+  workspaceAgentRuntime,
+}) {
   const routes = new Map();
   mountSearchRoutes({
     addRoute: (method, path, handler) => routes.set(`${method} ${path}`, handler),
     repoRoot,
     env,
     runAiWebSearch,
+    workspaceAgentRuntime,
   });
   return routes.get("POST /api/search/ai-web-search/run");
 }
@@ -140,10 +146,93 @@ test("AI web-search route streams activity before done and emits heartbeat comme
         data: { searched: 1, found: 2, new: 1, duplicates: 1, errors: [] },
       },
     ]);
+    const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+    assert.equal(durable.status, "completed");
+    assert.equal(durable.summary.new, 1);
+    assert.deepEqual(durable.metadata.promptIds, ["p1"]);
   } finally {
     globalThis.setInterval = originalSetInterval;
     globalThis.clearInterval = originalClearInterval;
   }
+});
+
+test("AI web search starts and completes in the same workspace-main history", async () => {
+  const repoRoot = tempRepo();
+  const started = [];
+  const completed = [];
+  const workspaceAgentRuntime = {
+    async recordSearchStart(input) {
+      started.push(input);
+    },
+    async recordSearchCompletion(input) {
+      completed.push(input);
+    },
+  };
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    workspaceAgentRuntime,
+    runAiWebSearch: async () => ({
+      searched: 1,
+      found: 3,
+      new: 2,
+      duplicates: 1,
+      errors: [],
+      failedPromptIds: [],
+      queryResults: [{ promptId: "p1", status: "completed", queries: ["AI roles"] }],
+      sources: [{ url: "https://jobs.example.test", status: "completed" }],
+    }),
+  })(request(), res);
+
+  assert.equal(started.length, 1);
+  assert.equal(started[0].run.purpose, "ai-web-search");
+  assert.equal(started[0].run.status, "running");
+  assert.deepEqual(started[0].input, {
+    purpose: "ai-web-search",
+    promptIds: ["p1"],
+  });
+  assert.deepEqual(started[0].sources, { promptCount: 1 });
+  assert.equal(completed.length, 1);
+  assert.equal(completed[0].run.id, started[0].run.id);
+  assert.equal(completed[0].run.status, "completed");
+  assert.equal(completed[0].run.summary.new, 2);
+});
+
+test("AI web-search route persists exact failed prompts and accepts retry prompt ids", async () => {
+  const repoRoot = tempRepo();
+  let receivedPromptIds;
+  const res = response();
+  await handlerFor({
+    repoRoot,
+    runAiWebSearch: async ({ promptIds }) => {
+      receivedPromptIds = promptIds;
+      return {
+        searched: 1,
+        found: 0,
+        new: 0,
+        duplicates: 0,
+        errors: ["search timed out"],
+        failedPromptIds: ["p1"],
+        queryResults: [
+          {
+            promptId: "p1",
+            prompt: "Find AI roles",
+            status: "failed",
+            queries: [{ query: "AI jobs", status: "failed", error: "search timed out" }],
+            error: "search timed out",
+          },
+        ],
+        sources: [{ url: "https://jobs.example.test", status: "failed", error: "timeout" }],
+      };
+    },
+  })(request('{"promptIds":["p1"]}'), res);
+
+  assert.deepEqual(receivedPromptIds, ["p1"]);
+  const durable = sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run;
+  assert.equal(durable.status, "failed");
+  assert.deepEqual(durable.error.failedPromptIds, ["p1"]);
+  assert.equal(durable.error.queryResults[0].queries[0].query, "AI jobs");
+  assert.equal(durable.error.sources[0].url, "https://jobs.example.test");
 });
 
 test("AI web-search route rejects a concurrent run with 409", async () => {

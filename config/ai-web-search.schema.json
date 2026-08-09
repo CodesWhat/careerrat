@@ -49,7 +49,9 @@
         "additionalProperties": false,
         "properties": {
           "prompt_id": { "type": "string" },
-          "query": { "type": "string" }
+          "query": { "type": "string" },
+          "status": { "type": "string", "enum": ["completed", "failed"] },
+          "error": { "type": ["string", "null"] }
         }
       }
     }

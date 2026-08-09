@@ -127,6 +127,80 @@ function throwPreconditionError(message, code) {
   throw err;
 }
 
+function safeToolError(content) {
+  let text = "";
+  if (typeof content === "string") text = content;
+  else if (Array.isArray(content)) {
+    text = content
+      .map((part) => (typeof part === "string" ? part : part?.text || ""))
+      .filter(Boolean)
+      .join(" ");
+  } else if (content != null) {
+    try {
+      text = JSON.stringify(content);
+    } catch {
+      text = String(content);
+    }
+  }
+  const normalized = text.replace(/\s+/g, " ").trim();
+  return normalized ? normalized.slice(0, 240) : "The web tool reported a failure.";
+}
+
+function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError = null }) {
+  const traceByQuery = new Map(
+    toolTrace
+      .filter((item) => item.kind === "query")
+      .map((item) => [
+        String(item.query || "")
+          .trim()
+          .toLowerCase(),
+        item,
+      ])
+  );
+  const normalizedQueries = Array.isArray(queriesRun) ? queriesRun : [];
+
+  const queryResults = selected.map((prompt) => {
+    let queries = normalizedQueries
+      .filter((item) => String(item?.prompt_id || "") === prompt.id)
+      .map((item) => {
+        const query = String(item?.query || "").trim();
+        const trace = traceByQuery.get(query.toLowerCase());
+        const failed = item?.status === "failed" || trace?.status === "failed";
+        return {
+          query,
+          status: failed ? "failed" : "completed",
+          error: failed ? String(item?.error || trace?.error || "The search query failed.") : null,
+        };
+      })
+      .filter((item) => item.query);
+
+    if (fallbackError) {
+      queries = [{ query: prompt.text, status: "failed", error: fallbackError }];
+    }
+
+    const failedQueries = queries.filter((item) => item.status === "failed");
+    const missingCoverage = !queries.length;
+    const error = fallbackError
+      ? fallbackError
+      : failedQueries[0]?.error ||
+        (missingCoverage ? "No query coverage was reported for this saved prompt." : null);
+    return {
+      promptId: prompt.id,
+      prompt: prompt.text,
+      status: error ? "failed" : "completed",
+      queries,
+      ...(error ? { error } : {}),
+    };
+  });
+
+  return {
+    queryResults,
+    failedPromptIds: queryResults
+      .filter((item) => item.status === "failed")
+      .map((item) => item.promptId),
+  };
+}
+
 // search-jobs is deliberately excluded from the embedded runtime's default
 // allowlist (see skill-runtime.mjs's own DEFAULT_RUNTIME_SKILLS comment) — a
 // blanket ROLESTER_RUNTIME_SKILLS opt-in shouldn't also hand every other
@@ -230,6 +304,8 @@ export async function runAiWebSearch({
   // own comment on why search-jobs needs a per-call override here rather
   // than living in the embedded runtime's own default allowlist.
   const skillEnv = buildAiWebSearchEnv({ repoRoot, env });
+  const toolCalls = new Map();
+  const toolTrace = [];
 
   async function invokeAiWebSearch({ correction }) {
     // A disconnect that landed between retry attempts (see
@@ -250,7 +326,12 @@ export async function runAiWebSearch({
         if (evt.type === "tool_use") {
           if (evt.data?.name === "WebSearch") {
             const query = String(evt.data?.input?.query || "").trim();
-            if (query) onProgress?.({ type: "activity", message: `Searching: ${query}…` });
+            if (query) {
+              const item = { kind: "query", query, status: "completed", error: null };
+              toolTrace.push(item);
+              if (evt.data?.id) toolCalls.set(evt.data.id, item);
+              onProgress?.({ type: "activity", message: `Searching: ${query}…` });
+            }
           } else if (evt.data?.name === "WebFetch") {
             const rawUrl = String(evt.data?.input?.url || "").trim();
             if (rawUrl) {
@@ -260,8 +341,25 @@ export async function runAiWebSearch({
               } catch {
                 // not a parseable URL — narrate the raw string as a fallback
               }
+              const item = {
+                kind: "source",
+                url: rawUrl,
+                host,
+                status: "completed",
+                error: null,
+              };
+              toolTrace.push(item);
+              if (evt.data?.id) toolCalls.set(evt.data.id, item);
               onProgress?.({ type: "activity", message: `Reading ${host}…` });
             }
+          }
+          return;
+        }
+        if (evt.type === "tool_result") {
+          const item = toolCalls.get(evt.data?.toolUseId);
+          if (item && evt.data?.isError) {
+            item.status = "failed";
+            item.error = safeToolError(evt.data?.content);
           }
           return;
         }
@@ -289,16 +387,31 @@ export async function runAiWebSearch({
   });
 
   if (!outcome.body.ok) {
+    const message =
+      outcome.body.error?.message || "AI web search failed to produce usable results.";
+    const coverage = normalizeQueryResults({
+      selected,
+      queriesRun: [],
+      toolTrace,
+      fallbackError: message,
+    });
     return {
       searched: selected.length,
       found: 0,
       new: 0,
       duplicates: 0,
-      errors: [outcome.body.error?.message || "AI web search failed to produce usable results."],
+      errors: [message],
+      ...coverage,
+      sources: toolTrace.filter((item) => item.kind === "source").map(({ kind, ...item }) => item),
     };
   }
 
   const roles = Array.isArray(outcome.body.data?.roles) ? outcome.body.data.roles : [];
+  const coverage = normalizeQueryResults({
+    selected,
+    queriesRun: outcome.body.data?.queries_run,
+    toolTrace,
+  });
   const { seenUrls, seenReqIds, seenCompanyRoles } = buildDbSeenSets({ repoRoot, env });
 
   const survivors = [];
@@ -327,5 +440,7 @@ export async function runAiWebSearch({
     new: survivors.length,
     duplicates: roles.length - survivors.length,
     errors: [],
+    ...coverage,
+    sources: toolTrace.filter((item) => item.kind === "source").map(({ kind, ...item }) => item),
   };
 }
