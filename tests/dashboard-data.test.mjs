@@ -412,6 +412,45 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   assert.equal(vm.calendar.sync.history[0].statusLabel, "Written");
 });
 
+test("Calendar counts and names a scheduled round inside the rolling 14-day horizon", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "temporal-staff-platform",
+        company: "Temporal",
+        role: "Staff Software Engineer, Platform",
+        status: "interview",
+        interviewAt: "2026-08-20T18:00:00.000Z",
+        interviewNote: "Hiring manager — Thu Aug 20 2:00 PM ET with Avery",
+        conversations: [
+          {
+            id: "temporal-hiring-manager",
+            kind: "hiring manager",
+            stage: "hiring-manager",
+            outcome: "pending",
+            date: "2026-08-20T18:00:00.000Z",
+            who: "Avery",
+          },
+        ],
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-08-09T16:00:00.000Z"),
+  });
+  const event = vm.calendar.upcoming.events.find(
+    (item) => item.detailId === "temporal-staff-platform"
+  );
+
+  assert.equal(vm.calendar.metrics.interviews, 1);
+  assert.equal(event?.title, "Temporal hiring manager");
+  assert.equal(event?.iso, "2026-08-20");
+});
+
 test("Dashboard shell locks Network to the company relationship map baseline", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
   const networkSection = html.match(

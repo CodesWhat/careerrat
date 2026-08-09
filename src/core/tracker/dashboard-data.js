@@ -1710,6 +1710,16 @@ const CALENDAR_KIND_LABELS = {
   busy: "Busy",
 };
 const CALENDAR_ACTIONABLE_KINDS = new Set(["reply", "follow-up", "assessment", "deadline"]);
+const CALENDAR_ROLLING_HORIZON_DAYS = 14;
+const SCHEDULED_INTERVIEW_STAGE_IDS = new Set([
+  "screen",
+  "interview",
+  "assessment",
+  "technical",
+  "hiring-manager",
+  "onsite",
+  "final",
+]);
 const CALENDAR_SYNC_PROVIDERS = [
   {
     key: "apple_calendar",
@@ -2204,16 +2214,33 @@ function followUpCalendarEvent(app, now) {
   };
 }
 
+function scheduledInterviewRoundLabel(app) {
+  // interviewNote is the typed logistics field and begins with the canonical
+  // round name (`<Round> — ...`). Prefer that current-round signal over the
+  // deepest historical conversation, which may describe an earlier round.
+  const noteRound = String(app?.interviewNote || "")
+    .split(/\s+[—–-]\s+/)[0]
+    .trim();
+  const noteStage = classifyStage(noteRound);
+  if (SCHEDULED_INTERVIEW_STAGE_IDS.has(noteStage)) return stageGroupLabel(noteStage);
+
+  const historyStage = furthestStageForApp(app).stage;
+  return SCHEDULED_INTERVIEW_STAGE_IDS.has(historyStage)
+    ? stageGroupLabel(historyStage)
+    : "Interview";
+}
+
 function explicitInterviewCalendarEvent(app, rawDate, now) {
   const iso = isoDate(rawDate);
   if (!iso) return null;
   const company = app.company || "Unknown company";
+  const round = scheduledInterviewRoundLabel(app);
   return {
     id: app.id ? `interview-${app.id}-${iso}` : `interview-${company}-${iso}`,
     iso,
     rawDate,
     sortTime: calendarDateSortTime(rawDate),
-    title: `${company} interview`,
+    title: `${company} ${round.toLowerCase()}`,
     meta: calendarEventMeta(rawDate, now, company, app.role),
     kind: "interview",
     detailId: app.id || "",
@@ -2482,6 +2509,8 @@ function buildCalendar(trackerData, { now = new Date() } = {}) {
   );
   const currentWeek = weeks[0];
   const todayEvents = events.filter((event) => event.iso === todayIso);
+  const rollingHorizonEnd = addDaysToIso(todayIso, CALENDAR_ROLLING_HORIZON_DAYS - 1);
+  const rollingHorizonEvents = eventsBetween(events, todayIso, rollingHorizonEnd);
   // "Upcoming" spans the next dated items from today forward, regardless of week
   // boundary. A today-only or this-week slice goes empty on a quiet day (e.g. a
   // Sunday whose next interview is Monday), which read as "nothing coming up."
@@ -2494,7 +2523,9 @@ function buildCalendar(trackerData, { now = new Date() } = {}) {
     currentWeekIndex: 0,
     metrics: {
       thisWeek: currentWeek.events.length,
-      interviews: currentWeek.events.filter((event) => event.kind === "interview").length,
+      interviews: rollingHorizonEvents.filter(
+        (event) => event.kind === "interview" && event.done !== true
+      ).length,
       dueToday: todayEvents.filter((event) => event.source !== "conversation").length,
     },
     weeks,

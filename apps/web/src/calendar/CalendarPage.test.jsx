@@ -341,4 +341,39 @@ describe("CalendarPage", () => {
     expect(html.indexOf("Send Initech thank-you")).toBeLessThan(html.indexOf("<details"));
     expect(html).toContain("Recent · 1");
   });
+
+  it("places an event inside the rolling 14-day strip under Next week", () => {
+    const html = renderCalendarPage({
+      data: {
+        calendar: {
+          todayIso: "2026-08-09",
+          metrics: { dueToday: 0, interviews: 1, thisWeek: 0 },
+          today: { events: [] },
+          upcoming: {
+            events: [
+              {
+                id: "temporal-hiring-manager",
+                iso: "2026-08-20",
+                time: "2:00 PM",
+                title: "Temporal hiring manager",
+                kind: "interview",
+                label: "Interview",
+                detailId: "temporal-staff-platform",
+                done: false,
+              },
+            ],
+          },
+          weeks: [],
+        },
+      },
+    });
+
+    const nextWeekHeading = html.indexOf("<h2>Next week</h2>");
+    const event = html.indexOf("Temporal hiring manager");
+    const laterHeading = html.indexOf("<h2>Later</h2>");
+
+    expect(nextWeekHeading).toBeGreaterThan(-1);
+    expect(event).toBeGreaterThan(nextWeekHeading);
+    expect(event).toBeLessThan(laterHeading);
+  });
 });

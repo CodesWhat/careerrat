@@ -343,10 +343,13 @@ function bucketForIso(iso, todayIso) {
   if (iso === todayIso) return "today";
   const tomorrowIso = isoFromDate(addUtcDays(utcDateFromIso(todayIso), 1));
   if (iso === tomorrowIso) return "tomorrow";
-  const currentSundayIso = isoFromDate(addUtcDays(mondayForDate(utcDateFromIso(todayIso)), 6));
-  if (compareIsoDate(iso, currentSundayIso) <= 0) return "thisWeek";
-  const nextSundayIso = isoFromDate(addUtcDays(utcDateFromIso(currentSundayIso), 7));
-  if (compareIsoDate(iso, nextSundayIso) <= 0) return "nextWeek";
+  // The strip is a rolling 14-day window beginning today, so the agenda uses
+  // the same horizon. Calendar-week cutoffs made a Sunday view classify an
+  // event visible near the end of that strip as "Later."
+  const thisWeekEndIso = isoFromDate(addUtcDays(utcDateFromIso(todayIso), 6));
+  if (compareIsoDate(iso, thisWeekEndIso) <= 0) return "thisWeek";
+  const nextWeekEndIso = isoFromDate(addUtcDays(utcDateFromIso(todayIso), STRIP_WINDOW_DAYS - 1));
+  if (compareIsoDate(iso, nextWeekEndIso) <= 0) return "nextWeek";
   return "later";
 }
 
@@ -459,14 +462,6 @@ function addUtcDays(date, days) {
   const next = new Date(date);
   next.setUTCDate(next.getUTCDate() + days);
   return next;
-}
-
-function mondayForDate(date) {
-  const monday = new Date(date);
-  const day = monday.getUTCDay();
-  const offset = day === 0 ? -6 : 1 - day;
-  monday.setUTCDate(monday.getUTCDate() + offset);
-  return monday;
 }
 
 function compareIsoDate(a, b) {
