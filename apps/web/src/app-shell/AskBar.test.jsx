@@ -1,0 +1,701 @@
+// apps/web/src/app-shell/AskBar.test.jsx
+// vitest coverage for the W3 shell-docked ask bar (commit 95f27540).
+//
+// This repo's vitest config runs in the default "node" environment (no
+// jsdom, no @testing-library/react — see JobDrawer.test.jsx/
+// DashboardContext.test.jsx for the house convention this file follows): a
+// hand-rolled hook harness replaces useState/useRef/useEffect via
+// vi.mock("react", ...), the component is invoked as a plain function, and
+// the returned React-element tree is walked directly. Unlike the existing
+// harnesses, AskBar's state machine genuinely depends on effect *cleanup*
+// (the debounce timer, the outside-click listener, the elapsed ticker), so
+// this harness's useEffect tracks deps AND runs the previous cleanup before
+// re-running a changed effect — closer to real React than the simpler
+// "always re-run" version in JobDrawer.test.jsx.
+//
+// vi.useFakeTimers() drives the ~300ms preview debounce and the 1s elapsed
+// ticker deterministically (also fakes Date, so Date.now()-based elapsed math
+// in AskBar.jsx advances in lockstep with vi.advanceTimersByTimeAsync()).
+
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// ---------------------------------------------------------------------------
+// Hook harness
+// ---------------------------------------------------------------------------
+
+const hooks = vi.hoisted(() => ({
+  cursor: 0,
+  states: [],
+  refs: [],
+  effectDeps: [],
+  effectCleanups: [],
+  pending: [],
+  reset() {
+    this.cursor = 0;
+    this.pending = [];
+  },
+  clear() {
+    this.cursor = 0;
+    this.states = [];
+    this.refs = [];
+    this.effectDeps = [];
+    this.effectCleanups = [];
+    this.pending = [];
+  },
+}));
+
+vi.mock("react", async (importOriginal) => {
+  const actual = await importOriginal();
+
+  function dependenciesChanged(previous, next) {
+    if (!previous || !next || previous.length !== next.length) return true;
+    return next.some((value, index) => !Object.is(value, previous[index]));
+  }
+
+  return {
+    ...actual,
+    useState(initial) {
+      const index = hooks.cursor++;
+      if (!(index in hooks.states)) {
+        hooks.states[index] = typeof initial === "function" ? initial() : initial;
+      }
+      const setValue = (next) => {
+        hooks.states[index] = typeof next === "function" ? next(hooks.states[index]) : next;
+      };
+      return [hooks.states[index], setValue];
+    },
+    useRef(initial) {
+      const index = hooks.cursor++;
+      if (!(index in hooks.refs)) hooks.refs[index] = { current: initial };
+      return hooks.refs[index];
+    },
+    useEffect(effect, deps) {
+      const index = hooks.cursor++;
+      if (dependenciesChanged(hooks.effectDeps[index], deps)) {
+        const prevCleanup = hooks.effectCleanups[index];
+        hooks.effectDeps[index] = deps;
+        hooks.pending.push({ index, effect, prevCleanup });
+      }
+    },
+  };
+});
+
+// react-router-dom — controllable per test via routerState.
+const routerState = vi.hoisted(() => ({
+  pathname: "/",
+  searchParams: new URLSearchParams(),
+}));
+vi.mock("react-router-dom", () => ({
+  useLocation: () => ({ pathname: routerState.pathname }),
+  useSearchParams: () => [routerState.searchParams],
+}));
+
+// The global ⌘K/Ctrl+K hook — mocked wholesale so this file can assert on
+// *what AskBar renders*, not on document-level keydown wiring (that's
+// useGlobalShortcut's own concern, and it never touches AskBar's state
+// machine). Captures the registered key + trigger for the one light
+// assertion that AskBar actually wires it up.
+const shortcut = vi.hoisted(() => ({ key: null, trigger: null }));
+vi.mock("../lib/useGlobalShortcut.js", () => ({
+  useGlobalShortcut: (key, onTrigger) => {
+    shortcut.key = key;
+    shortcut.trigger = onTrigger;
+  },
+}));
+
+vi.mock("../components/icons.jsx", () => ({
+  ArrowUpIcon: () => null,
+}));
+
+const api = vi.hoisted(() => ({
+  ApiError: class ApiError extends Error {
+    constructor(status, body) {
+      super(`request failed with status ${status}`);
+      this.name = "ApiError";
+      this.status = status;
+      this.body = body;
+    }
+  },
+  getWorkspaceThread: vi.fn(),
+  previewWorkspaceQuery: vi.fn(),
+  runWorkspaceIntent: vi.fn(),
+  sendWorkspaceMessage: vi.fn(),
+}));
+vi.mock("../lib/api.js", () => api);
+
+import { AskBar } from "./AskBar.jsx";
+
+// ---------------------------------------------------------------------------
+// Render + tree-walking helpers
+// ---------------------------------------------------------------------------
+
+function renderAskBar() {
+  hooks.reset();
+  return AskBar();
+}
+
+// Runs every effect queued by the render just performed, honoring cleanup:
+// the previous run's cleanup (if any) fires before the new effect body does,
+// same ordering real React uses on a dependency change.
+function runPendingEffects() {
+  const items = hooks.pending.splice(0);
+  for (const { index, effect, prevCleanup } of items) {
+    if (typeof prevCleanup === "function") prevCleanup();
+    const cleanup = effect();
+    hooks.effectCleanups[index] = typeof cleanup === "function" ? cleanup : undefined;
+  }
+}
+
+async function flushMicrotasks() {
+  await Promise.resolve();
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+// Inlines function-component children (AskBarPreview/AskBarTurn/EngineReceipt
+// are plain, hook-free render functions defined in AskBar.jsx) so visit()/
+// textOf() below can walk straight through to host elements.
+function expand(node) {
+  if (node == null || typeof node !== "object") return node;
+  if (Array.isArray(node)) return node.map(expand);
+  if (typeof node.type === "function") return expand(node.type(node.props));
+  return { ...node, props: { ...node.props, children: expand(node.props?.children) } };
+}
+
+function visit(node, predicate, found = []) {
+  if (node == null || typeof node === "boolean") return found;
+  if (Array.isArray(node)) {
+    for (const child of node) visit(child, predicate, found);
+    return found;
+  }
+  if (typeof node !== "object") return found;
+  if (predicate(node)) found.push(node);
+  visit(node.props?.children, predicate, found);
+  return found;
+}
+
+function textOf(node) {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(textOf).join("");
+  return textOf(node.props?.children);
+}
+
+function hasClass(node, cls) {
+  const className = node.props?.className;
+  return typeof className === "string" && className.split(" ").includes(cls);
+}
+
+function byClass(tree, cls) {
+  return visit(tree, (n) => hasClass(n, cls))[0];
+}
+
+function byTag(tree, tag) {
+  return visit(tree, (n) => n.type === tag)[0];
+}
+
+function optionRows(tree) {
+  return visit(tree, (n) => n.props?.role === "option");
+}
+
+function render() {
+  return expand(renderAskBar());
+}
+
+// ---------------------------------------------------------------------------
+// Fixtures
+// ---------------------------------------------------------------------------
+
+function actionPreview({ engineAvailable = true } = {}) {
+  return {
+    action: {
+      label: "Run a job search sweep",
+      intent: {
+        type: "search.run",
+        entity: { type: "workspace", id: "workspace-thread" },
+        input: { purpose: "manual-search" },
+      },
+    },
+    answer: { label: 'Answer: "sweep my boards"' },
+    engineAvailable,
+  };
+}
+
+function answerOnlyPreview({ engineAvailable = true } = {}) {
+  return {
+    action: null,
+    answer: { label: "Answer: “what's blocking my top role?”" },
+    engineAvailable,
+  };
+}
+
+function deferred() {
+  let resolve;
+  const promise = new Promise((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
+
+// ---------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------
+
+beforeEach(() => {
+  hooks.clear();
+  vi.clearAllMocks();
+  vi.useFakeTimers();
+  routerState.pathname = "/";
+  routerState.searchParams = new URLSearchParams();
+  shortcut.key = null;
+  shortcut.trigger = null;
+  globalThis.document = {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
+});
+
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+// ---------------------------------------------------------------------------
+// 1. Idle
+// ---------------------------------------------------------------------------
+
+describe("AskBar — idle", () => {
+  it("shows the pipeline placeholder on /jobs without a search tab", () => {
+    routerState.pathname = "/jobs";
+    routerState.searchParams = new URLSearchParams();
+    const input = byTag(render(), "input");
+    expect(input.props.placeholder).toBe("what's blocking my top role?");
+  });
+
+  it("shows the finder placeholder on /jobs?tab=search", () => {
+    routerState.pathname = "/jobs";
+    routerState.searchParams = new URLSearchParams({ tab: "search" });
+    const input = byTag(render(), "input");
+    expect(input.props.placeholder).toBe("sweep my pinned boards");
+  });
+
+  it("shows a route-specific placeholder on /calendar", () => {
+    routerState.pathname = "/calendar";
+    const input = byTag(render(), "input");
+    expect(input.props.placeholder).toBe("when's my next prep?");
+  });
+
+  it("shows a route-specific placeholder on /network", () => {
+    routerState.pathname = "/network";
+    const input = byTag(render(), "input");
+    expect(input.props.placeholder).toBe("draft a nudge to a contact");
+  });
+
+  it("falls back to the dashboard placeholder on an unmapped route", () => {
+    routerState.pathname = "/somewhere-else";
+    const input = byTag(render(), "input");
+    expect(input.props.placeholder).toBe("what should I do next?");
+  });
+
+  it("shows the ⌘K hint while the input is empty, and registers the k shortcut", () => {
+    const tree = render();
+    const hint = byClass(tree, "ask-bar__kbd");
+    expect(hint).toBeTruthy();
+    expect(textOf(hint)).toBe("⌘K");
+    expect(shortcut.key).toBe("k");
+    expect(typeof shortcut.trigger).toBe("function");
+  });
+
+  it("hides the ⌘K hint once there is text", () => {
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "s" } });
+    tree = render();
+    expect(byClass(tree, "ask-bar__kbd")).toBeUndefined();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. Focused — debounced preview
+// ---------------------------------------------------------------------------
+
+describe("AskBar — focused preview", () => {
+  it("debounces typing into a single classify call, rendering ACTION+ANSWER when an action exists", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+
+    expect(api.previewWorkspaceQuery).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    expect(api.previewWorkspaceQuery).toHaveBeenCalledTimes(1);
+    expect(api.previewWorkspaceQuery).toHaveBeenCalledWith("sweep my boards");
+
+    tree = render();
+    const rows = optionRows(tree);
+    expect(rows).toHaveLength(2);
+    expect(textOf(rows[0])).toContain("Run a job search sweep");
+    expect(textOf(rows[1])).toContain('Answer: "sweep my boards"');
+  });
+
+  it("renders ANSWER only when the preview has no action", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(answerOnlyPreview());
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "what's blocking my top role?" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+
+    tree = render();
+    const rows = optionRows(tree);
+    expect(rows).toHaveLength(1);
+    expect(textOf(rows[0])).toContain("what's blocking my top role?");
+  });
+
+  it("a stale preview response resolving after a newer one does not overwrite it", async () => {
+    const first = deferred();
+    const second = deferred();
+    api.previewWorkspaceQuery.mockImplementationOnce(() => first.promise);
+    api.previewWorkspaceQuery.mockImplementationOnce(() => second.promise);
+
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "aaa" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300); // fires the "aaa" debounce -> first.promise
+
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "bbb" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300); // fires the "bbb" debounce -> second.promise
+
+    expect(api.previewWorkspaceQuery).toHaveBeenCalledTimes(2);
+
+    // Newer ("bbb") resolves first.
+    second.resolve({ action: null, answer: { label: "Answer: B" }, engineAvailable: true });
+    await flushMicrotasks();
+    tree = render();
+    expect(textOf(optionRows(tree)[0])).toContain("Answer: B");
+
+    // Older ("aaa") resolves late — must be ignored.
+    first.resolve({ action: null, answer: { label: "Answer: A (stale)" }, engineAvailable: true });
+    await flushMicrotasks();
+    tree = render();
+    expect(textOf(optionRows(tree)[0])).toContain("Answer: B");
+    expect(textOf(optionRows(tree)[0])).not.toContain("stale");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. Nothing runs on a guess
+// ---------------------------------------------------------------------------
+
+describe("AskBar — nothing runs on a guess", () => {
+  it("typing and a resolved preview never call the message/intent APIs on their own", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    render();
+
+    expect(api.sendWorkspaceMessage).not.toHaveBeenCalled();
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+  });
+
+  it("Enter commits the selected ACTION row via runWorkspaceIntent", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [{ role: "assistant", kind: "action_result", text: "Sweep started." }],
+      },
+    });
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    input = byTag(tree, "input");
+
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "search.run",
+      { type: "workspace", id: "workspace-thread" },
+      { purpose: "manual-search" }
+    );
+    expect(api.sendWorkspaceMessage).not.toHaveBeenCalled();
+  });
+
+  it("Enter commits an ANSWER row via sendWorkspaceMessage when there is no action", async () => {
+    api.sendWorkspaceMessage.mockResolvedValue({
+      data: { messages: [{ role: "assistant", kind: "text", text: "Here you go." }] },
+    });
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "what's blocking my top role?" } });
+    tree = render();
+    input = byTag(tree, "input");
+
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+
+    expect(api.sendWorkspaceMessage).toHaveBeenCalledWith("what's blocking my top role?");
+    expect(api.runWorkspaceIntent).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. Acting
+// ---------------------------------------------------------------------------
+
+describe("AskBar — acting", () => {
+  it("renders a progress line with a live elapsed ticker while an action runs", async () => {
+    const pending = deferred();
+    api.runWorkspaceIntent.mockReturnValueOnce(pending.promise);
+    // Seed the preview via the real debounce path so `selected` defaults to
+    // "action" the same way a real user session would arrive at it.
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    tree = render();
+    runPendingEffects(); // registers the ticker now that turn.status is "running"
+
+    let progress = byClass(tree, "ask-bar__progress");
+    expect(textOf(progress)).toContain("Running · Run a job search sweep · 0S");
+
+    await vi.advanceTimersByTimeAsync(3000);
+    tree = render();
+    progress = byClass(tree, "ask-bar__progress");
+    expect(textOf(progress)).toContain("3S");
+
+    pending.resolve({
+      data: { messages: [{ role: "assistant", kind: "action_result", text: "Done." }] },
+    });
+    await flushMicrotasks();
+    render();
+  });
+
+  it("renders a completed answer inline with the AI · <label> · <N>S receipt", async () => {
+    api.sendWorkspaceMessage.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "text",
+            text: "Here's your answer.",
+            metadata: { engine: { id: "claude", label: "Claude Code" }, elapsedMs: 4200 },
+          },
+        ],
+      },
+    });
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "what should I do next?" } });
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const answer = byClass(tree, "ask-bar__answer");
+    expect(textOf(answer)).toBe("Here's your answer.");
+    const receipt = byClass(tree, "ask-bar__receipt");
+    expect(textOf(receipt)).toBe("AI · Claude Code · 4S");
+  });
+
+  it("renders an inline error when the agent turn comes back as agent_error", async () => {
+    api.sendWorkspaceMessage.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "agent_error",
+            text: "The agent hit a snag.",
+            error: { code: "SOME_OTHER_CODE" },
+          },
+        ],
+      },
+    });
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "what should I do next?" } });
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const error = byClass(tree, "ask-bar__error");
+    expect(textOf(error)).toBe("The agent hit a snag.");
+  });
+
+  it("commits straight to the NO ENGINE state when the preview says engineAvailable:false, without calling sendWorkspaceMessage", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(answerOnlyPreview({ engineAvailable: false }));
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "what's blocking my top role?" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    input = byTag(tree, "input");
+
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.sendWorkspaceMessage).not.toHaveBeenCalled();
+    const error = byClass(tree, "ask-bar__error");
+    expect(textOf(error)).toMatch(/No AI engine is configured yet/);
+    const receipt = byClass(tree, "ask-bar__receipt--no-engine");
+    expect(textOf(receipt)).toBe("No engine");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. Turn-id race guard (the fix commit 95f27540 landed)
+// ---------------------------------------------------------------------------
+
+describe("AskBar — turn-id race guard", () => {
+  it("a superseded turn's late resolution never clobbers the newer turn's state", async () => {
+    const firstCall = deferred();
+    const secondCall = deferred();
+    api.sendWorkspaceMessage.mockImplementationOnce(() => firstCall.promise);
+    api.sendWorkspaceMessage.mockImplementationOnce(() => secondCall.promise);
+
+    // Commit turn 1 — its promise stays unresolved.
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "first request" } });
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    tree = render();
+    expect(textOf(byClass(tree, "ask-bar__progress"))).toContain("first request");
+
+    // Commit turn 2 while turn 1 is still in flight.
+    input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "second request" } });
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    tree = render();
+    expect(textOf(byClass(tree, "ask-bar__progress"))).toContain("second request");
+
+    // Turn 2 finishes first.
+    secondCall.resolve({
+      data: { messages: [{ role: "assistant", kind: "text", text: "Second answer" }] },
+    });
+    await flushMicrotasks();
+    tree = render();
+    expect(textOf(byClass(tree, "ask-bar__answer"))).toBe("Second answer");
+
+    // Turn 1 finally resolves — must be dropped, not clobber turn 2's state.
+    firstCall.resolve({
+      data: { messages: [{ role: "assistant", kind: "text", text: "First result (late)" }] },
+    });
+    await flushMicrotasks();
+    tree = render();
+    expect(textOf(byClass(tree, "ask-bar__answer"))).toBe("Second answer");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. Esc collapse/blur + arrow-key selection
+// ---------------------------------------------------------------------------
+
+describe("AskBar — keyboard: Esc and arrow keys", () => {
+  it("Escape collapses the preview panel when it is open", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    expect(optionRows(tree).length).toBeGreaterThan(0);
+
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Escape", preventDefault: vi.fn() });
+    tree = render();
+    expect(optionRows(tree)).toHaveLength(0);
+  });
+
+  it("Escape with the panel already closed is a safe no-op (blurs an idle bar)", () => {
+    const tree = render();
+    const input = byTag(tree, "input");
+    expect(() => input.props.onKeyDown({ key: "Escape", preventDefault: vi.fn() })).not.toThrow();
+  });
+
+  it("arrow keys move the selected preview row and wrap around", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+
+    function selectedKind(t) {
+      const row = optionRows(t).find((r) => r.props["aria-selected"]);
+      return textOf(row).includes("Action") ? "action" : "answer";
+    }
+
+    expect(selectedKind(tree)).toBe("action");
+
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "ArrowDown", preventDefault: vi.fn() });
+    tree = render();
+    expect(selectedKind(tree)).toBe("answer");
+
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "ArrowDown", preventDefault: vi.fn() });
+    tree = render();
+    expect(selectedKind(tree)).toBe("action");
+
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "ArrowUp", preventDefault: vi.fn() });
+    tree = render();
+    expect(selectedKind(tree)).toBe("answer");
+  });
+});
