@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { NextConfig } from "next";
 
-// The workspace root is the rolester repo root, one level up from website/.
+// The workspace root is the careerrat repo root, one level up from website/.
 // Pinning it keeps turbopack from inferring the wrong root in the monorepo.
 const workspaceRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..");
 

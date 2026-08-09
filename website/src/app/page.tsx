@@ -1,4 +1,4 @@
-import DemoEmbed from "@/components/DemoEmbed";
+import DashboardPreview from "@/components/DashboardPreview";
 import SiteInteractions from "@/components/SiteInteractions";
 
 export default function Home() {
@@ -7,31 +7,34 @@ export default function Home() {
       {/* ─── NAV ─────────────────────────────────── */}
       <nav aria-label="Main navigation">
         <div className="wrap nav-inner">
-          <a className="nav-logo" href="#" aria-label="Rolester home">
-            <img
-              src="/logo.png"
-              alt="Rolester rat mascot logo"
-              width={32}
-              height={32}
-            />
-            Rolester
+          <a className="nav-logo" href="#" aria-label="CareerRat home">
+            CareerRat<span className="nav-logo-dot">.</span>
           </a>
           <ul className="nav-links nav-mobile-hide" role="list">
             <li>
               <a href="#how-it-works">How it works</a>
             </li>
             <li>
-              <a href="#privacy">Privacy</a>
+              <a href="#pricing">Pricing</a>
             </li>
             <li>
-              <a href="#what-you-get">What you get</a>
+              <a href="#privacy">Privacy</a>
             </li>
             <li>
               <a href="/docs">Docs</a>
             </li>
             <li>
+              <a
+                href="https://github.com/CodesWhat/careerrat"
+                target="_blank"
+                rel="noopener noreferrer"
+              >
+                GitHub
+              </a>
+            </li>
+            <li>
               <a href="#get" className="nav-cta">
-                Get Rolester →
+                Get CareerRat →
               </a>
             </li>
           </ul>
@@ -40,32 +43,19 @@ export default function Home() {
 
       {/* ─── HERO ─────────────────────────────────── */}
       <section className="hero" aria-labelledby="hero-h1">
-        <div className="hero-blobs" aria-hidden="true">
-          <div className="blob blob-1" />
-          <div className="blob blob-2" />
-          <div className="blob blob-3" />
-        </div>
         <div className="wrap hero-inner">
           <div className="hero-copy">
-            <div className="hero-eyebrow reveal" aria-hidden="true">
-              Your job hunt deserves better than a spreadsheet
+            <div className="hero-eyebrow receipt reveal" aria-hidden="true">
+              Free · Local · Runs on your own AI CLI
             </div>
             <h1 className="hero-h1 reveal reveal-delay-1" id="hero-h1">
-              A{" "}
-              <span className="underline-word" id="underline-sidekick">
-                sidekick
-                <svg viewBox="0 0 120 14" aria-hidden="true" focusable="false">
-                  <path d="M4,10 Q30,4 60,8 Q90,12 116,6" />
-                </svg>
-              </span>{" "}
-              for
-              <br />
-              your job&nbsp;search.
+              Your job hunt, run by a rat.
             </h1>
             <p className="hero-sub reveal reveal-delay-2">
-              Define what you actually want, vet real jobs before chasing them,
-              write honest applications from your own evidence, and track every
-              outcome — all on your own machine, with your own AI.
+              CareerRat rates the postings actually worth chasing, applies
+              with honest artifacts drawn from your own evidence, and tracks
+              every outcome. It runs on the AI CLI you already have — Claude
+              Code, Codex, or anything else on your PATH.
             </p>
             <div className="hero-actions reveal reveal-delay-3">
               <a href="#get" className="btn-primary">
@@ -91,151 +81,18 @@ export default function Home() {
                 See how it works
               </a>
             </div>
-            <div
-              className="hero-stickers reveal reveal-delay-4"
-              aria-label="Key features"
-            >
-              <span className="sticker sticker-coral">
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 13 13"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <circle
-                    cx="6.5"
-                    cy="6.5"
-                    r="6"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                  />
-                  <path
-                    d="M4 6.5l2 2 3-3"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                reads the whole job
+            <div className="hero-actions reveal reveal-delay-4">
+              <span className="hero-command receipt">
+                npm i -g careerrat
               </span>
-              <span className="sticker sticker-teal">
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 13 13"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <rect
-                    x="2"
-                    y="2"
-                    width="9"
-                    height="9"
-                    rx="2"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                  />
-                  <path
-                    d="M5 6.5h3"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                never lies on your résumé
-              </span>
-              <span className="sticker sticker-mustard">
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 13 13"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M6.5 2v9M2 6.5h9"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                  />
-                </svg>
-                stays on your laptop
-              </span>
-              <span className="sticker sticker-ink">
-                <svg
-                  width="13"
-                  height="13"
-                  viewBox="0 0 13 13"
-                  fill="none"
-                  aria-hidden="true"
-                >
-                  <path
-                    d="M2 11l3-6 2 3 2-4 2 7"
-                    stroke="currentColor"
-                    strokeWidth="1.5"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  />
-                </svg>
-                Claude or Codex
-              </span>
+            </div>
+            <div className="hero-cli-note receipt reveal reveal-delay-4">
+              Works with Claude Code · Codex · Gemini · any text-in, text-out
+              command
             </div>
           </div>
           <div className="hero-visual reveal reveal-delay-2">
-            <div className="rat-container">
-              <div className="rat-bg" aria-hidden="true" />
-              <img
-                className="rat-img"
-                src="/logo.png"
-                alt="Rolester's rat mascot — your friendly job-search sidekick"
-                width={220}
-                height={220}
-              />
-              <div className="rat-badge" aria-hidden="true">
-                <span>Fresh roles.</span>
-                <span>Sharp docs.</span>
-                <span>Fast apply.</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* ─── MEET YOUR SIDEKICK ───────────────────── */}
-      <section aria-labelledby="sidekick-h2">
-        <div className="wrap">
-          <div className="sidekick reveal">
-            <div className="sidekick-grid">
-              <div className="sidekick-demo">
-                <DemoEmbed />
-              </div>
-              <div className="sidekick-copy">
-                <div className="section-label">Meet your sidekick</div>
-                <h2 className="section-h2" id="sidekick-h2">
-                  Rolester is an agent-driven job-search workspace.
-                </h2>
-                <p className="section-sub">
-                  It onboards you once — your preferences, your evidence, your
-                  comp floor — and then works the whole loop: finding jobs,
-                  vetting them, writing honest applications, drafting recruiter
-                  messages, prepping you for interviews, and learning from every
-                  outcome. The agent does the work. You make the calls.
-                </p>
-                <div className="gate-pullquote">
-                  <div className="gate-badge">The Gate</div>
-                  <p className="gate-pullquote-text">
-                    &ldquo;It reads the actual job before you chase it.&rdquo;
-                  </p>
-                  <p className="gate-pullquote-sub">
-                    Every posting gets a verdict: keep it or cut it, how well it
-                    fits, whether the money works, and what to do next. Judged
-                    against your constraints, not a keyword match.
-                  </p>
-                </div>
-              </div>
-            </div>
+            <DashboardPreview />
           </div>
         </div>
       </section>
@@ -246,141 +103,50 @@ export default function Home() {
           <div className="reveal">
             <div className="section-label">How it works</div>
             <h2 className="section-h2" id="steps-h2">
-              Four steps. One loop.
+              Three steps, no forms up front.
             </h2>
             <p className="section-sub">
-              Each step builds on the last. Nothing is skipped, nothing is
-              faked.
+              Rate what&apos;s worth chasing, apply with real evidence, track
+              what happens next. That&apos;s the whole loop — R, A, T.
             </p>
           </div>
           <div className="steps-grid">
             <div className="step-card reveal reveal-delay-1">
-              <div className="step-number">1</div>
-              <svg
-                className="step-doodle"
-                width="40"
-                height="40"
-                viewBox="0 0 40 40"
-                fill="none"
-                aria-hidden="true"
-              >
-                <circle
-                  cx="20"
-                  cy="20"
-                  r="18"
-                  stroke="#e8553d"
-                  strokeWidth="1.5"
-                  strokeDasharray="4 3"
-                />
-                <path
-                  d="M13 20l4 4 10-8"
-                  stroke="#e8553d"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              <h3 className="step-h3">Tell it what you actually want</h3>
+              <div className="step-index receipt">01</div>
+              <h3 className="step-h3">Point it at your CLI</h3>
               <p className="step-p">
-                Answer a handful of questions. The roles you want, the least
-                you&apos;ll take, where you&apos;ll work, what you won&apos;t put
-                up with. Your answers live in plain files you can read. No black
-                box.
+                On first launch it finds the AI CLIs already installed. Pick
+                one — your subscription, your machine, nothing leaves it.
               </p>
+              <span className="step-chip step-chip-success">
+                CLAUDE CODE · DETECTED · V2.3
+              </span>
             </div>
 
             <div className="step-card reveal reveal-delay-2">
-              <div className="step-number">2</div>
-              <svg
-                className="step-doodle"
-                width="40"
-                height="40"
-                viewBox="0 0 40 40"
-                fill="none"
-                aria-hidden="true"
-              >
-                <rect
-                  x="8"
-                  y="10"
-                  width="24"
-                  height="20"
-                  rx="4"
-                  stroke="#2f9e8f"
-                  strokeWidth="1.5"
-                />
-                <path
-                  d="M14 18h12M14 23h7"
-                  stroke="#2f9e8f"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-              </svg>
-              <h3 className="step-h3">It finds and vets the real jobs</h3>
+              <div className="step-index receipt">02</div>
+              <h3 className="step-h3">Talk to it</h3>
               <p className="step-p">
-                Searches the boards you pick. Reads the whole posting, not the
-                headline. Weighs it against your comp floor, your location, your
-                dealbreakers — then tells you to go for it, skip it, or take a
-                closer look. No spray-and-pray.
+                Drop your résumé and answer a short interview. CareerRat
+                fills its own file as you talk — roles, floors, dealbreakers —
+                and you can edit any of it by hand.
               </p>
+              <span className="step-chip">
+                ROLES ✓ · GUARDRAILS ✓ · TARGETING.YML UPDATED
+              </span>
             </div>
 
             <div className="step-card reveal reveal-delay-3">
-              <div className="step-number">3</div>
-              <svg
-                className="step-doodle"
-                width="40"
-                height="40"
-                viewBox="0 0 40 40"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M12 28V20a8 8 0 1116 0v8"
-                  stroke="#e0a93b"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-                <path
-                  d="M8 28h24"
-                  stroke="#e0a93b"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                />
-                <circle cx="20" cy="16" r="3" stroke="#e0a93b" strokeWidth="1.5" />
-              </svg>
-              <h3 className="step-h3">It writes honest applications</h3>
+              <div className="step-index receipt">03</div>
+              <h3 className="step-h3">It hunts, you decide</h3>
               <p className="step-p">
-                Tailors your résumé and cover letter only from your real
-                evidence bank. Refuses to invent facts. Every claim is backed by
-                something you actually did.
+                Sweeps run in the background: pull, dedupe, cut, rank, prep.
+                Everything it does leaves a receipt, and nothing is sent
+                without you.
               </p>
-            </div>
-
-            <div className="step-card reveal reveal-delay-4">
-              <div className="step-number">4</div>
-              <svg
-                className="step-doodle"
-                width="40"
-                height="40"
-                viewBox="0 0 40 40"
-                fill="none"
-                aria-hidden="true"
-              >
-                <path
-                  d="M10 30l6-10 4 5 5-8 5 13"
-                  stroke="#2b2724"
-                  strokeWidth="1.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                />
-                <circle cx="30" cy="12" r="3" stroke="#2b2724" strokeWidth="1.5" />
-              </svg>
-              <h3 className="step-h3">It preps you to win</h3>
-              <p className="step-p">
-                Drafts recruiter messages and follow-ups. Builds story banks for
-                interviews. Coaches comp negotiation. Tracks every outcome and
-                gets smarter each run.
-              </p>
+              <span className="step-chip">
+                SWEEP 6:12 AM · 9 CUT · 12 RANKED · AI · CLAUDE CODE
+              </span>
             </div>
           </div>
         </div>
@@ -407,8 +173,9 @@ export default function Home() {
                 <div className="honesty-point-text">
                   <h4>Evidence bank, not a word bank</h4>
                   <p>
-                    You build a bank of real things you did — projects, metrics,
-                    decisions. Every tailored artifact draws only from that bank.
+                    You build a bank of real things you did — projects,
+                    metrics, decisions. Every tailored artifact draws only
+                    from that bank.
                   </p>
                 </div>
               </div>
@@ -419,9 +186,9 @@ export default function Home() {
                 <div className="honesty-point-text">
                   <h4>Refuses to invent facts</h4>
                   <p>
-                    If a claim isn&apos;t in your evidence, it won&apos;t write
-                    it. No hallucinated roles. No inflated titles. No fake
-                    metrics.
+                    If a claim isn&apos;t in your evidence, it won&apos;t
+                    write it. No hallucinated roles. No inflated titles. No
+                    fake metrics.
                   </p>
                 </div>
               </div>
@@ -432,8 +199,8 @@ export default function Home() {
                 <div className="honesty-point-text">
                   <h4>Tailored, not fabricated</h4>
                   <p>
-                    It reorders, reframes, and emphasises what genuinely fits the
-                    role. That&apos;s tailoring. That&apos;s honest.
+                    It reorders, reframes, and emphasises what genuinely fits
+                    the role. That&apos;s tailoring. That&apos;s honest.
                   </p>
                 </div>
               </div>
@@ -442,11 +209,11 @@ export default function Home() {
                   📋
                 </div>
                 <div className="honesty-point-text">
-                  <h4>Gate before tailor</h4>
+                  <h4>Rate before you apply</h4>
                   <p>
-                    Tailoring only runs after the gate clears. You never write a
-                    cover letter for a job that doesn&apos;t fit your
-                    constraints.
+                    Every posting gets rated against your constraints before
+                    tailoring starts. You never write a cover letter for a
+                    job that doesn&apos;t fit.
                   </p>
                 </div>
               </div>
@@ -466,10 +233,10 @@ export default function Home() {
                 </div>
                 <h3>Your stuff stays yours.</h3>
                 <p>
-                  Run Rolester on your own machine and your résumé, comp
-                  numbers, evidence bank, and full pipeline stay on your laptop.
-                  No account to create, no telemetry, nothing syncing in the
-                  background.
+                  Run CareerRat on your own machine and your résumé, comp
+                  numbers, evidence bank, and full pipeline stay on your
+                  laptop. No account to create, no telemetry, nothing syncing
+                  in the background.
                 </p>
                 <div className="privacy-chips" role="list">
                   <span className="privacy-chip" role="listitem">
@@ -542,8 +309,8 @@ export default function Home() {
               </h2>
               <p className="section-sub">
                 Job searches are personal. Your comp floor, your reasons for
-                leaving, your backup options — run Rolester yourself and all of
-                it stays on your machine, full stop.
+                leaving, your backup options — run CareerRat yourself and all
+                of it stays on your machine, full stop.
               </p>
               <p className="section-sub" style={{ marginTop: "16px" }}>
                 No signup, no telemetry, nothing phoned home. The self-host
@@ -566,9 +333,10 @@ export default function Home() {
                   Works with your favorite AI.
                 </h2>
                 <p className="section-sub">
-                  Rolester is an agent runtime. It doesn't lock you into a model
-                  or a subscription. Bring whatever AI CLI you already use —
-                  Claude Code, Codex, or anything else on your PATH.
+                  CareerRat is an agent runtime. It doesn&apos;t lock you
+                  into a model or a subscription. Bring whatever AI CLI you
+                  already use — Claude Code, Codex, or anything else on your
+                  PATH.
                 </p>
                 <div className="ai-chip-group">
                   <div className="ai-chip-group-title">CLI launch options</div>
@@ -629,11 +397,11 @@ export default function Home() {
                         xmlns="http://www.w3.org/2000/svg"
                       >
                         <title>any CLI on PATH</title>
-                        <rect width="24" height="24" rx="7" fill="#2B2724" />
+                        <rect width="24" height="24" rx="7" fill="#17171A" />
                         <path
                           d="M6.5 8.4L9.9 12l-3.4 3.6M12.2 15.5h5.3"
                           fill="none"
-                          stroke="#FFF8F0"
+                          stroke="#FBFBF9"
                           strokeLinecap="round"
                           strokeLinejoin="round"
                           strokeWidth="1.9"
@@ -655,9 +423,9 @@ export default function Home() {
                     <div className="terminal-dot terminal-dot-yellow" />
                     <div className="terminal-dot terminal-dot-green" />
                   </div>
-                  <div className="terminal-prompt">~ rolester $</div>
+                  <div className="terminal-prompt">~ careerrat $</div>
                   <div className="terminal-command">
-                    rolester start claude
+                    careerrat start claude
                     <span className="terminal-cursor" aria-hidden="true" />
                   </div>
                   <div className="terminal-comment">
@@ -673,11 +441,77 @@ export default function Home() {
                     lineHeight: 1.5,
                   }}
                 >
-                  Rolester scaffolds the workspace, installs skills, starts the
-                  dashboard, and hands off to a supported agent CLI. Model
-                  choice, cost, and local data stay under local control.
+                  CareerRat scaffolds the workspace, installs skills, starts
+                  the dashboard, and hands off to a supported agent CLI.
+                  Model choice, cost, and local data stay under local
+                  control.
                 </p>
               </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── PRICING ───────────────────────────────── */}
+      <section id="pricing" aria-labelledby="pricing-h2">
+        <div className="wrap">
+          <div className="reveal">
+            <div className="section-label">Pricing</div>
+            <h2 className="section-h2" id="pricing-h2">
+              Free is the product.
+            </h2>
+            <p className="section-sub">
+              With your own CLI you get all of it — the AI features
+              included. No account, no sign-in, no trial clock.
+            </p>
+          </div>
+          <div className="pricing-grid">
+            <div className="pricing-card reveal reveal-delay-1">
+              <div className="pricing-card-head">
+                <h3 className="pricing-card-name">Free</h3>
+                <span className="pricing-card-tag receipt">
+                  $0 · bring your CLI
+                </span>
+              </div>
+              <p className="pricing-card-p">
+                The whole app. AI features run on your installed CLI — your
+                subscription, your machine.
+              </p>
+              <ul className="pricing-list">
+                <li>Board pulls, dedupe, tracking</li>
+                <li>Fit scores + guardrail cuts</li>
+                <li>Interview prep + tailored drafts</li>
+                <li>Calendar, network, library</li>
+                <li>Local files you own — plain YAML</li>
+              </ul>
+              <a href="#get" className="btn-primary pricing-cta">
+                Get started free
+              </a>
+            </div>
+            <div className="pricing-card reveal reveal-delay-2">
+              <div className="pricing-card-head">
+                <h3 className="pricing-card-name">Hosted AI</h3>
+                <span className="pricing-card-tag pricing-card-tag-soon receipt">
+                  Coming soon
+                </span>
+              </div>
+              <p className="pricing-card-p">
+                No CLI, no setup — we run the model. Same app, same
+                receipts.
+              </p>
+              <ul className="pricing-list pricing-list-faint">
+                <li>Everything in Free</li>
+                <li>No CLI required — sign in and go</li>
+                <li>Pricing announced at launch</li>
+              </ul>
+              <a
+                href="https://github.com/CodesWhat/careerrat/discussions"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn-secondary pricing-cta"
+              >
+                Join the waitlist
+              </a>
             </div>
           </div>
         </div>
@@ -693,28 +527,32 @@ export default function Home() {
                 The whole loop, end to end.
               </h2>
               <p className="section-sub">
-                It all ships together, and none of it is built for one industry.
-                A nurse, an engineer, and a driver each answer onboarding their
-                own way and get the same loop.
+                It all ships together, and none of it is built for one
+                industry. A nurse, an engineer, and a driver each answer
+                onboarding their own way and get the same loop.
               </p>
               <div className="maker-note" aria-label="Note from the maker">
-                <strong>A note from the maker:</strong> I built this to solve my
-                own job search — the spray-and-pray cycle felt disrespectful of
-                everyone&apos;s time, including mine. Rolester is what I wanted:
-                an agent that vets first, writes honestly, and keeps my data to
-                itself.
+                <strong>A note from the maker:</strong> I built this to solve
+                my own job search — the spray-and-pray cycle felt
+                disrespectful of everyone&apos;s time, including mine.
+                CareerRat is what I wanted: something that rates first,
+                applies honestly, and keeps my data to itself.
               </div>
             </div>
             <div className="reveal reveal-delay-2">
               <ul className="checklist" role="list">
                 <li>Asks what you want, once — a guided onboarding</li>
-                <li>Finds and vets real jobs from the boards you choose</li>
+                <li>Finds and rates real jobs from the boards you choose</li>
                 <li>Reads the whole posting before it writes a word</li>
                 <li>Measures every role against your actual constraints</li>
-                <li>Writes honest résumés and cover letters from your evidence</li>
+                <li>
+                  Writes honest résumés and cover letters from your evidence
+                </li>
                 <li>Drafts and tracks recruiter messages and follow-ups</li>
                 <li>Researches companies and checks what the job should pay</li>
-                <li>Builds interview story banks and preps you for live calls</li>
+                <li>
+                  Builds interview story banks and preps you for live calls
+                </li>
                 <li>Coaches you through the comp conversation, out loud</li>
                 <li>Remembers every outcome and gets sharper as you go</li>
                 <li>A live dashboard — the agent works, you watch it happen</li>
@@ -731,89 +569,45 @@ export default function Home() {
           <div className="ai-section reveal">
             <div className="ai-section-inner">
               <div>
-                <div className="section-label">Get Rolester</div>
+                <div className="section-label">Get CareerRat</div>
                 <h2 className="section-h2" id="get-h2">
                   Install it. Run it. Own it.
                 </h2>
                 <p className="section-sub">
-                  Free to self-host, open source (MIT). No wizard, no signup —
-                  two commands and the agent takes it from there.
+                  Free to self-host, open source (MIT). No wizard, no signup
+                  — one command and the agent takes it from there.
                 </p>
                 <div style={{ marginTop: "28px" }}>
-                  <div
-                    style={{
-                      fontSize: "0.8rem",
-                      fontWeight: 700,
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                      color: "var(--ink-soft)",
-                      marginBottom: "10px",
-                    }}
-                  >
-                    Prerequisites
-                  </div>
-                  <ul
-                    style={{
-                      listStyle: "none",
-                      padding: 0,
-                      margin: 0,
-                      fontSize: "0.875rem",
-                      color: "var(--ink-soft)",
-                      lineHeight: 1.7,
-                    }}
-                  >
-                    <li>Node.js 18 or newer</li>
+                  <div className="prereq-label">Prerequisites</div>
+                  <ul className="prereq-list">
+                    <li>Node.js 24 or newer</li>
                     <li style={{ marginTop: "8px" }}>
                       An AI coding CLI on your PATH:
-                      <ul
-                        style={{
-                          listStyle: "none",
-                          padding: "6px 0 0 14px",
-                          margin: 0,
-                        }}
-                      >
+                      <ul className="prereq-sublist">
                         <li>
                           <strong style={{ color: "var(--ink)" }}>
                             Claude Code
                           </strong>{" "}
-                          <code
-                            style={{
-                              fontSize: "0.8rem",
-                              background: "rgba(44,35,29,0.06)",
-                              padding: "2px 5px",
-                              borderRadius: "3px",
-                            }}
-                          >
+                          <code className="inline-code">
                             npm install -g @anthropic-ai/claude-code
                           </code>{" "}
                           <a
                             href="https://claude.com/claude-code"
-                            style={{
-                              color: "var(--coral)",
-                              fontSize: "0.8rem",
-                            }}
+                            className="inline-link"
                           >
                             claude.com/claude-code
                           </a>
                         </li>
                         <li style={{ marginTop: "4px" }}>
-                          <strong style={{ color: "var(--ink)" }}>Codex</strong>{" "}
-                          <code
-                            style={{
-                              fontSize: "0.8rem",
-                              background: "rgba(44,35,29,0.06)",
-                              padding: "2px 5px",
-                              borderRadius: "3px",
-                            }}
-                          >
+                          <strong style={{ color: "var(--ink)" }}>
+                            Codex
+                          </strong>{" "}
+                          <code className="inline-code">
                             npm install -g @openai/codex
                           </code>{" "}
                           <a
                             href="https://github.com/openai/codex"
-                            style={{
-                              color: "var(--coral)",
-                              fontSize: "0.8rem",
-                            }}
+                            className="inline-link"
                           >
                             github.com/openai/codex
                           </a>
@@ -824,18 +618,7 @@ export default function Home() {
                 </div>
               </div>
               <div>
-                <div
-                  style={{
-                    fontSize: "0.8rem",
-                    fontWeight: 700,
-                    letterSpacing: "0.06em",
-                    textTransform: "uppercase",
-                    color: "var(--ink-soft)",
-                    marginBottom: "10px",
-                  }}
-                >
-                  Get it running
-                </div>
+                <div className="prereq-label">Get it running</div>
                 <div
                   className="terminal-sticker"
                   role="region"
@@ -848,53 +631,28 @@ export default function Home() {
                   </div>
                   <div className="terminal-prompt">~ $</div>
                   <div className="terminal-command">
-                    npm install -g rolester
+                    npm install -g careerrat
                     <br />
-                    rolester start claude
+                    careerrat start claude
                     <span className="terminal-cursor" aria-hidden="true" />
                   </div>
                   <div className="terminal-comment">
-                    # or: rolester start codex
-                    <br /># scaffolds workspace, installs skills, opens dashboard
-                    at localhost:7777
+                    # or: careerrat start codex
+                    <br /># scaffolds workspace, installs skills, opens the
+                    dashboard at localhost:7777
                     <br /># then hands off to the agent
                   </div>
                 </div>
-                <p
-                  style={{
-                    marginTop: "12px",
-                    fontSize: "0.85rem",
-                    color: "var(--ink-soft)",
-                    lineHeight: 1.5,
-                  }}
-                >
+                <p className="get-note">
                   Paste a job posting and say &ldquo;evaluate this&rdquo; to
                   kick off the loop. Or try the bundled sample under{" "}
-                  <code
-                    style={{
-                      fontSize: "0.82rem",
-                      background: "rgba(44,35,29,0.06)",
-                      padding: "2px 5px",
-                      borderRadius: "3px",
-                    }}
-                  >
+                  <code className="inline-code">
                     examples/sample-jobs/
                   </code>
                   .
                 </p>
                 <div style={{ marginTop: "28px" }}>
-                  <div
-                    style={{
-                      fontSize: "0.8rem",
-                      fontWeight: 700,
-                      letterSpacing: "0.06em",
-                      textTransform: "uppercase",
-                      color: "var(--ink-soft)",
-                      marginBottom: "10px",
-                    }}
-                  >
-                    Update later
-                  </div>
+                  <div className="prereq-label">Update later</div>
                   <div
                     className="terminal-sticker"
                     role="region"
@@ -905,9 +663,9 @@ export default function Home() {
                       <div className="terminal-dot terminal-dot-yellow" />
                       <div className="terminal-dot terminal-dot-green" />
                     </div>
-                    <div className="terminal-prompt">~ rolester $</div>
+                    <div className="terminal-prompt">~ careerrat $</div>
                     <div className="terminal-command">
-                      rolester update
+                      careerrat update
                       <span className="terminal-cursor" aria-hidden="true" />
                     </div>
                     <div className="terminal-comment">
@@ -926,23 +684,19 @@ export default function Home() {
       <section className="final-cta" aria-labelledby="final-h2">
         <div className="wrap">
           <div className="final-cta-inner reveal">
-            <img
-              className="final-rat"
-              src="/logo.png"
-              alt="Rolester rat mascot waving you in"
-              width={100}
-              height={100}
-            />
+            <div className="final-mark" aria-hidden="true">
+              🐀
+            </div>
             <h2 className="final-h2" id="final-h2">
               Ready when you are.
             </h2>
             <p className="final-sub">
-              Free. Local. Honest. One command to get going. Run it yourself and
-              your data stays put.
+              Free. Local. Honest. One command to get going. Run it yourself
+              and your data stays put.
             </p>
             <div className="final-actions">
               <a href="#get" className="btn-primary">
-                Get Rolester
+                Get CareerRat
               </a>
               <a href="#how-it-works" className="btn-secondary">
                 How it works
@@ -959,17 +713,16 @@ export default function Home() {
             {/* Brand */}
             <div className="footer-brand reveal">
               <div className="footer-logo">
-                <img src="/logo.png" alt="Rolester logo" width={28} height={28} />
-                Rolester
+                CareerRat<span className="footer-logo-dot">.</span>
               </div>
               <p className="footer-blurb">
-                An agentic, local-first job-search workspace. Find, vet, tailor,
-                track, and prep for roles — from your own data, on your own
-                machine.
+                A chat-first, local-first job-search tracker. Rate the jobs
+                worth chasing, apply with honest evidence, and track every
+                outcome — from your own data, on your own machine.
               </p>
               <div className="footer-social">
                 <a
-                  href="https://github.com/CodesWhat/rolester"
+                  href="https://github.com/CodesWhat/careerrat"
                   target="_blank"
                   rel="noopener noreferrer"
                   aria-label="GitHub"
@@ -999,33 +752,27 @@ export default function Home() {
               <div className="footer-col reveal reveal-delay-1">
                 <p className="footer-col-h">Product</p>
                 <a href="/docs">Documentation</a>
-                <a
-                  href="https://demo.rolester.codeswhat.com"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                >
-                  Live demo
-                </a>
                 <a href="#how-it-works">How it works</a>
+                <a href="#pricing">Pricing</a>
               </div>
               <div className="footer-col reveal reveal-delay-2">
                 <p className="footer-col-h">Project</p>
                 <a
-                  href="https://github.com/CodesWhat/rolester"
+                  href="https://github.com/CodesWhat/careerrat"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   GitHub
                 </a>
                 <a
-                  href="https://github.com/CodesWhat/rolester/releases"
+                  href="https://github.com/CodesWhat/careerrat/releases"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
                   Releases
                 </a>
                 <a
-                  href="https://github.com/CodesWhat/rolester/blob/main/LICENSE"
+                  href="https://github.com/CodesWhat/careerrat/blob/main/LICENSE"
                   target="_blank"
                   rel="noopener noreferrer"
                 >
@@ -1039,7 +786,7 @@ export default function Home() {
             <p className="footer-legal">
               © {new Date().getFullYear()} CodesWhat. Released under the{" "}
               <a
-                href="https://github.com/CodesWhat/rolester/blob/main/LICENSE"
+                href="https://github.com/CodesWhat/careerrat/blob/main/LICENSE"
                 target="_blank"
                 rel="noopener noreferrer"
               >

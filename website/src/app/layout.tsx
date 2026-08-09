@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Fraunces } from "next/font/google";
+import { Archivo } from "next/font/google";
 import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
@@ -19,23 +19,23 @@ const geistMono = localFont({
   display: "swap",
 });
 
-// next/font/google self-hosts Fraunces at build time (downloaded once, served
+// next/font/google self-hosts Archivo at build time (downloaded once, served
 // from our own domain) — nothing hits Google at runtime.
-const fraunces = Fraunces({
+const archivo = Archivo({
   subsets: ["latin"],
-  weight: ["400", "600", "900"],
+  weight: ["700", "800"],
   style: ["normal"],
   variable: "--font-display",
   display: "swap",
 });
 
 const siteDescription =
-  "A local-first, agent-driven job-search workspace. Define what you actually want, vet real jobs before chasing them, write honest applications from your own evidence, and track every outcome — all on your own machine, with your own AI.";
+  "CareerRat is a chat-first job-search tracker. Rate the jobs worth chasing, apply with honest evidence-backed artifacts, and track every outcome — free, local-first, and run by the AI CLI you already have.";
 
 export const metadata: Metadata = {
-  title: "Rolester — Find, vet, and advance the right roles.",
+  title: "CareerRat — Rate. Apply. Track.",
   description: siteDescription,
-  applicationName: "Rolester",
+  applicationName: "CareerRat",
   keywords: [
     "job search",
     "local-first",
@@ -45,20 +45,20 @@ export const metadata: Metadata = {
     "privacy",
   ],
   openGraph: {
-    title: "Rolester — Find, vet, and advance the right roles.",
+    title: "CareerRat — Rate. Apply. Track.",
     description: siteDescription,
-    siteName: "Rolester",
+    siteName: "CareerRat",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "Rolester — Find, vet, and advance the right roles.",
+    title: "CareerRat — Rate. Apply. Track.",
     description: siteDescription,
   },
 };
 
 export const viewport: Viewport = {
-  themeColor: "#faf6ef",
+  themeColor: "#ececea",
   width: "device-width",
   initialScale: 1,
 };
@@ -73,7 +73,7 @@ export const viewport: Viewport = {
 // it runs after `load` — well after hydration — so it's mutation-safe. Reduced
 // motion is handled purely in CSS (see the prefers-reduced-motion block).
 const REVEAL_BOOTSTRAP =
-  "(function(){var d=document,de=d.documentElement;de.classList.add('js');function revealAll(){var e=d.querySelectorAll('.reveal');for(var i=0;i<e.length;i++)e[i].classList.add('visible');}function failsafe(){if(!window.__rolesterRevealArmed)revealAll();}function schedule(){setTimeout(failsafe,1200);}if(d.readyState==='complete'){schedule();}else{window.addEventListener('load',schedule);}})();";
+  "(function(){var d=document,de=d.documentElement;de.classList.add('js');function revealAll(){var e=d.querySelectorAll('.reveal');for(var i=0;i<e.length;i++)e[i].classList.add('visible');}function failsafe(){if(!window.__careerratRevealArmed)revealAll();}function schedule(){setTimeout(failsafe,1200);}if(d.readyState==='complete'){schedule();}else{window.addEventListener('load',schedule);}})();";
 
 export default function RootLayout({
   children,
@@ -83,7 +83,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${geist.variable} ${geistMono.variable} ${fraunces.variable}`}
+      className={`${geist.variable} ${geistMono.variable} ${archivo.variable}`}
       suppressHydrationWarning
     >
       <body>
