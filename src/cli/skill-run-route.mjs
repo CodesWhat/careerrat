@@ -180,8 +180,9 @@ function validateToolProfileRequest({ toolProfile }) {
 export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = process.env }) {
   addRoute("GET", "/api/runtime/config", (_req, res) => {
     const skills = resolveAllowedSkills({ repoRoot, env });
-    const chatSkills = resolveAllowedChatSkills({ repoRoot, env });
-    const route = resolveAIRoute(env);
+    const route = resolveAIRoute(env, { repoRoot });
+    const chatSkills =
+      route.type === "installed" ? [] : resolveAllowedChatSkills({ repoRoot, env });
     sendJson(res, 200, {
       skills,
       chatSkills,
