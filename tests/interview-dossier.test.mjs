@@ -37,7 +37,7 @@ function seedCandidate(repoRoot) {
       compensation: {
         currency: "USD",
         current_base: 180000,
-        target_base: 220000,
+        target_base: 205000,
         minimum_base: 195000,
       },
       authorization: { work_authorized: true, requires_sponsorship: false },
@@ -177,7 +177,7 @@ test("buildInterviewDossier renders and persists an evidence-grounded dossier", 
   assert.match(result.dossier.markdown, /Morgan brings directly relevant experience/);
   assert.match(result.dossier.markdown, /Shipped three production AI workflow pilots/);
   assert.match(result.dossier.markdown, /Audience Focus \(hiring-manager\)/);
-  assert.match(result.dossier.markdown, /Target base:\*\* USD 220,000/);
+  assert.match(result.dossier.markdown, /Target base:\*\* USD 205,000/);
   assert.match(result.dossier.markdown, /model-training experience/);
   assert.doesNotMatch(result.dossier.markdown, /180,000|180000|current_base/);
 

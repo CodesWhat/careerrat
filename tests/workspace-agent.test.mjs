@@ -271,7 +271,7 @@ test("job evaluation executes behind workspace-main and preserves the typed verd
     compensation: {
       status: "clears-floor",
       currency: "USD",
-      minBase: 220000,
+      minBase: 205000,
       maxBase: 280000,
       source: "job-description",
       summary: "Posted base clears the candidate floor.",
