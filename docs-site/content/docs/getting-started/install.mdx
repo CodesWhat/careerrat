@@ -1,6 +1,6 @@
 ---
 title: Install & First Run
-description: Install and launch Rolester in two commands.
+description: Install and launch CareerRat in two commands.
 ---
 
 ## Prerequisites
@@ -12,13 +12,13 @@ description: Install and launch Rolester in two commands.
   - Codex: `npm install -g @openai/codex`
     ([github.com/openai/codex](https://github.com/openai/codex))
 
-You need one of those on your PATH before running `rolester start`.
+You need one of those on your PATH before running `careerrat start`.
 
 ## Public install
 
 ```bash
-npm install -g rolester
-rolester start claude        # or: rolester start codex
+npm install -g careerrat
+careerrat start claude        # or: careerrat start codex
 ```
 
 The `start` command does the whole arc in one shot:
@@ -35,11 +35,11 @@ Developing from a source checkout uses the same command shape after linking the
 local binary:
 
 ```bash
-git clone https://github.com/CodesWhat/rolester
-cd rolester
+git clone https://github.com/CodesWhat/careerrat
+cd careerrat
 npm install
 npm link
-rolester start claude        # or: rolester start codex
+careerrat start claude        # or: careerrat start codex
 ```
 
 ### Useful flags
@@ -56,7 +56,7 @@ rolester start claude        # or: rolester start codex
 If you prefer to open your agent yourself:
 
 ```bash
-rolester doctor     # verify environment + scaffold state
+careerrat doctor     # verify environment + scaffold state
 ```
 
 Then open Claude Code or Codex in the repo root and say:
@@ -72,8 +72,8 @@ By default `workspace/` and `candidate/` live inside the cloned repo. Set
 `ROLESTER_HOME` to put them somewhere else:
 
 ```bash
-export ROLESTER_HOME=~/rolester-data
-rolester start claude
+export ROLESTER_HOME=~/careerrat-data
+careerrat start claude
 ```
 
 Everything under `ROLESTER_HOME` is gitignored and never touches the repo tree.
@@ -81,7 +81,7 @@ Everything under `ROLESTER_HOME` is gitignored and never touches the repo tree.
 ## Health check
 
 ```bash
-rolester doctor
+careerrat doctor
 ```
 
 Reports environment health (Node version, agent CLI on PATH), skills

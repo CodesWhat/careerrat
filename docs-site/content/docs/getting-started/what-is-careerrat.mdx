@@ -1,5 +1,5 @@
 ---
-title: What Is Rolester?
+title: What Is CareerRat?
 description: The problem it solves, how it works, and what "agentic job-search workspace" actually means.
 ---
 
@@ -8,19 +8,19 @@ description: The problem it solves, how it works, and what "agentic job-search w
 Keyword-match job sourcing produces noise. Spray-and-pray applying produces
 silence. Most job-search tooling optimizes the wrong thing: volume over signal.
 
-Rolester is built around a different rule: **do not tailor or apply until the job
+CareerRat is built around a different rule: **do not tailor or apply until the job
 has passed a real body-read gate.** Every skill in the system enforces that
 principle.
 
-## What Rolester actually is
+## What CareerRat actually is
 
-Rolester is an **agent runtime** — a local workspace that a coding agent (Claude
+CareerRat is an **agent runtime** — a local workspace that a coding agent (Claude
 Code, Codex, or similar) runs inside. The agent reads a contract file
 (`AGENTS.md`) that tells it how to route your intent to 21 skills. Each skill is
 a detailed, executable procedure. You talk to the agent; the agent drives the
 skills.
 
-The CLI (`rolester`) scaffolds the workspace, serves the dashboard, checks
+The CLI (`careerrat`) scaffolds the workspace, serves the dashboard, checks
 health, and exposes validated config helpers. It does not do job-search work.
 The agent does.
 
@@ -55,11 +55,11 @@ into evaluation and tailoring so each pass is sharper than the last.
   excluded companies never leave your machine.
 - The agent may call an AI provider API (Claude, Codex) — review that provider's
   privacy policy.
-- No Rolester-operated server receives your data.
+- No CareerRat-operated server receives your data.
 - Browser automation is opt-in per capability, uses your own browser session, and
   stores no credentials.
 
-## What Rolester is not
+## What CareerRat is not
 
 - Not a resume builder (it tailors from your evidence; it does not write from scratch).
 - Not a job board (it sources from boards you configure; it is not a board itself).

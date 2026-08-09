@@ -12,7 +12,7 @@ All candidate data lives on your machine:
 - `workspace/` is gitignored — your tracker, job bodies, tailored artifacts,
   recruiter threads, research, and activity log are all local.
 
-No Rolester-operated server receives your data. The package is code + skills,
+No CareerRat-operated server receives your data. The package is code + skills,
 not a service.
 
 ## What the agent API receives
@@ -22,7 +22,7 @@ your AI provider's API — Claude, OpenAI, or similar. The text it sends include
 the relevant portions of your candidate profile, JD body, and instructions.
 Review your provider's privacy policy before use.
 
-Rolester does not add any network layer or logging on top of that API call. The
+CareerRat does not add any network layer or logging on top of that API call. The
 data goes directly from your machine to the provider you configured.
 
 ## Compensation privacy
@@ -36,7 +36,7 @@ Outbound comp anchors on `target_base` (or `oe_max_base` for OE roles).
 `minimum_base` is an internal walk-away reference — never surfaced outbound unless
 you explicitly instruct otherwise.
 
-The `rolester gate`, `rolester evidence`, and `rolester learnings` helpers all
+The `careerrat gate`, `careerrat evidence`, and `careerrat learnings` helpers all
 refuse to write an entry that contains `current_base` in any outbound field.
 
 ## Git safety
@@ -50,22 +50,22 @@ the files are simply never in a tracked directory.
 
 ## Browser automation and credentials
 
-When opt-in browser automation is enabled, Rolester drives your existing browser
+When opt-in browser automation is enabled, CareerRat drives your existing browser
 session — it does not store credentials. The session browser (Chrome extension or
-a Playwright persistent profile) holds your logins. Rolester reads pages and fills
+a Playwright persistent profile) holds your logins. CareerRat reads pages and fills
 forms through that session but cannot and does not export the credential store.
 
 ## The Activity Pulse is outbound
 
 `workspace/activity.jsonl` renders on the dashboard and is schema-validated for
-privacy before every write. The `rolester activity` helper refuses any entry that
+privacy before every write. The `careerrat activity` helper refuses any entry that
 contains `current_base` or placeholder residue. Activity events are an audit
 trail, not a highlight reel — log only what actually happened.
 
 ## Research memory
 
 Company intel and comp benchmarks in `workspace/research/` are treated as
-outbound. The `rolester research` helper refuses to write an artifact that cites no
+outbound. The `careerrat research` helper refuses to write an artifact that cites no
 source or contains `current_base`. Three fact tiers are enforced:
 
 1. **Verified evidence** (`candidate/evidence.yml`) — may appear in résumés and cover letters.

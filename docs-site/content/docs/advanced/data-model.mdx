@@ -6,7 +6,7 @@ description: Where data lives, what each file means, and how the tracker is stru
 ## Directory layout
 
 ```
-rolester/
+careerrat/
   candidate/          ← private, gitignored — your config and evidence
   workspace/          ← private, gitignored — runtime data and artifacts
   config/             ← public schemas and example files
@@ -105,7 +105,7 @@ The dashboard renders exclusively from `workspace/tracker.json`. There is no
 separate database. If the dashboard shows stale data, re-render:
 
 ```bash
-rolester tracker        # re-render from current tracker.json
+careerrat tracker        # re-render from current tracker.json
 ```
 
-Or run `rolester tracker-dev` for a live-reloading session.
+Or run `careerrat tracker-dev` for a live-reloading session.

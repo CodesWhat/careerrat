@@ -3,7 +3,7 @@ title: Skills Catalog
 description: All 21 skills — what each one does and when to invoke it.
 ---
 
-Rolester ships 21 skills under `.agents/skills/`. Each is a `SKILL.md` file — a
+CareerRat ships 21 skills under `.agents/skills/`. Each is a `SKILL.md` file — a
 detailed, executable procedure the agent follows when routed to that skill. Skills
 are field-neutral: the same skill serves any candidate because it reads your
 private config, not hardcoded preferences.
@@ -16,7 +16,7 @@ private config, not hardcoded preferences.
 | `setup-searches` | Build and maintain `config/search-sources.yml` from candidate targeting — generate a baseline from role buckets, curate enabled sources, add or import individual searches (including pasted board URLs with embedded filters preserved), and tune global filters. Upstream of search-jobs; does not scan. |
 | `search-jobs` | Run the top-of-funnel sourced sweep — scan configured sources, dedupe, check liveness, coarse-triage every new entry with fitScore/fitBucket/fitBasis, save JD bodies, write watermarks, and optionally hand top sourced roles to evaluate-job. Does not tailor, fill, or submit. |
 | `evaluate-job` | Body-read gate for a single job posting — fetch, save, check limits/comp/fit, emit GATE/FIT/COMP/ACTION, and write calibrated fit back to the tracker. Run before any tailoring or submission. |
-| `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the Rolester gate. Reject unresolved placeholders. |
+| `tailor-application` | Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. |
 | `apply-job` | End-to-end job application workflow — gates on app limits and evaluate-job verdict, tailors artifacts, builds the render, fills the ATS form (including LinkedIn Easy Apply one-click path), verifies submission, and updates the tracker. |
 
 ## Research loop
@@ -33,9 +33,9 @@ private config, not hardcoded preferences.
 
 | Skill | Description |
 |-------|-------------|
-| `email-comms` | Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the Rolester tracker. |
+| `email-comms` | Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the CareerRat tracker. |
 | `schedule-meeting` | Handle recruiter / hiring-team scheduling threads — read the proposed slots, the candidate's timezone and availability, and any calendar context; draft a clear availability reply, prepare a calendar-ready hold, and write scheduling state back to the tracker. Confirm-first before any outbound reply or calendar write. |
-| `ingest-mail` | Read job-search email updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail through the session browser; fold recruiter replies and status changes into Rolester tracker communication state. Opt-in, local-only, read-only. |
+| `ingest-mail` | Read job-search email updates from Apple Mail on macOS or, with separate mail_access consent, Gmail/Outlook webmail through the session browser; fold recruiter replies and status changes into CareerRat tracker communication state. Opt-in, local-only, read-only. |
 | `ingest-messages` | Read in-platform DMs from LinkedIn and Wellfound via the session browser and fold them into tracker communications — the browser analog of ingest-mail. Opt-in, user-initiated, local-only. |
 
 ## Interview & outcomes
@@ -65,4 +65,4 @@ private config, not hardcoded preferences.
 
 | Skill | Description |
 |-------|-------------|
-| `report-issue` | When Rolester itself looks broken — a crash, stack trace, non-zero exit, or clearly-wrong output — separate a real defect from a config problem, assemble redacted diagnostics (no candidate PII, comp, or workspace contents), and, only with an explicit yes, open a GitHub issue on the upstream `CodesWhat/rolester` repo under the user's own `gh` identity. Never auto-files; falls back to a prefilled issue URL when `gh` is unavailable. |
+| `report-issue` | When CareerRat itself looks broken — a crash, stack trace, non-zero exit, or clearly-wrong output — separate a real defect from a config problem, assemble redacted diagnostics (no candidate PII, comp, or workspace contents), and, only with an explicit yes, open a GitHub issue on the upstream `CodesWhat/careerrat` repo under the user's own `gh` identity. Never auto-files; falls back to a prefilled issue URL when `gh` is unavailable. |

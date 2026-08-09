@@ -3,14 +3,14 @@ title: Keeping Current
 description: How to pull the latest code without touching your data.
 ---
 
-Rolester is published to npm as `rolester@latest`. The update command pulls the
+CareerRat is published to npm as `careerrat@latest`. The update command pulls the
 latest code and overwrites only the code files. Your `workspace/` and `candidate/`
 data are never touched.
 
 ## Update command
 
 ```bash
-rolester update
+careerrat update
 ```
 
 The update does a privacy-guarded tarball extract: it downloads the latest
@@ -35,27 +35,27 @@ checkout. It never touches your `candidate/` directory or `workspace/` data.
 ## Checking your version
 
 ```bash
-rolester --version
+careerrat --version
 # or
-rolester doctor
+careerrat doctor
 ```
 
 `doctor` reports your current version alongside environment and scaffold state.
 
 ## After an update
 
-If the update added schema changes, run `rolester tracker --verify` to confirm your
+If the update added schema changes, run `careerrat tracker --verify` to confirm your
 tracker data is still valid:
 
 ```bash
-rolester tracker --verify
+careerrat tracker --verify
 ```
 
 Skill definitions are picked up automatically the next time you open your agent —
 no reinstall needed. If your agent does not see new skills after an update, run:
 
 ```bash
-rolester install-skills
+careerrat install-skills
 ```
 
 That re-shims `.claude/skills` → `.agents/skills` for Claude Code (or creates a

@@ -53,18 +53,33 @@ test("website install copy uses the public careerrat CLI convention", async () =
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });
 
-test("docs website source uses the public rolester CLI convention (pre-rebrand)", async () => {
-  // docs-site is still Rolester-branded until the W5b docs rebrand lands;
-  // flip these assertions to careerrat when that happens.
+test("docs website source uses the public careerrat CLI convention", async () => {
   const files = await listFiles("docs-site/content", ".mdx");
   const docs = await Promise.all(files.map(async (file) => readFile(file, "utf8")));
   const combined = docs.join("\n");
 
-  assert.match(combined, /npm install -g rolester/);
-  assert.match(combined, /rolester start claude/);
-  assert.match(combined, /rolester tracker-dev/);
-  assert.match(combined, /rolester automation status/);
-  assert.match(combined, /rolester update/);
+  assert.match(combined, /npm install -g careerrat/);
+  assert.match(combined, /careerrat start claude/);
+  assert.match(combined, /careerrat tracker-dev/);
+  assert.match(combined, /careerrat automation status/);
+  assert.match(combined, /careerrat update/);
+
+  // Frozen internal contracts stay literally "rolester" — these are real
+  // runtime strings (env var, hardcoded paths), not CLI convention.
+  assert.match(combined, /ROLESTER_HOME/);
+  assert.match(combined, /~\/Downloads\/rolester\//);
+  assert.match(combined, /~\/\.rolester\/board-profiles/);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
+});
+
+test("docs website is CareerRat-branded (product name and repo links)", async () => {
+  const layout = await readFile("docs-site/src/app/layout.tsx", "utf8");
+  const indexPage = await readFile("docs-site/content/docs/index.mdx", "utf8");
+
+  assert.match(layout, /CareerRat Docs/);
+  assert.match(layout, /github\.com\/CodesWhat\/careerrat/);
+  assert.match(indexPage, /CareerRat is a local, skill-driven job-search workspace/);
+
+  assert.doesNotMatch(layout, /\bRolester\b/);
 });

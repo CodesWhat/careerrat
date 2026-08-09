@@ -3,7 +3,7 @@ title: Browser Automation
 description: Three layers for reaching the web — static fetch, headless scripts, and the agent-driven session browser.
 ---
 
-Rolester reaches the web three ways. They are not interchangeable — each is
+CareerRat reaches the web three ways. They are not interchangeable — each is
 right for a different layer.
 
 ## Layer 1 — Static fetch (WebFetch)
@@ -22,7 +22,7 @@ No setup needed — Chromium ships with the package.
 Used for:
 - `npm run capture:search-sources` / `npm run capture:board` — bulk-scrape a
   board's listing DOM
-- Document and packet PDF export (`rolester export`)
+- Document and packet PDF export (`careerrat export`)
 
 This is for **batch, non-interactive** rendering where the agent does not need to
 reason turn-by-turn.
@@ -65,10 +65,10 @@ All three conditions must be true for a capability to run on a platform:
 3. That platform's one-time ToS consent is recorded.
 
 ```bash
-rolester automation status                               # current matrix
-rolester automation consent linkedin --write             # record consent
-rolester automation enable profile_optimize linkedin --write
-rolester automation session extension --write            # set provider
+careerrat automation status                               # current matrix
+careerrat automation consent linkedin --write             # record consent
+careerrat automation enable profile_optimize linkedin --write
+careerrat automation session extension --write            # set provider
 ```
 
 ## Safety rules (always enforced)
@@ -80,7 +80,7 @@ rolester automation session extension --write            # set provider
   submitting a form) requires explicit confirmation, even in high-volume mode.
 - **Capture artifacts are scratch.** Screenshots go to `workspace/captures/`
   (gitignored), never the repo root.
-- **No credential storage.** The session browser holds your logins. Rolester does
+- **No credential storage.** The session browser holds your logins. CareerRat does
   not export or cache them.
 
 ## SPA escalation

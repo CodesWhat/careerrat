@@ -3,28 +3,28 @@ title: The Dashboard
 description: What the local dashboard shows and how to run it.
 ---
 
-The Rolester dashboard is a local HTML page that renders from
+The CareerRat dashboard is a local HTML page that renders from
 `workspace/tracker.json`. It is **read-only** — the agent and skills write the
 data; the dashboard just surfaces it. You do not edit anything through the
 dashboard.
 
 ## Running the dashboard
 
-`rolester start` boots the live dashboard for you as part of first run. To run
+`careerrat start` boots the live dashboard for you as part of first run. To run
 it on its own:
 
 ```bash
-rolester tracker-dev    # live-reloading server on http://localhost:7777
-rolester tracker        # one-shot snapshot → workspace/tracker.html
+careerrat tracker-dev    # live-reloading server on http://localhost:7777
+careerrat tracker        # one-shot snapshot → workspace/tracker.html
 ```
 
-`rolester tracker-dev` watches `workspace/tracker.json` and your dashboard source
+`careerrat tracker-dev` watches `workspace/tracker.json` and your dashboard source
 files and refreshes the open page over Server-Sent Events. A write by the agent
 reaches your screen within ~120 ms — there is no refresh timer.
 
-The static `workspace/tracker.html` (from `rolester tracker`) fetches its data
+The static `workspace/tracker.html` (from `careerrat tracker`) fetches its data
 once at page load. Its "last updated" pill is accurate at open but ages from
-there. For any live session, use `rolester tracker-dev`.
+there. For any live session, use `careerrat tracker-dev`.
 
 ## What the dashboard shows
 
