@@ -145,3 +145,5 @@ workspace/setup-state.json
 !workspace/captures/.gitkeep
 !workspace/logos/.gitkeep
 !workspace/legacy/.gitkeep
+.vercel
+.env*

@@ -29,13 +29,32 @@ out
 /.agents
 /.claude
 /bin
-/src
+# src/ is excluded except the one module harden-static-html.mjs imports.
+# gitignore semantics: a re-include only works if no parent DIR is excluded,
+# hence the /*-then-! cascade at each level.
+/src/*
+!/src/core
+/src/core/*
+!/src/core/security
+/src/core/security/*
+!/src/core/security/browser-policy.mjs
 /config
 /templates
-/scripts
+# scripts/ is excluded by contents (not the dir itself) so the one build-time
+# dependency can be re-included — website/ and docs-site/ both run
+# ../scripts/harden-static-html.mjs in their postbuild.
+/scripts/*
+!/scripts/harden-static-html.mjs
 /mockups
 /examples
 /tests
 /docs/COMPARISON.md
 /ROADMAP.md
 /ROADMAP-ARCHIVE.md
+
+# Heavy local-only trees that broke the 100MB upload limit (2026-08-09).
+/qa
+/db
+/apps/desktop/dist
+/apps/desktop/staging
+/*.zip
