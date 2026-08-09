@@ -663,7 +663,7 @@ Rules for intake:
   setup issues to `configure` / `doctor`), assembles **redacted** diagnostics (no
   candidate PII, comp, employer/recruiter names, or workspace contents; home paths
   normalized), and — only with an explicit yes — opens a GitHub issue on the
-  upstream `CodesWhat/rolester` repo under the user's own `gh` identity. It never
+  upstream `CodesWhat/careerrat` repo under the user's own `gh` identity. It never
   auto-files and falls back to a prefilled issue URL when `gh` isn't available.
 
 ## Gate Contract

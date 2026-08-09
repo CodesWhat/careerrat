@@ -13,7 +13,7 @@ description: When Rolester itself looks broken — a crash, stack trace, non-zer
 
 When Rolester breaks, the agent's job is three things: (1) tell a real defect apart from a user-config problem, (2) assemble a useful report that is **scrubbed of all personal data**, and (3) file it upstream **only after the user says yes**. This skill never auto-files, never runs on a schedule, and never puts candidate data in a public place. The issue is authored by the user's own `gh` identity, so their GitHub username is publicly attached to it — surface that before filing.
 
-The report target is the upstream project tracker: **`CodesWhat/rolester`**. (A fork maintainer can change this slug.)
+The report target is the upstream project tracker: **`CodesWhat/careerrat`**. (A fork maintainer can change this slug.)
 
 ---
 
@@ -78,7 +78,7 @@ When in doubt, leave it out. A vaguer-but-clean report beats a precise leak.
 Search before filing so we don't pile on duplicates:
 
 ```
-gh issue list --repo CodesWhat/rolester --state open --search "<short error signature>"
+gh issue list --repo CodesWhat/careerrat --state open --search "<short error signature>"
 ```
 
 If a matching open issue exists, offer to **add a comment** with the user's redacted repro instead of opening a new one. Only open a fresh issue when nothing matches.
@@ -118,7 +118,7 @@ Title: <one-line summary of the failure>
 _Filed via the Rolester `report-issue` skill. Diagnostics were redacted of personal data._
 ```
 
-Tell the user plainly: "this posts publicly to CodesWhat/rolester under your GitHub account (`<gh username>`)." Get an explicit **yes** before filing. Nothing publishes without it.
+Tell the user plainly: "this posts publicly to CodesWhat/careerrat under your GitHub account (`<gh username>`)." Get an explicit **yes** before filing. Nothing publishes without it.
 
 ---
 
@@ -128,13 +128,13 @@ Try `gh` first (the user's authenticated path):
 
 ```
 gh auth status                        # confirm authed; if not, use the fallback
-gh issue create --repo CodesWhat/rolester \
+gh issue create --repo CodesWhat/careerrat \
   --title "<title>" --body-file <redacted-body-file> --label bug
 ```
 
 - On success, give the user the returned issue URL and confirm it's live (fetch it back if useful).
 - Drop `--label bug` if the repo doesn't carry that label (the create fails on an unknown label).
-- **Fallback (no `gh`, or not authed):** build a prefilled URL — `https://github.com/CodesWhat/rolester/issues/new?title=<enc>&body=<enc>&labels=bug` — and hand it to the user to open. If the body is too long for a URL, print the redacted body for them to paste instead. Never block: the user always gets a one-click or one-paste path.
+- **Fallback (no `gh`, or not authed):** build a prefilled URL — `https://github.com/CodesWhat/careerrat/issues/new?title=<enc>&body=<enc>&labels=bug` — and hand it to the user to open. If the body is too long for a URL, print the redacted body for them to paste instead. Never block: the user always gets a one-click or one-paste path.
 
 ---
 
@@ -152,5 +152,5 @@ Give the user the issue URL (or the prefilled link) and a one-line confirmation 
 - **The user's identity is public.** The issue is authored by their `gh` account — say so before filing.
 - **Dedup.** Search open issues first; prefer commenting on a match over opening a duplicate.
 - **Never block.** If `gh` isn't available, fall back to a prefilled URL or a paste-ready body. The user always has a path.
-- **Domain-neutral.** The only hardcoded value is the upstream repo slug (`CodesWhat/rolester`); everything else is gathered at runtime.
+- **Domain-neutral.** The only hardcoded value is the upstream repo slug (`CodesWhat/careerrat`); everything else is gathered at runtime.
 - **Local-first.** Diagnostics are gathered locally; nothing leaves the machine except the single approved issue.
