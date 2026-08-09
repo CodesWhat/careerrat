@@ -21,21 +21,21 @@
       "whatTheyPasted": "A recruiter / hiring email",
       "routeTo": "`email-comms`",
       "capturesInto": "`communications[].messages[]`",
-      "m9": { "status": "active", "kinds": ["recruiter-email"], "lane": "C", "skill": "email-comms" }
+      "m9": { "status": "active", "kinds": ["recruiter-email"], "lane": "W", "skill": "email-comms" }
     },
     {
       "id": "interview-invite",
       "whatTheyPasted": "An interview invite",
       "routeTo": "`interview-prep`",
       "capturesInto": "application status + `conversations[]`",
-      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "interview-prep" }
+      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "W", "skill": "interview-prep" }
     },
     {
       "id": "interview-notes",
       "whatTheyPasted": "Interview notes / a transcript",
       "routeTo": "`interview-prep`",
       "capturesInto": "`conversations[]`",
-      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "C", "skill": "interview-prep" }
+      "m9": { "status": "active", "kinds": ["interview-transcript"], "lane": "W", "skill": "interview-prep" }
     },
     {
       "id": "status-change",

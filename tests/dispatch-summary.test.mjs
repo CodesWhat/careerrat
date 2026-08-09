@@ -53,6 +53,24 @@ test("summarizeDispatch: chat_skill (Lane C)", () => {
   assert.equal(summary, "hand off to email-comms");
 });
 
+test("ISSUE-038 summarizeDispatch names a workspace-agent intent without implying another chat", () => {
+  const summary = summarizeDispatch({
+    lane: "W",
+    action: "workspace_intent",
+    params: { intentType: "communication.capture-inbound" },
+  });
+  assert.equal(summary, "capture the recruiter message in your workspace conversation");
+});
+
+test("summarizeDispatch keeps interview intake in the workspace conversation", () => {
+  const summary = summarizeDispatch({
+    lane: "W",
+    action: "workspace_intent",
+    params: { intentType: "interview.capture-context" },
+  });
+  assert.equal(summary, "capture this interview context in your workspace conversation");
+});
+
 test("summarizeDispatch: an unrecognized action falls back to the bare action string", () => {
   const summary = summarizeDispatch({ lane: null, action: "needs_you", params: { reason: "x" } });
   assert.equal(summary, "needs_you");

@@ -31,5 +31,17 @@ export function summarizeDispatch(dispatch) {
   }
   if (dispatch.action === "run_skill") return `run ${dispatch.params.skill}`;
   if (dispatch.action === "chat_skill") return `hand off to ${dispatch.params.skill}`;
+  if (
+    dispatch.action === "workspace_intent" &&
+    dispatch.params.intentType === "communication.capture-inbound"
+  ) {
+    return "capture the recruiter message in your workspace conversation";
+  }
+  if (
+    dispatch.action === "workspace_intent" &&
+    dispatch.params.intentType === "interview.capture-context"
+  ) {
+    return "capture this interview context in your workspace conversation";
+  }
   return dispatch.action;
 }

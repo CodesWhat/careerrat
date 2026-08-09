@@ -31,7 +31,9 @@
 //            normally an SSE stream a live client consumes; this confirm
 //            endpoint is a plain JSON responder, so the run's own done/error
 //            transition lands via a later intakeUpdate once it settles).
-//   Lane C — chatRuntime.findBySkill(skill): reuse an existing live session
+//   Lane W — execute a typed intent on the one durable workspace agent.
+//   Lane C — legacy compatibility for intake rows created before Lane W:
+//            chatRuntime.findBySkill(skill): reuse an existing live session
 //            via postMessage(), or startSession() when none exists — the
 //            SAME chatRuntime instance tracker-dev.mjs already constructs for
 //            /api/chat/*, never a second registry.
@@ -219,8 +221,64 @@ function withDispatchSummary(item) {
   return { ...item, dispatchSummary: summarizeDispatch(item.dispatch) };
 }
 
-function executeLaneA({ repoRoot, env, id, dispatch }) {
+export async function captureIntakeText({
+  repoRoot,
+  env = process.env,
+  text,
+  inputKind,
+  fetchImpl = fetch,
+  loadSdk,
+} = {}) {
+  const rawText = typeof text === "string" ? text : "";
+  if (!rawText.trim()) {
+    const error = new Error("text is required");
+    error.code = "EMPTY_INTAKE";
+    throw error;
+  }
+  if (inputKind !== undefined && inputKind !== "text" && inputKind !== "url") {
+    const error = new Error('inputKind must be "text" or "url" when given');
+    error.code = "BAD_INTAKE_KIND";
+    throw error;
+  }
+  const resolvedKind = inputKind || detectInputKind(rawText);
+  const captured = intakeCapture({ repoRoot, env, rawInput: rawText, inputKind: resolvedKind });
+  const finalItem = await classifyAndPropose({
+    repoRoot,
+    env,
+    id: captured.id,
+    inputKind: resolvedKind,
+    rawInput: rawText,
+    fetchImpl,
+    loadSdk,
+  });
+  return withDispatchSummary(finalItem);
+}
+
+async function executeLaneA({ repoRoot, env, id, dispatch, workspaceAgentRuntime }) {
   const { applicationId, to, note } = dispatch.params;
+  if (typeof workspaceAgentRuntime?.executeIntent === "function") {
+    const result = await workspaceAgentRuntime.executeIntent({
+      intent: {
+        type: "outcome.record",
+        entity: { type: "application", id: applicationId },
+        input: { to, note: note || null, sourceIntakeId: id },
+      },
+    });
+    return intakeUpdate({
+      repoRoot,
+      env,
+      id,
+      patch: {
+        status: "done",
+        result: {
+          applicationId,
+          to,
+          threadId: result.thread?.id || "workspace-main",
+        },
+        error: null,
+      },
+    }).item;
+  }
   const verbResult = appSetStatus({
     repoRoot,
     env,
@@ -357,6 +415,38 @@ async function executeLaneC({ repoRoot, env, id, item, dispatch, chatRuntime }) 
   return intakeUpdate({ repoRoot, env, id, patch: { status: "running", result: { chatId } } }).item;
 }
 
+async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime }) {
+  if (typeof workspaceAgentRuntime?.executeIntent !== "function") {
+    const error = new Error("the workspace agent is unavailable for this confirmed intake item");
+    error.code = "WORKSPACE_AGENT_UNAVAILABLE";
+    throw error;
+  }
+  const result = await workspaceAgentRuntime.executeIntent({
+    intent: {
+      type: dispatch.params.intentType,
+      entity: { type: "intake", id },
+    },
+  });
+  const actionResult = [...(result.messages || [])]
+    .reverse()
+    .find((message) => message.kind === "action_result");
+  return intakeUpdate({
+    repoRoot,
+    env,
+    id,
+    patch: {
+      status: "done",
+      result: {
+        threadId: result.thread?.id || "workspace-main",
+        intentType: dispatch.params.intentType,
+        communicationId: actionResult?.metadata?.communicationId || null,
+        applicationId: actionResult?.metadata?.applicationId || null,
+      },
+      error: null,
+    },
+  }).item;
+}
+
 // ---------------------------------------------------------------------------
 // mountIntakeRoutes
 // ---------------------------------------------------------------------------
@@ -369,6 +459,8 @@ export function mountIntakeRoutes({
   loadSdk,
   runSkillStream = defaultRunSkillStream,
   chatRuntime,
+  workspaceAgentRuntime,
+  captureTextImpl = captureIntakeText,
 }) {
   addRoute("POST", "/api/intake", async (req, res) => {
     let body;
@@ -379,36 +471,19 @@ export function mountIntakeRoutes({
       return;
     }
 
-    const text = typeof body?.text === "string" ? body.text : "";
-    if (!text.trim()) {
-      sendJson(res, 400, { ok: false, error: "body.text is required" });
-      return;
-    }
-    let inputKind = body?.inputKind;
-    if (inputKind !== undefined && inputKind !== "text" && inputKind !== "url") {
-      sendJson(res, 400, { ok: false, error: 'body.inputKind must be "text" or "url" when given' });
-      return;
-    }
-    if (!inputKind) inputKind = detectInputKind(text);
-
-    let captured;
     try {
-      captured = intakeCapture({ repoRoot, env, rawInput: text, inputKind });
+      const finalItem = await captureTextImpl({
+        repoRoot,
+        env,
+        text: body?.text,
+        inputKind: body?.inputKind,
+        fetchImpl,
+        loadSdk,
+      });
+      sendJson(res, 200, { ok: true, item: finalItem });
     } catch (err) {
       respondError(res, err);
-      return;
     }
-
-    const finalItem = await classifyAndPropose({
-      repoRoot,
-      env,
-      id: captured.id,
-      inputKind,
-      rawInput: text,
-      fetchImpl,
-      loadSdk,
-    });
-    sendJson(res, 200, { ok: true, item: withDispatchSummary(finalItem) });
   });
 
   addRoute("POST", "/api/intake/upload", async (req, res) => {
@@ -605,7 +680,13 @@ export function mountIntakeRoutes({
     let finalItem = decided.item;
     try {
       if (dispatch?.lane === "A") {
-        finalItem = executeLaneA({ repoRoot, env, id, dispatch });
+        finalItem = await executeLaneA({
+          repoRoot,
+          env,
+          id,
+          dispatch,
+          workspaceAgentRuntime,
+        });
       } else if (dispatch?.lane === "B") {
         finalItem = executeLaneB({ repoRoot, env, id, item: existing, dispatch, runSkillStream });
       } else if (dispatch?.lane === "C") {
@@ -616,6 +697,14 @@ export function mountIntakeRoutes({
           item: existing,
           dispatch,
           chatRuntime,
+        });
+      } else if (dispatch?.lane === "W") {
+        finalItem = await executeLaneW({
+          repoRoot,
+          env,
+          id,
+          dispatch,
+          workspaceAgentRuntime,
         });
       } else {
         // Defensive only: dispatch.mjs never returns a lane-less action

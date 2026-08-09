@@ -44,6 +44,13 @@ async function apiFetch(path, options = {}) {
   return body;
 }
 
+function runWorkspaceIntent(type, entity, input = {}) {
+  return apiFetch("/api/workspace/intent", {
+    method: "POST",
+    body: JSON.stringify({ intent: { type, entity, input } }),
+  });
+}
+
 export function getOnboardState() {
   return apiFetch("/api/onboard/state");
 }
@@ -61,6 +68,35 @@ export function saveOnboardingDraft(draft) {
 
 export function getAiSettings() {
   return apiFetch("/api/settings/ai");
+}
+
+export function getInstalledAiRuntimes() {
+  return apiFetch("/api/settings/ai-runtimes");
+}
+
+export function getAutomationSettings() {
+  return apiFetch("/api/settings/automation");
+}
+
+export function probeInstalledAiRuntime(runtimeId) {
+  return apiFetch("/api/settings/ai-runtime/probe", {
+    method: "POST",
+    body: JSON.stringify({ runtimeId }),
+  });
+}
+
+export function openInstalledAiRuntimeTerminal(runtimeId) {
+  return apiFetch("/api/settings/ai-runtime/open-terminal", {
+    method: "POST",
+    body: JSON.stringify({ runtimeId }),
+  });
+}
+
+export function selectInstalledAiRuntime({ runtimeId, providerFallback = false } = {}) {
+  return apiFetch("/api/settings/ai-runtime/select", {
+    method: "POST",
+    body: JSON.stringify({ runtimeId, providerFallback }),
+  });
 }
 
 export function getUsageSummary() {
@@ -235,13 +271,15 @@ export async function streamResumeAi(file, { onEvent, signal } = {}) {
 // already in flight, other 4xx/5xx for no-AI/no-prompts/lean-downshift with
 // the API's standard error shape. Static preview has no run route at all —
 // same immediate-throw contract as streamResumeAi above.
-export async function runAiWebSearchStream({ onEvent, signal } = {}) {
+export async function runAiWebSearchStream({ onEvent, promptIds, signal } = {}) {
   if (isStaticPreviewApi()) {
     throw new ApiError(501, { error: "ai-web-search run is unavailable in static preview" });
   }
 
   const res = await fetch("/api/search/ai-web-search/run", {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...(Array.isArray(promptIds) ? { promptIds } : {}) }),
     signal,
   });
   if (!res.ok || !res.body) {
@@ -445,6 +483,45 @@ export function addBoard({ url, label }) {
   });
 }
 
+export function getSourceMaintenance() {
+  return apiFetch("/api/boards/sources");
+}
+
+export function addSearchQuery({ query, label, provider = "HiringCafe" }) {
+  return apiFetch("/api/boards/search/add", {
+    method: "POST",
+    body: JSON.stringify({ query, label, provider }),
+  });
+}
+
+export function updateSearchSource({ index, label, target, enabled }) {
+  return apiFetch("/api/boards/search/update", {
+    method: "POST",
+    body: JSON.stringify({ index, label, target, enabled }),
+  });
+}
+
+export function removeSearchSource(index) {
+  return apiFetch("/api/boards/search/remove", {
+    method: "POST",
+    body: JSON.stringify({ index }),
+  });
+}
+
+export function saveCompanyBoard({ originalName, name, url, enabled = true }) {
+  return apiFetch("/api/boards/company/save", {
+    method: "POST",
+    body: JSON.stringify({ originalName, name, url, enabled }),
+  });
+}
+
+export function removeCompanyBoard(name) {
+  return apiFetch("/api/boards/company/remove", {
+    method: "POST",
+    body: JSON.stringify({ name }),
+  });
+}
+
 // ---------------------------------------------------------------------------
 // Chat runtime (src/cli/chat-route.mjs) — the Companies step's "Roland,
 // find companies" panel drives discover-companies through this exact
@@ -603,12 +680,34 @@ export function mergeNestedField(app, field, updates) {
   return { ...base, ...updates };
 }
 
-// POST /api/data/app/status — appSetStatus verb.
+// Visible status changes belong to the one durable workspace agent. The
+// deterministic outcome writer still owns the canonical DB transition behind
+// this typed intent.
 export function setAppStatus({ id, to, note, followUpDueAt, clearInterview } = {}) {
-  return apiFetch("/api/data/app/status", {
-    method: "POST",
-    body: JSON.stringify({ id, to, note, followUpDueAt, clearInterview }),
-  });
+  return runWorkspaceIntent(
+    "outcome.record",
+    { type: "application", id },
+    {
+      to,
+      note,
+      followUpDueAt,
+      clearInterview,
+    }
+  );
+}
+
+export function recordExternalApplication({ id, appliedAt } = {}) {
+  return runWorkspaceIntent(
+    "application.record-external",
+    { type: "application", id },
+    {
+      appliedAt,
+    }
+  );
+}
+
+export function applyOnSite({ id } = {}) {
+  return runWorkspaceIntent("job.apply", { type: "application", id });
 }
 
 // POST /api/data/app/fields — appSetFields verb (shallow one-level merge
@@ -625,39 +724,55 @@ export function setAppFields({ id, patch } = {}) {
 // nextInterviewAt instead of interviewAt (see verbs/app.mjs's own comment) —
 // the caller never has to decide which field to write.
 export function scheduleInterview({ id, at, round, note } = {}) {
-  return apiFetch("/api/data/app/interview", {
-    method: "POST",
-    body: JSON.stringify({ id, at, round, note }),
-  });
+  return runWorkspaceIntent(
+    "interview.schedule",
+    { type: "application", id },
+    {
+      at,
+      round,
+      note,
+    }
+  );
 }
 
 // POST /api/data/comm/message — commAppendMessage verb ("add a note to the
 // thread" affordance; `message.direction` is "note" for a plain drawer note).
 export function appendCommMessage({ id, message } = {}) {
-  return apiFetch("/api/data/comm/message", {
-    method: "POST",
-    body: JSON.stringify({ id, message }),
-  });
+  return runWorkspaceIntent(
+    "communication.add-note",
+    { type: "communication", id },
+    {
+      summary: message?.summary,
+      at: message?.at,
+    }
+  );
 }
 
 // POST /api/data/comm/send — commMarkSent verb. The literal mechanism behind
 // the self-clearing "Ready to send" CTA: nulls comm.draft (and, if linked,
 // app.followUp.draft) server-side in one write.
 export function markCommSent({ id, at, summary } = {}) {
-  return apiFetch("/api/data/comm/send", {
-    method: "POST",
-    body: JSON.stringify({ id, at, summary }),
-  });
+  return runWorkspaceIntent(
+    "communication.record-external",
+    { type: "communication", id },
+    {
+      sentAt: at,
+      summary,
+    }
+  );
 }
 
 // POST /api/data/sourced/promote — sourcedPromote verb (the folded-in
 // sourced-triage tab's "Gate this role" action: moves a sourced[] row into
 // applications[] as status "reviewed-hold").
 export function promoteSourced({ id, appRow } = {}) {
-  return apiFetch("/api/data/sourced/promote", {
-    method: "POST",
-    body: JSON.stringify({ id, appRow }),
-  });
+  return runWorkspaceIntent(
+    "sourced.promote",
+    { type: "sourced", id },
+    {
+      ...(appRow ? { appRow } : {}),
+    }
+  );
 }
 
 // POST /api/data/sourced/status — sourcedSetStatus verb. The Jobs Search
@@ -665,10 +780,14 @@ export function promoteSourced({ id, appRow } = {}) {
 // recoverable sourced[] state — track-outcomes SKILL.md's canonical status
 // vocabulary); there's no "park"/"hold" sourced[] state in that vocabulary.
 export function setSourcedStatus({ id, to, note } = {}) {
-  return apiFetch("/api/data/sourced/status", {
-    method: "POST",
-    body: JSON.stringify({ id, to, note }),
-  });
+  return runWorkspaceIntent(
+    "sourced.skip",
+    { type: "sourced", id },
+    {
+      ...(to && to !== "cut" ? { requestedStatus: to } : {}),
+      ...(note ? { note } : {}),
+    }
+  );
 }
 
 // GET /api/data/applications — the raw applications[] rows (not the derived
@@ -692,9 +811,8 @@ export function getApplications() {
 // `jobBody`/`jobUrl` are optional overrides (evaluatePacketGate reads the
 // already-captured JD off the application's artifacts.jd by default — see
 // the JD-body capture invariant in AGENTS.md — so a normal call only needs
-// applicationId). evaluatePacketGate does NOT persist the verdict onto the
-// application row itself; callers that want it to survive a reload must
-// follow up with setAppFields (see PacketGateCard.jsx).
+// applicationId). The route atomically persists the returned typed evaluation
+// and its list/drawer projections before responding.
 export function runPacketGate({ applicationId, jobBody, jobUrl } = {}) {
   return apiFetch("/api/packet/gate", {
     method: "POST",
@@ -767,6 +885,13 @@ export async function getDeepIngestState() {
 // contract.
 export function submitDeepIngestSource(payload = {}) {
   return apiFetch("/api/deep-ingest/sources", {
+    method: "POST",
+    body: JSON.stringify(payload),
+  });
+}
+
+export function removeDeepIngestSource(payload = {}) {
+  return apiFetch("/api/deep-ingest/sources/remove", {
     method: "POST",
     body: JSON.stringify(payload),
   });

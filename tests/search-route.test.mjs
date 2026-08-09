@@ -15,7 +15,12 @@ import { join } from "node:path";
 import { after, test } from "node:test";
 import { mountSearchRoutes } from "../src/cli/search-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { companyAtsUpsert, sourceConfigPut, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
+import {
+  companyAtsUpsert,
+  sourceConfigGet,
+  sourceConfigPut,
+  sourcedUpsertBatch,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 
@@ -450,6 +455,24 @@ test("GET /api/search/sources: reports only DB enabled/total searches and tracke
     repoRoot,
     entry: { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
   });
+  companyAtsUpsert({
+    repoRoot,
+    entry: {
+      name: "Disabled Co",
+      careers_url: "https://jobs.lever.co/disabled-co",
+    },
+  });
+  const companyConfig = sourceConfigGet({ repoRoot, name: "sourced-scan" }).data;
+  sourceConfigPut({
+    repoRoot,
+    name: "sourced-scan",
+    data: {
+      ...companyConfig,
+      tracked_companies: companyConfig.tracked_companies.map((company) =>
+        company.name === "Disabled Co" ? { ...company, enabled: false } : company
+      ),
+    },
+  });
 
   writeSearchSourcesConfig(repoRoot, [
     { provider: "HiringCafe", label: "legacy 1", enabled: true },
@@ -467,7 +490,8 @@ test("GET /api/search/sources: reports only DB enabled/total searches and tracke
     const res = await fetch(`${baseUrl(server)}/api/search/sources`);
     const body = await res.json();
     assert.deepEqual(body.searches, { enabled: 2, total: 3 });
-    assert.equal(body.trackedCompanies, 1);
+    assert.equal(body.trackedCompanies, 2);
+    assert.equal(body.enabledTrackedCompanies, 1);
   } finally {
     await closeServer(server);
   }

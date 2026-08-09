@@ -200,7 +200,7 @@ test("DOCX onboarding offers AI markdown extraction while preserving raw-text lo
     onboardRoute.indexOf('addRoute("POST", "/api/onboard/resume-docx"'),
     onboardRoute.indexOf('addRoute("POST", "/api/onboard/resume-ai"')
   );
-  assert.match(docxRoute, /resolveAIRoute\(env\)\.type !== "none"/);
+  assert.match(docxRoute, /resolveAIRoute\(env, \{ repoRoot \}\)\.type !== "none"/);
   assert.match(docxRoute, /extractDocxResumeMarkdown\(bytes\)/);
   assert.match(docxRoute, /runResumeExtractBounded/);
   assert.match(docxRoute, /const parsed = parseResume\(text\)/);

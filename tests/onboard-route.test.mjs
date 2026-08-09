@@ -204,8 +204,8 @@ async function getDirect(routes, path) {
 // runSkillStream layer (this route's own DI seam) rather than the SDK's.
 function fakeRunSkillStream(replies, { onCall } = {}) {
   let callCount = 0;
-  return async ({ skill, input, repoRoot, env, tools, onEvent }) => {
-    onCall?.({ skill, input, repoRoot, env, tools });
+  return async ({ skill, input, repoRoot, env, tools, outputSchema, onEvent }) => {
+    onCall?.({ skill, input, repoRoot, env, tools, outputSchema });
     const reply = replies[Math.min(callCount, replies.length - 1)];
     callCount++;
     onEvent({
@@ -1607,7 +1607,7 @@ describe("POST /api/onboard/resume-ai", () => {
     }
   });
 
-  it("passes a blank full_text straight through with no resume_document-derived fallback", async () => {
+  it("ISSUE-003: rejects a schema-valid extraction with a blank transcription", async () => {
     const repoRoot = buildTempRoot();
     const sparseReply = JSON.stringify({ ...JSON.parse(VALID_REPLY), full_text: "   " });
     const runSkillStream = fakeRunSkillStream([
@@ -1616,10 +1616,38 @@ describe("POST /api/onboard/resume-ai", () => {
     const { server } = await bootServer(repoRoot, {}, { runSkillStream });
     try {
       const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
-      assert.equal(status, 200);
-      assert.equal(body.data.fullText, "");
+      assert.equal(status, 422);
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "RESUME_EXTRACTION_INCOMPLETE");
+      assert.match(body.error.message, /usable resume facts/i);
+      assert.equal(body.manual.available, true);
+      assert.equal(body.data, undefined);
     } finally {
       await closeServer(server);
+    }
+  });
+
+  it("ISSUE-003: rejects a nonblank transcription when every factual field and section is empty", async () => {
+    const repoRoot = buildTempRoot();
+    const emptyReply = JSON.stringify({
+      full_text: "Document could not be read.",
+      candidate: { domain: "" },
+      claims: [],
+      sections: { experience: 0, education: 0, skills: 0, projects: 0, other: 0 },
+      targeting_suggestions: { role_buckets: [], keep_signals: [], tracked_companies: [] },
+    });
+    const runSkillStream = fakeRunSkillStream([emptyReply]);
+    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const { status, body } = await postResumeAiDirect(routes, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 422);
+      assert.equal(body.code, "RESUME_EXTRACTION_INCOMPLETE");
+      assert.equal(candidateArtifactGet({ repoRoot, id: "source-resume" }), null);
+      const state = (await getDirect(routes, "/api/onboard/state")).body;
+      assert.equal(state.sourceResumePresent, false);
+    } finally {
+      closeAll();
     }
   });
 
@@ -1787,6 +1815,7 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(calls.length, 1);
       assert.equal(calls[0].skill, "resume-extract");
       assert.deepEqual(calls[0].tools, ["Read"]);
+      assert.equal(calls[0].outputSchema?.title, "Rolester resume-extract skill output");
     } finally {
       await closeServer(server);
     }
@@ -1963,6 +1992,38 @@ describe("POST /api/onboard/resume-ai-stream", () => {
 
       const state = await getDirect(routes, "/api/onboard/state");
       assert.equal(state.body.sourceResumePresent, false);
+    } finally {
+      closeAll();
+    }
+  });
+
+  it("ISSUE-003: emits an incomplete-extraction error instead of done for empty AI facts", async () => {
+    const repoRoot = buildTempRoot();
+    const emptyReply = JSON.stringify({
+      full_text: "Document could not be read.",
+      candidate: { domain: "" },
+      claims: [],
+      sections: { experience: 0, education: 0, skills: 0, projects: 0, other: 0 },
+      targeting_suggestions: { role_buckets: [], keep_signals: [], tracked_companies: [] },
+    });
+    const runSkillStream = fakeRunSkillStream([emptyReply]);
+    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const result = await postResumeAiStreamDirect(routes, "resume.pdf", FAKE_PDF_BYTES);
+
+      assert.deepEqual(
+        result.frames.map((frame) => frame.type),
+        ["saved", "activity", "json", "error"]
+      );
+      const errorFrame = result.frames.at(-1);
+      assert.equal(errorFrame.status, 422);
+      assert.match(errorFrame.message, /usable resume facts/i);
+      assert.equal(
+        result.frames.some((frame) => frame.type === "done"),
+        false
+      );
+      assert.equal(candidateArtifactGet({ repoRoot, id: "source-resume" }), null);
     } finally {
       closeAll();
     }
@@ -2512,6 +2573,68 @@ describe("POST /api/onboard/quick-start", () => {
         false,
         "source resume remains DB artifact; quick-start does not export compatibility files"
       );
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("product quick-start dispatches the first search through workspace-main", async () => {
+    const repoRoot = buildTempRoot();
+    const intents = [];
+    const workspaceAgentRuntime = {
+      async executeIntent({ intent }) {
+        intents.push(intent);
+        return {
+          operationResult: {
+            ok: true,
+            reused: true,
+            run: {
+              id: "first-search-workspace-main",
+              purpose: "first-search",
+              status: "completed",
+              label: "Complete",
+              summary: { scanned: 5, presented: 2, filtered: 3, reconciled: 5 },
+            },
+            sources: { deterministicSources: { attempted: 1 } },
+          },
+        };
+      },
+    };
+    const { server } = await bootServer(repoRoot, {}, { workspaceAgentRuntime });
+    try {
+      await postJson(server, "/api/onboard/init", {});
+      await postJson(server, "/api/onboard/resume", {
+        text: "Ada Lovelace\nada@example.com\nNew York, NY\n\nBuilt agent workflows.",
+        save: true,
+      });
+      await postJson(server, "/api/onboard/candidate/profile", {
+        data: {
+          candidate: {
+            full_name: "Ada Lovelace",
+            email: "ada@example.com",
+            domain: "software engineering",
+          },
+          location: { home: "New York, NY", remote: true },
+        },
+      });
+      await postJson(server, "/api/onboard/candidate/targeting", {
+        data: {
+          role_buckets: [
+            { name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] },
+          ],
+        },
+      });
+
+      const { status, body } = await postJson(server, "/api/onboard/quick-start", {});
+      assert.equal(status, 200);
+      assert.equal(body.run.id, "first-search-workspace-main");
+      assert.deepEqual(intents, [
+        {
+          type: "search.run",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { purpose: "first-search", retryFailed: false },
+        },
+      ]);
     } finally {
       await closeServer(server);
     }

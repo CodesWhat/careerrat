@@ -466,7 +466,13 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     attemptedSources: deterministicSources.attempted,
     scanned: Number(summary.scanned || 0),
     new: Number(summary.new || 0),
+    qualified: Number(summary.qualified || 0),
+    presented: Number(summary.presented ?? summary.new ?? 0),
+    filtered: Math.max(0, Number(summary.scanned || 0) - Number(summary.presented ?? summary.new ?? 0)),
+    reconciled: Number(summary.reconciled || 0),
+    reasonCounts: clone(summary.reasonCounts || {}),
     errorCount: errors.length,
+    errors: clone(errors),
     offerCount: Array.isArray(summary.offers) ? summary.offers.length : 0,
     zeroResults: Number(summary.new || 0) === 0,
     deterministicSources: clone(deterministicSources),
@@ -506,7 +512,9 @@ async function startSearchRun({
       },
       sources: {
         searches: 0,
+        enabledSearches: 0,
         trackedCompanies: 0,
+        enabledTrackedCompanies: 0,
         deterministicSources: {
           attempted: 0,
           rss: 0,
@@ -546,9 +554,11 @@ async function startSearchRun({
       searches: Array.isArray(prepared.searchSources?.searches)
         ? prepared.searchSources.searches.length
         : 0,
+      enabledSearches: searchList(prepared.searchSources).filter(isEnabled).length,
       trackedCompanies: Array.isArray(prepared.sourcedScan?.tracked_companies)
         ? prepared.sourcedScan.tracked_companies.length
         : 0,
+      enabledTrackedCompanies: deterministicSources.supportedAtsCompanies,
       deterministicSources,
     },
     readiness: config.setup?.readiness || {},
@@ -731,6 +741,7 @@ export async function runFirstSearchInBackground({
       env,
       fetchImpl,
       write: true,
+      verify: true,
       onProgress: ({ batch: _batch, ...progress }) => {
         lastProgress = progress;
         recordProgress(progress);

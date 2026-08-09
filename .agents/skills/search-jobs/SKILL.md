@@ -24,7 +24,7 @@ Score every posting you keep using the **STEP 3 — Coarse triage** rules above,
 Finish with **exactly one** fenced ` ```json ` block matching `config/ai-web-search.schema.json` and nothing else — no prose before or after the fence, since the server is a machine reading exactly that one block. Shape:
 
 - `roles[]` — one entry per posting kept, each with `company`, `title`, `url`, `fit_score`, `fit_bucket`, `fit_basis`, `rule_flags`, `source_evidence` (required), plus whichever of `location`, `comp_text`, `posted_at`, `body_text`, `body_partial` you actually have.
-- `queries_run[]` — `{prompt_id, query}` for every `WebSearch` call you actually ran, so the server can report search coverage back to the user.
+- `queries_run[]` — `{prompt_id, query, status, error?}` for every `WebSearch` call you actually ran, so the server can report exact search coverage back to the user. Use `status: "completed"` when the query returned normally. Use `status: "failed"` and a short factual `error` when the search call failed; never hide a failed query or report it as completed.
 
 ## STEP 0 — Prerequisites
 

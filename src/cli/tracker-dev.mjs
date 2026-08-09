@@ -36,6 +36,7 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 import { createServer } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { createWorkspaceAgentRuntime } from "../core/agent/workspace-agent.mjs";
 import { loadLocalAiEnv } from "../core/ai/ai-env.mjs";
 import { createChatRuntime } from "../core/ai/chat-runtime.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
@@ -60,6 +61,7 @@ import {
 } from "../core/tracker/request-security.mjs";
 import { mountAiProvisionRoutes } from "./ai-provision-route.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
+import { mountAutomationRoutes } from "./automation-route.mjs";
 import { mountBoardsRoutes } from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
@@ -67,7 +69,10 @@ import { mountDataRoutes } from "./data-route.mjs";
 import { mountDeepIngestRoutes } from "./deep-ingest-route.mjs";
 import { mountDesktopAuthRoutes } from "./desktop-auth-route.mjs";
 import { mountDiscoveryRoutes } from "./discovery-route.mjs";
-import { mountIntakeRoutes } from "./intake-route.mjs";
+import { mountInstalledRuntimeRoutes } from "./installed-runtime-route.mjs";
+import { captureIntakeText, mountIntakeRoutes } from "./intake-route.mjs";
+import { mountInterviewPrepRoutes } from "./interview-prep-route.mjs";
+import { mountJobArtifactRoutes } from "./job-artifact-route.mjs";
 import { mountLogoRoutes } from "./logo-route.mjs";
 import { mountOnboardRoutes } from "./onboard-route.mjs";
 import { mountPacketRoutes } from "./packet-route.mjs";
@@ -75,6 +80,7 @@ import { mountSearchRoutes } from "./search-route.mjs";
 import { mountSkillRunRoute } from "./skill-run-route.mjs";
 import { mountSourcingRoutes } from "./sourcing-route.mjs";
 import { mountTrackOutcomeRoutes } from "./track-outcome-route.mjs";
+import { mountWorkspaceAgentRoutes } from "./workspace-agent-route.mjs";
 
 const DEFAULT_ROOT = join(fileURLToPath(new URL("../..", import.meta.url)));
 const LOCAL_BROWSER_SECURITY_HEADERS = securityHeaders({
@@ -130,6 +136,11 @@ export function createDevServer({
   // keeps `createDevServer({ repoRoot })` alone still fully functional, same
   // as before M2.
   chatRuntime = createChatRuntime({ repoRoot, env }),
+  workspaceAgentRuntime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env,
+    captureIntakeImpl: captureIntakeText,
+  }),
 } = {}) {
   // Boot-load any stored BYOK key from .internal/ai.env (see ai-env.mjs)
   // before any route captures `env` — a key saved by the onboarding wizard's
@@ -248,12 +259,14 @@ export function createDevServer({
   // Also registers GET /api/runtime/config (the allowlist the SPA's evaluate
   // flow polls to decide whether its decision buttons can run).
   mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env });
+  mountInstalledRuntimeRoutes({ addRoute, repoRoot, env });
+  mountAutomationRoutes({ addRoute, repoRoot });
 
   // M1 of the paid-POC journey — the non-AI onboarding wizard's HTTP surface
   // (candidate file seeding, resume parsing, BYOK key storage) —
   // src/cli/onboard-route.mjs. No page mounted here — apps/web's SPA
   // onboarding wizard is the only client.
-  mountOnboardRoutes({ addRoute, repoRoot, env });
+  mountOnboardRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
 
   // The Electron desktop shell's system-browser Google OAuth handoff (see
   // src/cli/desktop-auth-route.mjs's own header comment for the full flow).
@@ -291,6 +304,14 @@ export function createDevServer({
   // session — see chat-runtime.mjs's header comment for the long-lived
   // query()-with-streaming-input design decision.
   mountChatRoute({ addRoute, repoRoot, chatRuntime, env });
+  mountWorkspaceAgentRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    runTurnImpl: workspaceAgentRuntime.runTurn,
+    executeIntentImpl: workspaceAgentRuntime.executeIntent,
+    captureIntakeImpl: workspaceAgentRuntime.captureIntake,
+  });
   // App-facing supervised discovery pipeline. Shares the same chatRuntime as
   // /api/chat/* so Quick Start / Continue Discovery can start or reconnect to
   // exactly one visible research-boards/discover-companies/search-jobs session.
@@ -305,15 +326,17 @@ export function createDevServer({
   // deterministic (non-AI) ATS-board sweep. Its HTTP surface (run/read the
   // sweep) is src/cli/search-route.mjs. No page mounted here — apps/web's SPA
   // Jobs surface is the only client.
-  mountSearchRoutes({ addRoute, repoRoot, env });
-  mountSourcingRoutes({ addRoute, repoRoot, env });
+  mountSearchRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountSourcingRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
 
   // M4 of the paid-POC journey — the /packet view: review a gated
   // application's tailored resume/cover letter/answers, or generate them live
   // via tailor-application. Its HTTP surface (list + single-packet resolution,
   // path-safety-checked artifact reads) is src/cli/packet-route.mjs. No page
   // mounted here — apps/web's SPA is the only client.
-  mountPacketRoutes({ addRoute, repoRoot, env });
+  mountPacketRoutes({ addRoute, repoRoot, env, workspaceAgentRuntime });
+  mountInterviewPrepRoutes({ addRoute, repoRoot, env });
+  mountJobArtifactRoutes({ addRoute, repoRoot, env });
 
   // M6 — the sqlite-backed data layer's JSON API (src/cli/data-route.mjs).
   // Fail-closed per decision 7: every route 409s with a clear "no database
@@ -339,11 +362,20 @@ export function createDevServer({
   // M9 — Universal Intake's HTTP surface (src/cli/intake-route.mjs): the
   // paste/URL drop zone (POST /api/intake), its confirm-first gate
   // (POST /api/intake/confirm), and the read/dismiss/re-classify routes
-  // alongside it. Shares this SAME chatRuntime instance with mountChatRoute
-  // above (not a second registry) so Lane C's findBySkill/postMessage reuse
-  // an already-live ingest-profile/discover-companies-style session exactly
-  // as /api/chat/* would see it.
-  mountIntakeRoutes({ addRoute, repoRoot, env, chatRuntime });
+  // alongside it. New interactive dispatches go through workspaceAgentRuntime
+  // so buttons preserve workspace-main context; chatRuntime remains only for
+  // legacy Lane-C intake rows created before that contract.
+  mountIntakeRoutes({
+    addRoute,
+    repoRoot,
+    env,
+    chatRuntime,
+    workspaceAgentRuntime,
+    captureTextImpl: async ({ text, inputKind }) => {
+      const result = await workspaceAgentRuntime.captureIntake({ text, inputKind });
+      return result.intake;
+    },
+  });
 
   // M10 — boot-time Lane-C orphan reconciliation (see
   // src/core/db/verbs/intake.mjs's reconcileOrphanedLaneCIntakeItems doc

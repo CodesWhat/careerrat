@@ -13,25 +13,41 @@ test("jd-text and job-url both dispatch to Lane B: run_skill evaluate-job", () =
   }
 });
 
-test("recruiter-email dispatches to Lane C: chat_skill email-comms", () => {
+test("ISSUE-038 recruiter-email dispatches into the one workspace agent", () => {
   const result = resolveIntakeDispatch({
     kind: "recruiter-email",
     entities: {},
     trackerMatch: null,
   });
-  assert.deepEqual(result, { lane: "C", action: "chat_skill", params: { skill: "email-comms" } });
+  assert.deepEqual(result, {
+    lane: "W",
+    action: "workspace_intent",
+    params: { intentType: "communication.capture-inbound" },
+  });
 });
 
-test("interview-transcript dispatches to Lane C: chat_skill interview-prep", () => {
-  const result = resolveIntakeDispatch({
+test("interview-transcript requires an unambiguous application before entering workspace-main", () => {
+  const unmatched = resolveIntakeDispatch({
     kind: "interview-transcript",
     entities: {},
     trackerMatch: null,
   });
-  assert.deepEqual(result, {
-    lane: "C",
-    action: "chat_skill",
-    params: { skill: "interview-prep" },
+  assert.equal(unmatched.action, "needs_you");
+
+  const matched = resolveIntakeDispatch({
+    kind: "interview-transcript",
+    entities: { interviewDate: "2030-01-08T15:00:00.000Z" },
+    trackerMatch: {
+      matched: true,
+      recordType: "application",
+      id: "app-1",
+      confidence: "company_role",
+    },
+  });
+  assert.deepEqual(matched, {
+    lane: "W",
+    action: "workspace_intent",
+    params: { intentType: "interview.capture-context" },
   });
 });
 

@@ -1,3 +1,4 @@
+import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
 import {
   latestSourcingRunForUi,
   runFirstSearchInBackground,
@@ -36,14 +37,34 @@ function purposeFromUrl(req) {
   return requestUrl.searchParams.get("purpose") || "first-search";
 }
 
-function startBackground({ repoRoot, env, fetchImpl, result }) {
+function startBackground({
+  repoRoot,
+  env,
+  fetchImpl,
+  result,
+  runSearchInBackgroundImpl,
+  workspaceAgentRuntime,
+}) {
   if (result?.reused === true || result?.run?.status !== "running") return;
-  void runFirstSearchInBackground({
-    repoRoot,
-    env,
-    fetchImpl,
-    runId: result.run.id,
-  }).catch(() => {});
+  void runSearchInBackgroundImpl({ repoRoot, env, fetchImpl, runId: result.run.id })
+    .then((run) => workspaceAgentRuntime?.recordSearchCompletion?.({ run }))
+    .catch(() => {});
+}
+
+async function startThroughWorkspace({ workspaceAgentRuntime, purpose, retryFailed }) {
+  const thread = await workspaceAgentRuntime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose, retryFailed: retryFailed === true },
+    },
+  });
+  if (!thread?.operationResult) {
+    const error = new Error("The workspace agent did not return a search run.");
+    error.code = "SEARCH_START_FAILED";
+    throw error;
+  }
+  return thread.operationResult;
 }
 
 export function mountSourcingRoutes({
@@ -51,6 +72,10 @@ export function mountSourcingRoutes({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
+  workspaceAgentRuntime,
+  startFirstSearchImpl = startFirstSearchRun,
+  startManualSearchImpl = startManualSearchRun,
+  runSearchInBackgroundImpl = runFirstSearchInBackground,
 } = {}) {
   addRoute("GET", "/api/sourcing/runs/latest", (req, res) => {
     try {
@@ -65,8 +90,21 @@ export function mountSourcingRoutes({
     try {
       const latest = latestSourcingRunForUi({ repoRoot, env, purpose: "first-search" });
       const retryFailed = latest.run?.status === "failed";
-      const result = await startFirstSearchRun({ repoRoot, env, fetchImpl, retryFailed });
-      startBackground({ repoRoot, env, fetchImpl, result });
+      const result = workspaceAgentRuntime
+        ? await startThroughWorkspace({
+            workspaceAgentRuntime,
+            purpose: "first-search",
+            retryFailed,
+          })
+        : await startFirstSearchImpl({ repoRoot, env, fetchImpl, retryFailed });
+      startBackground({
+        repoRoot,
+        env,
+        fetchImpl,
+        result,
+        runSearchInBackgroundImpl,
+        workspaceAgentRuntime,
+      });
       sendJson(res, result.reused ? 200 : 202, result);
     } catch (err) {
       sendRouteError(res, err);
@@ -75,8 +113,21 @@ export function mountSourcingRoutes({
 
   addRoute("POST", "/api/sourcing/search/start", async (_req, res) => {
     try {
-      const result = await startManualSearchRun({ repoRoot, env, fetchImpl });
-      startBackground({ repoRoot, env, fetchImpl, result });
+      const result = workspaceAgentRuntime
+        ? await startThroughWorkspace({
+            workspaceAgentRuntime,
+            purpose: "manual-search",
+            retryFailed: false,
+          })
+        : await startManualSearchImpl({ repoRoot, env, fetchImpl });
+      startBackground({
+        repoRoot,
+        env,
+        fetchImpl,
+        result,
+        runSearchInBackgroundImpl,
+        workspaceAgentRuntime,
+      });
       sendJson(res, result.reused ? 200 : 202, result);
     } catch (err) {
       sendRouteError(res, err);

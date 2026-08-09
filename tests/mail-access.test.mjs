@@ -16,6 +16,7 @@ test("mail access: canUseMailAccess delegates to the automation switchboard", ()
   let verdict = canUseMailAccess({ platform: "outlook", data: cfg });
   assert.equal(verdict.allowed, false);
 
+  cfg.setup_mode = "advanced";
   cfg.capabilities.mail_access.enabled = true;
   cfg.capabilities.mail_access.platforms.outlook = true;
   cfg.consent.outlook = true;
@@ -26,6 +27,7 @@ test("mail access: canUseMailAccess delegates to the automation switchboard", ()
 
 test("mail access: generic webmail is a first-class verification-code platform", () => {
   const cfg = defaultAutomation();
+  cfg.setup_mode = "advanced";
   cfg.capabilities.mail_access.enabled = true;
   cfg.capabilities.mail_access.platforms.webmail = true;
   cfg.consent.webmail = true;

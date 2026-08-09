@@ -151,22 +151,22 @@ describe("onboarding shell styles", () => {
     assert.match(finePrintText, /display:\s*inline/);
   });
 
-  it("centers the signed-in account stack and lets the Clerk avatar fill its tile", () => {
+  it("keeps the optional signed-in account fallback compact and horizontally balanced", () => {
     const panel = cssRule(".onboarding-account__panel--signed-in");
     const main = cssRule(".onboarding-account__signed-in-main");
     const label = cssRule(".onboarding-account__signed-in-label");
-    const avatar = cssRule(".onboarding-account__avatar");
     const confirmation = cssRule(".onboarding-key__confirmation.onboarding-account__confirmation");
 
-    assert.match(panel, /align-items:\s*center/);
-    assert.match(panel, /justify-content:\s*center/);
-    assert.match(panel, /gap:\s*16px/);
+    assert.match(panel, /min-height:\s*0/);
+    assert.match(panel, /gap:\s*8px/);
+    assert.match(panel, /padding:\s*12px 14px/);
+    assert.match(main, /flex-direction:\s*row/);
+    assert.match(main, /justify-content:\s*space-between/);
+    assert.match(main, /align-items:\s*center/);
     assert.match(main, /flex:\s*0 0 auto/);
-    assert.match(main, /gap:\s*14px/);
-    assert.match(label, /align-self:\s*center/);
-    assert.match(avatar, /width:\s*128px/);
-    assert.match(avatar, /padding:\s*12px/);
-    assert.match(confirmation, /align-self:\s*center/);
+    assert.match(label, /align-self:\s*flex-start/);
+    assert.match(confirmation, /flex:\s*0 0 auto/);
+    assert.match(confirmation, /align-self:\s*auto/);
   });
 
   it("keeps the welcome headline spans from wrapping into extra visual lines", () => {

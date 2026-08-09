@@ -393,3 +393,76 @@ test("POST /api/sourcing/search/start creates a manual-search run without using 
     await closeServer(server);
   }
 });
+
+test("product search buttons dispatch through workspace-main and return background completion there", async () => {
+  const repoRoot = tempRepo();
+  markSearchReady(repoRoot);
+  seedDeterministicSources(repoRoot);
+  const intents = [];
+  const completions = [];
+  let resolveRecorded;
+  const recorded = new Promise((resolve) => {
+    resolveRecorded = resolve;
+  });
+  const workspaceAgentRuntime = {
+    async executeIntent({ intent }) {
+      intents.push(intent);
+      const purpose = intent.input.purpose;
+      return {
+        operationResult: {
+          ok: true,
+          reused: false,
+          run: {
+            id: `${purpose}-workspace-main`,
+            purpose,
+            status: "running",
+            label: "Searching",
+          },
+          sources: { deterministicSources: { attempted: 1 } },
+        },
+      };
+    },
+    async recordSearchCompletion({ run }) {
+      completions.push(run);
+      resolveRecorded();
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime,
+    startFirstSearchImpl: async () => {
+      throw new Error("direct first-search path should not run");
+    },
+    startManualSearchImpl: async () => {
+      throw new Error("direct manual-search path should not run");
+    },
+    runSearchInBackgroundImpl: async ({ runId }) => ({
+      id: runId,
+      purpose: runId.startsWith("first-search") ? "first-search" : "manual-search",
+      status: "completed",
+      summary: { scanned: 4, presented: 2, filtered: 2, reconciled: 4 },
+    }),
+  });
+  try {
+    const manual = await postJson(server, "/api/sourcing/search/start", {});
+    assert.equal(manual.status, 202);
+    assert.equal(manual.body.run.id, "manual-search-workspace-main");
+    assert.deepEqual(intents[0], {
+      type: "search.run",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: { purpose: "manual-search", retryFailed: false },
+    });
+    await recorded;
+    assert.equal(completions[0].status, "completed");
+
+    const first = await postJson(server, "/api/sourcing/first-run/start", {});
+    assert.equal(first.status, 202);
+    assert.equal(first.body.run.id, "first-search-workspace-main");
+    assert.deepEqual(intents[1], {
+      type: "search.run",
+      entity: { type: "workspace", id: "workspace-main" },
+      input: { purpose: "first-search", retryFailed: false },
+    });
+  } finally {
+    await closeServer(server);
+  }
+});

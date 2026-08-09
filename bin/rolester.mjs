@@ -32,9 +32,7 @@
 
 import { spawn, spawnSync } from "node:child_process";
 import {
-  accessSync,
   closeSync,
-  constants,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -42,8 +40,12 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { delimiter, join } from "node:path";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  findInstalledExecutable,
+  INSTALLED_RUNTIME_DEFINITIONS,
+} from "../src/core/ai/installed-runtimes.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../src/core/paths/workspace.mjs";
 import {
   extractOver,
@@ -107,10 +109,10 @@ const STARTER_PROMPT =
 // the starter prompt as a single positional argument (the seed-a-session form
 // both Claude Code and Codex accept). Declared above the command dispatch so
 // runStart can read them on its synchronous (no-await) --no-dashboard path.
-const AGENT_CANDIDATES = [
-  { name: "Claude Code", bin: "claude" },
-  { name: "Codex", bin: "codex" },
-];
+const AGENT_CANDIDATES = INSTALLED_RUNTIME_DEFINITIONS.map(({ name, binaries }) => ({
+  name,
+  bin: binaries[0],
+}));
 
 if (command === "version" || command === "--version" || command === "-v") {
   console.log(readVersion());
@@ -382,22 +384,7 @@ function resolveForcedAgent(name) {
 
 // Resolve an executable on PATH without running it (no version probes).
 function findOnPath(name) {
-  if (!name) return null;
-  const isWin = process.platform === "win32";
-  const exts = isWin ? (process.env.PATHEXT || ".EXE;.CMD;.BAT").split(";") : [""];
-  for (const dir of (process.env.PATH || "").split(delimiter)) {
-    if (!dir) continue;
-    for (const ext of exts) {
-      const full = join(dir, name + ext);
-      try {
-        accessSync(full, isWin ? constants.F_OK : constants.X_OK);
-        return full;
-      } catch {
-        /* keep looking */
-      }
-    }
-  }
-  return null;
+  return name ? findInstalledExecutable([name]) : null;
 }
 
 function run(scriptPath, extra) {

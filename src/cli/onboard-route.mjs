@@ -51,8 +51,9 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
+import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
-import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
+import { makeBoundedAIEnvelope, runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { validateAiProviderKey } from "../core/ai/provider-validation.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
@@ -202,6 +203,24 @@ const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
 // ---------------------------------------------------------------------------
 // Pure helpers
 // ---------------------------------------------------------------------------
+
+function hasUsableResumeExtraction(extracted) {
+  if (!String(extracted?.full_text || "").trim()) return false;
+
+  // Targeting suggestions and `candidate.domain` can be inferred by the
+  // model, so they do not prove that the uploaded document was actually
+  // transcribed. Require at least one literal candidate field, claim, or
+  // detected source section before accepting and persisting the result.
+  const candidateFacts = Object.entries(extracted?.candidate || {}).some(
+    ([key, value]) => key !== "domain" && String(value ?? "").trim()
+  );
+  const claimFacts = (extracted?.claims || []).some((claim) => String(claim?.claim ?? "").trim());
+  const sectionFacts = Object.values(extracted?.sections || {}).some(
+    (count) => Number.isFinite(Number(count)) && Number(count) > 0
+  );
+
+  return candidateFacts || claimFacts || sectionFacts;
+}
 
 // Detect resume text that is actually binary (a PDF/DOCX read client-side as
 // text, per onboard-page.mjs's FileReader.readAsText hint). Two tells: literal
@@ -772,6 +791,9 @@ export async function prepareQuickStartFirstSearch({
   env = process.env,
   fetchImpl = fetch,
   retry = false,
+  workspaceAgentRuntime,
+  startFirstSearchImpl = startFirstSearchRun,
+  runSearchInBackgroundImpl = runFirstSearchInBackground,
 } = {}) {
   const pathCtx = { repoRoot, env };
   if (!dbExists(pathCtx)) {
@@ -825,19 +847,31 @@ export async function prepareQuickStartFirstSearch({
   }
 
   try {
-    const result = await startFirstSearchRun({
-      repoRoot,
-      env,
-      fetchImpl,
-      retryFailed: retry === true,
-    });
+    const result = workspaceAgentRuntime
+      ? (
+          await workspaceAgentRuntime.executeIntent({
+            intent: {
+              type: "search.run",
+              entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+              input: { purpose: "first-search", retryFailed: retry === true },
+            },
+          })
+        )?.operationResult
+      : await startFirstSearchImpl({
+          repoRoot,
+          env,
+          fetchImpl,
+          retryFailed: retry === true,
+        });
+    if (!result) {
+      const error = new Error("The workspace agent did not return a first-search run.");
+      error.code = "SEARCH_START_FAILED";
+      throw error;
+    }
     if (result.reused !== true && result.run?.status === "running") {
-      void runFirstSearchInBackground({
-        repoRoot,
-        env,
-        fetchImpl,
-        runId: result.run.id,
-      }).catch(() => {});
+      void runSearchInBackgroundImpl({ repoRoot, env, fetchImpl, runId: result.run.id })
+        .then((run) => workspaceAgentRuntime?.recordSearchCompletion?.({ run }))
+        .catch(() => {});
     }
 
     // Best-effort: seed AI search prompts from the now-ready targeting/profile
@@ -906,6 +940,9 @@ export function mountOnboardRoutes({
   extractDocxResumeText = defaultExtractDocxResumeText,
   extractDocxResumeMarkdown = defaultExtractDocxResumeMarkdown,
   fetchImpl = fetch,
+  workspaceAgentRuntime,
+  startFirstSearchImpl = startFirstSearchRun,
+  runSearchInBackgroundImpl = runFirstSearchInBackground,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -948,7 +985,7 @@ export function mountOnboardRoutes({
           sourceResumePresent:
             dbSourceResumePresent(pathCtx) ||
             existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md")),
-          keyConfigured: resolveAIRoute(env).type !== "none",
+          keyConfigured: resolveAIRoute(env, { repoRoot }).type !== "none",
           searchSourcesPresent: dbSearchSourcesPresent(pathCtx, config),
           logoImageTokenConfigured: !!(integrations.logo_dev_token || publishableToken),
           logoSearchTokenConfigured: !!(integrations.logo_dev_secret_key || secretKey),
@@ -1006,7 +1043,7 @@ export function mountOnboardRoutes({
       files,
       data,
       sourceResumePresent: existsSync(userPath(pathCtx, sourceResumeEntry.candidatePath)),
-      keyConfigured: resolveAIRoute(env).type !== "none",
+      keyConfigured: resolveAIRoute(env, { repoRoot }).type !== "none",
       searchSourcesPresent: existsSync(userPath(pathCtx, "config/search-sources.yml")),
       logoImageTokenConfigured: !!publishableToken,
       logoSearchTokenConfigured: !!secretKey,
@@ -1243,7 +1280,7 @@ export function mountOnboardRoutes({
     // route is configured means a DOCX upload with no key behaves exactly
     // like it did before this route existed — no invokeResumeExtract, no
     // runSkillStream call, nothing to fail.
-    if (resolveAIRoute(env).type !== "none") {
+    if (resolveAIRoute(env, { repoRoot }).type !== "none") {
       try {
         const markdown = await extractDocxResumeMarkdown(bytes);
         const markdownRelPath = `${savedRelPath}.md`;
@@ -1692,6 +1729,7 @@ export function mountOnboardRoutes({
         // model this server is normally configured for.
         env: correction ? env : { ...env, ANTHROPIC_MODEL: fastModel },
         tools: ["Read"],
+        outputSchema: schema,
         onEvent: (evt) => {
           if (onProgress) {
             if (evt.type === "system") {
@@ -1729,7 +1767,7 @@ export function mountOnboardRoutes({
 
     onProgress?.({ type: "activity", message: "Warming up the reader…" });
 
-    return runBoundedAI({
+    const outcome = await runBoundedAI({
       labels: RESUME_AI_LABELS,
       schema,
       manual: RESUME_AI_MANUAL,
@@ -1740,6 +1778,22 @@ export function mountOnboardRoutes({
         return invokeResumeExtract({ correction });
       },
     });
+
+    if (outcome.body.ok && !hasUsableResumeExtraction(outcome.body.data)) {
+      return makeBoundedAIEnvelope({
+        ok: false,
+        status: 422,
+        code: "RESUME_EXTRACTION_INCOMPLETE",
+        error: {
+          message:
+            "AI could not extract usable resume facts. Try a clearer file or use the manual text path.",
+        },
+        ai: outcome.body.ai,
+        manual: outcome.body.manual,
+      });
+    }
+
+    return outcome;
   }
 
   // -------------------------------------------------------------------------
@@ -1982,6 +2036,9 @@ export function mountOnboardRoutes({
       env,
       fetchImpl,
       retry: body?.retry === true,
+      workspaceAgentRuntime,
+      startFirstSearchImpl,
+      runSearchInBackgroundImpl,
     });
     sendJson(res, result.status, result.body);
   });
@@ -2084,7 +2141,7 @@ export function mountOnboardRoutes({
 
   addRoute("GET", "/api/settings/ai", (_req, res) => {
     sendJson(res, 200, {
-      route: resolveAIRoute(env).type,
+      route: resolveAIRoute(env, { repoRoot }).type,
       keyPresent: !!env.ANTHROPIC_API_KEY,
     });
   });

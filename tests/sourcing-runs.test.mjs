@@ -42,6 +42,20 @@ test("sourcingRunLatest returns not_started when no run exists for the purpose",
   });
 });
 
+test("AI web-search runs use the same durable run ledger", () => {
+  const repoRoot = tempRepo();
+  const started = sourcingRunStart({
+    repoRoot,
+    purpose: "ai-web-search",
+    metadata: { promptIds: ["p1"] },
+  });
+
+  assert.equal(started.run.purpose, "ai-web-search");
+  assert.match(started.run.id, /^ai-web-search-/);
+  assert.deepEqual(started.run.metadata.promptIds, ["p1"]);
+  assert.equal(sourcingRunLatest({ repoRoot, purpose: "ai-web-search" }).run.id, started.run.id);
+});
+
 test("sourcingRunStart persists running state and complete persists summary JSON", () => {
   const repoRoot = tempRepo();
 

@@ -7,7 +7,9 @@
 //
 // Lane A — pure deterministic verb call, no AI at execution time.
 // Lane B — the existing embedded one-shot runtime (POST /api/skill/run).
-// Lane C — the existing chat runtime (findBySkill reuse / new session).
+// Lane W — the one durable workspace agent. Confirmed intake becomes a typed
+// intent on workspace-main instead of starting a skill-specific chat.
+// Lane C — retained only for legacy intake rows created before Lane W.
 //
 // "status-update" is the one kind that can ALSO resolve to needs_you: per
 // the decisions memo, an intake item never guesses which application a
@@ -18,6 +20,17 @@
 // exactly one row at that company exists — two-or-more stays unmatched.
 const NEEDS_YOU = (reason) => ({ lane: null, action: "needs_you", params: { reason } });
 
+function isUnambiguousApplicationMatch(trackerMatch) {
+  return (
+    trackerMatch?.matched === true &&
+    trackerMatch.recordType === "application" &&
+    Boolean(trackerMatch.id) &&
+    ["exact_req_id", "exact_url", "company_role", "company_unique"].includes(
+      trackerMatch.confidence
+    )
+  );
+}
+
 export function resolveIntakeDispatch({ kind, entities = {}, trackerMatch = null } = {}) {
   switch (kind) {
     case "jd-text":
@@ -25,20 +38,26 @@ export function resolveIntakeDispatch({ kind, entities = {}, trackerMatch = null
       return { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } };
 
     case "recruiter-email":
-      return { lane: "C", action: "chat_skill", params: { skill: "email-comms" } };
+      return {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "communication.capture-inbound" },
+      };
 
     case "interview-transcript":
-      return { lane: "C", action: "chat_skill", params: { skill: "interview-prep" } };
+      if (!isUnambiguousApplicationMatch(trackerMatch)) {
+        return NEEDS_YOU(
+          "no unambiguous tracked application matched this interview context — choose the application before saving it"
+        );
+      }
+      return {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "interview.capture-context" },
+      };
 
     case "status-update": {
-      const isUnambiguousApplicationMatch =
-        trackerMatch?.matched === true &&
-        trackerMatch.recordType === "application" &&
-        Boolean(trackerMatch.id) &&
-        ["exact_req_id", "exact_url", "company_role", "company_unique"].includes(
-          trackerMatch.confidence
-        );
-      if (!isUnambiguousApplicationMatch) {
+      if (!isUnambiguousApplicationMatch(trackerMatch)) {
         return NEEDS_YOU(
           "no unambiguous tracked application matched this status update — never guess which application it refers to"
         );

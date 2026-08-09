@@ -145,6 +145,8 @@ function bootServer(repoRoot, opts = {}) {
     loadSdk: opts.loadSdk,
     runSkillStream: opts.runSkillStream,
     chatRuntime: opts.chatRuntime,
+    workspaceAgentRuntime: opts.workspaceAgentRuntime,
+    captureTextImpl: opts.captureTextImpl,
   });
 
   const server = createServer((req, res) => {
@@ -286,6 +288,37 @@ test("POST /api/intake: 400 on an invalid explicit inputKind", async () => {
     });
     assert.equal(status, 400);
     assert.match(body.error, /"text" or "url"/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake can preserve the current client contract while routing through workspace-main", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const calls = [];
+  const server = await bootServer(repoRoot, {
+    captureTextImpl: async (input) => {
+      calls.push(input);
+      return {
+        id: "intake-workspace-1",
+        status: "proposed",
+        kind: "job-url",
+        dispatchSummary: "Evaluate this job before any application work.",
+      };
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/intake", {
+      text: "https://jobs.example.test/temporal/applied-ai-engineer",
+      inputKind: "url",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.item.id, "intake-workspace-1");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].repoRoot, repoRoot);
+    assert.equal(calls[0].text, "https://jobs.example.test/temporal/applied-ai-engineer");
+    assert.equal(calls[0].inputKind, "url");
   } finally {
     await closeServer(server);
   }
@@ -665,11 +698,14 @@ test("POST /api/intake/classify: re-runs classification on an existing item and 
     assert.equal(body.item.status, "proposed");
     assert.equal(body.item.kind, "recruiter-email");
     assert.deepEqual(body.item.dispatch, {
-      lane: "C",
-      action: "chat_skill",
-      params: { skill: "email-comms" },
+      lane: "W",
+      action: "workspace_intent",
+      params: { intentType: "communication.capture-inbound" },
     });
-    assert.equal(body.item.dispatchSummary, "hand off to email-comms");
+    assert.equal(
+      body.item.dispatchSummary,
+      "capture the recruiter message in your workspace conversation"
+    );
   } finally {
     await closeServer(server);
   }
@@ -744,6 +780,74 @@ test("POST /api/intake/confirm: Lane A calls appSetStatus directly and settles a
   }
 });
 
+test("chat-first POST /api/intake/confirm routes an outcome button through workspace-main", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  seedApp(repoRoot, { id: "app-1", company: "Acme", role: "SRE", status: "applied" });
+  const { id } = intakeCapture({ repoRoot, rawInput: "Acme rejected me", inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "status-update",
+      classification: classificationFixture({
+        kind: "status-update",
+        entities: { statusTo: "rejected", statusNote: "Role was filled internally." },
+      }),
+      trackerMatch: {
+        matched: true,
+        recordType: "application",
+        id: "app-1",
+        confidence: "company_unique",
+      },
+      dispatch: {
+        lane: "A",
+        action: "app_set_status",
+        params: {
+          applicationId: "app-1",
+          to: "rejected",
+          note: "Role was filled internally.",
+        },
+      },
+    },
+  });
+
+  const seen = [];
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime: {
+      async executeIntent(input) {
+        seen.push(input);
+        return {
+          thread: { id: "workspace-main" },
+          messages: [{ kind: "action_result", metadata: { state: "rejected" } }],
+        };
+      },
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(status, 200);
+    assert.equal(body.item.status, "done");
+    assert.equal(body.item.result.threadId, "workspace-main");
+    assert.deepEqual(seen, [
+      {
+        intent: {
+          type: "outcome.record",
+          entity: { type: "application", id: "app-1" },
+          input: {
+            to: "rejected",
+            note: "Role was filled internally.",
+            sourceIntakeId: id,
+          },
+        },
+      },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/intake/confirm: Lane B fires runSkillStream in the background — 'running' immediately, 'done' once it settles", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -810,6 +914,80 @@ test("POST /api/intake/confirm: Lane B settles to 'error' when the background ru
     await waitForPredicate(() => intakeOne({ repoRoot, id }).status === "error");
     const settled = intakeOne({ repoRoot, id });
     assert.match(settled.error, /skill run blew up/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("ISSUE-038 POST /api/intake/confirm routes recruiter email through workspace-main, never a skill chat", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({
+    repoRoot,
+    rawInput:
+      "From: Jordan Lee <jordan@temporal.example>\nSubject: Next steps\nCan you talk Tuesday?",
+    inputKind: "text",
+  });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "recruiter-email",
+      classification: classificationFixture({
+        kind: "recruiter-email",
+        entities: {
+          company: "Temporal Labs",
+          role: "Applied AI Engineer",
+          contactName: "Jordan Lee",
+          contactEmail: "jordan@temporal.example",
+        },
+      }),
+      trackerMatch: null,
+      dispatch: {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "communication.capture-inbound" },
+      },
+    },
+  });
+
+  const seen = [];
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime: {
+      async executeIntent(input) {
+        seen.push(input);
+        return {
+          thread: { id: "workspace-main" },
+          messages: [
+            {
+              kind: "action_result",
+              metadata: { communicationId: "comm-temporal-applied-ai-engineer-email" },
+            },
+          ],
+        };
+      },
+    },
+    chatRuntime: {
+      findBySkill() {
+        throw new Error("recruiter intake must not consult skill chat sessions");
+      },
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(status, 200);
+    assert.equal(body.item.status, "done");
+    assert.equal(body.item.result.threadId, "workspace-main");
+    assert.equal(body.item.result.communicationId, "comm-temporal-applied-ai-engineer-email");
+    assert.deepEqual(seen, [
+      {
+        intent: {
+          type: "communication.capture-inbound",
+          entity: { type: "intake", id },
+        },
+      },
+    ]);
   } finally {
     await closeServer(server);
   }
