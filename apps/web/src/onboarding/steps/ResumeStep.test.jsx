@@ -137,7 +137,8 @@ describe("ResumeStep shell layout", () => {
     expect(html).toContain("hopes-and-dreams.pdf");
     expect(html).toContain("onboarding-resume__document-object");
     expect(html).toContain("application/pdf");
-    expect(html).toContain("data:application/pdf;base64");
+    expect(html).toContain("blob:");
+    expect(html).not.toContain("data:application/pdf;base64");
     expect(html).not.toContain("onboarding-resume__preview-panel");
   });
 
@@ -183,21 +184,21 @@ describe("ResumeStep DOCX intake", () => {
     expect(getResumeUploadMode("resume.pdf", { aiEnabled: false })).toBe("ai-unavailable");
   });
 
-  it("describes unavailable managed AI without asking for a user API key", async () => {
+  it("describes an unavailable AI runtime without asking for a user API key", async () => {
     const parseResumeFileForReview = ResumeStepModule.parseResumeFileForReview;
     const describeResumeUploadError = ResumeStepModule.describeResumeUploadError;
 
     await expect(
       parseResumeFileForReview({ name: "resume.pdf" }, { aiEnabled: false })
-    ).rejects.toThrow("Managed AI required");
+    ).rejects.toThrow("AI runtime required");
 
     expect(describeResumeUploadError(new Error("missing"), { mode: "ai-unavailable" })).toEqual({
       message:
-        "Managed AI is needed to extract PDF/image resumes. Paste your resume text below for now.",
+        "A signed-in AI tool is needed to extract PDF/image resumes. Choose one in setup, or paste your resume text below.",
       showPaste: true,
     });
     expect(describeResumeUploadError({ status: 501 })).toEqual({
-      message: "Managed AI is unavailable right now — paste your resume text below instead.",
+      message: "The selected AI tool is unavailable right now — paste your resume text below instead.",
       showPaste: true,
     });
   });

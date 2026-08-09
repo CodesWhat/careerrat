@@ -23,7 +23,9 @@ test("the shared policy exposes the complete defense-in-depth header set", () =>
   const csp = buildContentSecurityPolicy({ inlineScripts: ["window.x=1;"] });
   assert.match(csp, /default-src 'self'/);
   assert.match(csp, /frame-ancestors 'none'/);
-  assert.match(csp, /object-src 'self'/);
+  assert.match(csp, /frame-src 'self' blob: https:\/\/challenges\.cloudflare\.com/);
+  assert.match(csp, /object-src 'self' blob:/);
+  assert.doesNotMatch(csp.match(/(?:frame|object)-src[^;]*/g)?.join(" ") || "", /data:/);
   assert.match(csp, /https:\/\/challenges\.cloudflare\.com/);
   assert.equal(securityHeaders()["X-Content-Type-Options"], "nosniff");
   assert.equal(securityHeaders()["X-Frame-Options"], "DENY");

@@ -24,7 +24,7 @@ const LOCAL_ACCEPT = ".docx,.txt,.md,.markdown";
 const AI_ACCEPT = ".pdf,.png,.jpg,.jpeg,.webp";
 const DOCX_FALLBACK_COPY =
   "We could not read usable text from that DOCX. The original file was saved; paste text or upload PDF, TXT, or Markdown.";
-const EXAMPLE_PDF_DATA_URI = `data:application/pdf;base64,${[
+const EXAMPLE_PDF_BASE64 = [
   "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBv",
   "YmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGlj",
   "YSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250",
@@ -51,7 +51,26 @@ const EXAMPLE_PDF_DATA_URI = `data:application/pdf;base64,${[
   "PDllYmU0NjY5YzgwZjIwNjJlNmJjNWE3YmNjNDhjZTA2Pjw5ZWJlNDY2OWM4MGYyMDYyZTZiYzVhN2JjYzQ4Y2Uw",
   "Nj5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0lu",
   "Zm8gNiAwIFIKL1Jvb3QgNSAwIFIKL1NpemUgOQo+PgpzdGFydHhyZWYKMTMxMgolJUVPRgo=",
-].join("")}`;
+].join("");
+
+function pdfBlobUrlFromBase64(base64) {
+  if (
+    typeof globalThis.atob !== "function" ||
+    typeof globalThis.Blob !== "function" ||
+    typeof globalThis.URL?.createObjectURL !== "function"
+  ) {
+    return null;
+  }
+  try {
+    const bytes = Uint8Array.from(globalThis.atob(base64), (char) => char.charCodeAt(0));
+    return globalThis.URL.createObjectURL(
+      new globalThis.Blob([bytes], { type: "application/pdf" })
+    );
+  } catch {
+    return null;
+  }
+}
+
 export const EXAMPLE_FILE_ITEM = {
   id: "example-hopes-and-dreams",
   name: "hopes-and-dreams.pdf",
@@ -60,7 +79,9 @@ export const EXAMPLE_FILE_ITEM = {
   status: "example",
   detail: "Example file",
   previewKind: "pdf",
-  previewUrl: EXAMPLE_PDF_DATA_URI,
+  // Keep previews on the same blob-only path as real uploads. A data URI here
+  // would require broadening frame/object CSP to permit arbitrary data documents.
+  previewUrl: pdfBlobUrlFromBase64(EXAMPLE_PDF_BASE64),
   previewText: "Hello World",
 };
 
@@ -293,7 +314,7 @@ export async function parseResumeFileForReview(
   }
   const ext = extOf(file?.name);
   const err = new Error(
-    mode === "ai-unavailable" ? "Managed AI required" : unsupportedFileMessage(ext)
+    mode === "ai-unavailable" ? "AI runtime required" : unsupportedFileMessage(ext)
   );
   err.status = mode === "ai-unavailable" ? 501 : 400;
   err.body = mode === "unsupported" ? { error: unsupportedFileMessage(ext) } : undefined;
@@ -308,13 +329,13 @@ export function describeResumeUploadError(err, { mode = "unsupported", ext = "" 
   if (mode === "ai-unavailable") {
     return {
       message:
-        "Managed AI is needed to extract PDF/image resumes. Paste your resume text below for now.",
+        "A signed-in AI tool is needed to extract PDF/image resumes. Choose one in setup, or paste your resume text below.",
       showPaste: true,
     };
   }
   if (err?.status === 501) {
     return {
-      message: "Managed AI is unavailable right now — paste your resume text below instead.",
+      message: "The selected AI tool is unavailable right now — paste your resume text below instead.",
       showPaste: true,
     };
   }
