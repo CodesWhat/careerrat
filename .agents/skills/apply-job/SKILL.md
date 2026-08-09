@@ -441,7 +441,7 @@ a re-run never double-logs:
 
 If any new application limit was learned during the apply flow (e.g. a blocker message or FAQ stating a reapply window): record it on the tracker row and, after confirmation, persist the durable limit with `rolester data candidate limits upsert --data '<json row>'` in DB mode. Legacy compatibility writes remain confirm-first.
 
-Commit with an emoji-conventional message (e.g. `✨ feat(apply): submit <Role> at <Company>`).
+Commit with a Conventional Commits message (e.g. `feat(apply): submit <Role> at <Company>`).
 
 **Interview recording (opt-in):** When the user books an interview, recommend
 they record it with a tool such as Granola or equivalent. Surface the consent

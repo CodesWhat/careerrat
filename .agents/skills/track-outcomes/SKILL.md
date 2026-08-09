@@ -335,10 +335,10 @@ A stated gate must never live only in chat. Do not hardcode it into skill prose.
 
 ## STEP 8 — Commit
 
-Commit `workspace/tracker.json`, any updated `candidate/learnings/<family>.md`, and any gate file changes with an emoji-conventional message:
+Commit `workspace/tracker.json`, any updated `candidate/learnings/<family>.md`, and any gate file changes with a Conventional Commits message:
 
 ```
-✨ feat(tracker): record <outcome-type> for <Company> — <Role>
+feat(tracker): record <outcome-type> for <Company> — <Role>
 ```
 
 Include the role family and threshold status in the commit body if a reevaluation threshold was tripped.
