@@ -80,7 +80,8 @@ describe("OnboardingPage goNext prerequisites", () => {
 
     expect(setters[4]).not.toHaveBeenCalled();
     expect(setters[6]).toHaveBeenCalledWith({
-      message: "Rolester needs AI to work — sign in or add your Anthropic key to continue",
+      message:
+        "Choose a signed-in AI tool on this computer, or configure an Advanced provider fallback",
       tone: "error",
     });
     timeout.mockRestore();
@@ -98,7 +99,8 @@ describe("OnboardingPage goNext prerequisites", () => {
     blocked.goNext();
     expect(blocked.setters[4]).not.toHaveBeenCalled();
     expect(blocked.setters[6]).toHaveBeenCalledWith({
-      message: "Rolester needs AI to work — sign in or add your Anthropic key to continue",
+      message:
+        "Choose a signed-in AI tool on this computer, or configure an Advanced provider fallback",
       tone: "error",
     });
 

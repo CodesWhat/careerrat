@@ -140,6 +140,15 @@ export function companySeedErrorMessage(err) {
   if (err?.status === 501 || err?.body?.code === "NO_AI_ROUTE") {
     return "AI company picks are unavailable right now. Add companies manually for now.";
   }
+  const details = Array.isArray(err?.body?.error?.details)
+    ? err.body.error.details
+        .slice(0, 3)
+        .map((detail) => [detail?.path, detail?.message].filter(Boolean).join(" "))
+        .filter(Boolean)
+    : [];
+  if (err?.body?.code === "AI_SCHEMA_INVALID" && details.length) {
+    return `Company suggestions were invalid${err?.body?.ai?.retried ? " after one repair attempt" : ""}: ${details.join("; ")}. Retry, or add company names/homepages manually.`;
+  }
   return "Company suggestions are unavailable. Add any companies you want scanned.";
 }
 
@@ -348,6 +357,7 @@ export function CompaniesStep({
   const [proposalBatch, setProposalBatch] = useState(initialProposalBatch);
   const [seedStatus, setSeedStatus] = useState(initialProposalBatch ? "ready" : "idle");
   const [seedError, setSeedError] = useState(null);
+  const [seedAttempt, setSeedAttempt] = useState(0);
 
   const canUseCompanyProposals = runtimeCapabilities.companyProposals !== false;
 
@@ -418,7 +428,7 @@ export function CompaniesStep({
     return () => {
       cancelled = true;
     };
-  }, [canUseCompanyProposals, companies.length, proposalBatch]);
+  }, [canUseCompanyProposals, companies.length, proposalBatch, seedAttempt]);
 
   function addCompany(name, domain) {
     const trimmed = String(name || "").trim();
@@ -527,7 +537,21 @@ export function CompaniesStep({
               ) : null}
 
               {error ? <InlineAlert message={error} /> : null}
-              {seedError ? <InlineAlert tone="warning" message={seedError} /> : null}
+              {seedError ? (
+                <div className="onboarding-companies__seed-recovery">
+                  <InlineAlert tone="warning" message={seedError} />
+                  <button
+                    type="button"
+                    className="onboarding-companies__retry"
+                    onClick={() => {
+                      setProposalBatch(null);
+                      setSeedAttempt((attempt) => attempt + 1);
+                    }}
+                  >
+                    Retry suggestions
+                  </button>
+                </div>
+              ) : null}
 
               {companies.length ? (
                 <ul

@@ -1,12 +1,24 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({
+  addBoard: vi.fn(),
+  addSearchQuery: vi.fn(),
   connectManagedAi: vi.fn(),
+  getAutomationSettings: vi.fn(),
   getAiSettings: vi.fn(),
+  getInstalledAiRuntimes: vi.fn(),
   getOnboardState: vi.fn(),
+  getSourceMaintenance: vi.fn(),
   getUsageSummary: vi.fn(),
+  openInstalledAiRuntimeTerminal: vi.fn(),
+  probeInstalledAiRuntime: vi.fn(),
+  removeCompanyBoard: vi.fn(),
+  removeSearchSource: vi.fn(),
   saveCandidateFile: vi.fn(),
+  saveCompanyBoard: vi.fn(),
+  selectInstalledAiRuntime: vi.fn(),
   validateAndSaveAiKey: vi.fn(),
+  updateSearchSource: vi.fn(),
 }));
 
 function sameDeps(left, right) {
@@ -173,8 +185,42 @@ beforeEach(() => {
   vi.clearAllMocks();
   api.getOnboardState.mockResolvedValue({ data: {} });
   api.getAiSettings.mockResolvedValue({ route: "none", keyPresent: false });
+  api.getInstalledAiRuntimes.mockResolvedValue({
+    selectedId: "codex",
+    providerFallback: false,
+    runtimes: [
+      {
+        id: "codex",
+        name: "Codex",
+        commandShape: "codex exec --json -",
+        available: true,
+        ready: true,
+        status: "ready",
+        selected: true,
+      },
+    ],
+  });
+  api.getAutomationSettings.mockResolvedValue({
+    mode: "basic",
+    liveCount: 0,
+    consent: {},
+    capabilities: [],
+  });
   api.getUsageSummary.mockResolvedValue({ summary: null });
+  api.getSourceMaintenance.mockResolvedValue({ searches: [], companies: [] });
   api.saveCandidateFile.mockResolvedValue({ ok: true });
+});
+
+it("makes installed AI the primary Settings route and nests provider credentials under Advanced", async () => {
+  const renderer = await mountLoadedSettings({});
+  const text = renderedText(renderer.output);
+  expect(text).toContain("Use an AI tool already on this computer");
+  expect(text).toContain("Codex");
+  expect(text).toContain("Selected");
+  expect(text).toContain("Advanced · Use a provider API key instead");
+  expect(text).toContain("How hands-on should Rolester be?");
+  expect(text).toContain("Every external capability is hard-off");
+  expect(api.getInstalledAiRuntimes).toHaveBeenCalledOnce();
 });
 
 afterEach(() => {
@@ -209,6 +255,7 @@ describe("SettingsPage managed AI reconnect", () => {
 
     expect(getToken).toHaveBeenCalledOnce();
     expect(api.connectManagedAi).toHaveBeenCalledWith("obviously-fake-jwt");
+    expect(api.selectInstalledAiRuntime).toHaveBeenCalledWith({ providerFallback: true });
     expect(api.getAiSettings).toHaveBeenCalledTimes(2);
     expect(
       findElement(renderer.output, (element) => element.props.message === "Managed AI connected.")
@@ -273,6 +320,41 @@ describe("SettingsPage edit surfaces", () => {
     expect(JSON.stringify(patch)).not.toContain("additional_links");
   });
 
+  it("prefills and round-trips hybrid and on-site work modes", async () => {
+    const renderer = await mountLoadedSettings({
+      profile: {
+        candidate: { location: "Brooklyn, NY" },
+        location: {
+          home: "Brooklyn, NY",
+          remote: false,
+          hybrid: true,
+          onsite: true,
+          commute_radius_miles: 25,
+          relocation: [],
+        },
+      },
+    });
+
+    const hybrid = actionButton(renderer, "Hybrid");
+    const onsite = actionButton(renderer, "On-site");
+    expect(hybrid.props["aria-pressed"]).toBe(true);
+    expect(onsite.props["aria-pressed"]).toBe(true);
+
+    await actionButton(renderer, "Save profile").props.onClick();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "profile",
+      expect.objectContaining({
+        location: expect.objectContaining({
+          remote: false,
+          hybrid: true,
+          onsite: true,
+          commute_radius_miles: 25,
+        }),
+      })
+    );
+  });
+
   it("resends complete targeting guardrail and company arrays", async () => {
     const renderer = await mountLoadedSettings({
       targeting: {
@@ -297,6 +379,78 @@ describe("SettingsPage edit surfaces", () => {
         tracked_companies: ["Tracked Corp"],
       })
     );
+  });
+
+  it("ISSUE-022: renders, edits, adds, and saves complete post-onboarding role lanes", async () => {
+    const renderer = await mountLoadedSettings({
+      targeting: {
+        role_buckets: [
+          {
+            name: "Backend & Platform",
+            priority: "primary",
+            titles: ["Staff Backend Engineer", "Staff Platform Engineer"],
+            notes: "Hands-on systems work",
+            fit_signals: ["distributed systems"],
+            down_signals: ["frontend-only"],
+          },
+        ],
+        cut_signals: ["heavy travel"],
+        keep_signals: ["distributed systems"],
+      },
+    });
+
+    expect(elementById(renderer, "targeting-role-0-name").props.value).toBe("Backend & Platform");
+    expect(elementById(renderer, "targeting-role-0-titles").props.values).toEqual([
+      "Staff Backend Engineer",
+      "Staff Platform Engineer",
+    ]);
+    elementById(renderer, "targeting-role-0-titles").props.onChange([
+      "Staff Backend Engineer",
+      "Principal Backend Engineer",
+    ]);
+    actionButton(renderer, "Add role lane").props.onClick();
+    elementById(renderer, "targeting-role-1-name").props.onChange("Infrastructure leadership");
+    elementById(renderer, "targeting-role-1-titles").props.onChange([
+      "Principal Platform Engineer",
+    ]);
+
+    await actionButton(renderer, "Save targeting").props.onClick();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith(
+      "targeting",
+      expect.objectContaining({
+        role_buckets: [
+          expect.objectContaining({
+            name: "Backend & Platform",
+            priority: "primary",
+            titles: ["Staff Backend Engineer", "Principal Backend Engineer"],
+          }),
+          expect.objectContaining({
+            name: "Infrastructure leadership",
+            priority: "secondary",
+            titles: ["Principal Platform Engineer"],
+          }),
+        ],
+      })
+    );
+    expect(renderedText(renderer.output)).toContain("Role-lane changes apply to future matching");
+  });
+
+  it("omits blank optional targeting numbers instead of sending schema-invalid nulls", async () => {
+    const renderer = await mountLoadedSettings({
+      targeting: {
+        role_buckets: [{ name: "Primary", priority: "primary", titles: ["Staff Engineer"] }],
+        cut_signals: [],
+        keep_signals: [],
+      },
+    });
+
+    await actionButton(renderer, "Save targeting").props.onClick();
+
+    const [, patch] = api.saveCandidateFile.mock.calls[0];
+    expect(patch.fit_bands).toEqual({});
+    expect(patch.reevaluation).toEqual({});
+    expect(JSON.stringify(patch)).not.toContain(":null");
   });
 
   it("prefills and round-trips agent_voice through the modes save", async () => {

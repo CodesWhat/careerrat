@@ -26,6 +26,7 @@ import {
   prefixedLinkBackspaceValue,
   prefixedLinkFocusValue,
   prefixedLinkPasteValue,
+  quickFactsValidationError,
   seedQuickFactsLinks,
 } from "./PrefsStep.jsx";
 
@@ -201,6 +202,8 @@ describe("PrefsStep shell layout", () => {
     expect(html).toContain(">Hybrid</button>");
     expect(html).toContain(">On-site</button>");
     expect(html).toContain("Required — pick one.");
+    expect(html).toContain("Commute radius");
+    expect(html).toContain('id="quick-facts-commute-radius"');
   });
 
   it("keeps commas inside relocation cities and documents Enter as the commit key", () => {
@@ -260,6 +263,23 @@ describe("PrefsStep shell layout", () => {
 });
 
 describe("quick facts data shaping", () => {
+  it("ISSUE-008: work-authorization validation resolves as soon as a valid choice is selected", () => {
+    expect(
+      quickFactsValidationError({
+        authChoice: null,
+        homeBase: "Brooklyn, NY",
+        workModes: ["hybrid"],
+      })
+    ).toMatch(/work authorization/i);
+    expect(
+      quickFactsValidationError({
+        authChoice: "authorized",
+        homeBase: "Brooklyn, NY",
+        workModes: ["hybrid"],
+      })
+    ).toBeNull();
+  });
+
   it("requires a home base or Remote before Continue can save", () => {
     expect(prefsStepModule.hasPrefsSearchLocation({ homeBase: "", workModes: [] })).toBe(false);
     expect(prefsStepModule.hasPrefsSearchLocation({ homeBase: "Lisbon", workModes: [] })).toBe(
@@ -332,17 +352,44 @@ describe("quick facts data shaping", () => {
     expect(payload.formDefaults).not.toHaveProperty("expected_base");
   });
 
+  it("ISSUE-009: normalizes a fully qualified custom URL instead of saving a double scheme", () => {
+    const payload = buildQuickFactsSavePayload({
+      links: {
+        additional_links: [
+          {
+            label: "Writing",
+            url: "https://https://morgan-hale.example.invalid/writing",
+          },
+        ],
+      },
+    });
+
+    expect(payload.profile.candidate.additional_links).toEqual([
+      {
+        label: "Writing",
+        url: "https://morgan-hale.example.invalid/writing",
+      },
+    ]);
+    expect(payload.formDefaults.additional_links).toEqual(
+      payload.profile.candidate.additional_links
+    );
+  });
+
   it("includes the exact location patch only when location signals are present", () => {
     const payload = buildQuickFactsSavePayload({
       workModes: ["remote", "hybrid", "onsite"],
       homeBase: " New York, NY ",
       relocationList: [" Boston, MA ", ""],
+      commuteRadiusMiles: 25,
     });
 
     expect(payload.profile.location).toEqual({
       remote: true,
+      hybrid: true,
+      onsite: true,
       home: "New York, NY",
       relocation: ["Boston, MA"],
+      commute_radius_miles: 25,
     });
   });
 

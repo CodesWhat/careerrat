@@ -11,7 +11,7 @@
     "requires_sponsorship": { "type": "string" },
     "current_employer": { "type": ["string", "null"] },
     "current_title": { "type": ["string", "null"] },
-    "expected_base": { "type": ["number", "string", "null"] },
+    "expected_base": { "type": ["number", "string", "null"], "minimum": 0 },
     "linkedin": { "type": ["string", "null"] },
     "github": { "type": ["string", "null"] },
     "portfolio": { "type": ["string", "null"] },

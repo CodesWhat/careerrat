@@ -1,23 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { Button, IconButton } from "../../components/Button.jsx";
 import { SuggestionChip } from "../../components/Chip.jsx";
-import { ChipInput, Field, TextField } from "../../components/form.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import { saveCandidateFile, suggestAssist } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
-
-const PRIORITY_OPTIONS = [
-  { value: "primary", label: "Primary" },
-  { value: "secondary", label: "Secondary" },
-  { value: "stretch", label: "Stretch" },
-  { value: "oe", label: "OE" },
-];
-
-function normalizePriority(priority, index) {
-  if (priority === "adjacent") return "stretch";
-  if (["primary", "secondary", "stretch", "oe"].includes(priority)) return priority;
-  return index === 0 ? "primary" : "secondary";
-}
+import {
+  normalizeRoleBuckets,
+  normalizeRoleSignals,
+  RoleLaneFields,
+  rolePriorityLabel,
+} from "./RoleLaneEditor.jsx";
 
 export function assistErrorMessage(err) {
   if (err?.status === 501) {
@@ -25,25 +17,6 @@ export function assistErrorMessage(err) {
   }
   if (err?.status === 422) return "Roland couldn't produce a suggestion this time — try again.";
   return err instanceof Error ? err.message : "Suggestion failed";
-}
-
-function normalizeBuckets(buckets) {
-  return (Array.isArray(buckets) ? buckets : [])
-    .map((bucket, index) => ({
-      name: bucket?.name || (index === 0 ? "Primary" : "Secondary"),
-      priority: normalizePriority(bucket?.priority, index),
-      titles: Array.isArray(bucket?.titles) ? bucket.titles.filter(Boolean) : [],
-      notes: bucket?.notes || "",
-      fit_signals: normalizeSignals(bucket?.fit_signals),
-      down_signals: normalizeSignals(bucket?.down_signals),
-    }))
-    .filter((bucket) => bucket.name || bucket.titles.length || bucket.notes);
-}
-
-function normalizeSignals(values) {
-  return Array.isArray(values)
-    ? values.map((value) => String(value || "").trim()).filter(Boolean)
-    : [];
 }
 
 function uniqueSignals(values) {
@@ -60,12 +33,12 @@ function uniqueSignals(values) {
 }
 
 function seedRoleBuckets({ savedTargeting, draftTargeting }) {
-  const savedBuckets = normalizeBuckets(savedTargeting.role_buckets);
-  const rolandBuckets = normalizeBuckets(draftTargeting.role_buckets);
+  const savedBuckets = normalizeRoleBuckets(savedTargeting.role_buckets);
+  const rolandBuckets = normalizeRoleBuckets(draftTargeting.role_buckets);
   const buckets = savedBuckets.length ? savedBuckets : rolandBuckets;
   const topFitSignals = savedTargeting.keep_signals?.length
-    ? normalizeSignals(savedTargeting.keep_signals)
-    : normalizeSignals(draftTargeting.keep_signals);
+    ? normalizeRoleSignals(savedTargeting.keep_signals)
+    : normalizeRoleSignals(draftTargeting.keep_signals);
 
   return buckets.map((bucket, index) => ({
     ...bucket,
@@ -88,10 +61,6 @@ function fallbackBuckets() {
       down_signals: [],
     },
   ];
-}
-
-function priorityLabel(priority) {
-  return PRIORITY_OPTIONS.find((option) => option.value === priority)?.label ?? "Primary";
 }
 
 function SummarySignalRow({ tone, symbol, label, signals, emptyLabel, onRemove }) {
@@ -143,8 +112,8 @@ export function TargetingStep({
   const draftTargeting = draftSeeds?.targeting ?? {};
   const seededBuckets = seedRoleBuckets({ savedTargeting, draftTargeting });
   const compatibilityCutSignals = savedTargeting.cut_signals?.length
-    ? normalizeSignals(savedTargeting.cut_signals)
-    : normalizeSignals(draftTargeting.cut_signals);
+    ? normalizeRoleSignals(savedTargeting.cut_signals)
+    : normalizeRoleSignals(draftTargeting.cut_signals);
   // Nothing saved yet but the resume parse already seeded lanes — this is a
   // confirm-what-Roland-found step, not a blank targeting form.
   const seededFromResumeUnsaved =
@@ -165,6 +134,9 @@ export function TargetingStep({
   const profile = state?.data?.profile ?? {};
   const summary = profile.candidate?.headline || profile.candidate?.domain || "";
   const selectedTitleCount = countTitles(roleBuckets);
+  const incompleteRoleLane = roleBuckets.some(
+    (bucket) => !normalizeRoleSignals(bucket?.titles).length
+  );
   const activeEditIndex =
     editingBucket !== null && roleBuckets[editingBucket] ? editingBucket : null;
   const activeEditBucket = activeEditIndex === null ? null : roleBuckets[activeEditIndex];
@@ -204,7 +176,7 @@ export function TargetingStep({
     const bucket = roleBuckets[index];
     if (!bucket) return;
     updateBucket(index, {
-      [field]: normalizeSignals(bucket[field]).filter((value) => value !== signal),
+      [field]: normalizeRoleSignals(bucket[field]).filter((value) => value !== signal),
     });
   }
 
@@ -254,9 +226,9 @@ export function TargetingStep({
   }, [aiEnabled, primaryTitleCount]);
 
   async function handleSaveAndNext() {
-    const cleanedBuckets = normalizeBuckets(roleBuckets).filter((bucket) => bucket.titles.length);
-    if (!cleanedBuckets.length) {
-      setError("Add at least one role title so Roland knows what to search.");
+    const cleanedBuckets = normalizeRoleBuckets(roleBuckets);
+    if (!cleanedBuckets.length || cleanedBuckets.some((bucket) => !bucket.titles.length)) {
+      setError("Every role lane needs at least one job title.");
       return;
     }
 
@@ -296,7 +268,7 @@ export function TargetingStep({
             direction="next"
             label="Continue"
             onClick={handleSaveAndNext}
-            disabled={saving || selectedTitleCount === 0}
+            disabled={saving || selectedTitleCount === 0 || incompleteRoleLane}
           />
         </>
       }
@@ -332,7 +304,9 @@ export function TargetingStep({
                 : " onboarding-targeting__content--lanes")
             }
           >
-            {error ? <InlineAlert message={error} /> : null}
+            {error || incompleteRoleLane ? (
+              <InlineAlert message={error || "Every role lane needs at least one job title."} />
+            ) : null}
             {assistError ? <InlineAlert message={assistError} /> : null}
 
             {activeEditBucket ? (
@@ -343,7 +317,7 @@ export function TargetingStep({
                 <div className="onboarding-targeting__lane-header">
                   <div>
                     <span className="onboarding-targeting__priority-pill">
-                      {priorityLabel(activeEditBucket.priority)}
+                      {rolePriorityLabel(activeEditBucket.priority)}
                     </span>
                     <h2>Edit {activeEditBucket.name}</h2>
                   </div>
@@ -362,120 +336,34 @@ export function TargetingStep({
                     ) : null}
                   </div>
                 </div>
-                <div className="onboarding-targeting__edit-fields">
-                  <Field label="Lane name" htmlFor={`targeting-bucket-name-${activeEditIndex}`}>
-                    <TextField
-                      id={`targeting-bucket-name-${activeEditIndex}`}
-                      value={activeEditBucket.name}
-                      onChange={(value) => updateBucket(activeEditIndex, { name: value })}
-                    />
-                  </Field>
-                  <div className="field">
-                    <span className="field__label">Priority</span>
-                    <fieldset
-                      className="onboarding-targeting__priority-row"
-                      aria-label={`Priority for ${activeEditBucket.name}`}
-                    >
-                      {PRIORITY_OPTIONS.map((option) => (
-                        <button
-                          key={option.value}
-                          type="button"
-                          className={
-                            option.value === activeEditBucket.priority
-                              ? "onboarding-targeting__priority-choice onboarding-targeting__priority-choice--active"
-                              : "onboarding-targeting__priority-choice"
-                          }
-                          onClick={() => updateBucket(activeEditIndex, { priority: option.value })}
+                <RoleLaneFields
+                  bucket={activeEditBucket}
+                  index={activeEditIndex}
+                  onChange={(patch) => updateBucket(activeEditIndex, patch)}
+                  titleTool={
+                    aiEnabled ? (
+                      <span className="onboarding-targeting__tool-wrap">
+                        <IconButton
+                          label={suggestingTitles ? "Finding more titles" : "Find more titles"}
+                          className="onboarding-targeting__field-tool"
+                          onClick={handleSuggestTitles}
+                          disabled={suggestingTitles}
+                          title=""
                         >
-                          {option.label}
-                        </button>
-                      ))}
-                    </fieldset>
-                  </div>
-                  <div className="field onboarding-targeting__titles-field">
-                    <div className="onboarding-targeting__field-heading">
-                      <label
-                        className="field__label"
-                        htmlFor={`targeting-bucket-titles-${activeEditIndex}`}
-                      >
-                        Job titles
-                      </label>
-                      {aiEnabled ? (
-                        <span className="onboarding-targeting__tool-wrap">
-                          <IconButton
-                            label={suggestingTitles ? "Finding more titles" : "Find more titles"}
-                            className="onboarding-targeting__field-tool"
-                            onClick={handleSuggestTitles}
-                            disabled={suggestingTitles}
-                            title=""
+                          <span
+                            className="onboarding-targeting__field-tool-glyph"
+                            aria-hidden="true"
                           >
-                            <span
-                              className="onboarding-targeting__field-tool-glyph"
-                              aria-hidden="true"
-                            >
-                              ✨
-                            </span>
-                          </IconButton>
-                          <span className="onboarding-targeting__tool-tip" role="tooltip">
-                            {suggestingTitles ? "Finding titles..." : "Find more titles"}
+                            ✨
                           </span>
+                        </IconButton>
+                        <span className="onboarding-targeting__tool-tip" role="tooltip">
+                          {suggestingTitles ? "Finding titles..." : "Find more titles"}
                         </span>
-                      ) : null}
-                    </div>
-                    <ChipInput
-                      id={`targeting-bucket-titles-${activeEditIndex}`}
-                      values={activeEditBucket.titles}
-                      onChange={(titles) => updateBucket(activeEditIndex, { titles })}
-                      placeholder="e.g. Staff Platform Engineer"
-                    />
-                    <span className="field__hint">Press Enter or comma to add another</span>
-                  </div>
-                  <Field
-                    label="Why this lane"
-                    htmlFor={`targeting-bucket-notes-${activeEditIndex}`}
-                  >
-                    <TextField
-                      id={`targeting-bucket-notes-${activeEditIndex}`}
-                      value={activeEditBucket.notes}
-                      onChange={(value) => updateBucket(activeEditIndex, { notes: value })}
-                      placeholder="Optional"
-                    />
-                  </Field>
-                  <div className="onboarding-targeting__edit-signals">
-                    <div className="onboarding-targeting__tag-box onboarding-targeting__tag-box--good">
-                      <span className="onboarding-targeting__tag-symbol">+</span>
-                      <Field
-                        label="Good fit"
-                        htmlFor={`targeting-bucket-fit-${activeEditIndex}`}
-                        hint="Specific to this lane"
-                      >
-                        <ChipInput
-                          id={`targeting-bucket-fit-${activeEditIndex}`}
-                          values={activeEditBucket.fit_signals}
-                          onChange={(fit_signals) => updateBucket(activeEditIndex, { fit_signals })}
-                          placeholder="e.g. developer tools"
-                        />
-                      </Field>
-                    </div>
-                    <div className="onboarding-targeting__tag-box onboarding-targeting__tag-box--bad">
-                      <span className="onboarding-targeting__tag-symbol">−</span>
-                      <Field
-                        label="Bad fit"
-                        htmlFor={`targeting-bucket-down-${activeEditIndex}`}
-                        hint="Specific to this lane"
-                      >
-                        <ChipInput
-                          id={`targeting-bucket-down-${activeEditIndex}`}
-                          values={activeEditBucket.down_signals}
-                          onChange={(down_signals) =>
-                            updateBucket(activeEditIndex, { down_signals })
-                          }
-                          placeholder="e.g. frontend-only"
-                        />
-                      </Field>
-                    </div>
-                  </div>
-                </div>
+                      </span>
+                    ) : null
+                  }
+                />
               </section>
             ) : (
               <section
@@ -493,7 +381,7 @@ export function TargetingStep({
                       <div className="onboarding-targeting__lane-header">
                         <div>
                           <span className="onboarding-targeting__priority-pill onboarding-targeting__priority-pill--corner">
-                            {priorityLabel(bucket.priority)}
+                            {rolePriorityLabel(bucket.priority)}
                           </span>
                           <h2>{bucket.name}</h2>
                         </div>

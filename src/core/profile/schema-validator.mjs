@@ -57,6 +57,16 @@ function validateNode(data, schema, path, errors) {
     }
   }
 
+  // --- numeric range ---
+  if (typeof data === "number" && Number.isFinite(data)) {
+    if (typeof schema.minimum === "number" && data < schema.minimum) {
+      errors.push({ path, message: `must be at least ${schema.minimum}` });
+    }
+    if (typeof schema.maximum === "number" && data > schema.maximum) {
+      errors.push({ path, message: `must be at most ${schema.maximum}` });
+    }
+  }
+
   // --- properties + required + additionalProperties ---
   if (
     schema.properties !== undefined ||

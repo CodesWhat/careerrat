@@ -29,6 +29,7 @@ location:
   remote: true
   hybrid: true
   onsite: false
+  commute_radius_miles: 25
   relocation: []
   travel_tolerance: "low"
 

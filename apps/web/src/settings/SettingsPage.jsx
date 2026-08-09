@@ -19,9 +19,14 @@ import {
   ApiError,
   connectManagedAi,
   getAiSettings,
+  getAutomationSettings,
+  getInstalledAiRuntimes,
   getOnboardState,
   getUsageSummary,
+  openInstalledAiRuntimeTerminal,
+  probeInstalledAiRuntime,
   saveCandidateFile,
+  selectInstalledAiRuntime,
   validateAndSaveAiKey,
 } from "../lib/api.js";
 import {
@@ -31,6 +36,7 @@ import {
   normalizeSignals,
   toggleGuardrailSignal,
 } from "../onboarding/steps/GuardrailsStep.jsx";
+import { InstalledRuntimeChoices } from "../onboarding/steps/KeyStep.jsx";
 // buildQuickFactsSavePayload is the only exported patch-builder here — the
 // individual pure helpers it composes (compensationPatch, authorizationPatch,
 // locationPatch, candidateLocationPatch, cleanLinkFields) are module-private
@@ -38,7 +44,14 @@ import {
 // reuses the exact same tested shaping logic without re-deriving it or
 // widening PrefsStep.jsx's export surface.
 import { buildQuickFactsSavePayload } from "../onboarding/steps/PrefsStep.jsx";
+import { normalizeRoleBuckets, RoleLaneFields } from "../onboarding/steps/RoleLaneEditor.jsx";
+import {
+  AutomationConsentMatrix,
+  AutomationModeChooser,
+  buildAutomationModePatch,
+} from "./AutomationControls.jsx";
 import { mapErrors } from "./error-map.js";
+import { SourceMaintenance } from "./SourceMaintenance.jsx";
 import {
   formatTokenCount,
   formatUsd,
@@ -72,9 +85,8 @@ const AGENT_VOICE_OPTIONS = modesSchema.properties.agent_voice.enum.map((v) => (
 // Work mode choices for the Profile card's location fields. Not schema-driven
 // (profile.schema.json's location object has no enum here) — mirrors
 // PrefsStep.jsx's own WORK_MODE_OPTIONS constant, which isn't exported.
-// Same caveat as PrefsStep's own comment: only the "remote" pick round-trips
-// to a real signal (generate-search-sources.mjs only reads
-// profile.location.remote); hybrid/onsite stay local UI state.
+// Every mode round-trips to the qualification gate; hybrid/on-site additionally
+// use the candidate's commute radius below.
 const WORK_MODE_OPTIONS = [
   { value: "remote", label: "Remote" },
   { value: "hybrid", label: "Hybrid" },
@@ -82,6 +94,7 @@ const WORK_MODE_OPTIONS = [
 ];
 
 const AI_ROUTE_LABEL = {
+  installed: "Connected (installed CLI)",
   byok: "Connected (BYOK)",
   proxy: "Connected (managed proxy)",
   none: "Not connected",
@@ -118,8 +131,23 @@ const PROFILE_FIELD_MAP = {
   "authorization.requires_sponsorship": "profile-authorization",
   "location.remote": "profile-work_mode",
   "location.home": "profile-home_base",
+  "location.commute_radius_miles": "profile-commute_radius",
   "location.relocation": "profile-relocation",
 };
+
+let roleLaneClientKey = 0;
+
+function nextRoleLaneClientKey() {
+  roleLaneClientKey += 1;
+  return `settings-role-lane-${roleLaneClientKey}`;
+}
+
+function withRoleLaneClientKeys(buckets) {
+  return buckets.map((bucket) => ({
+    ...bucket,
+    clientKey: bucket.clientKey || nextRoleLaneClientKey(),
+  }));
+}
 const TARGETING_FIELD_MAP = {
   "fit_bands.high_min": "targeting-high_min",
   "fit_bands.med_min": "targeting-med_min",
@@ -158,6 +186,14 @@ function get(obj, path, fallback) {
   );
 }
 
+function presentNumbers(values) {
+  return Object.fromEntries(
+    Object.entries(values).filter(
+      ([, value]) => typeof value === "number" && Number.isFinite(value)
+    )
+  );
+}
+
 export function SettingsPage() {
   const { getToken } = useRolesterUser();
   const [loading, setLoading] = useState(true);
@@ -165,6 +201,8 @@ export function SettingsPage() {
   const [toast, setToast] = useState(null);
 
   const [aiStatus, setAiStatus] = useState({ route: "none", keyPresent: false });
+  const [installedAi, setInstalledAi] = useState(null);
+  const [automationStatus, setAutomationStatus] = useState(null);
   const [aiKeyInput, setAiKeyInput] = useState("");
   const [usageSummary, setUsageSummary] = useState(EMPTY_USAGE_SUMMARY);
 
@@ -190,9 +228,11 @@ export function SettingsPage() {
     authChoice: null,
     workModes: [],
     homeBase: "",
+    commuteRadiusMiles: 25,
     relocationList: [],
   });
   const [targetingForm, setTargetingForm] = useState({
+    role_buckets: [],
     high_min: null,
     med_min: null,
     rejection_total: null,
@@ -229,12 +269,16 @@ export function SettingsPage() {
     setLoading(true);
     setLoadError(null);
     try {
-      const [state, ai, usage] = await Promise.all([
+      const [state, ai, usage, installed, automation] = await Promise.all([
         getOnboardState(),
         getAiSettings(),
         getUsageSummary(),
+        getInstalledAiRuntimes(),
+        getAutomationSettings(),
       ]);
       setAiStatus(ai);
+      setInstalledAi(installed);
+      setAutomationStatus(automation);
       setUsageSummary(usage?.summary ?? EMPTY_USAGE_SUMMARY);
 
       const modes = state.data?.modes ?? {};
@@ -262,8 +306,16 @@ export function SettingsPage() {
             : profile.authorization?.requires_sponsorship === true
               ? "sponsorship"
               : null,
-        workModes: profile.location?.remote ? ["remote"] : [],
+        workModes: [
+          ...(profile.location?.remote ? ["remote"] : []),
+          ...(profile.location?.hybrid ? ["hybrid"] : []),
+          ...(profile.location?.onsite ? ["onsite"] : []),
+        ],
         homeBase: String(profile.location?.home || profile.candidate?.location || "").trim(),
+        commuteRadiusMiles:
+          Number(profile.location?.commute_radius_miles) > 0
+            ? Number(profile.location.commute_radius_miles)
+            : 25,
         relocationList: Array.isArray(profile.location?.relocation)
           ? profile.location.relocation.filter(Boolean)
           : [],
@@ -271,6 +323,7 @@ export function SettingsPage() {
 
       const targeting = state.data?.targeting ?? {};
       setTargetingForm({
+        role_buckets: withRoleLaneClientKeys(normalizeRoleBuckets(targeting.role_buckets)),
         high_min: get(targeting, "fit_bands.high_min", null),
         med_min: get(targeting, "fit_bands.med_min", null),
         rejection_total: get(targeting, "reevaluation.rejection_total", null),
@@ -377,6 +430,7 @@ export function SettingsPage() {
       authChoice: profileForm.authChoice,
       workModes: profileForm.workModes,
       homeBase: profileForm.homeBase,
+      commuteRadiusMiles: profileForm.commuteRadiusMiles,
       relocationList: profileForm.relocationList,
       existingCandidateLocation: profileForm.candidateLocation,
     }).profile;
@@ -405,6 +459,7 @@ export function SettingsPage() {
     setSectionBanner((b) => ({ ...b, ai: null }));
     try {
       await validateAndSaveAiKey(aiKeyInput.trim());
+      await selectInstalledAiRuntime({ providerFallback: true });
       setAiKeyInput("");
       showToast("AI key saved.");
       const ai = await getAiSettings();
@@ -420,6 +475,98 @@ export function SettingsPage() {
     }
   }
 
+  async function handleSelectInstalledAi(runtimeId) {
+    setSaving((state) => ({ ...state, aiRuntime: runtimeId }));
+    setSectionBanner((state) => ({ ...state, aiRuntime: null }));
+    try {
+      await selectInstalledAiRuntime({ runtimeId });
+      setInstalledAi(await getInstalledAiRuntimes());
+      showToast("Installed AI tool selected.");
+    } catch (error) {
+      setSectionBanner((state) => ({
+        ...state,
+        aiRuntime: error?.body?.error || error?.body?.code || error?.message || "Selection failed",
+      }));
+    } finally {
+      setSaving((state) => ({ ...state, aiRuntime: null }));
+    }
+  }
+
+  async function handleProbeInstalledAi(runtimeId) {
+    setSaving((state) => ({ ...state, aiRuntime: runtimeId }));
+    try {
+      await probeInstalledAiRuntime(runtimeId);
+      setInstalledAi(await getInstalledAiRuntimes());
+    } finally {
+      setSaving((state) => ({ ...state, aiRuntime: null }));
+    }
+  }
+
+  async function handleOpenInstalledAiTerminal(runtimeId) {
+    setSaving((state) => ({ ...state, aiRuntime: runtimeId }));
+    try {
+      const result = await openInstalledAiRuntimeTerminal(runtimeId);
+      showToast(
+        result?.signInCommand
+          ? `Terminal opened. Sign in with: ${result.signInCommand}`
+          : "Terminal opened. Sign in, then retry detection."
+      );
+    } finally {
+      setSaving((state) => ({ ...state, aiRuntime: null }));
+    }
+  }
+
+  async function saveAutomationPatch(patch, successMessage) {
+    setSaving((state) => ({ ...state, automation: true }));
+    setSectionBanner((state) => ({ ...state, automation: null }));
+    try {
+      await saveCandidateFile("automation", patch);
+      setAutomationStatus(await getAutomationSettings());
+      showToast(successMessage);
+    } catch (error) {
+      setSectionBanner((state) => ({
+        ...state,
+        automation: error?.body?.error || error?.message || "Permission update failed",
+      }));
+    } finally {
+      setSaving((state) => ({ ...state, automation: false }));
+    }
+  }
+
+  function handleAutomationMode(mode) {
+    if (!automationStatus) return;
+    return saveAutomationPatch(
+      buildAutomationModePatch(automationStatus, mode),
+      mode === "basic"
+        ? "Basic mode enabled; every external capability is off."
+        : "Advanced controls available; nothing was enabled."
+    );
+  }
+
+  function handleAutomationCapability(capability, enabled) {
+    return saveAutomationPatch(
+      { setup_mode: "advanced", capabilities: { [capability]: { enabled } } },
+      "Capability permission updated."
+    );
+  }
+
+  function handleAutomationPlatform(capability, platform, enabled) {
+    return saveAutomationPatch(
+      {
+        setup_mode: "advanced",
+        capabilities: { [capability]: { platforms: { [platform]: enabled } } },
+      },
+      "Platform permission updated."
+    );
+  }
+
+  function handleAutomationConsent(platform, consent) {
+    return saveAutomationPatch(
+      { setup_mode: "advanced", consent: { [platform]: consent } },
+      consent ? "Platform terms consent recorded." : "Platform terms consent revoked."
+    );
+  }
+
   // src/cli/ai-provision-route.mjs — the same exchange KeyStep.jsx's
   // sign-in auto-provision uses, callable again here for a device that
   // signed in before managed AI existed, or whose provisioned token needs
@@ -433,9 +580,11 @@ export function SettingsPage() {
       if (!jwt) throw new Error("Sign in to connect managed AI.");
       const result = await connectManagedAi(jwt);
       if (!result?.ok) throw new Error("Could not connect managed AI.");
+      await selectInstalledAiRuntime({ providerFallback: true });
       showToast("Managed AI connected.");
-      const ai = await getAiSettings();
+      const [ai, installed] = await Promise.all([getAiSettings(), getInstalledAiRuntimes()]);
       setAiStatus(ai);
+      setInstalledAi(installed);
     } catch (err) {
       setSectionBanner((b) => ({
         ...b,
@@ -448,9 +597,53 @@ export function SettingsPage() {
 
   const errorsFor = (section) => fieldErrors[section] ?? {};
 
-  const aiBadgeLabel = useMemo(() => AI_ROUTE_LABEL[aiStatus.route] ?? "Unknown", [aiStatus.route]);
+  function updateRoleBucket(index, patch) {
+    setTargetingForm((form) => ({
+      ...form,
+      role_buckets: form.role_buckets.map((bucket, bucketIndex) =>
+        bucketIndex === index ? { ...bucket, ...patch } : bucket
+      ),
+    }));
+  }
+
+  function addRoleBucket() {
+    setTargetingForm((form) => ({
+      ...form,
+      role_buckets: [
+        ...form.role_buckets,
+        {
+          clientKey: nextRoleLaneClientKey(),
+          name: "Another lane",
+          priority: form.role_buckets.length ? "secondary" : "primary",
+          titles: [],
+          notes: "",
+          fit_signals: [],
+          down_signals: [],
+        },
+      ],
+    }));
+  }
+
+  function removeRoleBucket(index) {
+    setTargetingForm((form) => ({
+      ...form,
+      role_buckets: form.role_buckets.filter((_, bucketIndex) => bucketIndex !== index),
+    }));
+  }
+
+  const roleLanesInvalid =
+    targetingForm.role_buckets.length === 0 ||
+    targetingForm.role_buckets.some((bucket) => !bucket.titles?.length);
+
+  const displayedAiRoute = installedAi?.selectedId ? "installed" : aiStatus.route;
+  const aiBadgeLabel = useMemo(
+    () => AI_ROUTE_LABEL[displayedAiRoute] ?? "Unknown",
+    [displayedAiRoute]
+  );
   const aiBadgeTone =
-    aiStatus.keyPresent || aiStatus.route !== "none" ? "badge--ok" : "badge--muted";
+    installedAi?.selectedId || aiStatus.keyPresent || aiStatus.route !== "none"
+      ? "badge--ok"
+      : "badge--muted";
   const topFeatures = useMemo(
     () => topUsageFeatures(usageSummary.byFeature ?? [], 5),
     [usageSummary.byFeature]
@@ -482,45 +675,94 @@ export function SettingsPage() {
         title="AI connection"
         actions={<span className={`badge ${aiBadgeTone}`}>{aiBadgeLabel}</span>}
       >
+        {sectionBanner.aiRuntime ? <InlineAlert message={sectionBanner.aiRuntime} /> : null}
+        {InstalledRuntimeChoices({
+          state: installedAi,
+          busyId: saving.aiRuntime,
+          onSelect: handleSelectInstalledAi,
+          onRetry: handleProbeInstalledAi,
+          onOpenTerminal: handleOpenInstalledAiTerminal,
+          showAdvancedHint: false,
+        })}
         {sectionBanner.ai ? <InlineAlert message={sectionBanner.ai} /> : null}
-        <p className="field__hint" style={{ margin: 0 }}>
-          The key is never echoed back after saving. With ROLESTER_HOME it lives under
-          internal/ai.env; legacy repo-root workspaces use .internal/ai.env.
-        </p>
-        <div className="field-row">
-          <Field label="Anthropic API key" htmlFor="ai-key">
-            <TextField
-              id="ai-key"
-              type="password"
-              value={aiKeyInput}
-              onChange={setAiKeyInput}
-              placeholder="sk-ant-…"
-              autoComplete="off"
-            />
-          </Field>
-        </div>
-        <div>
-          <Button onClick={handleSaveAiKey} disabled={saving.ai || !aiKeyInput.trim()}>
-            {saving.ai ? "Saving…" : "Save key"}
-          </Button>
-        </div>
+        <details
+          className="settings-advanced-provider"
+          open={installedAi?.providerFallback === true}
+        >
+          <summary>Advanced · Use a provider API key instead</summary>
+          <div className="settings-advanced-provider__body">
+            <p className="field__hint" style={{ margin: 0 }}>
+              This explicitly switches AI calls away from an installed CLI. The key is never echoed
+              back after saving. With ROLESTER_HOME it lives under internal/ai.env; legacy repo-root
+              workspaces use .internal/ai.env.
+            </p>
+            <div className="field-row">
+              <Field label="Anthropic API key" htmlFor="ai-key">
+                <TextField
+                  id="ai-key"
+                  type="password"
+                  value={aiKeyInput}
+                  onChange={setAiKeyInput}
+                  placeholder="sk-ant-…"
+                  autoComplete="off"
+                />
+              </Field>
+            </div>
+            <div>
+              <Button onClick={handleSaveAiKey} disabled={saving.ai || !aiKeyInput.trim()}>
+                {saving.ai ? "Saving…" : "Save key and use provider"}
+              </Button>
+            </div>
 
-        {sectionBanner.aiManaged ? <InlineAlert message={sectionBanner.aiManaged} /> : null}
-        <p className="field__hint" style={{ margin: 0 }}>
-          Managed AI (no key of your own) connects automatically at sign-in. Reconnecting here mints
-          a fresh connection and replaces the previous one — one AI connection is active per account
-          at a time.
-        </p>
-        <div>
-          <Button
-            variant="secondary"
-            onClick={handleReconnectManagedAi}
-            disabled={saving.aiManaged}
-          >
-            {saving.aiManaged ? "Connecting…" : "Reconnect managed AI"}
-          </Button>
-        </div>
+            {sectionBanner.aiManaged ? <InlineAlert message={sectionBanner.aiManaged} /> : null}
+            <p className="field__hint" style={{ margin: 0 }}>
+              Managed AI is the account-backed provider fallback. Reconnecting mints a fresh
+              connection and replaces the previous one.
+            </p>
+            <div>
+              <Button
+                variant="secondary"
+                onClick={handleReconnectManagedAi}
+                disabled={saving.aiManaged}
+              >
+                {saving.aiManaged ? "Connecting…" : "Reconnect managed AI"}
+              </Button>
+            </div>
+          </div>
+        </details>
       </Card>
+
+      <Card
+        title="Automation permissions"
+        actions={
+          <span className={`badge ${automationStatus?.liveCount ? "badge--ok" : "badge--muted"}`}>
+            {automationStatus?.mode === "advanced" ? "Advanced" : "Basic"}
+          </span>
+        }
+      >
+        {sectionBanner.automation ? <InlineAlert message={sectionBanner.automation} /> : null}
+        {AutomationModeChooser({
+          status: automationStatus || {
+            mode: "basic",
+            liveCount: 0,
+            consent: {},
+            capabilities: [],
+          },
+          busy: saving.automation,
+          onSetMode: handleAutomationMode,
+        })}
+        {automationStatus?.mode === "advanced"
+          ? AutomationConsentMatrix({
+              status: automationStatus,
+              busy: saving.automation,
+              onCapabilityChange: handleAutomationCapability,
+              onPlatformChange: handleAutomationPlatform,
+              onConsentChange: handleAutomationConsent,
+            })
+          : null}
+      </Card>
+
+      <SourceMaintenance />
 
       {/* AI spend ------------------------------------------------- */}
       <Card title="AI spend">
@@ -811,7 +1053,7 @@ export function SettingsPage() {
             <span className="field__error">{errorsFor("profile")["profile-work_mode"]}</span>
           ) : (
             <span className="field__hint">
-              Pick every mode you'd take. Only "Remote" is used in search matching today.
+              Pick every mode you'd take. Search matching enforces each one.
             </span>
           )}
         </div>
@@ -842,6 +1084,21 @@ export function SettingsPage() {
               placeholder="e.g. Austin, TX"
             />
           </Field>
+          <Field
+            label="Commute radius"
+            htmlFor="profile-commute_radius"
+            error={errorsFor("profile")["profile-commute_radius"]}
+            hint="Miles from home for hybrid and on-site roles."
+          >
+            <NumberField
+              id="profile-commute_radius"
+              value={profileForm.commuteRadiusMiles}
+              onChange={(v) => setProfileForm((f) => ({ ...f, commuteRadiusMiles: v }))}
+              min="1"
+              step="1"
+              placeholder="25"
+            />
+          </Field>
         </div>
         <div>
           <Button
@@ -856,6 +1113,40 @@ export function SettingsPage() {
       {/* Targeting ----------------------------------------------------------- */}
       <Card title="Targeting">
         {sectionBanner.targeting ? <InlineAlert message={sectionBanner.targeting} /> : null}
+        <h4 style={{ margin: "0 0 4px" }}>Role lanes</h4>
+        <p className="field__hint" style={{ margin: 0 }}>
+          Role-lane changes apply to future matching. Re-run sourcing or rescore existing jobs to
+          apply them to work already in the queue.
+        </p>
+        <div className="settings-role-lanes">
+          {targetingForm.role_buckets.map((bucket, index) => (
+            <section
+              className="onboarding-targeting__edit-panel settings-role-lane"
+              key={bucket.clientKey}
+              aria-label={`Edit ${bucket.name || `role lane ${index + 1}`}`}
+            >
+              {RoleLaneFields({
+                bucket,
+                index,
+                idPrefix: "targeting-role",
+                onChange: (patch) => updateRoleBucket(index, patch),
+              })}
+              <button
+                type="button"
+                className="onboarding-targeting__remove"
+                onClick={() => removeRoleBucket(index)}
+              >
+                Remove role lane
+              </button>
+            </section>
+          ))}
+        </div>
+        {roleLanesInvalid ? (
+          <InlineAlert message="Add at least one complete role lane with a job title." />
+        ) : null}
+        <Button variant="secondary" onClick={addRoleBucket}>
+          Add role lane
+        </Button>
         <div className="field-row">
           <Field
             label="Fit band — high min"
@@ -996,16 +1287,20 @@ export function SettingsPage() {
 
         <div>
           <Button
-            disabled={saving.targeting}
+            disabled={saving.targeting || roleLanesInvalid}
             onClick={() =>
               handleSectionSave(
                 "targeting",
                 {
-                  fit_bands: { high_min: targetingForm.high_min, med_min: targetingForm.med_min },
-                  reevaluation: {
+                  role_buckets: normalizeRoleBuckets(targetingForm.role_buckets),
+                  fit_bands: presentNumbers({
+                    high_min: targetingForm.high_min,
+                    med_min: targetingForm.med_min,
+                  }),
+                  reevaluation: presentNumbers({
                     rejection_total: targetingForm.rejection_total,
                     rejection_per_family: targetingForm.rejection_per_family,
-                  },
+                  }),
                   cut_signals: targetingForm.cut_signals,
                   keep_signals: targetingForm.keep_signals,
                   excluded_companies: targetingForm.excluded_companies,

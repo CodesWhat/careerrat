@@ -171,6 +171,25 @@ describe("CompaniesStep logo UX", () => {
       "AI company picks are unavailable right now. Add companies manually for now."
     );
   });
+
+  it("preserves safe schema diagnostics and gives an explicit manual recovery", () => {
+    expect(
+      companySeedErrorMessage({
+        body: {
+          code: "AI_SCHEMA_INVALID",
+          error: {
+            details: [
+              { path: "companies.0.domain_hint", message: "must be a string" },
+              { path: "companies.0.approved", message: "is not allowed" },
+            ],
+          },
+          ai: { retried: true },
+        },
+      })
+    ).toBe(
+      "Company suggestions were invalid after one repair attempt: companies.0.domain_hint must be a string; companies.0.approved is not allowed. Retry, or add company names/homepages manually."
+    );
+  });
 });
 
 describe("company proposal API wrappers", () => {

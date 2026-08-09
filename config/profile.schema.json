@@ -30,14 +30,14 @@
       "properties": {
         "currency": { "type": "string", "default": "USD" },
         "current_comp_shareable": { "type": "boolean", "default": false },
-        "current_base": { "type": ["number", "null"] },
-        "target_base": { "type": ["number", "null"] },
-        "minimum_base": { "type": ["number", "null"] },
-        "target_total_comp": { "type": ["number", "null"] },
+        "current_base": { "type": ["number", "null"], "minimum": 0 },
+        "target_base": { "type": ["number", "null"], "minimum": 0 },
+        "minimum_base": { "type": ["number", "null"], "minimum": 0 },
+        "target_total_comp": { "type": ["number", "null"], "minimum": 0 },
         "cash_over_equity": { "type": "boolean", "default": true },
-        "expected_base": { "type": ["number", "null"] },
-        "oe_min_base": { "type": ["number", "null"] },
-        "oe_max_base": { "type": ["number", "null"] },
+        "expected_base": { "type": ["number", "null"], "minimum": 0 },
+        "oe_min_base": { "type": ["number", "null"], "minimum": 0 },
+        "oe_max_base": { "type": ["number", "null"], "minimum": 0 },
         "relo_package_needs": { "type": "string" },
         "benefits_priorities": {
           "type": "array",
@@ -54,6 +54,9 @@
         "remote": { "type": "boolean" },
         "hybrid": { "type": "boolean" },
         "onsite": { "type": "boolean" },
+        "commute_radius_miles": { "type": ["number", "null"], "exclusiveMinimum": 0 },
+        "home_latitude": { "type": ["number", "null"], "minimum": -90, "maximum": 90 },
+        "home_longitude": { "type": ["number", "null"], "minimum": -180, "maximum": 180 },
         "relocation": { "type": "array", "items": { "type": "string" } },
         "travel_tolerance": { "type": "string" }
       }

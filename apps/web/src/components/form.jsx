@@ -222,13 +222,14 @@ export function ChipInput({
 // The literal confirm-first-vs-autonomous switch (form-defaults.auto_submit)
 // is rendered with this control — the clearest "real form control" proof
 // point in the M7 brief.
-export function Toggle({ id, checked, onChange, label }) {
+export function Toggle({ id, checked, onChange, label, disabled = false }) {
   return (
     <label className="toggle" htmlFor={id}>
       <input
         id={id}
         type="checkbox"
         checked={!!checked}
+        disabled={disabled}
         onChange={(e) => onChange(e.target.checked)}
       />
       <span className="toggle__track">

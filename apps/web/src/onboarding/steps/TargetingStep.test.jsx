@@ -162,4 +162,22 @@ describe("TargetingStep shell layout", () => {
     expect(html).toContain("Find more titles");
     expect(html).not.toContain(">More role ideas<");
   });
+
+  it("ISSUE-006: blocks Continue while any visible role lane has no job titles", () => {
+    const html = renderTargetingStep({
+      state: { data: { profile: BASE_STATE.data.profile, targeting: {} } },
+      draftSeeds: {
+        targeting: {
+          role_buckets: [
+            { name: "Platform", priority: "primary", titles: ["Staff Platform Engineer"] },
+            { name: "Another lane", priority: "secondary", titles: [] },
+          ],
+        },
+      },
+    });
+
+    const continueTag = html.match(/<button[^>]*aria-label="Continue"[^>]*>/)?.[0] || "";
+    expect(continueTag).toContain("disabled");
+    expect(html).toContain("Every role lane needs at least one job title.");
+  });
 });

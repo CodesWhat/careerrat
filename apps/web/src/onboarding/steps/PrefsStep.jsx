@@ -6,11 +6,9 @@ import { saveCandidateFile } from "../../lib/api.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
 // Location gate (search-shaping): work mode is a multi-select (a candidate
-// can be open to more than one) but only the "remote" pick is a real signal
-// downstream — src/core/profile/generate-search-sources.mjs's location_filter
-// only reads profile.location.{remote,home,relocation}; hybrid vs. onsite
-// makes no difference to search generation today, so it stays local UI state
-// rather than a persisted field (no parallel shape invented on profile.location).
+// can be open to more than one). Persist every pick in the canonical
+// profile.location shape so later matching can distinguish remote, hybrid,
+// and on-site posture even while search-source generation remains coarser.
 const WORK_MODE_OPTIONS = [
   { value: "remote", label: "Remote" },
   { value: "hybrid", label: "Hybrid" },
@@ -61,15 +59,31 @@ const LINK_FIELD_META = [
 
 function cleanPrimaryLinkFields(values = {}) {
   return Object.fromEntries(
-    LINK_FIELDS.map((field) => [field, String(values[field] ?? "").trim()])
+    LINK_FIELDS.map((field) => [
+      field,
+      normalizePrefixedLinkValue(values[field], LINK_PREFIXES[field]),
+    ])
   );
+}
+
+export function normalizePrefixedLinkValue(value, prefix) {
+  let text = String(value || "").trim();
+  const normalizedPrefix = String(prefix || "");
+  while (
+    normalizedPrefix &&
+    text.toLowerCase().startsWith(normalizedPrefix.toLowerCase()) &&
+    /^[a-z][a-z0-9+.-]*:\/\//i.test(text.slice(normalizedPrefix.length))
+  ) {
+    text = text.slice(normalizedPrefix.length);
+  }
+  return text;
 }
 
 export function cleanAdditionalLinks(values = []) {
   return (Array.isArray(values) ? values : [])
     .map((link) => ({
       label: String(link?.label || "").trim() || "Link",
-      url: String(link?.url || "").trim(),
+      url: normalizePrefixedLinkValue(link?.url, ADDITIONAL_LINK_PREFIX),
     }))
     .filter((link) => link.url);
 }
@@ -156,14 +170,33 @@ function authorizationPatch(authChoice) {
 // signal (a work mode pick, a home base, or a relocation city) is enough to
 // write the object; all-empty means nothing to say yet, so skip the patch
 // rather than stomping a previously-saved value with zeros.
-function locationPatch({ workModes = [], homeBase = "", relocationList = [] } = {}) {
+function locationPatch({
+  workModes = [],
+  homeBase = "",
+  relocationList = [],
+  commuteRadiusMiles = null,
+} = {}) {
   const remote = Array.isArray(workModes) && workModes.includes("remote");
+  const hybrid = Array.isArray(workModes) && workModes.includes("hybrid");
+  const onsite = Array.isArray(workModes) && workModes.includes("onsite");
   const home = String(homeBase || "").trim();
   const relocation = (Array.isArray(relocationList) ? relocationList : [])
     .map((value) => String(value || "").trim())
     .filter(Boolean);
-  if (!remote && !home && !relocation.length) return {};
-  return { location: { remote, home, relocation } };
+  if (!remote && !hybrid && !onsite && !home && !relocation.length) return {};
+  const commuteRadius = Number(commuteRadiusMiles);
+  return {
+    location: {
+      remote,
+      hybrid,
+      onsite,
+      home,
+      relocation,
+      ...(Number.isFinite(commuteRadius) && commuteRadius > 0
+        ? { commute_radius_miles: commuteRadius }
+        : {}),
+    },
+  };
 }
 
 // The resume-header location string (candidate.location) only gets filled in
@@ -182,6 +215,16 @@ export function hasPrefsSearchLocation({ homeBase = "", workModes = [] } = {}) {
   );
 }
 
+export function quickFactsValidationError({ authChoice, homeBase = "", workModes = [] } = {}) {
+  if (!hasPrefsSearchLocation({ homeBase, workModes })) {
+    return "Add your home base or turn on Remote so Roland can search the right geography.";
+  }
+  if (authChoice !== "authorized" && authChoice !== "sponsorship") {
+    return "Pick your work authorization to continue — the gate and every application form need it.";
+  }
+  return null;
+}
+
 export function buildQuickFactsSavePayload({
   links = {},
   modesData = {},
@@ -191,6 +234,7 @@ export function buildQuickFactsSavePayload({
   workModes = [],
   homeBase = "",
   relocationList = [],
+  commuteRadiusMiles = null,
   existingCandidateLocation = "",
 } = {}) {
   const cleanedLinks = cleanLinkFields(links);
@@ -202,7 +246,7 @@ export function buildQuickFactsSavePayload({
       },
       ...compensationPatch(minimumBase),
       ...authorizationPatch(authChoice),
-      ...locationPatch({ workModes, homeBase, relocationList }),
+      ...locationPatch({ workModes, homeBase, relocationList, commuteRadiusMiles }),
     },
     modes: {
       usage_mode: modesData.usage_mode ?? DEFAULT_MODES.usage_mode,
@@ -233,7 +277,7 @@ function PrefixedLinkField({ id, value, onChange, prefix, placeholder }) {
     <TextField
       id={id}
       value={value}
-      onChange={onChange}
+      onChange={(next) => onChange(normalizePrefixedLinkValue(next, prefix))}
       placeholder={placeholder}
       data-link-prefix={prefix}
       onFocus={(event) => {
@@ -365,13 +409,15 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
     return null;
   });
 
-  // Location gate. Only `remote` round-trips from a saved value (see
-  // WORK_MODE_OPTIONS' comment) — hybrid/onsite start unselected on reload.
   // Home base prefers a previously saved profile.location.home, falling back
-  // to the resume-extracted candidate.location header field.
-  const [workModes, setWorkModes] = useState(() =>
-    profileData.location?.remote ? ["remote"] : []
-  );
+  // to the resume-extracted candidate.location header field. Every work mode
+  // and the commute radius round-trip because the qualification gate uses all
+  // of them.
+  const [workModes, setWorkModes] = useState(() => [
+    ...(profileData.location?.remote ? ["remote"] : []),
+    ...(profileData.location?.hybrid ? ["hybrid"] : []),
+    ...(profileData.location?.onsite ? ["onsite"] : []),
+  ]);
   const [homeBase, setHomeBase] = useState(() =>
     String(profileData.location?.home || profileData.candidate?.location || "").trim()
   );
@@ -380,9 +426,14 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
       ? profileData.location.relocation.filter(Boolean)
       : []
   );
+  const [commuteRadiusMiles, setCommuteRadiusMiles] = useState(() => {
+    const value = Number(profileData.location?.commute_radius_miles);
+    return Number.isFinite(value) && value > 0 ? value : 25;
+  });
 
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState(null);
+  const [saveError, setSaveError] = useState(null);
+  const [validationAttempted, setValidationAttempted] = useState(false);
 
   function toggleWorkMode(mode) {
     setWorkModes((current) =>
@@ -391,18 +442,13 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
   }
 
   async function handleSaveAndNext() {
-    if (!hasPrefsSearchLocation({ homeBase, workModes })) {
-      setError("Add your home base or turn on Remote so Roland can search the right geography.");
-      return;
-    }
-    if (authChoice !== "authorized" && authChoice !== "sponsorship") {
-      setError(
-        "Pick your work authorization to continue — the gate and every application form need it."
-      );
+    const validationError = quickFactsValidationError({ authChoice, homeBase, workModes });
+    setValidationAttempted(true);
+    if (validationError) {
       return;
     }
     setSaving(true);
-    setError(null);
+    setSaveError(null);
     try {
       const payload = buildQuickFactsSavePayload({
         links,
@@ -413,6 +459,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
         workModes,
         homeBase,
         relocationList,
+        commuteRadiusMiles,
         existingCandidateLocation: profileData.candidate?.location,
       });
       await saveCandidateFile("profile", payload.profile);
@@ -421,13 +468,17 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
       showToast("Saved.");
       goNext();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      setSaveError(err instanceof Error ? err.message : "Save failed");
     } finally {
       setSaving(false);
     }
   }
 
   const additionalLinks = Array.isArray(links.additional_links) ? links.additional_links : [];
+  const validationError = validationAttempted
+    ? quickFactsValidationError({ authChoice, homeBase, workModes })
+    : null;
+  const displayError = saveError || validationError;
 
   function updateAdditionalLink(index, nextLink) {
     setLinks((current) => {
@@ -499,7 +550,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
           </section>
 
           <div className="onboarding-step-card__content onboarding-step-card__content--dense onboarding-targeting__content onboarding-quick-facts__content">
-            {error ? <InlineAlert message={error} /> : null}
+            {displayError ? <InlineAlert message={displayError} /> : null}
 
             <section className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-quick-facts__panel">
               {saving && <span className="onboarding-step-status">Saving…</span>}
@@ -593,6 +644,20 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
                     value={homeBase}
                     onChange={setHomeBase}
                     placeholder="City, state or country"
+                  />
+                </Field>
+                <Field
+                  label="Commute radius"
+                  htmlFor="quick-facts-commute-radius"
+                  hint="Miles from home for hybrid and on-site roles. Remote roles use region eligibility instead."
+                >
+                  <NumberField
+                    id="quick-facts-commute-radius"
+                    value={commuteRadiusMiles}
+                    onChange={setCommuteRadiusMiles}
+                    min="1"
+                    step="1"
+                    placeholder="25"
                   />
                 </Field>
                 {!hasPrefsSearchLocation({ homeBase, workModes }) ? (

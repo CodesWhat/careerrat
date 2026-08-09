@@ -17,6 +17,7 @@ import { findCurrentBaseToken } from "../../profile/comp-guard.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
+import { bumpMeta, logActivityEvent } from "./shared.mjs";
 
 const PRODUCT_ROOT = fileURLToPath(new URL("../../../../", import.meta.url));
 
@@ -142,6 +143,44 @@ const DEFAULT_SETUP = {
     gate_ready: [],
     apply_ready: [],
     deep_ingest_complete: [],
+  },
+};
+
+const CANDIDATE_ACTIVITY = {
+  profile: {
+    title: "Candidate profile updated",
+    operation: "candidate:profile-update",
+    summary: "Saved identity, contact, location, compensation, or authorization changes.",
+  },
+  targeting: {
+    title: "Job targets updated",
+    operation: "candidate:targeting-update",
+    summary: "Saved role lanes, fit signals, companies, or search preferences.",
+  },
+  honesty: {
+    title: "Honesty boundaries updated",
+    operation: "candidate:honesty-update",
+    summary: "Saved confirmed claims and do-not-claim boundaries.",
+  },
+  "form-defaults": {
+    title: "Application defaults updated",
+    operation: "candidate:application-defaults-update",
+    summary: "Saved reusable application answers and document preferences.",
+  },
+  modes: {
+    title: "Working preferences updated",
+    operation: "candidate:modes-update",
+    summary: "Saved usage, application, or agent-voice preferences.",
+  },
+  automation: {
+    title: "Automation permissions updated",
+    operation: "candidate:automation-update",
+    summary: "Saved consent settings for optional automation capabilities.",
+  },
+  "application-limits": {
+    title: "Application limits updated",
+    operation: "candidate:application-limits-update",
+    summary: "Saved company application caps and cooldown rules.",
   },
 };
 
@@ -594,6 +633,23 @@ function ensureSetupRows(db) {
   putSingletonIfMissing(db, "candidate_setup", DEFAULT_SETUP);
 }
 
+function completeCandidateConfigWrite(db, name, { data, setup }, { recordActivity = true } = {}) {
+  if (!recordActivity) return { data, setup, meta: null, event: null };
+  const activity = CANDIDATE_ACTIVITY[name] || {
+    title: "Candidate settings updated",
+    operation: "candidate:settings-update",
+    summary: "Saved candidate settings.",
+  };
+  const meta = bumpMeta(db);
+  const event = logActivityEvent(db, {
+    type: "system",
+    title: activity.title,
+    summary: activity.summary,
+    tags: [`operation:${activity.operation}`],
+  });
+  return { data, setup, meta, event };
+}
+
 export function candidateSetupInitialize({ repoRoot, env } = {}) {
   const db = openDb({ repoRoot, env });
   return withTransaction(db, () => {
@@ -607,7 +663,7 @@ export function candidateConfigGet({ repoRoot, env } = {}) {
   return { ...readCandidateConfigFromDb(db), setup: computeCandidateSetup(db) };
 }
 
-export function candidateConfigPatch({ repoRoot, env, name, patch } = {}) {
+export function candidateConfigPatch({ repoRoot, env, name, patch, recordActivity = true } = {}) {
   if (!SINGLETON_TABLES[name]) {
     const err = new Error(`unknown candidate config "${name}"`);
     err.code = "NOT_FOUND";
@@ -620,7 +676,7 @@ export function candidateConfigPatch({ repoRoot, env, name, patch } = {}) {
   }
 
   const db = requireDb({ repoRoot, env });
-  return withTransaction(db, () => {
+  const result = withTransaction(db, () => {
     if (name === "targeting") {
       const current = readTargeting(db);
       const merged = deepMerge(current, patch);
@@ -633,7 +689,12 @@ export function candidateConfigPatch({ repoRoot, env, name, patch } = {}) {
       putSearchTracks(db, role_buckets);
       putCompanies(db, "target", tracked_companies);
       putCompanies(db, "excluded", excluded_companies);
-      return { ok: true, data: readTargeting(db), setup: refreshCandidateSetup(db) };
+      return completeCandidateConfigWrite(
+        db,
+        name,
+        { data: readTargeting(db), setup: refreshCandidateSetup(db) },
+        { recordActivity }
+      );
     }
 
     if (name === "application-limits") {
@@ -645,7 +706,12 @@ export function candidateConfigPatch({ repoRoot, env, name, patch } = {}) {
       const merged = normalizeApplicationLimits(deepMerge(current, patch));
       assertValid(name, merged);
       putSingleton(db, "candidate_application_limits", merged);
-      return { ok: true, data: merged, setup: refreshCandidateSetup(db) };
+      return completeCandidateConfigWrite(
+        db,
+        name,
+        { data: merged, setup: refreshCandidateSetup(db) },
+        { recordActivity }
+      );
     }
 
     const table = SINGLETON_TABLES[name];
@@ -653,8 +719,14 @@ export function candidateConfigPatch({ repoRoot, env, name, patch } = {}) {
     const merged = deepMerge(current, patch);
     assertValid(name, merged);
     putSingleton(db, table, merged);
-    return { ok: true, data: merged, setup: refreshCandidateSetup(db) };
+    return completeCandidateConfigWrite(
+      db,
+      name,
+      { data: merged, setup: refreshCandidateSetup(db) },
+      { recordActivity }
+    );
   });
+  return { ok: true, ...result };
 }
 
 export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
@@ -665,7 +737,7 @@ export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
     throw err;
   }
   const db = requireDb({ repoRoot, env });
-  return withTransaction(db, () => {
+  const result = withTransaction(db, () => {
     const current = normalizeApplicationLimits(
       readSingleton(db, "candidate_application_limits", DEFAULTS["application-limits"])
     );
@@ -683,8 +755,12 @@ export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
     }
     assertValid("application-limits", current);
     putSingleton(db, "candidate_application_limits", current);
-    return { ok: true, data: current, setup: refreshCandidateSetup(db) };
+    return completeCandidateConfigWrite(db, "application-limits", {
+      data: current,
+      setup: refreshCandidateSetup(db),
+    });
   });
+  return { ok: true, ...result };
 }
 
 // The same honesty/privacy backstop src/cli/evidence.mjs's `rolester evidence
@@ -732,7 +808,7 @@ function assertCleanEvidenceClaims(claims) {
   }
 }
 
-export function candidateEvidenceMerge({ repoRoot, env, claims } = {}) {
+export function candidateEvidenceMerge({ repoRoot, env, claims, recordActivity = true } = {}) {
   if (!Array.isArray(claims)) {
     const err = new Error("claims must be an array");
     err.code = "BAD_REQUEST";
@@ -740,7 +816,7 @@ export function candidateEvidenceMerge({ repoRoot, env, claims } = {}) {
   }
   assertCleanEvidenceClaims(claims);
   const db = requireDb({ repoRoot, env });
-  return withTransaction(db, () => {
+  const result = withTransaction(db, () => {
     const existing = readEvidence(db).claims;
     const seenClaims = new Map(
       existing.map((claim) => [String(claim.claim || "").trim(), String(claim.id || "")])
@@ -779,15 +855,29 @@ export function candidateEvidenceMerge({ repoRoot, env, claims } = {}) {
     }
     const evidence = readEvidence(db);
     assertValid("evidence", evidence);
+    const meta = added > 0 && recordActivity ? bumpMeta(db) : null;
+    const event =
+      added > 0 && recordActivity
+        ? logActivityEvent(db, {
+            type: "system",
+            title: "Evidence bank updated",
+            summary: `${added} evidence ${added === 1 ? "claim" : "claims"} saved${
+              skipped ? `; ${skipped} duplicate${skipped === 1 ? "" : "s"} skipped` : ""
+            }.`,
+            tags: ["operation:candidate:evidence-save"],
+          })
+        : null;
     return {
-      ok: true,
       added,
       skipped,
       total: evidence.claims.length,
       data: evidence,
       setup: refreshCandidateSetup(db),
+      meta,
+      event,
     };
   });
+  return { ok: true, ...result };
 }
 
 function nextClaimId(usedIds) {
@@ -812,9 +902,9 @@ export function candidateEvidenceRemoveOne({ repoRoot, env, id } = {}) {
     throw err;
   }
   const db = requireDb({ repoRoot, env });
-  return withTransaction(db, () => {
+  const result = withTransaction(db, () => {
     const existing = db
-      .prepare("SELECT 1 FROM candidate_evidence_claims WHERE id = ?")
+      .prepare("SELECT data FROM candidate_evidence_claims WHERE id = ?")
       .get(claimId);
     if (!existing) {
       const err = new Error(`evidence claim not found: "${claimId}"`);
@@ -822,8 +912,23 @@ export function candidateEvidenceRemoveOne({ repoRoot, env, id } = {}) {
       throw err;
     }
     db.prepare("DELETE FROM candidate_evidence_claims WHERE id = ?").run(claimId);
-    return { ok: true, removed: claimId, data: readEvidence(db), setup: refreshCandidateSetup(db) };
+    const removedClaim = JSON.parse(existing.data);
+    const meta = bumpMeta(db);
+    const event = logActivityEvent(db, {
+      type: "system",
+      title: "Evidence claim removed",
+      summary: String(removedClaim?.claim || "Removed one saved evidence claim.").slice(0, 120),
+      tags: ["operation:candidate:evidence-remove"],
+    });
+    return {
+      removed: claimId,
+      data: readEvidence(db),
+      setup: refreshCandidateSetup(db),
+      meta,
+      event,
+    };
   });
+  return { ok: true, ...result };
 }
 
 export function candidateArtifactPut({ repoRoot, env, id, kind, data } = {}) {
