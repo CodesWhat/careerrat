@@ -105,11 +105,13 @@ test("inventory probes installed CLIs, auto-selects the first ready one, and per
       { id: "claude", status: "authentication_required", ready: false, selected: false },
       { id: "codex", status: "ready", ready: true, selected: true },
       { id: "gemini", status: "not_installed", ready: false, selected: false },
+      { id: "custom", status: "not_installed", ready: false, selected: false },
     ]
   );
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
     runtimeId: "codex",
     providerFallback: false,
+    customCommand: null,
   });
   assert.equal(JSON.stringify(response.body).includes("morgan@example.com"), false);
 });
@@ -170,6 +172,7 @@ test("Advanced provider fallback is explicit, durable, and reversible", async ()
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
     runtimeId: null,
     providerFallback: true,
+    customCommand: null,
   });
 
   const local = await request(server, "POST", "/api/settings/ai-runtime/select", {
@@ -179,5 +182,6 @@ test("Advanced provider fallback is explicit, durable, and reversible", async ()
   assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
     runtimeId: "claude",
     providerFallback: false,
+    customCommand: null,
   });
 });

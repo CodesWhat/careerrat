@@ -193,7 +193,14 @@ const CANDIDATE_ROUTE_ENTRIES = [
 // write route (POST /api/onboard/candidate/honesty) already existed and
 // already validated against config/honesty.schema.json; only this read-side
 // prefill list was missing it.
-const SETTINGS_DATA_FILES = ["profile", "targeting", "form-defaults", "modes", "honesty"];
+const SETTINGS_DATA_FILES = [
+  "profile",
+  "targeting",
+  "form-defaults",
+  "modes",
+  "honesty",
+  "evidence",
+];
 const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
   enabled: true,
   source: "default",
@@ -529,6 +536,54 @@ function dbSourceResumePresent(pathCtx) {
   } catch {
     return false;
   }
+}
+
+// W4 — the chat-first onboarding surface's 7-item file pane / mini-progress
+// row (engine, resume, roles, companies, evidence, guardrails, quick facts).
+// Every item is derived from data GET /api/onboard/state already computes or
+// reads — no new store, per the W4 spec's server-scope note. `complete`
+// mirrors the design's "Setup complete · 7 of 7" line; the caller can leave
+// at any point (nothing here gates app routes, it's report-only).
+const SETUP_PROGRESS_ITEMS = [
+  "engine",
+  "resume",
+  "roles",
+  "companies",
+  "evidence",
+  "guardrails",
+  "quickFacts",
+];
+
+export function computeSetupProgress({
+  data = {},
+  sourceResumePresent = false,
+  keyConfigured = false,
+} = {}) {
+  const targeting = data.targeting || {};
+  const profile = data.profile || {};
+  const profileLocation = profile.location || {};
+
+  const done = {
+    engine: !!keyConfigured,
+    resume: !!sourceResumePresent,
+    roles: (targeting.role_buckets ?? []).some((b) => (b?.titles ?? []).length > 0),
+    companies: (targeting.tracked_companies ?? []).length > 0,
+    evidence: (data.evidence?.claims ?? []).length > 0,
+    guardrails: (targeting.cut_signals ?? []).length > 0,
+    quickFacts:
+      !!String(profileLocation.home || "").trim() ||
+      !!profileLocation.remote ||
+      !!profileLocation.hybrid ||
+      !!profileLocation.onsite,
+  };
+
+  const completedCount = SETUP_PROGRESS_ITEMS.filter((key) => done[key]).length;
+  return {
+    items: SETUP_PROGRESS_ITEMS.map((key) => ({ key, done: done[key] })),
+    completedCount,
+    total: SETUP_PROGRESS_ITEMS.length,
+    complete: completedCount === SETUP_PROGRESS_ITEMS.length,
+  };
 }
 
 // Same self-heal-on-read as search-route.mjs's GET /api/search/sources (see
@@ -963,33 +1018,42 @@ export function mountOnboardRoutes({
         });
         const deterministicSources = dbDeterministicSourceCounts(pathCtx, config);
         const deepIngest = buildDeepIngestViewModel({ repoRoot, env });
+        const dbSourceResumePresentValue =
+          dbSourceResumePresent(pathCtx) ||
+          existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md"));
+        const dbKeyConfigured = resolveAIRoute(env, { repoRoot }).type !== "none";
+        const stateData = {
+          profile: config.profile,
+          targeting: config.targeting,
+          evidence: config.evidence,
+          "form-defaults": config["form-defaults"],
+          modes: config.modes,
+          honesty: config.honesty,
+          setup: config.setup,
+          deepIngest,
+          sourcing: {
+            firstSearchRun,
+            sourceSetup: { deterministicSources },
+          },
+        };
         sendJson(res, 200, {
           ok: true,
           files: dbCandidateFiles(repoRoot, pathCtx, config),
-          data: {
-            profile: config.profile,
-            targeting: config.targeting,
-            "form-defaults": config["form-defaults"],
-            modes: config.modes,
-            honesty: config.honesty,
-            setup: config.setup,
-            deepIngest,
-            sourcing: {
-              firstSearchRun,
-              sourceSetup: { deterministicSources },
-            },
-          },
+          data: stateData,
           deepIngest,
           sourcing: { firstSearchRun },
           deterministicSources,
-          sourceResumePresent:
-            dbSourceResumePresent(pathCtx) ||
-            existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md")),
-          keyConfigured: resolveAIRoute(env, { repoRoot }).type !== "none",
+          sourceResumePresent: dbSourceResumePresentValue,
+          keyConfigured: dbKeyConfigured,
           searchSourcesPresent: dbSearchSourcesPresent(pathCtx, config),
           logoImageTokenConfigured: !!(integrations.logo_dev_token || publishableToken),
           logoSearchTokenConfigured: !!(integrations.logo_dev_secret_key || secretKey),
           publicSyncPreference: publicSyncPreferenceGet(pathCtx).preference,
+          setupProgress: computeSetupProgress({
+            data: stateData,
+            sourceResumePresent: dbSourceResumePresentValue,
+            keyConfigured: dbKeyConfigured,
+          }),
         });
         return;
       } catch (err) {
@@ -1037,17 +1101,26 @@ export function mountOnboardRoutes({
     // autocomplete/logo affordances or degrade straight to manual entry +
     // initials, without ever seeing the secret/token values.
     const { publishableToken, secretKey } = resolveLogoTokens(pathCtx, env);
+    const fallbackSourceResumePresent = existsSync(
+      userPath(pathCtx, sourceResumeEntry.candidatePath)
+    );
+    const fallbackKeyConfigured = resolveAIRoute(env, { repoRoot }).type !== "none";
 
     sendJson(res, 200, {
       ok: true,
       files,
       data,
-      sourceResumePresent: existsSync(userPath(pathCtx, sourceResumeEntry.candidatePath)),
-      keyConfigured: resolveAIRoute(env, { repoRoot }).type !== "none",
+      sourceResumePresent: fallbackSourceResumePresent,
+      keyConfigured: fallbackKeyConfigured,
       searchSourcesPresent: existsSync(userPath(pathCtx, "config/search-sources.yml")),
       logoImageTokenConfigured: !!publishableToken,
       logoSearchTokenConfigured: !!secretKey,
       publicSyncPreference: DEFAULT_PUBLIC_SYNC_PREFERENCE,
+      setupProgress: computeSetupProgress({
+        data,
+        sourceResumePresent: fallbackSourceResumePresent,
+        keyConfigured: fallbackKeyConfigured,
+      }),
     });
   });
 

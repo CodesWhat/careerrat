@@ -140,6 +140,23 @@ export function selectInstalledAiRuntime({ runtimeId, providerFallback = false }
   });
 }
 
+// W4 onboarding 3d/3f "Custom command" — any text-in/text-out command works.
+// /custom/test never persists anything (the "Test" button); /custom/select
+// persists it as the active runtime (runtimeId "custom").
+export function testCustomAiRuntime(command) {
+  return apiFetch("/api/settings/ai-runtime/custom/test", {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
+}
+
+export function selectCustomAiRuntime(command) {
+  return apiFetch("/api/settings/ai-runtime/custom/select", {
+    method: "POST",
+    body: JSON.stringify({ command }),
+  });
+}
+
 export function getUsageSummary() {
   return apiFetch("/api/settings/usage");
 }

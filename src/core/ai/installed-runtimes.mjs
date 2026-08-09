@@ -260,6 +260,21 @@ export function buildInstalledRuntimeInvocation({
   if (["gemini", "qwen", "antigravity", "grok"].includes(runtimeId)) {
     return { ...common, args: ["-p", ""] };
   }
+  // "custom" is the W4 onboarding 3d/3f custom-command runtime — its
+  // `executablePath` isn't a resolved binary path (there's no fixed
+  // definition to resolve against), it's the raw command string persisted by
+  // POST /api/settings/ai-runtime/custom/select. Split it into argv here, at
+  // invocation time, the same way probeCustomRuntimeCommand does.
+  if (runtimeId === "custom") {
+    const argv = parseCustomCommandString(executablePath);
+    if (!argv.length) {
+      const error = new Error("no custom command is configured");
+      error.code = "RUNTIME_UNSUPPORTED";
+      throw error;
+    }
+    const [bin, ...args] = argv;
+    return { ...common, command: bin, args };
+  }
   const error = new Error(`unsupported installed AI runtime: ${runtimeId}`);
   error.code = "RUNTIME_UNSUPPORTED";
   throw error;
@@ -273,6 +288,123 @@ export function sanitizeInstalledOutputSchema(value) {
       .filter(([key]) => key !== "$schema" && key !== "$id")
       .map(([key, entry]) => [key, sanitizeInstalledOutputSchema(entry)])
   );
+}
+
+// ---------------------------------------------------------------------------
+// Custom command runtime — W4 onboarding's 3d/3f "Custom command" + Test.
+// Any text-in/text-out command works: the probe writes a short prompt to
+// stdin and reads stdout back, exactly like the fixed registry's own
+// runInstalledRuntime() stdin/stdout contract above, just without a fixed
+// argv. shell:false is preserved (same security posture as the rest of this
+// file) — the command string is split into argv ourselves rather than handed
+// to a shell.
+// ---------------------------------------------------------------------------
+
+const CUSTOM_RUNTIME_TEST_PROMPT = "Reply with a single short sentence to confirm you can respond.";
+
+// A minimal argv splitter: whitespace-separated, with single/double-quoted
+// segments kept intact (so `~/bin/my-agent --name "my agent"` splits into
+// three argv entries, not four). Not a full shell grammar (no backslash
+// escapes, no nesting) — custom commands are simple CLI invocations, and a
+// user who needs more than this can wrap it in a small shell script instead.
+export function parseCustomCommandString(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  const pattern = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  const parts = [];
+  for (;;) {
+    const match = pattern.exec(raw);
+    if (!match) break;
+    parts.push(match[1] !== undefined ? match[1] : match[2] !== undefined ? match[2] : match[3]);
+  }
+  return parts;
+}
+
+// Runs the custom command once with a small stdin prompt and measures
+// latency. 15s timeout per the W4 spec (server scope item 4) — a stuck
+// custom command must not hang the Settings/onboarding UI. Never throws:
+// every failure path (bad command, spawn error, timeout, non-zero exit)
+// resolves to { ok: false, error }.
+export async function probeCustomRuntimeCommand({
+  command,
+  prompt = CUSTOM_RUNTIME_TEST_PROMPT,
+  timeoutMs = 15000,
+  spawnImpl = spawn,
+  env = process.env,
+  cwd,
+} = {}) {
+  const argv = parseCustomCommandString(command);
+  if (!argv.length) {
+    return { ok: false, error: "Enter a command to test." };
+  }
+  const startedAt = Date.now();
+  const [bin, ...args] = argv;
+
+  let child;
+  try {
+    child = spawnImpl(bin, args, {
+      shell: false,
+      windowsHide: true,
+      cwd,
+      env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (error) {
+    return { ok: false, error: `Could not start "${bin}": ${error.message}`, elapsedMs: null };
+  }
+
+  return new Promise((resolve) => {
+    let stdout = "";
+    let stderr = "";
+    let settled = false;
+    const timer = setTimeout(
+      () => {
+        if (settled) return;
+        settled = true;
+        try {
+          child.kill("SIGTERM");
+        } catch {
+          // best-effort only
+        }
+        resolve({ ok: false, error: "Timed out after 15s.", elapsedMs: Date.now() - startedAt });
+      },
+      Math.max(1, timeoutMs)
+    );
+    timer.unref?.();
+
+    child.stdout?.on("data", (chunk) => {
+      stdout += chunk.toString("utf8");
+    });
+    child.stderr?.on("data", (chunk) => {
+      stderr += chunk.toString("utf8");
+    });
+    child.on("error", (error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ ok: false, error: safeRuntimeDiagnostic(error.message), elapsedMs: null });
+    });
+    child.on("close", (status) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      const elapsedMs = Date.now() - startedAt;
+      if (status !== 0) {
+        resolve({
+          ok: false,
+          error: safeRuntimeDiagnostic(stderr) || `Exited with status ${status}.`,
+          elapsedMs,
+        });
+        return;
+      }
+      resolve({ ok: true, elapsedMs, output: safeRuntimeDiagnostic(stdout) });
+    });
+
+    child.stdin?.on("error", () => {
+      // A fast process can close stdin before the write completes.
+    });
+    child.stdin?.end(prompt);
+  });
 }
 
 export function installedRuntimeSignInCommand(runtimeId) {

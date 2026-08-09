@@ -20,8 +20,8 @@ const PRODUCT_FILES = [
 ];
 
 const REACT_PRODUCT_PAGE_FILES = [
-  "apps/web/src/onboarding/steps/WelcomeStep.jsx",
-  "apps/web/src/onboarding/steps/FinishStep.jsx",
+  "apps/web/src/onboarding/OnboardingPage.jsx",
+  "apps/web/src/onboarding/InterviewSurface.jsx",
 ];
 
 const LEGACY_STATIC_ROUTES = ["/onboard", "/search", "/packet", "/evaluate", "/answer", "/tracker"];
@@ -161,8 +161,8 @@ test("DB app shell guard scans the complete product boundary", () => {
 
 test("static affordance guard scans normal React product pages", () => {
   assert.deepEqual(REACT_PRODUCT_PAGE_FILES, [
-    "apps/web/src/onboarding/steps/WelcomeStep.jsx",
-    "apps/web/src/onboarding/steps/FinishStep.jsx",
+    "apps/web/src/onboarding/OnboardingPage.jsx",
+    "apps/web/src/onboarding/InterviewSurface.jsx",
   ]);
 });
 

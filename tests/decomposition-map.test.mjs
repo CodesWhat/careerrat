@@ -25,7 +25,6 @@ const routingPolicyText = readRepoFile(artifactPaths.routingPolicy);
 const agentsText = readRepoFile("AGENTS.md");
 const architectureText = readRepoFile("docs/ARCHITECTURE.md");
 const webApiText = readRepoFile("apps/web/src/lib/api.js");
-const companiesStepText = readRepoFile("apps/web/src/onboarding/steps/CompaniesStep.jsx");
 const decomposition = parseYaml(decompositionText);
 
 const requiredSkills = [
@@ -480,24 +479,16 @@ test("VER-05 docs and app wrappers keep discovery routing split aligned", () => 
   );
   assert.doesNotMatch(localProposalWrappers, /\/api\/chat|\/api\/skill\/run/);
 
-  const localProposalStep = requiredSlice(
-    companiesStepText,
-    "export async function runCompanyProposalCreate",
-    // The onboarding wizard's step numbering shifted — Companies is now
-    // Step 4 (was Step 6) — so the end-of-helpers marker moved with it.
-    "// Step 4",
-    "CompaniesStep local proposal helpers"
-  );
-  assert.doesNotMatch(localProposalStep, /ChatPanel|startChat|\/api\/chat|\/api\/skill\/run/);
-  // ca6371e8 removed CompaniesStep's "Agent-led discovery" ChatPanel
-  // escalation entirely — company discovery is local-proposal-only now.
-  // CompaniesStep.test.jsx's own "does not render proposal admin controls,
-  // chat handoffs, or logo.dev setup UI" test (added in the same commit)
-  // asserts the same absence via `not.toContain("CHAT:discover-companies")`.
-  // ChatPanel itself still exists and is used by the Inbox intake-triage
-  // surface (apps/web/src/inbox/IntakeCard.jsx), just not here.
-  assert.doesNotMatch(companiesStepText, /ChatPanel skill="discover-companies"/);
-  assert.doesNotMatch(companiesStepText, /Agent-led discovery/);
+  // W4 (chat-first onboarding) deleted apps/web/src/onboarding/steps/
+  // CompaniesStep.jsx — its runCompanyProposalCreate local-proposal-creation
+  // helper and the "no ChatPanel/Agent-led discovery escalation" guard that
+  // used to run against it were not ported: the new FilePane.jsx Companies
+  // row editor is a plain ChipInput bound to targeting.tracked_companies
+  // (see apps/web/src/onboarding/FilePane.jsx's CompaniesRowEditor), not a
+  // proposal-review UI, so there is no local-proposal-creation surface left
+  // to guard here. The api.js wrapper check above still covers the one
+  // routing invariant that survives the deletion: the wrappers themselves
+  // stay local, never touching chat/skill-run.
 });
 
 test("all Phase 1 artifacts keep the non-runtime boundary and D-01 through D-14 coverage", () => {

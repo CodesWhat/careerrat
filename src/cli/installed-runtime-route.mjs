@@ -2,6 +2,7 @@ import {
   detectInstalledRuntimes,
   installedRuntimeSignInCommand,
   openInstalledRuntimeTerminal,
+  probeCustomRuntimeCommand,
   probeInstalledRuntime,
 } from "../core/ai/installed-runtimes.mjs";
 import {
@@ -11,6 +12,29 @@ import {
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 16 * 1024;
+
+// The W4 onboarding 3d/3f custom-command entry, appended to the fixed
+// registry's own runtimes array so callers (the engine picker) can render it
+// alongside claude/codex/etc without a separate request. It is intentionally
+// excluded from inspect()'s below-autoSelect fallback: a saved custom command
+// only becomes "selected" through an explicit
+// POST /api/settings/ai-runtime/custom/select, matching the design's "ADD →"
+// affordance rather than silently taking over.
+function customRuntimeEntry(selection) {
+  const command = selection.customCommand;
+  return {
+    id: "custom",
+    name: "Custom command",
+    commandShape: command || null,
+    path: command || null,
+    available: Boolean(command),
+    warning: null,
+    status: command ? "ready_unverified" : "not_installed",
+    ready: Boolean(command),
+    action: null,
+    selected: selection.runtimeId === "custom" && !selection.providerFallback,
+  };
+}
 
 export function inspectInstalledRuntimeState({
   repoRoot,
@@ -43,10 +67,13 @@ export function inspectInstalledRuntimeState({
   return {
     selectedId,
     providerFallback: selection.providerFallback,
-    runtimes: runtimes.map((runtime) => ({
-      ...runtime,
-      selected: runtime.id === selectedId && !selection.providerFallback,
-    })),
+    runtimes: [
+      ...runtimes.map((runtime) => ({
+        ...runtime,
+        selected: runtime.id === selectedId && !selection.providerFallback,
+      })),
+      customRuntimeEntry(selection),
+    ],
   };
 }
 
@@ -57,6 +84,7 @@ export function mountInstalledRuntimeRoutes({
   detectImpl = detectInstalledRuntimes,
   probeImpl = probeInstalledRuntime,
   openTerminalImpl = openInstalledRuntimeTerminal,
+  probeCustomImpl = probeCustomRuntimeCommand,
 } = {}) {
   const inspect = (autoSelect = true) =>
     inspectInstalledRuntimeState({
@@ -157,5 +185,53 @@ export function mountInstalledRuntimeRoutes({
     } catch {
       sendJson(res, 500, { ok: false, code: "TERMINAL_OPEN_FAILED" });
     }
+  });
+
+  // POST /api/settings/ai-runtime/custom/test — 3d/3f's "Test" button. Runs
+  // the command once (15s timeout) and reports latency; never persists
+  // anything — see /custom/select below for that.
+  addRoute("POST", "/api/settings/ai-runtime/custom/test", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (error) {
+      sendJson(res, error.status || 400, { ok: false, error: error.message });
+      return;
+    }
+    const command = String(body?.command || "").trim();
+    if (!command) {
+      sendJson(res, 400, { ok: false, error: "command is required" });
+      return;
+    }
+    const result = await probeCustomImpl({ command, env });
+    sendJson(res, 200, result);
+  });
+
+  // POST /api/settings/ai-runtime/custom/select — persists the custom
+  // command as the selected runtime (runtimeId "custom"). Does not re-test
+  // it first: the 3d/3f UI is expected to have already run /custom/test, but
+  // a stale/untested command is still allowed to be selected (same trust
+  // level as picking a detected-but-unverified CLI below).
+  addRoute("POST", "/api/settings/ai-runtime/custom/select", async (req, res) => {
+    let body;
+    try {
+      body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
+    } catch (error) {
+      sendJson(res, error.status || 400, { ok: false, error: error.message });
+      return;
+    }
+    const command = String(body?.command || "").trim();
+    if (!command) {
+      sendJson(res, 400, { ok: false, error: "command is required" });
+      return;
+    }
+    writeInstalledRuntimeSelection({
+      repoRoot,
+      env,
+      runtimeId: "custom",
+      providerFallback: false,
+      customCommand: command,
+    });
+    sendJson(res, 200, { ok: true, selectedId: "custom", customCommand: command });
   });
 }

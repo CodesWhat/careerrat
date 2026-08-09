@@ -193,6 +193,7 @@ test("installed runtime selection persists under the active private Rolester hom
     assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: root, env }), {
       runtimeId: null,
       providerFallback: false,
+      customCommand: null,
     });
     writeInstalledRuntimeSelection({
       repoRoot: root,
@@ -203,6 +204,7 @@ test("installed runtime selection persists under the active private Rolester hom
     assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: root, env }), {
       runtimeId: "codex",
       providerFallback: false,
+      customCommand: null,
     });
   } finally {
     rmSync(root, { recursive: true, force: true });

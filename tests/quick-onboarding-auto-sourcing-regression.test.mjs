@@ -126,28 +126,23 @@ test("Jobs page manual search uses the deterministic sourcing endpoint", () => {
   assertNoForbiddenRuntime(getSearchSources, "getSearchSources API helper");
 });
 
-test("finish step persists cadence before starting the local first search", () => {
-  const finishStep = stripJavaScriptComments(
-    source("apps/web/src/onboarding/steps/FinishStep.jsx")
+test("W4 completion screen kicks off the local first search deterministically", () => {
+  // W4 (chat-first onboarding) deleted apps/web/src/onboarding/steps/
+  // FinishStep.jsx along with its cadence-preference form
+  // (cadencePatch/saveCadencePreference/saveCadenceAndStartFirstSearch/
+  // retryFirstSearch/isSourceSetupReady) — design 3e has no cadence UI, just
+  // an automatic kickoff + live status row. That logic now lives in
+  // InterviewSurface.jsx's CompletionScreen (design 3e), which auto-starts
+  // startFirstSearchRun() once and polls getSourcingRun for status. The
+  // assertion this test still owns — first-search kickoff never routes
+  // through chat/skill-run/browser-capture — carries over unchanged.
+  const interviewSurface = stripJavaScriptComments(
+    source("apps/web/src/onboarding/InterviewSurface.jsx")
   );
-  const cadencePatch = functionBlock(finishStep, "function cadencePatch");
-  const cadenceSave = functionBlock(finishStep, "export async function saveCadencePreference");
-  const firstSearch = functionBlock(
-    finishStep,
-    "export async function saveCadenceAndStartFirstSearch"
-  );
-  const retrySearch = functionBlock(finishStep, "export async function retryFirstSearch");
-  const sourceReady = functionBlock(finishStep, "export function isSourceSetupReady");
-
-  assert.match(cadencePatch, /search_preferences/);
-  assert.match(cadencePatch, /cadence/);
-  assert.match(cadenceSave, /saveCandidateFile\(\s*"targeting"/);
-  assert.match(firstSearch, /\bsaveCadencePreference\b/);
-  assert.match(firstSearch, /\bstartFirstSearchRun\(\)/);
-  assert.match(retrySearch, /startFirstSearchRun\(\{ retry: true \}\)/);
-  assert.match(sourceReady, /searchSourcesPresent === true/);
-  assertNoForbiddenRuntime(firstSearch, "finish step first-search action");
-  assertNoForbiddenRuntime(retrySearch, "finish step first-search retry");
+  const completionScreen = functionBlock(interviewSurface, "function CompletionScreen");
+  assert.match(completionScreen, /\bstartFirstSearchRun\(\)/);
+  assert.match(completionScreen, /\bgetSourcingRun\(\{ purpose: "first-search" \}\)/);
+  assertNoForbiddenRuntime(completionScreen, "onboarding completion screen first-search kickoff");
 });
 
 test("DB-backed search readiness comes from source config, not generated YAML", () => {

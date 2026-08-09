@@ -447,7 +447,13 @@ export function createChatRuntime({
       throw err;
     }
 
-    const route = resolveAIRoute(env);
+    // repoRoot is passed here (unlike an earlier version of this file) so a
+    // chat session honors the same installed-CLI selection every other AI
+    // call in this codebase already does (resolveAIRoute's own priority
+    // order: selected installed CLI -> BYOK -> proxy -> none). Without it,
+    // the W4 onboarding engine picker's selection would be silently ignored
+    // by the one caller — the interview itself — where it matters most.
+    const route = resolveAIRoute(env, { repoRoot });
     if (route.type === "none") {
       const err = new Error(route.error);
       err.code = "NO_AI_ROUTE";
