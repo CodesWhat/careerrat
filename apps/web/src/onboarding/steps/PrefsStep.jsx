@@ -217,7 +217,7 @@ export function hasPrefsSearchLocation({ homeBase = "", workModes = [] } = {}) {
 
 export function quickFactsValidationError({ authChoice, homeBase = "", workModes = [] } = {}) {
   if (!hasPrefsSearchLocation({ homeBase, workModes })) {
-    return "Add your home base or turn on Remote so Roland can search the right geography.";
+    return "Add your home base or turn on Remote so CareerRat can search the right geography.";
   }
   if (authChoice !== "authorized" && authChoice !== "sponsorship") {
     return "Pick your work authorization to continue — the gate and every application form need it.";
@@ -545,7 +545,7 @@ export function PrefsStep({ state, goNext, goBack, onProgressSelect, showToast }
             </div>
             <div className="onboarding-targeting__media-copy">
               <h1 id="quick-facts-title">Quick facts</h1>
-              <p>Confirm the public links and basics Roland can reuse in packets and forms.</p>
+              <p>Confirm the public links and basics CareerRat can reuse in packets and forms.</p>
             </div>
           </section>
 

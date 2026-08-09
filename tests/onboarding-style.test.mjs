@@ -168,10 +168,14 @@ describe("onboarding shell styles", () => {
       cssRule('[data-theme="dark"] .onboarding-step-card'),
       /background:\s*rgba\(35,\s*31,\s*24,\s*0\.96\)/
     );
+    // Flat design: the M9 aurora/gradient wash was stripped, so this panel
+    // is a plain flat surface fill in dark mode too — no gradient anywhere
+    // in app.css.
     assert.match(
       cssRule('[data-theme="dark"] .onboarding-targeting__media'),
-      /linear-gradient\(180deg,\s*rgba\(20,\s*22,\s*24,\s*0\.98\),\s*rgba\(0,\s*0,\s*0,\s*0\.98\)\)/
+      /background:\s*var\(--paper-band\)/
     );
+    assert.doesNotMatch(cssText(), /gradient\(/);
     assert.match(
       cssRule('[data-theme="dark"] .onboarding-targeting__tag-box--good'),
       /background:\s*rgba\(78,\s*135,\s*45,\s*0\.26\)/
@@ -319,7 +323,7 @@ describe("onboarding shell styles", () => {
 
     assert.match(roleCard, /position:\s*relative/);
     assert.match(roleCard, /border:\s*1px solid var\(--paper-edge\)/);
-    assert.match(roleCard, /box-shadow:\s*0 18px 34px rgba\(var\(--rgb-line\), 0\.08\)/);
+    assert.match(roleCard, /box-shadow:\s*none/);
     assert.match(roleMain, /display:\s*grid/);
     assert.match(laneActions, /justify-content:\s*flex-end/);
     assert.match(addButton, /border-radius:\s*999px/);

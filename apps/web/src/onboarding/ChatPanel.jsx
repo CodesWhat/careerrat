@@ -168,7 +168,7 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
           value={inputText}
           onChange={setInputText}
           rows={2}
-          placeholder="Reply to Roland…"
+          placeholder="Reply to CareerRat…"
           disabled={busy}
         />
         <Button onClick={handleSend} disabled={busy || !inputText.trim()}>

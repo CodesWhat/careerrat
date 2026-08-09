@@ -309,7 +309,7 @@ function firstSearchStatusView({ quickStarting, task, triggerError }) {
       text:
         task.counts.rolesFound > 0
           ? "First search is done — fresh roles are in Jobs."
-          : "First search is done. No matches yet — Roland keeps watching on your cadence.",
+          : "First search is done. No matches yet — CareerRat keeps watching on your cadence.",
       canRetry: false,
     };
   }
@@ -486,7 +486,7 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
             </div>
             <div className="onboarding-targeting__media-copy">
               <h1 id="finish-title">You're all set</h1>
-              <p>Roland is kicking off your first search. Here's how to make it hit harder.</p>
+              <p>CareerRat is kicking off your first search. Here's how to make it hit harder.</p>
             </div>
           </section>
 
@@ -557,7 +557,7 @@ export function FinishStep({ state, reload, goBack, onProgressSelect }) {
                   className="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"
                   aria-labelledby="finish-hero-title"
                 >
-                  <h2 id="finish-hero-title">Go deeper while Roland searches</h2>
+                  <h2 id="finish-hero-title">Go deeper while CareerRat searches</h2>
                   <p>
                     A guided ingest of your work history makes packets and applications much
                     stronger.

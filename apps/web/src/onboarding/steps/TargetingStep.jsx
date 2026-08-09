@@ -13,9 +13,9 @@ import {
 
 export function assistErrorMessage(err) {
   if (err?.status === 501) {
-    return "Roland suggestions are unavailable right now — add or edit roles manually.";
+    return "CareerRat suggestions are unavailable right now — add or edit roles manually.";
   }
-  if (err?.status === 422) return "Roland couldn't produce a suggestion this time — try again.";
+  if (err?.status === 422) return "CareerRat couldn't produce a suggestion this time — try again.";
   return err instanceof Error ? err.message : "Suggestion failed";
 }
 
@@ -34,8 +34,8 @@ function uniqueSignals(values) {
 
 function seedRoleBuckets({ savedTargeting, draftTargeting }) {
   const savedBuckets = normalizeRoleBuckets(savedTargeting.role_buckets);
-  const rolandBuckets = normalizeRoleBuckets(draftTargeting.role_buckets);
-  const buckets = savedBuckets.length ? savedBuckets : rolandBuckets;
+  const suggestedBuckets = normalizeRoleBuckets(draftTargeting.role_buckets);
+  const buckets = savedBuckets.length ? savedBuckets : suggestedBuckets;
   const topFitSignals = savedTargeting.keep_signals?.length
     ? normalizeRoleSignals(savedTargeting.keep_signals)
     : normalizeRoleSignals(draftTargeting.keep_signals);
@@ -95,7 +95,7 @@ function SummarySignalRow({ tone, symbol, label, signals, emptyLabel, onRemove }
   );
 }
 
-// Step 3 — Targeting. This is a review step for the role lanes Roland inferred
+// Step 3 — Targeting. This is a review step for the role lanes CareerRat inferred
 // from the resume, not a raw targeting.yml editor. Save still writes the same
 // candidate targeting fields the rest of Rolester consumes.
 export function TargetingStep({
@@ -115,7 +115,7 @@ export function TargetingStep({
     ? normalizeRoleSignals(savedTargeting.cut_signals)
     : normalizeRoleSignals(draftTargeting.cut_signals);
   // Nothing saved yet but the resume parse already seeded lanes — this is a
-  // confirm-what-Roland-found step, not a blank targeting form.
+  // confirm-what-CareerRat-found step, not a blank targeting form.
   const seededFromResumeUnsaved =
     !(savedTargeting.role_buckets?.length > 0) && draftTargeting.role_buckets?.length > 0;
 
@@ -281,7 +281,7 @@ export function TargetingStep({
         >
           <section
             className="onboarding-step-card__media onboarding-targeting__media"
-            aria-label="Roland role picks"
+            aria-label="Suggested role picks"
           >
             <div className="onboarding-targeting__mark" aria-hidden="true">
               🎯

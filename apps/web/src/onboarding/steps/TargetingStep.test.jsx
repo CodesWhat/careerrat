@@ -143,7 +143,7 @@ describe("TargetingStep shell layout", () => {
 
   it("describes unavailable role suggestions without asking for an AI key", () => {
     expect(assistErrorMessage({ status: 501 })).toBe(
-      "Roland suggestions are unavailable right now — add or edit roles manually."
+      "CareerRat suggestions are unavailable right now — add or edit roles manually."
     );
   });
 

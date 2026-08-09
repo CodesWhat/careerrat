@@ -30,14 +30,11 @@
 
 .funnel-sankey__link {
   opacity: 0.52;
-  transition:
-    opacity 0.16s ease,
-    filter 0.16s ease;
+  transition: opacity 0.16s ease;
 }
 
 .funnel-sankey__link:hover {
   opacity: 0.8;
-  filter: drop-shadow(0 4px 10px rgba(var(--rgb-line), 0.12));
 }
 
 .funnel-sankey__node[role="button"],
@@ -48,7 +45,6 @@
 .funnel-sankey__link.is-active {
   opacity: 0.94;
   stroke: var(--ink);
-  filter: drop-shadow(0 3px 8px rgba(var(--rgb-line), 0.24));
 }
 
 .funnel-sankey__node.is-dimmed,
@@ -75,12 +71,10 @@
 .funnel-sankey__node.is-active rect {
   stroke: var(--ink);
   stroke-width: 3.5px;
-  filter: drop-shadow(0 3px 9px rgba(var(--rgb-line), 0.3));
 }
 
 .funnel-sankey__node:hover rect {
-  filter: drop-shadow(0 4px 10px rgba(var(--rgb-line), 0.16));
-  stroke: var(--paper-surface);
+  stroke: var(--paper-edge-strong);
   stroke-width: 1.5px;
 }
 

@@ -24,6 +24,7 @@
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -38,10 +39,10 @@
 .network__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.4vw, 68px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -205,6 +206,7 @@
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   white-space: nowrap;
@@ -252,6 +254,7 @@
   cursor: pointer;
   font-size: 12px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   list-style: none;
   text-transform: uppercase;
@@ -310,6 +313,7 @@
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 850;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -341,10 +345,10 @@
 .network__drawer-header h2 {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(24px, 3vw, 32px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 1.05;
 }
 
@@ -401,6 +405,7 @@
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }

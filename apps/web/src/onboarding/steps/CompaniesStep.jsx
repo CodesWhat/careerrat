@@ -473,7 +473,7 @@ export function CompaniesStep({
       await saveCandidateFile("targeting", { tracked_companies: companies.map((c) => c.name) });
       if (hadFailure) {
         showToast(
-          "Some company boards couldn't be confirmed — Roland will retry later.",
+          "Some company boards couldn't be confirmed — CareerRat will retry later.",
           "warning"
         );
       } else {

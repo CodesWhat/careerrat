@@ -48,10 +48,10 @@
 .library__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(40px, 4.6vw, 56px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.98;
   text-wrap: balance;
 }
@@ -144,7 +144,6 @@
 .library__segment--active {
   background: var(--paper-surface);
   color: var(--ink);
-  box-shadow: 0 1px 3px rgba(var(--rgb-line), 0.16);
 }
 
 .library__empty {
@@ -188,9 +187,8 @@
 }
 
 .library__card:hover {
-  box-shadow:
-    0 16px 32px rgba(var(--rgb-line), 0.12),
-    0 3px 6px rgba(var(--rgb-line), 0.06);
+  border-color: var(--paper-edge-strong);
+  background: var(--paper-band);
 }
 
 .library__card:focus-visible {
@@ -210,6 +208,7 @@
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 700;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -511,6 +510,7 @@
   color: var(--ink);
   font-size: 13px;
   font-weight: 750;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }

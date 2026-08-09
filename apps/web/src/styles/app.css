@@ -57,8 +57,7 @@ button {
   min-width: 0;
   padding: 12px clamp(28px, 5vw, 64px) 10px max(92px, clamp(28px, 5vw, 64px));
   background: var(--header-bar-bg);
-  box-shadow: inset 0 -1px rgba(var(--rgb-line), 0.08);
-  backdrop-filter: blur(18px);
+  box-shadow: none;
   -webkit-app-region: drag;
 }
 
@@ -71,20 +70,13 @@ button {
   padding-right: clamp(18px, 3vw, 34px);
 }
 
-.app-shell__brand-logo {
-  width: 54px;
-  height: 54px;
-  object-fit: contain;
-  filter: drop-shadow(0 8px 14px rgba(var(--rgb-line), 0.1));
-}
-
 .app-shell__brand {
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(30px, 3vw, 42px);
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: -0.02em;
 }
 
 .app-shell__primary {
@@ -124,7 +116,7 @@ button {
   border-radius: 999px;
   background: var(--header-pill-bg);
   color: var(--ink-soft);
-  box-shadow: var(--header-pill-shadow);
+  box-shadow: none;
   font-size: 18px;
 }
 
@@ -137,19 +129,19 @@ button {
 [data-theme="dark"] .app-shell__header {
   background: var(--header-bar-bg);
   color: var(--ink);
-  box-shadow: inset 0 -1px rgba(255, 250, 242, 0.06);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .app-shell__utility {
   border-color: var(--header-pill-border);
   background: var(--header-pill-bg);
   color: var(--ink);
-  box-shadow: var(--header-pill-shadow);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .app-shell__utility:hover,
 [data-theme="dark"] .app-shell__utility--active {
-  background: rgba(255, 250, 242, 0.14);
+  background: rgba(var(--rgb-ink), 0.14);
   color: var(--ink);
 }
 
@@ -188,11 +180,6 @@ button {
   .app-shell__brand-lockup {
     padding-right: 0;
     border-right: 0;
-  }
-
-  .app-shell__brand-logo {
-    width: 36px;
-    height: 36px;
   }
 
   .app-shell__brand {
@@ -354,7 +341,7 @@ button {
   background: var(--paper-surface);
   border: 1px solid var(--paper-edge);
   border-radius: var(--card-radius);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
   padding: 18px 20px;
 }
 
@@ -398,10 +385,7 @@ button {
   padding: 14px;
   border-radius: 14px;
   background: rgba(var(--rgb-surface), 0.96);
-  box-shadow:
-    0 22px 50px rgba(var(--rgb-line), 0.18),
-    0 5px 14px rgba(var(--rgb-line), 0.08);
-  backdrop-filter: blur(18px);
+  box-shadow: none;
   -webkit-app-region: no-drag;
 }
 
@@ -468,10 +452,10 @@ button {
 .dashboard-home__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(46px, 5vw, 60px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.95;
 }
 
@@ -494,7 +478,7 @@ button {
   border-radius: var(--card-radius);
   background: var(--paper-surface);
   color: var(--ink);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
   text-align: center;
 }
 
@@ -512,6 +496,7 @@ button {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -581,7 +566,7 @@ button {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .dashboard-home__card-header {
@@ -689,6 +674,7 @@ button {
   color: var(--ink-soft);
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -717,6 +703,7 @@ button {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -917,6 +904,7 @@ button {
   color: var(--teal);
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -1040,6 +1028,7 @@ button {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -1047,10 +1036,10 @@ button {
 .dashboard__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.4vw, 68px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -1073,7 +1062,7 @@ button {
   border: 1px solid rgba(var(--rgb-line), 0.08);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .dashboard__score strong {
@@ -1117,7 +1106,7 @@ button {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .dashboard__panel-header {
@@ -1180,23 +1169,17 @@ button {
   margin: var(--dash-body-gap) var(--dash-gutter) var(--dash-gutter);
   padding: 22px;
   border-radius: var(--card-radius);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--coral) 14%, transparent),
-      color-mix(in srgb, var(--teal) 12%, transparent)
-    ),
-    var(--paper-band);
+  background: var(--paper-band);
 }
 
 .dashboard__focus h2 {
   max-width: 820px;
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(32px, 4vw, 46px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.96;
   text-wrap: balance;
 }
@@ -1599,10 +1582,10 @@ button {
 .calendar__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.4vw, 68px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -1625,13 +1608,14 @@ button {
   border: 1px solid rgba(var(--rgb-line), 0.08);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .calendar__score span {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -1665,7 +1649,7 @@ button {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .calendar__strip-controls {
@@ -1763,6 +1747,7 @@ button {
   color: var(--ink-soft);
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -1818,7 +1803,7 @@ button {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .calendar__bucket-header {
@@ -1834,6 +1819,7 @@ button {
   color: var(--ink);
   font-size: 12px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -1945,6 +1931,7 @@ button {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   white-space: nowrap;
@@ -1983,6 +1970,7 @@ button {
   color: var(--danger);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   white-space: nowrap;
@@ -1998,6 +1986,7 @@ button {
   color: var(--ink-soft);
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-decoration: none;
   text-transform: uppercase;
@@ -2315,7 +2304,7 @@ button {
   border-radius: 999px;
   background: var(--header-pill-bg);
   color: var(--ink-soft);
-  box-shadow: var(--header-pill-shadow);
+  box-shadow: none;
 }
 
 .app-shell__right .app-shell__utility svg {
@@ -2413,12 +2402,7 @@ button {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
   overflow: hidden;
-  background: linear-gradient(
-    180deg,
-    var(--paper-bg) 0%,
-    var(--paper-surface) 54%,
-    var(--paper-band) 100%
-  );
+  background: var(--paper-bg);
   color: var(--ink);
 }
 
@@ -2432,8 +2416,7 @@ button {
   padding: 0 clamp(28px, 5vw, 64px) 0 max(92px, clamp(28px, 5vw, 64px));
   background: var(--header-bar-bg);
   color: var(--ink);
-  box-shadow: inset 0 -1px rgba(var(--rgb-line), 0.08);
-  backdrop-filter: blur(18px);
+  box-shadow: none;
   -webkit-app-region: drag;
 }
 
@@ -2446,11 +2429,11 @@ button {
 
 .onboarding-shell__brand {
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(30px, 3vw, 42px);
-  font-weight: 900;
+  font-weight: 800;
   line-height: 1;
-  letter-spacing: 0;
+  letter-spacing: -0.02em;
 }
 
 .onboarding-shell__right {
@@ -2474,7 +2457,7 @@ button {
   border-radius: 999px;
   background: var(--header-pill-bg);
   color: var(--ink);
-  box-shadow: var(--header-pill-shadow);
+  box-shadow: none;
 }
 
 .onboarding-shell__theme:hover {
@@ -2512,19 +2495,6 @@ button {
 
 .onboarding-shell:not(.onboarding-shell--welcome) .onboarding-shell__main {
   padding-bottom: 86px;
-}
-
-.onboarding-shell--welcome .onboarding-shell__main::before {
-  position: absolute;
-  z-index: 0;
-  inset: clamp(12px, 4vh, 52px) clamp(0px, 4vw, 80px) 0;
-  pointer-events: none;
-  content: "";
-  background:
-    radial-gradient(ellipse 48% 40% at 30% 54%, rgba(47, 111, 159, 0.18), transparent 68%),
-    radial-gradient(ellipse 38% 32% at 59% 71%, rgba(232, 85, 61, 0.16), transparent 70%),
-    radial-gradient(ellipse 34% 30% at 74% 36%, rgba(223, 243, 200, 0.72), transparent 72%);
-  filter: blur(2px);
 }
 
 .onboarding-shell--welcome .onboarding-shell__stage {
@@ -2569,7 +2539,7 @@ button {
   background: rgba(var(--rgb-surface), 0.78);
   color: var(--ink);
   cursor: pointer;
-  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.07);
+  box-shadow: none;
   transition:
     background 0.16s ease,
     border-color 0.16s ease,
@@ -2582,14 +2552,14 @@ button {
   transform: translateY(-1px);
   border-color: var(--paper-edge-strong);
   background: var(--paper-surface);
-  box-shadow: 0 12px 24px rgba(var(--rgb-line), 0.1);
+  box-shadow: none;
 }
 
 .onboarding-nav-button--next {
   border-color: transparent;
   background: var(--m-secondary);
   color: var(--m-on-secondary);
-  box-shadow: 0 12px 26px rgba(232, 85, 61, 0.2);
+  box-shadow: none;
 }
 
 .onboarding-nav-button--next:hover:not(:disabled) {
@@ -2620,7 +2590,7 @@ button {
   background: var(--paper-surface);
   color: var(--ink);
   opacity: 1;
-  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.07);
+  box-shadow: none;
 }
 
 .onboarding-nav-button__icon {
@@ -2646,19 +2616,6 @@ button {
   gap: clamp(40px, 8vw, 92px);
 }
 
-.onboarding-hero--wash::before {
-  position: absolute;
-  z-index: 0;
-  inset: -110px -96px;
-  pointer-events: none;
-  content: "";
-  background:
-    radial-gradient(ellipse 40% 34% at 25% 52%, rgba(47, 111, 159, 0.13), transparent 72%),
-    radial-gradient(ellipse 34% 28% at 58% 70%, rgba(232, 85, 61, 0.11), transparent 72%),
-    radial-gradient(ellipse 30% 26% at 74% 34%, rgba(223, 243, 200, 0.58), transparent 76%);
-  filter: blur(1px);
-}
-
 .onboarding-hero__mark-stage {
   position: relative;
   z-index: 1;
@@ -2670,24 +2627,12 @@ button {
   min-width: 220px;
 }
 
-.onboarding-hero--wash .onboarding-hero__mark-stage::before {
-  position: absolute;
-  z-index: 0;
-  inset: 3% -10% -6%;
-  border-radius: 44%;
-  content: "";
-  background:
-    radial-gradient(circle at 56% 42%, rgba(47, 111, 159, 0.22), transparent 42%),
-    radial-gradient(circle at 35% 76%, rgba(232, 85, 61, 0.14), transparent 38%);
-}
-
 .onboarding-hero__mark {
   position: relative;
   z-index: 1;
   width: 72%;
   height: 72%;
   object-fit: contain;
-  filter: drop-shadow(0 18px 28px rgba(var(--rgb-line), 0.14));
 }
 
 .onboarding-hero__copy {
@@ -2703,11 +2648,11 @@ button {
   max-width: 580px;
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.7vw, 74px);
   line-height: 1.06;
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .onboarding-hero__underline-word {
@@ -2745,7 +2690,7 @@ button {
   background: var(--m-secondary);
   font-size: 15px;
   font-weight: 800;
-  box-shadow: 0 14px 28px rgba(232, 85, 61, 0.22);
+  box-shadow: none;
 }
 
 .onboarding-hero__cta:hover:not(:disabled) {
@@ -2851,7 +2796,7 @@ button {
 .onboarding-progress__case--active {
   background: rgba(47, 111, 159, 0.16);
   animation: onboarding-briefcase-knock 0.58s cubic-bezier(0.2, 0.8, 0.2, 1);
-  box-shadow: 0 8px 18px rgba(47, 111, 159, 0.22);
+  box-shadow: none;
 }
 
 .onboarding-progress__case-icon {
@@ -2911,7 +2856,7 @@ button {
   border: none;
   border-radius: 8px;
   background: rgba(var(--rgb-surface), 0.92);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .onboarding-step-card--single {
@@ -2942,6 +2887,7 @@ button {
   color: var(--coral);
   font-size: 12px;
   font-weight: 800;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -2951,9 +2897,7 @@ button {
   display: grid;
   place-items: center;
   min-height: 340px;
-  background:
-    radial-gradient(circle at 48% 44%, rgba(232, 85, 61, 0.12), transparent 36%),
-    linear-gradient(180deg, var(--paper-band), var(--paper-bg));
+  background: var(--paper-band);
   border-right: none;
 }
 
@@ -3006,11 +2950,11 @@ button {
 .onboarding-step-card__title-row h1 {
   margin: 0;
   max-width: 390px;
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(30px, 4vw, 44px);
   line-height: 1.02;
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .onboarding-step-card__content p {
@@ -3360,7 +3304,7 @@ button {
   border: 1px solid rgba(var(--rgb-line), 0.14);
   border-radius: 8px;
   background: var(--paper-surface);
-  box-shadow: 0 28px 72px rgba(var(--rgb-line), 0.24);
+  box-shadow: none;
 }
 
 .onboarding-resume__document-toolbar {
@@ -3383,6 +3327,7 @@ button {
   color: var(--coral);
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   line-height: 1;
   text-transform: uppercase;
@@ -3454,13 +3399,14 @@ button {
   border-radius: 6px;
   background: #fff;
   color: #231f1c;
-  box-shadow: 0 12px 30px rgba(var(--rgb-line), 0.1);
+  box-shadow: none;
 }
 
 .onboarding-resume__document-page span {
   color: var(--coral);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -3506,10 +3452,7 @@ button {
   align-items: flex-start;
   gap: 20px;
   padding: clamp(30px, 4.5vw, 48px);
-  background:
-    radial-gradient(circle at 58% 35%, rgba(47, 111, 159, 0.16), transparent 34%),
-    radial-gradient(circle at 38% 74%, rgba(232, 85, 61, 0.12), transparent 30%),
-    linear-gradient(180deg, var(--paper-band), var(--paper-bg));
+  background: var(--paper-band);
 }
 
 .onboarding-targeting__mark {
@@ -3520,7 +3463,7 @@ button {
   border-radius: 30px;
   background: var(--paper-surface);
   font-size: 50px;
-  box-shadow: 0 18px 34px rgba(var(--rgb-line), 0.1);
+  box-shadow: none;
 }
 
 .onboarding-targeting__media-copy {
@@ -3532,11 +3475,11 @@ button {
 .onboarding-targeting__media-copy h1 {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(32px, 4vw, 44px);
   line-height: 1.05;
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .onboarding-targeting__signal-panel h2 {
@@ -3669,7 +3612,7 @@ button {
   padding: 34px 22px 22px;
   border: 1px solid var(--paper-edge);
   background: rgba(var(--rgb-surface), 0.78);
-  box-shadow: 0 18px 34px rgba(var(--rgb-line), 0.08);
+  box-shadow: none;
 }
 
 .onboarding-targeting__summary-main {
@@ -3786,7 +3729,7 @@ button {
   border-color: var(--sky);
   background: var(--sky);
   color: var(--m-on-secondary);
-  box-shadow: 0 10px 22px rgba(var(--rgb-line), 0.1);
+  box-shadow: none;
   transform: rotate(-5deg);
   transform-origin: 50% 50%;
 }
@@ -3903,7 +3846,7 @@ button {
   border-color: var(--paper-edge);
   background: rgba(var(--rgb-surface), 0.78);
   color: var(--coral);
-  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.08);
+  box-shadow: none;
 }
 
 .onboarding-targeting__field-tool-glyph {
@@ -3933,7 +3876,7 @@ button {
   border-radius: 8px;
   background: var(--paper-surface);
   color: var(--ink);
-  box-shadow: 0 10px 24px rgba(var(--rgb-line), 0.16);
+  box-shadow: none;
   font-size: 11px;
   font-weight: 800;
   line-height: 1;
@@ -4205,7 +4148,7 @@ button {
   border-radius: 999px;
   background: rgba(var(--rgb-surface), 0.78);
   color: var(--ink);
-  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.05);
+  box-shadow: none;
 }
 
 .onboarding-quick-facts__link-icon svg {
@@ -4305,7 +4248,7 @@ button {
   font-size: 14px;
   font-weight: 850;
   line-height: 1;
-  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.05);
+  box-shadow: none;
 }
 
 .onboarding-quick-facts__add-button:hover {
@@ -4434,7 +4377,7 @@ button {
   font-size: 11px;
   font-weight: 700;
   line-height: 1.35;
-  box-shadow: 0 14px 28px rgba(var(--rgb-line), 0.12);
+  box-shadow: none;
   opacity: 0;
   pointer-events: none;
   transform: translate(-50%, 4px);
@@ -4671,7 +4614,7 @@ button {
   border: 1px solid var(--paper-edge-strong);
   border-radius: 8px;
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .onboarding-key__autosave {
@@ -4686,8 +4629,7 @@ button {
   border: 1px solid rgba(232, 85, 61, 0.16);
   border-radius: 999px;
   background: rgba(var(--rgb-surface), 0.9);
-  box-shadow: 0 10px 24px rgba(var(--rgb-line), 0.12);
-  backdrop-filter: blur(10px);
+  box-shadow: none;
 }
 
 .onboarding-key__autosave-disc {
@@ -4732,6 +4674,7 @@ button {
   color: var(--coral);
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -4853,8 +4796,9 @@ button {
 }
 
 .automation-mode__choice--selected {
-  border-color: rgba(var(--rgb-accent), 0.62);
-  box-shadow: inset 3px 0 0 var(--accent);
+  border: 1.5px solid var(--accent);
+  padding: 13.5px;
+  background: var(--accent-bg);
 }
 
 .automation-mode__choice > span {
@@ -4946,23 +4890,20 @@ button {
 }
 
 [data-theme="dark"] .onboarding-shell {
-  background:
-    radial-gradient(ellipse 60% 44% at 34% 44%, rgba(47, 111, 159, 0.14), transparent 68%),
-    radial-gradient(ellipse 44% 36% at 60% 72%, rgba(232, 85, 61, 0.1), transparent 72%),
-    linear-gradient(180deg, #0a0906 0%, #15130e 56%, #0a0906 100%);
+  background: var(--paper-bg);
 }
 
 [data-theme="dark"] .onboarding-shell__header {
   background: var(--header-bar-bg);
   color: var(--ink);
-  box-shadow: inset 0 -1px rgba(255, 250, 242, 0.06);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-shell__theme {
   border-color: var(--header-pill-border);
   background: var(--header-pill-bg);
   color: var(--ink);
-  box-shadow: var(--header-pill-shadow);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-shell__theme:hover {
@@ -4972,7 +4913,7 @@ button {
 [data-theme="dark"] .onboarding-step-card {
   border-color: rgba(255, 250, 242, 0.1);
   background: rgba(35, 31, 24, 0.96);
-  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.42);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-step-card__content {
@@ -4981,29 +4922,23 @@ button {
 
 [data-theme="dark"] .onboarding-key__title-side,
 [data-theme="dark"] .onboarding-resume__title-side {
-  background:
-    radial-gradient(circle at 58% 35%, rgba(47, 111, 159, 0.24), transparent 34%),
-    radial-gradient(circle at 38% 74%, rgba(232, 85, 61, 0.16), transparent 30%),
-    linear-gradient(180deg, rgba(20, 22, 24, 0.98), rgba(0, 0, 0, 0.98));
+  background: var(--paper-band);
 }
 
 [data-theme="dark"] .onboarding-targeting__media {
-  background:
-    radial-gradient(circle at 58% 35%, rgba(47, 111, 159, 0.24), transparent 34%),
-    radial-gradient(circle at 38% 74%, rgba(232, 85, 61, 0.16), transparent 30%),
-    linear-gradient(180deg, rgba(20, 22, 24, 0.98), rgba(0, 0, 0, 0.98));
+  background: var(--paper-band);
 }
 
 [data-theme="dark"] .onboarding-targeting__mark {
   background: rgba(255, 250, 242, 0.08);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.28);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-nav-button {
   border-color: rgba(255, 250, 242, 0.13);
   background: rgba(255, 250, 242, 0.1);
   color: var(--ink);
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-nav-button:hover:not(:disabled) {
@@ -5015,7 +4950,7 @@ button {
   border-color: transparent;
   background: var(--m-secondary);
   color: var(--m-on-secondary);
-  box-shadow: 0 12px 26px rgba(232, 85, 61, 0.24);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-nav-button:disabled {
@@ -5031,7 +4966,7 @@ button {
   background: rgba(255, 250, 242, 0.1);
   color: var(--ink);
   opacity: 1;
-  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-progress__case {
@@ -5160,7 +5095,7 @@ button {
 [data-theme="dark"] .onboarding-resume__document-viewer {
   border-color: rgba(239, 233, 221, 0.1);
   background: rgba(35, 31, 24, 0.98);
-  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.34);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-resume__document-stage {
@@ -5217,7 +5152,7 @@ button {
 [data-theme="dark"] .onboarding-targeting__summary-card--role {
   border-color: rgba(255, 250, 242, 0.12);
   background: rgba(255, 250, 242, 0.08);
-  box-shadow: 0 18px 34px rgba(0, 0, 0, 0.24);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .onboarding-targeting__signal-panel {
@@ -5921,7 +5856,7 @@ button.chip {
   min-height: 2.4rem;
 }
 
-/* ── M9 — Roland floating capture assistant (AppShell) ──────────────────── */
+/* ── M9 — floating capture assistant (AppShell) ──────────────────────────── */
 /* No left-edge accent strip (repo standing rule) — the drag-active state is
  * conveyed by the assistant's border/background, never a colored edge. */
 
@@ -5954,10 +5889,7 @@ button.chip {
   background: rgba(var(--rgb-surface), 0.9);
   color: var(--ink);
   cursor: pointer;
-  box-shadow:
-    0 18px 40px rgba(var(--rgb-line), 0.16),
-    0 4px 10px rgba(var(--rgb-line), 0.06);
-  backdrop-filter: blur(16px);
+  box-shadow: none;
 }
 
 .capture-assistant__launcher:hover,
@@ -5972,27 +5904,21 @@ button.chip {
   overflow: hidden;
   flex-shrink: 0;
   border-radius: 999px;
-  background: var(--paper-surface);
+  background: var(--accent-bg);
+  line-height: 1;
 }
 
 .capture-assistant__headshot {
   width: 58px;
   height: 58px;
-  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.12);
+  font-size: 28px;
 }
 
 .capture-assistant__mini-headshot {
   width: 42px;
   height: 42px;
   border: 1px solid rgba(var(--rgb-line), 0.08);
-}
-
-.capture-assistant__headshot img,
-.capture-assistant__mini-headshot img {
-  width: 86%;
-  height: 86%;
-  object-fit: contain;
-  object-position: center;
+  font-size: 20px;
 }
 
 .capture-assistant__launcher-copy,
@@ -6027,10 +5953,7 @@ button.chip {
   border: 1px solid var(--paper-edge);
   border-radius: 14px;
   background: rgba(var(--rgb-surface), 0.96);
-  box-shadow:
-    0 22px 50px rgba(var(--rgb-line), 0.18),
-    0 5px 14px rgba(var(--rgb-line), 0.08);
-  backdrop-filter: blur(18px);
+  box-shadow: none;
 }
 
 .capture-assistant--drag-active .capture-assistant__launcher,
@@ -6135,7 +6058,7 @@ button.chip {
   font-size: 12px;
   font-weight: 900;
   line-height: 1;
-  box-shadow: 0 8px 18px rgba(var(--rgb-line), 0.06);
+  box-shadow: none;
 }
 
 .capture-assistant__upload:hover {
@@ -6184,9 +6107,7 @@ button.chip {
 [data-theme="dark"] .capture-assistant__launcher {
   border-color: rgba(239, 233, 221, 0.12);
   background: rgba(34, 31, 25, 0.94);
-  box-shadow:
-    0 18px 40px rgba(0, 0, 0, 0.34),
-    0 4px 10px rgba(0, 0, 0, 0.22);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .capture-assistant__launcher:hover,
@@ -6196,9 +6117,7 @@ button.chip {
 
 [data-theme="dark"] .capture-assistant__panel {
   border-color: rgba(239, 233, 221, 0.14);
-  box-shadow:
-    0 22px 50px rgba(0, 0, 0, 0.48),
-    0 5px 14px rgba(0, 0, 0, 0.3);
+  box-shadow: none;
 }
 
 [data-theme="dark"] .capture-assistant--drag-active .capture-assistant__launcher,
@@ -6209,7 +6128,7 @@ button.chip {
 
 [data-theme="dark"] .capture-assistant__mini-headshot,
 [data-theme="dark"] .capture-assistant__headshot {
-  background: rgba(255, 250, 242, 0.9);
+  background: var(--accent-bg);
 }
 
 [data-theme="dark"] .capture-assistant__input {
@@ -6518,10 +6437,10 @@ button.chip {
 .jobs-page__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(46px, 5vw, 60px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.95;
 }
 
@@ -6579,7 +6498,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs-page__board-card {
@@ -6630,6 +6549,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -6643,6 +6563,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   white-space: nowrap;
@@ -6844,6 +6765,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -6851,10 +6773,10 @@ button.chip {
 .jobs-v2__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.4vw, 68px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -6868,7 +6790,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs-v2__tab,
@@ -6912,6 +6834,7 @@ button.chip {
   color: currentColor;
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   line-height: 1;
   opacity: 0.74;
@@ -6963,7 +6886,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.08);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs-v2__metric strong {
@@ -7015,7 +6938,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs-v2__search-mode {
@@ -7029,7 +6952,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs-v2__search-mode-head {
@@ -7046,6 +6969,7 @@ button.chip {
   color: var(--coral);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   line-height: 1;
   text-transform: uppercase;
@@ -7144,23 +7068,17 @@ button.chip {
   min-height: 250px;
   justify-content: flex-end;
   padding: 22px;
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--coral) 13%, transparent),
-      color-mix(in srgb, var(--teal) 10%, transparent)
-    ),
-    var(--paper-band);
+  background: var(--paper-band);
 }
 
 .jobs-v2__next-card h2,
 .jobs-v2__console-card h2 {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(31px, 3.8vw, 44px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.96;
   text-wrap: balance;
 }
@@ -7576,6 +7494,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.12);
   background: var(--paper-band);
   font-size: 11px;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -7740,6 +7659,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -7747,10 +7667,10 @@ button.chip {
 .jobs__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.4vw, 68px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -7776,6 +7696,7 @@ button.chip {
   font: inherit;
   font-size: 14px;
   font-weight: 800;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   touch-action: manipulation;
@@ -7784,7 +7705,7 @@ button.chip {
 .jobs__tab--active {
   background: var(--paper-surface);
   color: var(--ink);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs__tab:hover {
@@ -7815,23 +7736,17 @@ button.chip {
   gap: 18px;
   padding: 22px;
   border-radius: var(--card-radius);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--coral) 13%, transparent),
-      color-mix(in srgb, var(--teal) 10%, transparent)
-    ),
-    var(--paper-band);
-  box-shadow: var(--card-shadow);
+  background: var(--paper-band);
+  box-shadow: none;
 }
 
 .jobs__decision-strip h2 {
   margin: 4px 0 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(24px, 2.6vw, 32px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 1.05;
   text-wrap: balance;
 }
@@ -7850,7 +7765,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs__panel-header {
@@ -8016,7 +7931,7 @@ button.chip {
   border: 1px solid var(--paper-edge-strong);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs__filters-grid {
@@ -8092,7 +8007,7 @@ button.chip {
 .jobs__view-toggle button.is-active {
   background: var(--paper-surface);
   color: var(--ink);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs__clear {
@@ -8171,6 +8086,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-align: left;
   text-transform: uppercase;
@@ -8273,6 +8189,7 @@ button.chip {
   color: var(--coral-dark);
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   white-space: nowrap;
@@ -8286,6 +8203,7 @@ button.chip {
   border-radius: 999px;
   font-size: 10px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   white-space: nowrap;
@@ -8432,7 +8350,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .jobs__search-mode-head {
@@ -8448,6 +8366,7 @@ button.chip {
   color: var(--coral);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   line-height: 1;
   text-transform: uppercase;
@@ -8495,6 +8414,7 @@ button.chip {
 .jobs__ai-failures strong {
   color: var(--ink);
   font-size: 11px;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -8758,6 +8678,7 @@ button.chip {
   font: inherit;
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
   touch-action: manipulation;
@@ -8923,7 +8844,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.14);
   border-radius: 8px;
   background: var(--paper-surface);
-  box-shadow: 0 28px 72px rgba(var(--rgb-line), 0.24);
+  box-shadow: none;
 }
 
 .jobs__ai-prompts-modal-toolbar-actions {
@@ -9102,6 +9023,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -9109,10 +9031,10 @@ button.chip {
 .network-v2__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.4vw, 68px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -9135,7 +9057,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.08);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .network-v2__metric strong {
@@ -9179,7 +9101,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .network-v2__panel-header {
@@ -9225,23 +9147,17 @@ button.chip {
   margin: 18px;
   padding: 22px;
   border-radius: var(--card-radius);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--coral) 13%, transparent),
-      color-mix(in srgb, var(--teal) 12%, transparent)
-    ),
-    var(--paper-band);
+  background: var(--paper-band);
 }
 
 .network-v2__next-card h2,
 .network-v2__drawer-header h2 {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(31px, 3.8vw, 44px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.96;
   text-wrap: balance;
 }
@@ -9609,7 +9525,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .network-v2__chip-row {
@@ -9750,6 +9666,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -9757,10 +9674,10 @@ button.chip {
 .library-v2__title {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(48px, 5.4vw, 68px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.92;
   text-wrap: balance;
 }
@@ -9783,7 +9700,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.08);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .library-v2__metric strong {
@@ -9827,7 +9744,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .library-v2__panel-header {
@@ -9873,13 +9790,7 @@ button.chip {
   margin: 18px;
   padding: 22px;
   border-radius: var(--card-radius);
-  background:
-    linear-gradient(
-      135deg,
-      color-mix(in srgb, var(--coral) 13%, transparent),
-      color-mix(in srgb, var(--sky) 12%, transparent)
-    ),
-    var(--paper-band);
+  background: var(--paper-band);
 }
 
 .library-v2__feature-card h2,
@@ -9887,10 +9798,10 @@ button.chip {
   max-width: 820px;
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(31px, 3.8vw, 44px);
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
   line-height: 0.96;
   text-wrap: balance;
 }
@@ -9997,6 +9908,7 @@ button.chip {
   color: var(--ink-soft);
   font-size: 11px;
   font-weight: 900;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -10060,7 +9972,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: 999px;
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .library-v2__segment,
@@ -10109,6 +10021,7 @@ button.chip {
   gap: 7px;
   border: 1px solid rgba(var(--rgb-line), 0.12);
   background: var(--paper-band);
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -10380,7 +10293,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.1);
   border-radius: var(--card-radius);
   background: var(--paper-surface);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 @media (max-width: 1120px) {
@@ -10555,6 +10468,7 @@ button.chip {
   font-weight: 650;
   color: var(--ink-soft);
   text-transform: uppercase;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
 }
 
@@ -10778,7 +10692,7 @@ button.chip {
   border: 1px solid rgba(var(--rgb-line), 0.14);
   border-radius: 8px;
   background: var(--paper-surface);
-  box-shadow: 0 28px 72px rgba(var(--rgb-line), 0.24);
+  box-shadow: none;
 }
 
 .packet-viewer__toolbar {
@@ -10891,7 +10805,7 @@ button.chip {
   background: var(--paper-surface);
   border: 1px solid var(--paper-edge);
   border-radius: var(--card-radius);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
   z-index: 50;
 }
 
@@ -11067,6 +10981,7 @@ button.chip {
   color: var(--coral);
   font-size: 12px;
   font-weight: 800;
+  font-family: var(--label-font);
   letter-spacing: var(--label-tracking);
   text-transform: uppercase;
 }
@@ -11084,7 +10999,7 @@ button.chip {
   overflow: hidden;
   border-radius: 8px;
   background: rgba(var(--rgb-surface), 0.92);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .deep-wizard__step-card-media {
@@ -11094,10 +11009,7 @@ button.chip {
   align-items: flex-start;
   gap: 20px;
   padding: clamp(30px, 4.5vw, 48px);
-  background:
-    radial-gradient(circle at 58% 35%, rgba(47, 111, 159, 0.16), transparent 34%),
-    radial-gradient(circle at 38% 74%, rgba(232, 85, 61, 0.12), transparent 30%),
-    linear-gradient(180deg, var(--paper-band), var(--paper-bg));
+  background: var(--paper-band);
 }
 
 .deep-wizard__mark {
@@ -11108,7 +11020,7 @@ button.chip {
   border-radius: 26px;
   background: var(--paper-surface);
   font-size: 42px;
-  box-shadow: 0 18px 34px rgba(var(--rgb-line), 0.1);
+  box-shadow: none;
 }
 
 .deep-wizard__media-copy {
@@ -11120,11 +11032,11 @@ button.chip {
 .deep-wizard__media-copy h1 {
   margin: 0;
   color: var(--ink);
-  font-family: "Fraunces", Georgia, serif;
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
   font-size: clamp(28px, 3.6vw, 40px);
   line-height: 1.05;
-  font-weight: 900;
-  letter-spacing: 0;
+  font-weight: 800;
+  letter-spacing: -0.02em;
 }
 
 .deep-wizard__media-copy p {
@@ -11173,7 +11085,7 @@ button.chip {
 .deep-wizard__segment--active {
   background: var(--paper-surface);
   color: var(--ink);
-  box-shadow: var(--card-shadow);
+  box-shadow: none;
 }
 
 .deep-wizard__dropzone {

@@ -36,7 +36,7 @@ describe("app shell styles", () => {
     assert.match(header, /grid-template-columns:\s*auto 1fr auto/);
     assert.match(primary, /justify-content:\s*center/);
     assert.doesNotMatch(brandLockup, /border-right/);
-    assert.match(brand, /font-family:\s*"Fraunces"/);
+    assert.match(brand, /font-family:\s*"Archivo"/);
     assert.match(brand, /font-size:\s*clamp\(30px,\s*3vw,\s*42px\)/);
     assert.match(navList, /flex-direction:\s*row/);
     assert.match(content, /max-width:\s*1440px/);
@@ -67,7 +67,7 @@ describe("app shell styles", () => {
     );
   });
 
-  it("uses Roland as the floating ingestion surface instead of a bottom dock", () => {
+  it("uses a floating capture assistant instead of a bottom dock", () => {
     const assistant = cssRule(".capture-assistant");
     const launcher = cssRule(".capture-assistant__launcher");
 
@@ -78,7 +78,7 @@ describe("app shell styles", () => {
     assert.doesNotMatch(cssText(), /\.capture-bar\s*\{[\s\S]*margin:\s*0 clamp/);
   });
 
-  it("uses dark-mode header tokens instead of light header literals", () => {
+  it("uses dark-mode header tokens instead of light header literals, flat (no shadow)", () => {
     const header = cssRule(".app-shell__header");
     const utility = cssRule(".app-shell__utility");
     const darkHeader = cssRule('[data-theme="dark"] .app-shell__header');
@@ -86,19 +86,23 @@ describe("app shell styles", () => {
 
     assert.match(header, /background:\s*var\(--header-bar-bg\)/);
     assert.match(utility, /background:\s*var\(--header-pill-bg\)/);
-    assert.match(darkHeader, /box-shadow:\s*inset 0 -1px rgba\(255,\s*250,\s*242,\s*0\.06\)/);
+    assert.match(darkHeader, /box-shadow:\s*none/);
     assert.match(darkControls, /background:\s*var\(--header-pill-bg\)/);
     assert.match(darkControls, /border-color:\s*var\(--header-pill-border\)/);
     assert.doesNotMatch(header, /background:\s*rgba\(255,\s*250,\s*242/);
   });
 
-  it("keeps dark header tokens true-black instead of slate gray", () => {
+  it("keeps dark header tokens true near-black instead of slate gray", () => {
     const tokens = tokensText();
     const darkTheme = tokens.match(/\[data-theme="dark"\]\s*\{([^}]*)\}/)?.[1] ?? "";
 
-    assert.match(darkTheme, /--header-bar-bg:\s*rgba\(0,\s*0,\s*0,\s*0\.82\)/);
-    assert.match(darkTheme, /--header-pill-bg:\s*rgba\(255,\s*250,\s*242,\s*0\.08\)/);
-    assert.doesNotMatch(darkTheme, /--header-bar-bg:\s*rgba\(33,\s*37,\s*43/);
+    // The CareerRat design system routes --header-bar-bg/--header-pill-bg
+    // through --surface/--card rather than literal header-only colors, so
+    // the true-black regression guard now lives on --canvas itself.
+    assert.match(darkTheme, /--canvas:\s*#131316/);
+    assert.match(darkTheme, /--header-bar-bg:\s*var\(--surface\)/);
+    assert.match(darkTheme, /--header-pill-bg:\s*var\(--card\)/);
+    assert.doesNotMatch(darkTheme, /--canvas:\s*#(2|3|4|5|6)/);
   });
 
   it("keeps onboarding chrome aligned with the product header", () => {
@@ -111,7 +115,7 @@ describe("app shell styles", () => {
     assert.match(header, /display:\s*grid/);
     assert.match(header, /grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/);
     assert.match(header, /background:\s*var\(--header-bar-bg\)/);
-    assert.match(brand, /font-family:\s*"Fraunces"/);
+    assert.match(brand, /font-family:\s*"Archivo"/);
     assert.match(brand, /font-size:\s*clamp\(30px,\s*3vw,\s*42px\)/);
     assert.match(right, /justify-content:\s*flex-end/);
     assert.match(theme, /background:\s*var\(--header-pill-bg\)/);
@@ -144,17 +148,19 @@ describe("app shell styles", () => {
     assert.match(scopedUtility, /border-radius:\s*999px/);
   });
 
-  it("keeps Roland launcher art contained inside the circular headshot", () => {
-    const image = cssRule(
-      ".capture-assistant__headshot img,\n.capture-assistant__mini-headshot img"
-    );
+  it("keeps the capture launcher mark centered inside the circular headshot", () => {
+    const headshot = cssRule(".capture-assistant__headshot,\n.capture-assistant__mini-headshot");
+    const css = cssText();
 
-    assert.match(image, /width:\s*86%/);
-    assert.match(image, /height:\s*86%/);
-    assert.match(image, /object-fit:\s*contain/);
-    assert.match(image, /object-position:\s*center/);
-    assert.doesNotMatch(image, /width:\s*142%/);
-    assert.doesNotMatch(image, /object-fit:\s*cover/);
+    // The launcher/panel avatar is a plain emoji glyph in a flat tinted
+    // circle now, not an <img> (no persona headshot asset) — centered via
+    // place-items/line-height, sized via font-size per circle.
+    assert.match(headshot, /display:\s*grid/);
+    assert.match(headshot, /place-items:\s*center/);
+    assert.match(headshot, /border-radius:\s*999px/);
+    assert.match(headshot, /background:\s*var\(--accent-bg\)/);
+    assert.match(css, /\.capture-assistant__headshot\s*\{[^}]*font-size:\s*28px/);
+    assert.match(css, /\.capture-assistant__mini-headshot\s*\{[^}]*font-size:\s*20px/);
   });
 
   it("gives the Jobs board a dashboard product frame instead of scaffold styling", () => {
@@ -166,7 +172,7 @@ describe("app shell styles", () => {
 
     assert.match(page, /gap:\s*28px/);
     assert.match(hero, /grid-template-columns:\s*minmax\(0,\s*1fr\) auto/);
-    assert.match(title, /font-family:\s*"Fraunces"/);
+    assert.match(title, /font-family:\s*"Archivo"/);
     assert.match(board, /background:\s*var\(--paper-surface\)/);
     assert.match(row, /display:\s*grid/);
     assert.match(row, /grid-template-columns:\s*42px minmax\(240px,\s*1fr\) auto/);

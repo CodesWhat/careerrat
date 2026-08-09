@@ -118,7 +118,7 @@ const MATERIAL_STEP = {
   pill: "Material",
   emoji: "📥",
   heading: "Feed the machine",
-  payoff: "Everything you give Roland here makes every application hit harder.",
+  payoff: "Everything you give CareerRat here makes every application hit harder.",
   laneKey: null,
 };
 

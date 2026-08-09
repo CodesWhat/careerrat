@@ -424,7 +424,7 @@ export function startDiscoveryNext() {
   return apiFetch("/api/discovery/next", { method: "POST" });
 }
 
-// POST /api/assist/suggest — "Roland-suggest" chips. `kind` is "titles" or
+// POST /api/assist/suggest — AI-suggest chips. `kind` is "titles" or
 // "keywords"; 501 when no AI route is configured, 422 when the model never
 // produces valid structured output after one retry — both are ordinary
 // ApiError throws the caller catches and degrades on (hide/disable the
@@ -523,8 +523,8 @@ export function removeCompanyBoard(name) {
 }
 
 // ---------------------------------------------------------------------------
-// Chat runtime (src/cli/chat-route.mjs) — the Companies step's "Roland,
-// find companies" panel drives discover-companies through this exact
+// Chat runtime (src/cli/chat-route.mjs) — the Companies step's "Find
+// companies" panel drives discover-companies through this exact
 // surface. GET /api/chat/events is intentionally NOT wrapped here: it's a
 // plain GET SSE stream, consumed directly via useEventSource
 // (../lib/sse.js), same convention as that file's own header comment.

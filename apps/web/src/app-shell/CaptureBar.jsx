@@ -6,7 +6,7 @@ import { kindLabel } from "../inbox/intake-labels.js";
 import { ApiError, createIntake, uploadIntakeFile } from "../lib/api.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 
-// CaptureBar — the M9 capture surface, now presented as Roland's floating
+// CaptureBar — the M9 capture surface, presented as a floating capture
 // assistant instead of a docked paste bar. It is still the INPUT surface only:
 // on submit it shows what POST /api/intake's already-classified response says,
 // then the item lives on in the /inbox queue.
@@ -169,16 +169,16 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
       onDrop={handleDrop}
     >
       {open ? (
-        <div className="capture-assistant__panel" role="dialog" aria-label="Talk to Roland">
+        <div className="capture-assistant__panel" role="dialog" aria-label="Quick capture">
           <header className="capture-assistant__header">
             <span className="capture-assistant__mini-headshot" aria-hidden="true">
-              <img src="/assets/logo.png" alt="" />
+              🐀
             </span>
             <span className="capture-assistant__intro">
-              <strong>Roland</strong>
+              <strong>CareerRat</strong>
             </span>
             <IconButton
-              label="Close Roland intake"
+              label="Close capture"
               className="capture-assistant__close"
               onClick={() => setOpen(false)}
             >
@@ -210,7 +210,7 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
                   className="capture-assistant__file-input"
                   type="file"
                   onChange={handleFileSelection}
-                  aria-label="Attach a file to Roland"
+                  aria-label="Attach a file"
                 />
                 <div className="capture-assistant__actions">
                   <Button
@@ -223,7 +223,7 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
                   </Button>
                   <Button
                     className="capture-assistant__send"
-                    aria-label="Send to Roland"
+                    aria-label="Send"
                     onClick={() => submit(text)}
                     disabled={submitting || !text.trim()}
                   >
@@ -248,16 +248,16 @@ export function CaptureBarView({ initiallyOpen = false } = {}) {
       <button
         type="button"
         className="capture-assistant__launcher"
-        aria-label="Open Roland intake"
+        aria-label="Open capture"
         aria-expanded={open}
         aria-haspopup="dialog"
         onClick={() => setOpen((value) => !value)}
       >
         <span className="capture-assistant__headshot" aria-hidden="true">
-          <img src="/assets/logo.png" alt="" />
+          🐀
         </span>
         <span className="capture-assistant__launcher-copy">
-          <strong>Talk to Roland</strong>
+          <strong>Quick capture</strong>
           <small>Drop jobs, emails, docs</small>
         </span>
       </button>

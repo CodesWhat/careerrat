@@ -1,188 +1,267 @@
 /*
- * apps/web/src/styles/tokens.css — Material-3 "Command Center" token values,
- * COPIED (not shared-imported) from src/core/tracker/dashboard-shell.html's
- * inline <style> block. dashboard-shell.html is a flat, non-templated static
- * file that Tailwind's CDN build reads at runtime; the SPA is a real bundled
- * Vite app with no Tailwind, so it hand-writes CSS against these same custom
- * properties instead.
+ * apps/web/src/styles/tokens.css — CareerRat design-system tokens (flat,
+ * no shadows/gradients/backdrop-filters). Canonical tokens are declared
+ * first (--canvas/--surface/--card/--ink/--accent/etc., matching the
+ * design handoff's palette exactly); the historical variable names that
+ * app.css's ~11k lines already reference (--paper-bg, --coral, --sky,
+ * --m-secondary, ...) are kept as aliases pointing at the same canonical
+ * values so the rest of the stylesheet didn't need a line-by-line rename.
+ * New CSS should reach for the canonical names directly.
  *
- * Why a copy instead of a shared stylesheet: dashboard-shell.html's own
- * retirement is already on the roadmap ("retire tracker.json render path"),
- * a few milestones out — engineering a shared-token build step between a
- * file being actively retired and the thing replacing it isn't worth it.
- * Values may drift between the two surfaces until then; when
- * dashboard-shell.html retires, this file becomes the one source of truth
- * and this comment can go.
+ * Theming mechanism is unchanged and frozen: a `data-theme` attribute on
+ * <html> ("light"|"dark"), driven by localStorage key "rolester-theme" +
+ * prefers-color-scheme on first load (see ../lib/theme.js and
+ * ../../public/theme-init.js). Do not rename the storage key.
  *
- * Fonts: Geist Sans/Mono, served by tracker-dev.mjs at /fonts/* (already in
- * package.json#files and already used by the dashboard) — referenced here as
- * server-absolute paths so they resolve correctly under the /app/ mount
- * prefix regardless of what serves the page.
+ * Fonts: Archivo (display/headings) ships as a local npm dep
+ * (@fontsource/archivo, imported below — no CDN). Geist Sans/Mono were
+ * already self-hosted (served by tracker-dev.mjs at /fonts/*, no CDN
+ * either) and keep that path unchanged.
  */
 
+@import "@fontsource/archivo/700.css";
+@import "@fontsource/archivo/800.css";
+
 :root {
-  --paper-bg: #faf6ef;
-  --paper-band: #f5f0e8;
-  --paper-surface: #fffaf2;
-  --paper-edge: #dfd2c2;
-  --paper-edge-strong: #cdbda8;
-  --zebra-odd: var(--paper-band);
-  --zebra-even: var(--paper-surface);
-  --ink: #2b2724;
-  --ink-soft: #5a4f4a;
-  --cool-ink: #191c1e;
-  --cool-ink-mid: #45464d;
-  --cool-ink-soft: #76777d;
-  --coral: #e8553d;
-  --coral-dark: #c93e28;
-  --teal: #2f9e8f;
-  --teal-light: #d6f0ec;
-  --mustard: #e0a93b;
-  --mustard-light: #fdf3d6;
-  --sky: #2f6f9f;
-  --plum: #8a4f7d;
-  --danger: #ba2f20;
+  /* ── Canonical CareerRat tokens (light) ─────────────────────────────── */
+  --canvas: #ececea;
+  --surface: #fbfbf9;
+  --card: #ffffff;
+  --border: #d9d9d3;
+  --border-soft: #e4e4df;
+  --input-border: #d5d5cf;
+  --ink: #17171a;
+  --ink-soft: #63635e;
+  --ink-faint: #8f8f8a;
+  --ink-faint-2: #9a9a94;
+
+  --accent: #2545d3;
+  --accent-dark: #1a34a8;
+  --accent-bg: #eef1fc;
+  --accent-border: #c9d2f4;
+  --accent-chip: #e7ebfb;
+  --accent-on: #ffffff;
+
+  --success: #1e9e6a;
+  --success-bg: #e6f4ed;
+  --success-border: #b9e0cd;
+
+  --danger: #c2362f;
+  --danger-strong: #b3341f;
+  --danger-bg: #fbecea;
+  --danger-border: #e5b8b3;
+
+  --warning: #a16207;
+  --warning-bg: #faf1d9;
+  --warning-border: #ecd8a4;
+
+  --plum: #7d5fd6;
+  --plum-bg: #efecfb;
+
   --card-radius: 8px;
   --row-radius: 6px;
-  --card-shadow: 0 12px 28px rgba(var(--rgb-line), 0.08), 0 2px 4px rgba(var(--rgb-line), 0.04);
-  --label-font: "Geist Sans", system-ui, sans-serif;
+  --label-font: "Geist Mono", ui-monospace, monospace;
   --label-tracking: 0.07em;
 
-  --header-bar-bg: rgba(250, 246, 239, 0.88);
-  --header-pill-bg: rgba(250, 246, 239, 0.92);
-  --header-pill-border: rgba(var(--rgb-line), 0.07);
-  --header-pill-shadow:
-    0 8px 28px rgba(var(--rgb-line), 0.12), 0 2px 6px rgba(var(--rgb-line), 0.05);
+  /* ── Legacy names app.css already references — value-only aliases ──── */
+  --paper-bg: var(--canvas);
+  --paper-band: var(--surface);
+  --paper-surface: var(--card);
+  --paper-edge: var(--border-soft);
+  --paper-edge-strong: var(--border);
+  --zebra-odd: var(--paper-band);
+  --zebra-even: var(--paper-surface);
+  --cool-ink: var(--ink);
+  --cool-ink-mid: var(--ink-soft);
+  --cool-ink-soft: var(--ink-faint);
+  --coral: var(--accent);
+  --coral-dark: var(--accent-dark);
+  --teal: var(--success);
+  --teal-light: var(--success-bg);
+  --mustard: var(--warning);
+  --mustard-light: var(--warning-bg);
+  --sky: var(--accent);
 
-  --m-surface-tint: #8d7f73;
-  --m-surface-container-highest: #efe6da;
-  --m-primary-fixed-dim: #f4b2a5;
-  --m-error-container: #ffe0d8;
-  --m-on-secondary-fixed: #4a1b12;
-  --m-on-primary-fixed: #4a1b12;
-  --m-primary-container: #2b2724;
-  --m-tertiary-fixed: #d6f0ec;
-  --m-on-primary-fixed-variant: #7a2f22;
-  --m-on-secondary: #ffffff;
-  --m-tertiary-fixed-dim: #a9ddd6;
-  --m-on-primary: #ffffff;
-  --m-on-error-container: #8c1d11;
-  --m-surface-dim: #eee6da;
-  --m-surface-container-low: #faf6ef;
-  --m-on-tertiary-fixed-variant: #1f6f65;
-  --m-tertiary-container: #d6f0ec;
-  --m-secondary: #e8553d;
-  --m-primary: #2b2724;
-  --m-outline-variant: #dfd2c2;
-  --m-surface-bright: #fffaf2;
-  --m-on-tertiary: #ffffff;
-  --m-on-secondary-container: #4a1b12;
-  --m-tertiary: #2f9e8f;
-  --m-surface-container-lowest: #fffaf2;
-  --m-on-tertiary-fixed: #123f39;
-  --m-surface-variant: #f5f0e8;
-  --m-primary-fixed: #ffd8cf;
-  --m-on-secondary-fixed-variant: #7a2f22;
-  --m-on-background: #2b2724;
-  --m-on-tertiary-container: #2f9e8f;
-  --m-error: #ba2f20;
-  --m-secondary-container: #e8553d;
-  --m-secondary-fixed: #ffe6df;
-  --m-background: #faf6ef;
-  --m-surface-container-high: #f5f0e8;
+  /* Flat design: no elevation shadows anywhere. Both vars below feed the
+     ~35 box-shadow call sites in app.css directly, so zeroing them here
+     flattens every card/pill/header at once. */
+  --card-shadow: none;
+  --header-bar-bg: var(--surface);
+  --header-pill-bg: var(--card);
+  --header-pill-border: var(--border-soft);
+  --header-pill-shadow: none;
+
+  --rgb-line: 23, 23, 26;
+  --rgb-surface: 255, 255, 255;
+  --rgb-band: 251, 251, 249;
+  --rgb-ink: 23, 23, 26;
+  --rgb-accent: 37, 69, 211;
+
+  /* ── Material-3 role aliases (dashboard-shell.html parity, mostly
+     consumed by a handful of badge/pill/focus-ring rules) — same role
+     structure as before, recolored onto the tokens above. ────────────── */
+  --m-surface-tint: var(--ink-faint);
+  --m-surface-container-highest: #f0f0ed;
+  --m-primary-fixed-dim: var(--border);
+  --m-error-container: var(--danger-bg);
+  --m-on-secondary-fixed: #16266b;
+  --m-on-primary-fixed: #16266b;
+  --m-primary-container: var(--ink);
+  --m-tertiary-fixed: var(--success-bg);
+  --m-on-primary-fixed-variant: #1d2f8f;
+  --m-on-secondary: var(--accent-on);
+  --m-tertiary-fixed-dim: #a6e0c8;
+  --m-on-primary: var(--accent-on);
+  --m-on-error-container: #7a251f;
+  --m-surface-dim: #e2e2de;
+  --m-surface-container-low: var(--canvas);
+  --m-on-tertiary-fixed-variant: #12523a;
+  --m-tertiary-container: var(--success-bg);
+  --m-secondary: var(--accent);
+  --m-primary: var(--ink);
+  --m-outline-variant: var(--border-soft);
+  --m-surface-bright: var(--card);
+  --m-on-tertiary: var(--accent-on);
+  --m-on-secondary-container: var(--accent);
+  --m-tertiary: var(--success);
+  --m-surface-container-lowest: var(--card);
+  --m-on-tertiary-fixed: #0d3c2a;
+  --m-surface-variant: var(--surface);
+  --m-primary-fixed: var(--accent-bg);
+  --m-on-secondary-fixed-variant: #1d2f8f;
+  --m-on-background: var(--ink);
+  --m-on-tertiary-container: var(--success);
+  --m-error: var(--danger);
+  --m-secondary-container: var(--accent-bg);
+  --m-secondary-fixed: var(--accent-chip);
+  --m-background: var(--canvas);
+  --m-surface-container-high: var(--surface);
   --m-on-error: #ffffff;
-  --m-inverse-on-surface: #faf6ef;
-  --m-surface-container: #f5f0e8;
-  --m-secondary-fixed-dim: #ffb4a7;
-  --m-inverse-surface: #2b2724;
-  --m-outline: #8d7f73;
-  --m-on-surface-variant: #5a4f4a;
-  --m-inverse-primary: #ffd8cf;
-  --m-surface: #faf6ef;
-  --m-on-surface: #2b2724;
-  --m-on-primary-container: #6f352a;
-
-  --rgb-line: 43, 39, 36;
-  --rgb-surface: 255, 250, 242;
-  --rgb-band: 246, 239, 228;
+  --m-inverse-on-surface: var(--canvas);
+  --m-surface-container: var(--surface);
+  --m-secondary-fixed-dim: var(--accent-border);
+  --m-inverse-surface: var(--ink);
+  --m-outline: var(--ink-faint);
+  --m-on-surface-variant: var(--ink-soft);
+  --m-inverse-primary: var(--accent-bg);
+  --m-surface: var(--canvas);
+  --m-on-surface: var(--ink);
+  --m-on-primary-container: #16266b;
 }
 
 [data-theme="dark"] {
-  --header-bar-bg: rgba(0, 0, 0, 0.82);
-  --header-pill-bg: rgba(255, 250, 242, 0.08);
-  --header-pill-border: rgba(255, 250, 242, 0.12);
-  --header-pill-shadow: none;
-  --paper-bg: #000000;
-  --paper-band: #15130e;
-  --paper-surface: #1a1712;
-  --paper-edge: #332d23;
-  --paper-edge-strong: #443c30;
-  --ink: #efe9dd;
-  --ink-soft: #b3a99d;
-  --cool-ink: #efe9dd;
-  --cool-ink-mid: #c9c2b6;
-  --cool-ink-soft: #b3a99d;
-  --coral: #ff6e57;
-  --coral-dark: #ff8068;
-  --teal: #46c4b1;
-  --teal-light: #173b35;
-  --mustard: #e9b653;
-  --mustard-light: #322a14;
-  --sky: #5ea4d7;
-  --plum: #c585b5;
-  --danger: #ff6d5b;
-  --card-shadow: 0 12px 28px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.36);
-  --rgb-line: 235, 229, 221;
-  --rgb-surface: 26, 23, 18;
-  --rgb-band: 21, 19, 14;
+  /* ── Canonical CareerRat tokens (dark) — same tokens, contrast-kept ── */
+  --canvas: #131316;
+  --surface: #1a1a1e;
+  --card: #202024;
+  --border: #35353b;
+  --border-soft: #2e2e33;
+  --input-border: #3a3a41;
+  --ink: #ececea;
+  --ink-soft: #a8a8a3;
+  --ink-faint: #7a7a76;
+  --ink-faint-2: #8f8f8a;
 
-  --m-surface-tint: #9a8f7f;
-  --m-surface-container-highest: #241f18;
-  --m-primary-fixed-dim: #6a3328;
-  --m-error-container: #3d201a;
-  --m-on-secondary-fixed: #ffd8cf;
-  --m-on-primary-fixed: #ffd8cf;
-  --m-primary-container: #efe9dd;
-  --m-tertiary-fixed: #173b35;
-  --m-on-primary-fixed-variant: #f4b2a5;
-  --m-on-secondary: #ffffff;
-  --m-tertiary-fixed-dim: #2a5b54;
-  --m-on-primary: #1a1712;
-  --m-on-error-container: #ffb4a7;
-  --m-surface-dim: #0f0d09;
-  --m-surface-container-low: #14110c;
-  --m-on-tertiary-fixed-variant: #6fcabb;
-  --m-tertiary-container: #173b35;
-  --m-secondary: #ff6e57;
-  --m-primary: #efe9dd;
-  --m-outline-variant: #332d23;
-  --m-surface-bright: #2a251d;
-  --m-on-tertiary: #06201c;
-  --m-on-secondary-container: #ffd8cf;
-  --m-tertiary: #46c4b1;
-  --m-surface-container-lowest: #0d0b08;
-  --m-on-tertiary-fixed: #a9ddd6;
-  --m-surface-variant: #15130e;
-  --m-primary-fixed: #5a2a20;
-  --m-on-secondary-fixed-variant: #f4b2a5;
-  --m-on-background: #efe9dd;
-  --m-on-tertiary-container: #46c4b1;
-  --m-error: #ff6d5b;
-  --m-secondary-container: #ff6e57;
-  --m-secondary-fixed: #3a201a;
-  --m-background: #000000;
-  --m-surface-container-high: #1e1a14;
+  --accent: #4f74e8;
+  --accent-dark: #6f8fee;
+  --accent-bg: #1c2340;
+  --accent-border: #33417a;
+  --accent-chip: #212a4a;
+  --accent-on: #ffffff;
+
+  --success: #34c48c;
+  --success-bg: #123526;
+  --success-border: #1f5a3f;
+
+  --danger: #f2685c;
+  --danger-strong: #e2544a;
+  --danger-bg: #3a1512;
+  --danger-border: #6b2c26;
+
+  --warning: #d99a2b;
+  --warning-bg: #3a2c0c;
+  --warning-border: #5a4415;
+
+  --plum: #9c85e0;
+  --plum-bg: #241d40;
+
+  /* Legacy aliases (dark) */
+  --paper-bg: var(--canvas);
+  --paper-band: var(--surface);
+  --paper-surface: var(--card);
+  --paper-edge: var(--border-soft);
+  --paper-edge-strong: var(--border);
+  --cool-ink: var(--ink);
+  --cool-ink-mid: var(--ink-soft);
+  --cool-ink-soft: var(--ink-faint);
+  --coral: var(--accent);
+  --coral-dark: var(--accent-dark);
+  --teal: var(--success);
+  --teal-light: var(--success-bg);
+  --mustard: var(--warning);
+  --mustard-light: var(--warning-bg);
+  --sky: var(--accent);
+
+  --card-shadow: none;
+  --header-bar-bg: var(--surface);
+  --header-pill-bg: var(--card);
+  --header-pill-border: var(--border-soft);
+  --header-pill-shadow: none;
+
+  --rgb-line: 236, 236, 234;
+  --rgb-surface: 32, 32, 36;
+  --rgb-band: 26, 26, 30;
+  --rgb-ink: 236, 236, 234;
+  --rgb-accent: 79, 116, 232;
+
+  /* Material-3 role aliases (dark) */
+  --m-surface-tint: var(--ink-faint);
+  --m-surface-container-highest: #26262b;
+  --m-primary-fixed-dim: #16205c;
+  --m-error-container: var(--danger-bg);
+  --m-on-secondary-fixed: #c9d2f4;
+  --m-on-primary-fixed: #c9d2f4;
+  --m-primary-container: var(--ink);
+  --m-tertiary-fixed: #0f3a28;
+  --m-on-primary-fixed-variant: #eef1fc;
+  --m-on-secondary: var(--accent-on);
+  --m-tertiary-fixed-dim: #0a2a1c;
+  --m-on-primary: var(--card);
+  --m-on-error-container: #f5b8b0;
+  --m-surface-dim: #0e0e10;
+  --m-surface-container-low: #16161a;
+  --m-on-tertiary-fixed-variant: #a6e0c8;
+  --m-tertiary-container: var(--success-bg);
+  --m-secondary: var(--accent);
+  --m-primary: var(--ink);
+  --m-outline-variant: var(--border-soft);
+  --m-surface-bright: #2c2c31;
+  --m-on-tertiary: #06231a;
+  --m-on-secondary-container: #eef1fc;
+  --m-tertiary: var(--success);
+  --m-surface-container-lowest: #0b0b0d;
+  --m-on-tertiary-fixed: #d7f5e6;
+  --m-surface-variant: var(--surface);
+  --m-primary-fixed: #24337a;
+  --m-on-secondary-fixed-variant: #eef1fc;
+  --m-on-background: var(--ink);
+  --m-on-tertiary-container: var(--success);
+  --m-error: var(--danger);
+  --m-secondary-container: var(--accent);
+  --m-secondary-fixed: #24337a;
+  --m-background: var(--canvas);
+  --m-surface-container-high: var(--card);
   --m-on-error: #ffffff;
-  --m-inverse-on-surface: #14110c;
-  --m-surface-container: #191610;
-  --m-secondary-fixed-dim: #6a3328;
-  --m-inverse-surface: #efe9dd;
-  --m-outline: #9a8f7f;
-  --m-on-surface-variant: #b3a99d;
-  --m-inverse-primary: #ff8068;
-  --m-surface: #000000;
-  --m-on-surface: #efe9dd;
-  --m-on-primary-container: #ffd8cf;
+  --m-inverse-on-surface: #16161a;
+  --m-surface-container: var(--surface);
+  --m-secondary-fixed-dim: #16205c;
+  --m-inverse-surface: var(--canvas);
+  --m-outline: #4a4a50;
+  --m-on-surface-variant: var(--ink-soft);
+  --m-inverse-primary: var(--accent);
+  --m-surface: var(--canvas);
+  --m-on-surface: var(--ink);
+  --m-on-primary-container: #eef1fc;
 }
 
 @font-face {
@@ -196,35 +275,4 @@
   src: url("/fonts/GeistMonoVF.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
-}
-@font-face {
-  font-family: "Fraunces";
-  src: url("/fonts/FrauncesLatin.woff2") format("woff2");
-  font-weight: 400 900;
-  font-style: normal;
-  font-display: swap;
-  unicode-range:
-    U+??, U+131, U+152-153, U+2BB-2BC, U+2C6, U+2DA, U+2DC, U+304, U+308, U+329,
-    U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
-}
-@font-face {
-  font-family: "Fraunces";
-  src: url("/fonts/FrauncesLatinExt.woff2") format("woff2");
-  font-weight: 400 900;
-  font-style: normal;
-  font-display: swap;
-  unicode-range:
-    U+100-2BA, U+2BD-2C5, U+2C7-2CC, U+2CE-2D7, U+2DD-2FF, U+304, U+308,
-    U+329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB,
-    U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
-}
-@font-face {
-  font-family: "Fraunces";
-  src: url("/fonts/FrauncesVietnamese.woff2") format("woff2");
-  font-weight: 400 900;
-  font-style: normal;
-  font-display: swap;
-  unicode-range:
-    U+102-103, U+110-111, U+128-129, U+168-169, U+1A0-1A1, U+1AF-1B0,
-    U+300-301, U+303-304, U+308-309, U+323, U+329, U+1EA0-1EF9, U+20AB;
 }

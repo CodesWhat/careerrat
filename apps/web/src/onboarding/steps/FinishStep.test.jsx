@@ -129,7 +129,7 @@ describe("FinishStep resume gate", () => {
     expect(html).toContain("Résumé required");
     expect(html).toContain("Import it before finishing setup.");
     expect(html).toContain("Go to Resume step");
-    expect(html).not.toContain("Go deeper while Roland searches");
+    expect(html).not.toContain("Go deeper while CareerRat searches");
 
     const resumeButton = capturedButtons.find((props) => props.children === "Go to Resume step");
     expect(resumeButton).toBeTruthy();
@@ -140,7 +140,7 @@ describe("FinishStep resume gate", () => {
   it("renders normal finish content when a source resume exists", () => {
     const html = renderFinish({ ...SEARCH_READY_STATE, sourceResumePresent: true });
 
-    expect(html).toContain("Go deeper while Roland searches");
+    expect(html).toContain("Go deeper while CareerRat searches");
     expect(html).toContain("Search cadence");
     expect(html).not.toContain("Résumé required");
   });
@@ -282,7 +282,7 @@ describe("FinishStep deep-ingest hero", () => {
     expect(html).toContain(
       'class="onboarding-targeting__signal-panel onboarding-targeting__signal-panel--quiet onboarding-finish__hero"'
     );
-    expect(html).toContain("Go deeper while Roland searches");
+    expect(html).toContain("Go deeper while CareerRat searches");
     expect(html).toContain(
       "A guided ingest of your work history makes packets and applications much stronger."
     );
