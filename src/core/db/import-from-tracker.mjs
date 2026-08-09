@@ -218,12 +218,12 @@ function importLegacyCandidateSetup(pathCtx) {
     "application-limits",
   ]) {
     if (!legacy[name]) continue;
-    candidateConfigPatch({ ...pathCtx, name, patch: legacy[name] });
+    candidateConfigPatch({ ...pathCtx, name, patch: legacy[name], recordActivity: false });
     counts[name] = true;
   }
   const claims = Array.isArray(legacy.evidence?.claims) ? legacy.evidence.claims : [];
   if (claims.length) {
-    const result = candidateEvidenceMerge({ ...pathCtx, claims });
+    const result = candidateEvidenceMerge({ ...pathCtx, claims, recordActivity: false });
     counts.evidence = result.added;
   }
 

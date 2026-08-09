@@ -48,7 +48,7 @@ after(() => {
 test("migration 009 creates separate public-intel tables with JSON constraints and indexes", () => {
   const { db } = setupRepo();
 
-  assert.equal(ALL_MIGRATIONS.at(-1).id, 9);
+  assert.ok(ALL_MIGRATIONS.some(({ id, name }) => id === 9 && name === "public-intel"));
   const migrationLog = db.prepare("SELECT id, name FROM _migrations WHERE id = ?").get(9);
   assert.deepEqual({ ...migrationLog }, { id: 9, name: "public-intel" });
 

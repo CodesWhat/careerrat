@@ -6,8 +6,10 @@
 export { activityAppend } from "./activity.mjs";
 export { analyticsRefresh } from "./analytics.mjs";
 export {
+  appCaptureInterviewIntake,
   appRecordRoundOutcome,
   appRegisterArtifact,
+  appRegisterInterviewDossier,
   appRegisterPacketArtifacts,
   appRegisterPacketQuestionCapture,
   appScheduleInterview,
@@ -27,7 +29,13 @@ export {
   candidateEvidenceRemoveOne,
   candidateSetupInitialize,
 } from "./candidate.mjs";
-export { commAppendMessage, commMarkSent, commUpsert } from "./comm.mjs";
+export {
+  commAppendMessage,
+  commCaptureInbound,
+  commMarkSent,
+  commSetDraft,
+  commUpsert,
+} from "./comm.mjs";
 export {
   companyBoardResolutionGet,
   companyBoardResolutionListDue,
@@ -51,6 +59,7 @@ export {
   deepIngestSourceCreate,
   deepIngestSourceGet,
   deepIngestSourceList,
+  deepIngestSourceRemove,
   deepIngestStateGet,
 } from "./deep-ingest.mjs";
 export {

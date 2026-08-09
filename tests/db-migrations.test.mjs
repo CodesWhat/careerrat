@@ -54,13 +54,14 @@ test("re-running against a db already at the latest version is a no-op", () => {
   assert.equal(after, before, "no new _migrations rows on a no-op re-run");
 });
 
-test("migration 008 is registered as deep-ingest before public-intel", () => {
+test("migration 008-010 preserve deep-ingest, public-intel, then workspace-agent order", () => {
   assert.deepEqual(
-    ALL_MIGRATIONS.slice(-3).map((migration) => [migration.id, migration.name]),
+    ALL_MIGRATIONS.slice(-4).map((migration) => [migration.id, migration.name]),
     [
       [7, "sourcing-runs"],
       [8, "deep-ingest"],
       [9, "public-intel"],
+      [10, "workspace-agent"],
     ]
   );
 });

@@ -70,11 +70,17 @@ export function sourcedSetStatus({ repoRoot, env, id, to, note } = {}) {
 
     putRow(db, "sourced", id, updated);
     const meta = bumpMeta(db);
+    const skipped = ["cut", "withdrawn", "skipped"].includes(String(to).toLowerCase());
     const event = logActivityEvent(db, {
       type: "status_change",
-      title: `${role.company || id} — sourced ${from} → ${to}`,
+      title: skipped
+        ? `${role.company || id} — Role skipped`
+        : `${role.company || id} — Sourced role status updated`,
+      summary: skipped
+        ? note || "Removed this role from active review."
+        : `Moved the sourced role to ${String(to).replace(/[-_]/g, " ")}.`,
       refs: { company: role.company, role: role.role },
-      tags: [`status:${to}`],
+      tags: [`status:${to}`, "operation:sourced:status-update"],
     });
     const analytics = refreshAnalytics(db);
     return { id, from, to, meta, event, analytics };

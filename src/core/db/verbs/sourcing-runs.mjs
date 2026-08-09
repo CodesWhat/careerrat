@@ -10,7 +10,7 @@ export const SOURCING_RUN_STATUSES = Object.freeze({
   FAILED: "failed",
 });
 
-const PURPOSES = new Set(["first-search", "manual-search"]);
+const PURPOSES = new Set(["first-search", "manual-search", "ai-web-search"]);
 const TERMINAL_STATUSES = new Set([SOURCING_RUN_STATUSES.COMPLETED, SOURCING_RUN_STATUSES.FAILED]);
 
 function clone(value) {
@@ -28,7 +28,7 @@ function assertPurpose(purpose) {
   const normalized = String(purpose || "").trim();
   if (!PURPOSES.has(normalized)) {
     throw makeError(
-      'sourcing run purpose must be "first-search" or "manual-search"',
+      'sourcing run purpose must be "first-search", "manual-search", or "ai-web-search"',
       "BAD_REQUEST"
     );
   }
@@ -115,6 +115,9 @@ function normalizeError(error) {
     };
     if (typeof error.action === "string" && error.action.trim()) {
       result.action = error.action.trim();
+    }
+    for (const key of ["failedPromptIds", "queryResults", "sources", "errors"]) {
+      if (Array.isArray(error[key])) result[key] = clone(error[key]);
     }
     return result;
   }
