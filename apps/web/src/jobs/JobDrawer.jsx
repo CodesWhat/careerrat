@@ -19,8 +19,10 @@ import { InlineAlert } from "../components/Toast.jsx";
 import {
   appendCommMessage,
   applyOnSite,
+  draftCommunication,
   getApplication,
   getCommunications,
+  getJobDescription,
   getPacket,
   markCommSent,
   mergeNestedField,
@@ -34,6 +36,7 @@ import {
 } from "../lib/api.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { ArtifactViewerModal } from "./ArtifactViewerModal.jsx";
+import { InterviewDossierCard } from "./InterviewDossierCard.jsx";
 import { PacketDocumentsCard } from "./PacketDocumentsCard.jsx";
 import { PacketGateCard } from "./PacketGateCard.jsx";
 import { deriveJobCta } from "./useApplicationGates.js";
@@ -122,6 +125,8 @@ export function JobDrawer({ row, onClose, initialSection }) {
   const [notice, setNotice] = useState(null);
   const [sourcedResolved, setSourcedResolved] = useState(false);
   const [viewer, setViewer] = useState(null); // {title, artifact} | null
+  const [jdHint, setJdHint] = useState(null);
+  const [jdMeta, setJdMeta] = useState(null); // {completeness} | null
   const drawerRef = useRef(null);
 
   const isApplication = row.source === "application";
@@ -141,6 +146,8 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setActionError(null);
     setNotice(null);
     setSourcedResolved(false);
+    setJdHint(null);
+    setJdMeta(null);
     if (!isApplication) return undefined;
     (async () => {
       try {
@@ -209,6 +216,31 @@ export function JobDrawer({ row, onClose, initialSection }) {
       setViewer({ title: `${label} — preview`, artifact });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Could not load ${label.toLowerCase()}`);
+    }
+  }
+
+  // ISSUE-035 — the Artifacts card's Job description row opens the same
+  // ArtifactViewerModal via GET /api/jobs/job-description (readJobDescriptionArtifact),
+  // already shaped for the modal's `artifact.html` branch. JD_NOT_CAPTURED/
+  // JD_FILE_MISSING are expected "nothing captured yet" states surfaced as an
+  // inline hint next to the row, never the top-level actionError banner;
+  // JD_TOO_LARGE/UNSAFE_ARTIFACT_PATH are defensive edge cases that fall back
+  // to that generic banner instead.
+  async function handleViewJobDescription() {
+    setActionError(null);
+    setJdHint(null);
+    try {
+      const res = await getJobDescription({ source: row.source, id: row.id });
+      const artifact = res?.data?.artifact;
+      setJdMeta(artifact ? { completeness: artifact.completeness } : null);
+      setViewer({ title: "Job description — preview", artifact });
+    } catch (err) {
+      const code = err?.body?.code;
+      if (code === "JD_NOT_CAPTURED" || code === "JD_FILE_MISSING") {
+        setJdHint("No job description was captured for this role.");
+      } else {
+        setActionError(err instanceof Error ? err.message : "Could not load the job description");
+      }
     }
   }
 
@@ -353,6 +385,12 @@ export function JobDrawer({ row, onClose, initialSection }) {
             />
           ) : null}
 
+          {/* Interview prep dossier (ISSUE-030) — build/read only, always shown for
+            an application row; the backend (buildInterviewDossier) is the source of
+            truth on whether prep is meaningful yet, so this never re-derives its own
+            "is there really an interview scheduled" gate client-side. */}
+          {isApplication ? <InterviewDossierCard applicationId={row.id} /> : null}
+
           {/* 3. Ready-to-send panel */}
           {isApplication ? (
             <ReadyToSendCard
@@ -425,6 +463,13 @@ export function JobDrawer({ row, onClose, initialSection }) {
                   "Note added."
                 )
               }
+              onDraft={(commId) =>
+                runWrite(
+                  `draft-${commId}`,
+                  () => draftCommunication({ id: commId }),
+                  "Draft ready to review below."
+                )
+              }
             />
           ) : null}
 
@@ -445,24 +490,45 @@ export function JobDrawer({ row, onClose, initialSection }) {
           {drawer.artifacts?.length ? (
             <Card title="Artifacts">
               <ul className="job-drawer__list">
-                {drawer.artifacts.map((a, i) => (
-                  // artifacts is a small fixed-shape list with no stable id.
-                  // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
-                  <li key={i}>
-                    <strong>{a.kind}:</strong>{" "}
-                    {VIEWABLE_ARTIFACT_KIND_BY_LABEL[a.kind] ? (
-                      <button
-                        type="button"
-                        className="job-drawer__link-button"
-                        onClick={() => handleViewArtifact(a.kind)}
-                      >
-                        {a.note}
-                      </button>
-                    ) : (
-                      a.note
-                    )}
-                  </li>
-                ))}
+                {drawer.artifacts.map((a, i) => {
+                  // a.path only ever exists for a real captured JD (dashboard-data.js's
+                  // jobDetailFromRow) — the "source link only" fallback row never has one,
+                  // so it stays plain text below.
+                  const isViewableJd = a.kind === "Job description" && a.path;
+                  return (
+                    // artifacts is a small fixed-shape list with no stable id.
+                    // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
+                    <li key={i}>
+                      <strong>{a.kind}:</strong>{" "}
+                      {isViewableJd ? (
+                        <>
+                          {a.note}{" "}
+                          <button
+                            type="button"
+                            className="job-drawer__link-button"
+                            onClick={handleViewJobDescription}
+                          >
+                            View
+                          </button>
+                          {jdMeta?.completeness === "partial" ? (
+                            <span className="badge badge--muted">Partial capture</span>
+                          ) : null}
+                          {jdHint ? <p className="field__hint">{jdHint}</p> : null}
+                        </>
+                      ) : VIEWABLE_ARTIFACT_KIND_BY_LABEL[a.kind] ? (
+                        <button
+                          type="button"
+                          className="job-drawer__link-button"
+                          onClick={() => handleViewArtifact(a.kind)}
+                        >
+                          {a.note}
+                        </button>
+                      ) : (
+                        a.note
+                      )}
+                    </li>
+                  );
+                })}
               </ul>
             </Card>
           ) : null}
@@ -848,24 +914,49 @@ function CompFitCard({ row, drawer, app, isApplication, busy, onSaveCompNote }) 
   );
 }
 
-function CommsThreadCard({ comms, busyKey, onAddNote }) {
+// ISSUE-038 — communication.capture-inbound (the only verb that CREATES a
+// new communication row) requires an already-confirmed recruiter-email
+// intake item; it isn't a "type text, hit save" form field. The real entry
+// point for "Add thread" is therefore the same docked-AskBar paste-capture
+// path ISSUE-016's Network empty state uses — paste a recruiter/hiring-team
+// message there and intake classification + confirm does the rest. This is
+// a deliberately duplicated two-line querySelector, not a shared helper: see
+// ISSUE-016/ISSUE-038's overlap note (a shared lib/AskBar helper would force
+// those two lanes to serialize on the same files for no real benefit).
+function focusAskBar() {
+  document.querySelector(".ask-bar__input")?.focus();
+}
+
+// Exported (unlike the drawer's other private sub-components) so
+// JobDrawer.test.jsx can render these two directly with its hooks harness —
+// the top-level JobDrawer render tree never invokes local function
+// components while building its element tree (see that test file's own
+// convention), so exercising CommThread's "Draft reply" click and
+// CommsThreadCard's zero-thread CTA needs a direct call.
+export function CommsThreadCard({ comms, busyKey, onAddNote, onDraft }) {
   if (!comms.length) {
     return (
       <Card title="Communications">
-        <p className="field__hint">No communication threads yet.</p>
+        <p className="field__hint">
+          No communication threads yet. Paste a recruiter or hiring-team message into the ask bar to
+          capture it here.
+        </p>
+        <Button variant="secondary" onClick={focusAskBar}>
+          Paste a message
+        </Button>
       </Card>
     );
   }
   return (
     <Card title="Communications">
       {comms.map((c) => (
-        <CommThread key={c.id} comm={c} busyKey={busyKey} onAddNote={onAddNote} />
+        <CommThread key={c.id} comm={c} busyKey={busyKey} onAddNote={onAddNote} onDraft={onDraft} />
       ))}
     </Card>
   );
 }
 
-function CommThread({ comm, busyKey, onAddNote }) {
+export function CommThread({ comm, busyKey, onAddNote, onDraft }) {
   const [note, setNote] = useState("");
   const messages = comm.messages || [];
   return (
@@ -898,6 +989,22 @@ function CommThread({ comm, busyKey, onAddNote }) {
           }}
         >
           {busyKey === `note-${comm.id}` ? "Adding…" : "Add note"}
+        </Button>
+      </div>
+      {/* AI-drafts a reply and persists it as comm.draft — ReadyToSendCard above
+        already renders any draft this produces (it just checks c.draft.subject/
+        body), so there's no separate display path to wire here. Deliberately no
+        send/deliver button anywhere in this drawer: communication.send needs a
+        consented delivery executor that isn't connected yet (see the "I sent
+        this" affordance on ReadyToSendCard for the honest "record it sent
+        yourself" path). */}
+      <div className="job-drawer__inline-actions">
+        <Button
+          variant="secondary"
+          disabled={busyKey === `draft-${comm.id}`}
+          onClick={() => onDraft(comm.id)}
+        >
+          {busyKey === `draft-${comm.id}` ? "Drafting…" : "Draft reply"}
         </Button>
       </div>
     </div>

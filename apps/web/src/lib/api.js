@@ -1035,3 +1035,53 @@ export function removeDeepIngestConfirmedItem(payload = {}) {
     body: JSON.stringify(payload),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Jobs drawer follow-ups (ISSUE-030/ISSUE-035/ISSUE-038) — the JD-artifact
+// viewer, the interview-prep dossier builder/reader, and the AI-drafted
+// communication reply. Every route here already existed and is already
+// mounted (job-artifact-route.mjs, interview-prep-route.mjs,
+// workspace-agent.mjs's communication.draft intent) — same thin-wrapper
+// convention as every other section above.
+// ---------------------------------------------------------------------------
+
+// GET /api/jobs/job-description?source=application|sourced&id= —
+// readJobDescriptionArtifact. Returns {id, recordType, company, role,
+// artifact: {kind, completeness, capturedAt, sourceName, sourceUrl, markdown,
+// html, bodyChars, technical:{path}}} — already shaped for
+// ArtifactViewerModal's `artifact.html` branch. Throws ApiError with codes
+// JD_NOT_CAPTURED/JD_FILE_MISSING (expected "nothing captured yet" states)
+// or JD_TOO_LARGE/UNSAFE_ARTIFACT_PATH (defensive, unexpected) — callers
+// distinguish on err.body.code, not just err.status.
+export function getJobDescription({ source, id } = {}) {
+  return apiFetch(
+    `/api/jobs/job-description?source=${encodeURIComponent(source || "")}&id=${encodeURIComponent(id || "")}`
+  );
+}
+
+// POST /api/interview-prep/build — buildInterviewDossier. AI-spend surface,
+// explicit-click only (never auto-fires on mount). Returns {ok, data:
+// {applicationId, dossier: {title, round, path, generatedAt, markdown}, ...}}.
+export function buildInterviewDossier({ applicationId, audience, inviteNotes, jobSignals } = {}) {
+  return apiFetch("/api/interview-prep/build", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, audience, inviteNotes, jobSignals }),
+  });
+}
+
+// GET /api/interview-prep?id= — reads back app.artifacts.interviewDossier.
+// 404 with code DOSSIER_NOT_FOUND is the expected "not built yet" state, not
+// an error banner — callers render the Build action for it, same convention
+// as getJobDescription's JD_NOT_CAPTURED above.
+export function getInterviewDossier(id) {
+  return apiFetch(`/api/interview-prep?id=${encodeURIComponent(id || "")}`);
+}
+
+// POST /api/data/comm/message equivalent for AI drafting — communication.draft
+// verb (workspace-agent.mjs). AI-writes a reply and persists it as
+// comm.draft; ReadyToSendCard already renders any draft this produces, no
+// separate display wiring needed. `instruction` is optional — the agent
+// falls back to a sensible default when omitted.
+export function draftCommunication({ id, instruction } = {}) {
+  return runWorkspaceIntent("communication.draft", { type: "communication", id }, { instruction });
+}

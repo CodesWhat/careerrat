@@ -4083,6 +4083,42 @@ function buildHealthBadge(ch) {
   return { rating: ch.rating, label: word, title: `Company health: ${scope} — internal signal` };
 }
 
+// Short "Mon D" label for an artifact's <kind>GeneratedAt stamp
+// (appRegisterArtifact's convention — a full ISO datetime, unlike the
+// date-only strings formatDateShort above expects) — "" when absent/invalid
+// so callers can fall back to a generic label rather than showing "Invalid
+// Date".
+function formatArtifactDate(iso) {
+  if (!iso) return "";
+  const date = new Date(iso);
+  if (Number.isNaN(date.valueOf())) return "";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+// artifacts.jd/resume/coverLetter are usually a plain workspace-relative path
+// string, but resolveSafeJobPath (job-description.mjs) also tolerates an
+// {path} object shape — normalize either to the raw path string, or "" when
+// there's nothing there.
+function artifactPathString(value) {
+  if (typeof value === "string") return value.trim();
+  if (value && typeof value === "object" && typeof value.path === "string") {
+    return value.path.trim();
+  }
+  return "";
+}
+
+// One artifact-list row: `note` is always a short human-readable string —
+// NEVER the raw workspace path (ISSUE-018/ISSUE-035) — `path` carries that
+// raw value separately for a technical-details disclosure, omitted entirely
+// when there is none.
+function artifactRow(kind, note, path) {
+  return path ? { kind, note, path } : { kind, note };
+}
+
 function jobDetailFromRow(
   row,
   sourceRecord = {},
@@ -4092,17 +4128,41 @@ function jobDetailFromRow(
 ) {
   const compView = compRangeView(row, sourceRecord, profileComp);
   const artifacts = sourceRecord.artifacts || {};
+  const jdPath = artifactPathString(artifacts.jd || artifacts.jobDescription);
+  const resumePath = artifactPathString(artifacts.resume);
+  const coverLetterPath = artifactPathString(artifacts.coverLetter);
+  const jdCapturedLabel = formatArtifactDate(artifacts.jdGeneratedAt);
+  const resumeGeneratedLabel = formatArtifactDate(artifacts.resumeGeneratedAt);
+  const coverLetterGeneratedLabel = formatArtifactDate(artifacts.coverLetterGeneratedAt);
   const artifactList = [
-    artifacts.jd || artifacts.jobDescription
-      ? { kind: "Job description", note: artifacts.jd || artifacts.jobDescription }
+    jdPath
+      ? artifactRow(
+          "Job description",
+          jdCapturedLabel ? `Captured ${jdCapturedLabel}` : "Captured job description",
+          jdPath
+        )
       : null,
-    !artifacts.jd &&
-    !artifacts.jobDescription &&
-    (row.link || sourceRecord.link || sourceRecord.url)
+    !jdPath && (row.link || sourceRecord.link || sourceRecord.url)
       ? { kind: "Job description", note: "Source link is available from the drawer header." }
       : null,
-    artifacts.resume ? { kind: "Resume", note: artifacts.resumeNote || artifacts.resume } : null,
-    artifacts.coverLetter ? { kind: "Cover letter", note: artifacts.coverLetter } : null,
+    resumePath
+      ? artifactRow(
+          "Resume",
+          artifacts.resumeNote ||
+            (resumeGeneratedLabel ? `Generated ${resumeGeneratedLabel}` : "Generated document"),
+          resumePath
+        )
+      : null,
+    coverLetterPath
+      ? artifactRow(
+          "Cover letter",
+          artifacts.coverLetterNote ||
+            (coverLetterGeneratedLabel
+              ? `Generated ${coverLetterGeneratedLabel}`
+              : "Generated document"),
+          coverLetterPath
+        )
+      : null,
   ].filter(Boolean);
   const messages = communications.flatMap((comm) => comm.messages || []);
   const emailList = messages

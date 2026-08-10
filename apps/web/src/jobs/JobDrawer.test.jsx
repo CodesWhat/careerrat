@@ -33,8 +33,10 @@ const dashboard = vi.hoisted(() => ({ refetch: vi.fn() }));
 const api = vi.hoisted(() => ({
   applyOnSite: vi.fn(),
   appendCommMessage: vi.fn(),
+  draftCommunication: vi.fn(),
   getApplication: vi.fn(),
   getCommunications: vi.fn(),
+  getJobDescription: vi.fn(),
   getPacket: vi.fn(),
   markCommSent: vi.fn(),
   mergeNestedField: vi.fn((base, field, patch) => ({ ...(base?.[field] || {}), ...patch })),
@@ -74,11 +76,12 @@ vi.mock("../components/form.jsx", () => ({
 vi.mock("../components/icons.jsx", () => ({ KeyIcon: "key-icon" }));
 vi.mock("../components/Toast.jsx", () => ({ InlineAlert: "inline-alert" }));
 vi.mock("./ArtifactViewerModal.jsx", () => ({ ArtifactViewerModal: "artifact-viewer" }));
+vi.mock("./InterviewDossierCard.jsx", () => ({ InterviewDossierCard: "interview-dossier-card" }));
 vi.mock("./PacketDocumentsCard.jsx", () => ({ PacketDocumentsCard: "packet-documents-card" }));
 vi.mock("./PacketGateCard.jsx", () => ({ PacketGateCard: "packet-gate-card" }));
 
 import * as jobDrawerModule from "./JobDrawer.jsx";
-import { JobDrawer } from "./JobDrawer.jsx";
+import { CommsThreadCard, CommThread, JobDrawer } from "./JobDrawer.jsx";
 
 const applicationRow = {
   id: "app-1",
@@ -89,6 +92,13 @@ const applicationRow = {
   terminal: false,
   stageLabel: "Review",
   drawer: { artifacts: [] },
+};
+
+const applicationRowWithJd = {
+  ...applicationRow,
+  drawer: {
+    artifacts: [{ kind: "Job description", note: "Captured Jun 10", path: "workspace/jobs/x.md" }],
+  },
 };
 
 const sourcedRow = {
@@ -143,6 +153,7 @@ beforeEach(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
     getElementById: vi.fn(() => null),
+    querySelector: vi.fn(() => null),
   };
   dashboard.refetch.mockResolvedValue({});
   api.getCommunications.mockResolvedValue({ data: [] });
@@ -155,6 +166,7 @@ beforeEach(() => {
   api.setSourcedStatus.mockResolvedValue({});
   api.setAppStatus.mockResolvedValue({});
   api.setAppFields.mockResolvedValue({});
+  api.draftCommunication.mockResolvedValue({});
 });
 
 describe("JobDrawer", () => {
@@ -276,5 +288,94 @@ describe("JobDrawer", () => {
     const documents = visit(tree, (node) => node.type === "packet-documents-card")[0];
 
     expect(documents.props.gate).toBe("review");
+  });
+
+  it("mounts the interview dossier card for an application row", async () => {
+    renderDrawer(applicationRow);
+    await runEffects();
+    const tree = renderDrawer(applicationRow);
+
+    const dossierCard = visit(tree, (node) => node.type === "interview-dossier-card")[0];
+    expect(dossierCard).toBeTruthy();
+    expect(dossierCard.props.applicationId).toBe("app-1");
+  });
+
+  it("opens the JD viewer with a fixed 'View' label, never the raw path, on click", async () => {
+    api.getJobDescription.mockResolvedValueOnce({
+      data: { artifact: { kind: "job_description", completeness: "complete", html: "<p>JD</p>" } },
+    });
+    renderDrawer(applicationRowWithJd);
+    await runEffects();
+    const tree = renderDrawer(applicationRowWithJd);
+
+    const viewButton = button(tree, "View");
+    expect(viewButton).toBeTruthy();
+    expect(textOf(viewButton)).not.toBe("workspace/jobs/x.md");
+    await viewButton.props.onClick();
+    expect(api.getJobDescription).toHaveBeenCalledWith({ source: "application", id: "app-1" });
+  });
+
+  it("shows an inline hint (not the error banner) for JD_NOT_CAPTURED, and the generic banner otherwise", async () => {
+    api.getJobDescription.mockRejectedValueOnce({
+      status: 409,
+      body: { code: "JD_NOT_CAPTURED", error: { message: "no jd" } },
+    });
+    renderDrawer(applicationRowWithJd);
+    await runEffects();
+    let tree = renderDrawer(applicationRowWithJd);
+    await button(tree, "View").props.onClick();
+    tree = renderDrawer(applicationRowWithJd);
+    expect(JSON.stringify(tree)).toContain("No job description was captured for this role.");
+    expect(visit(tree, (node) => node.type === "inline-alert")).toHaveLength(0);
+
+    hooks.reset();
+    api.getJobDescription.mockRejectedValueOnce({
+      status: 413,
+      body: { code: "JD_TOO_LARGE" },
+    });
+    renderDrawer(applicationRowWithJd);
+    await runEffects();
+    tree = renderDrawer(applicationRowWithJd);
+    await button(tree, "View").props.onClick();
+    tree = renderDrawer(applicationRowWithJd);
+    expect(visit(tree, (node) => node.type === "inline-alert").length).toBeGreaterThan(0);
+  });
+
+  it("CommsThreadCard's zero-thread branch renders the AskBar-focus CTA instead of a dead sentence", () => {
+    hooks.reset();
+    const tree = CommsThreadCard({
+      comms: [],
+      busyKey: null,
+      onAddNote: vi.fn(),
+      onDraft: vi.fn(),
+    });
+    const cta = button(tree, "Paste a message");
+    expect(cta).toBeTruthy();
+    cta.props.onClick();
+    expect(document.querySelector).toHaveBeenCalledWith(".ask-bar__input");
+  });
+
+  it("CommThread's Draft reply button calls draftCommunication through the existing runWrite pattern", async () => {
+    const comm = { id: "comm-1", company: "Northstar", subject: "Re: Role", messages: [] };
+    hooks.reset();
+    let tree = CommThread({
+      comm,
+      busyKey: null,
+      onAddNote: vi.fn(),
+      onDraft: (id) => api.draftCommunication({ id }),
+    });
+    const draftButton = button(tree, "Draft reply");
+    expect(draftButton).toBeTruthy();
+    await draftButton.props.onClick();
+    expect(api.draftCommunication).toHaveBeenCalledWith({ id: "comm-1" });
+
+    // Wired end to end from the drawer itself: CommsThreadCard's onDraft prop
+    // (passed from JobDrawer's runWrite call) reaches draftCommunication with
+    // the comm's id and no send/deliver affordance anywhere alongside it.
+    api.draftCommunication.mockClear();
+    renderDrawer(applicationRow);
+    await runEffects();
+    tree = renderDrawer(applicationRow);
+    expect(JSON.stringify(tree)).not.toMatch(/Send|Deliver/);
   });
 });

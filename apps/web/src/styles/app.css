@@ -11513,6 +11513,21 @@ button.chip {
   white-space: pre-wrap;
 }
 
+/* Interview prep dossier (ISSUE-030) — the built dossier is raw markdown, not
+   server-rendered HTML (unlike the packet-artifact/job-description viewer
+   routes), so it renders as plain pre-wrapped text rather than through
+   .packet-viewer__markdown's HTML branch. Same font-size/line treatment as
+   .job-drawer__draft-body above, just scrollable for a longer document. */
+.job-drawer__dossier {
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--paper-band);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
 .job-drawer__thread {
   padding: 10px 0;
   border-bottom: 1px solid var(--paper-edge);

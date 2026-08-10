@@ -1016,6 +1016,83 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
   assert.equal(missing.drawer.nextAction.label, "Comp");
 });
 
+// ISSUE-018/ISSUE-035 — jobDetailFromRow's artifact list must never leak the
+// raw workspace path as `note` (the Library/JobDrawer "primary metadata" bug):
+// `note` is always a short human-readable string, and the raw path only ever
+// rides along on a separate `path` field, omitted when there is none.
+test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths, with path split out", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "with-dates",
+        company: "Dated Co",
+        role: "Platform Engineer",
+        status: "awaiting",
+        channel: "board",
+        fitScore: 80,
+        base: "$200K",
+        appliedAt: "2026-06-01",
+        artifacts: {
+          jd: "workspace/jobs/dated-co.md",
+          jdGeneratedAt: "2026-06-01T10:00:00.000Z",
+          resume: "workspace/tailored/dated-co-resume.md",
+          resumeNote: "Tailored for the platform team",
+          coverLetter: "workspace/tailored/dated-co-cover.md",
+          coverLetterGeneratedAt: "2026-06-02T10:00:00.000Z",
+        },
+      },
+      {
+        id: "no-dates",
+        company: "Plain Co",
+        role: "Backend Engineer",
+        status: "awaiting",
+        channel: "board",
+        fitScore: 75,
+        base: "$190K",
+        appliedAt: "2026-06-05",
+        artifacts: {
+          jd: "workspace/jobs/plain-co.md",
+          resume: "workspace/tailored/plain-co-resume.md",
+        },
+      },
+    ],
+    sourced: [],
+    communications: [],
+  };
+
+  const vm = buildDashboardViewModel(tracker, { now: new Date("2026-06-18T13:30:00.000Z") });
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+
+  const dated = byId.get("with-dates");
+  const jd = dated.drawer.artifacts.find((a) => a.kind === "Job description");
+  const resume = dated.drawer.artifacts.find((a) => a.kind === "Resume");
+  const coverLetter = dated.drawer.artifacts.find((a) => a.kind === "Cover letter");
+  assert.equal(jd.path, "workspace/jobs/dated-co.md");
+  assert.notEqual(jd.note, jd.path);
+  assert.match(jd.note, /Captured/);
+  assert.equal(resume.path, "workspace/tailored/dated-co-resume.md");
+  assert.equal(resume.note, "Tailored for the platform team");
+  assert.equal(coverLetter.path, "workspace/tailored/dated-co-cover.md");
+  assert.notEqual(coverLetter.note, coverLetter.path);
+  assert.match(coverLetter.note, /Generated/);
+
+  const plain = byId.get("no-dates");
+  const plainJd = plain.drawer.artifacts.find((a) => a.kind === "Job description");
+  const plainResume = plain.drawer.artifacts.find((a) => a.kind === "Resume");
+  assert.equal(plainJd.path, "workspace/jobs/plain-co.md");
+  assert.equal(plainJd.note, "Captured job description");
+  assert.equal(plainResume.path, "workspace/tailored/plain-co-resume.md");
+  assert.equal(plainResume.note, "Generated document");
+
+  // Regression guard for the exact reported bug: no artifact's clickable
+  // note field is ever the raw workspace path.
+  for (const row of [dated, plain]) {
+    for (const artifact of row.drawer.artifacts) {
+      if (artifact.path) assert.notEqual(artifact.note, artifact.path);
+    }
+  }
+});
+
 test("Dashboard shell exposes actionable Jobs filters and drawer next-action section", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
 
