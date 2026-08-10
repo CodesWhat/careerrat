@@ -1,4 +1,4 @@
-import { ArrowTopRightIcon, PaperPlaneIcon } from "@radix-ui/react-icons";
+import { ArrowTopRightIcon } from "@radix-ui/react-icons";
 import { useEffect, useState } from "react";
 import { ArrowRightIcon, CheckIcon, ChevronDownIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
@@ -392,7 +392,7 @@ export function EngineScreen({ mode, onReady, onBack }) {
               <span className="onboarding-engine__choice-copy">
                 <span className="onboarding-engine__choice-name">CareerRat AI</span>
                 <span className="onboarding-engine__choice-shape">
-                  No installs, no setup. We run the AI for you. Paid plan, sign-in required.
+                  No installs, no setup. We run the AI for you.
                 </span>
               </span>
               <span className="onboarding-engine__choice-actions">
@@ -427,13 +427,13 @@ export function EngineScreen({ mode, onReady, onBack }) {
                     />
                     <button
                       type="button"
-                      className="ask-bar__send"
+                      className="onboarding-engine__hosted-send"
                       aria-label="Send"
                       disabled={!EMAIL_SHAPE_RE.test(hostedEmail.trim())}
                       onMouseDown={(e) => e.preventDefault()}
                       onClick={handleHostedSubmit}
                     >
-                      <PaperPlaneIcon />
+                      <ArrowRightIcon width={14} height={14} />
                     </button>
                   </span>
                 ) : (

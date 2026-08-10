@@ -2277,8 +2277,17 @@ button {
 }
 
 .btn:disabled {
-  opacity: 0.55;
+  opacity: 1;
+  background: rgba(107, 96, 88, 0.14);
+  border-color: transparent;
+  color: rgba(35, 31, 28, 0.38);
   cursor: not-allowed;
+}
+
+[data-theme="dark"] .btn:disabled {
+  background: rgba(255, 250, 242, 0.07);
+  border-color: transparent;
+  color: rgba(239, 233, 221, 0.36);
 }
 
 .btn--primary {
@@ -5977,8 +5986,10 @@ button.chip {
 }
 
 .ask-bar__send:disabled {
+  background: var(--input-border);
+  color: #ffffff;
+  opacity: 1;
   cursor: default;
-  opacity: 0.45;
 }
 
 /* Intent preview — ACTION/ANSWER rows, attached to the bar. Never a modal;
@@ -6663,9 +6674,11 @@ a.onboarding-engine__not-found-chip:focus-visible {
   color: var(--danger);
 }
 
-/* REQUEST ACCESS transforms in place into this row — an email input plus
- * the app's existing cobalt-circle send button (.ask-bar__send, reused
- * as-is for the same "type, then send" idiom the ask bar already owns). */
+/* REQUEST ACCESS transforms in place into this row — an email input plus a
+ * flat arrow send button (.onboarding-engine__hosted-send below). Unlike
+ * the ask bar's circled send control, this one stays borderless and fills
+ * only on hover, so it reads as part of the input row rather than its own
+ * chip. */
 .onboarding-engine__hosted-email {
   display: flex;
   align-items: center;
@@ -6674,6 +6687,24 @@ a.onboarding-engine__not-found-chip:focus-visible {
 
 .onboarding-engine__hosted-email-input {
   width: 190px;
+}
+
+.onboarding-engine__hosted-send {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+
+.onboarding-engine__hosted-send:disabled {
+  color: var(--ink-faint);
+  cursor: default;
 }
 
 .onboarding-engine__footer {
