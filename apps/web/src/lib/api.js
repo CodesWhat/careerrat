@@ -157,6 +157,21 @@ export function selectCustomAiRuntime(command) {
   });
 }
 
+// POST /api/hosted-interest — the W4 engine picker's hosted "CareerRat AI"
+// card. REQUEST ACCESS transforms in place into an inline email capture;
+// this call only fires once that email passes the client's own shape check,
+// carrying the address the server records alongside requested_at (see
+// hosted-interest-route.mjs for its own re-check and for where this
+// eventually forwards to EmailOctopus/PostHog once credentials exist). Not
+// an engine selection — nothing here touches the installed-runtime
+// selection file.
+export function requestHostedInterest(email) {
+  return apiFetch("/api/hosted-interest", {
+    method: "POST",
+    body: JSON.stringify({ email }),
+  });
+}
+
 export function getUsageSummary() {
   return apiFetch("/api/settings/usage");
 }

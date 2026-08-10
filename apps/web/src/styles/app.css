@@ -6338,7 +6338,10 @@ button.chip {
 /* Engine gate/picker — frames 3f (2+ ready) and 3d (0 ready). */
 
 .onboarding-engine {
-  max-width: 560px;
+  /* ~15% wider than the original 560px column — still comfortably inside
+   * the 1280×860 Electron canvas (see this file's own canvas-cap section
+   * for that hard outer limit, untouched here). */
+  max-width: 644px;
   width: 100%;
   margin: 0 auto;
   padding: 40px 32px 44px;
@@ -6387,6 +6390,14 @@ button.chip {
   gap: 9px;
 }
 
+/* Whole-card click-to-select (ready/sign-in-needed rows only — 3d's compact
+ * gate rows never get this class, see EngineChoiceRow). The radio itself
+ * still carries the real keyboard/screen-reader affordance; this is just
+ * the mouse-target cursor cue that the whole row shares its job. */
+.onboarding-engine__choice--clickable {
+  cursor: pointer;
+}
+
 .onboarding-engine__radio {
   flex-shrink: 0;
   width: 16px;
@@ -6424,6 +6435,12 @@ button.chip {
   gap: 2px;
 }
 
+.onboarding-engine__choice-name-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .onboarding-engine__choice-name {
   font-size: 13px;
   font-weight: 600;
@@ -6433,6 +6450,25 @@ button.chip {
 .onboarding-engine__choice-shape {
   font-size: 11px;
   color: var(--ink-faint);
+}
+
+/* Provider brand mark (or neutral monogram fallback) — see ProviderIcon.jsx.
+ * Sized inline via the component's own width/height (20px on full cards,
+ * 14px on not-found chips), this just keeps it from being squashed by the
+ * flex row it sits in. */
+.onboarding-engine__provider-icon {
+  flex-shrink: 0;
+}
+
+.onboarding-engine__provider-icon--monogram {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--input-border);
+  border-radius: 6px;
+  color: var(--ink);
+  font-family: var(--label-font);
+  font-weight: 700;
 }
 
 /* 3d gate's compact rows — the raw runtime id (e.g. "claude"), mono, in
@@ -6446,9 +6482,9 @@ button.chip {
   color: var(--ink);
 }
 
-/* The "ADD →" custom-command trigger — same flat mono-link language as
- * .onboarding-engine__receipt-link's INSTALL GUIDE, just standalone rather
- * than nested inside a receipt. */
+/* The "ADD →" custom-command trigger — same flat mono-link language used
+ * elsewhere on this screen (the not-found chip strip's install links),
+ * just standalone rather than nested inside a chip. */
 .onboarding-engine__add-link {
   flex-shrink: 0;
   border: none;
@@ -6462,9 +6498,13 @@ button.chip {
   white-space: nowrap;
 }
 
+/* Secondary/muted on purpose — plain-language product principle: a runtime
+ * caveat is real information but shouldn't read as an alarm or dominate the
+ * card's primary line (name + descriptor above). Same faint weight as the
+ * hint copy elsewhere on this screen, not the loud --warning token. */
 .onboarding-engine__choice-warning {
-  font-size: 11px;
-  color: var(--warning);
+  font-size: 10px;
+  color: var(--ink-faint-2);
 }
 
 .onboarding-engine__choice-actions {
@@ -6486,13 +6526,47 @@ button.chip {
   color: var(--ink-faint);
 }
 
-.onboarding-engine__receipt-link {
-  color: var(--accent);
+/* The not-found compact strip — collapses every runtime the probe genuinely
+ * couldn't find (runtime.available false) into one muted row of
+ * name chips instead of a full card each, so a machine with a handful of
+ * detected CLIs and a long tail of absent ones doesn't turn into a wall of
+ * cards. Chip styling mirrors the existing flat .onboarding-suggestions__chip
+ * idiom (1px border, no fill, no shadow). */
+.onboarding-engine__not-found {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 2px 0;
+}
+
+.onboarding-engine__not-found-label {
+  font-family: var(--label-font);
+  font-size: 10px;
+  letter-spacing: var(--label-tracking);
+  color: var(--ink-faint-2);
+}
+
+.onboarding-engine__not-found-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.onboarding-engine__not-found-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--input-border);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 11px;
+  color: var(--ink-faint);
   text-decoration: none;
 }
 
-.onboarding-engine__receipt-link:hover {
-  text-decoration: underline;
+a.onboarding-engine__not-found-chip:hover {
+  color: var(--accent);
+  border-color: var(--accent);
 }
 
 .onboarding-engine__custom-heading {
@@ -6537,14 +6611,35 @@ button.chip {
   color: var(--ink-faint-2);
 }
 
-.onboarding-engine__hosted-note {
-  padding: 2px 2px 0;
-  font-size: 12px;
-  color: var(--ink-faint);
+/* The hosted "CareerRat AI" card's REQUEST ACCESS follow-up lines — same
+ * small mono-receipt language as .onboarding-engine__custom-receipt, just
+ * named for this card so a future reader isn't hunting through the custom-
+ * command section for an unrelated class. */
+.onboarding-engine__hosted-confirm {
+  font-family: var(--label-font);
+  font-size: 10px;
+  letter-spacing: var(--label-tracking);
+  color: var(--success);
 }
 
-.onboarding-engine__hosted-note a {
-  color: var(--accent);
+.onboarding-engine__hosted-error {
+  font-family: var(--label-font);
+  font-size: 10px;
+  letter-spacing: var(--label-tracking);
+  color: var(--danger);
+}
+
+/* REQUEST ACCESS transforms in place into this row — an email input plus
+ * the app's existing cobalt-circle send button (.ask-bar__send, reused
+ * as-is for the same "type, then send" idiom the ask bar already owns). */
+.onboarding-engine__hosted-email {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.onboarding-engine__hosted-email-input {
+  width: 190px;
 }
 
 .onboarding-engine__footer {
@@ -12406,5 +12501,67 @@ button.chip {
     padding: 0;
     pointer-events: auto;
     transform: none;
+  }
+}
+
+/* ── Desktop canvas cap ──────────────────────────────────────────────────
+ * The packaged app ships in an Electron window fixed at 1280×860 (see
+ * apps/desktop/window-options.mjs). On a larger browser viewport — QA,
+ * dev, or just a big monitor — both root shells render inside a centered
+ * canvas capped to that same 1280×860 so the layout QA sees matches the
+ * real window, letterboxed on the page's own --canvas background (body
+ * already paints --paper-bg, which resolves to --canvas). At or under
+ * 1280×860 nothing here applies and the shells fill the viewport exactly
+ * as before.
+ *
+ * `transform: translate(0)` on both shell roots is not decorative — it
+ * establishes a containing block for `position: fixed` descendants (the
+ * ask bar, onboarding progress footer, and every fixed modal/overlay), so
+ * they dock to the capped canvas's own edges instead of the real browser
+ * window once the canvas is smaller than the viewport. It's a no-op at or
+ * under the cap, since the shells already match the viewport exactly
+ * there — zero visual change in the real Electron window. */
+
+.app-shell,
+.onboarding-shell {
+  transform: translate(0);
+}
+
+@media (min-width: 1280.02px) {
+  #root {
+    display: flex;
+    justify-content: center;
+  }
+
+  .app-shell,
+  .onboarding-shell {
+    width: 1280px;
+    max-width: 1280px;
+  }
+}
+
+@media (min-height: 860.02px) {
+  html,
+  body,
+  #root {
+    overflow: hidden;
+  }
+
+  #root {
+    display: flex;
+    align-items: center;
+    background: var(--canvas);
+  }
+
+  .app-shell,
+  .onboarding-shell {
+    height: 860px;
+    max-height: 860px;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .onboarding-shell__main {
+    overflow-y: auto;
   }
 }

@@ -67,6 +67,7 @@ import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
 import { mountDeepIngestRoutes } from "./deep-ingest-route.mjs";
 import { mountDiscoveryRoutes } from "./discovery-route.mjs";
+import { mountHostedInterestRoutes } from "./hosted-interest-route.mjs";
 import { mountInstalledRuntimeRoutes } from "./installed-runtime-route.mjs";
 import { captureIntakeText, mountIntakeRoutes } from "./intake-route.mjs";
 import { mountInterviewPrepRoutes } from "./interview-prep-route.mjs";
@@ -258,6 +259,7 @@ export function createDevServer({
   // flow polls to decide whether its decision buttons can run).
   mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env });
   mountInstalledRuntimeRoutes({ addRoute, repoRoot, env });
+  mountHostedInterestRoutes({ addRoute, repoRoot, env });
   mountAutomationRoutes({ addRoute, repoRoot });
 
   // M1 of the paid-POC journey — the non-AI onboarding wizard's HTTP surface

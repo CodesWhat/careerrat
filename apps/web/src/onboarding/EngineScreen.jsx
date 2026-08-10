@@ -1,3 +1,4 @@
+import { ArrowTopRightIcon, PaperPlaneIcon } from "@radix-ui/react-icons";
 import { useEffect, useState } from "react";
 import { ArrowRightIcon, CheckIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
@@ -5,10 +6,17 @@ import {
   getInstalledAiRuntimes,
   openInstalledAiRuntimeTerminal,
   probeInstalledAiRuntime,
+  requestHostedInterest,
   selectCustomAiRuntime,
   selectInstalledAiRuntime,
   testCustomAiRuntime,
 } from "../lib/api.js";
+import { ProviderIcon } from "./ProviderIcon.jsx";
+
+// Basic email-shape check for the hosted card's inline capture — deliberately
+// not full RFC5322, just enough to catch an obviously-incomplete address
+// before it round-trips to the server (which re-checks the same shape).
+const EMAIL_SHAPE_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // EngineScreen — design frames 3f (2+ ready CLIs, you pick) and 3d (0 ready,
 // the only hard gate). Both share the same probe-results list; only the
@@ -37,14 +45,13 @@ import {
 // to commandShape for any runtime this map doesn't know about, so a future
 // registry addition never renders a blank descriptor line.
 const RUNTIME_DESCRIPTIONS = {
-  claude: "Uses your existing Claude subscription — no extra cost",
+  claude: "Uses your existing Claude subscription, no extra cost",
   codex: "Uses your OpenAI plan",
   gemini: "Uses your Google account",
-  opencode: "Open-source — works with any provider you've configured",
+  opencode: "Open-source, works with any provider you've configured",
   copilot: "Uses your GitHub Copilot subscription",
   qwen: "Uses your Qwen account",
   antigravity: "Uses your Google account",
-  grok: "Uses your xAI account",
 };
 
 export function EngineScreen({ mode, onReady, onBack }) {
@@ -61,6 +68,18 @@ export function EngineScreen({ mode, onReady, onBack }) {
   // gets picked instead — see selectRuntime()'s erase-on-switch below.
   const [customExpanded, setCustomExpanded] = useState(false);
   const [starting, setStarting] = useState(false);
+  // The hosted "CareerRat AI" card's REQUEST ACCESS CTA — not an engine
+  // selection (no radio, nothing persisted to the installed-runtime
+  // selection file), just a one-way interest ping to
+  // POST /api/hosted-interest. Clicking REQUEST ACCESS doesn't submit
+  // anything by itself: it transforms the button in place into an email
+  // input + send control (`hostedEditing`); only the send control actually
+  // posts. `requested` then collapses that back to a disabled "REQUESTED ✓"
+  // state; a failure keeps the input in place (with an inline error) so the
+  // user can retry without retyping the click.
+  const [hostedInterest, setHostedInterest] = useState({ requested: false, error: null });
+  const [hostedEditing, setHostedEditing] = useState(false);
+  const [hostedEmail, setHostedEmail] = useState("");
 
   // A fetch failure here (network down, 401/403, server error) is NOT the
   // same product state as a legitimate 200 with zero runtimes — conflating
@@ -87,6 +106,12 @@ export function EngineScreen({ mode, onReady, onBack }) {
   const runtimes = (state?.runtimes ?? []).filter((r) => r.id !== "custom");
   const custom = (state?.runtimes ?? []).find((r) => r.id === "custom") || null;
   const readyCount = runtimes.filter((r) => r.ready).length;
+  // Everything the probe genuinely couldn't find (runtime.available false —
+  // the literal "NOT FOUND" case) collapses into the compact chip strip
+  // below rather than a full card; ready and sign-in-needed runtimes keep
+  // rendering as EngineChoiceRow exactly as before, unchanged.
+  const cardRuntimes = runtimes.filter((r) => r.available);
+  const notFoundRuntimes = runtimes.filter((r) => !r.available);
   // The re-entry footer's "KEEP <CURRENT>" label — the runtime this browser
   // session actually landed on before the user opted to change it.
   const currentRuntime = runtimes.find((r) => r.id === state?.selectedId) || null;
@@ -145,6 +170,31 @@ export function EngineScreen({ mode, onReady, onBack }) {
     await refresh();
   }
 
+  // Escape or blurring away without sending resets the card to its plain
+  // "REQUEST ACCESS" button — no half-typed email or stale error left
+  // showing next time it's opened.
+  function cancelHostedEditing() {
+    setHostedEditing(false);
+    setHostedEmail("");
+    setHostedInterest((prev) => ({ ...prev, error: null }));
+  }
+
+  async function handleHostedSubmit() {
+    if (!EMAIL_SHAPE_RE.test(hostedEmail.trim())) return;
+    setHostedInterest((prev) => ({ ...prev, error: null }));
+    try {
+      await requestHostedInterest(hostedEmail.trim());
+      setHostedEditing(false);
+      setHostedEmail("");
+      setHostedInterest({ requested: true, error: null });
+    } catch (err) {
+      setHostedInterest({
+        requested: false,
+        error: err?.body?.error || "Could not send that. Try again.",
+      });
+    }
+  }
+
   async function handleContinue() {
     setStarting(true);
     try {
@@ -193,14 +243,14 @@ export function EngineScreen({ mode, onReady, onBack }) {
               <h1>{isGate ? "No AI engine found." : "Pick your engine."}</h1>
               <p>
                 {isGate
-                  ? "The rat probed this machine for installed CLIs and came up empty. Point it at anything that runs — or install one of these."
+                  ? "We looked for AI tools already on this computer and didn't find any. Add one below, or install one of these to get going."
                   : isRevisit
-                    ? "Pick a different CLI to run the rat on, or keep the one you're already using."
-                    : `The probe found ${readyCount} CLI${readyCount === 1 ? "" : "s"} on this machine. The rat runs on whichever you pick — chat unlocks right after.`}
+                    ? "Pick a different AI tool to run the rat on, or keep the one you're already using."
+                    : `We found ${readyCount} AI tool${readyCount === 1 ? "" : "s"} on this computer. Pick one and Paul gets to work. Chat unlocks right after.`}
               </p>
             </div>
 
-            {runtimes.map((runtime) => (
+            {cardRuntimes.map((runtime) => (
               <EngineChoiceRow
                 key={runtime.id}
                 runtime={runtime}
@@ -212,6 +262,34 @@ export function EngineScreen({ mode, onReady, onBack }) {
                 onOpenTerminal={() => handleOpenTerminal(runtime.id)}
               />
             ))}
+
+            {notFoundRuntimes.length > 0 ? (
+              <div className="onboarding-engine__not-found">
+                <span className="onboarding-engine__not-found-label">NOT INSTALLED</span>
+                <div className="onboarding-engine__not-found-chips">
+                  {notFoundRuntimes.map((runtime) =>
+                    runtime.installUrl ? (
+                      <a
+                        key={runtime.id}
+                        href={runtime.installUrl}
+                        target="_blank"
+                        rel="noreferrer noopener"
+                        className="onboarding-engine__not-found-chip"
+                      >
+                        <ProviderIcon runtimeId={runtime.id} name={runtime.name} size={14} />
+                        {runtime.name}
+                        <ArrowTopRightIcon aria-hidden="true" width={11} height={11} />
+                      </a>
+                    ) : (
+                      <span key={runtime.id} className="onboarding-engine__not-found-chip">
+                        <ProviderIcon runtimeId={runtime.id} name={runtime.name} size={14} />
+                        {runtime.name}
+                      </span>
+                    )
+                  )}
+                </div>
+              </div>
+            ) : null}
           </>
         )}
 
@@ -282,15 +360,82 @@ export function EngineScreen({ mode, onReady, onBack }) {
           )}
         </div>
 
-        <span className="onboarding-engine__hosted-note">
-          {isGate ? "No CLI at all?" : "No CLI?"} CareerRat AI is the hosted option — paid, needs
-          sign-in.
-        </span>
+        {!error ? (
+          <>
+            <div className="onboarding-engine__choice onboarding-engine__choice--unavailable">
+              <span className="onboarding-engine__choice-copy">
+                <span className="onboarding-engine__choice-name">CareerRat AI</span>
+                <span className="onboarding-engine__choice-shape">
+                  No installs, no setup. We run the AI for you. Paid plan, sign-in required.
+                </span>
+              </span>
+              <span className="onboarding-engine__choice-actions">
+                <span className="onboarding-engine__receipt onboarding-engine__receipt--muted">
+                  COMING SOON
+                </span>
+                {hostedInterest.requested ? (
+                  <button type="button" className="btn btn--secondary" disabled>
+                    REQUESTED ✓
+                  </button>
+                ) : hostedEditing ? (
+                  <span className="onboarding-engine__hosted-email">
+                    <input
+                      type="email"
+                      inputMode="email"
+                      // User-initiated transform (the REQUEST ACCESS click), not a page-load
+                      // autofocus — the cursor should land straight in the field that just
+                      // replaced the button.
+                      // biome-ignore lint/a11y/noAutofocus: see comment above
+                      autoFocus
+                      className="text-input onboarding-engine__hosted-email-input"
+                      placeholder="you@email.com"
+                      value={hostedEmail}
+                      onChange={(e) => setHostedEmail(e.target.value)}
+                      onBlur={cancelHostedEditing}
+                      onKeyDown={(e) => {
+                        if (e.key === "Escape") cancelHostedEditing();
+                        if (e.key === "Enter" && EMAIL_SHAPE_RE.test(hostedEmail.trim())) {
+                          handleHostedSubmit();
+                        }
+                      }}
+                    />
+                    <button
+                      type="button"
+                      className="ask-bar__send"
+                      aria-label="Send"
+                      disabled={!EMAIL_SHAPE_RE.test(hostedEmail.trim())}
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={handleHostedSubmit}
+                    >
+                      <PaperPlaneIcon />
+                    </button>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="btn btn--secondary"
+                    onClick={() => setHostedEditing(true)}
+                  >
+                    REQUEST ACCESS
+                  </button>
+                )}
+              </span>
+            </div>
+            {hostedInterest.requested ? (
+              <span className="onboarding-engine__hosted-confirm">
+                Thanks, we'll email you when it's ready.
+              </span>
+            ) : null}
+            {hostedInterest.error ? (
+              <span className="onboarding-engine__hosted-error">{hostedInterest.error}</span>
+            ) : null}
+          </>
+        ) : null}
 
         <div className="onboarding-engine__footer">
           {isGate || error ? (
             <button type="button" className="onboarding-engine__link" onClick={refresh}>
-              RE-RUN PROBE
+              CHECK AGAIN
             </button>
           ) : isRevisit && onBack ? (
             <button type="button" className="onboarding-engine__link" onClick={onBack}>
@@ -324,11 +469,24 @@ function EngineChoiceRow({ runtime, compact, selected, busy, onSelect, onRetry, 
   const descriptor = runtime.available
     ? RUNTIME_DESCRIPTIONS[runtime.id] || runtime.commandShape
     : null;
+  // Whole-card click-to-select — only for non-compact rows, the ones that
+  // actually carry a radio (3f/revisit). 3d's compact gate rows have no
+  // radio at all and stay click-inert here, same as before. Reuses the same
+  // onSelect the radio itself calls, which already no-ops for a runtime
+  // that isn't ready — clicking a sign-in-needed row's body is harmless.
+  //
+  // The radio button just below stays the real accessible control (its own
+  // aria-label, native keyboard/Enter/Space support) — this div's onClick is
+  // a mouse-only convenience layered on top, not a replacement widget, so
+  // there's no matching onKeyDown/role to add here.
   return (
+    // biome-ignore lint/a11y/noStaticElementInteractions: see comment above
+    // biome-ignore lint/a11y/useKeyWithClickEvents: see comment above
     <div
       className={`onboarding-engine__choice${selected ? " onboarding-engine__choice--selected" : ""}${
         runtime.available ? "" : " onboarding-engine__choice--unavailable"
-      }`}
+      }${!compact ? " onboarding-engine__choice--clickable" : ""}`}
+      onClick={!compact ? onSelect : undefined}
     >
       {!compact ? (
         <button
@@ -336,7 +494,10 @@ function EngineChoiceRow({ runtime, compact, selected, busy, onSelect, onRetry, 
           className="onboarding-engine__radio"
           aria-label={`Select ${runtime.name}`}
           disabled={!runtime.ready}
-          onClick={onSelect}
+          onClick={(e) => {
+            e?.stopPropagation?.();
+            onSelect();
+          }}
         >
           {selected ? <span className="onboarding-engine__radio-dot" /> : null}
         </button>
@@ -345,7 +506,10 @@ function EngineChoiceRow({ runtime, compact, selected, busy, onSelect, onRetry, 
         <span className="onboarding-engine__choice-id">{runtime.id}</span>
       ) : (
         <span className="onboarding-engine__choice-copy">
-          <span className="onboarding-engine__choice-name">{runtime.name}</span>
+          <span className="onboarding-engine__choice-name-row">
+            <ProviderIcon runtimeId={runtime.id} name={runtime.name} size={20} />
+            <span className="onboarding-engine__choice-name">{runtime.name}</span>
+          </span>
           {descriptor ? (
             <span className="onboarding-engine__choice-shape">{descriptor}</span>
           ) : null}
@@ -354,39 +518,37 @@ function EngineChoiceRow({ runtime, compact, selected, busy, onSelect, onRetry, 
           ) : null}
         </span>
       )}
+      {/* cardRuntimes (this row's only caller) already filters to
+       * runtime.available === true — a genuinely-not-found runtime never
+       * reaches this component at all, it renders in the not-found chip
+       * strip instead. So this row only ever has two receipt states. */}
       {runtime.ready ? (
         <span className="onboarding-engine__receipt onboarding-engine__receipt--ok">DETECTED</span>
-      ) : runtime.available ? (
+      ) : (
         <span className="onboarding-engine__choice-actions">
           <span className="onboarding-engine__receipt">SIGN-IN NEEDED</span>
           <button
             type="button"
             className="btn btn--secondary"
             disabled={busy}
-            onClick={onOpenTerminal}
+            onClick={(e) => {
+              e?.stopPropagation?.();
+              onOpenTerminal();
+            }}
           >
             Open Terminal
           </button>
-          <button type="button" className="btn btn--secondary" disabled={busy} onClick={onRetry}>
+          <button
+            type="button"
+            className="btn btn--secondary"
+            disabled={busy}
+            onClick={(e) => {
+              e?.stopPropagation?.();
+              onRetry();
+            }}
+          >
             Retry
           </button>
-        </span>
-      ) : (
-        <span className="onboarding-engine__receipt onboarding-engine__receipt--muted">
-          NOT FOUND
-          {runtime.installUrl ? (
-            <>
-              {" · "}
-              <a
-                href={runtime.installUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="onboarding-engine__receipt-link"
-              >
-                INSTALL GUIDE
-              </a>
-            </>
-          ) : null}
         </span>
       )}
     </div>
