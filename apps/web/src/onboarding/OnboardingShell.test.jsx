@@ -37,7 +37,7 @@ describe("OnboardingTopBar", () => {
 
     expect(html).toContain("onboarding-shell__header");
     expect(html).toContain("onboarding-shell__brand-lockup");
-    expect(html).toContain("Rolester");
+    expect(html).toContain("CareerRat");
     expect(html).toContain("onboarding-shell__theme");
     expect(html).toContain('aria-label="Switch to dark mode"');
     expect(html).toContain('title="Switch to dark mode"');

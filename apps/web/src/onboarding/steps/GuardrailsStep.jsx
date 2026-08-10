@@ -550,7 +550,7 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
                     <button
                       type="button"
                       className="onboarding-guardrails__info-button"
-                      aria-label="How Rolester detects guardrails"
+                      aria-label="How CareerRat detects guardrails"
                     >
                       <InfoIcon className="onboarding-guardrails__info-icon" />
                     </button>
@@ -565,7 +565,7 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
                 >
                   {GUARDRAIL_PRESETS.map((preset) => {
                     const selected = isGuardrailSelected(avoidSignals, preset.value);
-                    const sourceLabel = GUARDRAIL_SOURCE_LABELS[preset.source] || "Rolester signal";
+                    const sourceLabel = GUARDRAIL_SOURCE_LABELS[preset.source] || "CareerRat signal";
                     return (
                       <button
                         key={preset.value}

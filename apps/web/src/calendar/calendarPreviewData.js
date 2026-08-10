@@ -71,11 +71,11 @@ function buildExport({ id, title, meta, iso, time, durationMinutes }) {
   const ics = [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Rolester//Calendar Export//EN",
+    "PRODID:-//CareerRat//Calendar Export//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     "BEGIN:VEVENT",
-    `UID:${id}@rolester.local`,
+    `UID:${id}@careerrat.local`,
     `DTSTAMP:${stampUtc(new Date(Date.UTC(year, month - 1, day)))}`,
     `SUMMARY:${title}`,
     `DESCRIPTION:${meta || ""}`,

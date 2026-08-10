@@ -118,7 +118,7 @@ export function OnboardingTopBar() {
   return (
     <header className="onboarding-shell__header">
       <div className="onboarding-shell__brand-lockup">
-        <div className="onboarding-shell__brand">Rolester</div>
+        <div className="onboarding-shell__brand">CareerRat</div>
       </div>
       <div className="onboarding-shell__right">
         <IconButton label={themeLabel} className="onboarding-shell__theme" onClick={toggle}>

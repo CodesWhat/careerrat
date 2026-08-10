@@ -199,7 +199,7 @@ export function SourceMaintenanceView({
     <Card title="Search sources">
       <p className="field__hint settings-sources__intro">
         These are the exact broad searches and company ATS boards used by Electron and the
-        <code> rolester searches</code> / <code>rolester companies</code> commands.
+        <code> careerrat searches</code> / <code>careerrat companies</code> commands.
       </p>
       {error ? <InlineAlert message={error} /> : null}
       {loading ? <p>Loading source configuration…</p> : null}

@@ -153,7 +153,7 @@ test("onboarding page includes default-on public sync UI hooks and no-private-da
   }
 
   assert.match(ONBOARD_PAGE_HTML, /public company and board metadata/i);
-  assert.match(ONBOARD_PAGE_HTML, /improve Rolester/i);
+  assert.match(ONBOARD_PAGE_HTML, /improve CareerRat/i);
   for (const phrase of [
     /resume/i,
     /profile/i,

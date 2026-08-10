@@ -24,7 +24,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Search — Rolester</title>
+<title>Search — CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -195,7 +195,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
       <span class="badge badge-gate-review">Review</span>
     </div>
     <div id="scanner-review-error" data-hook="scanner-review-error" class="review-error" hidden></div>
-    <div id="scanner-review-empty" data-hook="scanner-review-empty" class="empty-state">No scanner reviews. Rolester only asks when public board metadata is ambiguous or conflicting. Clean misses are recorded locally and do not interrupt you.</div>
+    <div id="scanner-review-empty" data-hook="scanner-review-empty" class="empty-state">No scanner reviews. CareerRat only asks when public board metadata is ambiguous or conflicting. Clean misses are recorded locally and do not interrupt you.</div>
     <div id="scanner-review-list" data-hook="scanner-review-list" class="review-list"></div>
   </section>
 
@@ -320,8 +320,8 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
 
   function reviewReason(item) {
     if (item.reason === "provider_conflict") return "The provider appears to have changed since the last scan.";
-    if (item.reason === "ambiguous_public_page") return "Multiple board matches found. Choose the source Rolester should use locally.";
-    if (item.reason === "low_confidence_extraction") return "Rolester found public page text but could not confidently identify the careers board.";
+    if (item.reason === "ambiguous_public_page") return "Multiple board matches found. Choose the source CareerRat should use locally.";
+    if (item.reason === "low_confidence_extraction") return "CareerRat found public page text but could not confidently identify the careers board.";
     return item.reason || "Review needed";
   }
 

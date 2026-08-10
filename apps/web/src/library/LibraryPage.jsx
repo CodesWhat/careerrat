@@ -725,7 +725,7 @@ function EmptyLibraryState() {
       <p>
         Finish <Link to="/onboarding">onboarding</Link> or{" "}
         <Link to="/deep-ingest">deep ingest</Link> to capture evidence, STAR stories, and writing
-        voice so Rolester has a durable bank to browse here.
+        voice so CareerRat has a durable bank to browse here.
       </p>
     </div>
   );

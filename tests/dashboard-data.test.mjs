@@ -28,7 +28,7 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
 test("Dashboard sourceshell hydrates through the tracked data module", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
 
-  assert.match(html, /<title>Rolester · Application Tracker<\/title>/);
+  assert.match(html, /<title>CareerRat · Application Tracker<\/title>/);
   assert.match(html, /data-page-panel="dashboard"/);
   assert.match(html, /data-page-panel="jobs"/);
   assert.match(html, /new URL\(["']\.\/dashboard-data\.js["'],\s*import\.meta\.url\)/);

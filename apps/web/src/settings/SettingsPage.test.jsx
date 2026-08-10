@@ -214,7 +214,7 @@ it("makes installed AI the primary Settings route and nests provider credentials
   expect(text).toContain("Codex");
   expect(text).toContain("Selected");
   expect(text).toContain("Advanced · Use a provider API key instead");
-  expect(text).toContain("How hands-on should Rolester be?");
+  expect(text).toContain("How hands-on should CareerRat be?");
   expect(text).toContain("Every external capability is hard-off");
   expect(api.getInstalledAiRuntimes).toHaveBeenCalledOnce();
 });

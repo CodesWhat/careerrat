@@ -131,7 +131,7 @@ describe("GuardrailsStep shell layout", () => {
     expect(GUARDRAIL_PRESETS.some((preset) => preset.value === "Shrinking team")).toBe(false);
     expect(html).toContain("Layoff risk");
     expect(html).not.toContain("Shrinking team");
-    expect(html).toContain('aria-label="How Rolester detects guardrails"');
+    expect(html).toContain('aria-label="How CareerRat detects guardrails"');
     expect(html).toContain("job posts");
     expect(html).toContain("company sentiment scanning");
     expect(html).toContain("interviews");

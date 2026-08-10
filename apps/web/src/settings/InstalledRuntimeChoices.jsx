@@ -32,7 +32,7 @@ export function InstalledRuntimeChoices({
         <span className="badge">No extra API key</span>
       </div>
       <p className="field__hint">
-        Rolester uses the tool's existing login and subscription. Credentials stay with that CLI.
+        CareerRat uses the tool's existing login and subscription. Credentials stay with that CLI.
       </p>
       {!state ? <p className="field__hint">Checking this computer…</p> : null}
       {state && installed.length === 0 ? (

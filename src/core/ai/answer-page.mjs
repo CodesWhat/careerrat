@@ -14,7 +14,7 @@ export const ANSWER_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Answer a question — Rolester</title>
+<title>Answer a question — CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;

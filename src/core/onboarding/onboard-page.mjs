@@ -30,7 +30,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Set up your workspace — Rolester</title>
+<title>Set up your workspace — CareerRat</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -279,7 +279,7 @@ export const ONBOARD_PAGE_HTML = `<!doctype html>
     <div class="field">
       <label class="check-label" for="public-sync-toggle">
         <input id="public-sync-toggle" data-hook="public-sync-toggle" type="checkbox" checked>
-        <span>Share public company and board metadata to improve Rolester for future searches.</span>
+        <span>Share public company and board metadata to improve CareerRat for future searches.</span>
       </label>
       <p id="public-sync-copy" data-hook="public-sync-copy" class="hint">This can include company domains, career pages, ATS board links, providers, and scan confidence. It never sends resume text, profile data, applications, private notes, compensation, fit scores, or local files.</p>
     </div>

@@ -27,7 +27,7 @@ export function AutomationModeChooser({ status, onSetMode, busy = false }) {
       <div className="automation-mode__heading">
         <div>
           <span className="onboarding-runtime__eyebrow">One setup choice</span>
-          <h2 id="automation-mode-title">How hands-on should Rolester be?</h2>
+          <h2 id="automation-mode-title">How hands-on should CareerRat be?</h2>
         </div>
         <span className="badge">
           {status?.liveCount || 0} live {status?.liveCount === 1 ? "permission" : "permissions"}
