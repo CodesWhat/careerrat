@@ -88,6 +88,13 @@ button {
   overflow-y: hidden;
   scrollbar-width: none;
   -webkit-app-region: drag;
+  /* Trailing-edge fade signals there's more nav to scroll to when it clips
+     (e.g. narrow viewports) — a mask, not a colored rail; harmless when nav
+     fits, since the fade then sits past the content's own edge. SVG-encoded
+     fade (not a CSS gradient() function — flat design disallows those) using
+     the same data-URI mask technique as .nav-item--active::after below. */
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 24' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='f' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='0.75' stop-color='%23fff'/%3E%3Cstop offset='1' stop-color='%23fff' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='24' fill='url(%23f)'/%3E%3C/svg%3E");
+  mask-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 100 24' xmlns='http://www.w3.org/2000/svg' preserveAspectRatio='none'%3E%3Cdefs%3E%3ClinearGradient id='f' x1='0' y1='0' x2='1' y2='0'%3E%3Cstop offset='0' stop-color='%23fff'/%3E%3Cstop offset='0.75' stop-color='%23fff'/%3E%3Cstop offset='1' stop-color='%23fff' stop-opacity='0'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='24' fill='url(%23f)'/%3E%3C/svg%3E");
 }
 
 .app-shell__primary::-webkit-scrollbar {
@@ -1221,18 +1228,24 @@ button {
   display: inline-flex;
   align-items: center;
   min-height: 26px;
+  max-width: 100%;
   padding: 0 10px;
   border-radius: 999px;
   background: var(--paper-surface);
   color: var(--ink-soft);
   font-size: 12px;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .dashboard__focus-fact strong {
+  overflow: hidden;
+  min-width: 0;
+  max-width: 220px;
   margin-left: 4px;
   color: var(--ink);
   font-weight: 850;
+  text-overflow: ellipsis;
 }
 
 .dashboard__focus-actions {
@@ -11825,6 +11838,38 @@ button.chip {
 .activity-bell__meta {
   font-size: 10px;
   color: var(--ink-soft);
+}
+
+.activity-bell__details {
+  margin-top: 2px;
+}
+
+.activity-bell__details summary {
+  cursor: pointer;
+  list-style: none;
+  color: var(--ink-soft);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.activity-bell__details summary::-webkit-details-marker {
+  display: none;
+}
+
+.activity-bell__tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.activity-bell__tag {
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 9px;
 }
 
 /* ── Deep ingest wizard (/deep-ingest, DeepIngestPage.jsx) ────────────────

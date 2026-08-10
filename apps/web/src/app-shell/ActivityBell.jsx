@@ -78,6 +78,18 @@ export function ActivityBell() {
                     <span className="activity-bell__title">{e.title}</span>
                     {e.summary ? <span className="activity-bell__summary">{e.summary}</span> : null}
                     <span className="activity-bell__meta">{e.relTime}</span>
+                    {e.tags?.length ? (
+                      <details className="activity-bell__details">
+                        <summary>Details</summary>
+                        <div className="activity-bell__tags">
+                          {e.tags.map((tag) => (
+                            <span className="activity-bell__tag" key={tag}>
+                              {tag}
+                            </span>
+                          ))}
+                        </div>
+                      </details>
+                    ) : null}
                   </span>
                 </li>
               ))}

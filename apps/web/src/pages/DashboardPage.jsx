@@ -145,7 +145,11 @@ function PriorityFocus({ focus, showDeepIngestNudge }) {
       {facts.length ? (
         <div className="dashboard__focus-facts">
           {facts.map((fact) => (
-            <span className="dashboard__focus-fact" key={fact.label}>
+            <span
+              className="dashboard__focus-fact"
+              key={fact.label}
+              title={`${fact.label} · ${fact.value}`}
+            >
               {fact.label} · <strong>{fact.value}</strong>
             </span>
           ))}
