@@ -94,7 +94,7 @@ function avatarStyle(name) {
   }
   const hue = AVATAR_HUES[Math.abs(hash) % AVATAR_HUES.length];
   return {
-    background: `linear-gradient(135deg, hsl(${hue} 52% 56%), hsl(${hue} 58% 44%))`,
+    background: `hsl(${hue} 55% 48%)`,
   };
 }
 
