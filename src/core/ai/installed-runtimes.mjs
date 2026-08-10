@@ -30,7 +30,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["gemini"],
     commandShape: "gemini -p",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "May ask you to sign in the first time.",
+    warning: "Make sure you're signed in.",
     installUrl: "https://github.com/google-gemini/gemini-cli",
   },
   {
@@ -47,7 +47,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["copilot", "github-copilot"],
     commandShape: "copilot -p -",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "May ask you to sign in the first time.",
+    warning: "Make sure you're signed in.",
     installUrl:
       "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
   },
@@ -57,7 +57,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["qwen"],
     commandShape: "qwen -p",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "May ask you to sign in the first time.",
+    warning: "Make sure you're signed in.",
     installUrl: "https://github.com/QwenLM/qwen-code",
   },
   {
@@ -66,7 +66,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["antigravity", "antigravitycli"],
     commandShape: "antigravity -p",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "Installed, but we can't tell if it's set up yet.",
+    warning: "Make sure you're signed in.",
     installUrl: "https://antigravity.google/docs/cli/install",
   },
   {
@@ -75,7 +75,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["hermes"],
     commandShape: "hermes -z",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "May ask you to sign in the first time.",
+    warning: "Make sure you're signed in.",
     installUrl: "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
   },
   {
@@ -84,7 +84,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["amp"],
     commandShape: "amp -x",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "May ask you to sign in the first time.",
+    warning: "Make sure you're signed in.",
     installUrl: "https://ampcode.com/manual",
   },
   {
@@ -93,7 +93,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["goose"],
     commandShape: "goose run -i -",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "Installed, but we can't tell if it's set up yet.",
+    warning: "Make sure you're signed in.",
     installUrl: "https://goose-docs.ai/docs/getting-started/installation/",
   },
   {
@@ -102,7 +102,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["droid"],
     commandShape: "droid exec",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "Installed, but we can't tell if it's set up yet.",
+    warning: "Make sure you're signed in.",
     installUrl: "https://docs.factory.ai/droid-cli/quickstart",
   },
 ];
