@@ -36,13 +36,13 @@ import {
 
 const INTERVIEW_SKILL = "ingest-profile";
 
-// The two ways in for someone who hasn't attached a résumé yet: point Paul at
-// the work history they already have, or admit there isn't one and start from
-// a conversation. Pasting résumé text isn't a chip — that's what the bar
-// itself is for, and its placeholder says so.
+// The two ways in, as actions rather than sample text. "upload" opens the file
+// picker (dropping a résumé anywhere on the hero does the same thing); "send"
+// posts its label immediately so Paul answers and the conversation starts
+// without the user having to compose the admission themselves.
 const SUGGESTION_CHIPS = [
-  "Help me find jobs like my last role",
-  "I don't have a résumé. Help me start another way.",
+  { label: "Upload my résumé", kind: "upload" },
+  { label: "I don't have a résumé. Help me start another way.", kind: "send" },
 ];
 
 const RESUME_EXTENSIONS_AI = new Set(["pdf", "png", "jpg", "jpeg", "webp"]);
@@ -103,11 +103,11 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   // dialog copy below and OnboardingPage's forceEngineScreen flag, which
   // owns the actual navigation).
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
-  // The opening bar is controlled (the docked one below isn't) so a suggestion
-  // chip can drop its text straight into the input for the user to edit or
-  // send — the chips are examples of what to say, not one-click submits.
-  const [heroDraft, setHeroDraft] = useState("");
-  const heroInputRef = useRef(null);
+  // A résumé can be dropped anywhere on the hero, not just on the bar, so the
+  // drag state lives up here. `heroFileInputRef` is the bar's hidden file
+  // input, borrowed so the upload chip opens the same picker.
+  const [heroDragOver, setHeroDragOver] = useState(false);
+  const heroFileInputRef = useRef(null);
   const prevDoneRef = useRef({});
   const resumedRef = useRef(false);
 
@@ -555,21 +555,38 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       ) : null}
 
       {!docked ? (
-        <main className="onboarding-hero">
+        // biome-ignore lint/a11y/noStaticElementInteractions: whole-screen drop target; the upload chip and the bar's attach button are the keyboard/click equivalents
+        <main
+          className={`onboarding-hero${heroDragOver ? " onboarding-hero--drag-over" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setHeroDragOver(true);
+          }}
+          onDragLeave={(e) => {
+            // Leaving for a child element still fires dragleave on the parent;
+            // only clear when the pointer has actually left the hero.
+            if (!e.currentTarget.contains(e.relatedTarget)) setHeroDragOver(false);
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setHeroDragOver(false);
+            const file = e.dataTransfer?.files?.[0];
+            if (file) handleResumeDrop(file);
+          }}
+        >
           <div className="onboarding-hero__copy">
             <h1>This is Paul.</h1>
             <p>
-              He runs your job hunt. Start with your résumé, or just tell him what you're after. He
-              fills in the setup as you talk, and you can edit anything by hand, any time.
+              He runs your job hunt. Drop your résumé anywhere on this page to start, or just tell
+              him what you're after. He fills in the setup as you talk, and you can edit anything by
+              hand, any time.
             </p>
           </div>
           {error ? <InlineAlert message={error} /> : null}
           <OnboardingBar
             mode="centered"
             placeholder="Tell Paul what you're hunting, or paste your résumé text here."
-            value={heroDraft}
-            onChange={setHeroDraft}
-            inputRef={heroInputRef}
+            fileInputRef={heroFileInputRef}
             onSend={handleSend}
             onDropResume={handleResumeDrop}
             busy={starting || uploading}
@@ -577,15 +594,15 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
           <div className="onboarding-suggestions">
             {SUGGESTION_CHIPS.map((chip) => (
               <button
-                key={chip}
+                key={chip.label}
                 type="button"
                 className="onboarding-suggestions__chip"
                 onClick={() => {
-                  setHeroDraft(chip);
-                  heroInputRef.current?.focus();
+                  if (chip.kind === "upload") heroFileInputRef.current?.click();
+                  else handleSend(chip.label);
                 }}
               >
-                {chip}
+                {chip.label}
               </button>
             ))}
           </div>

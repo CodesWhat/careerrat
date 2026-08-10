@@ -6736,6 +6736,16 @@ a.onboarding-engine__not-found-chip:focus-visible {
   padding: 32px;
 }
 
+/* A résumé can be dropped anywhere on this screen, so the whole hero is the
+ * target — the tint is the only feedback that the drop will land. */
+.onboarding-hero--drag-over {
+  background: var(--accent-bg);
+}
+
+.onboarding-hero--drag-over .ask-bar__shell {
+  border-color: var(--accent);
+}
+
 .onboarding-hero__copy {
   text-align: center;
 }

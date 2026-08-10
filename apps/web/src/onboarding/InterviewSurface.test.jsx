@@ -296,7 +296,7 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     expect(textOf(userTurn)).toBe("I'm hunting applied AI roles");
   });
 
-  it("a suggestion chip fills the bar and focuses it instead of sending on its own", async () => {
+  it("the upload chip opens the file picker without starting a chat", async () => {
     api.startChat.mockResolvedValue({ chatId: "chat-chip", state: "running" });
     let tree = render({ runtime: RUNTIME });
     await runEffects();
@@ -304,20 +304,62 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
 
     const chips = byClass(tree, "onboarding-suggestions__chip");
     expect(chips).toHaveLength(2);
-    // Every chip must be a real button, not the inert span this shipped as.
+    // Both chips must be real buttons, not the inert spans this shipped as.
     for (const chip of chips) expect(chip.type).toBe("button");
-    expect(captured.onboardingBar.value).toBe("");
 
-    const focus = vi.fn();
-    captured.onboardingBar.inputRef.current = { focus };
-    chips[1].props.onClick();
-    tree = render({ runtime: RUNTIME });
+    const click = vi.fn();
+    captured.onboardingBar.fileInputRef.current = { click };
+    chips[0].props.onClick();
+    await flush();
 
-    expect(captured.onboardingBar.value).toBe(textOf(chips[1]));
-    expect(focus).toHaveBeenCalled();
-    // Filling the bar is not sending it — the user still edits and hits send.
+    expect(click).toHaveBeenCalled();
     expect(api.startChat).not.toHaveBeenCalled();
     expect(captured.onboardingBar.mode).toBe("centered");
+  });
+
+  it("the no-résumé chip sends its own label immediately and docks", async () => {
+    api.startChat.mockResolvedValue({ chatId: "chat-chip-2", state: "running" });
+    let tree = render({ runtime: RUNTIME });
+    await runEffects();
+    tree = render({ runtime: RUNTIME });
+
+    const chips = byClass(tree, "onboarding-suggestions__chip");
+    const label = textOf(chips[1]);
+    chips[1].props.onClick();
+    await flush();
+
+    tree = render({ runtime: RUNTIME });
+    expect(api.startChat).toHaveBeenCalledWith("ingest-profile", { input: label });
+    expect(captured.onboardingBar.mode).toBe("docked");
+    const userTurn = byClass(tree, "onboarding-transcript__turn--user")[0];
+    expect(textOf(userTurn)).toBe(label);
+  });
+
+  it("a résumé dropped anywhere on the hero uploads, not just one dropped on the bar", async () => {
+    api.startChat.mockResolvedValue({ chatId: "chat-hero-drop", state: "running" });
+    api.parseResumeText.mockResolvedValue({
+      profileSeed: { candidate: {} },
+      evidenceSeed: { claims: [] },
+    });
+    let tree = render({ runtime: RUNTIME });
+    await runEffects();
+    tree = render({ runtime: RUNTIME });
+
+    const hero = byClass(tree, "onboarding-hero")[0];
+    expect(hero.props.onDrop).toBeTruthy();
+
+    hero.props.onDragOver({ preventDefault: vi.fn() });
+    tree = render({ runtime: RUNTIME });
+    expect(byClass(tree, "onboarding-hero--drag-over")).toHaveLength(1);
+
+    const file = { name: "resume.txt", text: async () => "raw text" };
+    await byClass(tree, "onboarding-hero")[0].props.onDrop({
+      preventDefault: vi.fn(),
+      dataTransfer: { files: [file] },
+    });
+    await flush();
+
+    expect(api.parseResumeText).toHaveBeenCalledWith("raw text", { save: true });
   });
 
   it("docks after a résumé drop even with no typed message (never posts to /api/intake)", async () => {

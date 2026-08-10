@@ -34,17 +34,18 @@ export function OnboardingBar({
   placeholder = "Tell Paul what you're hunting, or paste your résumé text here.",
   value,
   onChange,
-  // Optional: lets the caller focus the input (the hero's suggestion chips
-  // drop text in and put the cursor there). Falls back to a local ref.
-  inputRef: providedInputRef,
+  // Optional: hands the hidden file input back to the caller, so the hero's
+  // upload chip opens the same picker as the attach button. Falls back to a
+  // local ref.
+  fileInputRef: providedFileInputRef,
   onSend,
   onDropResume,
   disabled = false,
   busy = false,
 }) {
-  const localInputRef = useRef(null);
-  const inputRef = providedInputRef ?? localInputRef;
-  const fileInputRef = useRef(null);
+  const inputRef = useRef(null);
+  const localFileInputRef = useRef(null);
+  const fileInputRef = providedFileInputRef ?? localFileInputRef;
   const [dragOver, setDragOver] = useState(false);
   const [internalValue, setInternalValue] = useState("");
   const text = value ?? internalValue;
