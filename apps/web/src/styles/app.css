@@ -6395,6 +6395,13 @@ button.chip {
   opacity: 0.6;
 }
 
+/* Opacity on the row also washes out the focus ring of the hosted-interest
+ * email field; a child can't exceed its parent's opacity, so lift the dim
+ * while anything inside the row has focus. */
+.onboarding-engine__choice--unavailable:focus-within {
+  opacity: 1;
+}
+
 .onboarding-engine__choice--custom {
   flex-direction: column;
   align-items: stretch;
