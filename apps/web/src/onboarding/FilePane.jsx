@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { ChipInput, TextArea, TextField } from "../components/form.jsx";
 import { CheckIcon } from "../components/icons.jsx";
+import { InlineAlert } from "../components/Toast.jsx";
 import { parseResumeText, removeEvidenceClaim, saveCandidateFile } from "../lib/api.js";
 import {
   buildSetupItemViewModels,
@@ -181,8 +182,16 @@ function RolesRowEditor({ state, onCommit, onCancel }) {
     });
   }
 
+  // Server-side, normalizeSearchTracks (src/core/db/verbs/candidate.mjs)
+  // silently drops any lane with no titles — no error, the lane just
+  // vanishes. Block that here instead so the user sees why the lane
+  // didn't save (ISSUE-006). Same check SettingsPage's roleLanesInvalid
+  // uses for the same reason (ISSUE-022).
+  const roleLanesInvalid = workingBuckets.some((bucket) => !bucket.titles?.length);
+
   async function handleSubmit(e) {
     e.preventDefault();
+    if (roleLanesInvalid) return;
     setSaving(true);
     try {
       await onCommit({
@@ -208,6 +217,9 @@ function RolesRowEditor({ state, onCommit, onCancel }) {
           onChange={(patch) => updateBucket(index, patch)}
         />
       ))}
+      {roleLanesInvalid ? (
+        <InlineAlert message="Add at least one complete role lane with a job title." />
+      ) : null}
       <EditorActions onCancel={onCancel} saving={saving} />
     </form>
   );

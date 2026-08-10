@@ -49,6 +49,7 @@ vi.mock("../components/form.jsx", () => ({
   TextArea: "mock-textarea",
   TextField: "mock-textfield",
 }));
+vi.mock("../components/Toast.jsx", () => ({ InlineAlert: "inline-alert" }));
 vi.mock("./steps/RoleLaneEditor.jsx", () => ({
   normalizeRoleBuckets: (buckets) => buckets,
   RoleLaneFields: "mock-role-lane-fields",
@@ -348,5 +349,110 @@ describe("FilePane — inline editors commit through onFieldSaved", () => {
 
     expect(api.removeEvidenceClaim).toHaveBeenCalledWith("seed-001");
     expect(onFieldSaved).toHaveBeenCalledWith({ key: "evidence", summary: "removed a claim" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Roles editor — empty-title lane guard (ISSUE-006). The server
+// (normalizeSearchTracks in src/core/db/verbs/candidate.mjs) silently drops
+// any lane with no titles, so the client must reject it before it ever
+// reaches saveCandidateFile — never a silent no-op.
+// ---------------------------------------------------------------------------
+
+describe("FilePane — Roles editor blocks empty-title lanes (ISSUE-006)", () => {
+  it("blocks submit and shows the inline error when a lane has no titles", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Roles").props.onClick();
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    // Default synthesized lane has no titles yet — the error shows up front,
+    // not only after a failed submit attempt.
+    expect(byTag(tree, "inline-alert").props.message).toBe(
+      "Add at least one complete role lane with a job title."
+    );
+
+    const form = byClass(tree, "file-pane__editor")[0];
+    await form.props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    expect(onFieldSaved).not.toHaveBeenCalled();
+  });
+
+  it("fixing the title clears the error and lets the save through", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onReload = vi.fn().mockResolvedValue();
+    const onFieldSaved = vi.fn();
+    let tree = render({ state: EMPTY_STATE, onReload, onFieldSaved });
+    rowByLabel(tree, "Roles").props.onClick();
+    tree = render({ state: EMPTY_STATE, onReload, onFieldSaved });
+    expect(byTag(tree, "inline-alert")).toBeTruthy();
+
+    const roleLaneFields = byTag(tree, "mock-role-lane-fields");
+    roleLaneFields.props.onChange({ titles: ["Staff Platform Engineer"] });
+    tree = render({ state: EMPTY_STATE, onReload, onFieldSaved });
+
+    expect(byTag(tree, "inline-alert")).toBeUndefined();
+
+    const form = byClass(tree, "file-pane__editor")[0];
+    await form.props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      role_buckets: [
+        {
+          name: "Primary",
+          priority: "primary",
+          titles: ["Staff Platform Engineer"],
+          notes: "",
+          fit_signals: [],
+          down_signals: [],
+        },
+      ],
+    });
+    expect(onReload).toHaveBeenCalledTimes(1);
+    expect(onFieldSaved).toHaveBeenCalledWith({ key: "roles", summary: "1 role lane" });
+
+    // editingKey resets after commit.
+    tree = render({ state: EMPTY_STATE, onReload, onFieldSaved });
+    expect(byClass(tree, "file-pane__row--editing")).toHaveLength(0);
+  });
+
+  it("a valid multi-lane save round-trips through saveCandidateFile unchanged", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    const bucketA = {
+      name: "Primary",
+      priority: "primary",
+      titles: ["Staff Platform Engineer"],
+      notes: "",
+      fit_signals: [],
+      down_signals: [],
+    };
+    const bucketB = {
+      name: "Secondary",
+      priority: "secondary",
+      titles: ["Engineering Manager"],
+      notes: "",
+      fit_signals: [],
+      down_signals: [],
+    };
+    const state = stateWith(["roles"], { targeting: { role_buckets: [bucketA, bucketB] } });
+    let tree = render({ state, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Roles").props.onClick();
+    tree = render({ state, onReload: vi.fn(), onFieldSaved });
+
+    expect(byTag(tree, "inline-alert")).toBeUndefined();
+
+    const form = byClass(tree, "file-pane__editor")[0];
+    await form.props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      role_buckets: [bucketA, bucketB],
+    });
+    expect(onFieldSaved).toHaveBeenCalledWith({ key: "roles", summary: "2 role lanes" });
   });
 });
