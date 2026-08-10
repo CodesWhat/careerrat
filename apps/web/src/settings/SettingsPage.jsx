@@ -27,6 +27,13 @@ import {
   selectInstalledAiRuntime,
   validateAndSaveAiKey,
 } from "../lib/api.js";
+// buildQuickFactsSavePayload is the only export consumed here — the
+// individual pure helpers it composes (compensationPatch, authorizationPatch,
+// locationPatch, candidateLocationPatch, cleanLinkFields) are module-private
+// to lib/quickFacts.js. Calling the composite and reading its `.profile`
+// slice reuses the exact same tested shaping logic without re-deriving it or
+// widening quickFacts.js's export surface.
+import { buildQuickFactsSavePayload } from "../lib/quickFacts.js";
 import {
   GUARDRAIL_PRESETS,
   GUARDRAIL_SUGGESTIONS,
@@ -34,14 +41,6 @@ import {
   normalizeSignals,
   toggleGuardrailSignal,
 } from "../onboarding/steps/GuardrailsStep.jsx";
-import { InstalledRuntimeChoices } from "../onboarding/steps/KeyStep.jsx";
-// buildQuickFactsSavePayload is the only exported patch-builder here — the
-// individual pure helpers it composes (compensationPatch, authorizationPatch,
-// locationPatch, candidateLocationPatch, cleanLinkFields) are module-private
-// to PrefsStep.jsx. Calling the composite and reading its `.profile` slice
-// reuses the exact same tested shaping logic without re-deriving it or
-// widening PrefsStep.jsx's export surface.
-import { buildQuickFactsSavePayload } from "../onboarding/steps/PrefsStep.jsx";
 import { normalizeRoleBuckets, RoleLaneFields } from "../onboarding/steps/RoleLaneEditor.jsx";
 import {
   AutomationConsentMatrix,
@@ -49,6 +48,7 @@ import {
   buildAutomationModePatch,
 } from "./AutomationControls.jsx";
 import { mapErrors } from "./error-map.js";
+import { InstalledRuntimeChoices } from "./InstalledRuntimeChoices.jsx";
 import { SourceMaintenance } from "./SourceMaintenance.jsx";
 import {
   formatTokenCount,
