@@ -40,6 +40,11 @@ test("runtime registry covers the supported installed CLI set", () => {
     assert.ok(definition.commandShape);
     assert.ok(definition.binaries.length >= 1);
     assert.ok(definition.authProbe.args.length >= 1);
+    // Onboarding's not-found rows link out to each CLI's official install
+    // docs (the "NOT FOUND · INSTALL GUIDE" receipt) — every registry entry
+    // must carry a real, verified https:// URL, never an invented one.
+    assert.ok(definition.installUrl, `${definition.id} needs an installUrl`);
+    assert.match(definition.installUrl, /^https:\/\//);
   }
 });
 
@@ -82,6 +87,16 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
     assert.equal(inventory.find(({ id }) => id === "claude").path, claudePath);
     assert.equal(inventory.find(({ id }) => id === "codex").path, codexPath);
     assert.equal(inventory.find(({ id }) => id === "gemini").available, false);
+    // installUrl flows from the registry definition through to every
+    // detected runtime, available or not.
+    assert.equal(
+      inventory.find(({ id }) => id === "claude").installUrl,
+      INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === "claude").installUrl
+    );
+    assert.equal(
+      inventory.find(({ id }) => id === "gemini").installUrl,
+      INSTALLED_RUNTIME_DEFINITIONS.find(({ id }) => id === "gemini").installUrl
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

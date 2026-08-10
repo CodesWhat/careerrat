@@ -14,6 +14,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["claude"],
     commandShape: "claude -p --output-format json",
     authProbe: { args: ["auth", "status"] },
+    installUrl: "https://code.claude.com/docs/en/overview",
   },
   {
     id: "codex",
@@ -21,6 +22,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["codex"],
     commandShape: "codex exec --json -",
     authProbe: { args: ["login", "status"] },
+    installUrl: "https://github.com/openai/codex",
   },
   {
     id: "gemini",
@@ -29,6 +31,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "gemini -p",
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "Sign-in can only be verified when the first request runs.",
+    installUrl: "https://github.com/google-gemini/gemini-cli",
   },
   {
     id: "opencode",
@@ -36,6 +39,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["opencode"],
     commandShape: "opencode run -",
     authProbe: { args: ["auth", "list"] },
+    installUrl: "https://opencode.ai/docs/",
   },
   {
     id: "copilot",
@@ -44,6 +48,8 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "copilot -p -",
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "Sign-in can only be verified when the first request runs.",
+    installUrl:
+      "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
   },
   {
     id: "qwen",
@@ -52,6 +58,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "qwen -p",
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "Sign-in can only be verified when the first request runs.",
+    installUrl: "https://github.com/QwenLM/qwen-code",
   },
   {
     id: "antigravity",
@@ -60,6 +67,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "antigravity -p",
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "This adapter has reduced readiness reporting.",
+    installUrl: "https://antigravity.google/docs/cli/install",
   },
   {
     id: "grok",
@@ -68,6 +76,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     commandShape: "grok -p",
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "This adapter has reduced readiness reporting.",
+    installUrl: "https://docs.x.ai/build/overview",
   },
 ];
 
@@ -157,6 +166,7 @@ export function detectInstalledRuntimes(options = {}) {
       path,
       available: Boolean(path),
       warning: definition.warning || null,
+      installUrl: definition.installUrl || null,
     };
   });
 }

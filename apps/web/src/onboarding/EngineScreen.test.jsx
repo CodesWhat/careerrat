@@ -114,6 +114,10 @@ function button(tree, label) {
   return visit(tree, (n) => n.type === "button" && textOf(n).trim() === label)[0];
 }
 
+function link(tree, label) {
+  return visit(tree, (n) => n.type === "a" && textOf(n).trim() === label)[0];
+}
+
 async function runEffects() {
   for (const effect of hooks.effects) effect();
   await Promise.resolve();
@@ -165,6 +169,15 @@ const COPILOT_NOT_FOUND = {
   ready: false,
   available: false,
   status: "not_installed",
+};
+// Same not-found copilot row, but carrying the registry's installUrl field —
+// kept as a separate fixture (rather than adding installUrl to
+// COPILOT_NOT_FOUND above) so the pre-existing "NOT FOUND" exact-text
+// assertions elsewhere don't have to account for the appended install link.
+const COPILOT_NOT_FOUND_WITH_INSTALL = {
+  ...COPILOT_NOT_FOUND,
+  installUrl:
+    "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
 };
 const CUSTOM_EMPTY = {
   id: "custom",
@@ -218,6 +231,34 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     expect(button(tree, "Retry")).toBeTruthy();
   });
 
+  it("renders a NOT FOUND · INSTALL GUIDE link for a not-found runtime that carries an installUrl, opening in a new tab", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([COPILOT_NOT_FOUND_WITH_INSTALL, CUSTOM_EMPTY])
+    );
+    let tree = render({ mode: "gate", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+
+    const receipt = byClass(tree, "onboarding-engine__receipt--muted");
+    expect(textOf(receipt)).toBe("NOT FOUND · INSTALL GUIDE");
+
+    const installLink = link(tree, "INSTALL GUIDE");
+    expect(installLink).toBeTruthy();
+    expect(installLink.props.href).toBe(COPILOT_NOT_FOUND_WITH_INSTALL.installUrl);
+    expect(installLink.props.target).toBe("_blank");
+    expect(installLink.props.rel).toBe("noreferrer");
+  });
+
+  it("omits the install-guide link for a not-found runtime with no installUrl", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([COPILOT_NOT_FOUND, CUSTOM_EMPTY]));
+    let tree = render({ mode: "gate", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+
+    expect(textOf(byClass(tree, "onboarding-engine__receipt--muted"))).toBe("NOT FOUND");
+    expect(link(tree, "INSTALL GUIDE")).toBeUndefined();
+  });
+
   it("Retry re-probes the runtime and Open Terminal calls the terminal API, both against the clicked runtime", async () => {
     api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([GEMINI_SIGNIN, CUSTOM_EMPTY]));
     api.probeInstalledAiRuntime.mockResolvedValue({ ok: true });
@@ -239,12 +280,68 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     expect(api.openInstalledAiRuntimeTerminal).toHaveBeenCalledWith("gemini");
   });
 
-  it("a probe failure on mount degrades to an empty runtime list rather than throwing", async () => {
+  it("a probe failure on mount renders an inline error instead of faking the empty-gate product state", async () => {
     api.getInstalledAiRuntimes.mockRejectedValue(new Error("network down"));
     let tree = render({ mode: "gate", onReady: vi.fn() });
     await expect(runEffects()).resolves.not.toThrow();
     tree = render({ mode: "gate", onReady: vi.fn() });
+
+    // Not the legitimate-empty-probe gate copy — a fetch failure (network,
+    // 401/403, 500) must not masquerade as "the rat looked and found nothing".
+    expect(textOf(byTag(tree, "h1"))).not.toBe("No AI engine found.");
+    const alert = byClass(tree, "inline-alert");
+    expect(alert).toBeTruthy();
+    expect(textOf(alert)).toBe("Couldn't reach this computer to check for AI CLIs.");
+    // No fake rows rendered off the swallowed failure.
+    expect(
+      visit(
+        tree,
+        (n) =>
+          hasClass(n, "onboarding-engine__choice") &&
+          !hasClass(n, "onboarding-engine__choice--custom")
+      )
+    ).toEqual([]);
+    expect(button(tree, "RE-RUN PROBE")).toBeTruthy();
+  });
+
+  it("surfaces the server's own error message from an ApiError-shaped failure (e.g. a 403)", async () => {
+    const apiError = new Error("request failed with status 403");
+    apiError.body = { error: "Forbidden — sign in and try again." };
+    api.getInstalledAiRuntimes.mockRejectedValue(apiError);
+    let tree = render({ mode: "gate", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+
+    expect(textOf(byClass(tree, "inline-alert"))).toBe("Forbidden — sign in and try again.");
+  });
+
+  it("a probe failure in picker mode also renders the inline error with a RE-RUN PROBE recovery action", async () => {
+    api.getInstalledAiRuntimes.mockRejectedValue(new Error("network down"));
+    let tree = render({ mode: "picker", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    expect(textOf(byTag(tree, "h1"))).not.toBe("Pick your engine.");
+    expect(byClass(tree, "inline-alert")).toBeTruthy();
+    // Picker mode normally hides RE-RUN PROBE entirely (it's the gate-only
+    // recovery affordance) — an error state must still offer a way back.
+    expect(button(tree, "RE-RUN PROBE")).toBeTruthy();
+  });
+
+  it("RE-RUN PROBE recovers from a failure once the probe succeeds again", async () => {
+    api.getInstalledAiRuntimes.mockRejectedValueOnce(new Error("network down"));
+    let tree = render({ mode: "gate", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+    expect(byClass(tree, "inline-alert")).toBeTruthy();
+
+    api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([COPILOT_NOT_FOUND, CUSTOM_EMPTY]));
+    await button(tree, "RE-RUN PROBE").props.onClick();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+
+    expect(byClass(tree, "inline-alert")).toBeFalsy();
     expect(textOf(byTag(tree, "h1"))).toBe("No AI engine found.");
+    expect(textOf(byClass(tree, "onboarding-engine__receipt--muted"))).toBe("NOT FOUND");
   });
 });
 

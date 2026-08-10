@@ -86,6 +86,7 @@ const INVENTORY = [
     path: null,
     available: false,
     warning: "reduced",
+    installUrl: "https://github.com/google-gemini/gemini-cli",
   },
 ];
 
@@ -121,6 +122,12 @@ test("inventory probes installed CLIs, auto-selects the first ready one, and per
     customCommand: null,
   });
   assert.equal(JSON.stringify(response.body).includes("morgan@example.com"), false);
+  // The registry's installUrl passes through the route untouched — the
+  // onboarding not-found row's "INSTALL GUIDE" link depends on this.
+  assert.equal(
+    response.body.runtimes.find(({ id }) => id === "gemini").installUrl,
+    "https://github.com/google-gemini/gemini-cli"
+  );
 });
 
 test("Open Terminal is an explicit user action with a fixed sign-in command", async () => {

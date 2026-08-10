@@ -6304,6 +6304,15 @@ button.chip {
   color: var(--ink-faint);
 }
 
+.onboarding-engine__receipt-link {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.onboarding-engine__receipt-link:hover {
+  text-decoration: underline;
+}
+
 .onboarding-engine__custom-heading {
   font-size: 13px;
   font-weight: 600;

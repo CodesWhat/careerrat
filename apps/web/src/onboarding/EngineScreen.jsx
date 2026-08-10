@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { CheckIcon } from "../components/icons.jsx";
+import { InlineAlert } from "../components/Toast.jsx";
 import {
   getInstalledAiRuntimes,
   openInstalledAiRuntimeTerminal,
@@ -17,6 +18,7 @@ import {
 // auto-selects a lone ready runtime server-side (inspectInstalledRuntimeState).
 export function EngineScreen({ mode, onReady }) {
   const [state, setState] = useState(null);
+  const [error, setError] = useState(null);
   const [pendingId, setPendingId] = useState(null);
   const [busyId, setBusyId] = useState(null);
   const [customCommand, setCustomCommand] = useState("");
@@ -24,13 +26,20 @@ export function EngineScreen({ mode, onReady }) {
   const [customTesting, setCustomTesting] = useState(false);
   const [starting, setStarting] = useState(false);
 
+  // A fetch failure here (network down, 401/403, server error) is NOT the
+  // same product state as a legitimate 200 with zero runtimes — conflating
+  // the two used to render the "No AI engine found" gate for both, making an
+  // auth/network failure look like a real probe result. Failures get their
+  // own error state and an inline alert instead; only a genuinely-empty
+  // probe response renders the gate copy.
   async function refresh() {
     try {
       const next = await getInstalledAiRuntimes();
       setState(next);
+      setError(null);
       if (next.selectedId) setPendingId(next.selectedId);
-    } catch {
-      setState({ selectedId: null, providerFallback: false, runtimes: [] });
+    } catch (err) {
+      setError(err?.body?.error || "Couldn't reach this computer to check for AI CLIs.");
     }
   }
 
@@ -110,27 +119,36 @@ export function EngineScreen({ mode, onReady }) {
         </span>
       </header>
       <main className="onboarding-engine">
-        <div className="onboarding-engine__intro">
-          <h1>{isGate ? "No AI engine found." : "Pick your engine."}</h1>
-          <p>
-            {isGate
-              ? "The rat probed this machine for installed CLIs and came up empty. Point it at anything that runs — or install one of these."
-              : "The probe found more than one CLI on this machine. The rat runs on whichever you pick — chat unlocks right after."}
-          </p>
-        </div>
+        {error ? (
+          <div className="onboarding-engine__intro">
+            <h1>Couldn't check this computer.</h1>
+            <InlineAlert message={error} />
+          </div>
+        ) : (
+          <>
+            <div className="onboarding-engine__intro">
+              <h1>{isGate ? "No AI engine found." : "Pick your engine."}</h1>
+              <p>
+                {isGate
+                  ? "The rat probed this machine for installed CLIs and came up empty. Point it at anything that runs — or install one of these."
+                  : "The probe found more than one CLI on this machine. The rat runs on whichever you pick — chat unlocks right after."}
+              </p>
+            </div>
 
-        {runtimes.map((runtime) => (
-          <EngineChoiceRow
-            key={runtime.id}
-            runtime={runtime}
-            compact={isGate}
-            selected={pendingId === runtime.id}
-            busy={busyId === runtime.id}
-            onSelect={() => runtime.ready && setPendingId(runtime.id)}
-            onRetry={() => handleRetry(runtime.id)}
-            onOpenTerminal={() => handleOpenTerminal(runtime.id)}
-          />
-        ))}
+            {runtimes.map((runtime) => (
+              <EngineChoiceRow
+                key={runtime.id}
+                runtime={runtime}
+                compact={isGate}
+                selected={pendingId === runtime.id}
+                busy={busyId === runtime.id}
+                onSelect={() => runtime.ready && setPendingId(runtime.id)}
+                onRetry={() => handleRetry(runtime.id)}
+                onOpenTerminal={() => handleOpenTerminal(runtime.id)}
+              />
+            ))}
+          </>
+        )}
 
         <div
           className={`onboarding-engine__choice onboarding-engine__choice--custom${
@@ -184,7 +202,7 @@ export function EngineScreen({ mode, onReady }) {
         </span>
 
         <div className="onboarding-engine__footer">
-          {isGate ? (
+          {isGate || error ? (
             <button type="button" className="onboarding-engine__link" onClick={refresh}>
               RE-RUN PROBE
             </button>
@@ -252,6 +270,19 @@ function EngineChoiceRow({ runtime, compact, selected, busy, onSelect, onRetry, 
       ) : (
         <span className="onboarding-engine__receipt onboarding-engine__receipt--muted">
           NOT FOUND
+          {runtime.installUrl ? (
+            <>
+              {" · "}
+              <a
+                href={runtime.installUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="onboarding-engine__receipt-link"
+              >
+                INSTALL GUIDE
+              </a>
+            </>
+          ) : null}
         </span>
       )}
     </div>
