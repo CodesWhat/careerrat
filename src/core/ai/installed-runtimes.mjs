@@ -14,7 +14,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["claude"],
     commandShape: "claude -p --output-format json",
     authProbe: { args: ["auth", "status"] },
-    installUrl: "https://code.claude.com/docs/en/overview",
+    installUrl: "https://code.claude.com/docs/en/quickstart",
   },
   {
     id: "codex",
@@ -22,7 +22,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["codex"],
     commandShape: "codex exec --json -",
     authProbe: { args: ["login", "status"] },
-    installUrl: "https://github.com/openai/codex",
+    installUrl: "https://learn.chatgpt.com/docs/codex/cli",
   },
   {
     id: "gemini",
@@ -68,6 +68,42 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     authProbe: { args: ["--version"], launchOnly: true },
     warning: "We can confirm this CLI is installed, but not whether it's set up and ready to run.",
     installUrl: "https://antigravity.google/docs/cli/install",
+  },
+  {
+    id: "hermes",
+    name: "Hermes Agent",
+    binaries: ["hermes"],
+    commandShape: "hermes -z",
+    authProbe: { args: ["--version"], launchOnly: true },
+    warning: "If you're not signed in to this CLI, the first run will fail and ask you to log in.",
+    installUrl: "https://hermes-agent.nousresearch.com/docs/getting-started/installation",
+  },
+  {
+    id: "amp",
+    name: "Amp",
+    binaries: ["amp"],
+    commandShape: "amp -x",
+    authProbe: { args: ["--version"], launchOnly: true },
+    warning: "If you're not signed in to this CLI, the first run will fail and ask you to log in.",
+    installUrl: "https://ampcode.com/manual",
+  },
+  {
+    id: "goose",
+    name: "Goose",
+    binaries: ["goose"],
+    commandShape: "goose run -i -",
+    authProbe: { args: ["--version"], launchOnly: true },
+    warning: "We can confirm this CLI is installed, but not whether it's set up and ready to run.",
+    installUrl: "https://goose-docs.ai/docs/getting-started/installation/",
+  },
+  {
+    id: "droid",
+    name: "Droid",
+    binaries: ["droid"],
+    commandShape: "droid exec",
+    authProbe: { args: ["--version"], launchOnly: true },
+    warning: "We can confirm this CLI is installed, but not whether it's set up and ready to run.",
+    installUrl: "https://docs.factory.ai/droid-cli/quickstart",
   },
 ];
 
@@ -261,6 +297,18 @@ export function buildInstalledRuntimeInvocation({
   if (["gemini", "qwen", "antigravity"].includes(runtimeId)) {
     return { ...common, args: ["-p", ""] };
   }
+  if (runtimeId === "hermes") {
+    return { ...common, args: ["-z"] };
+  }
+  if (runtimeId === "amp") {
+    return { ...common, args: ["-x"] };
+  }
+  if (runtimeId === "goose") {
+    return { ...common, args: ["run", "-i", "-"] };
+  }
+  if (runtimeId === "droid") {
+    return { ...common, args: ["exec"] };
+  }
   // "custom" is the W4 onboarding 3d/3f custom-command runtime — its
   // `executablePath` isn't a resolved binary path (there's no fixed
   // definition to resolve against), it's the raw command string persisted by
@@ -412,7 +460,8 @@ export function installedRuntimeSignInCommand(runtimeId) {
   if (runtimeId === "claude") return "claude auth login";
   if (runtimeId === "codex") return "codex login";
   if (runtimeId === "opencode") return "opencode auth login";
-  if (["gemini", "copilot", "qwen", "antigravity"].includes(runtimeId)) {
+  if (runtimeId === "goose") return "goose configure";
+  if (["gemini", "copilot", "qwen", "antigravity", "hermes", "amp", "droid"].includes(runtimeId)) {
     return `${runtimeId} --help`;
   }
   return null;

@@ -33,7 +33,19 @@ function executable(path) {
 test("runtime registry covers the supported installed CLI set", () => {
   assert.deepEqual(
     INSTALLED_RUNTIME_DEFINITIONS.map(({ id }) => id),
-    ["claude", "codex", "gemini", "opencode", "copilot", "qwen", "antigravity"]
+    [
+      "claude",
+      "codex",
+      "gemini",
+      "opencode",
+      "copilot",
+      "qwen",
+      "antigravity",
+      "hermes",
+      "amp",
+      "goose",
+      "droid",
+    ]
   );
   for (const definition of INSTALLED_RUNTIME_DEFINITIONS) {
     assert.ok(definition.name);
@@ -178,6 +190,44 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
   assert.ok(codex.args.includes("--output-schema"));
   assert.equal(codex.args.at(-1), "-");
   assert.equal(codex.options.shell, false);
+});
+
+test("newly added installed CLIs deliver the prompt on stdin with a fixed, shell-free argv", () => {
+  const hermes = buildInstalledRuntimeInvocation({
+    runtimeId: "hermes",
+    executablePath: "/safe/hermes",
+  });
+  assert.equal(hermes.command, "/safe/hermes");
+  assert.deepEqual(hermes.args, ["-z"]);
+  assert.equal(hermes.stdin, true);
+  assert.equal(hermes.options.shell, false);
+
+  const amp = buildInstalledRuntimeInvocation({
+    runtimeId: "amp",
+    executablePath: "/safe/amp",
+  });
+  assert.equal(amp.command, "/safe/amp");
+  assert.deepEqual(amp.args, ["-x"]);
+  assert.equal(amp.stdin, true);
+  assert.equal(amp.options.shell, false);
+
+  const goose = buildInstalledRuntimeInvocation({
+    runtimeId: "goose",
+    executablePath: "/safe/goose",
+  });
+  assert.equal(goose.command, "/safe/goose");
+  assert.deepEqual(goose.args, ["run", "-i", "-"]);
+  assert.equal(goose.stdin, true);
+  assert.equal(goose.options.shell, false);
+
+  const droid = buildInstalledRuntimeInvocation({
+    runtimeId: "droid",
+    executablePath: "/safe/droid",
+  });
+  assert.equal(droid.command, "/safe/droid");
+  assert.deepEqual(droid.args, ["exec"]);
+  assert.equal(droid.stdin, true);
+  assert.equal(droid.options.shell, false);
 });
 
 test("Open Terminal runs only the allowlisted sign-in command on macOS", () => {
