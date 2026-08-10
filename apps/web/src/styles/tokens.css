@@ -147,6 +147,9 @@
   --m-surface: var(--canvas);
   --m-on-surface: var(--ink);
   --m-on-primary-container: #16266b;
+
+  --opencode-mark-ink: #211e1e;
+  --opencode-mark-dim: #cfcecd;
 }
 
 [data-theme="dark"] {
@@ -262,6 +265,9 @@
   --m-surface: var(--canvas);
   --m-on-surface: var(--ink);
   --m-on-primary-container: #eef1fc;
+
+  --opencode-mark-ink: #f1ecec;
+  --opencode-mark-dim: #4b4646;
 }
 
 @font-face {

@@ -6592,7 +6592,7 @@ button.chip {
   align-items: center;
   gap: 5px;
   border: 1px solid var(--input-border);
-  border-radius: 999px;
+  border-radius: var(--card-radius);
   padding: 5px 12px;
   font-size: 11px;
   color: var(--ink-faint);
