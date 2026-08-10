@@ -65,6 +65,18 @@ vi.mock("react", async (importOriginal) => {
 
 vi.mock("../components/Toast.jsx", () => ({ InlineAlert: "inline-alert" }));
 
+// Same real-Link-as-plain-<a>-stand-in convention as LibraryPage.test.jsx —
+// the raw href="/settings" escape hatch bug this file guards against would
+// have been invisible under a Link mock that ignored `to`, so this keeps
+// `to` flowing through to a real rendered attribute.
+vi.mock("react-router-dom", () => ({
+  Link: ({ children, to, ...props }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
+  ),
+}));
+
 const captured = vi.hoisted(() => ({ filePane: null, onboardingBar: null }));
 vi.mock("./FilePane.jsx", () => ({
   FilePane: (props) => {
@@ -83,7 +95,10 @@ vi.mock("./OnboardingBar.jsx", () => ({
 // its exact props — {block, automationStatus, onConfirm} — rather than
 // recursing into ConfirmPill's own dialog/rendering logic, which has its own
 // dedicated test file.
-vi.mock("./ConfirmPill.jsx", () => ({ ConfirmPill: "mock-confirm-pill" }));
+vi.mock("./ConfirmPill.jsx", () => ({
+  ConfirmPill: "mock-confirm-pill",
+  ConfirmDialog: "mock-confirm-dialog",
+}));
 
 const sse = vi.hoisted(() => ({ calls: [] }));
 vi.mock("../lib/sse.js", () => ({
@@ -353,6 +368,96 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     expect(api.parseResumeText).toHaveBeenCalledWith("raw text", { save: true });
     expect(api.extractResumeAi).not.toHaveBeenCalled();
     expect(api.extractResumeDocx).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Escape hatch — a router Link, never a raw same-app <a href>
+// ---------------------------------------------------------------------------
+
+describe("InterviewSurface — escape hatch", () => {
+  it("renders the checklist escape hatch as a router Link to /settings, not a raw anchor", async () => {
+    render({ runtime: RUNTIME });
+    await runEffects();
+    const tree = render({ runtime: RUNTIME });
+
+    const hatch = byClass(tree, "onboarding-hero__escape-hatch")[0];
+    expect(hatch).toBeTruthy();
+    // The mocked react-router-dom Link renders as a plain <a href={to}> —
+    // this asserts `to` (the Link prop) reached the DOM, not a hardcoded
+    // href baked into a raw anchor that would resolve outside the
+    // BrowserRouter basename.
+    expect(hatch.props.href).toBe("/settings");
+    expect(textOf(hatch)).toBe("PREFER FORMS? OPEN THE CHECKLIST →");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Engine re-entry chip — confirm dialog gates the actual navigation
+// ---------------------------------------------------------------------------
+
+describe("InterviewSurface — engine re-entry chip (dialog-gated)", () => {
+  it("clicking the ENGINE chip opens the confirm dialog without calling onRequestEngineScreen", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    const onRequestEngineScreen = vi.fn();
+    render({ runtime: RUNTIME, onRequestEngineScreen });
+    await runEffects();
+    let tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+
+    expect(visit(tree, (n) => n.type === "mock-confirm-dialog")).toHaveLength(0);
+    const chip = visit(
+      tree,
+      (n) => n.type === "button" && textOf(n) === `ENGINE · ${RUNTIME.name.toUpperCase()}`
+    )[0];
+    expect(chip).toBeTruthy();
+    chip.props.onClick();
+    tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+
+    expect(visit(tree, (n) => n.type === "mock-confirm-dialog")).toHaveLength(1);
+    expect(onRequestEngineScreen).not.toHaveBeenCalled();
+  });
+
+  it("Cancel closes the dialog and leaves the interview untouched (no callback fired)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    const onRequestEngineScreen = vi.fn();
+    render({ runtime: RUNTIME, onRequestEngineScreen });
+    await runEffects();
+    let tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+    const chip = visit(
+      tree,
+      (n) => n.type === "button" && textOf(n) === `ENGINE · ${RUNTIME.name.toUpperCase()}`
+    )[0];
+    chip.props.onClick();
+    tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+
+    const dialog = visit(tree, (n) => n.type === "mock-confirm-dialog")[0];
+    dialog.props.onCancel();
+    tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+
+    expect(visit(tree, (n) => n.type === "mock-confirm-dialog")).toHaveLength(0);
+    expect(onRequestEngineScreen).not.toHaveBeenCalled();
+    expect(captured.filePane).toBeTruthy(); // still docked, still in the interview
+  });
+
+  it("Confirm calls onRequestEngineScreen and closes the dialog", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    const onRequestEngineScreen = vi.fn();
+    render({ runtime: RUNTIME, onRequestEngineScreen });
+    await runEffects();
+    let tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+    const chip = visit(
+      tree,
+      (n) => n.type === "button" && textOf(n) === `ENGINE · ${RUNTIME.name.toUpperCase()}`
+    )[0];
+    chip.props.onClick();
+    tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+
+    const dialog = visit(tree, (n) => n.type === "mock-confirm-dialog")[0];
+    await dialog.props.onConfirm();
+    tree = render({ runtime: RUNTIME, onRequestEngineScreen });
+
+    expect(onRequestEngineScreen).toHaveBeenCalledTimes(1);
+    expect(visit(tree, (n) => n.type === "mock-confirm-dialog")).toHaveLength(0);
   });
 });
 

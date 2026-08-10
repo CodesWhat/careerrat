@@ -16,6 +16,10 @@ import { useState } from "react";
 //   "advanced" — mayRun()'s own hard AND already requires advanced mode
 //   server-side, so a pill that could fire before that is just a dead click.
 //
+// ConfirmDialog itself is exported so InterviewSurface.jsx can reuse the
+// exact same overlay for its own "change engine mid-setup" confirmation —
+// one dialog convention, not two.
+//
 // Decline UX (spec's "Decline UX (settled)" section): authorization and
 // consent_mode are the two kinds a candidate can legitimately decline from
 // the chat itself — the agent has no write tools, so without a decline
@@ -192,7 +196,7 @@ function ConfirmPillButton({ label, summary, status, error, disabled, disabledHi
   );
 }
 
-function ConfirmDialog({ title, body, busy, onCancel, onConfirm }) {
+export function ConfirmDialog({ title, body, busy, onCancel, onConfirm }) {
   return (
     <div className="confirm-dialog-overlay">
       <div

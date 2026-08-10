@@ -130,6 +130,34 @@ test("inventory probes installed CLIs, auto-selects the first ready one, and per
   );
 });
 
+test("inventory leaves selectedId null when two or more CLIs are ready — the picker screen decides, not an auto-select", async () => {
+  const server = boot({
+    inventory: INVENTORY,
+    probes: {
+      claude: { status: "ready", ready: true, action: null },
+      codex: { status: "ready", ready: true, action: null },
+    },
+  });
+  const response = await request(server, "GET", "/api/settings/ai-runtimes");
+  assert.equal(response.status, 200);
+  assert.equal(response.body.selectedId, null);
+  assert.equal(response.body.providerFallback, false);
+  assert.deepEqual(
+    response.body.runtimes.map(({ id, ready, selected }) => ({ id, ready, selected })),
+    [
+      { id: "claude", ready: true, selected: false },
+      { id: "codex", ready: true, selected: false },
+      { id: "gemini", ready: false, selected: false },
+      { id: "custom", ready: false, selected: false },
+    ]
+  );
+  assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: server.repoRoot, env: server.env }), {
+    runtimeId: null,
+    providerFallback: false,
+    customCommand: null,
+  });
+});
+
 test("Open Terminal is an explicit user action with a fixed sign-in command", async () => {
   const opened = [];
   const server = boot({

@@ -11,13 +11,23 @@ import { InterviewSurface } from "./InterviewSurface.jsx";
 //
 // Engine gate (design frames 3f/3d): probe on entry via the same
 // GET /api/settings/ai-runtimes inspectInstalledRuntimeState() the Settings
-// page uses. It already auto-selects a lone ready runtime server-side, so
-// this component only ever has to render a screen for the 0-ready (gate) and
-// 2+-ready (picker) cases — the exactly-one case resolves itself before this
-// ever renders anything but a brief loading state.
+// page uses. Landing rule (server-owned): it auto-selects only an
+// unambiguous exactly-one-ready runtime; two or more ready lands on the
+// picker (3f) instead of silently choosing one, so this component renders a
+// screen for the 0-ready (gate) and 1+-ready-but-unresolved (picker) cases —
+// the exactly-one case resolves itself before this ever renders anything but
+// a brief loading state.
+//
+// Engine re-entry (forceEngineScreen): once in the interview, InterviewSurface's
+// ENGINE chip (after its own confirm dialog) can ask to revisit this gate
+// without losing setup progress — see handleRequestEngineScreen below. This
+// flag layers on top of `phase` rather than replacing it: phase stays
+// "interview" the whole time, so turning it back off just re-renders
+// InterviewSurface exactly where it left off.
 export function OnboardingPage() {
   const [phase, setPhase] = useState("loading");
   const [runtimeState, setRuntimeState] = useState(null);
+  const [forceEngineScreen, setForceEngineScreen] = useState(false);
 
   async function loadEngineState() {
     setPhase("loading");
@@ -58,7 +68,20 @@ export function OnboardingPage() {
     } catch {
       // Best-effort refresh only — proceed regardless.
     }
+    setForceEngineScreen(false);
     setPhase("interview");
+  }
+
+  // Re-entry "keep current" — no API call at all, so a user who opened the
+  // engine screen by mistake (or just wanted to check) loses nothing: not
+  // the interview transcript's session, not a single setup answer, and not
+  // an engine write. See EngineScreen's own "KEEP <CURRENT>" footer action.
+  function handleEngineBack() {
+    setForceEngineScreen(false);
+  }
+
+  function handleRequestEngineScreen() {
+    setForceEngineScreen(true);
   }
 
   if (phase === "loading") {
@@ -73,8 +96,14 @@ export function OnboardingPage() {
     return <EngineScreen mode={phase} onReady={handleEngineReady} />;
   }
 
+  if (forceEngineScreen) {
+    return <EngineScreen mode="revisit" onReady={handleEngineReady} onBack={handleEngineBack} />;
+  }
+
   const selectedRuntime = (runtimeState?.runtimes ?? []).find(
     (r) => r.id === runtimeState?.selectedId
   );
-  return <InterviewSurface runtime={selectedRuntime} />;
+  return (
+    <InterviewSurface runtime={selectedRuntime} onRequestEngineScreen={handleRequestEngineScreen} />
+  );
 }

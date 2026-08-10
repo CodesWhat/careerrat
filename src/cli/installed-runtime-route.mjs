@@ -51,10 +51,16 @@ export function inspectInstalledRuntimeState({
     return { ...runtime, ...probe };
   });
 
+  // Landing rule: auto-select only ever fires for an unambiguous exactly-one
+  // ready CLI (the OnboardingPage.jsx gate/picker/interview state machine
+  // then skips straight to the interview). Two or more ready CLIs is no
+  // longer auto-resolved here — selectedId stays null so the caller's own
+  // readyCount check lands on the picker screen instead, and the user picks.
   let selectedId = selection.runtimeId;
   if (!selectedId && !selection.providerFallback && autoSelect) {
-    selectedId = runtimes.find(({ ready }) => ready)?.id || null;
-    if (selectedId) {
+    const readyRuntimes = runtimes.filter(({ ready }) => ready);
+    if (readyRuntimes.length === 1) {
+      selectedId = readyRuntimes[0].id;
       writeInstalledRuntimeSelection({
         repoRoot,
         env,

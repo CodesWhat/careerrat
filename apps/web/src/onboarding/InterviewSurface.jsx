@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router-dom";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
   createCompanyProposals,
@@ -19,7 +20,7 @@ import {
 } from "../lib/api.js";
 import { useEventSource } from "../lib/sse.js";
 import { buildAutomationModePatch } from "../settings/AutomationControls.jsx";
-import { ConfirmPill } from "./ConfirmPill.jsx";
+import { ConfirmDialog, ConfirmPill } from "./ConfirmPill.jsx";
 import { unionCompanyNames } from "./companyUnion.js";
 import { parseConfirmBlocks } from "./confirmBlocks.js";
 import { FilePane } from "./FilePane.jsx";
@@ -82,7 +83,7 @@ function setBlockStatus(messages, messageIndex, blockIndex, status, extra = {}) 
 // change driven by whether a chat session exists yet (see the W4 spec's
 // finalized "Bar reuse" section), and 3e is a state of the SAME chat/session
 // (setupProgress.complete), not a navigation away from it.
-export function InterviewSurface({ runtime }) {
+export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   const [state, setState] = useState(null);
   const [chatId, setChatId] = useState(null);
   const [chatState, setChatState] = useState(null);
@@ -92,6 +93,13 @@ export function InterviewSurface({ runtime }) {
   const [error, setError] = useState(null);
   const [automationStatus, setAutomationStatus] = useState(null);
   const [companyProposals, setCompanyProposals] = useState({ batchId: null, items: [] });
+  // Engine re-entry (user QA: "a way to go back to the engine screen" once
+  // detection auto-selects a CLI and skips EngineScreen entirely). The chip
+  // click never navigates directly — it opens this confirm dialog first,
+  // since going back genuinely costs the on-screen conversation (see the
+  // dialog copy below and OnboardingPage's forceEngineScreen flag, which
+  // owns the actual navigation).
+  const [engineDialogOpen, setEngineDialogOpen] = useState(false);
   const prevDoneRef = useRef({});
   const resumedRef = useRef(false);
 
@@ -511,12 +519,32 @@ export function InterviewSurface({ runtime }) {
         <div className="onboarding-app__brand">
           CareerRat<span className="onboarding-app__brand-dot">.</span>
         </div>
-        <span className="onboarding-app__status">
-          {docked
-            ? `SETUP · ${setupCompletedCount(state)} OF ${setupTotal(state)} · INTERVIEW IN PROGRESS`
-            : `ENGINE · ${runtime?.name?.toUpperCase() || "READY"}`}
-        </span>
+        <div className="onboarding-app__header-status">
+          {docked ? (
+            <span className="onboarding-app__status">
+              SETUP · {setupCompletedCount(state)} OF {setupTotal(state)} · INTERVIEW IN PROGRESS
+            </span>
+          ) : null}
+          <button
+            type="button"
+            className="onboarding-engine__link"
+            onClick={() => setEngineDialogOpen(true)}
+          >
+            ENGINE · {runtime?.name?.toUpperCase() || "READY"}
+          </button>
+        </div>
       </header>
+      {engineDialogOpen ? (
+        <ConfirmDialog
+          title="Change engine?"
+          body="Setup answers save as you go, so nothing there is at risk. The chat conversation on screen isn't saved though — coming back here clears it."
+          onCancel={() => setEngineDialogOpen(false)}
+          onConfirm={() => {
+            setEngineDialogOpen(false);
+            onRequestEngineScreen?.();
+          }}
+        />
+      ) : null}
 
       {!docked ? (
         <main className="onboarding-hero">
@@ -543,9 +571,9 @@ export function InterviewSurface({ runtime }) {
             ))}
           </div>
           <MiniProgressRow state={state} />
-          <a className="onboarding-hero__escape-hatch" href="/settings">
+          <Link className="onboarding-hero__escape-hatch" to="/settings">
             PREFER FORMS? OPEN THE CHECKLIST →
-          </a>
+          </Link>
         </main>
       ) : (
         <div className="onboarding-interview">

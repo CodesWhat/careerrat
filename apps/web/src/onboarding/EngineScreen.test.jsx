@@ -48,6 +48,7 @@ vi.mock("react", async (importOriginal) => {
 
 vi.mock("../components/icons.jsx", () => ({
   CheckIcon: () => null,
+  ArrowRightIcon: () => null,
 }));
 
 const api = vi.hoisted(() => ({
@@ -343,6 +344,27 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     expect(textOf(byTag(tree, "h1"))).toBe("No AI engine found.");
     expect(textOf(byClass(tree, "onboarding-engine__receipt--muted"))).toBe("NOT FOUND");
   });
+
+  it("3d rows show the bare runtime id (mono), not the full display name — the custom row stays expanded and emphasized, and the hosted note reads 'No CLI at all?'", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([COPILOT_NOT_FOUND, GEMINI_SIGNIN, CUSTOM_EMPTY])
+    );
+    let tree = render({ mode: "gate", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+
+    const ids = visit(tree, (n) => hasClass(n, "onboarding-engine__choice-id")).map(textOf);
+    expect(ids).toEqual(["copilot", "gemini"]);
+    // No detected/picker-style bold name + descriptor in gate mode.
+    expect(visit(tree, (n) => hasClass(n, "onboarding-engine__choice-copy"))).toHaveLength(0);
+
+    // The custom row is always expanded here (no "ADD →" collapse) and
+    // carries the same accent-emphasis border a real selection gets.
+    expect(button(tree, "ADD →")).toBeUndefined();
+    expect(visit(tree, (n) => hasClass(n, "text-input"))[0]).toBeTruthy();
+
+    expect(textOf(byClass(tree, "onboarding-engine__hosted-note"))).toContain("No CLI at all?");
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -404,6 +426,96 @@ describe("EngineScreen — picker mode (2+ ready CLIs)", () => {
     expect(api.selectInstalledAiRuntime).not.toHaveBeenCalled();
     expect(onReady).toHaveBeenCalledTimes(1);
   });
+
+  it("shows a descriptor line for a detected runtime and omits it for one the probe couldn't find", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, COPILOT_NOT_FOUND, CUSTOM_EMPTY])
+    );
+    let tree = render({ mode: "picker", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    // Claude is DETECTED (available) — gets its human descriptor line. (The
+    // collapsed custom row's own hint text shares this same class, hence
+    // toContain rather than an exact single-item list.)
+    const shapes = visit(tree, (n) => hasClass(n, "onboarding-engine__choice-shape")).map(textOf);
+    expect(shapes).toContain("Uses your existing Claude subscription — no extra cost");
+    expect(shapes).not.toContain(undefined);
+
+    // Copilot is NOT FOUND (unavailable) — full name still renders, but no
+    // descriptor line underneath it (nothing to say about an uninstalled CLI).
+    const copilotName = visit(tree, (n) => textOf(n) === "GitHub Copilot CLI")[0];
+    expect(copilotName).toBeTruthy();
+  });
+
+  it("pluralizes the probe-count subhead off the live ready count, not a hardcoded 'more than one'", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, CODEX_READY, GEMINI_SIGNIN, CUSTOM_EMPTY])
+    );
+    let tree = render({ mode: "picker", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    expect(textOf(byClass(tree, "onboarding-engine__intro"))).toContain(
+      "The probe found 2 CLIs on this machine."
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mode: revisit (engine re-entry mid-setup — InterviewSurface's ENGINE chip)
+// ---------------------------------------------------------------------------
+
+describe("EngineScreen — revisit mode (engine re-entry, no auto-select/gate)", () => {
+  it("pre-seeds the current selection, renders a KEEP <CURRENT> action instead of RE-RUN PROBE, and enables Continue immediately", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, CODEX_READY, CUSTOM_EMPTY], { selectedId: "claude" })
+    );
+    const onBack = vi.fn();
+    let tree = render({ mode: "revisit", onReady: vi.fn(), onBack });
+    await runEffects();
+    tree = render({ mode: "revisit", onReady: vi.fn(), onBack });
+
+    expect(button(tree, "RE-RUN PROBE")).toBeUndefined();
+    const keepBtn = button(tree, "KEEP CLAUDE CODE");
+    expect(keepBtn).toBeTruthy();
+    expect(button(tree, "Continue").props.disabled).toBe(false);
+  });
+
+  it("KEEP <CURRENT> calls onBack directly, without touching selectInstalledAiRuntime or onReady", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, CODEX_READY, CUSTOM_EMPTY], { selectedId: "claude" })
+    );
+    const onBack = vi.fn();
+    const onReady = vi.fn();
+    let tree = render({ mode: "revisit", onReady, onBack });
+    await runEffects();
+    tree = render({ mode: "revisit", onReady, onBack });
+
+    button(tree, "KEEP CLAUDE CODE").props.onClick();
+    expect(onBack).toHaveBeenCalledTimes(1);
+    expect(api.selectInstalledAiRuntime).not.toHaveBeenCalled();
+    expect(onReady).not.toHaveBeenCalled();
+  });
+
+  it("picking a different engine and hitting Continue still goes through the normal selection flow", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, CODEX_READY, CUSTOM_EMPTY], { selectedId: "claude" })
+    );
+    api.selectInstalledAiRuntime.mockResolvedValue({ ok: true });
+    const onReady = vi.fn();
+    let tree = render({ mode: "revisit", onReady, onBack: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "revisit", onReady, onBack: vi.fn() });
+
+    const radio = visit(tree, (n) => n.props?.["aria-label"] === "Select Codex")[0];
+    radio.props.onClick();
+    tree = render({ mode: "revisit", onReady, onBack: vi.fn() });
+
+    await button(tree, "Continue").props.onClick();
+    expect(api.selectInstalledAiRuntime).toHaveBeenCalledWith({ runtimeId: "codex" });
+    expect(onReady).toHaveBeenCalledTimes(1);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -416,6 +528,11 @@ describe("EngineScreen — custom command test flow", () => {
     api.testCustomAiRuntime.mockResolvedValue({ ok: true, elapsedMs: 1234 });
     let tree = render({ mode: "picker", onReady: vi.fn() });
     await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    // The custom row starts collapsed behind its "ADD →" trigger in picker
+    // mode — open it before touching the test-command flow underneath.
+    button(tree, "ADD →").props.onClick();
     tree = render({ mode: "picker", onReady: vi.fn() });
 
     const commandInput = visit(tree, (n) => hasClass(n, "text-input"))[0];
@@ -442,6 +559,11 @@ describe("EngineScreen — custom command test flow", () => {
     await runEffects();
     tree = render({ mode: "picker", onReady: vi.fn() });
 
+    // The custom row starts collapsed behind its "ADD →" trigger in picker
+    // mode — open it before touching the test-command flow underneath.
+    button(tree, "ADD →").props.onClick();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
     const commandInput = visit(tree, (n) => hasClass(n, "text-input"))[0];
     commandInput.props.onChange({ target: { value: "bogus-command" } });
     tree = render({ mode: "picker", onReady: vi.fn() });
@@ -458,6 +580,11 @@ describe("EngineScreen — custom command test flow", () => {
     api.testCustomAiRuntime.mockRejectedValue(new Error("network error"));
     let tree = render({ mode: "picker", onReady: vi.fn() });
     await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    // The custom row starts collapsed behind its "ADD →" trigger in picker
+    // mode — open it before touching the test-command flow underneath.
+    button(tree, "ADD →").props.onClick();
     tree = render({ mode: "picker", onReady: vi.fn() });
 
     const commandInput = visit(tree, (n) => hasClass(n, "text-input"))[0];
@@ -478,6 +605,11 @@ describe("EngineScreen — custom command test flow", () => {
     await runEffects();
     tree = render({ mode: "picker", onReady: vi.fn() });
 
+    // The custom row starts collapsed behind its "ADD →" trigger in picker
+    // mode — open it before touching the test-command flow underneath.
+    button(tree, "ADD →").props.onClick();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
     const commandInput = visit(tree, (n) => hasClass(n, "text-input"))[0];
     commandInput.props.onChange({ target: { value: "~/bin/my-agent" } });
     tree = render({ mode: "picker", onReady: vi.fn() });
@@ -494,6 +626,11 @@ describe("EngineScreen — custom command test flow", () => {
     api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([CUSTOM_EMPTY]));
     let tree = render({ mode: "picker", onReady: vi.fn() });
     await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    // The custom row starts collapsed behind its "ADD →" trigger in picker
+    // mode — open it before touching the test-command flow underneath.
+    button(tree, "ADD →").props.onClick();
     tree = render({ mode: "picker", onReady: vi.fn() });
     expect(button(tree, "Test").props.disabled).toBe(true);
 
