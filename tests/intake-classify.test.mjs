@@ -113,6 +113,30 @@ test("buildIntakeClassifyPrompt: text input embeds the raw text and the data-not
   assert.match(prompt, /```json/);
 });
 
+test("buildIntakeClassifyPrompt: file input embeds the extracted text under file-specific framing, distinct from the text branch", () => {
+  const filePrompt = buildIntakeClassifyPrompt({
+    rawInput: "Subject: Staff Engineer at Acme\n\nWe are hiring.",
+    inputKind: "file",
+    resolved: null,
+    trackerMatch: null,
+    routeDigest: [],
+  });
+  assert.match(filePrompt, /The user uploaded a file\. This is the text extracted from it:/);
+  assert.match(filePrompt, /Subject: Staff Engineer at Acme/);
+  assert.equal(filePrompt.includes("The user pasted the following text:"), false);
+
+  const textPrompt = buildIntakeClassifyPrompt({
+    rawInput: "Subject: Staff Engineer at Acme\n\nWe are hiring.",
+    inputKind: "text",
+    resolved: null,
+    trackerMatch: null,
+    routeDigest: [],
+  });
+  assert.match(textPrompt, /The user pasted the following text:/);
+  assert.equal(textPrompt.includes("The user uploaded a file"), false);
+  assert.notEqual(filePrompt, textPrompt);
+});
+
 test("buildIntakeClassifyPrompt: resolved url (bodyFetchStatus resolved) embeds provider/title/company + body", () => {
   const prompt = buildIntakeClassifyPrompt({
     rawInput: "https://job-boards.greenhouse.io/acme/jobs/1",
@@ -219,6 +243,25 @@ test("classifyIntakeItem: a text input goes through bounded AI with intake label
   assert.equal(outcome.ai.retried, false);
   assert.deepEqual(seenOptions.tools, []);
   assert.equal(seenOptions.maxTurns, 1);
+});
+
+test("classifyIntakeItem: an inputKind:'file' item (extracted upload text) has no zero-AI shortcut and goes through bounded AI", async () => {
+  const repoRoot = tempRepo();
+  let loadSdkCalled = false;
+  const outcome = await classifyIntakeItem({
+    rawInput: "Subject: Staff Engineer at Acme\n\nWe are hiring a Staff Engineer.",
+    inputKind: "file",
+    repoRoot,
+    env: PROXY_ENV,
+    loadSdk: async () => {
+      loadSdkCalled = true;
+      return fakeSdk(assistantTextRun(VALID_REPLY));
+    },
+  });
+  assert.equal(loadSdkCalled, true);
+  assert.equal(outcome.aiSkipped, false);
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.data.kind, "jd-text");
 });
 
 test("classifyIntakeItem: a URL input that resolved but is NOT a known ATS still goes through AI", async () => {

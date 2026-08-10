@@ -108,12 +108,6 @@ const MIXED_ROUTE_SLICES = [
   },
   {
     file: "src/cli/intake-route.mjs",
-    label: "intake upload route",
-    start: 'addRoute("POST", "/api/intake/upload"',
-    end: 'addRoute("GET", "/api/intake/list"',
-  },
-  {
-    file: "src/cli/intake-route.mjs",
     label: "intake classify route",
     start: 'addRoute("POST", "/api/intake/classify"',
     end: 'addRoute("POST", "/api/intake/confirm"',
@@ -210,6 +204,15 @@ const CLASSIFIED_EXPLICIT_CHAT_SLICES = [
       ['addRoute("POST", "/api/onboard/resume-ai"', 'addRoute("POST", `/api/onboard/candidate'],
     ],
     patterns: [/\brunSkillStream\b/, /tools:\s*\[\s*"Read"\s*\]/, /skill:\s*"resume-extract"/],
+  },
+  {
+    file: "src/cli/intake-route.mjs",
+    label: "Read-only intake-extract retained runtime slice (PDF/image upload extraction)",
+    slices: [
+      ["async function runIntakeExtractBounded", "async function extractUploadText"],
+      ['addRoute("POST", "/api/intake/upload"', 'addRoute("GET", "/api/intake/list"'],
+    ],
+    patterns: [/\brunSkillStream\b/, /tools:\s*\[\s*"Read"\s*\]/, /skill:\s*"intake-extract"/],
   },
 ];
 

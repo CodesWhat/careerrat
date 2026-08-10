@@ -123,6 +123,9 @@ export function buildIntakeClassifyPrompt({
           "classify off the URL and anything else the user included alongside it."
       );
     }
+  } else if (inputKind === "file") {
+    lines.push("The user uploaded a file. This is the text extracted from it:");
+    lines.push(truncate(rawInput));
   } else {
     lines.push("The user pasted the following text:");
     lines.push(truncate(rawInput));

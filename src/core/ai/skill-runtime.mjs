@@ -61,14 +61,16 @@ export function discoverSkillDirs(repoRoot) {
 // Default-restricted to evaluate-job (P0-5's target), answer-question (the
 // Interactive Q&A slice's target — see .agents/skills/answer-question),
 // tailor-application (M4's target — the /packet view's "Generate packet"
-// button, see src/cli/packet-route.mjs), and resume-extract (M8's target —
+// button, see src/cli/packet-route.mjs), resume-extract (M8's target —
 // the onboarding wizard's PDF/image résumé-drop step, see
-// src/cli/onboard-route.mjs's POST /api/onboard/resume-ai). Widened
-// deliberately, not silently: resume-extract is a first-party wizard
-// feature (every install needs it the moment a candidate drops a PDF), not
-// an operator opt-in like a hypothetical third-party skill would be. Empty
-// string explicitly set in env means "nothing is allowed" — only an
-// *unset* env var falls back to the default, so an operator can
+// src/cli/onboard-route.mjs's POST /api/onboard/resume-ai), and
+// intake-extract (the Universal Intake file-upload lane's PDF/image branch,
+// see src/cli/intake-route.mjs's POST /api/intake/upload). Widened
+// deliberately, not silently: resume-extract and intake-extract are both
+// first-party features every install needs the moment a candidate drops a
+// PDF, not an operator opt-in like a hypothetical third-party skill would
+// be. Empty string explicitly set in env means "nothing is allowed" — only
+// an *unset* env var falls back to the default, so an operator can
 // deliberately lock the runtime down.
 //
 // search-jobs is deliberately NOT in this default: unlike the skills above,
@@ -77,7 +79,8 @@ export function discoverSkillDirs(repoRoot) {
 // would hand every one-shot run open-ended web access it never asked for.
 // Only the Jobs page's AI Web Search lane may run it, via a scoped per-call
 // env override — see ai-web-search.mjs's own call into runSkillStream.
-const DEFAULT_RUNTIME_SKILLS = "evaluate-job,answer-question,tailor-application,resume-extract";
+const DEFAULT_RUNTIME_SKILLS =
+  "evaluate-job,answer-question,tailor-application,resume-extract,intake-extract";
 
 // Shared allowlist-resolution shape both the one-shot embedded runtime
 // (ROLESTER_RUNTIME_SKILLS, below) and the conversational chat runtime

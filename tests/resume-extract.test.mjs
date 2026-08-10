@@ -28,65 +28,9 @@ import { fileURLToPath } from "node:url";
 import { runSkillStream } from "../src/core/ai/skill-runtime.mjs";
 import { runStructuredOneshot } from "../src/core/ai/structured-oneshot.mjs";
 import { validate } from "../src/core/profile/schema-validator.mjs";
+import { buildMinimalPdf } from "./fixtures/pdf.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
-
-// ---------------------------------------------------------------------------
-// buildMinimalPdf — a spec-minimal, byte-offset-accurate single-page PDF.
-// Pure and deterministic: no I/O.
-// ---------------------------------------------------------------------------
-
-function escapePdfText(str) {
-  return String(str).replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)");
-}
-
-export function buildMinimalPdf(bodyLines) {
-  const parts = [];
-  let offset = 0;
-  const objOffsets = {};
-  function push(str) {
-    parts.push(str);
-    offset += str.length;
-  }
-
-  push("%PDF-1.4\n");
-
-  objOffsets[1] = offset;
-  push("1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n");
-
-  objOffsets[2] = offset;
-  push("2 0 obj\n<< /Type /Pages /Kids [3 0 R] /Count 1 >>\nendobj\n");
-
-  objOffsets[3] = offset;
-  push(
-    "3 0 obj\n<< /Type /Page /Parent 2 0 R /Resources << /Font << /F1 4 0 R >> >> " +
-      "/MediaBox [0 0 612 792] /Contents 5 0 R >>\nendobj\n"
-  );
-
-  objOffsets[4] = offset;
-  push("4 0 obj\n<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>\nendobj\n");
-
-  const contentLines = bodyLines
-    .map((line, i) =>
-      i === 0
-        ? `72 720 Td\n(${escapePdfText(line)}) Tj\n`
-        : `0 -18 Td\n(${escapePdfText(line)}) Tj\n`
-    )
-    .join("");
-  const streamBody = `BT\n/F1 12 Tf\n${contentLines}ET\n`;
-  objOffsets[5] = offset;
-  push(`5 0 obj\n<< /Length ${streamBody.length} >>\nstream\n${streamBody}endstream\nendobj\n`);
-
-  const xrefOffset = offset;
-  let xref = "xref\n0 6\n0000000000 65535 f \n";
-  for (let i = 1; i <= 5; i++) {
-    xref += `${String(objOffsets[i]).padStart(10, "0")} 00000 n \n`;
-  }
-  push(xref);
-  push(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`);
-
-  return { bytes: Buffer.from(parts.join(""), "latin1"), objOffsets, xrefOffset };
-}
 
 test("buildMinimalPdf: every object's xref offset points at that object's own 'N 0 obj' header", () => {
   const { bytes, objOffsets } = buildMinimalPdf(["Jane Doe", "jane.doe@example.com"]);

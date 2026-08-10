@@ -43,8 +43,10 @@
 // resolve.mjs's own conventions) so every path here is testable without a
 // real network, SDK devDependency, or subprocess.
 
-import { mkdirSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { dirname, extname, join } from "node:path";
+import { runBoundedAI } from "../core/ai/bounded-ai.mjs";
+import { resolveAIRoute } from "../core/ai/call-ai.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import {
@@ -61,12 +63,34 @@ import { resolveIntakeDispatch } from "../core/intake/dispatch.mjs";
 import { summarizeDispatch } from "../core/intake/dispatch-summary.mjs";
 import { matchTrackerRecord } from "../core/intake/match.mjs";
 import { resolveJobUrl } from "../core/intake/resolve.mjs";
+import { extractDocxResumeText, normalizeDocxResumeText } from "../core/onboarding/resume-docx.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
 import { sanitizeUploadFilename } from "./onboard-route.mjs";
 import { readJsonBodyCapped, readRawBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap every other JSON-body route uses.
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024; // binary intake artifacts: PDFs/images/JDs.
+
+// Per-type extraction caps, tighter than MAX_UPLOAD_BYTES above — matches the
+// caps the resume routes already settled on (RESUME_AI_MAX_BYTES /
+// RESUME_DOCX_MAX_BYTES in onboard-route.mjs): consistency, and because the
+// AI-Read-tool path has a real per-call cost/latency floor. .txt/.md/.eml
+// decode cheaply, so they stay under the outer 10MB cap only.
+const AI_EXTRACT_MAX_BYTES = 5 * 1024 * 1024;
+const DOCX_EXTRACT_MAX_BYTES = 5 * 1024 * 1024;
+const AI_EXTRACT_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp"]);
+
+const INTAKE_EXTRACT_SCHEMA_PATH = "config/intake-extract.schema.json";
+const INTAKE_EXTRACT_LABELS = Object.freeze({
+  skill: "intake-extract",
+  action: "extract",
+  operation: "intake.upload-extract",
+});
+const INTAKE_EXTRACT_MANUAL = Object.freeze({
+  available: true,
+  reason: "intake-extract-unavailable",
+  action: "paste-the-content-as-text",
+});
 
 // A re-classify (POST /api/intake/classify) is allowed from any status short
 // of "confirmed and past it" — an item already being executed/decided is not
@@ -108,6 +132,248 @@ function detectInputKind(raw) {
     }
   }
   return "text";
+}
+
+// ---------------------------------------------------------------------------
+// extractUploadText — turns an uploaded file's raw bytes into plain text so
+// it can flow into the SAME classifyAndPropose() path pasted text already
+// uses, instead of dead-ending as needs_you for every upload. Dispatches on
+// extension:
+//   .txt/.md          -> utf8 decode + normalize, always available.
+//   .docx              -> mammoth (extractDocxResumeText), always available.
+//   .pdf/.png/.jpg/    -> the intake-extract skill (Claude's own Read tool),
+//   .jpeg/.webp           gated on an AI route actually being configured.
+//   .eml               -> a small hand-rolled header/body + quoted-printable/
+//                         base64 splitter — no mail-parsing dependency.
+//   anything else      -> unsupported, no attempt.
+// Never throws — every failure mode (unsupported type, oversize, no AI
+// configured, a provider/parse error) comes back as a normal
+// { ok: false, reason } return so the route handler has ONE place to decide
+// what happens next, not a scattered try/catch per branch.
+// ---------------------------------------------------------------------------
+
+// Loose, intake-scoped "is this real text" gate — deliberately NOT
+// looksLikeUsableResumeText (resume-docx.mjs), which false-negatives on
+// non-résumé text like a JD or a one-line status update. Just: non-empty
+// after trim, and not mostly U+FFFD replacement characters (the tell for a
+// lossy decode of binary data as if it were text).
+function isUsableExtractedText(text) {
+  const trimmed = String(text || "").trim();
+  if (!trimmed) return false;
+  const replacementCount = (trimmed.match(/�/g) || []).length;
+  return replacementCount / trimmed.length <= 0.01;
+}
+
+// extractionFailureReason — the human copy landed on classification.needsUserReason
+// when extraction doesn't succeed. A strict superset of the previous blanket
+// "binary file was captured..." message: unsupported/failed types still land
+// needs_you exactly like before, just with a more specific reason.
+function extractionFailureReason(reason, ext) {
+  if (reason === "unsupported-type") {
+    return `automatic text extraction isn't available for "${ext}" files — review it in Inbox and route it manually`;
+  }
+  if (reason === "ai-not-configured") {
+    return "this file needs AI-based extraction (PDF/image), but no AI provider is configured — configure one, or paste the content as text instead";
+  }
+  return "automatic text extraction failed for this file — review it in Inbox and route it manually";
+}
+
+// ---------------------------------------------------------------------------
+// .eml — best-effort deterministic parse. Split on the first blank line to
+// separate headers from body; decode a top-level or (for multipart) a
+// text/plain part's Content-Transfer-Encoding (quoted-printable or base64);
+// prefer Subject:/From: plus that decoded body as the extracted text.
+// Genuinely complex cases (multipart/alternative with only an HTML part,
+// S/MIME) degrade to { ok: false } rather than attempting HTML-to-text or
+// garbling output. No mailparser dependency — this format is simple enough
+// for a hand-rolled decoder.
+// ---------------------------------------------------------------------------
+
+function parseHeaderBlock(block) {
+  const headers = {};
+  let lastKey = null;
+  for (const line of block.split("\n")) {
+    if (/^[ \t]/.test(line) && lastKey) {
+      headers[lastKey] += ` ${line.trim()}`;
+      continue;
+    }
+    const m = line.match(/^([\w-]+):\s?(.*)$/);
+    if (m) {
+      lastKey = m[1].toLowerCase();
+      headers[lastKey] = m[2];
+    }
+  }
+  return headers;
+}
+
+// RFC 2045 quoted-printable: "=XX" hex-escapes a byte, "=" at end-of-line is
+// a soft line break to be removed. Decoded byte-by-byte then re-decoded as
+// utf8 so multi-byte characters (encoded as consecutive =XX escapes) survive
+// intact.
+function decodeQuotedPrintable(text) {
+  const joined = String(text || "").replace(/=\r?\n/g, "");
+  const bytes = [];
+  for (let i = 0; i < joined.length; i++) {
+    const hex = joined.slice(i + 1, i + 3);
+    if (joined[i] === "=" && /^[0-9A-Fa-f]{2}$/.test(hex)) {
+      bytes.push(Number.parseInt(hex, 16));
+      i += 2;
+    } else {
+      bytes.push(joined.charCodeAt(i));
+    }
+  }
+  return Buffer.from(bytes).toString("utf8");
+}
+
+function decodeEmailBodyPart(bodyText, transferEncoding) {
+  const enc = String(transferEncoding || "")
+    .toLowerCase()
+    .trim();
+  if (enc === "quoted-printable") return decodeQuotedPrintable(bodyText);
+  if (enc === "base64") {
+    try {
+      return Buffer.from(String(bodyText || "").replace(/\s+/g, ""), "base64").toString("utf8");
+    } catch {
+      return "";
+    }
+  }
+  return bodyText;
+}
+
+function parseEmlBytes(bytes) {
+  const raw = bytes.toString("utf8").replace(/\r\n/g, "\n");
+  const blankIdx = raw.indexOf("\n\n");
+  if (blankIdx === -1) return { ok: false, reason: "eml-no-header-body-split" };
+  const headers = parseHeaderBlock(raw.slice(0, blankIdx));
+  const bodyBlock = raw.slice(blankIdx + 2);
+
+  const contentType = headers["content-type"] || "";
+  const boundaryMatch = contentType.match(/boundary="?([^";]+)"?/i);
+  let plainBody = null;
+
+  if (/multipart\//i.test(contentType) && boundaryMatch) {
+    const boundary = boundaryMatch[1];
+    const parts = bodyBlock.split(`--${boundary}`).slice(1, -1);
+    for (const part of parts) {
+      const partBlankIdx = part.indexOf("\n\n");
+      if (partBlankIdx === -1) continue;
+      const partHeaders = parseHeaderBlock(part.slice(0, partBlankIdx).trim());
+      const partBody = part.slice(partBlankIdx + 2);
+      const partType = (partHeaders["content-type"] || "text/plain").toLowerCase();
+      if (partType.startsWith("text/plain")) {
+        plainBody = decodeEmailBodyPart(partBody, partHeaders["content-transfer-encoding"]);
+        break;
+      }
+    }
+    if (plainBody === null) return { ok: false, reason: "eml-no-plain-text-part" };
+  } else {
+    plainBody = decodeEmailBodyPart(bodyBlock, headers["content-transfer-encoding"]);
+  }
+
+  const lines = [];
+  if (headers.from) lines.push(`From: ${headers.from}`);
+  if (headers.subject) lines.push(`Subject: ${headers.subject}`);
+  if (lines.length) lines.push("");
+  lines.push(String(plainBody || "").trim());
+  const text = normalizeDocxResumeText(lines.join("\n"));
+  if (!isUsableExtractedText(text)) return { ok: false, reason: "eml-empty-body" };
+  return { ok: true, text };
+}
+
+// ---------------------------------------------------------------------------
+// PDF/image -> text via the new backend-only intake-extract skill — modeled
+// directly on onboard-route.mjs's runResumeExtractBounded (runSkillStream +
+// Read-only tool surface + runBoundedAI's bounded/retry wrapper), minus the
+// résumé-specific post-processing: the output schema is just { full_text }.
+// ---------------------------------------------------------------------------
+async function runIntakeExtractBounded({ savedPath, repoRoot, env, runSkillStream }) {
+  const schema = JSON.parse(readFileSync(join(repoRoot, INTAKE_EXTRACT_SCHEMA_PATH), "utf8"));
+
+  async function invoke({ correction }) {
+    let rawText = "";
+    await runSkillStream({
+      skill: "intake-extract",
+      action: INTAKE_EXTRACT_LABELS.action,
+      operation: INTAKE_EXTRACT_LABELS.operation,
+      input: correction
+        ? `Read the file at this exact path: ${savedPath}\n\n${correction}`
+        : { path: savedPath },
+      repoRoot,
+      env,
+      tools: ["Read"],
+      outputSchema: schema,
+      onEvent: (evt) => {
+        if (evt.type !== "assistant") return;
+        for (const block of evt.data?.message?.content ?? []) {
+          if (block?.type === "text" && typeof block.text === "string") {
+            rawText += block.text;
+          }
+        }
+      },
+    });
+    return rawText;
+  }
+
+  return runBoundedAI({
+    labels: INTAKE_EXTRACT_LABELS,
+    schema,
+    manual: INTAKE_EXTRACT_MANUAL,
+    structuredMode: "fallback",
+    maxRetries: 1,
+    invoke: ({ correction }) => invoke({ correction }),
+  });
+}
+
+async function extractUploadText({
+  ext,
+  bytes,
+  savedPath,
+  repoRoot,
+  env,
+  runSkillStream,
+  resolveAIRouteImpl = resolveAIRoute,
+}) {
+  if (ext === ".txt" || ext === ".md") {
+    const text = normalizeDocxResumeText(bytes.toString("utf8"));
+    if (!isUsableExtractedText(text)) return { ok: false, reason: "empty-file" };
+    return { ok: true, text, extraction: "local" };
+  }
+
+  if (ext === ".docx") {
+    if (bytes.length > DOCX_EXTRACT_MAX_BYTES) {
+      return { ok: false, reason: "too-large-for-extraction" };
+    }
+    let text;
+    try {
+      text = await extractDocxResumeText(bytes);
+    } catch {
+      return { ok: false, reason: "docx-extraction-failed" };
+    }
+    if (!isUsableExtractedText(text)) return { ok: false, reason: "docx-extraction-failed" };
+    return { ok: true, text, extraction: "local" };
+  }
+
+  if (ext === ".eml") {
+    const parsed = parseEmlBytes(bytes);
+    if (!parsed.ok) return { ok: false, reason: parsed.reason };
+    return { ok: true, text: parsed.text, extraction: "local" };
+  }
+
+  if (AI_EXTRACT_EXTENSIONS.has(ext)) {
+    if (bytes.length > AI_EXTRACT_MAX_BYTES) {
+      return { ok: false, reason: "too-large-for-ai-extraction" };
+    }
+    if (resolveAIRouteImpl(env, { repoRoot }).type === "none") {
+      return { ok: false, reason: "ai-not-configured" };
+    }
+    const outcome = await runIntakeExtractBounded({ savedPath, repoRoot, env, runSkillStream });
+    if (!outcome.body.ok) return { ok: false, reason: "extraction-failed" };
+    const fullText = normalizeDocxResumeText(outcome.body.data?.full_text || "");
+    if (!isUsableExtractedText(fullText)) return { ok: false, reason: "extraction-failed" };
+    return { ok: true, text: fullText, extraction: "ai" };
+  }
+
+  return { ok: false, reason: "unsupported-type" };
 }
 
 // ---------------------------------------------------------------------------
@@ -197,6 +463,12 @@ async function classifyAndPropose({ repoRoot, env, id, inputKind, rawInput, fetc
         classification,
         trackerMatch: finalMatch,
         dispatch,
+        // A file upload's rawInput is only known here (the extracted text,
+        // threaded straight in as the `rawInput` param above) — it was never
+        // set at intakeCapture() time (intake.mjs stores rawInput: null for
+        // inputKind:"file"). text/url captures already have rawInput
+        // persisted from capture time, so this is a no-op patch for them.
+        ...(inputKind === "file" ? { rawInput } : {}),
       },
     }).item;
   } catch (err) {
@@ -513,7 +785,9 @@ export function mountIntakeRoutes({
       return;
     }
 
-    const relPath = `workspace/intake/uploads/${Date.now()}-${sanitizeUploadFilename(name)}`;
+    const safeName = sanitizeUploadFilename(name);
+    const ext = extname(safeName).toLowerCase();
+    const relPath = `workspace/intake/uploads/${Date.now()}-${safeName}`;
     const absPath = userPath({ repoRoot, env }, relPath);
     mkdirSync(dirname(absPath), { recursive: true });
     writeFileSync(absPath, bytes);
@@ -523,6 +797,41 @@ export function mountIntakeRoutes({
       captured = intakeCapture({ repoRoot, env, inputKind: "file", sourceFilePath: relPath });
     } catch (err) {
       respondError(res, err);
+      return;
+    }
+
+    // Extract text first, THEN classify — the same classifyAndPropose()
+    // path pasted text/url captures already use. Every failure mode here
+    // (unsupported type, oversize, no AI configured, a provider/parse
+    // error) still lands the item at needs_you exactly like the old
+    // unconditional behavior did, just with a specific, honest reason
+    // instead of one blanket message.
+    const extraction = await extractUploadText({
+      ext,
+      bytes,
+      savedPath: absPath,
+      repoRoot,
+      env,
+      runSkillStream,
+    });
+
+    if (extraction.ok) {
+      await classifyAndPropose({
+        repoRoot,
+        env,
+        id: captured.id,
+        inputKind: "file",
+        rawInput: extraction.text,
+        fetchImpl,
+        loadSdk,
+      });
+      const withExtraction = intakeUpdate({
+        repoRoot,
+        env,
+        id: captured.id,
+        patch: { extraction: extraction.extraction },
+      }).item;
+      sendJson(res, 200, { ok: true, item: withDispatchSummary(withExtraction) });
       return;
     }
 
@@ -548,8 +857,7 @@ export function mountIntakeRoutes({
           proposedAction: "File captured. Review it in Inbox and route it manually.",
           confidence: 0,
           needsUser: true,
-          needsUserReason:
-            "binary file was captured, but automatic file text extraction is not available for intake yet",
+          needsUserReason: extractionFailureReason(extraction.reason, ext),
         },
         trackerMatch: null,
         dispatch: null,
