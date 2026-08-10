@@ -326,38 +326,25 @@ async function getDirect(routes, path) {
 }
 
 describe("GET /api/onboard/state — setupProgress", () => {
-  it("file-fallback mode: reflects the shipped example persona's illustrative candidate/targeting.yml content (engine/resume still unset)", async () => {
+  it("file-fallback mode: template example content never marks a step done on a fresh workspace", async () => {
     // Before POST /api/onboard/init, GET /api/onboard/state's file-fallback
     // read path (readBaseDoc) falls back to the TEMPLATE default for any
     // candidate file that doesn't exist yet — and this repo's shipped
-    // candidate/targeting.example.yml, evidence.example.yml, and
-    // profile.example.yml ship illustrative "Jane Candidate" demo content
-    // (role_buckets/tracked_companies/cut_signals/claims/location), not
-    // empty stubs. So setupProgress in fallback mode reports those items done
-    // from the example content alone — only engine (no key) and resume (no
-    // source résumé saved) start unset. The example persona's
-    // profile.example.yml ships work_authorized: true (authorization done)
-    // and templates/automation.example.yml ships setup_mode: basic (consent
-    // done) — same "illustrative example content, not an empty stub" pattern
-    // as roles/companies/evidence/guardrails/quickFacts below.
+    // templates carry illustrative "Jane Candidate" demo content
+    // (role_buckets/tracked_companies/cut_signals/claims/location/
+    // work_authorized/setup_mode), not empty stubs. That fallback is right
+    // for Settings prefill, but setupProgress must only count docs the user
+    // actually saved: a brand-new workspace showed 7 of 9 steps green from
+    // the example persona alone. So the route feeds computeSetupProgress a
+    // present-files-only view, and a fresh workspace starts at zero.
     const repoRoot = buildTempRoot();
     const routes = mountDirectRoutes(repoRoot);
     const { status, body } = await getDirect(routes, "/api/onboard/state");
     assert.equal(status, 200);
     assert.equal(body.setupProgress.total, 9);
     const doneKeys = body.setupProgress.items.filter((i) => i.done).map((i) => i.key);
-    assert.deepEqual(doneKeys.sort(), [
-      "authorization",
-      "companies",
-      "consent",
-      "evidence",
-      "guardrails",
-      "quickFacts",
-      "roles",
-    ]);
-    assert.equal(body.setupProgress.items.find((i) => i.key === "engine").done, false);
-    assert.equal(body.setupProgress.items.find((i) => i.key === "resume").done, false);
-    assert.equal(body.setupProgress.completedCount, 7);
+    assert.deepEqual(doneKeys, []);
+    assert.equal(body.setupProgress.completedCount, 0);
     assert.equal(body.setupProgress.complete, false);
   });
 

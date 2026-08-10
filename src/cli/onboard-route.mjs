@@ -1122,6 +1122,11 @@ export function mountOnboardRoutes({
     // the M7 design explicitly prefers extending state when it's missing a
     // needed read, over growing the route surface.
     const data = {};
+    // setupProgress must only ever see docs the user actually saved:
+    // readBaseDoc() falls back to the illustrative templates ("Jane
+    // Candidate") when a candidate file is missing, which is right for
+    // Settings prefill but would mark steps done on a fresh workspace.
+    const progressData = {};
     for (const name of SETTINGS_DATA_FILES) {
       const entry = CANDIDATE_ROUTE_ENTRIES.find((f) => f.name === name);
       if (!entry) continue;
@@ -1135,6 +1140,7 @@ export function mountOnboardRoutes({
         // prefill rather than 500ing the whole state read.
         data[name] = {};
       }
+      if (existsSync(candidatePath)) progressData[name] = data[name];
     }
     // Lane A / R1, R5 — same credential-echo guard as the DB path above:
     // automation.integrations is never handed back, even in the non-DB
@@ -1145,6 +1151,7 @@ export function mountOnboardRoutes({
         capabilities: data.automation.capabilities,
         consent: data.automation.consent,
       };
+      if (progressData.automation) progressData.automation = data.automation;
     }
 
     // M8 additive (Builder B): logo.dev credential presence, never the values
@@ -1170,7 +1177,7 @@ export function mountOnboardRoutes({
       logoSearchTokenConfigured: !!secretKey,
       publicSyncPreference: DEFAULT_PUBLIC_SYNC_PREFERENCE,
       setupProgress: computeSetupProgress({
-        data,
+        data: progressData,
         sourceResumePresent: fallbackSourceResumePresent,
         keyConfigured: fallbackKeyConfigured,
       }),
