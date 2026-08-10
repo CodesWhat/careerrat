@@ -1,6 +1,6 @@
 import { ArrowTopRightIcon, PaperPlaneIcon } from "@radix-ui/react-icons";
 import { useEffect, useState } from "react";
-import { ArrowRightIcon, CheckIcon } from "../components/icons.jsx";
+import { ArrowRightIcon, CheckIcon, ChevronDownIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
   getInstalledAiRuntimes,
@@ -67,6 +67,11 @@ export function EngineScreen({ mode, onReady, onBack }) {
   // comment). Collapses back to the trigger row whenever a detected runtime
   // gets picked instead — see selectRuntime()'s erase-on-switch below.
   const [customExpanded, setCustomExpanded] = useState(false);
+  // The not-installed card's own disclosure state — collapsed by default so
+  // a long tail of absent CLIs stays a single header row rather than an
+  // always-open chip wall. Independent of customExpanded; picking a runtime
+  // or switching to the custom row never touches this.
+  const [notFoundOpen, setNotFoundOpen] = useState(false);
   const [starting, setStarting] = useState(false);
   // The hosted "CareerRat AI" card's REQUEST ACCESS CTA — not an engine
   // selection (no radio, nothing persisted to the installed-runtime
@@ -107,9 +112,11 @@ export function EngineScreen({ mode, onReady, onBack }) {
   const custom = (state?.runtimes ?? []).find((r) => r.id === "custom") || null;
   const readyCount = runtimes.filter((r) => r.ready).length;
   // Everything the probe genuinely couldn't find (runtime.available false —
-  // the literal "NOT FOUND" case) collapses into the compact chip strip
-  // below rather than a full card; ready and sign-in-needed runtimes keep
-  // rendering as EngineChoiceRow exactly as before, unchanged.
+  // the literal "NOT FOUND" case) collapses into a single card-stack entry
+  // with its own header-row disclosure (notFoundOpen) rather than either a
+  // full card each or an always-visible floating strip; ready and
+  // sign-in-needed runtimes keep rendering as EngineChoiceRow exactly as
+  // before, unchanged.
   const cardRuntimes = runtimes.filter((r) => r.available);
   const notFoundRuntimes = runtimes.filter((r) => !r.available);
   // The re-entry footer's "KEEP <CURRENT>" label — the runtime this browser
@@ -264,30 +271,49 @@ export function EngineScreen({ mode, onReady, onBack }) {
             ))}
 
             {notFoundRuntimes.length > 0 ? (
-              <div className="onboarding-engine__not-found">
-                <span className="onboarding-engine__not-found-label">NOT INSTALLED</span>
-                <div className="onboarding-engine__not-found-chips">
-                  {notFoundRuntimes.map((runtime) =>
-                    runtime.installUrl ? (
-                      <a
-                        key={runtime.id}
-                        href={runtime.installUrl}
-                        target="_blank"
-                        rel="noreferrer noopener"
-                        className="onboarding-engine__not-found-chip"
-                      >
-                        <ProviderIcon runtimeId={runtime.id} name={runtime.name} size={14} />
-                        {runtime.name}
-                        <ArrowTopRightIcon aria-hidden="true" width={11} height={11} />
-                      </a>
-                    ) : (
-                      <span key={runtime.id} className="onboarding-engine__not-found-chip">
-                        <ProviderIcon runtimeId={runtime.id} name={runtime.name} size={14} />
-                        {runtime.name}
-                      </span>
-                    )
-                  )}
-                </div>
+              <div className="onboarding-engine__choice onboarding-engine__choice--not-found">
+                <button
+                  type="button"
+                  className="onboarding-engine__not-found-toggle"
+                  aria-expanded={notFoundOpen}
+                  onClick={() => setNotFoundOpen((open) => !open)}
+                >
+                  <span className="onboarding-engine__not-found-label">
+                    NOT INSTALLED · {notFoundRuntimes.length}
+                  </span>
+                  <ChevronDownIcon
+                    aria-hidden="true"
+                    width={13}
+                    height={13}
+                    className={`onboarding-engine__not-found-chevron${
+                      notFoundOpen ? " onboarding-engine__not-found-chevron--open" : ""
+                    }`}
+                  />
+                </button>
+                {notFoundOpen ? (
+                  <div className="onboarding-engine__not-found-chips">
+                    {notFoundRuntimes.map((runtime) =>
+                      runtime.installUrl ? (
+                        <a
+                          key={runtime.id}
+                          href={runtime.installUrl}
+                          target="_blank"
+                          rel="noreferrer noopener"
+                          className="onboarding-engine__not-found-chip"
+                        >
+                          <ProviderIcon runtimeId={runtime.id} name={runtime.name} size={14} />
+                          {runtime.name}
+                          <ArrowTopRightIcon aria-hidden="true" width={11} height={11} />
+                        </a>
+                      ) : (
+                        <span key={runtime.id} className="onboarding-engine__not-found-chip">
+                          <ProviderIcon runtimeId={runtime.id} name={runtime.name} size={14} />
+                          {runtime.name}
+                        </span>
+                      )
+                    )}
+                  </div>
+                ) : null}
               </div>
             ) : null}
           </>

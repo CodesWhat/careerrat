@@ -49,6 +49,7 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("../components/icons.jsx", () => ({
   CheckIcon: () => null,
   ArrowRightIcon: () => null,
+  ChevronDownIcon: () => null,
 }));
 
 const api = vi.hoisted(() => ({
@@ -118,6 +119,13 @@ function button(tree, label) {
 
 function link(tree, label) {
   return visit(tree, (n) => n.type === "a" && textOf(n).trim() === label)[0];
+}
+
+// The not-found card's header-row disclosure toggle — collapsed by default,
+// so any test that needs to see the chip strip underneath must click this
+// first (see EngineScreen.jsx's notFoundOpen).
+function notFoundToggle(tree) {
+  return visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-toggle"))[0];
 }
 
 async function runEffects() {
@@ -225,12 +233,14 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     tree = render({ mode: "gate", onReady: vi.fn() });
 
     // Copilot (unavailable) is no longer a per-row "NOT FOUND" receipt — it
-    // collapses into the compact chip strip instead.
+    // collapses into the not-found card instead.
     const receiptTexts = visit(tree, (n) => hasClass(n, "onboarding-engine__receipt")).map(textOf);
     expect(receiptTexts).not.toContain("NOT FOUND");
     expect(receiptTexts).toContain("SIGN-IN NEEDED");
 
-    expect(textOf(byClass(tree, "onboarding-engine__not-found-label"))).toBe("NOT INSTALLED");
+    expect(textOf(byClass(tree, "onboarding-engine__not-found-label"))).toBe("NOT INSTALLED · 1");
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "gate", onReady: vi.fn() });
     const chip = visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chip"))[0];
     expect(textOf(chip)).toBe(COPILOT_NOT_FOUND.name);
 
@@ -246,6 +256,9 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     await runEffects();
     tree = render({ mode: "gate", onReady: vi.fn() });
 
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+
     const installLink = link(tree, COPILOT_NOT_FOUND_WITH_INSTALL.name);
     expect(installLink).toBeTruthy();
     expect(hasClass(installLink, "onboarding-engine__not-found-chip")).toBe(true);
@@ -258,6 +271,9 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([COPILOT_NOT_FOUND, CUSTOM_EMPTY]));
     let tree = render({ mode: "gate", onReady: vi.fn() });
     await runEffects();
+    tree = render({ mode: "gate", onReady: vi.fn() });
+
+    notFoundToggle(tree).props.onClick();
     tree = render({ mode: "gate", onReady: vi.fn() });
 
     expect(link(tree, COPILOT_NOT_FOUND.name)).toBeUndefined();
@@ -348,7 +364,9 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
 
     expect(byClass(tree, "inline-alert")).toBeFalsy();
     expect(textOf(byTag(tree, "h1"))).toBe("No AI engine found.");
-    expect(textOf(byClass(tree, "onboarding-engine__not-found-label"))).toBe("NOT INSTALLED");
+    expect(textOf(byClass(tree, "onboarding-engine__not-found-label"))).toBe("NOT INSTALLED · 1");
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "gate", onReady: vi.fn() });
     expect(textOf(visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chip"))[0])).toBe(
       COPILOT_NOT_FOUND.name
     );
@@ -461,8 +479,11 @@ describe("EngineScreen — picker mode (2+ ready CLIs)", () => {
     expect(shapes).toContain("Uses your existing Claude subscription, no extra cost");
     expect(shapes).not.toContain(undefined);
 
-    // Copilot is NOT FOUND (unavailable) — full name still renders, but no
-    // descriptor line underneath it (nothing to say about an uninstalled CLI).
+    // Copilot is NOT FOUND (unavailable) — it collapses into the not-found
+    // card's chip strip, which only renders its name once expanded, and
+    // never gets a descriptor line (nothing to say about an uninstalled CLI).
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "picker", onReady: vi.fn() });
     const copilotName = visit(tree, (n) => textOf(n) === "GitHub Copilot CLI")[0];
     expect(copilotName).toBeTruthy();
   });
@@ -680,7 +701,7 @@ describe("EngineScreen — custom command test flow", () => {
 // ---------------------------------------------------------------------------
 
 describe("EngineScreen — not-found chip strip (picker mode)", () => {
-  it("renders ready runtimes as full radio cards and collapses not-found ones into the chip strip", async () => {
+  it("renders ready runtimes as full radio cards and collapses not-found ones into the not-found card", async () => {
     api.getInstalledAiRuntimes.mockResolvedValue(
       runtimeState([CLAUDE_READY, CODEX_READY, COPILOT_NOT_FOUND, CUSTOM_EMPTY])
     );
@@ -693,19 +714,23 @@ describe("EngineScreen — not-found chip strip (picker mode)", () => {
     expect(receipts).toEqual(["DETECTED", "DETECTED"]);
     expect(visit(tree, (n) => n.props?.["aria-label"] === "Select Claude Code")[0]).toBeTruthy();
 
-    // Copilot never gets its own card — it's a chip in the strip instead.
+    // Copilot never gets its own card — it's a chip inside the not-found
+    // card's expanded body instead.
     expect(
       visit(
         tree,
         (n) => textOf(n) === "GitHub Copilot CLI" && hasClass(n, "onboarding-engine__choice-name")
       )
     ).toHaveLength(0);
-    expect(textOf(byClass(tree, "onboarding-engine__not-found-label"))).toBe("NOT INSTALLED");
+    expect(textOf(byClass(tree, "onboarding-engine__not-found-label"))).toBe("NOT INSTALLED · 1");
+
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "picker", onReady: vi.fn() });
     const chip = visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chip"))[0];
     expect(textOf(chip)).toBe(COPILOT_NOT_FOUND.name);
   });
 
-  it("omits the not-found strip entirely when every runtime is either ready or sign-in-needed", async () => {
+  it("omits the not-found card entirely when every runtime is either ready or sign-in-needed", async () => {
     api.getInstalledAiRuntimes.mockResolvedValue(
       runtimeState([CLAUDE_READY, GEMINI_SIGNIN, CUSTOM_EMPTY])
     );
@@ -714,6 +739,56 @@ describe("EngineScreen — not-found chip strip (picker mode)", () => {
     tree = render({ mode: "picker", onReady: vi.fn() });
 
     expect(byClass(tree, "onboarding-engine__not-found-label")).toBeFalsy();
+    expect(notFoundToggle(tree)).toBeFalsy();
+    expect(visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chip"))).toHaveLength(0);
+  });
+
+  it("the not-found card is collapsed by default — chips are not in the tree until the header is toggled", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, COPILOT_NOT_FOUND, GEMINI_SIGNIN, CUSTOM_EMPTY])
+    );
+    let tree = render({ mode: "picker", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    const toggle = notFoundToggle(tree);
+    expect(toggle).toBeTruthy();
+    expect(toggle.props["aria-expanded"]).toBe(false);
+    expect(visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chips"))).toHaveLength(0);
+    expect(visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chip"))).toHaveLength(0);
+  });
+
+  it("clicking the header expands the card and reveals the chips, reflecting aria-expanded", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, COPILOT_NOT_FOUND, CUSTOM_EMPTY])
+    );
+    let tree = render({ mode: "picker", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    expect(notFoundToggle(tree).props["aria-expanded"]).toBe(true);
+    expect(visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chip"))).toHaveLength(1);
+  });
+
+  it("clicking the header a second time collapses the card again", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(
+      runtimeState([CLAUDE_READY, COPILOT_NOT_FOUND, CUSTOM_EMPTY])
+    );
+    let tree = render({ mode: "picker", onReady: vi.fn() });
+    await runEffects();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+    expect(notFoundToggle(tree).props["aria-expanded"]).toBe(true);
+
+    notFoundToggle(tree).props.onClick();
+    tree = render({ mode: "picker", onReady: vi.fn() });
+
+    expect(notFoundToggle(tree).props["aria-expanded"]).toBe(false);
     expect(visit(tree, (n) => hasClass(n, "onboarding-engine__not-found-chip"))).toHaveLength(0);
   });
 });

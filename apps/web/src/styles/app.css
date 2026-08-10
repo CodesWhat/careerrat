@@ -6526,17 +6526,31 @@ button.chip {
   color: var(--ink-faint);
 }
 
-/* The not-found compact strip — collapses every runtime the probe genuinely
- * couldn't find (runtime.available false) into one muted row of
- * name chips instead of a full card each, so a machine with a handful of
- * detected CLIs and a long tail of absent ones doesn't turn into a wall of
- * cards. Chip styling mirrors the existing flat .onboarding-suggestions__chip
- * idiom (1px border, no fill, no shadow). */
-.onboarding-engine__not-found {
-  display: flex;
+/* The not-found card — collapses every runtime the probe genuinely couldn't
+ * find (runtime.available false) into one card-stack entry, same metrics as
+ * every other .onboarding-engine__choice card, so a machine with a handful
+ * of detected CLIs and a long tail of absent ones doesn't turn into a wall
+ * of cards or a floating strip outside the stack's rhythm. Collapsed behind
+ * a disclosure header by default (notFoundOpen); expanding it reveals the
+ * chip strip below. Chip styling mirrors the existing flat
+ * .onboarding-suggestions__chip idiom (1px border, no fill, no shadow). */
+.onboarding-engine__choice--not-found {
   flex-direction: column;
+  align-items: stretch;
   gap: 8px;
-  padding: 2px 2px 0;
+}
+
+.onboarding-engine__not-found-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  border: none;
+  background: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
 }
 
 .onboarding-engine__not-found-label {
@@ -6544,6 +6558,16 @@ button.chip {
   font-size: 10px;
   letter-spacing: var(--label-tracking);
   color: var(--ink-faint-2);
+}
+
+.onboarding-engine__not-found-chevron {
+  flex-shrink: 0;
+  color: var(--ink-faint-2);
+  transition: transform 0.15s ease;
+}
+
+.onboarding-engine__not-found-chevron--open {
+  transform: rotate(180deg);
 }
 
 .onboarding-engine__not-found-chips {
@@ -6562,10 +6586,20 @@ button.chip {
   font-size: 11px;
   color: var(--ink-faint);
   text-decoration: none;
+  filter: grayscale(1);
+  transition:
+    filter 0.15s ease,
+    color 0.15s ease;
 }
 
-a.onboarding-engine__not-found-chip:hover {
+.onboarding-engine__not-found-chip:hover,
+.onboarding-engine__not-found-chip:focus-visible {
+  filter: grayscale(0);
   color: var(--accent);
+}
+
+a.onboarding-engine__not-found-chip:hover,
+a.onboarding-engine__not-found-chip:focus-visible {
   border-color: var(--accent);
 }
 
