@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
 import { ArrowUpIcon, UploadIcon } from "../components/icons.jsx";
-import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 
 // OnboardingBar — the W4 chat-first onboarding surface's interview bar.
 // Per the finalized "Bar reuse" section of the W4 spec: the W3 AskBar.jsx
@@ -9,8 +8,11 @@ import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 // this surface doesn't need (no intent preview until setup completes, no
 // action/answer split — every reply is just a chat turn). So this is a NEW
 // component that reuses the `.ask-bar*` CSS anatomy (`__shell`, `__row`,
-// `__input`, `__send`, `__kbd`), ArrowUpIcon, and useGlobalShortcut —
-// AskBar.jsx itself is untouched, no interview mode was added to it.
+// `__input`, `__send`) and ArrowUpIcon — AskBar.jsx itself is untouched, no
+// interview mode was added to it. The shell bar's ⌘K focus shortcut and its
+// hint are deliberately NOT reused here: during setup this input is the only
+// thing on screen and already focused, so the shortcut had nothing to jump
+// from, and the hint only taught a browser-shortcut override nobody needed.
 //
 // `mode` selects the markup's only real variance:
 //   - "centered": 3a's opening state — static-positioned inside the hero
@@ -37,10 +39,6 @@ export function OnboardingBar({
   const [internalValue, setInternalValue] = useState("");
   const text = value ?? internalValue;
   const setText = onChange ?? setInternalValue;
-
-  useGlobalShortcut("k", () => {
-    inputRef.current?.focus();
-  });
 
   function commit() {
     const trimmed = text.trim();
@@ -120,11 +118,6 @@ export function OnboardingBar({
             onChange={(e) => setText(e.target.value)}
             onKeyDown={handleKeyDown}
           />
-          {!text.trim() ? (
-            <span className="ask-bar__kbd" aria-hidden="true">
-              ⌘K
-            </span>
-          ) : null}
           <button
             type="button"
             className="ask-bar__send"

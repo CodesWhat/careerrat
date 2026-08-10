@@ -140,10 +140,11 @@ describe("OnboardingBar — mode", () => {
     expect(byClass(noHandler, "onboarding-bar__resume-row")).toBeUndefined();
   });
 
-  it("registers the ⌘K global shortcut regardless of mode", () => {
+  it("never registers a global shortcut — ⌘K belongs to the app-shell bar only", () => {
     render({ mode: "centered" });
-    expect(shortcut.key).toBe("k");
-    expect(typeof shortcut.trigger).toBe("function");
+    expect(shortcut.key).toBe(null);
+    render({ mode: "docked" });
+    expect(shortcut.key).toBe(null);
   });
 });
 
@@ -223,9 +224,9 @@ describe("OnboardingBar — sending", () => {
     expect(onChange).toHaveBeenCalledWith("next");
   });
 
-  it("shows the ⌘K hint only while the input is empty", () => {
+  it("never renders the ⌘K hint, empty input or not", () => {
     let tree = render({});
-    expect(byClass(tree, "ask-bar__kbd")).toBeTruthy();
+    expect(byClass(tree, "ask-bar__kbd")).toBeUndefined();
 
     const input = byTag(tree, "input");
     input.props.onChange({ target: { value: "s" } });
