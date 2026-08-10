@@ -435,6 +435,84 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     expect(api.extractResumeAi).not.toHaveBeenCalled();
     expect(api.extractResumeDocx).not.toHaveBeenCalled();
   });
+
+  it("a résumé drop seeds an empty targeting.yml with role_buckets, keep_signals, and tracked_companies", async () => {
+    api.startChat.mockResolvedValue({ chatId: "chat-target-1", state: "running" });
+    api.extractResumeAi.mockResolvedValue({
+      profileSeed: { candidate: {} },
+      evidenceSeed: { claims: [] },
+      targetingSeed: {
+        role_buckets: [{ name: "Primary", priority: "primary", titles: ["Engineer"] }],
+        keep_signals: ["Remote"],
+        tracked_companies: ["Anthropic"],
+      },
+    });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    await captured.onboardingBar.onDropResume({ name: "resume.pdf" });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      tracked_companies: ["Anthropic"],
+      role_buckets: [{ name: "Primary", priority: "primary", titles: ["Engineer"] }],
+      keep_signals: ["Remote"],
+    });
+  });
+
+  it("a résumé drop never overwrites existing role_buckets/keep_signals, but still unions tracked_companies (never a replace)", async () => {
+    api.startChat.mockResolvedValue({ chatId: "chat-target-2", state: "running" });
+    api.extractResumeAi.mockResolvedValue({
+      profileSeed: { candidate: {} },
+      evidenceSeed: { claims: [] },
+      targetingSeed: {
+        role_buckets: [{ name: "Primary", priority: "primary", titles: ["Designer"] }],
+        keep_signals: ["Hybrid"],
+        tracked_companies: ["Anthropic"],
+      },
+    });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({
+        data: {
+          targeting: {
+            role_buckets: [{ name: "Primary", priority: "primary", titles: ["Engineer"] }],
+            keep_signals: ["Remote"],
+            tracked_companies: ["Stripe"],
+          },
+        },
+      })
+    );
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    await captured.onboardingBar.onDropResume({ name: "resume.pdf" });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      tracked_companies: ["Stripe", "Anthropic"],
+    });
+  });
+
+  it("a résumé drop with no targetingSeed data never calls saveCandidateFile for targeting", async () => {
+    api.startChat.mockResolvedValue({ chatId: "chat-target-3", state: "running" });
+    api.extractResumeAi.mockResolvedValue({
+      profileSeed: { candidate: {} },
+      evidenceSeed: { claims: [] },
+    });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    await captured.onboardingBar.onDropResume({ name: "resume.pdf" });
+    await flush();
+
+    expect(api.saveCandidateFile).not.toHaveBeenCalledWith("targeting", expect.anything());
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -981,6 +1059,77 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
       tracked_companies: ["Stripe", "Anthropic"],
     });
+  });
+
+  it("candidate_patch pill confirm writes payload.patch to payload.doc, then refreshes state", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "candidate_patch",
+          payload: {
+            doc: "profile",
+            patch: { candidate: { full_name: "Ada Lovelace", email: "ada@example.com" } },
+          },
+        })
+      )
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+    });
+    expect(api.getOnboardState).toHaveBeenCalled();
+
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("resolved");
+    expect(pill.props.block.resultSummary).toBe("Profile saved");
+  });
+
+  it("evidence_claim pill confirm calls saveEvidenceSeed with the single claim/evidence pair", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveEvidenceSeed.mockResolvedValue({ ok: true });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "evidence_claim",
+          payload: { claim: "Ran a 12-person kitchen", evidence: "Candidate-stated during setup" },
+        })
+      )
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveEvidenceSeed).toHaveBeenCalledWith([
+      { claim: "Ran a 12-person kitchen", evidence: "Candidate-stated during setup" },
+    ]);
+
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("resolved");
+    expect(pill.props.block.resultSummary).toBe("Evidence saved");
   });
 
   it("companies_suggest pill confirm calls createCompanyProposals and reloads the pending list for FilePane", async () => {

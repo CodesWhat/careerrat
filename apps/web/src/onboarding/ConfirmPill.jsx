@@ -1,11 +1,14 @@
 import { useState } from "react";
+import { flattenPatchLeaves } from "./patchFields.js";
 
 // ConfirmPill — Lane A / R1 & R4. Renders one parsed confirm block (see
 // confirmBlocks.js) as a clickable pill inline in the interview transcript.
 //
-// - authorization / company_add / companies_suggest: single-click inline
-//   pills. Labels are code-owned (CONFIRM_LABELS below); the model's own
-//   `summary` MAY render alongside that label, but never replaces it.
+// - authorization / company_add / companies_suggest / candidate_patch /
+//   evidence_claim: single-click inline pills. Labels are code-owned
+//   (CONFIRM_LABELS below, plus candidatePatchPillLabel/flattenPatchLeaves
+//   for candidate_patch's field list); the model's own `summary` MAY render
+//   alongside that label, but never replaces it.
 // - consent_mode / consent_capability: the pill click opens a SECOND
 //   confirmation dialog (reusing the app's existing centered-overlay
 //   convention — see .confirm-dialog-overlay/.confirm-dialog in app.css,
@@ -38,7 +41,23 @@ const CONFIRM_LABELS = {
   authorization: "Work authorization",
   company_add: "Track company",
   companies_suggest: "Suggest companies",
+  evidence_claim: "Save evidence",
 };
+
+// candidate_patch's payload.doc is the closed CANDIDATE_PATCH_DOCS enum from
+// confirmBlocks.js — this is the code-owned label per doc, never the
+// model's own wording for which file it's writing to.
+const CANDIDATE_PATCH_DOC_LABELS = {
+  profile: "profile",
+  targeting: "targeting",
+  honesty: "honesty",
+  "form-defaults": "form defaults",
+};
+
+function candidatePatchPillLabel(block) {
+  const doc = CANDIDATE_PATCH_DOC_LABELS[block.payload?.doc] || "details";
+  return `Update ${doc}`;
+}
 
 const CONSENT_MODE_COPY = {
   basic: {
@@ -136,13 +155,26 @@ export function ConfirmPill({ block, automationStatus, onConfirm, onDecline }) {
     );
   }
 
-  // Single-click kinds — authorization, company_add, companies_suggest.
+  // Single-click kinds — authorization, company_add, companies_suggest,
+  // candidate_patch, evidence_claim.
   const codeLabel =
-    block.kind === "authorization" ? authorizationPillLabel(block) : CONFIRM_LABELS[block.kind];
+    block.kind === "authorization"
+      ? authorizationPillLabel(block)
+      : block.kind === "candidate_patch"
+        ? candidatePatchPillLabel(block)
+        : CONFIRM_LABELS[block.kind];
+  // candidate_patch shows WHAT it's about to save (leaf field paths/values)
+  // right in the label, so the click is informed without opening a second
+  // dialog — the model's own summary still renders alongside it, same as
+  // every other single-click kind, but the field list itself is code-owned.
+  const patchFields =
+    block.kind === "candidate_patch" ? flattenPatchLeaves(block.payload?.patch) : [];
   const displayLabel =
     block.kind === "company_add" && block.payload?.name
       ? `${codeLabel} · ${block.payload.name}`
-      : codeLabel;
+      : block.kind === "candidate_patch" && patchFields.length
+        ? [codeLabel, ...patchFields.map((leaf) => `${leaf.label}: ${leaf.value}`)].join(" · ")
+        : codeLabel;
   const pillButton = (
     <ConfirmPillButton
       label={displayLabel}

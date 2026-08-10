@@ -19,6 +19,12 @@ function isNonEmptyString(value) {
   return typeof value === "string" && value.trim().length > 0;
 }
 
+function isPlainObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value);
+}
+
+const CANDIDATE_PATCH_DOCS = new Set(["profile", "targeting", "honesty", "form-defaults"]);
+
 const KIND_VALIDATORS = {
   authorization: (block) =>
     block?.patch &&
@@ -34,6 +40,23 @@ const KIND_VALIDATORS = {
   companies_suggest: () => true,
   company_add: (block) =>
     block?.payload && typeof block.payload === "object" && isNonEmptyString(block.payload.name),
+  // Generic write-anything-to-a-candidate-doc kind (see the note at the top
+  // of this file). payload.doc is a closed enum matching the four candidate
+  // config files the onboarding agent can write to; payload.patch must be a
+  // plain object with at least one key, so an empty/no-op patch is dropped
+  // the same way a missing required field would be.
+  candidate_patch: (block) => {
+    const payload = block?.payload;
+    if (!isPlainObject(payload)) return false;
+    if (!CANDIDATE_PATCH_DOCS.has(payload.doc)) return false;
+    return isPlainObject(payload.patch) && Object.keys(payload.patch).length > 0;
+  },
+  // Generic evidence-claim capture kind — the interview's only way to seed
+  // evidence.yml claims outside a résumé upload.
+  evidence_claim: (block) =>
+    isPlainObject(block?.payload) &&
+    isNonEmptyString(block.payload.claim) &&
+    isNonEmptyString(block.payload.evidence),
 };
 
 export const CONFIRM_KINDS = Object.keys(KIND_VALIDATORS);
@@ -42,7 +65,13 @@ export const CONFIRM_KINDS = Object.keys(KIND_VALIDATORS);
 // render alongside a code-owned kind label). consent_mode/consent_capability
 // are deliberately excluded — R4 requires a distinct second confirmation
 // dialog with code-owned copy for those two.
-export const SINGLE_CLICK_KINDS = new Set(["authorization", "company_add", "companies_suggest"]);
+export const SINGLE_CLICK_KINDS = new Set([
+  "authorization",
+  "company_add",
+  "companies_suggest",
+  "candidate_patch",
+  "evidence_claim",
+]);
 
 // Parses every confirm fence out of `text`. Returns { text, blocks } — `text`
 // is the original string with every matched fence (valid or not) removed and

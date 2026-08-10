@@ -149,6 +149,60 @@ describe("ConfirmPill — single-click kinds", () => {
     expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Suggest companies");
   });
 
+  it("candidate_patch: code-owned 'Update <doc>' label plus the patch's leaf fields, model summary alongside", () => {
+    const tree = render({
+      block: {
+        kind: "candidate_patch",
+        summary: "Told me their name and email",
+        payload: {
+          doc: "profile",
+          patch: { candidate: { full_name: "Ada Lovelace", email: "ada@example.com" } },
+        },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe(
+      "Update profile · Full name: Ada Lovelace · Email: ada@example.com"
+    );
+    expect(textOf(byClass(tree, "confirm-pill__summary")[0])).toBe("Told me their name and email");
+  });
+
+  it("candidate_patch: labels each of the four docs distinctly", () => {
+    const labelFor = (doc) =>
+      textOf(
+        byClass(
+          render({
+            block: {
+              kind: "candidate_patch",
+              payload: { doc, patch: { x: "y" } },
+              status: "pending",
+            },
+            onConfirm: vi.fn(),
+          }),
+          "confirm-pill__label"
+        )[0]
+      );
+    expect(labelFor("profile")).toBe("Update profile · X: y");
+    expect(labelFor("targeting")).toBe("Update targeting · X: y");
+    expect(labelFor("honesty")).toBe("Update honesty · X: y");
+    expect(labelFor("form-defaults")).toBe("Update form defaults · X: y");
+  });
+
+  it("evidence_claim: fixed code-owned label, model summary renders alongside it", () => {
+    const tree = render({
+      block: {
+        kind: "evidence_claim",
+        summary: "Ran a 12-person kitchen",
+        payload: { claim: "Ran a 12-person kitchen", evidence: "Candidate-stated" },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Save evidence");
+    expect(textOf(byClass(tree, "confirm-pill__summary")[0])).toBe("Ran a 12-person kitchen");
+  });
+
   it("saving status disables the button and shows 'Saving…'", () => {
     const tree = render({
       block: { kind: "companies_suggest", status: "saving" },

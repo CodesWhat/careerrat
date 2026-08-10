@@ -111,6 +111,93 @@ describe("parseConfirmBlocks — companies_suggest / company_add", () => {
   });
 });
 
+describe("parseConfirmBlocks — candidate_patch", () => {
+  it("accepts a well-formed patch to any of the four candidate docs", () => {
+    for (const doc of ["profile", "targeting", "honesty", "form-defaults"]) {
+      const raw = fence({
+        kind: "candidate_patch",
+        summary: "Saving what you told me",
+        payload: { doc, patch: { some_field: "value" } },
+      });
+      expect(parseConfirmBlocks(raw).blocks).toHaveLength(1);
+    }
+  });
+
+  it("carries doc/patch through inside payload, never touching the parser's top-level patch field", () => {
+    const raw = fence({
+      kind: "candidate_patch",
+      payload: { doc: "profile", patch: { candidate: { full_name: "Ada Lovelace" } } },
+    });
+    const { blocks } = parseConfirmBlocks(raw);
+    expect(blocks).toEqual([
+      {
+        kind: "candidate_patch",
+        summary: "",
+        patch: null,
+        payload: { doc: "profile", patch: { candidate: { full_name: "Ada Lovelace" } } },
+      },
+    ]);
+  });
+
+  it("drops a block whose doc is outside the closed enum", () => {
+    const raw = fence({
+      kind: "candidate_patch",
+      payload: { doc: "not_a_real_doc", patch: { foo: "bar" } },
+    });
+    expect(parseConfirmBlocks(raw).blocks).toEqual([]);
+  });
+
+  it("drops a block whose patch is missing, not an object, or empty", () => {
+    expect(
+      parseConfirmBlocks(fence({ kind: "candidate_patch", payload: { doc: "profile" } })).blocks
+    ).toEqual([]);
+    expect(
+      parseConfirmBlocks(
+        fence({ kind: "candidate_patch", payload: { doc: "profile", patch: "nope" } })
+      ).blocks
+    ).toEqual([]);
+    expect(
+      parseConfirmBlocks(fence({ kind: "candidate_patch", payload: { doc: "profile", patch: {} } }))
+        .blocks
+    ).toEqual([]);
+  });
+});
+
+describe("parseConfirmBlocks — evidence_claim", () => {
+  it("accepts a well-formed claim/evidence pair", () => {
+    const raw = fence({
+      kind: "evidence_claim",
+      payload: { claim: "Ran a 12-person kitchen", evidence: "Candidate-stated during setup" },
+    });
+    const { blocks } = parseConfirmBlocks(raw);
+    expect(blocks).toEqual([
+      {
+        kind: "evidence_claim",
+        summary: "",
+        patch: null,
+        payload: { claim: "Ran a 12-person kitchen", evidence: "Candidate-stated during setup" },
+      },
+    ]);
+  });
+
+  it("drops a block missing either claim or evidence, or with a blank one", () => {
+    expect(
+      parseConfirmBlocks(fence({ kind: "evidence_claim", payload: { claim: "Ran a kitchen" } }))
+        .blocks
+    ).toEqual([]);
+    expect(
+      parseConfirmBlocks(
+        fence({ kind: "evidence_claim", payload: { evidence: "Candidate-stated" } })
+      ).blocks
+    ).toEqual([]);
+    expect(
+      parseConfirmBlocks(
+        fence({ kind: "evidence_claim", payload: { claim: "  ", evidence: "Candidate-stated" } })
+      ).blocks
+    ).toEqual([]);
+  });
+});
+
 describe("parseConfirmBlocks — dropped/invalid blocks are still stripped from display text", () => {
   it("an unknown kind is silently dropped, and the fence is still removed", () => {
     const raw = `Noted.\n\n${fence({ kind: "not_a_real_kind" })}`;
@@ -146,9 +233,15 @@ describe("parseConfirmBlocks — multiple blocks in one turn", () => {
 });
 
 describe("CONFIRM_KINDS / SINGLE_CLICK_KINDS", () => {
-  it("SINGLE_CLICK_KINDS is exactly authorization, company_add, companies_suggest", () => {
+  it("SINGLE_CLICK_KINDS is exactly authorization, company_add, companies_suggest, candidate_patch, evidence_claim", () => {
     expect(SINGLE_CLICK_KINDS).toEqual(
-      new Set(["authorization", "company_add", "companies_suggest"])
+      new Set([
+        "authorization",
+        "company_add",
+        "companies_suggest",
+        "candidate_patch",
+        "evidence_claim",
+      ])
     );
   });
 

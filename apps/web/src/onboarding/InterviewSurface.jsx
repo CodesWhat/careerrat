@@ -47,6 +47,15 @@ const SUGGESTION_CHIPS = [
 
 const RESUME_EXTENSIONS_AI = new Set(["pdf", "png", "jpg", "jpeg", "webp"]);
 
+// Receipt copy for a resolved candidate_patch pill — keyed by the same
+// closed payload.doc enum confirmBlocks.js validates against.
+const CANDIDATE_PATCH_DOC_LABELS = {
+  profile: "Profile",
+  targeting: "Targeting",
+  honesty: "Honesty",
+  "form-defaults": "Form defaults",
+};
+
 function extractAssistantText(data) {
   const content = data?.message?.content;
   if (!Array.isArray(content) || !content.length) return "";
@@ -325,6 +334,34 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       if (claims.length) {
         await saveEvidenceSeed(claims);
       }
+      // A parsed résumé also carries targeting.yml progress (role_buckets,
+      // keep_signals, tracked_companies) — otherwise free setup progress
+      // gets thrown away on every upload. candidateConfigPatch's deepMerge
+      // replaces any array in a patch wholesale rather than merging it
+      // (companyUnion.js), so tracked_companies goes through the same union
+      // helper company_add uses (never a replace); role_buckets and
+      // keep_signals have no such merge helper, so those two only write when
+      // the candidate hasn't already entered anything there, rather than
+      // risk clobbering a hand-entered answer with the résumé's version.
+      const targetingSeed = seed?.targetingSeed ?? {};
+      const existingTargeting = state?.data?.targeting ?? {};
+      const targetingPatch = {};
+      if (targetingSeed.tracked_companies?.length) {
+        const nextCompanies = unionCompanyNames(
+          existingTargeting.tracked_companies,
+          targetingSeed.tracked_companies
+        );
+        if (nextCompanies.length) targetingPatch.tracked_companies = nextCompanies;
+      }
+      if (targetingSeed.role_buckets?.length && !existingTargeting.role_buckets?.length) {
+        targetingPatch.role_buckets = targetingSeed.role_buckets;
+      }
+      if (targetingSeed.keep_signals?.length && !existingTargeting.keep_signals?.length) {
+        targetingPatch.keep_signals = targetingSeed.keep_signals;
+      }
+      if (Object.keys(targetingPatch).length) {
+        await saveCandidateFile("targeting", targetingPatch);
+      }
       await checkProgressDelta();
       await sendChatMessage(
         id,
@@ -418,6 +455,24 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       await saveCandidateFile("targeting", { tracked_companies: next });
       await reloadState();
       return `Added ${block.payload.name}`;
+    }
+    if (block.kind === "candidate_patch") {
+      // The generic write-anything-to-a-candidate-doc kind (confirmBlocks.js
+      // closes payload.doc to profile/targeting/honesty/form-defaults) — the
+      // agent has no write tools, so this is the only way answers outside
+      // the five narrow kinds above ever get saved. Same REST endpoint every
+      // other branch here uses; the pill click is still the human action.
+      await saveCandidateFile(block.payload.doc, block.payload.patch);
+      await checkProgressDelta();
+      return `${CANDIDATE_PATCH_DOC_LABELS[block.payload.doc]} saved`;
+    }
+    if (block.kind === "evidence_claim") {
+      // The generic evidence-capture kind — mirrors handleResumeDrop's own
+      // saveEvidenceSeed call for claims volunteered mid-interview instead
+      // of parsed off a résumé.
+      await saveEvidenceSeed([{ claim: block.payload.claim, evidence: block.payload.evidence }]);
+      await checkProgressDelta();
+      return "Evidence saved";
     }
     throw new Error(`Unknown confirm kind "${block.kind}"`);
   }

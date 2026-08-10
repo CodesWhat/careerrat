@@ -416,9 +416,28 @@ const CONFIRM_BLOCK_GUIDANCE =
   "Only these kinds are recognized — anything else is silently dropped, never rendered: " +
   "`authorization` (patch: {work_authorized, requires_sponsorship}), `consent_mode` (payload: " +
   '"basic"|"advanced"), `consent_capability` (payload: {capability, platform}), `companies_suggest` ' +
-  "(no payload), `company_add` (payload: {name}). Always propose consent_mode before offering any " +
+  "(no payload), `company_add` (payload: {name}), `candidate_patch` (payload: {doc, patch} where doc " +
+  'is exactly one of "profile", "targeting", "honesty", "form-defaults" and patch is the partial ' +
+  "document to merge), `evidence_claim` (payload: {claim, evidence}, both non-empty strings, for " +
+  "banking one piece of work history). Examples:\n" +
+  "```careerrat:confirm\n" +
+  '{"kind":"candidate_patch","summary":"Your name and contact details","payload":{"doc":"profile","patch":{"candidate":{"full_name":"Ada Lovelace","email":"ada@example.com"}}}}\n' +
+  "```\n" +
+  "```careerrat:confirm\n" +
+  '{"kind":"evidence_claim","summary":"Ran a 12-person kitchen","payload":{"claim":"Ran a 12-person kitchen","evidence":"Candidate-stated during setup interview"}}\n' +
+  "```\n" +
+  "Always propose consent_mode before offering any " +
   "consent_capability block — a capability pill only works once advanced mode is already set. Keep " +
-  "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words.";
+  "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words. " +
+  "Emit a confirm block as soon as a fact is settled, not at the end of a topic: if the user gives " +
+  "their name and email, send a candidate_patch for those two fields right away rather than waiting " +
+  "to also collect phone, city, and links, so an interrupted conversation never loses everything " +
+  "already answered. Group one coherent set of facts per block: name plus email plus phone together " +
+  "is right, a separate pill for each is wrong. Never re-propose a fact the user already saved or " +
+  "declined. `current_base` (what the candidate currently earns) is private: whenever a patch sets " +
+  'it, include `current_comp_shareable: false` in the same patch, and it must never appear in any ' +
+  "outbound artifact. Do not invent kinds outside this closed list; anything not in it is silently " +
+  "dropped and the user never sees it.";
 
 function declinedFieldsNote(declinedFields) {
   const fields = Array.isArray(declinedFields) ? declinedFields.filter(Boolean) : [];
