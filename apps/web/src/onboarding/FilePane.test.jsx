@@ -1,5 +1,5 @@
 // apps/web/src/onboarding/FilePane.test.jsx
-// vitest coverage for "THE RAT'S FILE" pane (design 3b/3c, commit c1d601e3).
+// vitest coverage for "PAUL'S FILE" pane (design 3b/3c, commit c1d601e3).
 // Same hook harness convention as JobDrawer.test.jsx (no dependency-diffing —
 // FilePane's own useState(editingKey) and each inline editor's useState calls
 // have no cleanup to worry about, so the simpler harness suffices here too).
@@ -169,7 +169,7 @@ beforeEach(() => {
 describe("FilePane — rows", () => {
   it("renders exactly 9 rows in the fixed order with the pane heading", () => {
     const tree = render({ state: EMPTY_STATE });
-    expect(textOf(byClass(tree, "file-pane__title")[0])).toBe("THE RAT'S FILE");
+    expect(textOf(byClass(tree, "file-pane__title")[0])).toBe("PAUL'S FILE");
     expect(textOf(byClass(tree, "file-pane__subtitle")[0])).toBe("LIVE · ~/CANDIDATE");
     const rows = byClass(tree, "file-pane__row");
     expect(rows).toHaveLength(9);

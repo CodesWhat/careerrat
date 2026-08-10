@@ -10,7 +10,7 @@ import {
 } from "./onboardingSetup.js";
 import { normalizeRoleBuckets, RoleLaneFields } from "./steps/RoleLaneEditor.jsx";
 
-// FilePane — "THE RAT'S FILE" (design 3b/3c). Rows map 1:1 to the 7 setup
+// FilePane — "PAUL'S FILE" (design 3b/3c; Paul is the mascot). Rows map 1:1 to the 7 setup
 // items; done/not-done comes from the server (state.setupProgress — see
 // src/cli/onboard-route.mjs's computeSetupProgress), detail lines from
 // onboardingSetup.js. Clicking a row with an editor opens it IN PLACE
@@ -62,7 +62,7 @@ export function FilePane({
   return (
     <aside className="file-pane">
       <div className="file-pane__heading">
-        <span className="file-pane__title">THE RAT'S FILE</span>
+        <span className="file-pane__title">PAUL'S FILE</span>
         <span className="file-pane__subtitle">LIVE · ~/CANDIDATE</span>
       </div>
       {items.map((item) => (

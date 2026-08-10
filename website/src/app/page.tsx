@@ -795,7 +795,7 @@ export default function Home() {
               .
             </p>
             <p className="footer-tagline">
-              The rat drafts — you send. Nothing goes out without you.
+              Paul drafts. You send. Nothing goes out without you.
             </p>
             <a
               className="footer-pill"
