@@ -3,7 +3,6 @@ import { AppShell } from "./app-shell/AppShell.jsx";
 import { DashboardProvider } from "./app-shell/DashboardContext.jsx";
 import { CalendarPage } from "./calendar/CalendarPage.jsx";
 import { DeepIngestPage } from "./deep-ingest/DeepIngestPage.jsx";
-import { InboxPage } from "./inbox/InboxPage.jsx";
 import { JobsPage } from "./jobs/JobsPage.jsx";
 import { LibraryPage } from "./library/LibraryPage.jsx";
 import { NetworkPage } from "./network/NetworkPage.jsx";
@@ -31,7 +30,6 @@ export function App() {
       <Routes>
         <Route path="/" element={<DashboardPage />} />
         <Route path="/settings" element={<SettingsPage />} />
-        <Route path="/inbox" element={<InboxPage />} />
         <Route path="/jobs" element={<JobsPage />} />
         <Route path="/calendar" element={<CalendarPage />} />
         <Route path="/network" element={<NetworkPage />} />

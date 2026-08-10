@@ -6083,6 +6083,80 @@ button.chip {
   border-color: var(--accent);
 }
 
+/* Lane B — universal intake through the ask bar (paste/drop/attach). Capture
+ * mode swaps the single-line input for a multiline textarea (same
+ * `.ask-bar__input` anatomy, no new chrome); the receipt/needs-you blocks
+ * reuse the bar's own Geist-Mono label styling and the existing
+ * `.badge`/`.btn` primitives — no card chrome imported into the bar. */
+
+.ask-bar__input--capture {
+  resize: none;
+  overflow-y: auto;
+  max-height: 220px;
+  line-height: 1.5;
+}
+
+.ask-bar__file-input {
+  display: none;
+}
+
+.ask-bar__attach {
+  flex: 0 0 auto;
+}
+
+.ask-bar__needs-chip {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  border: none;
+  border-radius: 6px;
+  background: var(--mustard-light);
+  color: var(--mustard);
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.ask-bar__needs-chip:hover {
+  opacity: 0.85;
+}
+
+.ask-bar__needs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 320px;
+  padding-bottom: 6px;
+  overflow-y: auto;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.ask-bar__needs-empty {
+  margin: 0;
+  padding: 4px 2px;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.ask-bar__intake {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-bar__intake-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ask-bar__intake-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .onboarding-bar__resume-row {
   display: flex;
   align-items: center;
@@ -6868,80 +6942,6 @@ button.chip {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-/* ── M9 — /inbox ─────────────────────────────────────────────────────────── */
-
-.inbox-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.inbox-filter {
-  padding: 6px 12px;
-  border-radius: 999px;
-  border: 1px solid var(--paper-edge);
-  background: var(--paper-surface);
-  color: var(--ink-soft);
-  font-size: 12px;
-  font-weight: 600;
-  cursor: pointer;
-}
-
-.inbox-filter:hover {
-  border-color: var(--paper-edge-strong);
-  color: var(--ink);
-}
-
-.inbox-filter--active {
-  background: var(--m-secondary-container);
-  border-color: transparent;
-  color: var(--m-on-secondary-container);
-}
-
-.inbox-list {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.intake-card__raw {
-  margin: 0;
-  font-size: 12px;
-  color: var(--ink-soft);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
-.intake-card__match {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 8px 10px;
-  border-radius: var(--row-radius);
-  background: var(--paper-band);
-}
-
-.intake-card__match p {
-  margin: 0;
-  font-size: 12px;
-}
-
-.intake-card__dispatch {
-  margin: 0;
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--ink);
-}
-
-.intake-card__chat {
-  margin-top: 4px;
-}
-
-.intake-card__actions {
-  display: flex;
-  gap: 8px;
 }
 
 /* ── M10 — nav footer (theme toggle + activity bell side by side) ──────── */

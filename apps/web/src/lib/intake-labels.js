@@ -1,12 +1,11 @@
-// apps/web/src/inbox/intake-labels.js — human labels for the M9 kind/status
+// apps/web/src/lib/intake-labels.js — human labels for the M9 kind/status
 // enums (config/intake-classify.schema.json / migration 002's CHECK
-// constraint). Split out of the now-deleted inbox/dispatch-summary.js (M10):
-// that file's OWN dispatch-sentence formatter was a hand-maintained mirror of
-// the server's summarizeDispatch() and is gone now that every intake API
-// response carries a real `dispatchSummary` string (src/core/intake/
-// dispatch-summary.mjs, consumed straight off `item.dispatchSummary`) — but
-// these two label lookups aren't dispatch-summary formatting at all, just
-// enum→label maps, so they move here rather than disappearing.
+// constraint). Originally split out of the now-deleted inbox/dispatch-
+// summary.js (M10), then moved here from inbox/ (Lane B) when /inbox and its
+// page/card components were retired in favor of universal AskBar intake —
+// these two label lookups are just enum→label maps, not page-shaped, so they
+// live in lib/ alongside the rest of the shared client helpers rather than
+// disappearing with the page that used to own them.
 export const KIND_LABELS = {
   "jd-text": "Job posting (pasted text)",
   "job-url": "Job posting (URL)",

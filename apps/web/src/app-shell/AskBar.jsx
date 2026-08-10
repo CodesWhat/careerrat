@@ -1,14 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useSearchParams } from "react-router-dom";
-import { ArrowUpIcon } from "../components/icons.jsx";
+import { Button, IconButton } from "../components/Button.jsx";
+import { ArrowUpIcon, PaperclipIcon } from "../components/icons.jsx";
 import {
   ApiError,
+  confirmIntake,
+  createIntake,
+  dismissIntake,
   getWorkspaceThread,
   previewWorkspaceQuery,
+  reclassifyIntake,
   runWorkspaceIntent,
   sendWorkspaceMessage,
+  uploadIntakeFile,
 } from "../lib/api.js";
+import { emitIntakeChanged } from "../lib/intake-events.js";
+import { kindLabel } from "../lib/intake-labels.js";
 import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
+import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
 // AskBar — the W3 shell-docked ask bar (DESIGN-SPEC.md "Ask bar (component)").
 // Mounted once in AppShell.jsx, docked at the bottom of every route, same
@@ -23,10 +32,27 @@ import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 // line with a live client ticker, swapped for a receipt + one-line summary on
 // completion). Never a modal; the input stays usable throughout, including
 // while an action runs in the background.
+//
+// Lane B (universal intake, /inbox retired as a destination): a multi-line/
+// long paste, a dropped file, or the attach button all feed the same M9
+// intake pipeline (POST /api/intake, /api/intake/upload) this bar already
+// had the workspace-agent APIs sitting next to. A paste/drop/attach that
+// looks like a *capture* (not a short query) flips the bar into "capture
+// mode" — the single-line input becomes a multiline surface, and the
+// preview panel offers a CAPTURE row (Enter-default) alongside the existing
+// ANSWER row. Committing CAPTURE reuses the exact same turnIdRef-guarded
+// commit shape as commitAction/commitAnswer below, just carrying a
+// classified intake item instead of an intent result — so a stale capture
+// response can never clobber a newer turn, same guarantee the acting state
+// machine already gave answers and actions.
 
 const PREVIEW_DEBOUNCE_MS = 300;
 const ACTION_POLL_MS = 2000;
 const ACTION_POLL_TIMEOUT_MS = 5 * 60 * 1000;
+// A paste/drop/attach this long or this multiline reads as a capture (a JD,
+// a recruiter email, a status update), not a short query — see the M9
+// intake pipeline's own kind classifier for the same rough shape rule.
+const CAPTURE_MIN_LENGTH = 200;
 
 // Domain-neutral, page-aware placeholders (DESIGN-SPEC.md's examples are
 // company-specific mockup copy — these are the generic equivalents the W3
@@ -56,6 +82,63 @@ function describeAskBarError(err) {
       : `That didn't go through (${err.status}).`;
   }
   return err instanceof Error ? err.message : "That didn't go through.";
+}
+
+// Ported from the deleted CaptureBar.jsx (git show 95f27540~1) — the 409
+// NO_DATABASE hint every /api/data/* route already surfaces for a legacy
+// (pre-migration) workspace; intake is DB-native by construction
+// (migration 002), so this is expected on an un-migrated workspace, not a
+// bug. Show the server's own actionable message verbatim.
+function describeCaptureError(err) {
+  if (err instanceof ApiError) {
+    if (err.status === 409) {
+      return (
+        err.body?.error || "This workspace hasn't finished setup yet. Finish setup, then try again."
+      );
+    }
+    return err.body?.error || `Capture failed (${err.status}).`;
+  }
+  return err instanceof Error ? err.message : "Capture failed.";
+}
+
+// Ported from the deleted inbox/IntakeCard.jsx's own inline catch.
+function describeDecideError(err, label) {
+  return err?.body?.error || (err instanceof Error ? err.message : `${label} failed`);
+}
+
+// Mirrors executeLaneA/executeLaneB's own result shapes (intake-route.mjs) —
+// ported from IntakeCard.jsx's describeResult().
+function describeIntakeResult(item) {
+  if (item.dispatch?.action === "app_set_status") {
+    return `Status updated to "${item.result?.to ?? "?"}".`;
+  }
+  if (item.dispatch?.action === "run_skill") {
+    return item.result?.ok === false
+      ? "Skill run finished with an error — see below."
+      : `${item.dispatch.params.skill} finished.`;
+  }
+  return "Completed.";
+}
+
+function isCaptureCandidate(text) {
+  return text.includes("\n") || text.length > CAPTURE_MIN_LENGTH;
+}
+
+// Ported from the deleted CaptureBar.jsx — client-side text extraction for
+// .txt/.md/.markdown drops/attaches. Anything else goes straight to
+// POST /api/intake/upload as raw bytes (no text extraction yet, a known gap
+// — intake-route.mjs:551).
+function isTextFile(file) {
+  return file.type.startsWith("text/") || /\.(txt|md|markdown)$/i.test(file.name);
+}
+
+function readFileAsText(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(reader.error || new Error("could not read file"));
+    reader.readAsText(file);
+  });
 }
 
 function isTerminalActionMessage(message) {
@@ -107,10 +190,12 @@ export function AskBar() {
   const [searchParams] = useSearchParams();
   const rootRef = useRef(null);
   const inputRef = useRef(null);
+  const fileInputRef = useRef(null);
   const previewRequestId = useRef(0);
   // Committing a new turn while an earlier one is still resolving is allowed
   // (the input stays usable during acting) — this id keeps a superseded
-  // turn's late completion from clobbering the newer turn's state.
+  // turn's late completion from clobbering the newer turn's state. Capture
+  // commits (commitCaptureText/commitCaptureFile) share this exact guard.
   const turnIdRef = useRef(0);
 
   const [text, setText] = useState("");
@@ -120,6 +205,14 @@ export function AskBar() {
   const [selected, setSelected] = useState("answer");
   const [turn, setTurn] = useState(null);
   const [, setTick] = useState(0);
+
+  // Lane B additions — independent of the action/answer machinery above.
+  const [captureMode, setCaptureMode] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const [decideBusyId, setDecideBusyId] = useState(null);
+  const [decideError, setDecideError] = useState(null); // { id, message } | null
+  const [needsYouOpen, setNeedsYouOpen] = useState(false);
+  const needsYou = useNeedsYouCount();
 
   const placeholder = placeholderForRoute(location.pathname, searchParams);
   const panelOpen = focused && text.trim().length > 0;
@@ -140,10 +233,13 @@ export function AskBar() {
   }, [panelOpen]);
 
   // Debounced classify — cheap, deterministic, side-effect free on the
-  // server (previewWorkspaceIntent never writes to the thread).
+  // server (previewWorkspaceIntent never writes to the thread). Skipped
+  // entirely in capture mode: a pasted JD/email isn't a workspace-agent
+  // query, and firing the intent classifier at it would be noise (same
+  // "nothing runs on a guess" spirit as the rest of this effect).
   useEffect(() => {
     const trimmed = text.trim();
-    if (!trimmed) {
+    if (!trimmed || captureMode) {
       setPreview(null);
       setPreviewPending(false);
       return undefined;
@@ -165,7 +261,7 @@ export function AskBar() {
       }
     }, PREVIEW_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [text]);
+  }, [text, captureMode]);
 
   // Live client-side elapsed ticker while a turn is running — reconciled
   // with the server's own elapsedMs the moment the turn completes.
@@ -176,11 +272,13 @@ export function AskBar() {
   }, [turn?.status]);
 
   function availableRows() {
+    if (captureMode) return ["capture", "answer"];
     return preview?.action ? ["action", "answer"] : ["answer"];
   }
 
   function handleKeyDown(e) {
     if (e.key === "Enter") {
+      if (captureMode && e.shiftKey) return; // newline in the capture surface
       e.preventDefault();
       commit();
       return;
@@ -207,6 +305,15 @@ export function AskBar() {
   function commit() {
     const trimmed = text.trim();
     if (!trimmed) return;
+    if (captureMode) {
+      if (selected === "capture") {
+        commitCaptureText(trimmed);
+      } else {
+        setCaptureMode(false);
+        commitAnswer(trimmed, null);
+      }
+      return;
+    }
     if (selected === "action" && preview?.action) {
       commitAction(preview.action);
     } else {
@@ -329,38 +436,263 @@ export function AskBar() {
     }
   }
 
+  // --- Lane B: capture commits -------------------------------------------
+  // Same shape/guard as commitAction/commitAnswer above (turnIdRef-guarded,
+  // single `turn` slot) — a capture is just a third turn kind, carrying a
+  // classified intake item instead of an intent/answer result.
+
+  async function commitCaptureText(trimmed) {
+    const startedAt = Date.now();
+    const turnId = ++turnIdRef.current;
+    setTurn({
+      kind: "capture",
+      status: "running",
+      label: "Sending to triage…",
+      startedAt,
+      item: null,
+      error: null,
+    });
+    setText("");
+    setPreview(null);
+    setFocused(false);
+    setCaptureMode(false);
+
+    try {
+      const { item } = await createIntake({ text: trimmed });
+      if (turnIdRef.current !== turnId) return;
+      setTurn((t) => (t && t.kind === "capture" ? { ...t, status: "done", item, error: null } : t));
+      emitIntakeChanged();
+    } catch (err) {
+      if (turnIdRef.current !== turnId) return;
+      setTurn((t) =>
+        t && t.kind === "capture" ? { ...t, status: "error", error: describeCaptureError(err) } : t
+      );
+    }
+  }
+
+  async function commitCaptureFile(file) {
+    const startedAt = Date.now();
+    const turnId = ++turnIdRef.current;
+    setTurn({
+      kind: "capture",
+      status: "running",
+      label: `Uploading ${file.name}…`,
+      startedAt,
+      item: null,
+      error: null,
+    });
+    setText("");
+    setPreview(null);
+    setFocused(false);
+    setCaptureMode(false);
+
+    try {
+      const { item } = await uploadIntakeFile(file);
+      if (turnIdRef.current !== turnId) return;
+      setTurn((t) => (t && t.kind === "capture" ? { ...t, status: "done", item, error: null } : t));
+      emitIntakeChanged();
+    } catch (err) {
+      if (turnIdRef.current !== turnId) return;
+      setTurn((t) =>
+        t && t.kind === "capture" ? { ...t, status: "error", error: describeCaptureError(err) } : t
+      );
+    }
+  }
+
+  // Confirm/Reclassify/Dismiss — ported from the deleted inbox/IntakeCard.jsx.
+  // Used both by the just-captured receipt (turn.kind === "capture") and by
+  // each row in the expanded NEEDS-YOU list; either way the server response
+  // is the source of truth, so a decide success just re-syncs local state
+  // and lets emitIntakeChanged() drive everyone else's refetch.
+  async function decideIntake(item, action, label) {
+    setDecideBusyId(item.id);
+    setDecideError(null);
+    try {
+      const { item: updated } = await action(item.id);
+      setTurn((t) =>
+        t?.kind === "capture" && t.item?.id === updated.id ? { ...t, item: updated } : t
+      );
+      emitIntakeChanged();
+    } catch (err) {
+      setDecideError({ id: item.id, message: describeDecideError(err, label) });
+    } finally {
+      setDecideBusyId(null);
+    }
+  }
+
+  const handleConfirmIntake = (item) => decideIntake(item, confirmIntake, "Confirm");
+  const handleReclassifyIntake = (item) => decideIntake(item, reclassifyIntake, "Reclassify");
+  const handleDismissIntake = (item) => decideIntake(item, dismissIntake, "Dismiss");
+
+  // A paste/drop/attach candidate lands in the bar text (appending to
+  // whatever's already there, same as the deleted CaptureBar.jsx did) and,
+  // if it reads as a capture, flips capture mode on with CAPTURE
+  // pre-selected as the Enter-default.
+  function ingestText(content) {
+    if (!content) return;
+    const merged = text.trim() ? `${text}\n${content}` : content;
+    setText(merged);
+    setFocused(true);
+    if (isCaptureCandidate(merged)) {
+      setCaptureMode(true);
+      setSelected("capture");
+    }
+  }
+
+  async function ingestFile(file) {
+    if (!file) return;
+    if (isTextFile(file)) {
+      try {
+        const content = await readFileAsText(file);
+        ingestText(content);
+      } catch {
+        ++turnIdRef.current; // supersede any in-flight capture, same as every other commit path
+        setTurn({
+          kind: "capture",
+          status: "error",
+          label: null,
+          startedAt: Date.now(),
+          item: null,
+          error: "Couldn't read that file as text — try dropping it again.",
+        });
+      }
+      return;
+    }
+    await commitCaptureFile(file);
+  }
+
+  function handlePaste(e) {
+    const pasted = e.clipboardData?.getData("text/plain") || "";
+    if (!pasted || !isCaptureCandidate(pasted)) return; // short single-line paste — unchanged default behavior
+    e.preventDefault();
+    ingestText(pasted);
+  }
+
+  async function handleDrop(e) {
+    e.preventDefault();
+    setDragActive(false);
+    const file = e.dataTransfer?.files?.[0];
+    if (file) {
+      await ingestFile(file);
+      return;
+    }
+    const dropped =
+      e.dataTransfer?.getData("text/uri-list") || e.dataTransfer?.getData("text/plain");
+    if (dropped) ingestText(dropped);
+  }
+
+  async function handleFileSelection(e) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (file) await ingestFile(file);
+  }
+
+  const captureRows = Math.min(8, Math.max(3, text.split("\n").length));
+
   return (
     <div className="ask-bar" ref={rootRef}>
-      <div className="ask-bar__shell">
-        {turn ? <AskBarTurn turn={turn} /> : null}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: drag/drop capture surface; the attach button below is the keyboard/click equivalent */}
+      <div
+        className={`ask-bar__shell${dragActive ? " ask-bar__shell--drag-over" : ""}`}
+        onDragOver={(e) => {
+          e.preventDefault();
+          setDragActive(true);
+        }}
+        onDragLeave={() => setDragActive(false)}
+        onDrop={handleDrop}
+      >
+        {turn ? (
+          <AskBarTurn
+            turn={turn}
+            decideBusyId={decideBusyId}
+            decideError={decideError}
+            onConfirm={handleConfirmIntake}
+            onReclassify={handleReclassifyIntake}
+            onDismiss={handleDismissIntake}
+          />
+        ) : null}
+        {needsYouOpen ? (
+          <AskBarNeedsYouList
+            items={needsYou.items}
+            decideBusyId={decideBusyId}
+            decideError={decideError}
+            onConfirm={handleConfirmIntake}
+            onReclassify={handleReclassifyIntake}
+            onDismiss={handleDismissIntake}
+          />
+        ) : null}
         {panelOpen ? (
           <AskBarPreview
             preview={preview}
             pending={previewPending}
             selected={selected}
             onSelect={setSelected}
+            captureMode={captureMode}
           />
         ) : null}
         <div className="ask-bar__row">
-          <input
-            ref={inputRef}
-            type="text"
-            className="ask-bar__input"
-            role="combobox"
-            aria-expanded={panelOpen}
-            aria-haspopup="listbox"
-            aria-controls="ask-bar-preview"
-            placeholder={placeholder}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onFocus={() => setFocused(true)}
-            onKeyDown={handleKeyDown}
-          />
+          {captureMode ? (
+            <textarea
+              ref={inputRef}
+              className="ask-bar__input ask-bar__input--capture"
+              rows={captureRows}
+              role="combobox"
+              aria-expanded={panelOpen}
+              aria-haspopup="listbox"
+              aria-controls="ask-bar-preview"
+              placeholder={placeholder}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onPaste={handlePaste}
+              onKeyDown={handleKeyDown}
+            />
+          ) : (
+            <input
+              ref={inputRef}
+              type="text"
+              className="ask-bar__input"
+              role="combobox"
+              aria-expanded={panelOpen}
+              aria-haspopup="listbox"
+              aria-controls="ask-bar-preview"
+              placeholder={placeholder}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onFocus={() => setFocused(true)}
+              onPaste={handlePaste}
+              onKeyDown={handleKeyDown}
+            />
+          )}
+          {needsYou.count > 0 ? (
+            <button
+              type="button"
+              className="ask-bar__needs-chip"
+              aria-expanded={needsYouOpen}
+              onClick={() => setNeedsYouOpen((v) => !v)}
+            >
+              Needs you · {needsYou.count}
+            </button>
+          ) : null}
           {!text.trim() ? (
             <span className="ask-bar__kbd" aria-hidden="true">
               ⌘K
             </span>
           ) : null}
+          <input
+            ref={fileInputRef}
+            type="file"
+            className="ask-bar__file-input"
+            onChange={handleFileSelection}
+            aria-label="Attach a file"
+          />
+          <IconButton
+            label="Attach a file"
+            className="ask-bar__attach"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <PaperclipIcon />
+          </IconButton>
           <button
             type="button"
             className="ask-bar__send"
@@ -376,8 +708,8 @@ export function AskBar() {
   );
 }
 
-function AskBarPreview({ preview, pending, selected, onSelect }) {
-  if (pending && !preview) {
+function AskBarPreview({ preview, pending, selected, onSelect, captureMode }) {
+  if (!captureMode && pending && !preview) {
     return (
       <div
         className="ask-bar__preview"
@@ -391,7 +723,7 @@ function AskBarPreview({ preview, pending, selected, onSelect }) {
       </div>
     );
   }
-  if (!preview) return null;
+  if (!captureMode && !preview) return null;
 
   return (
     <div
@@ -400,7 +732,19 @@ function AskBarPreview({ preview, pending, selected, onSelect }) {
       role="listbox"
       aria-label="Ask bar suggestions"
     >
-      {preview.action ? (
+      {captureMode ? (
+        <button
+          type="button"
+          role="option"
+          aria-selected={selected === "capture"}
+          className={`ask-bar__preview-row${selected === "capture" ? " ask-bar__preview-row--selected" : ""}`}
+          onClick={() => onSelect("capture")}
+        >
+          <span className="ask-bar__preview-kind">Capture</span>
+          <span className="ask-bar__preview-label">Send to triage</span>
+          <span className="ask-bar__preview-kbd">↵ Send</span>
+        </button>
+      ) : preview.action ? (
         <button
           type="button"
           role="option"
@@ -422,10 +766,10 @@ function AskBarPreview({ preview, pending, selected, onSelect }) {
       >
         <span className="ask-bar__preview-kind">Answer</span>
         <span className="ask-bar__preview-label">
-          {preview.answer?.label || "Ask the workspace agent"}
+          {(!captureMode && preview?.answer?.label) || "Ask the workspace agent"}
         </span>
       </button>
-      {preview.engineAvailable === false ? (
+      {!captureMode && preview?.engineAvailable === false ? (
         <div className="ask-bar__preview-note">No AI engine is configured yet.</div>
       ) : null}
     </div>
@@ -443,7 +787,133 @@ function EngineReceipt({ engine, elapsedMs, noEngine }) {
   );
 }
 
-function AskBarTurn({ turn }) {
+// Stateless by design (see AskBar.test.jsx's own header comment) — every
+// bit of mutable state (busy/error) lives in AskBar itself and is threaded
+// down as props, same as AskBarPreview above.
+function AskBarIntakeReceipt({ item, busy, error, onConfirm, onReclassify, onDismiss }) {
+  if (!item) return null;
+  const needsUser = item.status === "needs_you";
+  // M10: read straight off the API response (src/core/intake/dispatch-summary.mjs,
+  // computed server-side once) — no client-side re-derivation.
+  const dispatchSummary = item.dispatchSummary;
+  const canConfirm = item.status === "proposed";
+  const canDismiss = ["proposed", "needs_you", "error"].includes(item.status);
+  const canReclassify = ["needs_you", "error"].includes(item.status);
+
+  return (
+    <div className="ask-bar__intake">
+      <div className="ask-bar__intake-row">
+        <span className="badge badge--muted">{kindLabel(item.kind)}</span>
+        {item.trackerMatch?.matched ? <span className="badge badge--ok">Tracker match</span> : null}
+      </div>
+      {item.trackerMatch?.matched ? (
+        <p className="ask-bar__summary">{item.trackerMatch.summary}</p>
+      ) : null}
+      {needsUser ? (
+        <p className="ask-bar__error">
+          Needs you: {item.classification?.needsUserReason || "review manually."}
+        </p>
+      ) : item.classification?.proposedAction ? (
+        <p className="ask-bar__summary">{item.classification.proposedAction}</p>
+      ) : null}
+      {dispatchSummary && (item.status === "proposed" || item.status === "confirmed") ? (
+        <p className="ask-bar__receipt">Will: {dispatchSummary}</p>
+      ) : null}
+      {item.status === "running" ? (
+        <p className="ask-bar__receipt">
+          Running{item.dispatch?.params?.skill ? ` ${item.dispatch.params.skill}` : ""}… this can
+          take a minute.
+        </p>
+      ) : null}
+      {item.status === "done" ? (
+        <p className="ask-bar__receipt">{describeIntakeResult(item)}</p>
+      ) : null}
+      {item.status === "error" ? (
+        <p className="ask-bar__error">{item.error || "The confirmed action failed."}</p>
+      ) : null}
+      {error ? <p className="ask-bar__error">{error}</p> : null}
+      {canConfirm || canDismiss || canReclassify ? (
+        <div className="ask-bar__intake-actions">
+          {canConfirm ? (
+            <Button onClick={() => onConfirm(item)} disabled={busy}>
+              {busy ? "Confirming…" : "Confirm"}
+            </Button>
+          ) : null}
+          {canReclassify ? (
+            <Button variant="secondary" onClick={() => onReclassify(item)} disabled={busy}>
+              {busy ? "Working…" : "Reclassify"}
+            </Button>
+          ) : null}
+          {canDismiss ? (
+            <Button variant="secondary" onClick={() => onDismiss(item)} disabled={busy}>
+              Dismiss
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function AskBarNeedsYouList({
+  items,
+  decideBusyId,
+  decideError,
+  onConfirm,
+  onReclassify,
+  onDismiss,
+}) {
+  return (
+    <div className="ask-bar__needs-list">
+      {items.length === 0 ? (
+        <p className="ask-bar__needs-empty">Nothing needs you right now.</p>
+      ) : (
+        items.map((item) => (
+          <AskBarIntakeReceipt
+            key={item.id}
+            item={item}
+            busy={decideBusyId === item.id}
+            error={decideError?.id === item.id ? decideError.message : null}
+            onConfirm={onConfirm}
+            onReclassify={onReclassify}
+            onDismiss={onDismiss}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function AskBarTurn({ turn, decideBusyId, decideError, onConfirm, onReclassify, onDismiss }) {
+  if (turn.kind === "capture") {
+    if (turn.status === "running") {
+      return (
+        <div className="ask-bar__turn">
+          <span className="ask-bar__progress">{turn.label || "Sending to triage…"}</span>
+        </div>
+      );
+    }
+    if (turn.status === "error") {
+      return (
+        <div className="ask-bar__turn">
+          <p className="ask-bar__error">{turn.error}</p>
+        </div>
+      );
+    }
+    return (
+      <div className="ask-bar__turn">
+        <AskBarIntakeReceipt
+          item={turn.item}
+          busy={decideBusyId === turn.item?.id}
+          error={decideError?.id === turn.item?.id ? decideError.message : null}
+          onConfirm={onConfirm}
+          onReclassify={onReclassify}
+          onDismiss={onDismiss}
+        />
+      </div>
+    );
+  }
+
   if (turn.status === "running") {
     const elapsedMs = Date.now() - turn.startedAt;
     return (

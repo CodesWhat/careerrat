@@ -105,6 +105,7 @@ vi.mock("../lib/useGlobalShortcut.js", () => ({
 
 vi.mock("../components/icons.jsx", () => ({
   ArrowUpIcon: () => null,
+  PaperclipIcon: () => null,
 }));
 
 const api = vi.hoisted(() => ({
@@ -120,6 +121,12 @@ const api = vi.hoisted(() => ({
   previewWorkspaceQuery: vi.fn(),
   runWorkspaceIntent: vi.fn(),
   sendWorkspaceMessage: vi.fn(),
+  createIntake: vi.fn(),
+  uploadIntakeFile: vi.fn(),
+  listIntake: vi.fn(),
+  confirmIntake: vi.fn(),
+  reclassifyIntake: vi.fn(),
+  dismissIntake: vi.fn(),
 }));
 vi.mock("../lib/api.js", () => api);
 
@@ -198,6 +205,10 @@ function optionRows(tree) {
   return visit(tree, (n) => n.props?.role === "option");
 }
 
+function buttonByText(tree, label) {
+  return visit(tree, (n) => n.type === "button").find((n) => textOf(n).trim() === label);
+}
+
 function render() {
   return expand(renderAskBar());
 }
@@ -237,6 +248,53 @@ function deferred() {
   return { promise, resolve };
 }
 
+function intakeItem(overrides = {}) {
+  return {
+    id: "intake-1",
+    kind: "jd-text",
+    status: "proposed",
+    classification: { proposedAction: "Will tailor + apply." },
+    trackerMatch: { matched: false },
+    dispatchSummary: "tailor-application",
+    ...overrides,
+  };
+}
+
+// Minimal FileReader stand-in — this repo's vitest config runs in the "node"
+// environment (no jsdom), so there's no real FileReader; readFileAsText
+// (AskBar.jsx) only ever calls .readAsText(file) and reads .onload/.result,
+// so that's all this fakes. Fixtures pass the text to read via a `__content`
+// property on the fake File object rather than a real Blob body.
+class FakeFileReader {
+  readAsText(file) {
+    Promise.resolve().then(() => {
+      this.result = file?.__content ?? "";
+      this.onload?.();
+    });
+  }
+}
+
+function pasteEvent(text) {
+  return {
+    preventDefault: vi.fn(),
+    clipboardData: { getData: (type) => (type === "text/plain" ? text : "") },
+  };
+}
+
+function dropEvent({ file, text, uri } = {}) {
+  return {
+    preventDefault: vi.fn(),
+    dataTransfer: {
+      files: file ? [file] : [],
+      getData: (type) => {
+        if (type === "text/uri-list") return uri || "";
+        if (type === "text/plain") return text || "";
+        return "";
+      },
+    },
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Setup
 // ---------------------------------------------------------------------------
@@ -253,6 +311,11 @@ beforeEach(() => {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   };
+  globalThis.FileReader = FakeFileReader;
+  // useNeedsYouCount's own mount effect (queued whenever a test calls
+  // runPendingEffects()) fetches this — default to "nothing pending" so
+  // tests that don't care about the NEEDS-YOU chip aren't forced to stub it.
+  api.listIntake.mockResolvedValue({ items: [] });
 });
 
 afterEach(() => {
@@ -697,5 +760,204 @@ describe("AskBar — keyboard: Esc and arrow keys", () => {
     input.props.onKeyDown({ key: "ArrowUp", preventDefault: vi.fn() });
     tree = render();
     expect(selectedKind(tree)).toBe("answer");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. Lane B — universal intake (paste/drop/attach capture)
+// ---------------------------------------------------------------------------
+
+describe("AskBar — Lane B: paste routing", () => {
+  it("a multi-line paste flips into capture mode with a CAPTURE row as the default", () => {
+    let tree = render();
+    const input = byTag(tree, "input");
+    const evt = pasteEvent("Line one\nLine two");
+    input.props.onPaste(evt);
+    expect(evt.preventDefault).toHaveBeenCalled();
+
+    tree = render();
+    // The main text control swaps to a <textarea>; note a hidden
+    // <input type="file"> (the attach control) is always present in the
+    // row, so this checks the ask-bar__input-classed element specifically
+    // rather than asserting no <input> tag exists anywhere.
+    expect(byTag(tree, "textarea")).toBeTruthy();
+    expect(byClass(tree, "ask-bar__input").type).toBe("textarea");
+    const rows = optionRows(tree);
+    expect(rows).toHaveLength(2);
+    expect(textOf(rows[0])).toContain("Send to triage");
+    expect(rows[0].props["aria-selected"]).toBe(true);
+    expect(textOf(rows[1])).toContain("Ask the workspace agent");
+  });
+
+  it("a paste over 200 chars (no newline) also flips into capture mode", () => {
+    let tree = render();
+    const input = byTag(tree, "input");
+    const long = "x".repeat(210);
+    const evt = pasteEvent(long);
+    input.props.onPaste(evt);
+    expect(evt.preventDefault).toHaveBeenCalled();
+
+    tree = render();
+    expect(byTag(tree, "textarea").props.value).toBe(long);
+  });
+
+  it("a short single-line paste is left to the browser's default behavior, unchanged", () => {
+    let tree = render();
+    const input = byTag(tree, "input");
+    const evt = pasteEvent("sweep my boards");
+    input.props.onPaste(evt);
+    expect(evt.preventDefault).not.toHaveBeenCalled();
+
+    tree = render();
+    expect(byTag(tree, "textarea")).toBeFalsy();
+    expect(byClass(tree, "ask-bar__input").type).toBe("input");
+  });
+
+  it("does not call previewWorkspaceQuery while in capture mode", async () => {
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onPaste(pasteEvent("Line one\nLine two"));
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+
+    expect(api.previewWorkspaceQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe("AskBar — Lane B: drop", () => {
+  it("dropping a .txt file reads it client-side and treats it as pasted text", async () => {
+    let tree = render();
+    const shell = byClass(tree, "ask-bar__shell");
+    const file = { name: "jd.txt", type: "text/plain", __content: "Line one\nLine two" };
+    await shell.props.onDrop(dropEvent({ file }));
+    await flushMicrotasks();
+
+    tree = render();
+    expect(api.uploadIntakeFile).not.toHaveBeenCalled();
+    expect(byTag(tree, "textarea").props.value).toBe("Line one\nLine two");
+  });
+
+  it("dropping a non-text file uploads it via the raw-bytes endpoint", async () => {
+    api.uploadIntakeFile.mockResolvedValue({ item: intakeItem({ status: "needs_you" }) });
+    let tree = render();
+    const shell = byClass(tree, "ask-bar__shell");
+    const file = { name: "resume.pdf", type: "application/pdf" };
+    await shell.props.onDrop(dropEvent({ file }));
+    await flushMicrotasks();
+
+    expect(api.uploadIntakeFile).toHaveBeenCalledWith(file);
+    tree = render();
+    expect(textOf(byClass(tree, "ask-bar__intake"))).toContain("Needs you");
+  });
+});
+
+describe("AskBar — Lane B: attach", () => {
+  it("picking a non-text file through the hidden file input uploads it, same as drop", async () => {
+    api.uploadIntakeFile.mockResolvedValue({ item: intakeItem({ status: "proposed" }) });
+    const tree = render();
+    const fileInput = byClass(tree, "ask-bar__file-input");
+    const file = { name: "resume.pdf", type: "application/pdf" };
+    await fileInput.props.onChange({ target: { files: [file], value: "x" } });
+
+    expect(api.uploadIntakeFile).toHaveBeenCalledWith(file);
+  });
+});
+
+describe("AskBar — Lane B: capture receipt decide actions", () => {
+  async function commitLongPaste() {
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onPaste(pasteEvent("Line one\nLine two"));
+    tree = render();
+    input = byTag(tree, "textarea");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    return render();
+  }
+
+  it("Confirm hits confirmIntake for a proposed item", async () => {
+    api.createIntake.mockResolvedValue({ item: intakeItem({ status: "proposed" }) });
+    api.confirmIntake.mockResolvedValue({
+      item: intakeItem({
+        status: "running",
+        dispatch: { lane: "B", params: { skill: "tailor-application" } },
+      }),
+    });
+    let tree = await commitLongPaste();
+
+    expect(api.createIntake).toHaveBeenCalledWith({ text: "Line one\nLine two" });
+    const confirm = buttonByText(tree, "Confirm");
+    expect(confirm).toBeTruthy();
+    confirm.props.onClick();
+    await flushMicrotasks();
+
+    expect(api.confirmIntake).toHaveBeenCalledWith("intake-1");
+    tree = render();
+    expect(textOf(byClass(tree, "ask-bar__intake"))).toContain("Running");
+  });
+
+  it("Reclassify and Dismiss are offered (not Confirm) for a needs_you item, and hit their APIs", async () => {
+    api.createIntake.mockResolvedValue({ item: intakeItem({ status: "needs_you" }) });
+    api.reclassifyIntake.mockResolvedValue({ item: intakeItem({ status: "proposed" }) });
+    api.dismissIntake.mockResolvedValue({ item: intakeItem({ status: "dismissed" }) });
+    let tree = await commitLongPaste();
+
+    expect(buttonByText(tree, "Confirm")).toBeFalsy();
+    const reclassify = buttonByText(tree, "Reclassify");
+    reclassify.props.onClick();
+    await flushMicrotasks();
+    expect(api.reclassifyIntake).toHaveBeenCalledWith("intake-1");
+
+    tree = render();
+    const dismiss = buttonByText(tree, "Dismiss");
+    dismiss.props.onClick();
+    await flushMicrotasks();
+    expect(api.dismissIntake).toHaveBeenCalledWith("intake-1");
+  });
+
+  it("a capture error is shown inline and does not clobber the previous turn silently", async () => {
+    api.createIntake.mockRejectedValue(new api.ApiError(500, { error: "boom" }));
+    const tree = await commitLongPaste();
+
+    expect(textOf(byClass(tree, "ask-bar__error"))).toBe("boom");
+  });
+});
+
+describe("AskBar — Lane B: NEEDS-YOU chip", () => {
+  it("shows the pending needs_you count and stays hidden at zero", async () => {
+    let tree = render();
+    runPendingEffects();
+    await flushMicrotasks();
+    tree = render();
+    expect(byClass(tree, "ask-bar__needs-chip")).toBeFalsy();
+  });
+
+  it("expands into the same decide actions when there is a pending count", async () => {
+    api.listIntake.mockResolvedValue({
+      items: [intakeItem({ id: "n1", status: "needs_you", kind: "recruiter-email" })],
+    });
+    api.dismissIntake.mockResolvedValue({ item: intakeItem({ id: "n1", status: "dismissed" }) });
+
+    let tree = render();
+    runPendingEffects();
+    await flushMicrotasks();
+    tree = render();
+
+    const chip = byClass(tree, "ask-bar__needs-chip");
+    expect(textOf(chip)).toContain("1");
+    expect(byClass(tree, "ask-bar__needs-list")).toBeFalsy();
+
+    chip.props.onClick();
+    tree = render();
+    const list = byClass(tree, "ask-bar__needs-list");
+    expect(list).toBeTruthy();
+    expect(textOf(list)).toContain("Recruiter email");
+
+    const dismiss = buttonByText(tree, "Dismiss");
+    dismiss.props.onClick();
+    await flushMicrotasks();
+    expect(api.dismissIntake).toHaveBeenCalledWith("n1");
   });
 });
