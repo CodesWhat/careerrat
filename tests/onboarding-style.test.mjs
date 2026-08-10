@@ -326,7 +326,7 @@ describe("onboarding shell styles", () => {
     assert.match(roleCard, /box-shadow:\s*none/);
     assert.match(roleMain, /display:\s*grid/);
     assert.match(laneActions, /justify-content:\s*flex-end/);
-    assert.match(addButton, /border-radius:\s*999px/);
+    assert.match(addButton, /border-radius:\s*var\(--pill-radius\)/);
   });
 
   it("stacks role summary fit sections and renders signals as pills", () => {
@@ -341,7 +341,7 @@ describe("onboarding shell styles", () => {
     assert.match(signalRow, /display:\s*grid/);
     assert.match(signalRow, /grid-template-columns:\s*22px minmax\(0,\s*1fr\)/);
     assert.match(pillList, /flex-wrap:\s*wrap/);
-    assert.match(signalPill, /border-radius:\s*999px/);
+    assert.match(signalPill, /border-radius:\s*var\(--pill-radius\)/);
     assert.match(signalPillRemove, /border:\s*0/);
   });
 

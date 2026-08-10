@@ -37,6 +37,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
     --good: #1a7f4e;
     --warn: #a86400;
     --bad: #b3261e;
+    --pill-radius: 8px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -123,7 +124,7 @@ export const SEARCH_PAGE_HTML = `<!doctype html>
     text-transform: uppercase;
     letter-spacing: 0.02em;
     padding: 0.2rem 0.5rem;
-    border-radius: 999px;
+    border-radius: var(--pill-radius);
     border: 1px solid var(--border);
     color: var(--muted);
     white-space: nowrap;

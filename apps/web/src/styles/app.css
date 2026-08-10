@@ -291,7 +291,7 @@ button {
   font-weight: 700;
   letter-spacing: 0.04em;
   padding: 2px 6px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
 }
@@ -703,7 +703,7 @@ button {
   align-items: center;
   min-height: 28px;
   padding: 0 12px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   font-size: 11px;
@@ -736,7 +736,7 @@ button {
   min-height: 44px;
   padding: 0 18px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--ink);
   color: var(--paper-surface);
   cursor: pointer;
@@ -904,7 +904,7 @@ button {
   align-items: center;
   min-height: 24px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--teal-light);
   color: var(--teal);
   font-size: 10px;
@@ -1243,7 +1243,7 @@ button {
   min-height: 26px;
   max-width: 100%;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   font-size: 12px;
@@ -1701,7 +1701,7 @@ button {
   min-height: 32px;
   padding: 0 14px;
   border: 1px solid rgba(var(--rgb-line), 0.14);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink);
   cursor: pointer;
@@ -1963,7 +1963,7 @@ button {
   align-items: center;
   min-height: 26px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   color: var(--ink-soft);
   font-size: 11px;
@@ -2002,7 +2002,7 @@ button {
   align-items: center;
   min-height: 26px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--m-error-container);
   color: var(--danger);
   font-size: 11px;
@@ -2412,7 +2412,7 @@ button {
   align-items: center;
   gap: 6px;
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.02em;
@@ -2570,7 +2570,7 @@ button {
 .onboarding-shell__actions .btn {
   min-width: 132px;
   min-height: 44px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 0 22px;
 }
 
@@ -2731,7 +2731,7 @@ button {
   min-width: min(340px, 100%);
   min-height: 50px;
   padding: 0 28px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--m-secondary);
   font-size: 15px;
   font-weight: 800;
@@ -2810,7 +2810,7 @@ button {
   min-height: 32px;
   padding: 0 10px;
   border: none;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -3044,7 +3044,7 @@ button {
 
 .onboarding-step-card__actions .btn {
   min-height: 42px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 0 18px;
 }
 
@@ -3160,7 +3160,7 @@ button {
   align-items: center;
   min-height: 26px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(var(--rgb-surface), 0.78);
   color: var(--ink-soft);
   font-size: 11px;
@@ -3734,7 +3734,7 @@ button {
 
 .onboarding-targeting__add-lane {
   min-height: 42px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 0 16px 0 10px;
 }
 
@@ -3756,7 +3756,7 @@ button {
   align-items: center;
   min-height: 28px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(47, 111, 159, 0.15);
   color: #2f5f85;
   font-size: 11px;
@@ -3812,7 +3812,7 @@ button {
   min-height: 38px;
   padding: 0 8px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   color: var(--ink-soft);
   font-size: 11px;
@@ -4076,7 +4076,7 @@ button {
   max-width: 100%;
   min-height: 30px;
   padding: 0 8px 0 11px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(var(--rgb-surface), 0.82);
   color: var(--ink);
   font-size: 12px;
@@ -4285,7 +4285,7 @@ button {
   min-height: 44px;
   padding: 0 18px 0 14px;
   border: 1px solid var(--paper-edge-strong);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(var(--rgb-surface), 0.72);
   color: var(--ink);
   cursor: pointer;
@@ -4452,7 +4452,7 @@ button {
   gap: 7px;
   padding: 0 11px;
   border: 1px solid rgba(var(--rgb-line), 0.1);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(var(--rgb-surface), 0.76);
   color: var(--ink);
   cursor: pointer;
@@ -4501,7 +4501,7 @@ button {
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid rgba(var(--rgb-line), 0.1);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(var(--rgb-surface), 0.76);
   color: var(--ink);
   cursor: pointer;
@@ -4541,7 +4541,7 @@ button {
   align-items: center;
   min-height: 28px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(47, 111, 159, 0.15);
   color: #2f5f85;
   font-size: 11px;
@@ -4593,7 +4593,7 @@ button {
   min-height: 34px;
   padding: 4px 5px 4px 5px;
   border: 1px solid rgba(105, 88, 78, 0.16);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(var(--rgb-surface), 0.72);
   color: var(--ink);
   font-size: 12px;
@@ -5558,7 +5558,7 @@ button {
   align-items: center;
   gap: 8px;
   padding: 7px 12px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   border: 1px solid var(--paper-edge);
   background: var(--paper-surface);
   color: var(--ink-soft);
@@ -5610,7 +5610,7 @@ button {
   align-items: center;
   gap: 6px;
   padding: 5px 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink);
   font-size: 12px;
@@ -5742,7 +5742,7 @@ button.chip {
   min-height: 44px;
   padding: 6px 8px;
   border: 1px solid rgba(var(--rgb-line), 0.1);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(255, 250, 242, 0.7);
   color: var(--ink);
   cursor: pointer;
@@ -5788,7 +5788,7 @@ button.chip {
   flex: 0 0 auto;
   min-width: 38px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(232, 85, 61, 0.12);
   color: var(--coral);
   font-size: 10px;
@@ -6041,7 +6041,7 @@ button.chip {
   min-width: 60px;
   padding: 2px 8px;
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   font-family: var(--label-font);
@@ -6596,7 +6596,7 @@ button.chip {
   align-items: center;
   gap: 5px;
   border: 1px solid var(--input-border);
-  border-radius: var(--card-radius);
+  border-radius: var(--pill-radius);
   padding: 5px 12px;
   font-size: 11px;
   color: var(--ink-faint);
@@ -6771,10 +6771,24 @@ a.onboarding-engine__not-found-chip:focus-visible {
 
 .onboarding-suggestions__chip {
   border: 1px solid var(--input-border);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 6px 13px;
+  background: transparent;
+  font: inherit;
   font-size: 12px;
   color: var(--ink-soft);
+  cursor: pointer;
+}
+
+.onboarding-suggestions__chip:hover {
+  border-color: var(--paper-edge-strong);
+  background: var(--paper-surface);
+  color: var(--ink);
+}
+
+.onboarding-suggestions__chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .onboarding-hero__escape-hatch {
@@ -6897,7 +6911,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   color: var(--ink-soft);
   background: var(--surface);
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 4px 12px;
 }
 
@@ -6968,7 +6982,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   color: var(--ink);
   background: var(--card);
   border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 6px 8px 6px 14px;
   cursor: pointer;
 }
@@ -6997,7 +7011,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   letter-spacing: var(--label-tracking);
   color: var(--accent);
   background: var(--surface);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 3px 9px;
 }
 
@@ -7019,7 +7033,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   letter-spacing: var(--label-tracking);
   color: var(--success);
   background: var(--success-bg);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 5px 12px;
 }
 
@@ -7667,7 +7681,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
 
 .jobs-page__search-button {
   min-height: 42px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   font-weight: 900;
 }
 
@@ -7675,7 +7689,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   width: fit-content;
   margin: 0;
   padding: 9px 12px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   font-weight: 800;
 }
@@ -7834,7 +7848,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   justify-content: center;
   min-height: 30px;
   padding: 0 11px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(47, 158, 143, 0.1);
   color: var(--teal);
   font-size: 11px;
@@ -7987,7 +8001,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 38px;
   padding: 0 15px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
@@ -8167,7 +8181,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
 .jobs-v2__source-pill {
   max-width: 180px;
   padding: 7px 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   overflow: hidden;
@@ -8290,7 +8304,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   width: fit-content;
   min-height: 26px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
 }
 
@@ -8303,7 +8317,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 40px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--ink);
   color: var(--paper-surface);
   cursor: pointer;
@@ -8442,7 +8456,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   justify-content: center;
   min-height: 30px;
   padding: 0 11px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(47, 158, 143, 0.1);
   color: var(--teal);
   font-size: 11px;
@@ -8604,7 +8618,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   justify-content: center;
   min-height: 30px;
   padding: 0 11px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: rgba(47, 158, 143, 0.1);
   color: var(--teal);
   white-space: nowrap;
@@ -8625,7 +8639,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid rgba(var(--rgb-line), 0.14);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   color: var(--ink);
   cursor: pointer;
@@ -9028,7 +9042,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 40px;
   min-width: 0;
   padding: 8px 12px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   border: 1px solid var(--paper-edge-strong);
   background: var(--paper-bg);
   color: var(--ink);
@@ -9239,7 +9253,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 28px;
   padding: 0 6px 0 10px;
   border: 1px solid rgba(var(--rgb-line), 0.14);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink);
   cursor: pointer;
@@ -9360,7 +9374,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   width: fit-content;
   min-height: 24px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   white-space: nowrap;
 }
@@ -9370,7 +9384,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   align-items: center;
   min-height: 24px;
   padding: 0 9px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--m-error-container);
   color: var(--coral-dark);
   font-size: 10px;
@@ -9386,7 +9400,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   align-items: center;
   min-height: 22px;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   font-size: 10px;
   font-weight: 900;
   font-family: var(--label-font);
@@ -9580,7 +9594,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
 .jobs__source-pill {
   max-width: 180px;
   padding: 7px 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   overflow: hidden;
@@ -9692,7 +9706,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
 .settings-sources__heading > span {
   flex: 0 0 auto;
   padding: 6px 9px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
 }
 
@@ -9720,7 +9734,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
 
 .settings-sources__meta span {
   padding: 4px 7px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   color: var(--ink-soft);
   font-size: 10px;
@@ -9788,7 +9802,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   margin-top: auto;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--ink);
   color: var(--paper-surface);
   cursor: pointer;
@@ -9887,7 +9901,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 38px;
   padding: 0 15px;
   border: 1px solid rgba(var(--rgb-line), 0.12);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   cursor: pointer;
@@ -9990,7 +10004,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 30px;
   padding: 0 10px;
   border: 1px solid rgba(var(--rgb-line), 0.14);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   color: var(--ink);
   cursor: pointer;
@@ -10397,7 +10411,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 40px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--ink);
   color: var(--paper-surface);
   cursor: pointer;
@@ -10422,7 +10436,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   width: fit-content;
   min-height: 26px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   white-space: nowrap;
 }
@@ -10755,7 +10769,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 28px;
   align-items: center;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   font-size: 11px;
@@ -11045,7 +11059,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 40px;
   padding: 0 16px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--ink);
   color: var(--paper-surface);
   cursor: pointer;
@@ -11071,7 +11085,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   width: fit-content;
   min-height: 26px;
   padding: 0 10px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   white-space: nowrap;
 }
@@ -11148,7 +11162,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 44px;
   padding: 0 14px;
   border: 1px solid rgba(var(--rgb-line), 0.14);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
 }
@@ -11186,7 +11200,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   gap: 6px;
   padding: 5px;
   border: 1px solid rgba(var(--rgb-line), 0.1);
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   box-shadow: none;
 }
@@ -11196,7 +11210,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 34px;
   padding: 0 14px;
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: transparent;
   color: var(--ink-soft);
   cursor: pointer;
@@ -11249,7 +11263,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   align-items: center;
   justify-content: center;
   padding: 0 6px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-surface);
   color: inherit;
   font-size: 10px;
@@ -11337,7 +11351,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   min-height: 24px;
   max-width: 100%;
   padding: 0 8px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: color-mix(in srgb, var(--library-v2-tone) 12%, var(--paper-surface));
   color: var(--library-v2-tone);
   font-size: 11px;
@@ -12151,7 +12165,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
 
 .activity-bell__tag {
   padding: 1px 6px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
   color: var(--ink-soft);
   font-family: "Geist Mono", ui-monospace, monospace;

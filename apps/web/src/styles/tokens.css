@@ -60,6 +60,10 @@
 
   --card-radius: 8px;
   --row-radius: 6px;
+  /* Pills, chips, and badges are squircles, never 999px capsules. Circles
+   * (icon buttons, dots, radios, toggles, spinners) and progress tracks keep
+   * their own radius. */
+  --pill-radius: var(--card-radius);
   --label-font: "Geist Mono", ui-monospace, monospace;
   --label-tracking: 0.07em;
 

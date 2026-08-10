@@ -121,13 +121,13 @@
   flex-wrap: wrap;
   gap: 4px;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: var(--paper-band);
 }
 
 .library__segment {
   border: 0;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   padding: 6px 12px;
   background: transparent;
   color: var(--ink-soft);
@@ -240,7 +240,7 @@
   align-items: center;
   min-height: 22px;
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: color-mix(in srgb, var(--kind-tone) 14%, var(--paper-surface));
   color: var(--kind-tone);
   font-size: 11px;
@@ -281,7 +281,7 @@
   min-height: 24px;
   max-width: 100%;
   padding: 4px 8px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: color-mix(in srgb, var(--tag-tone) 12%, var(--paper-surface));
   color: var(--tag-tone);
   font-size: 11px;
@@ -432,7 +432,7 @@
   align-items: center;
   min-height: 22px;
   padding: 3px 9px;
-  border-radius: 999px;
+  border-radius: var(--pill-radius);
   background: color-mix(in srgb, var(--doc-tone) 14%, var(--paper-surface));
   color: var(--doc-tone);
   font-size: 11px;
