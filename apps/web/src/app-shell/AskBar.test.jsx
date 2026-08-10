@@ -368,6 +368,11 @@ describe("AskBar — idle", () => {
     expect(typeof shortcut.trigger).toBe("function");
   });
 
+  it("keeps the shell's neutral 1px border while idle (no focused preview open)", () => {
+    const tree = render();
+    expect(hasClass(byClass(tree, "ask-bar__shell"), "ask-bar__shell--active")).toBe(false);
+  });
+
   it("hides the ⌘K hint once there is text", () => {
     let tree = render();
     const input = byTag(tree, "input");
@@ -402,6 +407,26 @@ describe("AskBar — focused preview", () => {
     expect(rows).toHaveLength(2);
     expect(textOf(rows[0])).toContain("Run a job search sweep");
     expect(textOf(rows[1])).toContain('Answer: "sweep my boards"');
+  });
+
+  it("gives the ACTION row DESIGN-SPEC.md's accent-tinted pill, the ANSWER row a neutral one, and turns the shell border active", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+
+    const rows = optionRows(tree);
+    const actionKind = visit(rows[0], (n) => hasClass(n, "ask-bar__preview-kind"))[0];
+    const answerKind = visit(rows[1], (n) => hasClass(n, "ask-bar__preview-kind"))[0];
+    expect(hasClass(actionKind, "ask-bar__preview-kind--action")).toBe(true);
+    expect(hasClass(answerKind, "ask-bar__preview-kind--action")).toBe(false);
+    expect(hasClass(byClass(tree, "ask-bar__shell"), "ask-bar__shell--active")).toBe(true);
   });
 
   it("renders ANSWER only when the preview has no action", async () => {
@@ -557,6 +582,11 @@ describe("AskBar — acting", () => {
 
     let progress = byClass(tree, "ask-bar__progress");
     expect(textOf(progress)).toContain("Running · Run a job search sweep · 0S");
+    expect(byClass(tree, "ask-bar__progress-spinner")).toBeTruthy();
+    // The panel's 1.5px active border is a focused-preview signal — once the
+    // turn starts running, text/preview are cleared and the shell reverts to
+    // its neutral idle border (DESIGN-SPEC.md: acting state, not focused).
+    expect(hasClass(byClass(tree, "ask-bar__shell"), "ask-bar__shell--active")).toBe(false);
 
     await vi.advanceTimersByTimeAsync(3000);
     tree = render();
@@ -787,6 +817,10 @@ describe("AskBar — Lane B: paste routing", () => {
     expect(textOf(rows[0])).toContain("Send to triage");
     expect(rows[0].props["aria-selected"]).toBe(true);
     expect(textOf(rows[1])).toContain("Ask the workspace agent");
+
+    // CAPTURE commits on Enter, same as ACTION — same accent-tinted pill.
+    const captureKind = visit(rows[0], (n) => hasClass(n, "ask-bar__preview-kind"))[0];
+    expect(hasClass(captureKind, "ask-bar__preview-kind--action")).toBe(true);
   });
 
   it("a paste over 200 chars (no newline) also flips into capture mode", () => {

@@ -593,7 +593,7 @@ export function AskBar() {
     <div className="ask-bar" ref={rootRef}>
       {/* biome-ignore lint/a11y/noStaticElementInteractions: drag/drop capture surface; the attach button below is the keyboard/click equivalent */}
       <div
-        className={`ask-bar__shell${dragActive ? " ask-bar__shell--drag-over" : ""}`}
+        className={`ask-bar__shell${panelOpen ? " ask-bar__shell--active" : ""}${dragActive ? " ask-bar__shell--drag-over" : ""}`}
         onDragOver={(e) => {
           e.preventDefault();
           setDragActive(true);
@@ -740,7 +740,7 @@ function AskBarPreview({ preview, pending, selected, onSelect, captureMode }) {
           className={`ask-bar__preview-row${selected === "capture" ? " ask-bar__preview-row--selected" : ""}`}
           onClick={() => onSelect("capture")}
         >
-          <span className="ask-bar__preview-kind">Capture</span>
+          <span className="ask-bar__preview-kind ask-bar__preview-kind--action">Capture</span>
           <span className="ask-bar__preview-label">Send to triage</span>
           <span className="ask-bar__preview-kbd">↵ Send</span>
         </button>
@@ -752,7 +752,7 @@ function AskBarPreview({ preview, pending, selected, onSelect, captureMode }) {
           className={`ask-bar__preview-row${selected === "action" ? " ask-bar__preview-row--selected" : ""}`}
           onClick={() => onSelect("action")}
         >
-          <span className="ask-bar__preview-kind">Action</span>
+          <span className="ask-bar__preview-kind ask-bar__preview-kind--action">Action</span>
           <span className="ask-bar__preview-label">{preview.action.label}</span>
           <span className="ask-bar__preview-kbd">↵ Run</span>
         </button>
@@ -773,6 +773,18 @@ function AskBarPreview({ preview, pending, selected, onSelect, captureMode }) {
         <div className="ask-bar__preview-note">No AI engine is configured yet.</div>
       ) : null}
     </div>
+  );
+}
+
+// The acting-state spinning ring from DESIGN-SPEC.md's ask bar anatomy —
+// reuses Button.jsx/OnboardingShell.jsx's own `.btn__spinner` ring (same
+// border/animation), tinted cobalt via the `--action` modifier below.
+function ProgressLine({ children }) {
+  return (
+    <span className="ask-bar__progress">
+      <span className="btn__spinner ask-bar__progress-spinner" aria-hidden="true" />
+      {children}
+    </span>
   );
 }
 
@@ -889,7 +901,7 @@ function AskBarTurn({ turn, decideBusyId, decideError, onConfirm, onReclassify, 
     if (turn.status === "running") {
       return (
         <div className="ask-bar__turn">
-          <span className="ask-bar__progress">{turn.label || "Sending to triage…"}</span>
+          <ProgressLine>{turn.label || "Sending to triage…"}</ProgressLine>
         </div>
       );
     }
@@ -918,9 +930,9 @@ function AskBarTurn({ turn, decideBusyId, decideError, onConfirm, onReclassify, 
     const elapsedMs = Date.now() - turn.startedAt;
     return (
       <div className="ask-bar__turn">
-        <span className="ask-bar__progress">
+        <ProgressLine>
           Running · {turn.label} · {formatElapsedSeconds(elapsedMs)}
-        </span>
+        </ProgressLine>
       </div>
     );
   }
