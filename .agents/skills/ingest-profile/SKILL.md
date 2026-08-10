@@ -59,6 +59,8 @@ Record the answer as `depth: "deep"` or `depth: "shallow"`.
 
 In **shallow** mode, mark these step keys as deferred immediately: `domain`, `projects-scan`, `work-history`, `keep-cut`, `location`, `authorization`, `education`, `exclusions`, `toolchain`, `writing-samples`, `capabilities`. The minimum-viable core steps (`identity`, `targets`, `comp`, `form-defaults`) stay in-scope now.
 
+**Exception — no résumé.** Deferring `work-history` assumes a parsed résumé already seeded the evidence bank. If the candidate has no résumé (STEP 2a), that assumption is false and shallow mode would leave them with zero evidence, so `work-history` stays in-scope for them at any depth.
+
 **Question style — simple vs advanced:**
 
 > "For each section, do you want **Simple** questions (focused, fast, covers what matters most) or **Advanced** questions (deeper follow-ups, more edge cases, more nuance captured)?
@@ -159,16 +161,27 @@ that opening message.
 3. **Offer the alternatives once, then move on.** In descending order of value: a
    LinkedIn profile URL or export, a projects folder or repo (STEP 2b, which mines real
    work), or simply answering questions. Let them pick one or none. Never require any.
-4. **Get the work history by asking** (this replaces the parsed résumé as the evidence
-   source — see STEP 3). Walk employers one at a time, most recent first: what the place
-   was, what they actually did there, roughly when they started and stopped, and what
-   they'd point to as the thing they did best. Stop when they say that's all of it.
-   Someone with no work history at all is still valid — take schooling, volunteer work,
-   caretaking, military service, or self-taught projects as the history instead.
-5. **Bank claims from their answers, honestly.** Every claim originates from what the
-   candidate said, so its `evidence` field reads as candidate-stated, not as a cited
-   document. The Honesty Firewall applies unchanged: no metric they didn't give you, no
-   title they didn't claim, no dates you inferred. Ask or omit.
+4. **Get the work history by asking.** This step *is* the résumé for this candidate —
+   there is no parsed document behind them, so anything not captured here does not exist
+   anywhere. Walk employers one at a time, most recent first: what the place was, what
+   they actually did there, roughly when they started and stopped, and what they'd point
+   to as the thing they did best. Stop when they say that's all of it. Someone with no
+   work history at all is still valid — take schooling, volunteer work, caretaking,
+   military service, or self-taught projects as the history instead.
+5. **Bank each employer as you finish it, not at the end of the walk.** The moment one
+   employer's answers are in, write them before asking about the next:
+   ```
+   rolester data candidate evidence --data '{"claim":"...","evidence":"Candidate-stated during setup interview"}'
+   ```
+   Batching to the end of the step means an interrupted session loses the whole history.
+   Every claim originates from what the candidate said, so its `evidence` field reads as
+   candidate-stated, not as a cited document. The Honesty Firewall applies unchanged: no
+   metric they didn't give you, no title they didn't claim, no dates you inferred. Ask or
+   omit.
+   **This banking runs at every depth.** `work-history` is on STEP 0a's shallow-mode
+   deferral list, but that deferral assumes a parsed résumé already seeded the bank. When
+   STEP 2a ran, it did not — deferring here would leave a shallow-mode candidate with no
+   evidence at all. Run it, then let STEP 3 confirm boundaries rather than re-collect.
 6. **If they produce a résumé later**, run the normal parse (`rolester ingest --resume
    <path>`), then clear the decline by patching `declined_fields.resume` to `null`. The
    banked conversational claims stay; reconcile duplicates by upsert rather than wiping
