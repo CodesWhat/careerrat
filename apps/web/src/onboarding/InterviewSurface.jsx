@@ -36,10 +36,14 @@ import {
 
 const INTERVIEW_SKILL = "ingest-profile";
 
+// Examples of what to type, dropped into the bar on click. Deliberately
+// field-neutral and low on specifics: this is the first screen a nurse, a
+// driver, and an engineer all see, so no industry and no aspirational comp
+// number (both read as "this tool isn't for me" to everyone outside them).
 const SUGGESTION_CHIPS = [
-  "I'm hunting applied AI roles",
-  "Remote only, $200K floor",
-  "Paste résumé text",
+  "I'm hunting roles like my last one",
+  "Remote only, $75K floor",
+  "Let me paste my résumé",
 ];
 
 const RESUME_EXTENSIONS_AI = new Set(["pdf", "png", "jpg", "jpeg", "webp"]);
@@ -100,6 +104,11 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   // dialog copy below and OnboardingPage's forceEngineScreen flag, which
   // owns the actual navigation).
   const [engineDialogOpen, setEngineDialogOpen] = useState(false);
+  // The opening bar is controlled (the docked one below isn't) so a suggestion
+  // chip can drop its text straight into the input for the user to edit or
+  // send — the chips are examples of what to say, not one-click submits.
+  const [heroDraft, setHeroDraft] = useState("");
+  const heroInputRef = useRef(null);
   const prevDoneRef = useRef({});
   const resumedRef = useRef(false);
 
@@ -559,15 +568,26 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
           <OnboardingBar
             mode="centered"
             placeholder="Tell it what you're hunting, or just drop your résumé in."
+            value={heroDraft}
+            onChange={setHeroDraft}
+            inputRef={heroInputRef}
             onSend={handleSend}
             onDropResume={handleResumeDrop}
             busy={starting || uploading}
           />
           <div className="onboarding-suggestions">
             {SUGGESTION_CHIPS.map((chip) => (
-              <span key={chip} className="onboarding-suggestions__chip">
+              <button
+                key={chip}
+                type="button"
+                className="onboarding-suggestions__chip"
+                onClick={() => {
+                  setHeroDraft(chip);
+                  heroInputRef.current?.focus();
+                }}
+              >
                 {chip}
-              </span>
+              </button>
             ))}
           </div>
           <MiniProgressRow state={state} />

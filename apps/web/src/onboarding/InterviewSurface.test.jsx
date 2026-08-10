@@ -296,6 +296,30 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     expect(textOf(userTurn)).toBe("I'm hunting applied AI roles");
   });
 
+  it("a suggestion chip fills the bar and focuses it instead of sending on its own", async () => {
+    api.startChat.mockResolvedValue({ chatId: "chat-chip", state: "running" });
+    let tree = render({ runtime: RUNTIME });
+    await runEffects();
+    tree = render({ runtime: RUNTIME });
+
+    const chips = byClass(tree, "onboarding-suggestions__chip");
+    expect(chips).toHaveLength(3);
+    // Every chip must be a real button, not the inert span this shipped as.
+    for (const chip of chips) expect(chip.type).toBe("button");
+    expect(captured.onboardingBar.value).toBe("");
+
+    const focus = vi.fn();
+    captured.onboardingBar.inputRef.current = { focus };
+    chips[1].props.onClick();
+    tree = render({ runtime: RUNTIME });
+
+    expect(captured.onboardingBar.value).toBe(textOf(chips[1]));
+    expect(focus).toHaveBeenCalled();
+    // Filling the bar is not sending it — the user still edits and hits send.
+    expect(api.startChat).not.toHaveBeenCalled();
+    expect(captured.onboardingBar.mode).toBe("centered");
+  });
+
   it("docks after a résumé drop even with no typed message (never posts to /api/intake)", async () => {
     api.startChat.mockResolvedValue({ chatId: "chat-2", state: "running" });
     api.extractResumeAi.mockResolvedValue({

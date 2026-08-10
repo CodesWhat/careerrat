@@ -28,12 +28,16 @@ export function OnboardingBar({
   placeholder = "Tell it what you're hunting, or just drop your résumé in.",
   value,
   onChange,
+  // Optional: lets the caller focus the input (the hero's suggestion chips
+  // drop text in and put the cursor there). Falls back to a local ref.
+  inputRef: providedInputRef,
   onSend,
   onDropResume,
   disabled = false,
   busy = false,
 }) {
-  const inputRef = useRef(null);
+  const localInputRef = useRef(null);
+  const inputRef = providedInputRef ?? localInputRef;
   const fileInputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const [internalValue, setInternalValue] = useState("");
