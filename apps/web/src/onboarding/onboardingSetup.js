@@ -98,7 +98,11 @@ export function engineDetailLine({ runtime } = {}) {
 
 export function resumeDetailLine({ state } = {}) {
   const claimCount = (state?.data?.evidence?.claims ?? []).length;
-  if (!state?.sourceResumePresent) return null;
+  if (!state?.sourceResumePresent) {
+    // No résumé is a supported way in (the interview builds the history by
+    // asking) — say so rather than leaving the row blank like an unstarted one.
+    return state?.data?.["form-defaults"]?.declined_fields?.resume ? "Built from your answers" : null;
+  }
   return claimCount ? `${claimCount} claim${claimCount === 1 ? "" : "s"} extracted` : "Uploaded";
 }
 

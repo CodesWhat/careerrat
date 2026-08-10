@@ -32,7 +32,7 @@ Before asking anything:
 2. Run `rolester ingest --check --json` to see which fields fail validation or still hold placeholder values.
 3. Read existing candidate config through the shared DB-first accessor. In legacy workspaces, YAML files are the fallback. Note what is already populated.
 4. Check session memory and any pasted or attached documents (résumé, LinkedIn export, notes).
-5. If the user supplied a résumé file path: run `rolester ingest --resume <path> --json` to seed profile and evidence YAML from the parsed content.
+5. If the user supplied a résumé file path: run `rolester ingest --resume <path> --json` to seed profile and evidence YAML from the parsed content. If `form-defaults#declined_fields.resume` is set or `setup-state.json` carries `resume_source: "none"`, they have already told us there is no résumé — skip every résumé prompt and run STEP 2a's conversational path instead.
 6. For each section below, **open with a confirmation of what you already know** ("I have you as X — right?") rather than a cold question. Only ask for what is genuinely missing or unconfirmed.
 
 ---
@@ -134,6 +134,51 @@ Tell the user:
 3. **Corrupt/bad-paste gate:** If `rolester ingest --resume <path>` produced empty contact or empty sections, say so and ask for a screenshot, plain-text paste, or different export before continuing. Never proceed on an unreadable parse.
 4. Write all identity fields through `rolester data candidate patch profile --data ...` in DB mode; legacy YAML is fallback only when no DB exists.
 
+### STEP 2a — NO RÉSUMÉ (a supported way in, not a failure)
+
+Some candidates have no résumé at all: first job, a long gap, a trade or shift-work
+history that was never written down, a file lost two laptops ago. The onboarding screen
+offers "I don't have a résumé. Help me start another way." as an opening move, so this
+branch is a normal entry point and must never read as a problem to be solved.
+
+Enter this branch when the candidate says they have no résumé, can't find one, or sends
+that opening message.
+
+1. **Take it in stride, in one line.** Something like: "No problem, plenty of people
+   don't. We'll build it as we go — tell me about the work you've been doing." Do not
+   apologize, do not explain the drawbacks, do not ask a second time later, and do not
+   re-offer the upload at every step. Asking again reads as disbelief.
+2. **Record it so nothing re-asks.** Write the decline immediately:
+   ```
+   rolester data candidate patch form-defaults --data '{"declined_fields":{"resume":{"declined_at":"<ISO timestamp>"}}}'
+   ```
+   This is what lets the setup checklist count the résumé step as answered — without it
+   the candidate is stuck one step short of complete forever. Also set
+   `resume_source: "none"` in `workspace/setup-state.json` so a resumed session doesn't
+   re-open the question.
+3. **Offer the alternatives once, then move on.** In descending order of value: a
+   LinkedIn profile URL or export, a projects folder or repo (STEP 2b, which mines real
+   work), or simply answering questions. Let them pick one or none. Never require any.
+4. **Get the work history by asking** (this replaces the parsed résumé as the evidence
+   source — see STEP 3). Walk employers one at a time, most recent first: what the place
+   was, what they actually did there, roughly when they started and stopped, and what
+   they'd point to as the thing they did best. Stop when they say that's all of it.
+   Someone with no work history at all is still valid — take schooling, volunteer work,
+   caretaking, military service, or self-taught projects as the history instead.
+5. **Bank claims from their answers, honestly.** Every claim originates from what the
+   candidate said, so its `evidence` field reads as candidate-stated, not as a cited
+   document. The Honesty Firewall applies unchanged: no metric they didn't give you, no
+   title they didn't claim, no dates you inferred. Ask or omit.
+6. **If they produce a résumé later**, run the normal parse (`rolester ingest --resume
+   <path>`), then clear the decline by patching `declined_fields.resume` to `null`. The
+   banked conversational claims stay; reconcile duplicates by upsert rather than wiping
+   the bank.
+
+**Never do in this branch:** block any later step on the missing file, tell them their
+setup is incomplete because of it, generate a résumé document and present it as theirs
+without confirmation, or invent employers, dates, or numbers to fill the shape of a
+résumé.
+
 ---
 
 ## STEP 2b — SCAN A PROJECTS FOLDER / REPO (evidence source — optional, re-runnable)
@@ -189,6 +234,9 @@ own; a project's existence is evidence of building it, not of its business impac
 ---
 
 ## STEP 3 — WORK HISTORY TRUTH BOUNDARIES
+
+> **No résumé?** STEP 2a already gathered the history by asking. Don't re-walk it here —
+> confirm what was captured and go straight to the truth boundaries below.
 
 1. Ask which employers and titles are accurate as stated. Identify any gaps, overlaps, or tenure edge cases that need care.
 2. Identify which metrics and outcomes are verified and citable with evidence.
@@ -466,8 +514,9 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
 
 ## Rules
 
-- **Persistence cadence.** After completing each major step, append its step key to `completed[]` in `workspace/setup-state.json` and refresh `updatedAt` (read-modify-write; keep the JSON minimal). Step keys: `domain`, `identity`, `projects-scan`, `work-history`, `targets`, `keep-cut`, `comp`, `location`, `authorization`, `education`, `exclusions`, `form-defaults`, `proof-points`, `toolchain`, `writing-samples`, `capabilities`, `materialize`, `discovery-handoff`. The `setup-state.json` shape also carries `question_style`, `optional_areas`, and `agent_voice` (set in STEP 0a). On a deliberate pause, do the same and tell the user: "Progress saved — re-run `ingest-profile` (or `rolester ingest`) to resume."
+- **Persistence cadence.** After completing each major step, append its step key to `completed[]` in `workspace/setup-state.json` and refresh `updatedAt` (read-modify-write; keep the JSON minimal). Step keys: `domain`, `identity`, `projects-scan`, `work-history`, `targets`, `keep-cut`, `comp`, `location`, `authorization`, `education`, `exclusions`, `form-defaults`, `proof-points`, `toolchain`, `writing-samples`, `capabilities`, `materialize`, `discovery-handoff`. The `setup-state.json` shape also carries `question_style`, `optional_areas`, and `agent_voice` (set in STEP 0a), plus `resume_source` (`"none"` when STEP 2a ran, so a resumed session doesn't re-ask for a file that doesn't exist). On a deliberate pause, do the same and tell the user: "Progress saved — re-run `ingest-profile` (or `rolester ingest`) to resume."
 - Never invent facts. Ask or omit — do not guess.
+- A missing résumé is never a blocker. If the candidate has none, run STEP 2a, record the decline so the checklist can complete, and never ask for the file again in the same setup.
 - Keep `current_base` private. Store it with `current_comp_shareable: false`. It must never appear in any résumé, cover letter, form field, ATS entry, recruiter message, interview packet, or shareable tracker note. This is enforced by field path: always read outbound comp from `expected_base`, `target_base`, or `minimum_base`.
 - Keep `current_base` separate from `expected_base`. They are different fields and must never be conflated. `expected_base` is what goes on forms; `current_base` is a private gate input only.
 - Translate stated preferences into explicit keep/cut signal lists in candidate targeting config. Vague preferences are not signals.

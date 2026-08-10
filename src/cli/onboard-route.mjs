@@ -579,6 +579,16 @@ function authorizationValuePresent(data = {}) {
 // setup_mode key, until the user picks basic/advanced) OR a decline was
 // recorded (the decline leaves setup_mode untouched — see the spec's Decline
 // UX section — so it needs its own OR branch here).
+// "Value present" for resume = a source résumé was saved, OR the candidate
+// told the interview they don't have one (same declined_fields mechanism as
+// authorization/consent). Without the second branch a résumé-less candidate
+// can never reach 9 of 9, so setup never completes for them — and "I don't
+// have a résumé" is a supported way to start, not a failure state.
+function resumeValuePresent(data = {}, sourceResumePresent = false) {
+  if (sourceResumePresent) return true;
+  return !!data["form-defaults"]?.declined_fields?.resume;
+}
+
 function consentValuePresent(data = {}) {
   const automation = data.automation || {};
   const declinedFields = data["form-defaults"]?.declined_fields || {};
@@ -596,7 +606,7 @@ export function computeSetupProgress({
 
   const done = {
     engine: !!keyConfigured,
-    resume: !!sourceResumePresent,
+    resume: resumeValuePresent(data, sourceResumePresent),
     roles: (targeting.role_buckets ?? []).some((b) => (b?.titles ?? []).length > 0),
     companies: (targeting.tracked_companies ?? []).length > 0,
     evidence: (data.evidence?.claims ?? []).length > 0,

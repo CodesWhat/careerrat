@@ -173,6 +173,21 @@ describe("resumeDetailLine", () => {
     ).toBeNull();
   });
 
+  it("says the history was built from answers once 'I don't have a résumé' is recorded", () => {
+    expect(
+      resumeDetailLine({
+        state: {
+          sourceResumePresent: false,
+          data: {
+            "form-defaults": {
+              declined_fields: { resume: { declined_at: "2026-08-10T12:00:00Z" } },
+            },
+          },
+        },
+      })
+    ).toBe("Built from your answers");
+  });
+
   it("returns 'Uploaded' when present with zero claims", () => {
     expect(resumeDetailLine({ state: { sourceResumePresent: true, data: {} } })).toBe("Uploaded");
   });

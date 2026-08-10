@@ -167,6 +167,33 @@ describe("computeSetupProgress", () => {
     );
   });
 
+  it("resume flips on a saved source résumé, or on a recorded 'I don't have one'", () => {
+    assert.equal(
+      computeSetupProgress({ sourceResumePresent: false }).items.find((i) => i.key === "resume")
+        .done,
+      false
+    );
+    assert.equal(
+      computeSetupProgress({ sourceResumePresent: true }).items.find((i) => i.key === "resume")
+        .done,
+      true
+    );
+    // The résumé-less candidate ("I don't have a résumé. Help me start another
+    // way." on the onboarding screen) must be able to reach 9 of 9 — without
+    // this branch they sit one step short forever.
+    assert.equal(
+      computeSetupProgress({
+        sourceResumePresent: false,
+        data: {
+          "form-defaults": {
+            declined_fields: { resume: { declined_at: "2026-08-10T12:00:00Z" } },
+          },
+        },
+      }).items.find((i) => i.key === "resume").done,
+      true
+    );
+  });
+
   it("consent flips once automation.setup_mode is explicitly written, or a recorded decline", () => {
     assert.equal(
       computeSetupProgress({ data: { automation: {} } }).items.find((i) => i.key === "consent")
