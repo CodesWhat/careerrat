@@ -623,7 +623,7 @@ export function createChatRuntime({
     }
 
     // route.type === "installed": the user picked a local CLI (codex/gemini/
-    // opencode/copilot/qwen/antigravity/grok/custom/claude), not the Agent
+    // opencode/copilot/qwen/antigravity/custom/claude), not the Agent
     // SDK. There is no long-lived child process to open a push-queue against
     // (see runInstalledTurn's own header comment) — never call loadSdk() or
     // build an SDK query() on this branch, so a session for this route never

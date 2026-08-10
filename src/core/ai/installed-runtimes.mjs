@@ -30,7 +30,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["gemini"],
     commandShape: "gemini -p",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "Sign-in can only be verified when the first request runs.",
+    warning: "If you're not signed in to this CLI, the first run will fail and ask you to log in.",
     installUrl: "https://github.com/google-gemini/gemini-cli",
   },
   {
@@ -47,7 +47,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["copilot", "github-copilot"],
     commandShape: "copilot -p -",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "Sign-in can only be verified when the first request runs.",
+    warning: "If you're not signed in to this CLI, the first run will fail and ask you to log in.",
     installUrl:
       "https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/install-copilot-cli",
   },
@@ -57,7 +57,7 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["qwen"],
     commandShape: "qwen -p",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "Sign-in can only be verified when the first request runs.",
+    warning: "If you're not signed in to this CLI, the first run will fail and ask you to log in.",
     installUrl: "https://github.com/QwenLM/qwen-code",
   },
   {
@@ -66,17 +66,8 @@ export const INSTALLED_RUNTIME_DEFINITIONS = [
     binaries: ["antigravity", "antigravitycli"],
     commandShape: "antigravity -p",
     authProbe: { args: ["--version"], launchOnly: true },
-    warning: "This adapter has reduced readiness reporting.",
+    warning: "We can confirm this CLI is installed, but not whether it's set up and ready to run.",
     installUrl: "https://antigravity.google/docs/cli/install",
-  },
-  {
-    id: "grok",
-    name: "Grok CLI",
-    binaries: ["grok"],
-    commandShape: "grok -p",
-    authProbe: { args: ["--version"], launchOnly: true },
-    warning: "This adapter has reduced readiness reporting.",
-    installUrl: "https://docs.x.ai/build/overview",
   },
 ];
 
@@ -267,7 +258,7 @@ export function buildInstalledRuntimeInvocation({
   if (runtimeId === "copilot") {
     return { ...common, args: ["-p", "-"] };
   }
-  if (["gemini", "qwen", "antigravity", "grok"].includes(runtimeId)) {
+  if (["gemini", "qwen", "antigravity"].includes(runtimeId)) {
     return { ...common, args: ["-p", ""] };
   }
   // "custom" is the W4 onboarding 3d/3f custom-command runtime — its
@@ -421,7 +412,7 @@ export function installedRuntimeSignInCommand(runtimeId) {
   if (runtimeId === "claude") return "claude auth login";
   if (runtimeId === "codex") return "codex login";
   if (runtimeId === "opencode") return "opencode auth login";
-  if (["gemini", "copilot", "qwen", "antigravity", "grok"].includes(runtimeId)) {
+  if (["gemini", "copilot", "qwen", "antigravity"].includes(runtimeId)) {
     return `${runtimeId} --help`;
   }
   return null;

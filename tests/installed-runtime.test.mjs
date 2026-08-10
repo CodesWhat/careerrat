@@ -33,7 +33,7 @@ function executable(path) {
 test("runtime registry covers the supported installed CLI set", () => {
   assert.deepEqual(
     INSTALLED_RUNTIME_DEFINITIONS.map(({ id }) => id),
-    ["claude", "codex", "gemini", "opencode", "copilot", "qwen", "antigravity", "grok"]
+    ["claude", "codex", "gemini", "opencode", "copilot", "qwen", "antigravity"]
   );
   for (const definition of INSTALLED_RUNTIME_DEFINITIONS) {
     assert.ok(definition.name);
