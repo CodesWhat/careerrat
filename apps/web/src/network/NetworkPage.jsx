@@ -14,7 +14,7 @@
 import { useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
-import { IconButton } from "../components/Button.jsx";
+import { Button, IconButton } from "../components/Button.jsx";
 import { CompanyAvatar } from "../components/CompanyAvatar.jsx";
 import { ArrowRightIcon, CheckIcon, ClockIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
@@ -269,15 +269,31 @@ function NetworkHero({ needsTouchCount, peopleCount }) {
   );
 }
 
+// Focuses the docked AskBar input from outside its own component tree. A
+// direct DOM query is a small purpose-built escape hatch here — same pattern
+// AppShell.jsx already uses for nav autoscroll (scrollActivePrimaryNavItem) —
+// rather than standing up a shared event-bus module for one call site.
+function focusAskBar() {
+  document.querySelector(".ask-bar__input")?.focus();
+}
+
 // Zero companies at all is the only empty state the reduced list can hit —
 // buildPeopleCards() always emits at least a "company memory" card per
-// company, so a non-empty companies[] never produces an empty people[].
-function PeopleList({ onOpen, people }) {
+// company, so a non-empty companies[] never produces an empty people[]. The
+// real capture path isn't a form on this page (no "add contact" write verb
+// exists) — it's pasting a recruiter/hiring-team message into the docked
+// AskBar, which flips into capture mode and feeds this list automatically.
+export function PeopleList({ onOpen, people }) {
   if (!people.length) {
     return (
       <div className="network__empty">
-        Portal-only application threads (no-reply@workday/ashby/greenhouse) are intentionally
-        excluded; this fills in once a human recruiter or hiring-team thread is captured.
+        <p>
+          Portal-only application threads (no-reply@workday/ashby/greenhouse) are intentionally
+          excluded; this fills in once a human recruiter or hiring-team thread is captured.
+        </p>
+        <Button onClick={focusAskBar} variant="secondary">
+          Paste a message to capture a contact
+        </Button>
       </div>
     );
   }
