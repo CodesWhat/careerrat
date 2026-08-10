@@ -296,6 +296,11 @@ export async function runAiWebSearchLane({
   setActivity,
   setCounts,
   setError,
+  // Optional — reports the stream's wall-clock duration once a run finishes,
+  // for the sweep-line engine receipt (design handoff 3b: "AI · ENGINE ·
+  // 41S"). Measured client-side since neither the runtime-config route nor
+  // the "done" SSE frame carries a server-side duration.
+  setElapsedMs,
 } = {}) {
   setError?.(null);
   setCounts?.(null);
@@ -318,6 +323,7 @@ export async function runAiWebSearchLane({
 
   setActivity?.(null);
 
+  const startedAt = Date.now();
   let doneData = null;
   let sawDone = false;
   let streamErrorMessage = null;
@@ -390,6 +396,7 @@ export async function runAiWebSearchLane({
   }
 
   setCounts?.(doneData);
+  setElapsedMs?.(Date.now() - startedAt);
   setStatus?.("results");
   await refetch?.();
   return { ok: true, data: doneData };

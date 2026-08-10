@@ -475,11 +475,11 @@ describe("JobsPage", () => {
     expect(html).toContain('class="jobs"');
     expect(html).toContain(">Jobs<");
     expect(html).toContain("Pipeline");
-    expect(html).toContain("Search");
+    expect(html).toContain("Finder");
     expect(html).toContain("Jobs funnel");
     expect(html).toContain("Jobs Sankey funnel");
     expect(html).toContain('role="button"');
-    for (const label of ["Company", "Role", "Fit", "Base", "Stage", "Applied", "Action"]) {
+    for (const label of ["Company / Role", "Stage", "Next Action", "Due", "Last Touch", "Fit"]) {
       expect(html).toContain(label);
     }
     expect(html).toContain("Northstar Systems");

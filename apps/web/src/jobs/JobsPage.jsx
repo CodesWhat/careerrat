@@ -32,7 +32,7 @@ const STORAGE_KEY = "rolester-jobs-next-explorer";
 
 const TAB_OPTIONS = [
   { key: "pipeline", label: "Pipeline" },
-  { key: "search", label: "Search" },
+  { key: "search", label: "Finder" },
 ];
 
 const SEARCH_FILTERS = [
@@ -83,13 +83,12 @@ const SORT_OPTIONS = [
 ];
 
 const SORT_COLUMNS = [
-  { key: "company", label: "Company" },
-  { key: "role", label: "Role" },
-  { key: "fit", label: "Fit" },
-  { key: "base", label: "Base" },
+  { key: "company", label: "Company / Role" },
   { key: "stage", label: "Stage" },
-  { key: "applied", label: "Applied" },
-  { key: "action", label: "Action" },
+  { key: "action", label: "Next Action" },
+  { key: "due", label: "Due", sortable: false },
+  { key: "applied", label: "Last Touch" },
+  { key: "fit", label: "Fit" },
 ];
 
 function loadExplorerState() {
@@ -115,6 +114,7 @@ export function JobsPage() {
   const [aiSearchActivity, setAiSearchActivity] = useState(null);
   const [aiSearchCounts, setAiSearchCounts] = useState(null);
   const [aiSearchError, setAiSearchError] = useState(null);
+  const [aiSearchElapsedMs, setAiSearchElapsedMs] = useState(null);
   const aiSearchAbortRef = useRef(null);
   const [explorerState, setExplorerState] = useState(loadExplorerState);
   const [queryDraft, setQueryDraft] = useState(explorerState.query);
@@ -151,6 +151,25 @@ export function JobsPage() {
     ? aiSearchCounts.failedPromptIds
     : [];
   const aiSearchAttached = Boolean(aiSearchAbortRef.current);
+  // Tab labels carry live counts per the canvas ("Pipeline · 6" / "Finder ·
+  // 7 new") — Pipeline counts committed, non-terminal work; Finder counts
+  // sourced roles still in the default review queue (filterSearchRows below).
+  const pipelineCount = model.rows.filter(
+    (row) => row.source !== "sourced" && !row.terminal
+  ).length;
+  const finderNewCount = filterSearchRows(model.sourcedRoles, "review").length;
+  // Sweep-line receipt (design handoff 3b): the free-board lane never ranks
+  // anything, so its engine chip is fixed copy. The AI lane's chip names the
+  // real configured route (never a hardcoded CLI name — runtime/config only
+  // exposes route type, not a specific tool) and a client-measured elapsed
+  // time, shown once a run completes.
+  const aiSearchElapsedS = Number.isFinite(aiSearchElapsedMs)
+    ? Math.max(0, Math.round(aiSearchElapsedMs / 1000))
+    : null;
+  const aiSearchReceipt =
+    aiSearchStatus === "results" && aiSearchElapsedS !== null
+      ? `AI · ${describeAiRouteLabel(runtimeConfig?.ai?.route)} · ${aiSearchElapsedS}S`
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -354,6 +373,7 @@ export function JobsPage() {
       setActivity: setAiSearchActivity,
       setCounts: setAiSearchCounts,
       setError: setAiSearchError,
+      setElapsedMs: setAiSearchElapsedMs,
     });
     if (aiSearchAbortRef.current === controller) aiSearchAbortRef.current = null;
   }
@@ -418,7 +438,9 @@ export function JobsPage() {
               key={option.key}
               onClick={() => setTab(option.key)}
             >
-              {option.label}
+              {option.key === "pipeline"
+                ? `${option.label} · ${pipelineCount}`
+                : `${option.label} · ${finderNewCount} new`}
             </button>
           ))}
         </div>
@@ -469,6 +491,7 @@ export function JobsPage() {
             onAction: aiSearchRunning
               ? handleAiWebSearchAbort
               : () => handleAiWebSearch(aiRetryPromptIds),
+            receipt: aiSearchReceipt,
             statusText: aiSearchStatusText,
             title: aiSearchTitleLabel({ available: aiWebSearchAvailable }),
           }}
@@ -764,14 +787,18 @@ function JobsTable({ gatesByAppId, rows, state, onOpen, onSort }) {
       <table className="jobs__table">
         <thead>
           <tr>
-            {SORT_COLUMNS.map((column) => (
-              <SortHeader
-                key={column.key}
-                column={column}
-                state={state}
-                onSort={() => onSort(column.key)}
-              />
-            ))}
+            {SORT_COLUMNS.map((column) =>
+              column.sortable === false ? (
+                <th key={column.key}>{column.label}</th>
+              ) : (
+                <SortHeader
+                  key={column.key}
+                  column={column}
+                  state={state}
+                  onSort={() => onSort(column.key)}
+                />
+              )
+            )}
           </tr>
         </thead>
         <tbody>
@@ -784,11 +811,11 @@ function JobsTable({ gatesByAppId, rows, state, onOpen, onSort }) {
                 role="button"
                 tabIndex={0}
                 aria-label={`Open ${row.company} ${row.role}`}
-                onClick={() => onOpen(row.id)}
+                onClick={() => onOpen(row.id, cta?.section)}
                 onKeyDown={(event) => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    onOpen(row.id);
+                    onOpen(row.id, cta?.section);
                   }
                 }}
               >
@@ -797,42 +824,42 @@ function JobsTable({ gatesByAppId, rows, state, onOpen, onSort }) {
                     <CompanyAvatar name={row.company} domain={row.domain} size={34} />
                     <span>
                       <span className="jobs__company-name">{row.company}</span>
-                      <span className="jobs__subline">{row.location || row.domain}</span>
+                      <span className="jobs__subline">{row.role}</span>
                     </span>
                     <HealthBadge badge={row.healthBadge} />
                   </span>
                 </td>
-                <td>{row.role}</td>
-                <td className="jobs__num">
-                  <FitValue row={row} />
-                  <GateBadge gate={gatesByAppId[row.id]?.gate} />
-                </td>
-                <td className="jobs__num">{formatCompK(row)}</td>
                 <td>
                   <span className="jobs__stage-cell">
                     <span className="jobs__stage-pill">{row.stageLabel || row.stage}</span>
                     <DecayPill row={row} />
                   </span>
                 </td>
-                <td className="jobs__num">{row.appliedLabel || row.appliedAt || ""}</td>
                 <td>
-                  <span className="jobs__action-cell">
-                    {cta ? (
-                      <button
-                        type="button"
-                        className="jobs__cta-button"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          onOpen(row.id, cta.section);
-                        }}
-                      >
-                        {cta.label}
-                      </button>
-                    ) : (
-                      <span>{row.action?.cta || "Open details"}</span>
-                    )}
-                    {row.action?.dueText ? <small>{row.action.dueText}</small> : null}
+                  <span className="jobs__next-action">
+                    {cta?.label || row.action?.cta || "Open details"}
+                    <span aria-hidden="true" className="jobs__next-action-arrow">
+                      →
+                    </span>
                   </span>
+                </td>
+                <td className="jobs__num">
+                  {row.action?.dueText ? (
+                    <span
+                      className={
+                        /today|overdue/i.test(row.action.dueText) ? "jobs__due-urgent" : undefined
+                      }
+                    >
+                      {row.action.dueText}
+                    </span>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+                <td className="jobs__num">{row.appliedLabel || row.appliedAt || "—"}</td>
+                <td className="jobs__num">
+                  <FitValue row={row} />
+                  <GateBadge gate={gatesByAppId[row.id]?.gate} />
                 </td>
               </tr>
             );
@@ -956,12 +983,16 @@ function SearchView({
           title="Found Roles"
           meta={`${filteredRoles.length} roles`}
         />
-        <SearchStatusStrip
-          aiSearchStatusText={aiSearch.statusText}
-          manualSearchRunning={manualSearchRunning}
-          model={model}
-          sourceSetupReady={sourceSetupReady}
+        <LaneReceipt
+          engine="NO ENGINE · NOTHING RANKED"
+          label={
+            manualSearchRunning
+              ? "Finding roles…"
+              : describeManualRunSummary(model.manualSearchRun) ||
+                sourceSetupSummary(model.sourceSetup, sourceSetupReady)
+          }
         />
+        <LaneReceipt engine={aiSearch.receipt} label={aiSearch.statusText || aiSearch.body} />
         <div className="jobs__filter-bar">
           <fieldset className="jobs__filter-group">
             <legend>Found Role Filters</legend>
@@ -1046,19 +1077,15 @@ export function describeManualRunSummary(run) {
   return text;
 }
 
-function SearchStatusStrip({ aiSearchStatusText, manualSearchRunning, model, sourceSetupReady }) {
-  const runSummary = describeManualRunSummary(model.manualSearchRun);
-  const sourceSummary = sourceSetupSummary(model.sourceSetup, sourceSetupReady);
-  const statusText =
-    aiSearchStatusText || (manualSearchRunning ? "Finding roles…" : runSummary || sourceSummary);
+// One receipt strip per lane (design handoff 3b) — the free-board lane's
+// engine chip is always "NO ENGINE · NOTHING RANKED"; the AI lane's chip
+// only appears once a run has actually completed (see aiSearchReceipt in
+// JobsPage above), so nothing here ever fabricates an engine name or time.
+function LaneReceipt({ engine, label }) {
   return (
     <div className="jobs__search-status" aria-live="polite">
-      <span>{statusText}</span>
-      <span>
-        {model.sourcedRoles.length
-          ? `${model.sourcedRoles.length} sourced`
-          : "No sourced roles yet"}
-      </span>
+      <span>{label}</span>
+      {engine ? <span className="jobs__search-status-engine">{engine}</span> : null}
     </div>
   );
 }
@@ -1324,6 +1351,17 @@ function AiSearchFailureDetails({ counts }) {
   );
 }
 
+// Names the configured AI route for the sweep-line receipt without ever
+// hardcoding a specific CLI — GET /api/runtime/config only reports the route
+// TYPE (installed / byok / proxy / none), never which tool is installed, so
+// that's the most specific real data available client-side.
+function describeAiRouteLabel(route) {
+  if (route === "installed") return "Installed CLI";
+  if (route === "byok") return "API Key";
+  if (route === "proxy") return "Hosted AI";
+  return "AI Engine";
+}
+
 function aiSearchTitleLabel({ available }) {
   return available ? "AI Web Search" : "AI Web Search Unavailable";
 }
@@ -1367,11 +1405,6 @@ function formatFit(value) {
 function isTriageFit(row) {
   const basis = String(row?.fitBasis || "").toLowerCase();
   return basis.startsWith("triage") || basis.includes("guess");
-}
-
-function formatCompK(row) {
-  const value = Number(row?.baseK || row?.compMidpointK || 0);
-  return Number.isFinite(value) && value > 0 ? `$${Math.round(value)}K` : "No comp";
 }
 
 function decisionActionLabel(action) {
