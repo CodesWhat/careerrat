@@ -395,12 +395,51 @@ const CONVERSATIONAL_POSTURE =
   "answer on the user's behalf. Confirm what you already know before asking again (skill's own " +
   "STEP 0 guidance).";
 
+// Lane A / R1, R4, R6 — the confirm-block mechanism InterviewSurface.jsx's
+// parser looks for. No new runtime tool: the agent still just writes text,
+// but a fenced ```careerrat:confirm block containing one closed-kind JSON
+// object renders as a clickable pill the user saves or declines, instead of
+// the skill trying to write candidate config itself. Conversational mode only
+// — the one-shot embedded runtime has nobody to click a pill, so this stays
+// out of ONESHOT_POSTURE entirely.
+const CONFIRM_BLOCK_GUIDANCE =
+  "When you have a specific, structured fact ready to record — work authorization, an automation " +
+  "consent decision, or a company to track — emit a fenced confirm block instead of writing the " +
+  "value into prose, so the user can review it and click to save. Syntax (exact fence, valid JSON, " +
+  "nothing else on those lines):\n" +
+  "```careerrat:confirm\n" +
+  '{"kind":"authorization","summary":"Authorized to work in your country, no sponsorship needed","patch":{"work_authorized":true,"requires_sponsorship":false}}\n' +
+  "```\n" +
+  "Only these kinds are recognized — anything else is silently dropped, never rendered: " +
+  "`authorization` (patch: {work_authorized, requires_sponsorship}), `consent_mode` (payload: " +
+  '"basic"|"advanced"), `consent_capability` (payload: {capability, platform}), `companies_suggest` ' +
+  "(no payload), `company_add` (payload: {name}). Always propose consent_mode before offering any " +
+  "consent_capability block — a capability pill only works once advanced mode is already set. Keep " +
+  "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words.";
+
+function declinedFieldsNote(declinedFields) {
+  const fields = Array.isArray(declinedFields) ? declinedFields.filter(Boolean) : [];
+  if (!fields.length) return "";
+  return (
+    ` The user already declined to answer: ${fields.join(", ")} — never ask about ` +
+    `${fields.length === 1 ? "it" : "these"} again.`
+  );
+}
+
+function conversationalPosture(declinedFields) {
+  return `${CONVERSATIONAL_POSTURE} ${CONFIRM_BLOCK_GUIDANCE}${declinedFieldsNote(declinedFields)}`;
+}
+
 // `mode` defaults to "oneshot" so every existing call site (runSkillStream,
 // below) is byte-identical to the pre-M2 text; "conversational" is the only
-// other value and swaps in CONVERSATIONAL_POSTURE above.
-export function buildPrompt({ skill, input, mode = "oneshot", skillMdPath }) {
+// other value and swaps in conversationalPosture() above. `declinedFields`
+// (conversational mode only) is the current form-defaults.declined_fields key
+// list — see chat-runtime.mjs's two buildPrompt call sites, which read it off
+// the candidate config once per session/turn so this stays a pure function.
+export function buildPrompt({ skill, input, mode = "oneshot", skillMdPath, declinedFields = [] }) {
   const body = typeof input === "string" ? input : JSON.stringify(input ?? {});
-  const posture = mode === "conversational" ? CONVERSATIONAL_POSTURE : ONESHOT_POSTURE;
+  const posture =
+    mode === "conversational" ? conversationalPosture(declinedFields) : ONESHOT_POSTURE;
   // Smaller/faster models guess wrong filenames for the spec (e.g. a literal
   // `resume-extract.SKILL.md`) and burn their whole run failing to find it, so
   // when the caller knows the resolved path, state it outright.

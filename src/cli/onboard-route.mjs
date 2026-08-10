@@ -60,6 +60,7 @@ import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtim
 import { readUsageEvents, summarizeUsageEvents } from "../core/ai/usage-log.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import {
+  authorizationDeclared,
   candidateArtifactExists,
   candidateArtifactPut,
   candidateConfigGet,
@@ -200,6 +201,9 @@ const SETTINGS_DATA_FILES = [
   "modes",
   "honesty",
   "evidence",
+  // Lane A / R1, R5 — same reason as the DB-path stateData.automation above:
+  // computeSetupProgress's consent item reads data.automation.setup_mode.
+  "automation",
 ];
 const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
   enabled: true,
@@ -544,6 +548,11 @@ function dbSourceResumePresent(pathCtx) {
 // reads — no new store, per the W4 spec's server-scope note. `complete`
 // mirrors the design's "Setup complete · 7 of 7" line; the caller can leave
 // at any point (nothing here gates app routes, it's report-only).
+// Lane A / R5 — authorization and consent join the original 7 as glanceable
+// "quick facts"-style setup items (the interview's confirm-pill kinds that
+// aren't tied to a multi-field editor). Appended at the end rather than
+// interleaved so every pre-existing index/order assumption (MiniProgressRow,
+// FilePane's row list) keeps reading the first 7 exactly as before.
 const SETUP_PROGRESS_ITEMS = [
   "engine",
   "resume",
@@ -552,7 +561,29 @@ const SETUP_PROGRESS_ITEMS = [
   "evidence",
   "guardrails",
   "quickFacts",
+  "authorization",
+  "consent",
 ];
+
+// "Value present" for authorization reuses candidate.mjs's own declared-split
+// (R3) — a profile.authorization sub-object with real boolean answers for
+// both fields, OR a recorded decline. Kept in sync with computeCandidateSetup's
+// gate/apply-readiness computation rather than re-derived here.
+function authorizationValuePresent(data = {}) {
+  return authorizationDeclared(data.profile || {}, data["form-defaults"] || {});
+}
+
+// "Value present" for consent = setup_mode has been explicitly written at
+// least once (candidate/automation.yml's absence is load-bearing — see
+// AUTOMATION_ROUTE_ENTRY's own comment — so the DB default is `{}`, no
+// setup_mode key, until the user picks basic/advanced) OR a decline was
+// recorded (the decline leaves setup_mode untouched — see the spec's Decline
+// UX section — so it needs its own OR branch here).
+function consentValuePresent(data = {}) {
+  const automation = data.automation || {};
+  const declinedFields = data["form-defaults"]?.declined_fields || {};
+  return typeof automation.setup_mode === "string" || !!declinedFields.consent;
+}
 
 export function computeSetupProgress({
   data = {},
@@ -575,6 +606,8 @@ export function computeSetupProgress({
       !!profileLocation.remote ||
       !!profileLocation.hybrid ||
       !!profileLocation.onsite,
+    authorization: authorizationValuePresent(data),
+    consent: consentValuePresent(data),
   };
 
   const completedCount = SETUP_PROGRESS_ITEMS.filter((key) => done[key]).length;
@@ -1027,6 +1060,16 @@ export function mountOnboardRoutes({
           targeting: config.targeting,
           evidence: config.evidence,
           "form-defaults": config["form-defaults"],
+          // Lane A / R1, R5 — setup_mode/capabilities/consent only:
+          // automation.integrations carries logo.dev credentials, and this
+          // route already has a hard "never echo credential values" contract
+          // (see logoImageTokenConfigured/logoSearchTokenConfigured below) —
+          // never widen this to the raw `automation` doc.
+          automation: {
+            setup_mode: automation.setup_mode,
+            capabilities: automation.capabilities,
+            consent: automation.consent,
+          },
           modes: config.modes,
           honesty: config.honesty,
           setup: config.setup,
@@ -1092,6 +1135,16 @@ export function mountOnboardRoutes({
         // prefill rather than 500ing the whole state read.
         data[name] = {};
       }
+    }
+    // Lane A / R1, R5 — same credential-echo guard as the DB path above:
+    // automation.integrations is never handed back, even in the non-DB
+    // compatibility fallback.
+    if (data.automation) {
+      data.automation = {
+        setup_mode: data.automation.setup_mode,
+        capabilities: data.automation.capabilities,
+        consent: data.automation.consent,
+      };
     }
 
     // M8 additive (Builder B): logo.dev credential presence, never the values

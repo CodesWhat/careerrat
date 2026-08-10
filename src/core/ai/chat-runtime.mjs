@@ -47,6 +47,7 @@
 
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+import { candidateConfigGet } from "../db/verbs.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
@@ -60,6 +61,26 @@ import {
   writeByokUsage,
 } from "./skill-runtime.mjs";
 import { appendUsageEvent } from "./usage-log.mjs";
+
+// Lane A / R6 — the current form-defaults.declined_fields key list, read once
+// per session start (both the SDK path's kickoff message and the installed
+// path's systemPrompt are built exactly once, at startSession time — see
+// startInstalledSession's own header comment on why systemPrompt is replayed
+// unchanged for the rest of that session) and threaded into buildPrompt's
+// posture text so the agent never re-asks a field the user already declined.
+// Best-effort and silent on any failure (no DB yet, corrupt config, a
+// repoRoot with no candidate setup at all) — a chat session must still start
+// with no declines known rather than fail because this read couldn't run.
+function resolveDeclinedFieldKeys({ repoRoot, env }) {
+  try {
+    const declinedFields = candidateConfigGet({ repoRoot, env })?.["form-defaults"]
+      ?.declined_fields;
+    if (!declinedFields || typeof declinedFields !== "object") return [];
+    return Object.keys(declinedFields).filter((key) => declinedFields[key]);
+  } catch {
+    return [];
+  }
+}
 
 // Default-restricted to conversational setup and confirm-first workflow skills:
 // ingest-profile (M2's original interview target), research-boards /
@@ -90,14 +111,14 @@ export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
 // never hand-duplicated.
 // ---------------------------------------------------------------------------
 
-export function buildChatKickoffPrompt({ skill, input } = {}) {
-  return buildPrompt({ skill, input, mode: "conversational" });
+export function buildChatKickoffPrompt({ skill, input, declinedFields = [] } = {}) {
+  return buildPrompt({ skill, input, mode: "conversational", declinedFields });
 }
 
-function buildKickoffMessage({ skill, input }) {
+function buildKickoffMessage({ skill, input, declinedFields }) {
   return {
     type: "user",
-    message: { role: "user", content: buildChatKickoffPrompt({ skill, input }) },
+    message: { role: "user", content: buildChatKickoffPrompt({ skill, input, declinedFields }) },
     parent_tool_use_id: null,
   };
 }
@@ -672,7 +693,13 @@ export function createChatRuntime({
     });
     session.query = q;
 
-    pushQueue.push(buildKickoffMessage({ skill: trimmedSkill, input }));
+    pushQueue.push(
+      buildKickoffMessage({
+        skill: trimmedSkill,
+        input,
+        declinedFields: resolveDeclinedFieldKeys({ repoRoot, env }),
+      })
+    );
 
     // Fire-and-forget: pump() never rejects (every error path inside it
     // closes the session instead), so there's nothing to await or attach a
@@ -696,7 +723,13 @@ export function createChatRuntime({
     const runtimeTools = resolveChatRuntimeTools({ skill: trimmedSkill });
     const skillMdPath = join(repoRoot, ".agents", "skills", trimmedSkill, "SKILL.md");
     const systemPrompt =
-      `${buildPrompt({ skill: trimmedSkill, input, mode: "conversational", skillMdPath })}\n\n` +
+      `${buildPrompt({
+        skill: trimmedSkill,
+        input,
+        mode: "conversational",
+        skillMdPath,
+        declinedFields: resolveDeclinedFieldKeys({ repoRoot, env }),
+      })}\n\n` +
       `This app-authorized run is limited to these capabilities: ${runtimeTools.join(", ") || "none"}. Do not exceed that scope.`;
 
     const abortController = new AbortController();

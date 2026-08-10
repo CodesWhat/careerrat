@@ -349,9 +349,30 @@ function hasCompFloor(profile) {
   return typeof value === "number" && Number.isFinite(value) && value > 0;
 }
 
-function hasAuthorization(profile) {
-  const auth = profile.authorization || {};
-  return auth.work_authorized === true || auth.requires_sponsorship === true;
+// authorizationDeclared — Lane A / R3: splits "declared" (a real answer exists
+// for readiness purposes) from "authorized" (work_authorized or
+// requires_sponsorship === true, hasAuthorization's old, still-narrower bar).
+// gate.mjs / form-fill.mjs / sourced-scanner.mjs keep reading
+// profile.authorization directly with their own semantics — this helper only
+// feeds the readiness/setup surface below (searchMissing never referenced
+// authorization; only gateMissing/applyMissing do).
+//
+// profile.authorization can't carry an "explicitly answered false/false" flag
+// of its own: DEFAULTS.profile.authorization already seeds {work_authorized:
+// false, requires_sponsorship: false} at candidateSetupInitialize() time (see
+// DEFAULTS above, and gate.mjs's own notAuthorized check, which must keep
+// reading that exact default) — so a profile-shape check alone can never tell
+// a genuine "not authorized, no sponsorship needed either" answer apart from
+// an untouched row. The interview UI (apps/web/src/onboarding/InterviewSurface.jsx)
+// resolves that ambiguity procedurally: an authorization confirm-pill save that
+// resolves to {false, false} ALSO records a form-defaults.declined_fields.authorization
+// entry (same as an explicit "I'd rather not say") — so "declared" here is a
+// single check: a recorded decline in form-defaults.declined_fields.authorization,
+// or the pre-existing affirmative case.
+export function authorizationDeclared(profile, formDefaults) {
+  const auth = profile?.authorization || {};
+  const declined = !!formDefaults?.declined_fields?.authorization;
+  return auth.work_authorized === true || auth.requires_sponsorship === true || declined;
 }
 
 function tableExists(db, table) {
@@ -398,6 +419,7 @@ function humanizeDeepIngestStatus(status) {
 function computeCandidateSetup(db) {
   const config = readCandidateConfigFromDb(db);
   const { profile, targeting, evidence } = config;
+  const formDefaults = config["form-defaults"] || {};
   const hasSourceResume = hasCandidateArtifact(db, {
     id: "source-resume",
     kind: "source-resume",
@@ -405,7 +427,7 @@ function computeCandidateSetup(db) {
   const titlesReady = hasAnyTitle(targeting);
   const locationReady = hasSearchLocation(profile);
   const compReady = hasCompFloor(profile);
-  const authReady = hasAuthorization(profile);
+  const authDeclared = authorizationDeclared(profile, formDefaults);
   const evidenceCount = (evidence.claims || []).length;
 
   const searchMissing = [];
@@ -417,7 +439,7 @@ function computeCandidateSetup(db) {
   if (!titlesReady) gateMissing.push("role titles");
   if (!locationReady) gateMissing.push("location posture");
   if (!compReady) gateMissing.push("compensation floor");
-  if (!authReady) gateMissing.push("work authorization");
+  if (!authDeclared) gateMissing.push("work authorization");
 
   const applyMissing = [...gateMissing];
   if (!String(profile.candidate?.full_name || "").trim()) applyMissing.push("candidate full name");

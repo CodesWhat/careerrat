@@ -6636,6 +6636,166 @@ button.chip {
   color: var(--ink-faint);
 }
 
+/* Lane A / R1, R4 — confirm-block pills. Sit directly under an assistant
+ * turn's text (.onboarding-transcript__body stacks them in a column); every
+ * pill is a real <button>, never a passive .onboarding-transcript__pill —
+ * those stay reserved for the read-only "YOU EDITED" dual-drive receipts. */
+.onboarding-transcript__body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.onboarding-transcript__pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.confirm-pill-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+/* Lane A / R4 (decline UX) — authorization and consent_mode pills pair the
+ * primary pill with a flat, text-style decline action, same row. Reuses
+ * .file-pane__row-override's link-button convention (no border, no
+ * background, muted color) rather than inventing new pill chrome. */
+.confirm-pill-group {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.confirm-pill__decline {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--label-font);
+  font-size: 9px;
+  letter-spacing: var(--label-tracking);
+  color: var(--ink-faint);
+  cursor: pointer;
+}
+
+.confirm-pill__decline:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.confirm-pill {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: inherit;
+  font-size: 12px;
+  color: var(--ink);
+  background: var(--card);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  padding: 6px 8px 6px 14px;
+  cursor: pointer;
+}
+
+.confirm-pill:disabled {
+  cursor: default;
+  color: var(--ink-faint);
+}
+
+.confirm-pill--error {
+  border-color: var(--m-error);
+}
+
+.confirm-pill__label {
+  font-weight: 600;
+}
+
+.confirm-pill__summary {
+  color: var(--ink-faint);
+}
+
+.confirm-pill__action {
+  flex-shrink: 0;
+  font-family: var(--label-font);
+  font-size: 9.5px;
+  letter-spacing: var(--label-tracking);
+  color: var(--accent);
+  background: var(--surface);
+  border-radius: 999px;
+  padding: 3px 9px;
+}
+
+.confirm-pill:disabled .confirm-pill__action {
+  color: var(--ink-faint);
+}
+
+.confirm-pill__error-text {
+  padding-left: 14px;
+  font-size: 10.5px;
+  color: var(--m-error);
+}
+
+.confirm-pill--resolved {
+  display: inline-flex;
+  align-items: center;
+  font-family: var(--label-font);
+  font-size: 9.5px;
+  letter-spacing: var(--label-tracking);
+  color: var(--success);
+  background: var(--success-bg);
+  border-radius: 999px;
+  padding: 5px 12px;
+}
+
+/* Lane A / R4 — the consent_mode/consent_capability second-confirmation
+ * dialog. Same centered-overlay convention as .packet-viewer-overlay/
+ * .packet-viewer (see that block's own header comment) sized down for a
+ * short confirmation instead of a document viewer. */
+.confirm-dialog-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  display: grid;
+  place-items: center;
+  background: rgba(var(--rgb-line), 0.35);
+}
+
+.confirm-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: min(420px, calc(100vw - 48px));
+  padding: 22px;
+  border: 1px solid rgba(var(--rgb-line), 0.14);
+  border-radius: 8px;
+  background: var(--paper-surface);
+}
+
+.confirm-dialog__title {
+  margin: 0;
+  font-family: "Archivo", sans-serif;
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.confirm-dialog__body {
+  margin: 0;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--ink-soft);
+}
+
+.confirm-dialog__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* THE RAT'S FILE — file pane. */
 
 .file-pane {
@@ -6756,6 +6916,37 @@ button.chip {
   color: var(--accent);
 }
 
+/* Lane A / R6 — a declined field's row replaces the normal pending/done
+ * button entirely (nothing to click into, no UP NEXT chip) until the user
+ * explicitly overrides it. Same dashed shell as a pending row, no accent
+ * edge — "Answer now" is a plain text-style link action, not new chrome. */
+.file-pane__row--declined {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px dashed var(--input-border);
+  border-radius: 8px;
+}
+
+.file-pane__row-override {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--label-font);
+  font-size: 9px;
+  letter-spacing: var(--label-tracking);
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.file-pane__row-override:disabled {
+  cursor: default;
+  color: var(--ink-faint);
+}
+
 /* Dual-drive editing — 1.5px cobalt FULL border (all four sides), never an
  * edge rail. See design-system-regression.test.js's own carve-out note for
  * the identical .automation-mode__choice--selected precedent. */
@@ -6843,6 +7034,63 @@ button.chip {
   gap: 5px;
   font-size: 12px;
   color: var(--ink-soft);
+}
+
+/* Lane A / R2 — pending company-proposal chips inside the Companies editor.
+ * Accept unions into targeting.tracked_companies (never a replace — see
+ * companyUnion.js); reject just clears the proposal. Same pill shell as
+ * .onboarding-transcript__pill, with two small text-action buttons instead
+ * of the transcript's passive read-only rendering. */
+.file-pane__proposal-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.file-pane__proposal-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.file-pane__proposal-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--ink);
+}
+
+.file-pane__proposal-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 10px;
+}
+
+.file-pane__proposal-actions button {
+  border: none;
+  background: none;
+  padding: 0;
+  font-family: var(--label-font);
+  font-size: 9px;
+  letter-spacing: var(--label-tracking);
+  cursor: pointer;
+}
+
+.file-pane__proposal-actions button:disabled {
+  cursor: default;
+  color: var(--ink-faint);
+}
+
+.file-pane__proposal-accept {
+  color: var(--success);
+}
+
+.file-pane__proposal-reject {
+  color: var(--ink-faint);
 }
 
 /* 3e — done, bar stays as the ask bar. */

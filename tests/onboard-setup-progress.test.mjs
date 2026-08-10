@@ -37,15 +37,25 @@ after(() => {
 // ---------------------------------------------------------------------------
 
 describe("computeSetupProgress", () => {
-  it("marks all 7 items not-done, completedCount 0, and complete:false with no data at all", () => {
+  it("marks all 9 items not-done, completedCount 0, and complete:false with no data at all", () => {
     const progress = computeSetupProgress({});
     assert.deepEqual(
       progress.items.map((i) => i.key),
-      ["engine", "resume", "roles", "companies", "evidence", "guardrails", "quickFacts"]
+      [
+        "engine",
+        "resume",
+        "roles",
+        "companies",
+        "evidence",
+        "guardrails",
+        "quickFacts",
+        "authorization",
+        "consent",
+      ]
     );
     assert.ok(progress.items.every((i) => i.done === false));
     assert.equal(progress.completedCount, 0);
-    assert.equal(progress.total, 7);
+    assert.equal(progress.total, 9);
     assert.equal(progress.complete, false);
   });
 
@@ -121,23 +131,74 @@ describe("computeSetupProgress", () => {
     );
   });
 
-  it("completedCount and complete track exactly how many of the 7 flags are true", () => {
-    const sixOfSeven = computeSetupProgress({
-      keyConfigured: true,
-      sourceResumePresent: true,
-      data: {
-        targeting: {
-          role_buckets: [{ titles: ["Applied AI Engineer"] }],
-          tracked_companies: ["Stripe"],
-          cut_signals: ["Below $200K"],
+  it("authorization flips on work_authorized/requires_sponsorship===true, or a recorded decline", () => {
+    assert.equal(
+      computeSetupProgress({
+        data: { profile: { authorization: { work_authorized: true } } },
+      }).items.find((i) => i.key === "authorization").done,
+      true
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: { profile: { authorization: { requires_sponsorship: true } } },
+      }).items.find((i) => i.key === "authorization").done,
+      true
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          "form-defaults": {
+            declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } },
+          },
         },
-        evidence: { claims: [{ claim: "Shipped a thing" }] },
-      },
-    });
-    assert.equal(sixOfSeven.completedCount, 6);
-    assert.equal(sixOfSeven.complete, false);
+      }).items.find((i) => i.key === "authorization").done,
+      true
+    );
+    // An untouched {false, false} — the freshly-initialized default's exact
+    // shape — must NOT trivially read as done (see authorizationDeclared's
+    // own header comment in src/core/db/verbs/candidate.mjs for why).
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          profile: { authorization: { work_authorized: false, requires_sponsorship: false } },
+        },
+      }).items.find((i) => i.key === "authorization").done,
+      false
+    );
+  });
 
-    const allSeven = computeSetupProgress({
+  it("consent flips once automation.setup_mode is explicitly written, or a recorded decline", () => {
+    assert.equal(
+      computeSetupProgress({ data: { automation: {} } }).items.find((i) => i.key === "consent")
+        .done,
+      false
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: { automation: { setup_mode: "basic" } },
+      }).items.find((i) => i.key === "consent").done,
+      true
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: { automation: { setup_mode: "advanced" } },
+      }).items.find((i) => i.key === "consent").done,
+      true
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          "form-defaults": {
+            declined_fields: { consent: { declined_at: "2026-08-09T12:00:00Z" } },
+          },
+        },
+      }).items.find((i) => i.key === "consent").done,
+      true
+    );
+  });
+
+  it("completedCount and complete track exactly how many of the 9 flags are true", () => {
+    const eightOfNine = computeSetupProgress({
       keyConfigured: true,
       sourceResumePresent: true,
       data: {
@@ -147,11 +208,28 @@ describe("computeSetupProgress", () => {
           cut_signals: ["Below $200K"],
         },
         evidence: { claims: [{ claim: "Shipped a thing" }] },
-        profile: { location: { remote: true } },
+        profile: { location: { remote: true }, authorization: { work_authorized: true } },
       },
     });
-    assert.equal(allSeven.completedCount, 7);
-    assert.equal(allSeven.complete, true);
+    assert.equal(eightOfNine.completedCount, 8);
+    assert.equal(eightOfNine.complete, false);
+
+    const allNine = computeSetupProgress({
+      keyConfigured: true,
+      sourceResumePresent: true,
+      data: {
+        targeting: {
+          role_buckets: [{ titles: ["Applied AI Engineer"] }],
+          tracked_companies: ["Stripe"],
+          cut_signals: ["Below $200K"],
+        },
+        evidence: { claims: [{ claim: "Shipped a thing" }] },
+        profile: { location: { remote: true }, authorization: { work_authorized: true } },
+        automation: { setup_mode: "basic" },
+      },
+    });
+    assert.equal(allNine.completedCount, 9);
+    assert.equal(allNine.complete, true);
   });
 });
 
@@ -255,18 +333,23 @@ describe("GET /api/onboard/state — setupProgress", () => {
     // candidate/targeting.example.yml, evidence.example.yml, and
     // profile.example.yml ship illustrative "Jane Candidate" demo content
     // (role_buckets/tracked_companies/cut_signals/claims/location), not
-    // empty stubs. So setupProgress in fallback mode reports those 5 items
-    // done from the example content alone — only engine (no key) and resume
-    // (no source résumé saved) start unset. This is real, observed behavior,
-    // not the "everything blank" shape a fresh install intuitively suggests.
+    // empty stubs. So setupProgress in fallback mode reports those items done
+    // from the example content alone — only engine (no key) and resume (no
+    // source résumé saved) start unset. The example persona's
+    // profile.example.yml ships work_authorized: true (authorization done)
+    // and templates/automation.example.yml ships setup_mode: basic (consent
+    // done) — same "illustrative example content, not an empty stub" pattern
+    // as roles/companies/evidence/guardrails/quickFacts below.
     const repoRoot = buildTempRoot();
     const routes = mountDirectRoutes(repoRoot);
     const { status, body } = await getDirect(routes, "/api/onboard/state");
     assert.equal(status, 200);
-    assert.equal(body.setupProgress.total, 7);
+    assert.equal(body.setupProgress.total, 9);
     const doneKeys = body.setupProgress.items.filter((i) => i.done).map((i) => i.key);
     assert.deepEqual(doneKeys.sort(), [
+      "authorization",
       "companies",
+      "consent",
       "evidence",
       "guardrails",
       "quickFacts",
@@ -274,7 +357,7 @@ describe("GET /api/onboard/state — setupProgress", () => {
     ]);
     assert.equal(body.setupProgress.items.find((i) => i.key === "engine").done, false);
     assert.equal(body.setupProgress.items.find((i) => i.key === "resume").done, false);
-    assert.equal(body.setupProgress.completedCount, 5);
+    assert.equal(body.setupProgress.completedCount, 7);
     assert.equal(body.setupProgress.complete, false);
   });
 

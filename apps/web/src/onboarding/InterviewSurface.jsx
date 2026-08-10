@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
+  createCompanyProposals,
+  decideCompanyProposal,
   extractResumeAi,
   extractResumeDocx,
   findChatBySkill,
+  getAutomationSettings,
+  getCompanyProposals,
   getOnboardState,
   getSourcingRun,
   parseResumeText,
@@ -14,6 +18,10 @@ import {
   startFirstSearchRun,
 } from "../lib/api.js";
 import { useEventSource } from "../lib/sse.js";
+import { buildAutomationModePatch } from "../settings/AutomationControls.jsx";
+import { ConfirmPill } from "./ConfirmPill.jsx";
+import { unionCompanyNames } from "./companyUnion.js";
+import { parseConfirmBlocks } from "./confirmBlocks.js";
 import { FilePane } from "./FilePane.jsx";
 import { OnboardingBar } from "./OnboardingBar.jsx";
 import {
@@ -22,6 +30,7 @@ import {
   setupCompletedCount,
   setupIsComplete,
   setupProgressFromState,
+  setupTotal,
 } from "./onboardingSetup.js";
 
 const INTERVIEW_SKILL = "ingest-profile";
@@ -50,6 +59,23 @@ function fileExtension(name) {
     ?.toLowerCase();
 }
 
+// Lane A / R1, R4 — immutably flips one parsed confirm block's status within
+// the transcript's messages array (pending -> saving -> resolved|error), by
+// [messageIndex, blockIndex] coordinates assigned when the block was parsed.
+// Never mutates the block in place: React state must see a new reference to
+// re-render the pill.
+function setBlockStatus(messages, messageIndex, blockIndex, status, extra = {}) {
+  return messages.map((message, i) => {
+    if (i !== messageIndex || message.role !== "assistant" || !message.blocks) return message;
+    return {
+      ...message,
+      blocks: message.blocks.map((block, j) =>
+        j === blockIndex ? { ...block, status, ...extra } : block
+      ),
+    };
+  });
+}
+
 // InterviewSurface — design frames 3a (centered opening) through 3b/3c
 // (docked interview + dual-drive editing) and 3e (done, bar stays as the
 // ask bar). One component, not four screens: docking is purely a layout
@@ -64,6 +90,8 @@ export function InterviewSurface({ runtime }) {
   const [starting, setStarting] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState(null);
+  const [automationStatus, setAutomationStatus] = useState(null);
+  const [companyProposals, setCompanyProposals] = useState({ batchId: null, items: [] });
   const prevDoneRef = useRef({});
   const resumedRef = useRef(false);
 
@@ -73,9 +101,57 @@ export function InterviewSurface({ runtime }) {
     return next;
   }, []);
 
+  // Lane A / R1, R4 — automationStatus backs the consent_capability pill's
+  // "requires advanced mode" gate and its code-owned capability/platform
+  // labels (automationStatus().capabilities[].label/summary — the same
+  // route AutomationControls.jsx already reads, never a duplicated
+  // frontend copy of CAPABILITIES).
+  const reloadAutomationStatus = useCallback(async () => {
+    try {
+      const next = await getAutomationSettings();
+      setAutomationStatus(next);
+      return next;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  // Lane A / R2, R6 — the latest pending company-proposal batch (GET
+  // /api/discovery/company-proposals?status=pending returns { data: { batch
+  // } }, a single batch object — not an array). FilePane's Companies editor
+  // renders companyProposals.items as accept/reject chips; batchId +
+  // per-proposal version travel with each item so a decision call can
+  // include the {batchId, proposalId, expectedVersion} optimistic-
+  // concurrency triple the backend requires (see
+  // src/core/discovery/company-proposal-decisions.mjs).
+  const reloadCompanyProposals = useCallback(async () => {
+    try {
+      const res = await getCompanyProposals({ status: "pending" });
+      const batch = res?.data?.batch ?? null;
+      setCompanyProposals({
+        batchId: batch?.batchId ?? null,
+        items: (batch?.proposals ?? []).map((p) => ({
+          proposalId: p.proposalId,
+          name: p.company?.name || "",
+          version: p.version,
+        })),
+      });
+    } catch {
+      setCompanyProposals({ batchId: null, items: [] });
+    }
+  }, []);
+
   useEffect(() => {
     void reloadState();
   }, [reloadState]);
+
+  useEffect(() => {
+    void reloadAutomationStatus();
+  }, [reloadAutomationStatus]);
+
+  useEffect(() => {
+    void reloadCompanyProposals();
+  }, [reloadCompanyProposals]);
 
   // Resumability (spec's "Decided defaults" section): reopening /onboarding
   // reconnects to a live session rather than starting a fresh interview.
@@ -126,8 +202,24 @@ export function InterviewSurface({ runtime }) {
       data = null;
     }
     if (type === "assistant") {
-      const text = extractAssistantText(data);
-      if (text) setMessages((m) => [...m, { role: "assistant", text }]);
+      const assistantRaw = extractAssistantText(data);
+      if (assistantRaw) {
+        // Lane A / R1, R4 — strip any confirm fences out of the display text
+        // and attach the validated blocks so TranscriptTurn can render a
+        // ConfirmPill per block. A turn that is ONLY a confirm block (no
+        // other prose) still gets a transcript entry — text renders empty.
+        const { text, blocks } = parseConfirmBlocks(assistantRaw);
+        if (text || blocks.length) {
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              text,
+              blocks: blocks.map((block) => ({ ...block, status: "pending" })),
+            },
+          ]);
+        }
+      }
     } else if (type === "chat_state") {
       if (data?.state) {
         setChatState(data.state);
@@ -250,6 +342,153 @@ export function InterviewSurface({ runtime }) {
     }
   }
 
+  // Lane A / R1-R4 — dispatches one confirm block's write, per kind. Returns
+  // the resultSummary string a resolved pill displays. Every write here goes
+  // through the SAME REST endpoints the file pane's manual editors already
+  // use (saveCandidateFile et al.) — this never adds a new agent tool; the
+  // pill click is the human action that turns the model's proposal into a
+  // real write.
+  async function runConfirmAction(block) {
+    if (block.kind === "authorization") {
+      await saveCandidateFile("profile", { authorization: block.patch });
+      // R3: candidate.mjs's authorizationDeclared() only treats an explicit
+      // true/true-style answer or a recorded decline as "declared" (day-1
+      // DB defaults already seed false/false, so that pair alone can't mean
+      // "declared" server-side without this procedural write) — an
+      // authorization pill that resolves to false/false is itself the
+      // user's explicit "no/no" answer, so it also records the decline.
+      if (block.patch.work_authorized === false && block.patch.requires_sponsorship === false) {
+        await saveCandidateFile("form-defaults", {
+          declined_fields: { authorization: { declined_at: new Date().toISOString() } },
+        });
+      }
+      await checkProgressDelta();
+      return "Work authorization saved";
+    }
+    if (block.kind === "consent_mode") {
+      const patch = buildAutomationModePatch(automationStatus, block.payload);
+      await saveCandidateFile("automation", patch);
+      await reloadAutomationStatus();
+      await checkProgressDelta();
+      return block.payload === "advanced" ? "Advanced mode on" : "Basic mode kept";
+    }
+    if (block.kind === "consent_capability") {
+      // Defense in depth — the pill is already disabled in the UI until
+      // advanced mode is on (R1); this guards the same call reaching here
+      // from a stale render.
+      if (automationStatus?.mode !== "advanced") {
+        throw new Error("Advanced mode must be turned on first.");
+      }
+      const { capability, platform } = block.payload;
+      // R1 — one write sets capabilities.<cap>.platforms.<platform>=true,
+      // capabilities.<cap>.enabled=true, and consent.<platform>=true together.
+      await saveCandidateFile("automation", {
+        capabilities: { [capability]: { enabled: true, platforms: { [platform]: true } } },
+        consent: { [platform]: true },
+      });
+      await reloadAutomationStatus();
+      await checkProgressDelta();
+      return "Permission granted";
+    }
+    if (block.kind === "companies_suggest") {
+      await createCompanyProposals({});
+      await reloadCompanyProposals();
+      return "Suggestions ready — check the file pane";
+    }
+    if (block.kind === "company_add") {
+      // R2 — union with the existing list, never a replace.
+      const existing = state?.data?.targeting?.tracked_companies ?? [];
+      const next = unionCompanyNames(existing, [block.payload.name]);
+      await saveCandidateFile("targeting", { tracked_companies: next });
+      await reloadState();
+      return `Added ${block.payload.name}`;
+    }
+    throw new Error(`Unknown confirm kind "${block.kind}"`);
+  }
+
+  async function handleConfirmAction(messageIndex, blockIndex, block) {
+    setMessages((m) => setBlockStatus(m, messageIndex, blockIndex, "saving"));
+    try {
+      const resultSummary = await runConfirmAction(block);
+      setMessages((m) =>
+        setBlockStatus(m, messageIndex, blockIndex, "resolved", { resultSummary })
+      );
+    } catch (err) {
+      const message = err?.body?.error || (err instanceof Error ? err.message : "Save failed.");
+      setMessages((m) => setBlockStatus(m, messageIndex, blockIndex, "error", { error: message }));
+    }
+  }
+
+  // Lane A / R4, R6 (Decline UX) — the pill-level "I'd rather not say" action
+  // for authorization/consent_mode blocks (see DECLINABLE_KINDS in
+  // ConfirmPill.jsx). This is the only path that lets a decline made INSIDE
+  // the chat actually get recorded: the agent has no write tools of its own,
+  // so without this a user who tells the agent "I'd rather not say" has no
+  // way to turn that into a real declined_fields write short of switching to
+  // the file pane. Writes ONLY form-defaults.declined_fields — for
+  // consent_mode this deliberately never touches automation.setup_mode, so
+  // declining consent can't leave automation half-configured. Fires the same
+  // [SYSTEM] chat-note pattern handleFieldSaved uses for a manual file-pane
+  // edit, so the agent's next turn acknowledges the decline instead of
+  // re-asking, and checkProgressDelta so the item flips to "Declined".
+  async function runDeclineAction(block) {
+    const key = block.kind === "consent_mode" ? "consent" : "authorization";
+    await saveCandidateFile("form-defaults", {
+      declined_fields: { [key]: { declined_at: new Date().toISOString() } },
+    });
+    await checkProgressDelta();
+    if (chatId) {
+      try {
+        await sendChatMessage(
+          chatId,
+          `[SYSTEM] The user declined to answer ${SETUP_ITEM_LABELS[key].toLowerCase()} (won't ask again). Acknowledge this and move on.`
+        );
+      } catch {
+        // Best-effort — the decline is already recorded; the assistant
+        // simply won't get a chance to acknowledge it this turn.
+      }
+    }
+    return "Noted — won't ask again";
+  }
+
+  async function handleDeclineAction(messageIndex, blockIndex, block) {
+    setMessages((m) => setBlockStatus(m, messageIndex, blockIndex, "saving"));
+    try {
+      const resultSummary = await runDeclineAction(block);
+      setMessages((m) =>
+        setBlockStatus(m, messageIndex, blockIndex, "resolved", { resultSummary })
+      );
+    } catch (err) {
+      const message = err?.body?.error || (err instanceof Error ? err.message : "Save failed.");
+      setMessages((m) => setBlockStatus(m, messageIndex, blockIndex, "error", { error: message }));
+    }
+  }
+
+  // Lane A / R2, R6 — FilePane's companies-proposal accept/reject chips call
+  // this. Accept unions the proposal's company name into
+  // targeting.tracked_companies (never a replace — companyUnion.js) and
+  // records the decision as "approve-supported-ats" with userConfirmed:true
+  // (a human click in the file pane relaxes the same confidence-tier bar
+  // the backend applies to an unattended auto-approve); reject just records
+  // "reject". Either way the proposal disappears from the pending list on
+  // the next reload.
+  async function handleCompanyProposalDecision(proposal, action) {
+    await decideCompanyProposal({
+      batchId: companyProposals.batchId,
+      proposalId: proposal.proposalId,
+      action,
+      expectedVersion: proposal.version,
+      ...(action === "approve-supported-ats" ? { userConfirmed: true } : {}),
+    });
+    if (action === "approve-supported-ats") {
+      const existing = state?.data?.targeting?.tracked_companies ?? [];
+      const next = unionCompanyNames(existing, [proposal.name]);
+      await saveCandidateFile("targeting", { tracked_companies: next });
+      await reloadState();
+    }
+    await reloadCompanyProposals();
+  }
+
   if (!state) return null;
 
   const docked = !!chatId;
@@ -274,7 +513,7 @@ export function InterviewSurface({ runtime }) {
         </div>
         <span className="onboarding-app__status">
           {docked
-            ? `SETUP · ${setupCompletedCount(state)} OF 7 · INTERVIEW IN PROGRESS`
+            ? `SETUP · ${setupCompletedCount(state)} OF ${setupTotal(state)} · INTERVIEW IN PROGRESS`
             : `ENGINE · ${runtime?.name?.toUpperCase() || "READY"}`}
         </span>
       </header>
@@ -313,8 +552,15 @@ export function InterviewSurface({ runtime }) {
           <div className="onboarding-interview__chat">
             <div className="onboarding-transcript">
               {messages.map((m, i) => (
-                // biome-ignore lint/suspicious/noArrayIndexKey: append-only transcript log
-                <TranscriptTurn key={i} message={m} />
+                <TranscriptTurn
+                  // biome-ignore lint/suspicious/noArrayIndexKey: append-only transcript log
+                  key={i}
+                  message={m}
+                  index={i}
+                  automationStatus={automationStatus}
+                  onConfirmBlock={handleConfirmAction}
+                  onDeclineBlock={handleDeclineAction}
+                />
               ))}
               {chatState === "running" ? (
                 <div className="onboarding-transcript__thinking">Thinking…</div>
@@ -327,6 +573,8 @@ export function InterviewSurface({ runtime }) {
             runtime={runtime}
             onReload={reloadState}
             onFieldSaved={handleFieldSaved}
+            companyProposals={companyProposals.items}
+            onDecideCompanyProposal={handleCompanyProposalDecision}
           />
         </div>
       )}
@@ -359,7 +607,7 @@ function MiniProgressRow({ state }) {
   );
 }
 
-function TranscriptTurn({ message }) {
+function TranscriptTurn({ message, index, automationStatus, onConfirmBlock, onDeclineBlock }) {
   if (message.role === "receipt") {
     return <div className="onboarding-transcript__receipt">{message.text}</div>;
   }
@@ -382,7 +630,23 @@ function TranscriptTurn({ message }) {
       <span className="onboarding-transcript__avatar" aria-hidden="true">
         R
       </span>
-      <span className="onboarding-transcript__text">{message.text}</span>
+      <div className="onboarding-transcript__body">
+        {message.text ? <span className="onboarding-transcript__text">{message.text}</span> : null}
+        {message.blocks?.length ? (
+          <div className="onboarding-transcript__pills">
+            {message.blocks.map((block, blockIndex) => (
+              <ConfirmPill
+                // biome-ignore lint/suspicious/noArrayIndexKey: fixed per-turn block list, no stable id
+                key={blockIndex}
+                block={block}
+                automationStatus={automationStatus}
+                onConfirm={() => onConfirmBlock(index, blockIndex, block)}
+                onDecline={() => onDeclineBlock(index, blockIndex, block)}
+              />
+            ))}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -428,7 +692,9 @@ function CompletionScreen({ state, runtime, onSend, reloadState }) {
         <div className="onboarding-app__brand">
           CareerRat<span className="onboarding-app__brand-dot">.</span>
         </div>
-        <span className="onboarding-app__status">SETUP · 7 OF 7 · DONE</span>
+        <span className="onboarding-app__status">
+          SETUP · {setupTotal(state)} OF {setupTotal(state)} · DONE
+        </span>
       </header>
       <main className="onboarding-done">
         <div>
@@ -442,7 +708,10 @@ function CompletionScreen({ state, runtime, onSend, reloadState }) {
             ✓
           </span>
           <span className="onboarding-done__label">
-            Setup complete <span className="onboarding-done__label-muted">· 7 of 7</span>
+            Setup complete{" "}
+            <span className="onboarding-done__label-muted">
+              · {setupTotal(state)} of {setupTotal(state)}
+            </span>
           </span>
           <button
             type="button"

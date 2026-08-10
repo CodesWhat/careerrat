@@ -5,9 +5,10 @@
 // the engine gate, the file pane, and the mini-progress row without either
 // component re-deriving the same shape.
 //
-// The 7 setup items (engine, resume, roles, companies, evidence, guardrails,
-// quickFacts) mirror src/cli/onboard-route.mjs's computeSetupProgress() —
-// GET /api/onboard/state's `setupProgress` field is the source of truth for
+// The 9 setup items (engine, resume, roles, companies, evidence, guardrails,
+// quickFacts, authorization, consent — the last two added for Lane A / R5)
+// mirror src/cli/onboard-route.mjs's computeSetupProgress() — GET
+// /api/onboard/state's `setupProgress` field is the source of truth for
 // which items are "done"; this module only adds display copy (labels,
 // detail lines, UP NEXT) on top of that server-computed done/undone shape.
 
@@ -19,6 +20,8 @@ export const SETUP_ITEM_ORDER = [
   "evidence",
   "guardrails",
   "quickFacts",
+  "authorization",
+  "consent",
 ];
 
 export const SETUP_ITEM_LABELS = {
@@ -29,10 +32,12 @@ export const SETUP_ITEM_LABELS = {
   evidence: "Evidence",
   guardrails: "Guardrails",
   quickFacts: "Quick facts",
+  authorization: "Work authorization",
+  consent: "Automation consent",
 };
 
 // The compact mono-caps chip row shown in 3a (centered, before docking) —
-// same 7 items, just uppercase short labels.
+// same items, just uppercase short labels.
 export const SETUP_CHIP_LABELS = {
   engine: "ENGINE",
   resume: "RESUME",
@@ -41,9 +46,11 @@ export const SETUP_CHIP_LABELS = {
   evidence: "EVIDENCE",
   guardrails: "GUARDRAILS",
   quickFacts: "QUICK FACTS",
+  authorization: "AUTHORIZATION",
+  consent: "CONSENT",
 };
 
-// Builds the ordered 7-row view model the mini-progress row and the file
+// Builds the ordered row view model the mini-progress row and the file
 // pane both render from. `doneByKey` comes straight off
 // state.setupProgress.items (server-computed); this never re-derives
 // done-ness itself. The "next" flag marks the first not-done item after the
@@ -66,6 +73,13 @@ export function setupProgressFromState(state) {
 
 export function setupCompletedCount(state) {
   return state?.setupProgress?.completedCount ?? 0;
+}
+
+// Lane A / R5 — the header/completion-screen "X of N" copy must read the
+// server-computed total rather than a hardcoded item count, so a future
+// setup-item addition never desyncs the two.
+export function setupTotal(state) {
+  return state?.setupProgress?.total ?? SETUP_ITEM_ORDER.length;
 }
 
 export function setupIsComplete(state) {
@@ -124,6 +138,24 @@ export function quickFactsDetailLine({ state } = {}) {
   return modes.join(" · ");
 }
 
+export function authorizationDetailLine({ state } = {}) {
+  const auth = state?.data?.profile?.authorization ?? {};
+  const declined = !!state?.data?.["form-defaults"]?.declined_fields?.authorization;
+  if (declined) return "Declined";
+  if (auth.work_authorized === true) return "Authorized";
+  if (auth.requires_sponsorship === true) return "Needs sponsorship";
+  return null;
+}
+
+export function consentDetailLine({ state } = {}) {
+  const automation = state?.data?.automation ?? {};
+  const declined = !!state?.data?.["form-defaults"]?.declined_fields?.consent;
+  if (declined) return "Declined";
+  if (automation.setup_mode === "advanced") return "Advanced";
+  if (automation.setup_mode === "basic") return "Basic";
+  return null;
+}
+
 const DETAIL_LINE_BUILDERS = {
   engine: engineDetailLine,
   resume: resumeDetailLine,
@@ -132,6 +164,8 @@ const DETAIL_LINE_BUILDERS = {
   evidence: evidenceDetailLine,
   guardrails: guardrailsDetailLine,
   quickFacts: quickFactsDetailLine,
+  authorization: authorizationDetailLine,
+  consent: consentDetailLine,
 };
 
 export function detailLineFor(key, ctx) {

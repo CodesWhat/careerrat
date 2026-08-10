@@ -6,8 +6,10 @@
 
 import { describe, expect, it } from "vitest";
 import {
+  authorizationDetailLine,
   buildSetupItemViewModels,
   companiesDetailLine,
+  consentDetailLine,
   detailLineFor,
   engineDetailLine,
   evidenceDetailLine,
@@ -20,10 +22,11 @@ import {
   setupCompletedCount,
   setupIsComplete,
   setupProgressFromState,
+  setupTotal,
 } from "./onboardingSetup.js";
 
 describe("SETUP_ITEM_ORDER / SETUP_ITEM_LABELS", () => {
-  it("has exactly the 7 setup items in the documented order", () => {
+  it("has exactly the 9 setup items in the documented order (Lane A adds authorization, consent)", () => {
     expect(SETUP_ITEM_ORDER).toEqual([
       "engine",
       "resume",
@@ -32,6 +35,8 @@ describe("SETUP_ITEM_ORDER / SETUP_ITEM_LABELS", () => {
       "evidence",
       "guardrails",
       "quickFacts",
+      "authorization",
+      "consent",
     ]);
   });
 
@@ -46,7 +51,7 @@ describe("SETUP_ITEM_ORDER / SETUP_ITEM_LABELS", () => {
 describe("buildSetupItemViewModels", () => {
   it("marks every item not-done, and the FIRST item as UP NEXT, when doneByKey is empty", () => {
     const items = buildSetupItemViewModels({});
-    expect(items).toHaveLength(7);
+    expect(items).toHaveLength(9);
     expect(items.every((item) => item.done === false)).toBe(true);
     expect(items[0].key).toBe("engine");
     expect(items[0].isNext).toBe(true);
@@ -124,6 +129,18 @@ describe("setupCompletedCount / setupIsComplete", () => {
   it("setupIsComplete requires complete to be strictly true", () => {
     expect(setupIsComplete({ setupProgress: { complete: "true" } })).toBe(false);
     expect(setupIsComplete({ setupProgress: { complete: 1 } })).toBe(false);
+  });
+});
+
+describe("setupTotal", () => {
+  it("reads state.setupProgress.total when present", () => {
+    expect(setupTotal({ setupProgress: { total: 9 } })).toBe(9);
+  });
+
+  it("falls back to SETUP_ITEM_ORDER.length when total is absent", () => {
+    expect(setupTotal(undefined)).toBe(SETUP_ITEM_ORDER.length);
+    expect(setupTotal({})).toBe(SETUP_ITEM_ORDER.length);
+    expect(setupTotal({ setupProgress: {} })).toBe(SETUP_ITEM_ORDER.length);
   });
 });
 
@@ -247,6 +264,61 @@ describe("quickFactsDetailLine", () => {
         state: { data: { profile: { location: { remote: true, hybrid: true, onsite: true } } } },
       })
     ).toBe("Remote · Hybrid · On-site");
+  });
+});
+
+describe("authorizationDetailLine", () => {
+  it("returns null with no authorization answered and no decline", () => {
+    expect(authorizationDetailLine({ state: {} })).toBeNull();
+    expect(
+      authorizationDetailLine({
+        state: { data: { profile: { authorization: { work_authorized: false } } } },
+      })
+    ).toBeNull();
+  });
+
+  it("returns 'Declined' when declined_fields.authorization is recorded, regardless of the answer", () => {
+    expect(
+      authorizationDetailLine({
+        state: { data: { "form-defaults": { declined_fields: { authorization: {} } } } },
+      })
+    ).toBe("Declined");
+  });
+
+  it("returns 'Authorized' or 'Needs sponsorship' from the profile answer", () => {
+    expect(
+      authorizationDetailLine({
+        state: { data: { profile: { authorization: { work_authorized: true } } } },
+      })
+    ).toBe("Authorized");
+    expect(
+      authorizationDetailLine({
+        state: { data: { profile: { authorization: { requires_sponsorship: true } } } },
+      })
+    ).toBe("Needs sponsorship");
+  });
+});
+
+describe("consentDetailLine", () => {
+  it("returns null with no setup_mode and no decline", () => {
+    expect(consentDetailLine({ state: {} })).toBeNull();
+  });
+
+  it("returns 'Declined' when declined_fields.consent is recorded", () => {
+    expect(
+      consentDetailLine({
+        state: { data: { "form-defaults": { declined_fields: { consent: {} } } } },
+      })
+    ).toBe("Declined");
+  });
+
+  it("returns 'Basic' or 'Advanced' from automation.setup_mode", () => {
+    expect(consentDetailLine({ state: { data: { automation: { setup_mode: "basic" } } } })).toBe(
+      "Basic"
+    );
+    expect(consentDetailLine({ state: { data: { automation: { setup_mode: "advanced" } } } })).toBe(
+      "Advanced"
+    );
   });
 });
 

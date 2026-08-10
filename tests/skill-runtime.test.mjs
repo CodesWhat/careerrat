@@ -16,6 +16,7 @@ import { DEFAULT_MODEL, DEFAULT_SMALL_FAST_MODEL } from "../src/core/ai/ai-confi
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import {
   buildChildEnv,
+  buildPrompt,
   discoverSkillDirs,
   loadClaudeAgentSdk,
   mapSdkMessage,
@@ -810,6 +811,47 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
+});
+
+// ---------------------------------------------------------------------------
+// buildPrompt — Lane A / R1, R4, R6: the confirm-block posture-text addition.
+// Conversational mode only (the one-shot embedded runtime has nobody to click
+// a pill); oneshot must stay byte-identical to the pre-Lane-A text.
+// ---------------------------------------------------------------------------
+
+test("buildPrompt: conversational mode includes the confirm-block fence syntax and the closed kind set", () => {
+  const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
+  assert.match(prompt, /```careerrat:confirm/);
+  assert.match(prompt, /"kind":"authorization"/);
+  assert.match(prompt, /consent_mode/);
+  assert.match(prompt, /consent_capability/);
+  assert.match(prompt, /companies_suggest/);
+  assert.match(prompt, /company_add/);
+  assert.match(prompt, /propose consent_mode before/i);
+});
+
+test("buildPrompt: oneshot mode never gets the confirm-block guidance (byte-identical framing)", () => {
+  const prompt = buildPrompt({ skill: "evaluate-job", input: "go", mode: "oneshot" });
+  assert.doesNotMatch(prompt, /careerrat:confirm/);
+  assert.match(prompt, /non-interactive, headless/);
+});
+
+test("buildPrompt: conversational mode injects the current declined-fields list so the agent never re-asks", () => {
+  const withDeclines = buildPrompt({
+    skill: "ingest-profile",
+    input: "hi",
+    mode: "conversational",
+    declinedFields: ["authorization", "consent"],
+  });
+  assert.match(withDeclines, /already declined to answer: authorization, consent/);
+  assert.match(withDeclines, /never ask about these again/);
+
+  const withoutDeclines = buildPrompt({
+    skill: "ingest-profile",
+    input: "hi",
+    mode: "conversational",
+  });
+  assert.doesNotMatch(withoutDeclines, /already declined/);
 });
 
 // ---------------------------------------------------------------------------

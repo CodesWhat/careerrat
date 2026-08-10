@@ -19,6 +19,7 @@ export {
 } from "./app.mjs";
 export { calendarBusyUpsert, calendarWriteAppend } from "./calendar.mjs";
 export {
+  authorizationDeclared,
   candidateApplicationLimitUpsert,
   candidateArtifactExists,
   candidateArtifactGet,

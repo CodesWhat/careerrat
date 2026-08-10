@@ -18,6 +18,7 @@ import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { closeAll } from "../src/core/db/connection.mjs";
 import {
+  authorizationDeclared,
   candidateArtifactPut,
   candidateConfigGet,
   candidateConfigPatch,
@@ -565,5 +566,106 @@ describe("candidate setup DB readiness and document formats", () => {
     );
     assert.equal(unknownRejected.valid, false, "unknown export formats must be rejected");
     assert.match(JSON.stringify(unknownRejected.errors), /document_formats|pages|enum/i);
+  });
+
+  it("validates declined_fields — an object with declined_at, or null to clear it", () => {
+    const schema = formDefaultsSchema();
+
+    const declined = validate(
+      {
+        auto_submit: false,
+        declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } },
+      },
+      schema
+    );
+    assert.equal(declined.valid, true, JSON.stringify(declined.errors));
+
+    const cleared = validate(
+      { auto_submit: false, declined_fields: { authorization: null } },
+      schema
+    );
+    assert.equal(cleared.valid, true, JSON.stringify(cleared.errors));
+
+    const missingTimestamp = validate(
+      { auto_submit: false, declined_fields: { authorization: {} } },
+      schema
+    );
+    assert.equal(missingTimestamp.valid, false, "declined_at must be required when present");
+  });
+
+  it("authorizationDeclared — R3 readiness declared-split (declined, false/false via decline, absent)", () => {
+    // Absent: no authorization sub-object, no decline — still missing. This is
+    // also the freshly-initialized DB row's exact shape (DEFAULTS.profile.authorization
+    // is {false, false}), so a plain profile-shape check can never tell "never
+    // touched" apart from "explicitly answered false/false" — see this
+    // function's own header comment for why the false/false case below is
+    // only declared once the UI also records a decline.
+    assert.equal(authorizationDeclared({}, {}), false);
+    assert.equal(authorizationDeclared({ authorization: {} }, {}), false);
+    assert.equal(
+      authorizationDeclared(
+        { authorization: { work_authorized: false, requires_sponsorship: false } },
+        {}
+      ),
+      false,
+      "false/false alone (no recorded decline) must still read as missing — same shape as an untouched default"
+    );
+
+    // True/anything and anything/true count (the pre-existing "authorized" case).
+    assert.equal(
+      authorizationDeclared(
+        { authorization: { work_authorized: true, requires_sponsorship: false } },
+        {}
+      ),
+      true
+    );
+
+    // An explicit false/false answer counts as declared once the interview UI
+    // has also recorded it as a decline (InterviewSurface's own save path).
+    assert.equal(
+      authorizationDeclared(
+        { authorization: { work_authorized: false, requires_sponsorship: false } },
+        { declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } } }
+      ),
+      true
+    );
+
+    // A recorded decline counts as declared even with no authorization sub-object.
+    assert.equal(
+      authorizationDeclared(
+        {},
+        { declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } } }
+      ),
+      true
+    );
+
+    // A cleared decline (null) does not count.
+    assert.equal(authorizationDeclared({}, { declined_fields: { authorization: null } }), false);
+  });
+
+  it("computeCandidateSetup — a recorded decline drops 'work authorization' from gate/apply missing", () => {
+    const repoRoot = buildDbRoot();
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { role_buckets: [{ name: "Primary", priority: "primary", titles: ["Engineer"] }] },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { location: { home: "Remote", remote: true, hybrid: false, onsite: false } },
+    });
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "form-defaults",
+      patch: { declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } } },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.ok(
+      !config.setup.missing.gate_ready.includes("work authorization"),
+      `expected "work authorization" to be cleared by a decline; got: ${JSON.stringify(config.setup.missing.gate_ready)}`
+    );
   });
 });

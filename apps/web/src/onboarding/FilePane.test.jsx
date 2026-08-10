@@ -136,6 +136,8 @@ const EMPTY_STATE = {
       { key: "evidence", done: false },
       { key: "guardrails", done: false },
       { key: "quickFacts", done: false },
+      { key: "authorization", done: false },
+      { key: "consent", done: false },
     ],
   },
   sourceResumePresent: false,
@@ -165,12 +167,12 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("FilePane — rows", () => {
-  it("renders exactly 7 rows in the fixed order with the pane heading", () => {
+  it("renders exactly 9 rows in the fixed order with the pane heading", () => {
     const tree = render({ state: EMPTY_STATE });
     expect(textOf(byClass(tree, "file-pane__title")[0])).toBe("THE RAT'S FILE");
     expect(textOf(byClass(tree, "file-pane__subtitle")[0])).toBe("LIVE · ~/CANDIDATE");
     const rows = byClass(tree, "file-pane__row");
-    expect(rows).toHaveLength(7);
+    expect(rows).toHaveLength(9);
     expect(rows.map((r) => textOf(byClass(r, "file-pane__row-title")[0]))).toEqual([
       "Engine",
       "Resume",
@@ -179,6 +181,8 @@ describe("FilePane — rows", () => {
       "Evidence",
       "Guardrails",
       "Quick facts",
+      "Work authorization",
+      "Automation consent",
     ]);
   });
 
@@ -454,5 +458,218 @@ describe("FilePane — Roles editor blocks empty-title lanes (ISSUE-006)", () =>
       role_buckets: [bucketA, bucketB],
     });
     expect(onFieldSaved).toHaveBeenCalledWith({ key: "roles", summary: "2 role lanes" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lane A / R3, R6 — authorization row (declared-vs-answered split, decline)
+// ---------------------------------------------------------------------------
+
+describe("FilePane — Authorization editor (R3, R6)", () => {
+  it("saving true/false writes only profile.authorization (no decline write)", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Work authorization").props.onClick();
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    const authorizedToggle = visit(
+      tree,
+      (n) => n.type === "input" && n.props.type === "checkbox"
+    )[0];
+    authorizedToggle.props.onChange({ target: { checked: true } });
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    const form = byClass(tree, "file-pane__editor")[0];
+    await form.props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      authorization: { work_authorized: true, requires_sponsorship: false },
+    });
+    expect(onFieldSaved).toHaveBeenCalledWith({ key: "authorization", summary: "authorized" });
+  });
+
+  it("saving false/false also records declined_fields.authorization (R3's procedural fix)", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Work authorization").props.onClick();
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    const form = byClass(tree, "file-pane__editor")[0];
+    await form.props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(2);
+    expect(api.saveCandidateFile).toHaveBeenNthCalledWith(1, "profile", {
+      authorization: { work_authorized: false, requires_sponsorship: false },
+    });
+    expect(api.saveCandidateFile.mock.calls[1][0]).toBe("form-defaults");
+    expect(
+      api.saveCandidateFile.mock.calls[1][1].declined_fields.authorization.declined_at
+    ).toEqual(expect.any(String));
+    expect(onFieldSaved).toHaveBeenCalledWith({ key: "authorization", summary: "not authorized" });
+  });
+
+  it("Decline to answer records the decline with no profile write", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Work authorization").props.onClick();
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    const declineButton = visit(
+      tree,
+      (n) => n.type === "button" && textOf(n) === "Decline to answer"
+    )[0];
+    await declineButton.props.onClick();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
+      declined_fields: { authorization: { declined_at: expect.any(String) } },
+    });
+    expect(onFieldSaved).toHaveBeenCalledWith({ key: "authorization", summary: "declined" });
+  });
+
+  it("a declined field renders the 'Declined — won't ask again' row instead of the normal button", () => {
+    const state = stateWith([], {
+      "form-defaults": { declined_fields: { authorization: { declined_at: "2026-01-01" } } },
+    });
+    const tree = render({ state });
+    const declinedRow = byClass(tree, "file-pane__row--declined")[0];
+    expect(declinedRow).toBeTruthy();
+    expect(textOf(declinedRow)).toContain("Declined — won't ask again");
+    expect(byClass(declinedRow, "file-pane__row-next")).toHaveLength(0);
+  });
+
+  it("'Answer now' clears the decline and opens the editor", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onReload = vi.fn().mockResolvedValue();
+    const state = stateWith([], {
+      "form-defaults": { declined_fields: { authorization: { declined_at: "2026-01-01" } } },
+    });
+    let tree = render({ state, onReload });
+    const answerNow = visit(tree, (n) => n.type === "button" && textOf(n) === "Answer now")[0];
+    await answerNow.props.onClick();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
+      declined_fields: { authorization: null },
+    });
+    expect(onReload).toHaveBeenCalledTimes(1);
+
+    tree = render({ state, onReload });
+    const editingRow = byClass(tree, "file-pane__row--editing")[0];
+    expect(textOf(byClass(editingRow, "file-pane__row-title")[0])).toBe("Work authorization");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lane A / R5, R6 — consent row
+// ---------------------------------------------------------------------------
+
+describe("FilePane — Consent editor (R5, R6)", () => {
+  it("saving a mode writes automation.setup_mode through the normal commit path", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Automation consent").props.onClick();
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    const advancedRadio = visit(
+      tree,
+      (n) => n.type === "input" && n.props.type === "radio" && !n.props.checked
+    )[0];
+    advancedRadio.props.onChange();
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    const form = byClass(tree, "file-pane__editor")[0];
+    await form.props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("automation", { setup_mode: "advanced" });
+    expect(onFieldSaved).toHaveBeenCalledWith({ key: "consent", summary: "advanced mode" });
+  });
+
+  it("Decline to answer records declined_fields.consent with no automation write", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Automation consent").props.onClick();
+    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
+
+    const declineButton = visit(
+      tree,
+      (n) => n.type === "button" && textOf(n) === "Decline to answer"
+    )[0];
+    await declineButton.props.onClick();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
+      declined_fields: { consent: { declined_at: expect.any(String) } },
+    });
+    expect(onFieldSaved).toHaveBeenCalledWith({ key: "consent", summary: "declined" });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Lane A / R2 — pending company-proposal chips inside the Companies editor
+// ---------------------------------------------------------------------------
+
+describe("FilePane — company proposal chips (R2)", () => {
+  const PROPOSAL = { proposalId: "p1", name: "Acme", version: 1 };
+
+  it("renders a pending proposal as an accept/reject chip", () => {
+    let tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL] });
+    rowByLabel(tree, "Companies").props.onClick();
+    tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL] });
+
+    const row = byClass(tree, "file-pane__proposal-row")[0];
+    expect(textOf(byClass(row, "file-pane__proposal-name")[0])).toBe("Acme");
+  });
+
+  it("Accept calls onDecideCompanyProposal with the proposal and 'approve-supported-ats'", async () => {
+    const onDecideCompanyProposal = vi.fn().mockResolvedValue();
+    let tree = render({
+      state: EMPTY_STATE,
+      companyProposals: [PROPOSAL],
+      onDecideCompanyProposal,
+    });
+    rowByLabel(tree, "Companies").props.onClick();
+    tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
+
+    const acceptButton = byClass(tree, "file-pane__proposal-accept")[0];
+    await acceptButton.props.onClick();
+    await flush();
+
+    expect(onDecideCompanyProposal).toHaveBeenCalledWith(PROPOSAL, "approve-supported-ats");
+  });
+
+  it("Reject calls onDecideCompanyProposal with the proposal and 'reject'", async () => {
+    const onDecideCompanyProposal = vi.fn().mockResolvedValue();
+    let tree = render({
+      state: EMPTY_STATE,
+      companyProposals: [PROPOSAL],
+      onDecideCompanyProposal,
+    });
+    rowByLabel(tree, "Companies").props.onClick();
+    tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
+
+    const rejectButton = byClass(tree, "file-pane__proposal-reject")[0];
+    await rejectButton.props.onClick();
+    await flush();
+
+    expect(onDecideCompanyProposal).toHaveBeenCalledWith(PROPOSAL, "reject");
+  });
+
+  it("renders no proposal list when there are no pending proposals", () => {
+    let tree = render({ state: EMPTY_STATE });
+    rowByLabel(tree, "Companies").props.onClick();
+    tree = render({ state: EMPTY_STATE });
+    expect(byClass(tree, "file-pane__proposal-list")).toHaveLength(0);
   });
 });

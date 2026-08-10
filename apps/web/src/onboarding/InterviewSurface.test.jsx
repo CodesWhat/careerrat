@@ -78,6 +78,12 @@ vi.mock("./OnboardingBar.jsx", () => ({
     return null;
   },
 }));
+// Mocked to a bare host-tag string (same technique FilePane.test.jsx uses for
+// ChipInput/TextArea/TextField) so `expand()` leaves it as a leaf carrying
+// its exact props — {block, automationStatus, onConfirm} — rather than
+// recursing into ConfirmPill's own dialog/rendering logic, which has its own
+// dedicated test file.
+vi.mock("./ConfirmPill.jsx", () => ({ ConfirmPill: "mock-confirm-pill" }));
 
 const sse = vi.hoisted(() => ({ calls: [] }));
 vi.mock("../lib/sse.js", () => ({
@@ -87,9 +93,13 @@ vi.mock("../lib/sse.js", () => ({
 }));
 
 const api = vi.hoisted(() => ({
+  createCompanyProposals: vi.fn(),
+  decideCompanyProposal: vi.fn(),
   extractResumeAi: vi.fn(),
   extractResumeDocx: vi.fn(),
   findChatBySkill: vi.fn(),
+  getAutomationSettings: vi.fn(),
+  getCompanyProposals: vi.fn(),
   getOnboardState: vi.fn(),
   getSourcingRun: vi.fn(),
   parseResumeText: vi.fn(),
@@ -100,6 +110,15 @@ const api = vi.hoisted(() => ({
   startFirstSearchRun: vi.fn(),
 }));
 vi.mock("../lib/api.js", () => api);
+
+// Lane A / R1, R4 — AutomationControls.jsx is only imported here for its
+// pure buildAutomationModePatch helper (see InterviewSurface.jsx's own
+// import). Mocked to just that function so this file never pulls in the
+// Toggle-based JSX components AutomationControls.jsx also exports.
+vi.mock("../settings/AutomationControls.jsx", () => ({
+  buildAutomationModePatch: (_status, mode) =>
+    mode === "advanced" ? { setup_mode: "advanced" } : { setup_mode: "basic" },
+}));
 
 import { InterviewSurface } from "./InterviewSurface.jsx";
 
@@ -168,10 +187,20 @@ async function flush() {
 // Fixtures
 // ---------------------------------------------------------------------------
 
+const ALL_SETUP_KEYS = [
+  "engine",
+  "resume",
+  "roles",
+  "companies",
+  "evidence",
+  "guardrails",
+  "quickFacts",
+  "authorization",
+  "consent",
+];
+
 function progressItems(doneKeys) {
-  return ["engine", "resume", "roles", "companies", "evidence", "guardrails", "quickFacts"].map(
-    (key) => ({ key, done: doneKeys.includes(key) })
-  );
+  return ALL_SETUP_KEYS.map((key) => ({ key, done: doneKeys.includes(key) }));
 }
 
 function stateFixture({
@@ -184,6 +213,7 @@ function stateFixture({
     setupProgress: {
       items: progressItems(doneKeys),
       completedCount: doneKeys.length,
+      total: ALL_SETUP_KEYS.length,
       complete,
     },
     sourceResumePresent,
@@ -193,6 +223,16 @@ function stateFixture({
 
 const NOT_COMPLETE_STATE = stateFixture({});
 const RUNTIME = { id: "claude", name: "Claude Code" };
+
+// Builds a ``` careerrat:confirm fence exactly like skill-runtime.mjs's
+// CONFIRM_BLOCK_GUIDANCE documents to the model.
+function confirmFence(block) {
+  return `\`\`\`careerrat:confirm\n${JSON.stringify(block)}\n\`\`\``;
+}
+
+function assistantEvent(text) {
+  return JSON.stringify({ message: { content: [{ type: "text", text }] } });
+}
 
 beforeEach(() => {
   hooks.clear();
@@ -455,23 +495,374 @@ describe("InterviewSurface — dual drive", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Lane A / R1-R5 — confirm blocks
+// ---------------------------------------------------------------------------
+
+describe("InterviewSurface — confirm blocks (Lane A)", () => {
+  it("parses a confirm fence out of an assistant event into a ConfirmPill, stripping it from the display text", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    const fence = confirmFence({
+      kind: "authorization",
+      summary: "Sounds authorized",
+      patch: { work_authorized: true, requires_sponsorship: false },
+    });
+    onEvent("assistant", assistantEvent(`Got it.\n\n${fence}`));
+
+    const tree = render({ runtime: RUNTIME });
+    const assistantText = byClass(tree, "onboarding-transcript__text")[0];
+    expect(textOf(assistantText)).toBe("Got it.");
+    const pills = visit(tree, (n) => n.type === "mock-confirm-pill");
+    expect(pills).toHaveLength(1);
+    expect(pills[0].props.block.kind).toBe("authorization");
+    expect(pills[0].props.block.status).toBe("pending");
+  });
+
+  it("a turn that is ONLY a confirm block (no prose) still renders a pill with no text span", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent("assistant", assistantEvent(confirmFence({ kind: "companies_suggest" })));
+
+    const tree = render({ runtime: RUNTIME });
+    expect(visit(tree, (n) => n.type === "mock-confirm-pill")).toHaveLength(1);
+  });
+
+  it("an unknown kind or malformed JSON is silently dropped (no pill, fence still stripped)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(`Noted.\n\n\`\`\`careerrat:confirm\n{"kind":"not_a_real_kind"}\n\`\`\``)
+    );
+
+    const tree = render({ runtime: RUNTIME });
+    expect(visit(tree, (n) => n.type === "mock-confirm-pill")).toHaveLength(0);
+    expect(textOf(byClass(tree, "onboarding-transcript__text")[0])).toBe("Noted.");
+  });
+
+  it("authorization pill confirm (true) saves only profile.authorization, then resolves", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "authorization",
+          patch: { work_authorized: true, requires_sponsorship: false },
+        })
+      )
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      authorization: { work_authorized: true, requires_sponsorship: false },
+    });
+
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("resolved");
+    expect(pill.props.block.resultSummary).toBe("Work authorization saved");
+  });
+
+  it("authorization pill confirm (false/false) also records declined_fields.authorization (R3)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "authorization",
+          patch: { work_authorized: false, requires_sponsorship: false },
+        })
+      )
+    );
+
+    const tree = render({ runtime: RUNTIME });
+    const pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(2);
+    expect(api.saveCandidateFile).toHaveBeenNthCalledWith(1, "profile", {
+      authorization: { work_authorized: false, requires_sponsorship: false },
+    });
+    expect(api.saveCandidateFile.mock.calls[1][0]).toBe("form-defaults");
+    expect(
+      api.saveCandidateFile.mock.calls[1][1].declined_fields.authorization.declined_at
+    ).toEqual(expect.any(String));
+  });
+
+  it("authorization pill decline writes declined_fields.authorization, fires a [SYSTEM] note, and resolves the block (Decline UX)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    api.sendChatMessage.mockResolvedValue({ ok: true });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "authorization",
+          patch: { work_authorized: false, requires_sponsorship: false },
+        })
+      )
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onDecline();
+    await flush();
+
+    // Only form-defaults gets written — no profile write from a decline.
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
+      declined_fields: { authorization: { declined_at: expect.any(String) } },
+    });
+
+    // Same [SYSTEM] chat-note flow handleFieldSaved uses, so the agent's
+    // next turn acknowledges the decline instead of re-asking.
+    expect(api.sendChatMessage).toHaveBeenCalledWith(
+      "resumed-1",
+      expect.stringContaining("[SYSTEM]")
+    );
+    expect(api.sendChatMessage.mock.calls[0][1].toLowerCase()).toContain("declined");
+
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("resolved");
+    expect(pill.props.block.resultSummary).toBe("Noted — won't ask again");
+  });
+
+  it("consent_mode pill confirm writes automation.setup_mode via buildAutomationModePatch", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(confirmFence({ kind: "consent_mode", payload: "advanced" }))
+    );
+
+    const tree = render({ runtime: RUNTIME });
+    const pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("automation", { setup_mode: "advanced" });
+  });
+
+  it("consent_mode pill decline writes declined_fields.consent and NEVER touches automation (Decline UX)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    api.sendChatMessage.mockResolvedValue({ ok: true });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(confirmFence({ kind: "consent_mode", payload: "advanced" }))
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onDecline();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
+      declined_fields: { consent: { declined_at: expect.any(String) } },
+    });
+    // The declined_fields key is "consent", not "consent_mode" — and
+    // automation/setup_mode is never written on a decline.
+    const automationCalls = api.saveCandidateFile.mock.calls.filter(
+      (call) => call[0] === "automation"
+    );
+    expect(automationCalls).toHaveLength(0);
+
+    expect(api.sendChatMessage).toHaveBeenCalledWith(
+      "resumed-1",
+      expect.stringContaining("[SYSTEM]")
+    );
+
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("resolved");
+    expect(pill.props.block.resultSummary).toBe("Noted — won't ask again");
+  });
+
+  it("consent_capability pill confirm errors (no write) when automationStatus.mode isn't advanced", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.getAutomationSettings.mockResolvedValue({ mode: "basic", capabilities: [] });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "consent_capability",
+          payload: { capability: "messaging", platform: "linkedin" },
+        })
+      )
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("error");
+    expect(pill.props.block.error).toMatch(/advanced/i);
+  });
+
+  it("consent_capability pill confirm (advanced mode) sets capability+platform+consent together in ONE write (R1)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    api.getAutomationSettings.mockResolvedValue({ mode: "advanced", capabilities: [] });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "consent_capability",
+          payload: { capability: "messaging", platform: "linkedin" },
+        })
+      )
+    );
+
+    const tree = render({ runtime: RUNTIME });
+    const pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("automation", {
+      capabilities: { messaging: { enabled: true, platforms: { linkedin: true } } },
+      consent: { linkedin: true },
+    });
+  });
+
+  it("company_add pill confirm unions the new name into tracked_companies (R2, never a replace)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({ data: { targeting: { tracked_companies: ["Stripe"] } } })
+    );
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(confirmFence({ kind: "company_add", payload: { name: "Anthropic" } }))
+    );
+
+    const tree = render({ runtime: RUNTIME });
+    const pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
+      tracked_companies: ["Stripe", "Anthropic"],
+    });
+  });
+
+  it("companies_suggest pill confirm calls createCompanyProposals and reloads the pending list for FilePane", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.createCompanyProposals.mockResolvedValue({ ok: true });
+    api.getCompanyProposals.mockResolvedValue({
+      data: {
+        batch: {
+          batchId: "b1",
+          proposals: [{ proposalId: "p1", company: { name: "Acme" }, version: 1 }],
+        },
+      },
+    });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent("assistant", assistantEvent(confirmFence({ kind: "companies_suggest" })));
+
+    const tree = render({ runtime: RUNTIME });
+    const pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    expect(api.createCompanyProposals).toHaveBeenCalledWith({});
+    render({ runtime: RUNTIME });
+    expect(captured.filePane.companyProposals).toEqual([
+      { proposalId: "p1", name: "Acme", version: 1 },
+    ]);
+  });
+
+  it("the docked header status reads the dynamic total instead of a hardcoded 7", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    const tree = render({ runtime: RUNTIME });
+    expect(textOf(byClass(tree, "onboarding-app__status")[0])).toBe(
+      "SETUP · 0 OF 9 · INTERVIEW IN PROGRESS"
+    );
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Completion (3e)
 // ---------------------------------------------------------------------------
 
 describe("InterviewSurface — completion screen (3e)", () => {
-  it("renders 'Setup complete · 7 of 7', expands the disclosure, and kicks off the first sweep once", async () => {
+  it("renders 'Setup complete · 9 of 9', expands the disclosure, and kicks off the first sweep once", async () => {
     vi.useFakeTimers();
     try {
       const completeState = stateFixture({
-        doneKeys: [
-          "engine",
-          "resume",
-          "roles",
-          "companies",
-          "evidence",
-          "guardrails",
-          "quickFacts",
-        ],
+        doneKeys: ALL_SETUP_KEYS,
         complete: true,
       });
       api.getOnboardState.mockResolvedValue(completeState);
@@ -484,7 +875,7 @@ describe("InterviewSurface — completion screen (3e)", () => {
       await flush();
       tree = render({ runtime: RUNTIME });
 
-      expect(textOf(byClass(tree, "onboarding-app__status")[0])).toBe("SETUP · 7 OF 7 · DONE");
+      expect(textOf(byClass(tree, "onboarding-app__status")[0])).toBe("SETUP · 9 OF 9 · DONE");
       expect(textOf(byTag(tree, "h1"))).toBe("Your rat is set.");
       expect(api.startFirstSearchRun).toHaveBeenCalledTimes(1);
 

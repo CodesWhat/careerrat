@@ -22,16 +22,41 @@ import { normalizeRoleBuckets, RoleLaneFields } from "./steps/RoleLaneEditor.jsx
 // InterviewSurface can post it into the transcript as a system pill the
 // assistant acknowledges next turn (server scope item 3 of the W4 spec —
 // no new chat-runtime endpoint needed, just a normally-posted message).
-export function FilePane({ state, runtime, onReload, onFieldSaved }) {
+export function FilePane({
+  state,
+  runtime,
+  onReload,
+  onFieldSaved,
+  companyProposals = [],
+  onDecideCompanyProposal,
+}) {
   const [editingKey, setEditingKey] = useState(null);
+  const [overridingKey, setOverridingKey] = useState(null);
   const doneByKey = setupProgressFromState(state);
   const items = buildSetupItemViewModels(doneByKey);
 
   async function commitPatch({ key, entry, patch, summary }) {
-    await saveCandidateFile(entry, patch);
+    // `entry: null` is the established bypass an editor uses when it already
+    // made its own API call(s) directly (ResumeRowEditor/EvidenceRowEditor,
+    // and now AuthorizationRowEditor/ConsentRowEditor's decline path) — skip
+    // the generic save rather than calling saveCandidateFile(null, patch).
+    if (entry) await saveCandidateFile(entry, patch);
     await onReload?.();
     setEditingKey(null);
     onFieldSaved?.({ key, summary });
+  }
+
+  // Lane A / R6 — clears a recorded decline (declined_fields.<key> = null)
+  // and opens that row's editor so the user can answer now.
+  async function handleOverrideDecline(key) {
+    setOverridingKey(key);
+    try {
+      await saveCandidateFile("form-defaults", { declined_fields: { [key]: null } });
+      await onReload?.();
+      setEditingKey(key);
+    } finally {
+      setOverridingKey(null);
+    }
   }
 
   return (
@@ -47,9 +72,13 @@ export function FilePane({ state, runtime, onReload, onFieldSaved }) {
           state={state}
           runtime={runtime}
           editing={editingKey === item.key}
+          overridingKey={overridingKey}
           onOpen={() => setEditingKey(item.key)}
           onClose={() => setEditingKey(null)}
           onCommit={commitPatch}
+          onOverrideDecline={handleOverrideDecline}
+          companyProposals={companyProposals}
+          onDecideCompanyProposal={onDecideCompanyProposal}
         />
       ))}
     </aside>
@@ -63,11 +92,31 @@ const EDITABLE_KEYS = new Set([
   "evidence",
   "guardrails",
   "quickFacts",
+  "authorization",
+  "consent",
 ]);
 
-function FilePaneRow({ item, state, runtime, editing, onOpen, onClose, onCommit }) {
+// Lane A / R6 — the two setup items that can be recorded as declined
+// (never re-asked) instead of answered.
+const DECLINABLE_KEYS = new Set(["authorization", "consent"]);
+
+function FilePaneRow({
+  item,
+  state,
+  runtime,
+  editing,
+  overridingKey,
+  onOpen,
+  onClose,
+  onCommit,
+  onOverrideDecline,
+  companyProposals,
+  onDecideCompanyProposal,
+}) {
   const detail = detailLineFor(item.key, { state, runtime });
   const editable = EDITABLE_KEYS.has(item.key);
+  const declinedFields = state?.data?.["form-defaults"]?.declined_fields || {};
+  const declined = DECLINABLE_KEYS.has(item.key) && !!declinedFields[item.key];
 
   if (editing) {
     return (
@@ -76,7 +125,36 @@ function FilePaneRow({ item, state, runtime, editing, onOpen, onClose, onCommit 
           <span className="file-pane__row-title">{item.label}</span>
           <span className="file-pane__editing-tag">EDITING</span>
         </div>
-        <RowEditor itemKey={item.key} state={state} onCommit={onCommit} onCancel={onClose} />
+        <RowEditor
+          itemKey={item.key}
+          state={state}
+          onCommit={onCommit}
+          onCancel={onClose}
+          companyProposals={companyProposals}
+          onDecideCompanyProposal={onDecideCompanyProposal}
+        />
+      </div>
+    );
+  }
+
+  // Lane A / R6 — a declined field replaces the normal pending/done row
+  // entirely until the user explicitly overrides it. Never shows UP NEXT or
+  // an EDIT hint — there's nothing pending to click into.
+  if (declined) {
+    return (
+      <div className="file-pane__row file-pane__row--declined">
+        <span className="file-pane__row-copy">
+          <span className="file-pane__row-title">{item.label}</span>
+          <span className="file-pane__row-detail">Declined — won't ask again</span>
+        </span>
+        <button
+          type="button"
+          className="file-pane__row-override"
+          onClick={() => onOverrideDecline(item.key)}
+          disabled={overridingKey === item.key}
+        >
+          {overridingKey === item.key ? "…" : "Answer now"}
+        </button>
       </div>
     );
   }
@@ -101,19 +179,38 @@ function FilePaneRow({ item, state, runtime, editing, onOpen, onClose, onCommit 
   );
 }
 
-function RowEditor({ itemKey, state, onCommit, onCancel }) {
+function RowEditor({
+  itemKey,
+  state,
+  onCommit,
+  onCancel,
+  companyProposals,
+  onDecideCompanyProposal,
+}) {
   if (itemKey === "resume")
     return <ResumeRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
   if (itemKey === "roles")
     return <RolesRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
   if (itemKey === "companies")
-    return <CompaniesRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
+    return (
+      <CompaniesRowEditor
+        state={state}
+        onCommit={onCommit}
+        onCancel={onCancel}
+        companyProposals={companyProposals}
+        onDecideCompanyProposal={onDecideCompanyProposal}
+      />
+    );
   if (itemKey === "evidence")
     return <EvidenceRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
   if (itemKey === "guardrails")
     return <GuardrailsRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
   if (itemKey === "quickFacts")
     return <QuickFactsRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
+  if (itemKey === "authorization")
+    return <AuthorizationRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
+  if (itemKey === "consent")
+    return <ConsentRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
   return null;
 }
 
@@ -225,9 +322,16 @@ function RolesRowEditor({ state, onCommit, onCancel }) {
   );
 }
 
-function CompaniesRowEditor({ state, onCommit, onCancel }) {
+function CompaniesRowEditor({
+  state,
+  onCommit,
+  onCancel,
+  companyProposals = [],
+  onDecideCompanyProposal,
+}) {
   const [companies, setCompanies] = useState(() => state?.data?.targeting?.tracked_companies ?? []);
   const [saving, setSaving] = useState(false);
+  const [decidingId, setDecidingId] = useState(null);
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -244,10 +348,55 @@ function CompaniesRowEditor({ state, onCommit, onCancel }) {
     }
   }
 
+  // Lane A / R2 — accept unions the proposed name into tracked_companies via
+  // onDecideCompanyProposal (InterviewSurface owns the union write + the
+  // decision call together, since a decision needs the batch's current
+  // {batchId, proposalId, expectedVersion} triple this editor doesn't
+  // track). Never edits the local `companies` chip list directly — that
+  // list only reflects THIS form's own unsaved edits.
+  async function handleDecide(proposal, action) {
+    setDecidingId(proposal.proposalId);
+    try {
+      await onDecideCompanyProposal?.(proposal, action);
+    } finally {
+      setDecidingId(null);
+    }
+  }
+
   return (
     <form onSubmit={handleSubmit} className="file-pane__editor">
       <span className="field__hint">Companies to watch closely — sweeps prioritize these.</span>
       <ChipInput values={companies} onChange={setCompanies} placeholder="e.g. Stripe" />
+      {companyProposals.length ? (
+        <>
+          <span className="field__hint">Suggested — accept to add, reject to dismiss.</span>
+          <ul className="file-pane__proposal-list">
+            {companyProposals.map((proposal) => (
+              <li key={proposal.proposalId} className="file-pane__proposal-row">
+                <span className="file-pane__proposal-name">{proposal.name}</span>
+                <span className="file-pane__proposal-actions">
+                  <button
+                    type="button"
+                    className="file-pane__proposal-accept"
+                    disabled={decidingId === proposal.proposalId}
+                    onClick={() => handleDecide(proposal, "approve-supported-ats")}
+                  >
+                    Accept
+                  </button>
+                  <button
+                    type="button"
+                    className="file-pane__proposal-reject"
+                    disabled={decidingId === proposal.proposalId}
+                    onClick={() => handleDecide(proposal, "reject")}
+                  >
+                    Reject
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </>
+      ) : null}
       <EditorActions onCancel={onCancel} saving={saving} />
     </form>
   );
@@ -369,6 +518,183 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
         </label>
       </div>
       <EditorActions onCancel={onCancel} saving={saving} />
+    </form>
+  );
+}
+
+// Lane A / R3, R6 — authorization row. A save where both toggles are off is
+// itself an explicit "no/no" answer, so it also records the decline
+// (declined_fields.authorization) alongside the profile write in the SAME
+// submit — otherwise candidate.mjs's authorizationDeclared() (day-1 DB
+// defaults already seed false/false) could never tell "answered no" apart
+// from "never asked" without this procedural write. "Decline to answer"
+// records the decline with no profile write at all — the field stays
+// whatever it was, just never re-asked.
+function AuthorizationRowEditor({ state, onCommit, onCancel }) {
+  const auth = state?.data?.profile?.authorization ?? {};
+  const [workAuthorized, setWorkAuthorized] = useState(!!auth.work_authorized);
+  const [requiresSponsorship, setRequiresSponsorship] = useState(!!auth.requires_sponsorship);
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await saveCandidateFile("profile", {
+        authorization: {
+          work_authorized: workAuthorized,
+          requires_sponsorship: requiresSponsorship,
+        },
+      });
+      if (!workAuthorized && !requiresSponsorship) {
+        await saveCandidateFile("form-defaults", {
+          declined_fields: { authorization: { declined_at: new Date().toISOString() } },
+        });
+      }
+      await onCommit({
+        key: "authorization",
+        entry: null,
+        patch: null,
+        summary: workAuthorized ? "authorized" : "not authorized",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDecline() {
+    setSaving(true);
+    try {
+      await saveCandidateFile("form-defaults", {
+        declined_fields: { authorization: { declined_at: new Date().toISOString() } },
+      });
+      await onCommit({ key: "authorization", entry: null, patch: null, summary: "declined" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="file-pane__editor">
+      <span className="field__hint">Work authorization for the roles you're targeting.</span>
+      <div className="file-pane__toggle-row">
+        <label className="file-pane__toggle">
+          <input
+            type="checkbox"
+            checked={workAuthorized}
+            onChange={(e) => setWorkAuthorized(e.target.checked)}
+          />
+          Authorized to work
+        </label>
+        <label className="file-pane__toggle">
+          <input
+            type="checkbox"
+            checked={requiresSponsorship}
+            onChange={(e) => setRequiresSponsorship(e.target.checked)}
+          />
+          Needs sponsorship
+        </label>
+      </div>
+      <div className="file-pane__editor-actions">
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={handleDecline}
+          disabled={saving}
+        >
+          Decline to answer
+        </button>
+        <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn--primary" disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
+// Lane A / R5, R6 — consent row. Deliberately a lighter mode-only toggle
+// (setup_mode: "basic"|"advanced") rather than the full capability × platform
+// matrix — that already lives on the Settings page
+// (AutomationControls.jsx's AutomationConsentMatrix); this row only needs to
+// answer "is a mode picked yet" for computeSetupProgress's consent item.
+// Switching TO basic here only sets setup_mode, unlike
+// buildAutomationModePatch's Settings-page behavior of also zeroing every
+// capability/platform/consent flag — a quick file-pane toggle shouldn't
+// silently revoke permissions the user granted elsewhere.
+function ConsentRowEditor({ state, onCommit, onCancel }) {
+  const automation = state?.data?.automation ?? {};
+  const [mode, setMode] = useState(automation.setup_mode === "advanced" ? "advanced" : "basic");
+  const [saving, setSaving] = useState(false);
+
+  async function handleSubmit(e) {
+    e.preventDefault();
+    setSaving(true);
+    try {
+      await onCommit({
+        key: "consent",
+        entry: "automation",
+        patch: { setup_mode: mode },
+        summary: mode === "advanced" ? "advanced mode" : "basic mode",
+      });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDecline() {
+    setSaving(true);
+    try {
+      await saveCandidateFile("form-defaults", {
+        declined_fields: { consent: { declined_at: new Date().toISOString() } },
+      });
+      await onCommit({ key: "consent", entry: null, patch: null, summary: "declined" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="file-pane__editor">
+      <span className="field__hint">How hands-on should automation be?</span>
+      <div className="file-pane__toggle-row">
+        <label className="file-pane__toggle">
+          <input
+            type="radio"
+            name="file-pane-consent-mode"
+            checked={mode === "basic"}
+            onChange={() => setMode("basic")}
+          />
+          Basic — read-only, manual
+        </label>
+        <label className="file-pane__toggle">
+          <input
+            type="radio"
+            name="file-pane-consent-mode"
+            checked={mode === "advanced"}
+            onChange={() => setMode("advanced")}
+          />
+          Advanced — individual opt-ins
+        </label>
+      </div>
+      <div className="file-pane__editor-actions">
+        <button
+          type="button"
+          className="btn btn--secondary"
+          onClick={handleDecline}
+          disabled={saving}
+        >
+          Decline to answer
+        </button>
+        <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={saving}>
+          Cancel
+        </button>
+        <button type="submit" className="btn btn--primary" disabled={saving}>
+          {saving ? "Saving…" : "Save"}
+        </button>
+      </div>
     </form>
   );
 }
