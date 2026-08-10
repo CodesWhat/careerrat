@@ -285,6 +285,7 @@ nav.scrolled {
   font-family: var(--font-display), sans-serif;
   font-size: 0.95rem;
   font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--ink);
 }
 .dash-card-dot {
@@ -306,6 +307,7 @@ nav.scrolled {
   font-family: var(--font-display), sans-serif;
   font-size: 1.15rem;
   font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--ink);
   margin-bottom: 4px;
 }
@@ -740,6 +742,7 @@ section {
   font-family: var(--font-display), sans-serif;
   font-size: 1.5rem;
   font-weight: 800;
+  letter-spacing: -0.02em;
   color: var(--ink);
 }
 .pricing-card-tag {
@@ -1026,6 +1029,11 @@ footer {
 }
 .footer-legal a:hover {
   color: var(--accent);
+}
+.footer-tagline {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--ink-faint);
 }
 .footer-pill {
   display: inline-flex;

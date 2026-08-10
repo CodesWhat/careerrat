@@ -794,6 +794,9 @@ export default function Home() {
               </a>
               .
             </p>
+            <p className="footer-tagline">
+              The rat drafts — you send. Nothing goes out without you.
+            </p>
             <a
               className="footer-pill"
               href="https://github.com/CodesWhat"
