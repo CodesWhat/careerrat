@@ -543,9 +543,6 @@ function EngineChoiceRow({ runtime, compact, selected, busy, onSelect, onRetry, 
           {descriptor ? (
             <span className="onboarding-engine__choice-shape">{descriptor}</span>
           ) : null}
-          {runtime.warning ? (
-            <span className="onboarding-engine__choice-warning">{runtime.warning}</span>
-          ) : null}
         </span>
       )}
       {/* cardRuntimes (this row's only caller) already filters to

@@ -6509,13 +6509,10 @@ button.chip {
   white-space: nowrap;
 }
 
-/* Secondary/muted on purpose — plain-language product principle: a runtime
- * caveat is real information but shouldn't read as an alarm or dominate the
- * card's primary line (name + descriptor above). Same faint weight as the
- * hint copy elsewhere on this screen, not the loud --warning token. */
-.onboarding-engine__choice-warning {
-  font-size: 10px;
-  color: var(--ink-faint-2);
+/* The Goose mark is a black silhouette raster; flip it in dark mode so it
+ * stays visible on dark cards. */
+[data-theme="dark"] .provider-icon-goose {
+  filter: invert(1);
 }
 
 .onboarding-engine__choice-actions {
