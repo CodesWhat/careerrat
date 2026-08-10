@@ -279,7 +279,7 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     await runEffects();
 
     let tree = render({ runtime: RUNTIME });
-    expect(textOf(byTag(tree, "h1"))).toBe("Set up your rat.");
+    expect(textOf(byTag(tree, "h1"))).toBe("This is Paul.");
     expect(captured.onboardingBar.mode).toBe("centered");
     expect(captured.filePane).toBeNull();
 
@@ -303,7 +303,7 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     tree = render({ runtime: RUNTIME });
 
     const chips = byClass(tree, "onboarding-suggestions__chip");
-    expect(chips).toHaveLength(3);
+    expect(chips).toHaveLength(2);
     // Every chip must be a real button, not the inert span this shipped as.
     for (const chip of chips) expect(chip.type).toBe("button");
     expect(captured.onboardingBar.value).toBe("");

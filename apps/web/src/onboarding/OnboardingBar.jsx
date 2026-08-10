@@ -23,9 +23,15 @@ import { ArrowUpIcon, UploadIcon } from "../components/icons.jsx";
 //     bottom-center) — the same physical bar, just relocated by CSS, per the
 //     spec's "docking is a layout change in the onboarding surface, not a
 //     new component."
+// The accepted formats used to be spelled out in a mono-caps band above the
+// input ("DROP A RÉSUMÉ · PDF DOCX TXT MD"). They live here instead: the file
+// picker already filters by `accept`, so on screen it was noise stacked on top
+// of a second upload button.
+const RESUME_ATTACH_LABEL = "Attach a résumé (PDF, DOCX, TXT, or MD)";
+
 export function OnboardingBar({
   mode = "centered",
-  placeholder = "Tell it what you're hunting, or just drop your résumé in.",
+  placeholder = "Tell Paul what you're hunting, or paste your résumé text here.",
   value,
   onChange,
   // Optional: lets the caller focus the input (the hero's suggestion chips
@@ -73,7 +79,7 @@ export function OnboardingBar({
 
   return (
     <div className={`ask-bar${mode === "centered" ? " ask-bar--centered" : ""}`}>
-      {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop resume affordance; the visible upload button above is the keyboard/click equivalent */}
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: drag-and-drop resume affordance; the attach button in the row is the keyboard/click equivalent */}
       <div
         className={`ask-bar__shell${dragOver ? " ask-bar__shell--drag-over" : ""}`}
         onDragOver={
@@ -88,21 +94,6 @@ export function OnboardingBar({
         onDrop={showResumeAffordance ? handleDrop : undefined}
       >
         {showResumeAffordance ? (
-          <button
-            type="button"
-            className="onboarding-bar__resume-row"
-            onClick={() => fileInputRef.current?.click()}
-          >
-            <span className="onboarding-bar__resume-label">
-              <UploadIcon className="onboarding-bar__resume-icon" />
-              DROP A RÉSUMÉ · PDF DOCX TXT MD
-            </span>
-            <span className="onboarding-bar__resume-affordance" aria-hidden="true">
-              <UploadIcon />
-            </span>
-          </button>
-        ) : null}
-        {showResumeAffordance ? (
           <input
             ref={fileInputRef}
             type="file"
@@ -112,6 +103,17 @@ export function OnboardingBar({
           />
         ) : null}
         <div className="ask-bar__row">
+          {showResumeAffordance ? (
+            <button
+              type="button"
+              className="onboarding-bar__attach"
+              aria-label={RESUME_ATTACH_LABEL}
+              title={RESUME_ATTACH_LABEL}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <UploadIcon />
+            </button>
+          ) : null}
           <input
             ref={inputRef}
             type="text"

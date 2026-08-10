@@ -6240,43 +6240,38 @@ button.chip {
   gap: 8px;
 }
 
-.onboarding-bar__resume-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 0;
-  border: none;
-  background: none;
-  cursor: pointer;
-  text-align: left;
-}
-
-.onboarding-bar__resume-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  color: var(--ink-faint);
-  font-family: var(--label-font);
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: var(--label-tracking);
-}
-
-.onboarding-bar__resume-icon {
-  width: 13px;
-  height: 13px;
-}
-
-.onboarding-bar__resume-affordance {
+/* Attach sits inside the input row, left of the placeholder — flat, so the
+ * send button stays the only filled control in the bar. */
+.onboarding-bar__attach {
   display: grid;
   place-items: center;
   flex-shrink: 0;
-  width: 30px;
-  height: 30px;
-  border-radius: 999px;
-  background: var(--input-border);
-  color: var(--card);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--pill-radius);
+  background: transparent;
+  color: var(--ink-faint);
+  cursor: pointer;
+  transition:
+    color 0.15s ease,
+    background 0.15s ease;
+}
+
+.onboarding-bar__attach:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+
+.onboarding-bar__attach:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.onboarding-bar__attach svg {
+  width: 17px;
+  height: 17px;
 }
 
 .onboarding-bar__file-input {

@@ -36,14 +36,13 @@ import {
 
 const INTERVIEW_SKILL = "ingest-profile";
 
-// Examples of what to type, dropped into the bar on click. Deliberately
-// field-neutral and low on specifics: this is the first screen a nurse, a
-// driver, and an engineer all see, so no industry and no aspirational comp
-// number (both read as "this tool isn't for me" to everyone outside them).
+// The two ways in for someone who hasn't attached a résumé yet: point Paul at
+// the work history they already have, or admit there isn't one and start from
+// a conversation. Pasting résumé text isn't a chip — that's what the bar
+// itself is for, and its placeholder says so.
 const SUGGESTION_CHIPS = [
-  "I'm hunting roles like my last one",
-  "Remote only, $75K floor",
-  "Let me paste my résumé",
+  "Help me find jobs like my last role",
+  "I don't have a résumé. Help me start another way.",
 ];
 
 const RESUME_EXTENSIONS_AI = new Set(["pdf", "png", "jpg", "jpeg", "webp"]);
@@ -558,16 +557,16 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       {!docked ? (
         <main className="onboarding-hero">
           <div className="onboarding-hero__copy">
-            <h1>Set up your rat.</h1>
+            <h1>This is Paul.</h1>
             <p>
-              Tell it what you're hunting. It fills in the setup as you talk, and you can edit
-              anything by hand, any time.
+              He runs your job hunt. Start with your résumé, or just tell him what you're after. He
+              fills in the setup as you talk, and you can edit anything by hand, any time.
             </p>
           </div>
           {error ? <InlineAlert message={error} /> : null}
           <OnboardingBar
             mode="centered"
-            placeholder="Tell it what you're hunting, or just drop your résumé in."
+            placeholder="Tell Paul what you're hunting, or paste your résumé text here."
             value={heroDraft}
             onChange={setHeroDraft}
             inputRef={heroInputRef}

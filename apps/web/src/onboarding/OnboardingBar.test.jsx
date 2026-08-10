@@ -129,15 +129,15 @@ describe("OnboardingBar — mode", () => {
     expect(byClass(tree, "ask-bar--centered")).toBeUndefined();
   });
 
-  it("shows the inline résumé-drop affordance only in centered mode with onDropResume wired", () => {
+  it("shows the résumé attach button only in centered mode with onDropResume wired", () => {
     const centered = render({ mode: "centered", onDropResume: vi.fn() });
-    expect(byClass(centered, "onboarding-bar__resume-row")).toBeTruthy();
+    expect(byClass(centered, "onboarding-bar__attach")).toBeTruthy();
 
     const docked = render({ mode: "docked", onDropResume: vi.fn() });
-    expect(byClass(docked, "onboarding-bar__resume-row")).toBeUndefined();
+    expect(byClass(docked, "onboarding-bar__attach")).toBeUndefined();
 
     const noHandler = render({ mode: "centered" });
-    expect(byClass(noHandler, "onboarding-bar__resume-row")).toBeUndefined();
+    expect(byClass(noHandler, "onboarding-bar__attach")).toBeUndefined();
   });
 
   it("never registers a global shortcut — ⌘K belongs to the app-shell bar only", () => {
@@ -255,7 +255,7 @@ describe("OnboardingBar — résumé drop", () => {
 
     const resumeButton = visit(
       tree,
-      (n) => n.type === "button" && hasClass(n, "onboarding-bar__resume-row")
+      (n) => n.type === "button" && hasClass(n, "onboarding-bar__attach")
     )[0];
     expect(typeof resumeButton.props.onClick).toBe("function");
     resumeButton.props.onClick();
