@@ -52,6 +52,10 @@ const RUNTIME_DESCRIPTIONS = {
   copilot: "Uses your GitHub Copilot subscription",
   qwen: "Uses your Qwen account",
   antigravity: "Uses your Google account",
+  hermes: "Uses your Nous Research account",
+  amp: "Uses your Amp account",
+  goose: "Open-source, works with any provider you've configured",
+  droid: "Uses your Factory account",
 };
 
 export function EngineScreen({ mode, onReady, onBack }) {
