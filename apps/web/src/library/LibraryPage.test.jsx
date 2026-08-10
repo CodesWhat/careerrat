@@ -118,7 +118,7 @@ vi.mock("./libraryPreviewData.js", () => ({
   PREVIEW_LIBRARY: { cards: [], metrics: {}, preview: false },
 }));
 
-import { LibraryPage } from "./LibraryPage.jsx";
+import { collectLibraryDocuments, LibraryPage } from "./LibraryPage.jsx";
 
 function renderLibrary() {
   hookHarness.reset();
@@ -161,6 +161,14 @@ beforeEach(() => {
   captured.buttons = [];
   captured.fields = [];
   vi.clearAllMocks();
+  // LibraryDrawer's Escape-key effect calls document.addEventListener; this
+  // harness runs under vitest's "node" environment, so stub it the same way
+  // JobDrawer.test.jsx does whenever a test flushes effects with the drawer
+  // mounted.
+  globalThis.document = {
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+  };
   dashboardContext.refetch = vi.fn().mockResolvedValue(undefined);
   dashboardContext.useDashboardSnapshot.mockReturnValue({
     data: { library: { cards: [] }, jobs: { rows: [] } },
@@ -353,5 +361,221 @@ describe("LibraryPage", () => {
     expect(html).toContain(
       "Its forbidden wording is enforced on every future generated document — but education policy and confirmed tools still live only in Settings → Honesty boundaries."
     );
+  });
+
+  // ISSUE-017: DashboardContext.jsx's ~10s poll (and this test harness's own
+  // non-memoized useMemo mock, which mirrors it) hands LibraryDrawer a
+  // brand-new `card` object on every render even when nothing changed. The
+  // reset effect used to key on the `card` object itself, so it fired (and
+  // clobbered in-progress state) on every one of those re-renders, not just
+  // when the candidate opened a genuinely different card.
+  it("keeps an in-progress edit open across a same-card re-render (simulated poll refresh)", async () => {
+    showCard({
+      id: "story-poll-001",
+      kind: "story",
+      label: "STAR Story",
+      title: "Rollout story",
+      summary: "Reference material",
+      note: "Reusable note",
+      tags: [],
+      metadata: { title: "Rollout story" },
+    });
+    renderLibrary();
+    await flushEffects();
+
+    capturedButton("Edit").onClick();
+    renderLibrary();
+    await flushEffects();
+    expect(capturedButton("Save")).toBeDefined();
+
+    // Re-render again with no data change at all — buildLibraryModel's
+    // non-memoized card mapping alone produces a new `card` reference, the
+    // same thing a real poll tick does.
+    renderLibrary();
+    await flushEffects();
+
+    renderLibrary();
+
+    expect(capturedButton("Save")).toBeDefined();
+    expect(captured.buttons.some((props) => props.children === "Edit")).toBe(false);
+  });
+
+  it("resets to the read view when a genuinely different card opens", async () => {
+    showCard({
+      id: "story-poll-001",
+      kind: "story",
+      label: "STAR Story",
+      title: "Rollout story",
+      summary: "Reference material",
+      note: "Reusable note",
+      tags: [],
+      metadata: { title: "Rollout story" },
+    });
+    renderLibrary();
+    await flushEffects();
+
+    capturedButton("Edit").onClick();
+    renderLibrary();
+    await flushEffects();
+    expect(capturedButton("Save")).toBeDefined();
+
+    showCard(
+      {
+        id: "story-poll-002",
+        kind: "story",
+        label: "STAR Story",
+        title: "A different story",
+        summary: "Reference material",
+        note: "Reusable note",
+        tags: [],
+        metadata: { title: "A different story" },
+      },
+      "story-poll-002"
+    );
+    renderLibrary();
+    await flushEffects();
+
+    const html = renderLibrary();
+
+    expect(html).toContain("A different story");
+    expect(capturedButton("Edit")).toBeDefined();
+    expect(captured.buttons.some((props) => props.children === "Save")).toBe(false);
+  });
+});
+
+describe("collectLibraryDocuments", () => {
+  // ISSUE-018: the shared dashboard-data.js contract puts a short
+  // human-readable label on `note` and keeps the raw workspace path (when
+  // available) on a separate `path` field — collectLibraryDocuments must
+  // carry both through untouched, never collapsing one into the other.
+  it("carries the friendly note and the raw path as separate fields", () => {
+    const documents = collectLibraryDocuments({
+      rows: [
+        {
+          id: "job-jd-001",
+          drawerId: "job-jd-001",
+          company: "Acme Robotics",
+          role: "Staff Engineer",
+          drawer: {
+            artifacts: [
+              {
+                kind: "Job description",
+                note: "Captured job description",
+                path: "workspace/jobs/acme-staff-engineer-greenhouse-123.md",
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(documents).toHaveLength(1);
+    expect(documents[0].note).toBe("Captured job description");
+    expect(documents[0].path).toBe("workspace/jobs/acme-staff-engineer-greenhouse-123.md");
+    expect(documents[0].note).not.toContain("workspace/");
+  });
+
+  it("defaults path to an empty string when the artifact carries none", () => {
+    const documents = collectLibraryDocuments({
+      rows: [
+        {
+          id: "job-resume-001",
+          drawerId: "job-resume-001",
+          company: "Beta Labs",
+          role: "Senior Engineer",
+          drawer: {
+            artifacts: [{ kind: "Resume", note: "Generated document" }],
+          },
+        },
+      ],
+    });
+
+    expect(documents[0].path).toBe("");
+  });
+});
+
+describe("Documents view", () => {
+  // ISSUE-018: DocumentRow must render the friendly note as primary text and
+  // tuck the raw path under a collapsed "Technical details" disclosure — the
+  // raw path should never appear ahead of the friendly note in the row.
+  it("renders the friendly note as primary text and demotes the raw path under Technical details", () => {
+    hookHarness.params = new URLSearchParams({ tab: "external" });
+    dashboardContext.useDashboardSnapshot.mockReturnValue({
+      data: {
+        library: { cards: [], metrics: {} },
+        jobs: {
+          rows: [
+            {
+              id: "job-jd-002",
+              drawerId: "job-jd-002",
+              company: "Acme Robotics",
+              role: "Staff Engineer",
+              drawer: {
+                artifacts: [
+                  {
+                    kind: "Job description",
+                    note: "Captured job description",
+                    path: "workspace/jobs/acme-staff-engineer-greenhouse-123.md",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      },
+      loading: false,
+      error: null,
+      noDatabase: false,
+      refetch: dashboardContext.refetch,
+    });
+
+    const html = renderLibrary();
+
+    const noteIndex = html.indexOf("Captured job description");
+    const detailsIndex = html.indexOf("Technical details");
+    const pathIndex = html.indexOf("workspace/jobs/acme-staff-engineer-greenhouse-123.md");
+
+    expect(noteIndex).toBeGreaterThan(-1);
+    expect(detailsIndex).toBeGreaterThan(noteIndex);
+    expect(pathIndex).toBeGreaterThan(detailsIndex);
+  });
+
+  it("omits the Technical details disclosure when the artifact carries no path", () => {
+    hookHarness.params = new URLSearchParams({ tab: "external" });
+    dashboardContext.useDashboardSnapshot.mockReturnValue({
+      data: {
+        library: { cards: [], metrics: {} },
+        jobs: {
+          rows: [
+            {
+              id: "job-resume-002",
+              drawerId: "job-resume-002",
+              company: "Beta Labs",
+              role: "Senior Engineer",
+              drawer: {
+                artifacts: [{ kind: "Resume", note: "Generated document" }],
+              },
+            },
+          ],
+        },
+      },
+      loading: false,
+      error: null,
+      noDatabase: false,
+      refetch: dashboardContext.refetch,
+    });
+
+    const html = renderLibrary();
+
+    expect(html).toContain("Generated document");
+    expect(html).not.toContain("Technical details");
+  });
+
+  it("gives the Documents heading an explicit accessible name", () => {
+    hookHarness.params = new URLSearchParams({ tab: "external" });
+
+    const html = renderLibrary();
+
+    expect(html).toContain('aria-label="Documents"');
   });
 });

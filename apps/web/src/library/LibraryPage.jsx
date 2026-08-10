@@ -297,11 +297,14 @@ async function copyTextToClipboard(text) {
 }
 
 // The gather described in the file header comment — one flat list of
-// {kind, note} artifacts across every job, each tagged with the parent job's
-// company/role/detailId so a row can link back into that job's own drawer
-// (the job drawer already renders the artifact; this list is a finder, not a
-// second viewer). Miss a job source (applications vs. sourced) and rows
-// silently vanish, the same risk collectCalendarEvents() calls out.
+// {kind, note, path} artifacts across every job, each tagged with the parent
+// job's company/role/detailId so a row can link back into that job's own
+// drawer (the job drawer already renders the artifact; this list is a
+// finder, not a second viewer). Miss a job source (applications vs. sourced)
+// and rows silently vanish, the same risk collectCalendarEvents() calls out.
+// `note` is jobDetailFromRow()'s short human-readable label (never a raw
+// workspace path); `path`, when present, is the raw workspace path, kept
+// only for DocumentRow's "Technical details" disclosure.
 export function collectLibraryDocuments(jobs) {
   const rows = Array.isArray(jobs?.rows) ? jobs.rows : [];
   const documents = [];
@@ -313,6 +316,7 @@ export function collectLibraryDocuments(jobs) {
         id: `${row.drawerId || row.id || "job"}-${index}-${normalize(artifact.kind)}`,
         kind: artifact.kind,
         note: artifact.note || "",
+        path: artifact.path || "",
         company: row.company || "Unknown company",
         role: row.role || "Open role",
         detailId: row.drawerId || row.id || "",
@@ -731,7 +735,7 @@ function LibraryDocuments({ docKind, documents, onDocKindChange, onQueryChange, 
   return (
     <section aria-label="Documents" className="library__documents">
       <header className="library__panel-header library__panel-header--documents">
-        <h2>
+        <h2 aria-label="Documents">
           <span className="library__panel-icon">
             <PaperclipIcon />
           </span>
@@ -807,6 +811,12 @@ function DocumentRow({ doc }) {
           {doc.company} · {doc.role}
         </strong>
         {doc.note ? <small>{doc.note}</small> : null}
+        {doc.path ? (
+          <details className="library__doc-technical">
+            <summary>Technical details</summary>
+            <span className="library__doc-path">{doc.path}</span>
+          </details>
+        ) : null}
       </span>
       {doc.detailId ? (
         <Link className="library__doc-link" to={`/jobs?open=${encodeURIComponent(doc.detailId)}`}>
@@ -830,15 +840,33 @@ function LibraryDrawer({
   const [editing, setEditing] = useState(false);
   const [values, setValues] = useState(() => editableValuesFromCard(card));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [syncedCardId, setSyncedCardId] = useState(card.id);
 
-  // A new card (or a refetch after this same card's own save) always lands
-  // back in the read-only view with fresh starting values — mirrors
-  // CompFitCard's own re-sync effect on the fields it can't own locally.
+  // DashboardContext.jsx's ~10s poll hands this drawer a brand-new `card`
+  // object every tick even when the underlying record hasn't changed (see
+  // ISSUE-017) — keying this reset on the `card` object itself reset an
+  // in-progress edit or a pending delete confirmation on every poll tick,
+  // not just when the candidate actually opened a different card. Keying on
+  // `card.id` instead means poll churn on the *same* card id never clobbers
+  // `editing`/`confirmingDelete`/in-progress `values`. Opening a genuinely
+  // different card (id changes) still resets everything to the clean read
+  // view. When the id is unchanged and the drawer is in the read view (not
+  // mid-edit), `values` still re-syncs from the fresh card so a real
+  // server-side update elsewhere is reflected next time it's viewed
+  // read-only — mirrors CompFitCard's own re-sync effect on the fields it
+  // can't own locally.
   useEffect(() => {
-    setEditing(false);
-    setConfirmingDelete(false);
-    setValues(editableValuesFromCard(card));
-  }, [card]);
+    if (card.id !== syncedCardId) {
+      setSyncedCardId(card.id);
+      setEditing(false);
+      setConfirmingDelete(false);
+      setValues(editableValuesFromCard(card));
+      return;
+    }
+    if (!editing) {
+      setValues(editableValuesFromCard(card));
+    }
+  }, [card, editing, syncedCardId]);
 
   useEffect(() => {
     function onKeyDown(event) {
