@@ -24,7 +24,9 @@ describe("AppShell", () => {
 
     expect(html).toContain('class="app-shell__header"');
     expect(html).toContain('class="app-shell__brand-lockup"');
-    expect(html).toContain('class="app-shell__brand">CareerRat</div>');
+    expect(html).toContain(
+      'class="app-shell__brand">CareerRat<span class="app-shell__brand-dot">.</span></div>'
+    );
     expect(html).not.toContain('class="app-shell__brand-logo"');
     expect(html).toContain('aria-label="Primary navigation"');
     expect(html).not.toContain('class="app-shell__nav"');

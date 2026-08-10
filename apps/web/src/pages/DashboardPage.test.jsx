@@ -144,7 +144,7 @@ describe("DashboardPage", () => {
     const html = renderDashboardPage();
 
     expect(html).toContain('class="dashboard"');
-    expect(html).toContain(">Dashboard</h1>");
+    expect(html).toContain(">Clear these 2 and call it done.</h1>");
     expect(html).not.toContain("Preview Data");
     expect(html).not.toContain("Dashboard V2 ·");
     expect(html).toContain('data-dashboard-stat="needsYou"');
@@ -202,7 +202,7 @@ describe("DashboardPage", () => {
       },
     });
 
-    expect(html).toContain(">Dashboard</h1>");
+    expect(html).toContain(">Clear these 3 and call it done.</h1>");
     expect(html).toContain("Prep Cyberdyne Systems technical screen");
     expect(html).not.toContain("Send Abstergo Industries follow-up");
     expect(html).toContain("Due by today");

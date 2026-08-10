@@ -39,7 +39,9 @@ export function AppShell({ children }) {
       <div className="app-shell">
         <header className="app-shell__header">
           <div className="app-shell__brand-lockup">
-            <div className="app-shell__brand">CareerRat</div>
+            <div className="app-shell__brand">
+              CareerRat<span className="app-shell__brand-dot">.</span>
+            </div>
           </div>
           <nav className="app-shell__primary" aria-label="Primary navigation">
             <NavList />

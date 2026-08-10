@@ -46,7 +46,8 @@ export function DashboardPage() {
     <div className="dashboard">
       <header className="dashboard__hero">
         <div className="dashboard__title-block">
-          <h1 className="dashboard__title">Dashboard</h1>
+          <div className="dashboard__eyebrow">{dashboardEyebrow(model.activeJobsValue)}</div>
+          <h1 className="dashboard__title">{dashboardHeadline(model.needsYouValue)}</h1>
         </div>
         <DashboardScoreboard metrics={model.metrics} />
       </header>
@@ -60,19 +61,17 @@ export function DashboardPage() {
 
       {dashboard ? (
         <>
-          <section className="dashboard__workbench">
+          <section className="dashboard__stack" aria-label="Dashboard work queue">
             <PriorityPanel
               focus={dashboard.focus}
               showDeepIngestNudge={deepIngest.needed && deepIngest.dismissed}
             />
-            <PipelinePanel model={model} />
-          </section>
-
-          <section className="dashboard__lower-grid" aria-label="Dashboard work queues">
             <DecisionPanel hasWork={model.decisionHasWork} roles={model.reviewRoles} />
             <FreshFindsPanel roles={model.freshRoles} />
             <TodayPanel events={model.todayEvents} />
           </section>
+
+          <PipelinePanel model={model} />
         </>
       ) : null}
     </div>
@@ -107,10 +106,12 @@ function PriorityFocus({ focus, showDeepIngestNudge }) {
   if (!focus) {
     return (
       <div className="dashboard__focus">
-        <span className="dashboard__pill dashboard__pill--success">Clear</span>
-        <h2>Nothing blocking</h2>
-        <p>No tracked action needs attention right now.</p>
-        {showDeepIngestNudge ? <DeepIngestPriorityNudge /> : null}
+        <div className="dashboard__focus-body">
+          <span className="dashboard__pill dashboard__pill--success">Clear</span>
+          <h2>Nothing blocking</h2>
+          <p>No tracked action needs attention right now.</p>
+          {showDeepIngestNudge ? <DeepIngestPriorityNudge /> : null}
+        </div>
       </div>
     );
   }
@@ -128,33 +129,36 @@ function PriorityFocus({ focus, showDeepIngestNudge }) {
 
   return (
     <div className="dashboard__focus">
-      {focus.type || focus.dueText ? (
-        <div className="dashboard__focus-tags">
-          {focus.type ? <span className="dashboard__pill">{focus.type}</span> : null}
-          {focus.dueText ? (
-            <span className={`dashboard__pill ${toneClass}`}>{duePillLabel(focus.dueText)}</span>
-          ) : null}
-        </div>
-      ) : null}
-      <h2>{focus.title}</h2>
-      <p>
-        {focus.company}
-        {focus.role ? ` · ${focus.role}` : ""}
-      </p>
-      {focus.meta ? <p className="dashboard__focus-meta">{focus.meta}</p> : null}
-      {facts.length ? (
-        <div className="dashboard__focus-facts">
-          {facts.map((fact) => (
-            <span
-              className="dashboard__focus-fact"
-              key={fact.label}
-              title={`${fact.label} · ${fact.value}`}
-            >
-              {fact.label} · <strong>{fact.value}</strong>
-            </span>
-          ))}
-        </div>
-      ) : null}
+      <div className="dashboard__focus-body">
+        {focus.type || focus.dueText ? (
+          <div className="dashboard__focus-tags">
+            {focus.type ? <span className="dashboard__pill">{focus.type}</span> : null}
+            {focus.dueText ? (
+              <span className={`dashboard__pill ${toneClass}`}>{duePillLabel(focus.dueText)}</span>
+            ) : null}
+          </div>
+        ) : null}
+        <h2>{focus.title}</h2>
+        <p>
+          {focus.company}
+          {focus.role ? ` · ${focus.role}` : ""}
+        </p>
+        {focus.meta ? <p className="dashboard__focus-meta">{focus.meta}</p> : null}
+        {facts.length ? (
+          <div className="dashboard__focus-facts">
+            {facts.map((fact) => (
+              <span
+                className="dashboard__focus-fact"
+                key={fact.label}
+                title={`${fact.label} · ${fact.value}`}
+              >
+                {fact.label} · <strong>{fact.value}</strong>
+              </span>
+            ))}
+          </div>
+        ) : null}
+        {showDeepIngestNudge ? <DeepIngestPriorityNudge /> : null}
+      </div>
       <div className="dashboard__focus-actions">
         {showDossierLink ? (
           <Link className="dashboard__secondary-link" to={ctaTo}>
@@ -166,14 +170,13 @@ function PriorityFocus({ focus, showDeepIngestNudge }) {
           <ArrowRightIcon />
         </Link>
       </div>
-      {showDeepIngestNudge ? <DeepIngestPriorityNudge /> : null}
     </div>
   );
 }
 
 function PipelinePanel({ model }) {
   return (
-    <aside className="dashboard__panel">
+    <aside className="dashboard__panel dashboard__panel--pipeline">
       <PanelHeader icon={<ListIcon />} title="Momentum" to="/jobs" actionLabel="Open Jobs" />
       <div className="dashboard__pipeline-list">
         {model.pipeline.map((item) => (
@@ -338,6 +341,11 @@ function buildDashboardModel(data) {
     freshRoles,
     pipeline,
     decisionHasWork: decisionCount > 0 || Boolean(data?.jobs?.rail?.nextDecision?.hasWork),
+    // Exposed alongside `metrics` (below) so the hero eyebrow/headline can
+    // read the same counts the scoreboard tiles already render, instead of
+    // recomputing them.
+    needsYouValue: needsYou,
+    activeJobsValue: Number.isFinite(activeJobs) ? activeJobs : Number(data?.stats?.inPlay || 0),
     metrics: [
       {
         key: "needsYou",
@@ -445,6 +453,28 @@ function decisionRoleCount(data, roles = []) {
   const railManualReview = Number(data?.jobs?.rail?.manualReview);
   if (Number.isFinite(railManualReview)) return railManualReview;
   return roles.length;
+}
+
+// "{Weekday, Mon D} · {n} active applications" — the Geist Mono eyebrow line
+// that replaces the old plain "Dashboard" title, so the date + active count
+// are legible at a glance without a dedicated stat tile.
+function dashboardEyebrow(activeJobs) {
+  const dateLabel = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    month: "short",
+    day: "numeric",
+  });
+  return `${dateLabel} · ${formatNumber(activeJobs)} active applications`;
+}
+
+// The Archivo headline names how much is queued, echoing the same count the
+// "Needs You" scoreboard tile already shows. No apostrophe in the copy —
+// react-dom/server escapes it to `&#x27;` in static markup, which is
+// needlessly fragile for callers matching on this string.
+function dashboardHeadline(needsYou) {
+  if (!needsYou) return "Nothing needs you right now.";
+  if (needsYou === 1) return "Clear this one and call it done.";
+  return `Clear these ${needsYou} and call it done.`;
 }
 
 function duePillLabel(value) {

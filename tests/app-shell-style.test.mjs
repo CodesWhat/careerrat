@@ -37,7 +37,9 @@ describe("app shell styles", () => {
     assert.match(primary, /justify-content:\s*center/);
     assert.doesNotMatch(brandLockup, /border-right/);
     assert.match(brand, /font-family:\s*"Archivo"/);
-    assert.match(brand, /font-size:\s*clamp\(30px,\s*3vw,\s*42px\)/);
+    assert.match(brand, /font-size:\s*22px/);
+    assert.match(brand, /letter-spacing:\s*-0\.02em/);
+    assert.match(cssRule(".app-shell__brand-dot"), /color:\s*var\(--accent\)/);
     assert.match(navList, /flex-direction:\s*row/);
     assert.match(content, /max-width:\s*1440px/);
     assert.match(content, /margin:\s*0 auto/);
@@ -122,31 +124,33 @@ describe("app shell styles", () => {
     assert.match(theme, /background:\s*var\(--header-pill-bg\)/);
   });
 
-  it("uses the signature squiggly underline for the active product nav item", () => {
-    const underline = cssRule(".nav-item--active::after");
+  it("uses a straight cobalt underline for the active product nav item", () => {
+    const base = cssRule(".nav-item");
+    const active = cssRule(".nav-item--active");
 
-    assert.match(underline, /mask-image:\s*url\("data:image\/svg\+xml/);
-    assert.match(underline, /background:\s*var\(--coral\)/);
-    assert.match(underline, /mask-size:\s*100% 100%/);
-    assert.doesNotMatch(underline, /height:\s*3px/);
-    assert.doesNotMatch(underline, /border-radius:\s*999px/);
+    // Reserved transparent border on every item so labels never shift when
+    // the active underline appears; the old wavy ::after mask is gone.
+    assert.match(base, /border-bottom:\s*2px solid transparent/);
+    assert.match(active, /border-bottom-color:\s*var\(--accent\)/);
+    assert.doesNotMatch(cssText(), /\.nav-item--active::after\s*\{/);
   });
 
-  it("makes header utility buttons circular and avatar-sized", () => {
+  it("makes header utility buttons compact rounded squares", () => {
     const utility = cssRule(".app-shell__utility");
     const scopedUtility = cssRule(".app-shell__right .app-shell__utility");
 
-    assert.match(utility, /width:\s*38px/);
-    assert.match(utility, /height:\s*38px/);
-    assert.match(utility, /border-radius:\s*999px/);
-    assert.match(scopedUtility, /flex:\s*0 0 38px/);
-    assert.match(scopedUtility, /min-width:\s*38px/);
-    assert.match(scopedUtility, /max-width:\s*38px/);
-    assert.match(scopedUtility, /min-height:\s*38px/);
-    assert.match(scopedUtility, /max-height:\s*38px/);
+    assert.match(utility, /width:\s*34px/);
+    assert.match(utility, /height:\s*34px/);
+    assert.match(utility, /border-radius:\s*8px/);
+    assert.match(scopedUtility, /flex:\s*0 0 34px/);
+    assert.match(scopedUtility, /min-width:\s*34px/);
+    assert.match(scopedUtility, /max-width:\s*34px/);
+    assert.match(scopedUtility, /min-height:\s*34px/);
+    assert.match(scopedUtility, /max-height:\s*34px/);
     assert.match(scopedUtility, /aspect-ratio:\s*1 \/ 1/);
     assert.match(scopedUtility, /padding:\s*0/);
-    assert.match(scopedUtility, /border-radius:\s*999px/);
+    assert.match(scopedUtility, /border-radius:\s*8px/);
+    assert.doesNotMatch(scopedUtility, /border-radius:\s*999px/);
   });
 
   it("gives the Jobs board a dashboard product frame instead of scaffold styling", () => {
