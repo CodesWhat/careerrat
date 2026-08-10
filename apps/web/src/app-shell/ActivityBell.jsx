@@ -65,7 +65,7 @@ export function ActivityBell() {
           <div className="activity-bell__header">Activity</div>
           {events.length === 0 ? (
             <p className="field__hint" style={{ margin: "0 12px 12px" }}>
-              Nothing tracked yet — activity shows up here as the tracker changes.
+              Nothing tracked yet. Activity shows up here as the tracker changes.
             </p>
           ) : (
             <ul className="activity-bell__list">

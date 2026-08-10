@@ -68,7 +68,7 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
       const res = await generatePacketDocuments({ applicationId, formats: ["pdf"] });
       const gapCount = Array.isArray(res?.data?.gaps) ? res.data.gaps.length : 0;
       setNotice(
-        `Packet ${res?.data?.status || "generated"} — ${gapCount} gap${gapCount === 1 ? "" : "s"}.`
+        `Packet ${res?.data?.status || "generated"}: ${gapCount} gap${gapCount === 1 ? "" : "s"}.`
       );
       await loadPacket();
     } catch (err) {
@@ -128,7 +128,7 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
               <button
                 type="button"
                 className="job-drawer__link-button"
-                onClick={() => onView({ title: `${label} — preview`, artifact: artifacts[key] })}
+                onClick={() => onView({ title: `${label}: preview`, artifact: artifacts[key] })}
               >
                 View
               </button>

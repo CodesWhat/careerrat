@@ -796,7 +796,7 @@ export function SettingsPage() {
             label="Agent voice"
             htmlFor="modes-agent_voice"
             error={errorsFor("modes")["modes-agent_voice"]}
-            hint="Changes how the agent talks to you in chat — it does not change the tone of generated résumés or cover letters (that's Writing voice, in Library)."
+            hint="Changes how the agent talks to you in chat. It does not change the tone of generated résumés or cover letters (that's Writing voice, in Library)."
           >
             <Select
               id="modes-agent_voice"
@@ -1103,7 +1103,7 @@ export function SettingsPage() {
         </Button>
         <div className="field-row">
           <Field
-            label="Fit band — high min"
+            label="Fit band: high min"
             htmlFor="targeting-high_min"
             error={errorsFor("targeting")["targeting-high_min"]}
           >
@@ -1114,7 +1114,7 @@ export function SettingsPage() {
             />
           </Field>
           <Field
-            label="Fit band — med min"
+            label="Fit band: med min"
             htmlFor="targeting-med_min"
             error={errorsFor("targeting")["targeting-med_min"]}
           >
@@ -1182,7 +1182,7 @@ export function SettingsPage() {
           label="Cut signals"
           htmlFor="targeting-cut_signals"
           error={errorsFor("targeting")["targeting-cut_signals"]}
-          hint="Press Enter or comma to add another guardrail. Presets above are suggestions only — nothing saves until you press Save targeting."
+          hint="Press Enter or comma to add another guardrail. Presets above are suggestions only. Nothing saves until you press Save targeting."
         >
           <ChipInput
             id="targeting-cut_signals"

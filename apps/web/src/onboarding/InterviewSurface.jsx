@@ -401,7 +401,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     if (block.kind === "companies_suggest") {
       await createCompanyProposals({});
       await reloadCompanyProposals();
-      return "Suggestions ready — check the file pane";
+      return "Suggestions ready: check the file pane";
     }
     if (block.kind === "company_add") {
       // R2 — union with the existing list, never a replace.
@@ -456,7 +456,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
         // simply won't get a chance to acknowledge it this turn.
       }
     }
-    return "Noted — won't ask again";
+    return "Noted, won't ask again";
   }
 
   async function handleDeclineAction(messageIndex, blockIndex, block) {
@@ -537,7 +537,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       {engineDialogOpen ? (
         <ConfirmDialog
           title="Change engine?"
-          body="Setup answers save as you go, so nothing there is at risk. The chat conversation on screen isn't saved though — coming back here clears it."
+          body="Setup answers save as you go, so nothing there is at risk. The chat conversation on screen isn't saved though. Coming back here clears it."
           onCancel={() => setEngineDialogOpen(false)}
           onConfirm={() => {
             setEngineDialogOpen(false);
@@ -551,14 +551,14 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
           <div className="onboarding-hero__copy">
             <h1>Set up your rat.</h1>
             <p>
-              Tell it what you're hunting. It fills in the setup as you talk — and you can edit
+              Tell it what you're hunting. It fills in the setup as you talk, and you can edit
               anything by hand, any time.
             </p>
           </div>
           {error ? <InlineAlert message={error} /> : null}
           <OnboardingBar
             mode="centered"
-            placeholder="Tell it what you're hunting — or just drop your résumé in."
+            placeholder="Tell it what you're hunting, or just drop your résumé in."
             onSend={handleSend}
             onDropResume={handleResumeDrop}
             busy={starting || uploading}
@@ -609,7 +609,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       {docked ? (
         <OnboardingBar
           mode="docked"
-          placeholder="Reply — or click any field in the file pane to edit it directly"
+          placeholder="Reply, or click any field in the file pane to edit it directly"
           onSend={handleSend}
           busy={starting || uploading || chatState === "running"}
         />
@@ -728,7 +728,7 @@ function CompletionScreen({ state, runtime, onSend, reloadState }) {
         <div>
           <h1>Your rat is set.</h1>
           <p>
-            Setup's done — everything you told it is saved on this machine. It's already hunting.
+            Setup's done. Everything you told it is saved on this machine. It's already hunting.
           </p>
         </div>
         <div className="onboarding-done__row">
@@ -753,7 +753,7 @@ function CompletionScreen({ state, runtime, onSend, reloadState }) {
           <ul className="onboarding-done__disclosure">
             {SETUP_ITEM_ORDER.map((key) => (
               <li key={key}>
-                {SETUP_ITEM_LABELS[key]} — {doneByKey[key] ? "done" : "not set"}
+                {SETUP_ITEM_LABELS[key]}: {doneByKey[key] ? "done" : "not set"}
               </li>
             ))}
           </ul>
@@ -770,7 +770,7 @@ function CompletionScreen({ state, runtime, onSend, reloadState }) {
       </main>
       <OnboardingBar
         mode="docked"
-        placeholder='Ask your rat anything — "why did Stripe get cut?"'
+        placeholder='Ask your rat anything: "why did Stripe get cut?"'
         onSend={async (text) => {
           await onSend(text);
           await reloadState();
@@ -783,10 +783,10 @@ function CompletionScreen({ state, runtime, onSend, reloadState }) {
 function firstSweepLabel(run) {
   const summary = run?.summary || {};
   if (run?.status === "completed") {
-    return `First sweep done — ${summary.boards ?? 0} boards, ${summary.roles ?? summary.totalRoles ?? 0} roles pulled`;
+    return `First sweep done: ${summary.boards ?? 0} boards, ${summary.roles ?? summary.totalRoles ?? 0} roles pulled`;
   }
   if (run?.status === "failed") {
-    return "First sweep couldn't finish — retry from the Jobs tab anytime.";
+    return "First sweep couldn't finish. Retry from the Jobs tab anytime.";
   }
-  return `First sweep running — ${summary.boards ?? 0} boards, ${summary.roles ?? summary.totalRoles ?? 0} roles pulled, gates next`;
+  return `First sweep running: ${summary.boards ?? 0} boards, ${summary.roles ?? summary.totalRoles ?? 0} roles pulled, gates next`;
 }

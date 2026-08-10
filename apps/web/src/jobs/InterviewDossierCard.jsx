@@ -94,7 +94,7 @@ export function InterviewDossierCard({ applicationId }) {
       ) : (
         <>
           <p className="field__hint">
-            Build a prep dossier for this interview — company and role research, likely questions,
+            Build a prep dossier for this interview: company and role research, likely questions,
             and evidence-grounded talking points, generated from the captured job description and
             your evidence bank.
           </p>

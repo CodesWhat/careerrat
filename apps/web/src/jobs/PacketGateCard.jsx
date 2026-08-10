@@ -92,7 +92,7 @@ export function PacketGateCard({ verdict, busy, onEvaluate }) {
         </>
       ) : (
         <p className="field__hint">
-          Not evaluated yet — run the packet gate to check fit and comp before generating documents.
+          Not evaluated yet. Run the packet gate to check fit and comp before generating documents.
         </p>
       )}
       <Button disabled={busy} onClick={onEvaluate}>

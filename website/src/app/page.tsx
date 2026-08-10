@@ -54,12 +54,12 @@ export default function Home() {
             <p className="hero-sub reveal reveal-delay-2">
               CareerRat rates the postings actually worth chasing, applies
               with honest artifacts drawn from your own evidence, and tracks
-              every outcome. It runs on the AI CLI you already have — Claude
+              every outcome. It runs on the AI CLI you already have: Claude
               Code, Codex, or anything else on your PATH.
             </p>
             <div className="hero-actions reveal reveal-delay-3">
               <a href="#get" className="btn-primary">
-                Get started — free &amp; open source
+                Get started, free &amp; open source
                 <svg
                   width="16"
                   height="16"
@@ -107,7 +107,7 @@ export default function Home() {
             </h2>
             <p className="section-sub">
               Rate what&apos;s worth chasing, apply with real evidence, track
-              what happens next. That&apos;s the whole loop — R, A, T.
+              what happens next. That&apos;s the whole loop: R, A, T.
             </p>
           </div>
           <div className="steps-grid">
@@ -116,7 +116,7 @@ export default function Home() {
               <h3 className="step-h3">Point it at your CLI</h3>
               <p className="step-p">
                 On first launch it finds the AI CLIs already installed. Pick
-                one — your subscription, your machine, nothing leaves it.
+                one: your subscription, your machine, nothing leaves it.
               </p>
               <span className="step-chip step-chip-success">
                 CLAUDE CODE · DETECTED · V2.3
@@ -128,8 +128,8 @@ export default function Home() {
               <h3 className="step-h3">Talk to it</h3>
               <p className="step-p">
                 Drop your résumé and answer a short interview. CareerRat
-                fills its own file as you talk — roles, floors, dealbreakers —
-                and you can edit any of it by hand.
+                fills its own file as you talk: roles, floors, dealbreakers.
+                You can edit any of it by hand.
               </p>
               <span className="step-chip">
                 ROLES ✓ · GUARDRAILS ✓ · TARGETING.YML UPDATED
@@ -161,7 +161,7 @@ export default function Home() {
               That&apos;s the point.
             </h2>
             <p className="section-sub">
-              Honest tailoring isn&apos;t a limitation — it&apos;s a design
+              Honest tailoring isn&apos;t a limitation. It&apos;s a design
               choice. Applications that overclaim don&apos;t hold up in
               interviews. Artifacts built from your real evidence do.
             </p>
@@ -173,7 +173,7 @@ export default function Home() {
                 <div className="honesty-point-text">
                   <h4>Evidence bank, not a word bank</h4>
                   <p>
-                    You build a bank of real things you did — projects,
+                    You build a bank of real things you did: projects,
                     metrics, decisions. Every tailored artifact draws only
                     from that bank.
                   </p>
@@ -309,7 +309,7 @@ export default function Home() {
               </h2>
               <p className="section-sub">
                 Job searches are personal. Your comp floor, your reasons for
-                leaving, your backup options — run CareerRat yourself and all
+                leaving, your backup options. Run CareerRat yourself and all
                 of it stays on your machine, full stop.
               </p>
               <p className="section-sub" style={{ marginTop: "16px" }}>
@@ -335,7 +335,7 @@ export default function Home() {
                 <p className="section-sub">
                   CareerRat is an agent runtime. It doesn&apos;t lock you
                   into a model or a subscription. Bring whatever AI CLI you
-                  already use — Claude Code, Codex, or anything else on your
+                  already use: Claude Code, Codex, or anything else on your
                   PATH.
                 </p>
                 <div className="ai-chip-group">
@@ -461,7 +461,7 @@ export default function Home() {
               Free is the product.
             </h2>
             <p className="section-sub">
-              With your own CLI you get all of it — the AI features
+              With your own CLI you get all of it: the AI features
               included. No account, no sign-in, no trial clock.
             </p>
           </div>
@@ -474,7 +474,7 @@ export default function Home() {
                 </span>
               </div>
               <p className="pricing-card-p">
-                The whole app. AI features run on your installed CLI — your
+                The whole app. AI features run on your installed CLI: your
                 subscription, your machine.
               </p>
               <ul className="pricing-list">
@@ -482,7 +482,7 @@ export default function Home() {
                 <li>Fit scores + guardrail cuts</li>
                 <li>Interview prep + tailored drafts</li>
                 <li>Calendar, network, library</li>
-                <li>Local files you own — plain YAML</li>
+                <li>Local files you own: plain YAML</li>
               </ul>
               <a href="#get" className="btn-primary pricing-cta">
                 Get started free
@@ -496,12 +496,12 @@ export default function Home() {
                 </span>
               </div>
               <p className="pricing-card-p">
-                No CLI, no setup — we run the model. Same app, same
+                No CLI, no setup. We run the model. Same app, same
                 receipts.
               </p>
               <ul className="pricing-list pricing-list-faint">
                 <li>Everything in Free</li>
-                <li>No CLI required — sign in and go</li>
+                <li>No CLI required: sign in and go</li>
                 <li>Pricing announced at launch</li>
               </ul>
               <a
@@ -533,7 +533,7 @@ export default function Home() {
               </p>
               <div className="maker-note" aria-label="Note from the maker">
                 <strong>A note from the maker:</strong> I built this to solve
-                my own job search — the spray-and-pray cycle felt
+                my own job search. The spray-and-pray cycle felt
                 disrespectful of everyone&apos;s time, including mine.
                 CareerRat is what I wanted: something that rates first,
                 applies honestly, and keeps my data to itself.
@@ -541,7 +541,7 @@ export default function Home() {
             </div>
             <div className="reveal reveal-delay-2">
               <ul className="checklist" role="list">
-                <li>Asks what you want, once — a guided onboarding</li>
+                <li>Asks what you want, once: a guided onboarding</li>
                 <li>Finds and rates real jobs from the boards you choose</li>
                 <li>Reads the whole posting before it writes a word</li>
                 <li>Measures every role against your actual constraints</li>
@@ -555,7 +555,7 @@ export default function Home() {
                 </li>
                 <li>Coaches you through the comp conversation, out loud</li>
                 <li>Remembers every outcome and gets sharper as you go</li>
-                <li>A live dashboard — the agent works, you watch it happen</li>
+                <li>A live dashboard: the agent works, you watch it happen</li>
                 <li>Works the same for any role, in any field</li>
               </ul>
             </div>
@@ -574,8 +574,8 @@ export default function Home() {
                   Install it. Run it. Own it.
                 </h2>
                 <p className="section-sub">
-                  Free to self-host, open source (MIT). No wizard, no signup
-                  — one command and the agent takes it from there.
+                  Free to self-host, open source (MIT). No wizard, no signup:
+                  one command and the agent takes it from there.
                 </p>
                 <div style={{ marginTop: "28px" }}>
                   <div className="prereq-label">Prerequisites</div>
@@ -718,7 +718,7 @@ export default function Home() {
               <p className="footer-blurb">
                 A chat-first, local-first job-search tracker. Rate the jobs
                 worth chasing, apply with honest evidence, and track every
-                outcome — from your own data, on your own machine.
+                outcome: from your own data, on your own machine.
               </p>
               <div className="footer-social">
                 <a

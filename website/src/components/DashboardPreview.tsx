@@ -28,7 +28,7 @@ export default function DashboardPreview() {
           <span className="dash-card-row-text">Review 4 new high-fit roles</span>
         </div>
         <div className="dash-card-ask">
-          <span>Ask your rat — &ldquo;why did Stripe get cut?&rdquo;</span>
+          <span>Ask your rat: &ldquo;why did Stripe get cut?&rdquo;</span>
           <span className="dash-card-ask-send" aria-hidden="true">
             <svg
               viewBox="0 0 24 24"

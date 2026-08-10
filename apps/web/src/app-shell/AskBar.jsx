@@ -114,7 +114,7 @@ function describeIntakeResult(item) {
   }
   if (item.dispatch?.action === "run_skill") {
     return item.result?.ok === false
-      ? "Skill run finished with an error — see below."
+      ? "Skill run finished with an error. See below."
       : `${item.dispatch.params.skill} finished.`;
   }
   return "Completed.";
@@ -400,7 +400,7 @@ export function AskBar() {
               ...t,
               status: "error",
               noEngine: true,
-              error: "No AI engine is configured yet — connect one in Settings.",
+              error: "No AI engine is configured yet. Connect one in Settings.",
             }
           : t
       );
@@ -553,7 +553,7 @@ export function AskBar() {
           label: null,
           startedAt: Date.now(),
           item: null,
-          error: "Couldn't read that file as text — try dropping it again.",
+          error: "Couldn't read that file as text. Try dropping it again.",
         });
       }
       return;

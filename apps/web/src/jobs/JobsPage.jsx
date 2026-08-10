@@ -416,7 +416,7 @@ export function JobsPage() {
   if (noDatabase) {
     return (
       <div className="jobs">
-        <InlineAlert message="This workspace hasn't finished setup yet — finish setup, then reload." />
+        <InlineAlert message="This workspace hasn't finished setup yet. Finish setup, then reload." />
       </div>
     );
   }
@@ -853,10 +853,10 @@ function JobsTable({ gatesByAppId, rows, state, onOpen, onSort }) {
                       {row.action.dueText}
                     </span>
                   ) : (
-                    "—"
+                    "–"
                   )}
                 </td>
-                <td className="jobs__num">{row.appliedLabel || row.appliedAt || "—"}</td>
+                <td className="jobs__num">{row.appliedLabel || row.appliedAt || "–"}</td>
                 <td className="jobs__num">
                   <FitValue row={row} />
                   <GateBadge gate={gatesByAppId[row.id]?.gate} />
@@ -1067,7 +1067,7 @@ export function describeManualRunSummary(run) {
   const summary = run?.summary;
   if (run?.status === "failed" || !summary) return null;
   if (typeof summary === "string") return summary;
-  if (summary.zeroResults) return "Free-board sweep finished — no new roles this pass.";
+  if (summary.zeroResults) return "Free-board sweep finished. No new roles this pass.";
   const scanned = Number(summary.scanned || 0);
   const newRoles = Number(summary.new || 0);
   const attemptedSources = Number(summary.attemptedSources || 0);

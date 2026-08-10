@@ -31,7 +31,7 @@ export function CalendarPage() {
   if (noDatabase) {
     return (
       <div className="calendar">
-        <InlineAlert message="This workspace hasn't finished setup yet — finish setup, then reload." />
+        <InlineAlert message="This workspace hasn't finished setup yet. Finish setup, then reload." />
       </div>
     );
   }

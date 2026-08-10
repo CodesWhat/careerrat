@@ -765,7 +765,7 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     tree = render({ runtime: RUNTIME });
     pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
     expect(pill.props.block.status).toBe("resolved");
-    expect(pill.props.block.resultSummary).toBe("Noted — won't ask again");
+    expect(pill.props.block.resultSummary).toBe("Noted, won't ask again");
   });
 
   it("consent_mode pill confirm writes automation.setup_mode via buildAutomationModePatch", async () => {
@@ -827,7 +827,7 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     tree = render({ runtime: RUNTIME });
     pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
     expect(pill.props.block.status).toBe("resolved");
-    expect(pill.props.block.resultSummary).toBe("Noted — won't ask again");
+    expect(pill.props.block.resultSummary).toBe("Noted, won't ask again");
   });
 
   it("consent_capability pill confirm errors (no write) when automationStatus.mode isn't advanced", async () => {

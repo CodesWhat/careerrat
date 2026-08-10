@@ -43,11 +43,11 @@ const CONFIRM_LABELS = {
 const CONSENT_MODE_COPY = {
   basic: {
     title: "Keep automation basic?",
-    body: "Every external capability stays off — read-only and manual. You can switch to advanced permissions later from Settings.",
+    body: "Every external capability stays off: read-only and manual. You can switch to advanced permissions later from Settings.",
   },
   advanced: {
     title: "Turn on advanced permissions?",
-    body: "This unlocks individual capability and platform opt-ins below. Nothing turns on by itself — you still approve each platform separately.",
+    body: "This unlocks individual capability and platform opt-ins below. Nothing turns on by itself. You still approve each platform separately.",
   },
 };
 

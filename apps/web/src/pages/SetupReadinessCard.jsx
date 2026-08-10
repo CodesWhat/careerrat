@@ -58,7 +58,7 @@ export function DeepIngestToast({ onDismiss }) {
 export function DeepIngestPriorityNudge() {
   return (
     <Link className="dashboard__secondary-link dashboard__deep-ingest-nudge" to="/deep-ingest">
-      <span>Go deeper — start deep ingest</span>
+      <span>Go deeper: start deep ingest</span>
     </Link>
   );
 }

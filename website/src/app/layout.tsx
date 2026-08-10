@@ -30,7 +30,7 @@ const archivo = Archivo({
 });
 
 const siteDescription =
-  "CareerRat is a chat-first job-search tracker. Rate the jobs worth chasing, apply with honest evidence-backed artifacts, and track every outcome — free, local-first, and run by the AI CLI you already have.";
+  "CareerRat is a chat-first job-search tracker. Rate the jobs worth chasing, apply with honest evidence-backed artifacts, and track every outcome. Free, local-first, and run by the AI CLI you already have.";
 
 export const metadata: Metadata = {
   title: "CareerRat — Rate. Apply. Track.",

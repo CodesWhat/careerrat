@@ -23,7 +23,7 @@ import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 //     new component."
 export function OnboardingBar({
   mode = "centered",
-  placeholder = "Tell it what you're hunting — or just drop your résumé in.",
+  placeholder = "Tell it what you're hunting, or just drop your résumé in.",
   value,
   onChange,
   onSend,

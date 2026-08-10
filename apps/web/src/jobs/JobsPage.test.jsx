@@ -109,7 +109,7 @@ describe("describeManualRunSummary", () => {
 
   it("describes a zero-results sweep", () => {
     expect(describeManualRunSummary({ status: "completed", summary: { zeroResults: true } })).toBe(
-      "Free-board sweep finished — no new roles this pass."
+      "Free-board sweep finished. No new roles this pass."
     );
   });
 

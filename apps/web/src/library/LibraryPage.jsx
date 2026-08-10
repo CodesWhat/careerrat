@@ -149,7 +149,7 @@ const CARD_KIND_DISCLAIMER = {
     "Used automatically in future cover letters and answers (and as résumé theme hints) when job-relevant. Existing documents don't change.",
   voice: "Shapes the tone of every future generated document. Existing documents don't change.",
   honesty:
-    "Its forbidden wording is enforced on every future generated document — but education policy and confirmed tools still live only in Settings → Honesty boundaries.",
+    "Its forbidden wording is enforced on every future generated document, but education policy and confirmed tools still live only in Settings → Honesty boundaries.",
   role_signal:
     "Applied to matching role families in fit checks, sourced-job scoring, and document framing. Existing results don't change.",
 };
@@ -532,7 +532,7 @@ export function LibraryPage() {
   if (noDatabase) {
     return (
       <div className="library">
-        <InlineAlert message="This workspace hasn't finished setup yet — finish setup, then reload." />
+        <InlineAlert message="This workspace hasn't finished setup yet. Finish setup, then reload." />
       </div>
     );
   }
@@ -747,7 +747,7 @@ function LibraryDocuments({ docKind, documents, onDocKindChange, onQueryChange, 
       </header>
       <p className="library__panel-note">
         Résumés, cover letters, and job descriptions gathered from every job's own artifacts. Opens
-        back into that job's drawer — the artifact isn't duplicated here.
+        back into that job's drawer. The artifact isn't duplicated here.
       </p>
 
       <div className="library__toolbar">

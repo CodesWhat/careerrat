@@ -324,12 +324,12 @@ describe("DeepIngestPage wizard", () => {
 
     const html = renderPage(state);
 
-    expect(html).toContain("Pasted notes — Led the billing migration and cut");
+    expect(html).toContain("Pasted notes: Led the billing migration and cut");
     expect(html).toContain("example.com");
     expect(html).toContain("Resume.pdf");
     expect(html).toContain("Reading…");
     expect(html).toContain("Drafts ready");
-    expect(html).toContain("Couldn&#x27;t draft — needs a look");
+    expect(html).toContain("Couldn&#x27;t draft, needs a look");
     expect(html).toContain("Skipped");
     for (const rawValue of [
       "deep_src_",
@@ -590,11 +590,11 @@ describe("DeepIngestPage wizard", () => {
 
     const html = selectStep("Done", state);
 
-    expect(html).toContain("<strong>Evidence claims</strong> — 2 confirmed.");
-    expect(html).toContain("<strong>Story bank</strong> — 1 confirmed.");
-    expect(html).toContain("<strong>Honesty boundaries</strong> — 0 confirmed.");
-    expect(html).toContain("<strong>Writing voice</strong> — 3 confirmed.");
-    expect(html).toContain("<strong>Role signals</strong> — 2 confirmed.");
+    expect(html).toContain("<strong>Evidence claims</strong>: 2 confirmed.");
+    expect(html).toContain("<strong>Story bank</strong>: 1 confirmed.");
+    expect(html).toContain("<strong>Honesty boundaries</strong>: 0 confirmed.");
+    expect(html).toContain("<strong>Writing voice</strong>: 3 confirmed.");
+    expect(html).toContain("<strong>Role signals</strong>: 2 confirmed.");
     expect(html).toContain("Still thin:");
     expect(html).toContain("Missing a quantified leadership outcome.");
     expect(html).not.toContain("Provider timed out while drafting.");

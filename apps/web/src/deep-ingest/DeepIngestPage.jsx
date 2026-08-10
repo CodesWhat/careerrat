@@ -71,9 +71,9 @@ const LANE_PAYOFF_LINE = {
   evidence_claims:
     "Powers every tailored résumé, cover letter, and answer you generate from here on.",
   story_bank:
-    "Feeds your tailored cover letters and answers — the most job-relevant confirmed stories are pulled in automatically, and résumés use them as theme hints.",
+    "Feeds your tailored cover letters and answers: the most job-relevant confirmed stories are pulled in automatically, and résumés use them as theme hints.",
   honesty_boundaries:
-    "Enforced on every tailored résumé, cover letter, and answer — its forbidden wording is blocked alongside your Settings honesty boundaries.",
+    "Enforced on every tailored résumé, cover letter, and answer: its forbidden wording is blocked alongside your Settings honesty boundaries.",
   writing_voice:
     "Shapes the tone and phrasing of every tailored résumé, cover letter, and answer you generate from here on.",
   role_signals:
@@ -257,7 +257,7 @@ function sourceDisplayLabel(source) {
     .filter(Boolean)
     .slice(0, 6)
     .join(" ");
-  return words ? `Pasted notes — ${words}` : "Pasted notes";
+  return words ? `Pasted notes: ${words}` : "Pasted notes";
 }
 
 function sourceStatusMeta(source, hasDrafts) {
@@ -266,14 +266,14 @@ function sourceStatusMeta(source, hasDrafts) {
     return { label: "Reading…", tone: "badge--muted" };
   }
   if (status === "manual_fallback" || status === "failed") {
-    return { label: "Couldn't draft — needs a look", tone: "badge--warn" };
+    return { label: "Couldn't draft, needs a look", tone: "badge--warn" };
   }
   if (hasDrafts) return { label: "Drafts ready", tone: "badge--ok" };
   if (status === "proposal_ready") return { label: "Ready to draft", tone: "badge--muted" };
   if (status === "deferred" || status === "not_available") {
     return { label: "Skipped", tone: "badge--muted" };
   }
-  return { label: "Couldn't draft — needs a look", tone: "badge--warn" };
+  return { label: "Couldn't draft, needs a look", tone: "badge--warn" };
 }
 
 function firstWords(text, count) {
@@ -1153,7 +1153,7 @@ function DoneStepContent({ confirmed, openGaps, sources, proposals, onAddMoreMat
           const count = asArray(confirmed?.[LANE_CONFIRMED_COUNT_KEY[lane.key]]).length;
           return (
             <li key={lane.key}>
-              <strong>{lane.heading}</strong> — {count} confirmed.
+              <strong>{lane.heading}</strong>: {count} confirmed.
             </li>
           );
         })}

@@ -359,7 +359,7 @@ describe("LibraryPage", () => {
     const html = renderLibrary();
 
     expect(html).toContain(
-      "Its forbidden wording is enforced on every future generated document — but education policy and confirmed tools still live only in Settings → Honesty boundaries."
+      "Its forbidden wording is enforced on every future generated document, but education policy and confirmed tools still live only in Settings → Honesty boundaries."
     );
   });
 

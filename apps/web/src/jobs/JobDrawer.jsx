@@ -213,7 +213,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
         setActionError(`${label} isn't available to preview yet.`);
         return;
       }
-      setViewer({ title: `${label} — preview`, artifact });
+      setViewer({ title: `${label}: preview`, artifact });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : `Could not load ${label.toLowerCase()}`);
     }
@@ -233,7 +233,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
       const res = await getJobDescription({ source: row.source, id: row.id });
       const artifact = res?.data?.artifact;
       setJdMeta(artifact ? { completeness: artifact.completeness } : null);
-      setViewer({ title: "Job description — preview", artifact });
+      setViewer({ title: "Job description: preview", artifact });
     } catch (err) {
       const code = err?.body?.code;
       if (code === "JD_NOT_CAPTURED" || code === "JD_FILE_MISSING") {
@@ -285,7 +285,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
           className="job-drawer"
           role="dialog"
           aria-modal="true"
-          aria-label={`${row.company} — ${row.role}`}
+          aria-label={`${row.company}, ${row.role}`}
           tabIndex={-1}
           onClick={(e) => e.stopPropagation()}
         >
@@ -619,7 +619,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
               ) : sourcedActionable ? (
                 <>
                   <p className="field__hint">
-                    This role is still in Sourced — promote it to the active pipeline, or skip it.
+                    This role is still in Sourced. Promote it to the active pipeline, or skip it.
                   </p>
                   <div className="job-drawer__inline-actions">
                     <Button

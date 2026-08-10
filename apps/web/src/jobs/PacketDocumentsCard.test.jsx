@@ -139,7 +139,7 @@ describe("PacketDocumentsCard", () => {
     expect(textOf(tree)).toContain("Resume: View");
     expect(textOf(tree)).toContain("Cover letter: View");
     expect(textOf(tree)).toContain("Answers: Not generated yet");
-    expect(textOf(tree)).toContain("Packet reviewable — 1 gap.");
+    expect(textOf(tree)).toContain("Packet reviewable: 1 gap.");
   });
 
   it("shows a disabled busy label while generation is pending", async () => {
