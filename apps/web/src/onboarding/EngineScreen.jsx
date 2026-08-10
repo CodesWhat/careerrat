@@ -400,9 +400,11 @@ export function EngineScreen({ mode, onReady, onBack }) {
                 </span>
               </span>
               <span className="onboarding-engine__choice-actions">
-                <span className="onboarding-engine__receipt onboarding-engine__receipt--muted">
-                  COMING SOON
-                </span>
+                {hostedEditing ? null : (
+                  <span className="onboarding-engine__receipt onboarding-engine__receipt--muted">
+                    COMING SOON
+                  </span>
+                )}
                 {hostedInterest.requested ? (
                   <button type="button" className="btn btn--secondary" disabled>
                     REQUESTED ✓
