@@ -30,7 +30,7 @@ const TARGET_SHAPES = [
 ];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-deep-ingest-scanner-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-deep-ingest-scanner-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

@@ -449,7 +449,7 @@ test("VER-05 docs and app wrappers keep discovery routing split aligned", () => 
     /explicit/i,
     /allowlist/i,
     /confirm-first|confirmed writes/i,
-    /source[- ]config|source config|rolester companies|companyAtsUpsert/i,
+    /source[- ]config|source config|careerrat companies|companyAtsUpsert/i,
     /local proposal (errors|failures)[^.]+(do not|must not)[^.]+silently[^.]+(chat|\/api\/chat|full skill runtime|POST \/api\/skill\/run)/i,
   ];
 

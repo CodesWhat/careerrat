@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://careerrat.local/schemas/intake-classify.schema.json",
-  "title": "Rolester POST /api/intake classify model output",
+  "title": "CareerRat POST /api/intake classify model output",
   "type": "object",
   "required": ["kind", "proposedAction", "confidence", "needsUser"],
   "additionalProperties": false,

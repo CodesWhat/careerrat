@@ -14,7 +14,7 @@ import { matchTrackerRecord } from "../src/core/intake/match.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-intake-match-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-intake-match-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

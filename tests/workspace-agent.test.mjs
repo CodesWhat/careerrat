@@ -30,7 +30,7 @@ import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-workspace-agent-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-"));
   cleanupRoots.push(repoRoot);
   openDb({ repoRoot, env: {} });
   return repoRoot;
@@ -972,7 +972,7 @@ test("I applied elsewhere records only the user-reported outcome in the same thr
   const app = readApplication(repoRoot, "app-temporal");
   assert.equal(app.status, "applied");
   assert.equal(app.appliedAt, "2026-08-08T19:30:00.000Z");
-  assert.match(app.statusNote, /outside Rolester/i);
+  assert.match(app.statusNote, /outside CareerRat/i);
   assert.deepEqual(
     result.messages.map(({ role, kind }) => ({ role, kind })),
     [
@@ -980,7 +980,7 @@ test("I applied elsewhere records only the user-reported outcome in the same thr
       { role: "assistant", kind: "action_result" },
     ]
   );
-  assert.match(result.messages[1].text, /recorded.*applied outside Rolester/i);
+  assert.match(result.messages[1].text, /recorded.*applied outside CareerRat/i);
   assert.deepEqual(result.messages[1].metadata, {
     intentMessageId: result.messages[0].id,
     state: "recorded",

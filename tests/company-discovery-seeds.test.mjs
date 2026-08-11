@@ -35,7 +35,7 @@ const FAILURE_LEAK_SENTINELS = [
 ];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-company-discovery-seeds-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-company-discovery-seeds-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

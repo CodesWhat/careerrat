@@ -269,7 +269,7 @@ test("computeStoryWrite refuses a story that fails the firewall", () => {
 // ---------------------------------------------------------------------------
 
 test("writeStories + loadStories round-trips through candidate/stories.yml", () => {
-  const dir = mkdtempSync(join(tmpdir(), "rolester-stories-"));
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-stories-"));
   try {
     const stories = [goodStory(), goodStory({ id: "migration", evidence_ids: ["project-002"] })];
     const res = writeStories({ stories, root: dir });
@@ -288,7 +288,7 @@ test("writeStories + loadStories round-trips through candidate/stories.yml", () 
 });
 
 test("loadStories reports a missing bank without throwing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "rolester-stories-empty-"));
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-stories-empty-"));
   try {
     const loaded = loadStories({ root: dir });
     assert.equal(loaded.exists, false);

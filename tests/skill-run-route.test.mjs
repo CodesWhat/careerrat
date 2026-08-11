@@ -42,7 +42,7 @@ function bootRouteServer(runSkillStream, { repoRoot = "/fake/repo", env = {} } =
 }
 
 function tempRepoWithSkills(skillNames = []) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-run-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-run-route-"));
   for (const name of skillNames) {
     const dir = join(repoRoot, ".agents/skills", name);
     mkdirSync(dir, { recursive: true });

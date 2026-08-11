@@ -9,7 +9,7 @@
 // dashboard-data.js) is the same JSON view-model builder used to power this
 // route — reused here completely UNMODIFIED, never forked. (The legacy
 // static-HTML dashboard render this route was originally extracted from —
-// `rolester tracker`, src/cli/tracker.mjs — has since been retired; tracker.mjs
+// `careerrat tracker`, src/cli/tracker.mjs — has since been retired; tracker.mjs
 // now only snapshots/summarizes tracker.json. This route is the sole live
 // caller of buildDashboardViewModel.) Its verified input contract (read
 // directly off its own top ~20 lines, `buildDashboardViewModel(trackerData,

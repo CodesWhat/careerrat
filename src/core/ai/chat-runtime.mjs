@@ -48,6 +48,7 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { candidateConfigGet } from "../db/verbs.mjs";
+import { readEnv } from "../env-compat.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
@@ -91,7 +92,7 @@ function resolveDeclinedFieldKeys({ repoRoot, env }) {
 // explicitly stop before tailoring/filling/submitting (search-jobs). The
 // opposite one-shot runtime remains narrower because nobody is present to
 // answer questions there. Same "empty string explicitly locks it down, unset
-// falls back to the default" semantics as ROLESTER_RUNTIME_SKILLS.
+// falls back to the default" semantics as CAREERRAT_RUNTIME_SKILLS.
 const DEFAULT_CHAT_SKILLS =
   "ingest-profile,research-boards,discover-companies,search-jobs,email-comms,track-outcomes";
 
@@ -99,7 +100,7 @@ export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
     repoRoot,
     env,
-    envVar: "ROLESTER_CHAT_SKILLS",
+    envVar: "CAREERRAT_CHAT_SKILLS",
     defaultValue: DEFAULT_CHAT_SKILLS,
   });
 }
@@ -247,14 +248,14 @@ function createPushQueue() {
 }
 
 // ---------------------------------------------------------------------------
-// Small env-number helper — ROLESTER_CHAT_IDLE_TTL_MS / ROLESTER_CHAT_MAX_TURNS
+// Small env-number helper — CAREERRAT_CHAT_IDLE_TTL_MS / CAREERRAT_CHAT_MAX_TURNS
 // override the factory defaults below when set to a positive number; any
 // other value (unset, blank, non-numeric, zero/negative) falls back silently
 // rather than producing a broken runtime.
 // ---------------------------------------------------------------------------
 
 function envNumber(env, key, fallback) {
-  const raw = env?.[key];
+  const raw = readEnv(key, { env });
   if (raw === undefined || raw === null || raw === "") return fallback;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -270,10 +271,10 @@ export function createChatRuntime({
   loadSdk = loadClaudeAgentSdk,
   runInstalledRuntimeImpl = runInstalledRuntime,
   now = () => Date.now(),
-  idleTtlMs = envNumber(env, "ROLESTER_CHAT_IDLE_TTL_MS", 30 * 60 * 1000),
+  idleTtlMs = envNumber(env, "CAREERRAT_CHAT_IDLE_TTL_MS", 30 * 60 * 1000),
   closedTtlMs = 5 * 60 * 1000,
   maxSessions = 4,
-  maxTurns = envNumber(env, "ROLESTER_CHAT_MAX_TURNS", 200),
+  maxTurns = envNumber(env, "CAREERRAT_CHAT_MAX_TURNS", 200),
 } = {}) {
   // id -> session record. See this file's header + the M2 design doc for the
   // exact record shape: {id, skill, route, sdkSessionId, state, closeReason,
@@ -472,7 +473,9 @@ export function createChatRuntime({
         env,
         signal: turnController.signal,
         model:
-          String(env.ROLESTER_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() || undefined,
+          String(
+            readEnv("CAREERRAT_INSTALLED_AI_MODEL", { env }) || env.ANTHROPIC_MODEL || ""
+          ).trim() || undefined,
         tools: resolveChatRuntimeTools({ skill: session.skill }),
       });
 
@@ -585,7 +588,7 @@ export function createChatRuntime({
     if (!allowed.includes(trimmedSkill)) {
       const err = new Error(
         `skill "${trimmedSkill}" is not allowed to run via the chat runtime (allowed: ` +
-          `${allowed.join(", ") || "none"}) — set ROLESTER_CHAT_SKILLS to opt more in`
+          `${allowed.join(", ") || "none"}) — set CAREERRAT_CHAT_SKILLS to opt more in`
       );
       err.code = "SKILL_NOT_ALLOWED";
       err.allowed = allowed;
@@ -688,7 +691,7 @@ export function createChatRuntime({
         canUseTool: toolPolicy.canUseTool,
         hooks: toolPolicy.hooks,
         maxTurns,
-        title: `rolester chat: ${trimmedSkill}`,
+        title: `careerrat chat: ${trimmedSkill}`,
       },
     });
     session.query = q;

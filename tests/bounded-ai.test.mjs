@@ -37,7 +37,7 @@ const SEED_SCHEMA = {
   },
 };
 
-const ROOT = "/tmp/rolester-test-root";
+const ROOT = "/tmp/careerrat-test-root";
 const FORBIDDEN_CONTENT = [
   "PROMPT_SECRET_02_07",
   "RAW_MODEL_REPLY_02_07",

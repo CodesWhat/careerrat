@@ -6,7 +6,7 @@
 //
 // Pure (no fs) so it can live in shipped `src/` and be shared by both callers:
 //   - scripts/rebase-demo-dates.mjs — CLI used by build:demo on a throwaway copy.
-//   - db/demo-seed.mjs — `rolester data init --demo` rebases to real-today on every
+//   - db/demo-seed.mjs — `careerrat data init --demo` rebases to real-today on every
 //     seed, keeping the live dev dashboard current without mutating the committed
 //     fixture.
 //

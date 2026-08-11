@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Make Rolester's skills discoverable by whatever agent pulled the repo down.
+// Make CareerRat's skills discoverable by whatever agent pulled the repo down.
 //
 // The single source of truth is `.agents/skills/<name>/SKILL.md` (the
 // CLI-agnostic convention the AGENTS.md router references). Different agents
@@ -141,7 +141,7 @@ if (asJson) {
   process.exit(result.ok || soft ? 0 : 1);
 }
 
-log("rolester install-skills");
+log("careerrat install-skills");
 log("=======================");
 log("");
 if (checkOnly) {

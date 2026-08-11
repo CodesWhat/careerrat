@@ -42,13 +42,13 @@ const READINESS_KEYS = ["search_ready", "gate_ready", "apply_ready", "deep_inges
 // A fresh repoRoot with just enough of the real tree for loadModes() to work
 // (it unconditionally reads config/modes.schema.json regardless of whether
 // candidate/modes.yml itself exists — same requirement any test of the real
-// `rolester tracker`/`rolester doctor` CLI would have). No candidate/*.yml
+// `careerrat tracker`/`careerrat doctor` CLI would have). No candidate/*.yml
 // files are copied in, so settings/library/agentGuidance all degrade to their
 // documented "not configured" defaults — exactly what buildDashboardViewModel
 // tolerates by design (every buildXStatus() reader defaults its own input to
 // {}/null).
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-dashboard-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-dashboard-route-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   writeFileSync(
@@ -178,7 +178,7 @@ test("GET /api/data/dashboard: 409 with the fail-closed message when no db exist
     assert.equal(status, 409);
     assert.equal(body.setup, null);
     assert.match(body.error, /no database yet/);
-    assert.match(body.error, /rolester data import/);
+    assert.match(body.error, /careerrat data import/);
   } finally {
     await closeServer(server);
   }

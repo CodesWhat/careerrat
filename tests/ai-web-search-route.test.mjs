@@ -14,7 +14,7 @@ import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 const roots = [];
 
 function tempRepo({ prompts = 1 } = {}) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-ai-web-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-ai-web-route-"));
   roots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   if (prompts) saveSearchPrompts({ repoRoot, prompts: [{ id: "p1", text: "Find AI roles" }] });

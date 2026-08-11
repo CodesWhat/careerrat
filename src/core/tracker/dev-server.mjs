@@ -3,12 +3,13 @@
 // path-traversal guard, MIME mapping, live-reload injection, port parsing — are
 // unit-testable without booting a server.
 import { extname, join, normalize } from "node:path";
+import { readEnv } from "../env-compat.mjs";
 
 // The live-reload client. Injected into served HTML at request time only — never
 // written to the real workspace/tracker.html artifact, so it never leaks into the
 // committed render. EventSource auto-reconnects; we also retry on error.
 export const LIVERELOAD_SNIPPET = `
-<script data-rolester-livereload>
+<script data-careerrat-livereload>
 (function () {
   function connect() {
     try {
@@ -82,7 +83,7 @@ export function resolvePort(argv = [], env = {}, fallback = 7777) {
     const p = Number(argv[flagIdx + 1]);
     if (Number.isInteger(p) && p > 0 && p < 65536) return p;
   }
-  const e = Number(env.ROLESTER_DEV_PORT);
+  const e = Number(readEnv("CAREERRAT_DEV_PORT", { env }));
   if (Number.isInteger(e) && e > 0 && e < 65536) return e;
   return fallback;
 }

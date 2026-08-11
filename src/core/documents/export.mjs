@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import sanitizeHtml from "sanitize-html";
+import { readEnv } from "../env-compat.mjs";
 
 const repoRoot = join(fileURLToPath(new URL("../../..", import.meta.url)));
 const ARTIFACT_HTML_TAGS = [
@@ -66,7 +67,7 @@ function safeArtifactHref(value) {
 
   if (href.includes("://")) return null;
   try {
-    new URL(href, "https://rolester.invalid/");
+    new URL(href, "https://careerrat.invalid/");
     return href;
   } catch {
     return null;
@@ -670,7 +671,7 @@ export async function renderPdf({
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-rolester-render-token": desktopRenderer.token,
+        "x-careerrat-render-token": desktopRenderer.token,
       },
       body: JSON.stringify({ html: source }),
     });
@@ -725,8 +726,8 @@ export async function renderPdf({
 }
 
 function desktopPdfRendererConfig(env) {
-  const rawUrl = String(env?.ROLESTER_DESKTOP_PDF_RENDER_URL || "").trim();
-  const token = String(env?.ROLESTER_DESKTOP_PDF_RENDER_TOKEN || "").trim();
+  const rawUrl = String(readEnv("CAREERRAT_DESKTOP_PDF_RENDER_URL", { env }) || "").trim();
+  const token = String(readEnv("CAREERRAT_DESKTOP_PDF_RENDER_TOKEN", { env }) || "").trim();
   if (!rawUrl && !token) return null;
   if (!rawUrl || !token) {
     const err = new Error("Desktop PDF renderer configuration is incomplete");
@@ -911,8 +912,8 @@ function makeReferenceDoc(dst) {
 }
 
 async function renderDocxViaPandoc({ markdown, outPath, title }) {
-  const tmp = join(tmpdir(), `rolester-export-${Date.now()}.md`);
-  const refDoc = join(tmpdir(), `rolester-ref-${Date.now()}.docx`);
+  const tmp = join(tmpdir(), `careerrat-export-${Date.now()}.md`);
+  const refDoc = join(tmpdir(), `careerrat-ref-${Date.now()}.docx`);
   writeFileSync(tmp, markdown, "utf8");
   makeReferenceDoc(refDoc);
 
@@ -958,7 +959,7 @@ async function renderDocxViaPandoc({ markdown, outPath, title }) {
 // --- soffice path ---
 
 async function renderDocxViaSoffice({ markdown, outPath, title }) {
-  const tmp = join(tmpdir(), `rolester-export-${Date.now()}.html`);
+  const tmp = join(tmpdir(), `careerrat-export-${Date.now()}.html`);
   const tmpDocx = tmp.replace(".html", ".docx");
 
   writeFileSync(tmp, documentHtml(markdown, { title }), "utf8");

@@ -43,7 +43,7 @@ function selectInstalledRuntime({ repoRoot, env }) {
 
 function tempRepoWithSkill(skillNames = "ingest-profile") {
   const names = Array.isArray(skillNames) ? skillNames : [skillNames];
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-chat-runtime-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-chat-runtime-"));
   for (const skillName of names) {
     const skillDir = join(repoRoot, ".agents/skills", skillName);
     mkdirSync(skillDir, { recursive: true });
@@ -1209,7 +1209,7 @@ test("createChatRuntime.interrupt (installed route): aborts only the in-flight t
 test("INTEGRATION (skipped without ANTHROPIC_API_KEY): a real 2-turn ping/pong chat survives past the first result and answers a second pushed message", {
   skip: !process.env.ANTHROPIC_API_KEY,
 }, async () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-chat-runtime-live-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-chat-runtime-live-"));
   const skillDir = join(repoRoot, ".agents/skills/pingpong");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(

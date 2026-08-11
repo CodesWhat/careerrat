@@ -8,8 +8,8 @@ export const DASHBOARD_SCRIPT = `
     // "<family>-<mode>" palette key (CSS), data-mode holds just the mode (drives
     // the toggle icon). "original" maps to the base :root / [data-theme="dark"].
     var root = document.documentElement;
-    var KEY_THEME = "rolester-theme";  // family
-    var KEY_MODE = "rolester-mode";    // light | dark
+    var KEY_THEME = "careerrat-theme";  // family
+    var KEY_MODE = "careerrat-mode";    // light | dark
     var VALID_FAMILY = { original: 1, spinel: 1, slate: 1, box: 1, tokyonight: 1, gruvbox: 1 };
     var themeSelect = document.getElementById("theme-select");
     var family = "original", mode = "light";
@@ -556,7 +556,7 @@ export const DASHBOARD_SCRIPT = `
       renderBody();
 
       // Re-render when the "Show rejected" toggle flips (terminal rows in/out).
-      document.addEventListener("rolester:rejected", renderBody);
+      document.addEventListener("careerrat:rejected", renderBody);
     })();
 
     // ── Jobs section: Table / Board / Calendar view toggle ─────────────────
@@ -573,7 +573,7 @@ export const DASHBOARD_SCRIPT = `
         calendar: { cls: "jobs-view-calendar", btn: btnCal },
       };
 
-      var KEY_VIEW = "rolester-jobs-view";
+      var KEY_VIEW = "careerrat-jobs-view";
       var currentView = "table";
       try {
         var saved = localStorage.getItem(KEY_VIEW);
@@ -592,7 +592,7 @@ export const DASHBOARD_SCRIPT = `
             spec.btn.setAttribute("aria-pressed", on ? "true" : "false");
           }
         });
-        if (v === "calendar") document.dispatchEvent(new CustomEvent("rolester:calendar"));
+        if (v === "calendar") document.dispatchEvent(new CustomEvent("careerrat:calendar"));
         try { localStorage.setItem(KEY_VIEW, v); } catch (e) {}
       }
 
@@ -747,7 +747,7 @@ export const DASHBOARD_SCRIPT = `
         });
 
         renderStage();
-        document.addEventListener("rolester:rejected", renderStage);
+        document.addEventListener("careerrat:rejected", renderStage);
       }
 
       // Wire card hover to the existing job tooltip (active pipeline + rejected)
@@ -778,12 +778,12 @@ export const DASHBOARD_SCRIPT = `
 
     // ── "Show rejected" toggle ─────────────────────────────────────────────
     // Flips #jobs-section.show-rejected; the table + board listen for the
-    // "rolester:rejected" event to re-filter and recount. State persists.
+    // "careerrat:rejected" event to re-filter and recount. State persists.
     (function () {
       var btn = document.getElementById("rej-toggle");
       var section = document.getElementById("jobs-section");
       if (!btn || !section) return;
-      var KEY = "rolester-show-rejected";
+      var KEY = "careerrat-show-rejected";
       var on = false;
       try { on = localStorage.getItem(KEY) === "1"; } catch (e) {}
       function apply() {
@@ -793,12 +793,12 @@ export const DASHBOARD_SCRIPT = `
       }
       apply();
       // Sync the table/board to the restored state (they rendered with defaults).
-      document.dispatchEvent(new CustomEvent("rolester:rejected"));
+      document.dispatchEvent(new CustomEvent("careerrat:rejected"));
       btn.addEventListener("click", function () {
         on = !on;
         try { localStorage.setItem(KEY, on ? "1" : "0"); } catch (e) {}
         apply();
-        document.dispatchEvent(new CustomEvent("rolester:rejected"));
+        document.dispatchEvent(new CustomEvent("careerrat:rejected"));
       });
     })();
 

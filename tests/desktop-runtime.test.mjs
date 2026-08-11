@@ -27,8 +27,8 @@ afterEach(() => {
 });
 
 describe("desktop runtime path resolution", () => {
-  it("resolves packaged ROLESTER_HOME under Electron userData and repoRoot under resources", () => {
-    const root = tempRoot("rolester-desktop-runtime-");
+  it("resolves packaged CAREERRAT_HOME under Electron userData and repoRoot under resources", () => {
+    const root = tempRoot("careerrat-desktop-runtime-");
     try {
       const userDataPath = join(root, "user-data");
       const resourcesPath = join(root, "CareerRat.app", "Contents", "Resources");
@@ -40,15 +40,15 @@ describe("desktop runtime path resolution", () => {
         appDir: join(root, "checkout", "apps", "desktop"),
       });
 
-      assert.equal(runtime.rolesterHome, join(userDataPath, "data"));
-      assert.equal(runtime.repoRoot, join(resourcesPath, "rolester"));
-      assert.equal(runtime.rolesterHome.startsWith(resourcesPath), false);
+      assert.equal(runtime.careerratHome, join(userDataPath, "data"));
+      assert.equal(runtime.repoRoot, join(resourcesPath, "careerrat"));
+      assert.equal(runtime.careerratHome.startsWith(resourcesPath), false);
     } finally {
       cleanup(root);
     }
   });
 
-  it("keeps dev mode on the checkout without assigning ROLESTER_HOME", () => {
+  it("keeps dev mode on the checkout without assigning CAREERRAT_HOME", () => {
     const appDir = join("checkout", "apps", "desktop");
     const runtime = resolveDesktopRuntimePaths({
       isPackaged: false,
@@ -57,12 +57,12 @@ describe("desktop runtime path resolution", () => {
       resourcesPath: "ignored-resources",
     });
 
-    assert.equal(runtime.rolesterHome, null);
+    assert.equal(runtime.careerratHome, null);
     assert.equal(runtime.repoRoot, join(appDir, "../.."));
   });
 
   it("keeps branded node_modules Electron launches in dev mode when appDir is the checkout", () => {
-    const root = tempRoot("rolester-desktop-branded-dev-");
+    const root = tempRoot("careerrat-desktop-branded-dev-");
     try {
       const appDir = join(root, "checkout", "apps", "desktop");
       const resourcesPath = join(
@@ -84,7 +84,7 @@ describe("desktop runtime path resolution", () => {
       });
 
       assert.equal(runtime.isPackaged, false);
-      assert.equal(runtime.rolesterHome, null);
+      assert.equal(runtime.careerratHome, null);
       assert.equal(runtime.repoRoot, join(appDir, "../.."));
     } finally {
       cleanup(root);
@@ -92,9 +92,9 @@ describe("desktop runtime path resolution", () => {
   });
 });
 
-describe("desktop packaged ROLESTER_HOME storage", () => {
-  it("initializes SQLite and all registered migrations under packaged ROLESTER_HOME", () => {
-    const root = tempRoot("rolester-desktop-db-");
+describe("desktop packaged CAREERRAT_HOME storage", () => {
+  it("initializes SQLite and all registered migrations under packaged CAREERRAT_HOME", () => {
+    const root = tempRoot("careerrat-desktop-db-");
     try {
       const runtime = resolveDesktopRuntimePaths({
         isPackaged: true,
@@ -102,15 +102,15 @@ describe("desktop packaged ROLESTER_HOME storage", () => {
         resourcesPath: join(root, "Resources"),
         appDir: join(root, "checkout", "apps", "desktop"),
       });
-      const env = { ROLESTER_HOME: runtime.rolesterHome };
+      const env = { CAREERRAT_HOME: runtime.careerratHome };
 
       const db = openDb({ repoRoot: runtime.repoRoot, env });
-      const expectedDbPath = join(runtime.rolesterHome, "db", "rolester.db");
+      const expectedDbPath = join(runtime.careerratHome, "db", "rolester.db");
 
       assert.equal(dbFilePath({ repoRoot: runtime.repoRoot, env }), expectedDbPath);
-      assert.ok(existsSync(expectedDbPath), "database must be created under ROLESTER_HOME");
+      assert.ok(existsSync(expectedDbPath), "database must be created under CAREERRAT_HOME");
       assert.equal(
-        existsSync(join(runtime.repoRoot, ".rolester", "db", "rolester.db")),
+        existsSync(join(runtime.repoRoot, ".careerrat", "db", "rolester.db")),
         false,
         "packaged startup must not create the database under staged resources"
       );
@@ -130,8 +130,8 @@ describe("desktop packaged ROLESTER_HOME storage", () => {
     }
   });
 
-  it("persists BYOK credentials under packaged ROLESTER_HOME/internal without echoing secrets", () => {
-    const root = tempRoot("rolester-desktop-byok-");
+  it("persists BYOK credentials under packaged CAREERRAT_HOME/internal without echoing secrets", () => {
+    const root = tempRoot("careerrat-desktop-byok-");
     try {
       const runtime = resolveDesktopRuntimePaths({
         isPackaged: true,
@@ -139,14 +139,14 @@ describe("desktop packaged ROLESTER_HOME storage", () => {
         resourcesPath: join(root, "Resources"),
         appDir: join(root, "checkout", "apps", "desktop"),
       });
-      const env = { ROLESTER_HOME: runtime.rolesterHome };
+      const env = { CAREERRAT_HOME: runtime.careerratHome };
       const apiKey = "sk-ant-packaged-runtime-secret";
 
       const writeResult = writeLocalAiKey({ repoRoot: runtime.repoRoot, apiKey, env });
-      const loadEnv = { ROLESTER_HOME: runtime.rolesterHome };
+      const loadEnv = { CAREERRAT_HOME: runtime.careerratHome };
       const loadResult = loadLocalAiEnv({ repoRoot: runtime.repoRoot, env: loadEnv });
 
-      assert.equal(writeResult.path, join(runtime.rolesterHome, "internal", "ai.env"));
+      assert.equal(writeResult.path, join(runtime.careerratHome, "internal", "ai.env"));
       assert.equal(loadResult.path, writeResult.path);
       assert.equal(statSync(writeResult.path).mode & 0o777, 0o600);
       assert.deepEqual(loadResult.loaded, ["ANTHROPIC_API_KEY"]);

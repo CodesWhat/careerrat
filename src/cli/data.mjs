@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 
-// rolester data — the sqlite-backed data layer's CLI surface (M6).
+// careerrat data — the sqlite-backed data layer's CLI surface (M6).
 //
-// `rolester data <verb>` is a thin argv shim over the exact same lib functions
+// `careerrat data <verb>` is a thin argv shim over the exact same lib functions
 // the HTTP route (src/cli/data-route.mjs) calls — decision 6's "one shared
 // write path": there is exactly one INSERT/UPDATE call site per domain action,
 // this file just parses argv into the same options object the route builds
@@ -743,7 +743,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester data — sqlite-backed data layer (M6)
+  console.log(`careerrat data — sqlite-backed data layer (M6)
 
 Usage:
   node src/cli/data.mjs status [--json]

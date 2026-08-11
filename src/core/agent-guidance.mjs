@@ -81,8 +81,8 @@ export function buildAgentGuidance({
     return {
       ...base,
       nextSkill: null,
-      command: "rolester doctor",
-      message: "Fix the missing Rolester scaffold files before running job-search skills.",
+      command: "careerrat doctor",
+      message: "Fix the missing CareerRat scaffold files before running job-search skills.",
       reason: "System files are missing, so the agent cannot reliably route the workflow.",
     };
   }
@@ -90,8 +90,8 @@ export function buildAgentGuidance({
     return {
       ...base,
       nextSkill: null,
-      command: "rolester install-skills",
-      message: "Run rolester install-skills so the agent can invoke the Rolester skills.",
+      command: "careerrat install-skills",
+      message: "Run careerrat install-skills so the agent can invoke the CareerRat skills.",
       reason: "Skills exist in the repo but are not discoverable by the current agent surface.",
     };
   }
@@ -99,7 +99,7 @@ export function buildAgentGuidance({
     return {
       ...base,
       nextSkill: "configure",
-      command: "rolester modes status",
+      command: "careerrat modes status",
       message: "Ask your agent to fix candidate/modes.yml before continuing.",
       reason: "Invalid modes can make later skill-routing decisions ambiguous.",
     };
@@ -108,7 +108,7 @@ export function buildAgentGuidance({
     return {
       ...base,
       nextSkill: "ingest-profile",
-      command: "rolester ingest",
+      command: "careerrat ingest",
       message: "Ask your agent to run ingest-profile next.",
       reason:
         "Candidate setup is incomplete, so searches and gates do not have full targeting context.",
@@ -119,7 +119,7 @@ export function buildAgentGuidance({
     return {
       ...base,
       nextSkill: "ingest-profile",
-      command: "rolester ingest",
+      command: "careerrat ingest",
       message: "Ask your agent to continue onboarding with ingest-profile next.",
       reason: missing.length
         ? `Candidate setup is not search-ready yet; missing: ${missing.join(", ")}.`
@@ -130,7 +130,7 @@ export function buildAgentGuidance({
     return {
       ...base,
       nextSkill: "setup-searches",
-      command: "rolester searches --from-targeting",
+      command: "careerrat searches --from-targeting",
       message: "Ask your agent to run setup-searches next.",
       reason:
         "Broad search sources are missing or disabled, so there is nothing useful to sweep yet.",
@@ -140,7 +140,7 @@ export function buildAgentGuidance({
     return {
       ...base,
       nextSkill: "discover-companies",
-      command: "rolester companies",
+      command: "careerrat companies",
       message: "Ask your agent to repair company ATS scans with discover-companies.",
       reason: "The company ATS scan config exists but is invalid.",
     };
@@ -193,9 +193,9 @@ export function buildAgentGuidance({
 }
 
 export function formatAgentGuidanceLines(guidance) {
-  if (!guidance) return ["- Rolester is agent-led: run `rolester doctor` for the next handoff."];
+  if (!guidance) return ["- CareerRat is agent-led: run `careerrat doctor` for the next handoff."];
   const lines = [
-    "- Rolester is agent-led: ask the agent to run the next skill, then let that skill write durable state.",
+    "- CareerRat is agent-led: ask the agent to run the next skill, then let that skill write durable state.",
     `- ${guidance.message}`,
   ];
   if (guidance.reason) lines.push(`  Why: ${guidance.reason}`);
@@ -207,7 +207,7 @@ export function formatAgentGuidanceLines(guidance) {
 }
 
 export function formatAgentGuidanceSummary(guidance) {
-  if (!guidance) return ["Next: run rolester doctor."];
+  if (!guidance) return ["Next: run careerrat doctor."];
   const first = guidance.nextSkill
     ? `Next: ask your agent to run ${guidance.nextSkill}.`
     : guidance.command

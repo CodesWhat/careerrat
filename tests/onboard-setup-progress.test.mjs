@@ -298,7 +298,7 @@ describe("computeSetupProgress", () => {
 // ---------------------------------------------------------------------------
 
 function buildTempRoot() {
-  const tempRoot = mkdtempSync(join(tmpdir(), "rolester-onboard-setup-progress-"));
+  const tempRoot = mkdtempSync(join(tmpdir(), "careerrat-onboard-setup-progress-"));
   cleanupRoots.push(tempRoot);
   mkdirSync(join(tempRoot, "templates"), { recursive: true });
   mkdirSync(join(tempRoot, "config"), { recursive: true });

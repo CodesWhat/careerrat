@@ -84,7 +84,7 @@ export function buildDiscoveryKickoff({
   return [
     source,
     `Current next discovery skill: ${skill}.`,
-    message || "Continue the Rolester discovery pipeline from the current workspace state.",
+    message || "Continue the CareerRat discovery pipeline from the current workspace state.",
     candidateContext && Object.keys(candidateContext).length
       ? `Outbound-safe candidate context: ${JSON.stringify(candidateContext)}`
       : null,

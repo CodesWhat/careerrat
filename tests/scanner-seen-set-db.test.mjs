@@ -21,7 +21,7 @@ const NEW_URL = "https://jobs.lever.co/acme/new-role";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-scanner-seen-set-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-scanner-seen-set-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "workspace"), { recursive: true });
   return repoRoot;

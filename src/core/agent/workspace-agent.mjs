@@ -96,7 +96,7 @@ function compactCandidateSnapshot({ repoRoot, env }) {
 export function buildWorkspaceAgentSystemPrompt({ repoRoot, env = process.env } = {}) {
   const snapshot = compactCandidateSnapshot({ repoRoot, env });
   return [
-    "You are Rolester, the one durable career-search workspace agent for this candidate.",
+    "You are CareerRat, the one durable career-search workspace agent for this candidate.",
     "Continue the same relationship across onboarding, Ask, and every contextual button result.",
     "Use the complete conversation supplied with this turn and the canonical candidate snapshot below.",
     "Never invent candidate facts, job facts, completed actions, or evidence. If information is missing, say so plainly.",
@@ -1095,7 +1095,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `Recorded that you sent the response for ${communicationLabel(communication)} outside Rolester.`,
+        text: `Recorded that you sent the response for ${communicationLabel(communication)} outside CareerRat.`,
         metadata: {
           state: "sent",
           deliveryVerified: false,
@@ -1151,7 +1151,7 @@ export async function executeWorkspaceIntent({
         env,
         id: normalized.entity.id,
         to: "applied",
-        note: "Applied outside Rolester — reported by user.",
+        note: "Applied outside CareerRat — reported by user.",
         appliedAt,
       });
       return appendActionResult({
@@ -1159,7 +1159,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `Recorded that you applied outside Rolester: ${applicationLabel(application)}.`,
+        text: `Recorded that you applied outside CareerRat: ${applicationLabel(application)}.`,
         metadata: {
           state: "recorded",
           recordingMode: "external_report",

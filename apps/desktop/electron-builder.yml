@@ -1,6 +1,6 @@
 # electron-builder config for the CareerRat desktop shell (M5, macOS-first).
 #
-# `npm run dist` runs `stage.mjs` first (builds staging/rolester, the
+# `npm run dist` runs `stage.mjs` first (builds staging/careerrat, the
 # extraResources tree below) then electron-builder itself.
 #
 # Signing: leave `mac.identity` unset so electron-builder uses its standard
@@ -23,8 +23,8 @@ files:
   - window-options.mjs
   - package.json
 extraResources:
-  - from: staging/rolester
-    to: rolester
+  - from: staging/careerrat
+    to: careerrat
     filter:
       - "**/*"
       - ".agents/**"
@@ -33,8 +33,8 @@ extraResources:
       - "!**/.DS_Store"
   # electron-builder's copy filter rejects a root-level `node_modules`
   # directory inside a FileSet, so copy the staged SDK tree as its own source.
-  - from: staging/rolester/node_modules
-    to: rolester/node_modules
+  - from: staging/careerrat/node_modules
+    to: careerrat/node_modules
     filter:
       - "**/*"
       - "!**/.DS_Store"

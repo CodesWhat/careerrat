@@ -789,7 +789,7 @@ export function renderTrackerSummaryText(trackerData) {
   const customStages = trackerData?.stages || [];
 
   const lines = [
-    "=== Rolester Tracker Summary ===",
+    "=== CareerRat Tracker Summary ===",
     "",
     `Applications:   ${counts.applications}`,
     `Sourced:        ${counts.sourced}`,

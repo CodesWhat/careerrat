@@ -430,7 +430,7 @@ export function getSearchSources() {
 }
 
 // AI search-assistant prompts (src/cli/search-route.mjs) — generate-first:
-// Rolester generates the prompts, the user edits/adds/removes afterward.
+// CareerRat generates the prompts, the user edits/adds/removes afterward.
 // GET/PUT both unwrap to the stored { id, text, source, updatedAt } list;
 // generate additionally persists server-side before returning it.
 export function getSearchPrompts() {

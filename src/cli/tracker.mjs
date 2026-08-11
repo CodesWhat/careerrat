@@ -1,20 +1,20 @@
 #!/usr/bin/env node
-// Rolester tracker CLI — snapshot tracker.json, summarize, check follow-ups, verify.
+// CareerRat tracker CLI — snapshot tracker.json, summarize, check follow-ups, verify.
 //
 // The legacy static-HTML dashboard publish step (workspace/tracker.html +
 // workspace/dashboard-data.js/modes.json/settings.json/library.json) has been
 // retired — the live product is the React SPA at /app (src/cli/tracker-dev.mjs),
 // which reads the sqlite-backed GET /api/data/dashboard view model directly.
 // The default (no-flag) action here still snapshots tracker.json, since many
-// skills rely on `rolester tracker` as their durable-backup checkpoint.
+// skills rely on `careerrat tracker` as their durable-backup checkpoint.
 //
 // Usage:
-//   rolester tracker                 Snapshot workspace/tracker.json, print a summary
-//   rolester tracker --summary    Print a plaintext status summary
-//   rolester tracker --followups  List follow-ups due now
-//   rolester tracker --verify     Validate tracker.json against config/tracker.schema.json
-//   rolester tracker --json       Machine-readable output for the current mode
-//   rolester tracker --help
+//   careerrat tracker                 Snapshot workspace/tracker.json, print a summary
+//   careerrat tracker --summary    Print a plaintext status summary
+//   careerrat tracker --followups  List follow-ups due now
+//   careerrat tracker --verify     Validate tracker.json against config/tracker.schema.json
+//   careerrat tracker --json       Machine-readable output for the current mode
+//   careerrat tracker --help
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -186,15 +186,15 @@ function loadFollowUpRules() {
 }
 
 function printHelp() {
-  console.log(`rolester tracker — snapshot, summary, follow-ups, verify
+  console.log(`careerrat tracker — snapshot, summary, follow-ups, verify
 
 Usage:
-  rolester tracker                 Snapshot workspace/tracker.json, print a summary
-  rolester tracker --summary    Plaintext status summary
-  rolester tracker --followups  Follow-ups due now
-  rolester tracker --verify     Validate against config/tracker.schema.json
-  rolester tracker --snapshots  List rolling tracker.json snapshots (workspace/.snapshots/)
-  rolester tracker --json       Machine-readable output
+  careerrat tracker                 Snapshot workspace/tracker.json, print a summary
+  careerrat tracker --summary    Plaintext status summary
+  careerrat tracker --followups  Follow-ups due now
+  careerrat tracker --verify     Validate against config/tracker.schema.json
+  careerrat tracker --snapshots  List rolling tracker.json snapshots (workspace/.snapshots/)
+  careerrat tracker --json       Machine-readable output
 
 Reads workspace/tracker.json (seed from templates/tracker.json).
 Snapshots: workspace/.snapshots/tracker-<timestamp>.json, newest-20 kept.

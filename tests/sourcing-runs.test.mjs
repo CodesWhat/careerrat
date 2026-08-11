@@ -16,7 +16,7 @@ import { candidateSetupInitialize } from "../src/core/db/verbs.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-sourcing-runs-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-sourcing-runs-"));
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;

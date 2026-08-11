@@ -4,7 +4,8 @@ import { ArrowLeftIcon, ArrowRightIcon, MoonIcon, SunIcon } from "../components/
 import { useTheme } from "../lib/theme.js";
 
 const DEFAULT_STEP_COUNT = 8;
-const PROGRESS_FOOTER_REVEAL_STORAGE_KEY = "rolester:onboarding-progress-footer-revealed";
+const PROGRESS_FOOTER_REVEAL_STORAGE_KEY = "careerrat:onboarding-progress-footer-revealed";
+const LEGACY_PROGRESS_FOOTER_REVEAL_STORAGE_KEY = "rolester:onboarding-progress-footer-revealed";
 let progressFooterRevealSeen = false;
 const OnboardingCompletionContext = createContext(null);
 const DEFAULT_PROGRESS_STEPS = [
@@ -96,7 +97,10 @@ export function getOnboardingProgressFooterClassName({
 function hasProgressFooterRevealBeenSeen() {
   if (progressFooterRevealSeen) return true;
   try {
-    return globalThis.localStorage?.getItem(PROGRESS_FOOTER_REVEAL_STORAGE_KEY) === "1";
+    return (
+      globalThis.localStorage?.getItem(PROGRESS_FOOTER_REVEAL_STORAGE_KEY) === "1" ||
+      globalThis.localStorage?.getItem(LEGACY_PROGRESS_FOOTER_REVEAL_STORAGE_KEY) === "1"
+    );
   } catch {
     return false;
   }

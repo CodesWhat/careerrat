@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 
 import { parseYaml } from "../src/core/profile/yaml.mjs";
 
-// Every YAML file Rolester ships (config defaults, onboarding templates, example
+// Every YAML file CareerRat ships (config defaults, onboarding templates, example
 // candidate) is read at runtime via parseYaml — a malformed one ships green
 // through the suite and only fails when a user hits that code path (broken
 // onboarding, blank dashboard identity). This guard parses every tracked .yml so

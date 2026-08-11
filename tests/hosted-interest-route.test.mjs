@@ -14,7 +14,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const roots = new Set();
 
 function root() {
-  const value = mkdtempSync(join(tmpdir(), "rolester-hosted-interest-route-"));
+  const value = mkdtempSync(join(tmpdir(), "careerrat-hosted-interest-route-"));
   roots.add(value);
   return value;
 }

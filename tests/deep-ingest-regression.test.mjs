@@ -187,7 +187,7 @@ test("D-01..D-15 happy path ingests, proposes, confirms, projects Library cards,
   assertFixtureDecisionCoverage();
   const fixture = SOURCE_CASES.cases.happyPath;
   const expected = EXPECTED.cases.happyPath;
-  const repoRoot = tempRepo("rolester-deep-regression-happy-");
+  const repoRoot = tempRepo("careerrat-deep-regression-happy-");
   openDb({ repoRoot });
   seedCandidate(repoRoot);
 
@@ -269,7 +269,7 @@ test("D-07/D-08/D-10/D-11/D-12 no-AI fallback keeps source reviewable and termin
   assertFixtureDecisionCoverage();
   const fixture = SOURCE_CASES.cases.noAiManualFallback;
   const expected = EXPECTED.cases.noAiManualFallback;
-  const repoRoot = tempRepo("rolester-deep-regression-noai-");
+  const repoRoot = tempRepo("careerrat-deep-regression-noai-");
   openDb({ repoRoot });
   seedCandidate(repoRoot);
 
@@ -327,7 +327,7 @@ test("D-05/D-09/D-13/D-14/D-15 hostile sources become gaps, blocked proposals, o
   assertFixtureDecisionCoverage();
   const fixture = SOURCE_CASES.cases.hostileSource;
   const expected = EXPECTED.cases.hostileSource;
-  const repoRoot = tempRepo("rolester-deep-regression-hostile-");
+  const repoRoot = tempRepo("careerrat-deep-regression-hostile-");
   openDb({ repoRoot });
   seedCandidate(repoRoot);
 

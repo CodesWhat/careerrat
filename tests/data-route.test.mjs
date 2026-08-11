@@ -17,7 +17,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-data-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-data-route-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -120,8 +120,8 @@ test("GET /api/data/snapshot: 409 with the exact fail-closed message when no db 
     const { status, body } = await getJson(server, "/api/data/snapshot");
     assert.equal(status, 409);
     assert.match(body.error, /no database yet/);
-    assert.match(body.error, /rolester data import/);
-    assert.match(body.error, /rolester data init/);
+    assert.match(body.error, /careerrat data import/);
+    assert.match(body.error, /careerrat data init/);
   } finally {
     await closeServer(server);
   }

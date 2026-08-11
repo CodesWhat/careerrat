@@ -298,7 +298,7 @@ test("computeGateEdit: refuses (valid:false) when the result would break the sch
 // ── atomicWriteFile ──────────────────────────────────────────────────────────
 
 test("atomicWriteFile writes content and leaves no temp file behind", () => {
-  const dir = mkdtempSync(join(tmpdir(), "rolester-gate-"));
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-gate-"));
   try {
     const target = join(dir, "out.yml");
     writeFileSync(target, "old: 1\n");

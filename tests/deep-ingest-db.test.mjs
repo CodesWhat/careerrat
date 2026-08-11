@@ -42,7 +42,7 @@ const VALID_LANE_STATUSES = [
 ];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-deep-ingest-db-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-deep-ingest-db-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

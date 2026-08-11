@@ -1,4 +1,4 @@
-// evaluate/gate.mjs — M4 evaluate-job gate logic for Rolester.
+// evaluate/gate.mjs — M4 evaluate-job gate logic for CareerRat.
 // Zero runtime dependencies. Node v24 ESM.
 
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";

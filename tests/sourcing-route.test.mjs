@@ -31,7 +31,7 @@ const FORBIDDEN_ROUTE_TOKENS = [
 ];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-sourcing-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-sourcing-route-"));
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;
@@ -237,7 +237,7 @@ test("GET /api/sourcing/runs/latest returns not_started for first-search before 
 });
 
 test("POST /api/sourcing/first-run/start returns 409 when SQLite DB is missing", async () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-sourcing-route-no-db-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-sourcing-route-no-db-"));
   cleanupRoots.push(repoRoot);
   const server = await bootServer(repoRoot);
   try {

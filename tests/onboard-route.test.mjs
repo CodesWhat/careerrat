@@ -63,7 +63,7 @@ const FORBIDDEN_TEXT = FORBIDDEN_CONTENT.join(" ");
 // ---------------------------------------------------------------------------
 
 function buildTempRoot() {
-  const tempRoot = mkdtempSync(join(tmpdir(), "rolester-onboard-route-"));
+  const tempRoot = mkdtempSync(join(tmpdir(), "careerrat-onboard-route-"));
   cleanupRoots.push(tempRoot);
   mkdirSync(join(tempRoot, "templates"), { recursive: true });
   mkdirSync(join(tempRoot, "config"), { recursive: true });
@@ -1820,7 +1820,7 @@ describe("POST /api/onboard/resume-ai", () => {
       assert.equal(calls.length, 1);
       assert.equal(calls[0].skill, "resume-extract");
       assert.deepEqual(calls[0].tools, ["Read"]);
-      assert.equal(calls[0].outputSchema?.title, "Rolester resume-extract skill output");
+      assert.equal(calls[0].outputSchema?.title, "CareerRat resume-extract skill output");
     } finally {
       await closeServer(server);
     }

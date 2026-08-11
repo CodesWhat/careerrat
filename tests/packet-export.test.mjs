@@ -15,7 +15,7 @@ import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-packet-export-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-export-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "workspace/tailored"), { recursive: true });
   return repoRoot;
@@ -26,7 +26,7 @@ function tempRepo() {
 // ROLESTER_DOWNLOADS_DIR redirects that away from the real OS home so these
 // tests never write into the machine's actual ~/Downloads.
 function tempDownloadsEnv() {
-  const dir = mkdtempSync(join(tmpdir(), "rolester-packet-downloads-"));
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-packet-downloads-"));
   cleanupRoots.push(dir);
   return { ROLESTER_DOWNLOADS_DIR: dir };
 }

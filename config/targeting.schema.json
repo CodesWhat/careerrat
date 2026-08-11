@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://careerrat.local/schemas/targeting.schema.json",
-  "title": "Rolester Targeting",
+  "title": "CareerRat Targeting",
   "type": "object",
   "required": ["role_buckets", "keep_signals", "cut_signals"],
   "additionalProperties": false,

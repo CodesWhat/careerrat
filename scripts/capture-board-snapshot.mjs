@@ -114,7 +114,7 @@ try {
       offers: snapshot.offers,
       savedAt: now,
     });
-    if (!result) throw new Error("capture ingest requires a Rolester SQLite database");
+    if (!result) throw new Error("capture ingest requires a CareerRat SQLite database");
     console.log(`Ingested ${result.persistedRows} captured offers into SQLite sourced rows`);
   }
 } finally {

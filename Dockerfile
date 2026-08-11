@@ -20,5 +20,5 @@ WORKDIR /app
 COPY . .
 
 # Default command: show the help screen.
-ENTRYPOINT ["node", "bin/rolester.mjs"]
+ENTRYPOINT ["node", "bin/careerrat.mjs"]
 CMD ["help"]

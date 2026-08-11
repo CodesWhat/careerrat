@@ -20,7 +20,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-search-sources-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-search-sources-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

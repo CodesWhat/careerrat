@@ -1,4 +1,4 @@
-// Communication thread helpers for Rolester.
+// Communication thread helpers for CareerRat.
 // Zero runtime dependencies. All functions are immutable — inputs are never mutated.
 
 const VALID_CHANNELS = new Set(["email", "linkedin", "portal", "phone", "sms", "other"]);

@@ -15,7 +15,7 @@ import { appUpsert, sourcedUpsertBatch } from "../src/core/db/verbs.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-scan-context-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-scan-context-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "workspace"), { recursive: true });
   return repoRoot;

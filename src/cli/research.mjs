@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-// rolester research — the safe read/record helper for web-research artifacts.
+// careerrat research — the safe read/record helper for web-research artifacts.
 //
-// M11 lets Rolester "go find things out": skills web-search a company, a market
+// M11 lets CareerRat "go find things out": skills web-search a company, a market
 // comp band, or new boards and persist cited findings under `workspace/research/`
 // (see AGENTS.md → Research Memory). Skills RECORD through this helper instead of
 // writing the file directly so the citation-hygiene + privacy guards always run —
-// the same reason they call `rolester gate` / `rolester learnings` instead of hand-
+// the same reason they call `careerrat gate` / `careerrat learnings` instead of hand-
 // editing. Other skills (interview-prep, evaluate-job) READ through it.
 //
 // Usage:
@@ -279,7 +279,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester research — safe read/record for web-research artifacts
+  console.log(`careerrat research — safe read/record for web-research artifacts
 
 Usage:
   node src/cli/research.mjs list [--json]
@@ -301,7 +301,7 @@ Options:
   --write       Commit the record (default: dry run).
   --days N      For 'stale': override the comparison window.
   --json        Machine-readable output.
-  --root DIR    Repo root (default: the rolester install).
+  --root DIR    Repo root (default: the careerrat install).
 
 A company resolves to one file via its slug. Recorded artifacts must carry valid
 frontmatter (type, fetchedAt, company|role), cite at least one source for sourced

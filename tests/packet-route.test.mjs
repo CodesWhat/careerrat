@@ -21,7 +21,7 @@ import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-packet-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-route-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "workspace/tailored"), { recursive: true });
   return repoRoot;

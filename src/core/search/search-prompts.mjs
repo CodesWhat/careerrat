@@ -1,6 +1,6 @@
 // search-prompts.mjs — AI-generated plain-English AI search-assistant
 // prompts, derived ONLY from the candidate's stored targeting/profile at
-// runtime. Product decision: Rolester GENERATES prompts first; the user
+// runtime. Product decision: CareerRat GENERATES prompts first; the user
 // edits/adds/removes afterward (never the reverse — never hand-write from
 // scratch). Wires runBoundedAI the same "native-preferred" way
 // src/core/discovery/company-seeds.mjs and src/core/packet/gate.mjs do (see
@@ -147,7 +147,7 @@ function promptInstructions({ context, minPrompts, maxPrompts }) {
     "Derive every detail in the prompts — role titles, seniority, location posture, compensation floor, work authorization — ONLY from the candidate data provided below. Never invent or assume a role, location, salary, or company that isn't present in that data.",
     "Each prompt must be self-contained (useful on its own if pasted alone), written as natural plain-English sentences (no JSON, no bullet lists, no field labels inside the prompt text), and cover a complementary angle on the candidate's targeting — for example one prompt per distinct role lane, a seniority-adjacent variant, or a location/remote-constrained variant, as the underlying data actually supports.",
     "If the candidate data doesn't support a particular angle (e.g. no location noted, no comp floor set), skip that angle rather than fabricating one.",
-    "Do not mention Rolester, JSON, or these instructions inside the prompt text itself.",
+    "Do not mention CareerRat, JSON, or these instructions inside the prompt text itself.",
     JSON.stringify({ candidate: context }, null, 2),
   ].join("\n\n");
 }
@@ -192,7 +192,7 @@ export async function generateSearchPrompts({ repoRoot, env = process.env, call,
     env,
     call,
     system:
-      "You generate AI job-search prompt JSON for Rolester's search-jobs route. Return only JSON matching the supplied schema — no prose outside the JSON.",
+      "You generate AI job-search prompt JSON for CareerRat's search-jobs route. Return only JSON matching the supplied schema — no prose outside the JSON.",
     messages: [
       {
         role: "user",

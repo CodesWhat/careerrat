@@ -102,7 +102,7 @@ tailwind.config = {
 // B10: apply the saved/preferred theme before paint to avoid a flash.
 (function () {
   try {
-    var t = localStorage.getItem("rolester-theme");
+    var t = localStorage.getItem("careerrat-theme") || localStorage.getItem("rolester-theme");
     if (t !== "dark" && t !== "light") {
       t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     }
@@ -3085,11 +3085,11 @@ tailwind.config = {
     opacity: 1;
     transform: translateX(-50%) translateY(0);
   }
-  .source-icon-rolester {
+  .source-icon-careerrat {
     background: #e9f0ff;
     border: 1px solid #d7e2ff;
   }
-  .source-icon-rolester img {
+  .source-icon-careerrat img {
     width: 17px;
     height: 17px;
     object-fit: contain;
@@ -4040,7 +4040,7 @@ tailwind.config = {
     background: var(--ink);
     color: var(--paper-surface);
   }
-  .source-icon-rolester {
+  .source-icon-careerrat {
     border-color: rgba(232, 85, 61, 0.18);
     background: #ffe6df;
   }
@@ -5939,7 +5939,7 @@ tailwind.config = {
      families. These selectors carry hardcoded cool-grey / white / pastel literals
      that the pass couldn't safely fold (e.g. #ffffff doubles as card bg AND
      text-on-accent), so we flip just these in dark mode. Light theme is untouched. */
-  [data-theme="dark"] .source-icon-rolester {
+  [data-theme="dark"] .source-icon-careerrat {
     background: rgba(232, 85, 61, 0.16);
     border-color: rgba(232, 85, 61, 0.34);
   }
@@ -7711,8 +7711,8 @@ function updateRecencyStats(root = document) {
 
 function startRecencyStats() {
   updateRecencyStats();
-  window.clearInterval(window.rolesterRecencyTimer);
-  window.rolesterRecencyTimer = window.setInterval(updateRecencyStats, 30000);
+  window.clearInterval(window.careerratRecencyTimer);
+  window.careerratRecencyTimer = window.setInterval(updateRecencyStats, 30000);
 }
 
 function setupHeaderScrollState() {
@@ -7828,7 +7828,7 @@ function annotateCalendarPastDays(root = document, today = new Date()) {
 
 function downloadCalendarIcs(filename, ics) {
   if (!ics) return;
-  const safeName = String(filename || 'rolester-calendar.ics').replace(/[^\w.-]+/g, '-');
+  const safeName = String(filename || 'careerrat-calendar.ics').replace(/[^\w.-]+/g, '-');
   const blob = new Blob([ics], { type: 'text/calendar;charset=utf-8' });
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
@@ -7842,7 +7842,7 @@ function downloadCalendarIcs(filename, ics) {
 
 function calendarExportForEvent(id) {
   if (!id) return null;
-  const calendar = window.rolesterCalendarViewModel;
+  const calendar = window.careerratCalendarViewModel;
   const weeks = Array.isArray(calendar?.weeks) ? calendar.weeks : [];
   for (const week of weeks) {
     const events = Array.isArray(week?.events) ? week.events : [];
@@ -7983,7 +7983,7 @@ function setupCalendarWorkbench() {
   }
 
   function expandMonthWeek(iso) {
-    const calendar = window.rolesterCalendarViewModel;
+    const calendar = window.careerratCalendarViewModel;
     const days = Array.isArray(calendar?.month?.days) ? calendar.month.days : [];
     const grid = workbench.querySelector('[data-calendar-month-grid]');
     const idx = days.findIndex((day) => day && day.iso === iso);
@@ -8018,10 +8018,10 @@ function setupCalendarWorkbench() {
   }
 
   function renderWeek() {
-    const calendar = window.rolesterCalendarViewModel;
+    const calendar = window.careerratCalendarViewModel;
     const weeks = Array.isArray(calendar?.weeks) ? calendar.weeks : [];
-    if (typeof window.rolesterCalendarRender === 'function') {
-      window.rolesterCalendarRender({ root: document, weekIndex });
+    if (typeof window.careerratCalendarRender === 'function') {
+      window.careerratCalendarRender({ root: document, weekIndex });
     }
     if (prevButton) prevButton.disabled = weekIndex === 0;
     if (nextButton) nextButton.disabled = !weeks.length || weekIndex >= weeks.length - 1;
@@ -8031,7 +8031,7 @@ function setupCalendarWorkbench() {
   }
 
   window.updateCalendarWorkbench = function updateCalendarWorkbench(calendar) {
-    window.rolesterCalendarViewModel = calendar;
+    window.careerratCalendarViewModel = calendar;
     const weeks = Array.isArray(calendar?.weeks) ? calendar.weeks : [];
     weekIndex = Math.max(0, Math.min(Number(calendar?.currentWeekIndex || 0), Math.max(0, weeks.length - 1)));
     renderWeek();
@@ -8080,8 +8080,8 @@ function setupCalendarWorkbench() {
       return;
     }
     if (event.target.closest('[data-calendar-next-week]')) {
-      const weeks = Array.isArray(window.rolesterCalendarViewModel?.weeks)
-        ? window.rolesterCalendarViewModel.weeks
+      const weeks = Array.isArray(window.careerratCalendarViewModel?.weeks)
+        ? window.careerratCalendarViewModel.weeks
         : [];
       weekIndex = Math.min(Math.max(0, weeks.length - 1), weekIndex + 1);
       renderWeek();
@@ -8457,12 +8457,12 @@ function setupNetworkToggles() {
 function renderActionsDrawer() {
   const body = document.getElementById('actions-drawer-body');
   if (!body) return;
-  const vm = window.rolesterDashboardViewModel;
+  const vm = window.careerratDashboardViewModel;
   // Single source of truth: the full (uncapped) derived action list from tracker.json.
   // The card shows the top 3 (vm.nextSteps); the queue shows everything (vm.allNextSteps).
   const steps = (vm && (vm.allNextSteps || vm.nextSteps)) || [];
-  if (steps.length && typeof window.rolesterRenderNextSteps === 'function') {
-    body.innerHTML = window.rolesterRenderNextSteps(steps);
+  if (steps.length && typeof window.careerratRenderNextSteps === 'function') {
+    body.innerHTML = window.careerratRenderNextSteps(steps);
   } else {
     body.innerHTML = '<div class="px-5 py-8 text-center text-[13px] text-on-surface-variant" data-actions-empty>Nothing in the queue right now.</div>';
   }
@@ -8746,7 +8746,7 @@ function openDrawer(id) {
 }
 
 function buildFallback(id) {
-  const hydrated = window.rolesterJobDetails && window.rolesterJobDetails[id];
+  const hydrated = window.careerratJobDetails && window.careerratJobDetails[id];
   if (hydrated) return hydrated;
 
   return { company: id, role: 'Software Engineer', stage: 'Applied', fit: 75, base:'$200K', matched:[], gaps:[], timeline:[], emails:[], artifacts:[], benefits:[] };
@@ -9025,7 +9025,7 @@ function applyTheme(theme) {
   el.setAttribute('data-theme', theme);
   el.classList.toggle('dark', theme === 'dark');
   el.classList.toggle('light', theme !== 'dark');
-  try { localStorage.setItem('rolester-theme', theme); } catch (e) {}
+  try { localStorage.setItem('careerrat-theme', theme); } catch (e) {}
   const btn = document.getElementById('theme-toggle');
   if (btn) btn.setAttribute('aria-label', theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode');
   syncLogoTheme(theme === 'dark');
@@ -9155,7 +9155,7 @@ function renderDossierMarkdown(md) {
 function openDossierModal(appId) {
   const modal = document.getElementById('dossier-modal');
   if (!modal) return;
-  const dossier = (window.rolesterDossiers || {})[appId] || null;
+  const dossier = (window.careerratDossiers || {})[appId] || null;
   const titleEl = document.getElementById('dossier-modal-title');
   const subEl = document.getElementById('dossier-modal-sub');
   const bodyEl = document.getElementById('dossier-modal-body');
@@ -9215,7 +9215,7 @@ function setupJobsExplorer() {
   const funnel = document.getElementById('jobs-funnel');
   if (!explorer || !funnel) return;
 
-  const JOBS_STATE_KEY = 'rolester-d-jobs-explorer-state';
+  const JOBS_STATE_KEY = 'careerrat-d-jobs-explorer-state';
   const defaultState = {
     stage: 'all',
     query: '',
@@ -9911,16 +9911,16 @@ import(dashboardDataUrl)
   .then((mod) => {
     // Expose the derived-action renderer so the Action Queue drawer renders from the
     // same view-model data as the Next Steps card (one source of truth).
-    if (typeof mod.renderNextSteps === "function") window.rolesterRenderNextSteps = mod.renderNextSteps;
+    if (typeof mod.renderNextSteps === "function") window.careerratRenderNextSteps = mod.renderNextSteps;
     return mod.hydrateDashboardFromTracker();
   })
   .then((viewModel) => {
-    window.rolesterDashboardViewModel = viewModel;
+    window.careerratDashboardViewModel = viewModel;
     document.documentElement.dataset.dashboardSource = "tracker-json";
   })
   .catch((error) => {
     document.documentElement.dataset.dashboardSource = "static-fallback";
-    console.warn("Rolester dashboard mock is using static fallback data.", error);
+    console.warn("CareerRat dashboard mock is using static fallback data.", error);
   });
 </script>
 </body>

@@ -27,11 +27,12 @@
 // The SDK itself is a devDependency only (Phase 0 spike posture — the
 // published npm package stays zero runtime deps). It is never imported at
 // module scope; `loadClaudeAgentSdk()` dynamic-imports it lazily so a
-// workspace-only install of rolester (no devDependencies) degrades to a clear
+// workspace-only install of careerrat (no devDependencies) degrades to a clear
 // 501 from the route instead of crashing at require-time.
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
+import { readEnv } from "../env-compat.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
@@ -47,7 +48,7 @@ import { appendUsageEvent, computeCost, deriveUsageFeature } from "./usage-log.m
 // universe. `resolveAllowedSkills` narrows this to what's *runnable via the
 // embedded runtime*, which defaults far more restrictive than "everything
 // installed": this endpoint runs headlessly with no human watching the tool
-// calls, so only skills explicitly opted in via ROLESTER_RUNTIME_SKILLS may
+// calls, so only skills explicitly opted in via CAREERRAT_RUNTIME_SKILLS may
 // run this way.
 export function discoverSkillDirs(repoRoot) {
   const skillsRoot = join(repoRoot, ".agents/skills");
@@ -75,7 +76,7 @@ export function discoverSkillDirs(repoRoot) {
 //
 // search-jobs is deliberately NOT in this default: unlike the skills above,
 // it's a WebSearch-capable lane (see runtime-tools.mjs's "chat" profile) —
-// letting an operator's blanket ROLESTER_RUNTIME_SKILLS opt-in reach it
+// letting an operator's blanket CAREERRAT_RUNTIME_SKILLS opt-in reach it
 // would hand every one-shot run open-ended web access it never asked for.
 // Only the Jobs page's AI Web Search lane may run it, via a scoped per-call
 // env override — see ai-web-search.mjs's own call into runSkillStream.
@@ -83,15 +84,15 @@ const DEFAULT_RUNTIME_SKILLS =
   "evaluate-job,answer-question,tailor-application,resume-extract,intake-extract";
 
 // Shared allowlist-resolution shape both the one-shot embedded runtime
-// (ROLESTER_RUNTIME_SKILLS, below) and the conversational chat runtime
-// (ROLESTER_CHAT_SKILLS — see chat-runtime.mjs's resolveAllowedChatSkills)
+// (CAREERRAT_RUNTIME_SKILLS, below) and the conversational chat runtime
+// (CAREERRAT_CHAT_SKILLS — see chat-runtime.mjs's resolveAllowedChatSkills)
 // narrow from: a comma-separated env var, filtered down to whatever's
 // actually discoverable under .agents/skills/. Pulled out to M2 so the two
 // runtimes can't drift on the "empty string explicitly locks it down, unset
 // falls back to the default" semantics documented above.
 export function resolveSkillAllowlist({ repoRoot, env = process.env, envVar, defaultValue } = {}) {
   const discovered = new Set(discoverSkillDirs(repoRoot));
-  const raw = String(env[envVar] ?? defaultValue);
+  const raw = String(readEnv(envVar, { env }) ?? defaultValue);
   const requested = raw
     .split(",")
     .map((s) => s.trim())
@@ -105,7 +106,7 @@ export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
     repoRoot,
     env,
-    envVar: "ROLESTER_RUNTIME_SKILLS",
+    envVar: "CAREERRAT_RUNTIME_SKILLS",
     defaultValue: DEFAULT_RUNTIME_SKILLS,
   });
 }
@@ -149,7 +150,8 @@ const CHILD_RUNTIME_ENV_VARS = [
   "WINDIR",
   "PATHEXT",
   "COMSPEC",
-  "ROLESTER_HOME",
+  "CAREERRAT_HOME",
+  "ROLESTER_HOME", // legacy fallback name — see src/core/env-compat.mjs
 ];
 
 // Pure + exported so the routing decision is unit-testable without spawning
@@ -161,10 +163,10 @@ const CHILD_RUNTIME_ENV_VARS = [
 function customHeaderLines({ feature, skill, action, operation } = {}) {
   const resolvedFeature = feature || deriveUsageFeature({ skill, action, operation });
   return [
-    resolvedFeature ? `x-rolester-feature: ${resolvedFeature}` : null,
-    skill ? `x-rolester-skill: ${skill}` : null,
-    action ? `x-rolester-action: ${action}` : null,
-    operation ? `x-rolester-operation: ${operation}` : null,
+    resolvedFeature ? `x-careerrat-feature: ${resolvedFeature}` : null,
+    skill ? `x-careerrat-skill: ${skill}` : null,
+    action ? `x-careerrat-action: ${action}` : null,
+    operation ? `x-careerrat-operation: ${operation}` : null,
   ].filter(Boolean);
 }
 
@@ -212,8 +214,8 @@ export function buildChildEnv({
   const electronGuard = { ELECTRON_RUN_AS_NODE: "1" };
 
   if (route.type === "byok") {
-    // Direct to Anthropic (or a ROLESTER_ANTHROPIC_BASE_URL override) with the
-    // user's own key. No x-rolester-* labels here — call-ai.mjs's own BYOK
+    // Direct to Anthropic (or a CAREERRAT_ANTHROPIC_BASE_URL override) with the
+    // user's own key. No x-careerrat-* labels here — call-ai.mjs's own BYOK
     // path doesn't send them to the real Anthropic API either; they're a
     // proxy-metering label, not something Anthropic's API consumes.
     return {
@@ -517,7 +519,7 @@ export async function runSkillStream({
   if (!allowed.includes(skill)) {
     const err = new Error(
       `skill "${skill}" is not allowed to run via the embedded runtime (allowed: ` +
-        `${allowed.join(", ") || "none"}) — set ROLESTER_RUNTIME_SKILLS to opt more in`
+        `${allowed.join(", ") || "none"}) — set CAREERRAT_RUNTIME_SKILLS to opt more in`
     );
     err.code = "SKILL_NOT_ALLOWED";
     err.allowed = allowed;
@@ -555,7 +557,9 @@ export async function runSkillStream({
         env,
         signal,
         model:
-          String(env.ROLESTER_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() || undefined,
+          String(
+            readEnv("CAREERRAT_INSTALLED_AI_MODEL", { env }) || env.ANTHROPIC_MODEL || ""
+          ).trim() || undefined,
         tools: runtimeTools,
         outputSchema,
       });

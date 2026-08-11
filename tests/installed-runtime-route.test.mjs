@@ -11,7 +11,7 @@ import { loadInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.
 const roots = new Set();
 
 function root() {
-  const value = mkdtempSync(join(tmpdir(), "rolester-runtime-route-"));
+  const value = mkdtempSync(join(tmpdir(), "careerrat-runtime-route-"));
   roots.add(value);
   return value;
 }

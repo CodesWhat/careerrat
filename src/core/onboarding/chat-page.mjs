@@ -231,7 +231,7 @@ export const CHAT_PAGE_HTML = `<!doctype html>
 (function () {
   "use strict";
 
-  var STORAGE_KEY = "rolester_chat_ingest_profile";
+  var STORAGE_KEY = "careerrat_chat_ingest_profile";
   var SKILL_NAME = "ingest-profile";
 
   var startSection = document.getElementById("start-section");

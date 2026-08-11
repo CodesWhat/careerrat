@@ -2,7 +2,7 @@
 // spec: do node:sqlite's GENERATED ALWAYS AS (json_extract(...)) STORED
 // columns, WAL journal mode, and busy_timeout actually work on this Node?
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
@@ -11,7 +11,7 @@ import { closeAll, dbExists, dbFilePath, openDb } from "../src/core/db/connectio
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-smoke-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-smoke-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -36,6 +36,14 @@ test("dbExists is false before openDb, true after", () => {
 
 test("dbFilePath resolves under <dataRoot>/db/rolester.db, never a hardcoded path", () => {
   const repoRoot = tempRepo();
+  const path = dbFilePath({ repoRoot });
+  assert.match(path, /\.careerrat[/\\]db[/\\]rolester\.db$/);
+  assert.ok(path.startsWith(repoRoot), "db path must live under the resolved data root");
+});
+
+test("dbFilePath keeps using a pre-existing .rolester workspace in place when no .careerrat sibling exists", () => {
+  const repoRoot = tempRepo();
+  mkdirSync(join(repoRoot, ".rolester"), { recursive: true });
   const path = dbFilePath({ repoRoot });
   assert.match(path, /\.rolester[/\\]db[/\\]rolester\.db$/);
   assert.ok(path.startsWith(repoRoot), "db path must live under the resolved data root");

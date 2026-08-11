@@ -1,17 +1,17 @@
 #!/usr/bin/env node
-// rolester restore [snapshot] — recover workspace/tracker.json from a snapshot.
+// careerrat restore [snapshot] — recover workspace/tracker.json from a snapshot.
 //
 // Usage:
-//   rolester restore             list available snapshots + confirm-restore newest
-//   rolester restore <name>      restore by exact filename (e.g. tracker-2026-06-20T14-30-00-000Z.json)
-//   rolester restore <index>     restore by 1-based index from the "list" output (newest = 1)
+//   careerrat restore             list available snapshots + confirm-restore newest
+//   careerrat restore <name>      restore by exact filename (e.g. tracker-2026-06-20T14-30-00-000Z.json)
+//   careerrat restore <index>     restore by 1-based index from the "list" output (newest = 1)
 
-// Node version guard — same minimum as bin/rolester.mjs.
+// Node version guard — same minimum as bin/careerrat.mjs.
 {
   const major = parseInt(process.versions.node.split(".")[0], 10);
   if (major < 18) {
     process.stderr.write(
-      `rolester requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
+      `careerrat requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
     );
     process.exit(1);
   }
@@ -61,7 +61,7 @@ if (!selector) {
     }
     if (!chosen) {
       console.error(`No snapshot matching "${selector}".`);
-      console.error("Run `rolester restore` with no argument to list available snapshots.");
+      console.error("Run `careerrat restore` with no argument to list available snapshots.");
       process.exit(1);
     }
   }

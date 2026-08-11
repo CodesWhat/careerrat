@@ -12,8 +12,8 @@ import {
 
 test("injectLiveReload inserts the client immediately before </body>", () => {
   const out = injectLiveReload("<html><body><h1>hi</h1></body></html>");
-  assert.ok(out.includes("data-rolester-livereload"));
-  assert.ok(out.indexOf("data-rolester-livereload") < out.indexOf("</body>"));
+  assert.ok(out.includes("data-careerrat-livereload"));
+  assert.ok(out.indexOf("data-careerrat-livereload") < out.indexOf("</body>"));
   assert.ok(out.includes("<h1>hi</h1>"));
 });
 
@@ -27,14 +27,14 @@ test("injectLiveReload targets the LAST </body> when there are several", () => {
 
 test("injectLiveReload is case-insensitive about </BODY>", () => {
   const out = injectLiveReload("<BODY>x</BODY>");
-  assert.ok(out.includes("data-rolester-livereload"));
-  assert.ok(out.indexOf("data-rolester-livereload") < out.indexOf("</BODY>"));
+  assert.ok(out.includes("data-careerrat-livereload"));
+  assert.ok(out.indexOf("data-careerrat-livereload") < out.indexOf("</BODY>"));
 });
 
 test("injectLiveReload appends when there is no body tag", () => {
   const out = injectLiveReload("just text");
   assert.ok(out.startsWith("just text"));
-  assert.ok(out.includes("data-rolester-livereload"));
+  assert.ok(out.includes("data-careerrat-livereload"));
 });
 
 // ── mimeFor ──────────────────────────────────────────────────────────────────

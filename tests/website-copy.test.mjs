@@ -4,7 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 const STALE_PUBLIC_CLI_PATTERN =
-  /node bin\/rolester\.mjs|npm run (?:doctor|next|ingest|searches|companies|modes|automation|research|gate|learnings|stories|activity|analytics|evidence|strategy-review|status:map|export|install-skills|evaluate|tracker|tracker:dev)(?:\s|`|$)|(?:rolester|careerrat) [a-z:-]+ -- --|tracker:dev/;
+  /node bin\/careerrat\.mjs|npm run (?:doctor|next|ingest|searches|companies|modes|automation|research|gate|learnings|stories|activity|analytics|evidence|strategy-review|status:map|export|install-skills|evaluate|tracker|tracker:dev)(?:\s|`|$)|(?:rolester|careerrat) [a-z:-]+ -- --|tracker:dev/;
 
 async function listFiles(dir, suffix) {
   const out = [];
@@ -64,10 +64,10 @@ test("docs website source uses the public careerrat CLI convention", async () =>
   assert.match(combined, /careerrat automation status/);
   assert.match(combined, /careerrat update/);
 
-  // Frozen internal contracts stay literally "rolester" — these are real
+  // Frozen internal contracts stay literally "careerrat" — these are real
   // runtime strings (env var, hardcoded paths), not CLI convention.
   assert.match(combined, /ROLESTER_HOME/);
-  assert.match(combined, /~\/Downloads\/rolester\//);
+  assert.match(combined, /~\/Downloads\/careerrat\//);
   assert.match(combined, /~\/\.rolester\/board-profiles/);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);

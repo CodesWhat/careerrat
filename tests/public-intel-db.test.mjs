@@ -11,7 +11,7 @@ const cleanupRoots = [];
 const NOW = new Date("2026-07-06T12:00:00.000Z");
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-public-intel-db-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-public-intel-db-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

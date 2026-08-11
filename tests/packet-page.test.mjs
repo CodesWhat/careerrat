@@ -18,7 +18,7 @@ import { PACKET_PAGE_HTML } from "../src/core/onboarding/packet-page.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-packet-page-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-page-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   return repoRoot;
 }

@@ -50,7 +50,7 @@ import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-scan-sourced-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-scan-sourced-"));
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   mkdirSync(join(repoRoot, "workspace"), { recursive: true });
   return repoRoot;

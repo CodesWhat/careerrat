@@ -1,4 +1,4 @@
-// Dependency-free JSON Schema (draft-2020-12 subset) validator for Rolester.
+// Dependency-free JSON Schema (draft-2020-12 subset) validator for CareerRat.
 // Supports the exact keyword subset used by config/*.schema.json.
 
 // ---------------------------------------------------------------------------

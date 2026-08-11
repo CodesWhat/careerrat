@@ -11,7 +11,7 @@ const ROOT = new URL("..", import.meta.url).pathname;
 const cleanupHomes = [];
 
 function tempHome() {
-  const home = mkdtempSync(join(tmpdir(), "rolester-searches-cli-"));
+  const home = mkdtempSync(join(tmpdir(), "careerrat-searches-cli-"));
   cleanupHomes.push(home);
   return home;
 }
@@ -47,7 +47,7 @@ after(() => {
   }
 });
 
-test("rolester searches --add-query writes DB source config without search-sources.yml", () => {
+test("careerrat searches --add-query writes DB source config without search-sources.yml", () => {
   const home = tempHome();
   assert.equal(runData(["init"], home).status, 0);
 
@@ -65,7 +65,7 @@ test("rolester searches --add-query writes DB source config without search-sourc
   assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
 });
 
-test("rolester searches --from-targeting writes generated DB source config without YAML", () => {
+test("careerrat searches --from-targeting writes generated DB source config without YAML", () => {
   const home = tempHome();
   assert.equal(runData(["init"], home).status, 0);
   assert.equal(
@@ -110,7 +110,7 @@ test("rolester searches --from-targeting writes generated DB source config witho
   assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
 });
 
-test("rolester searches --from-targeting rejects a generated baseline containing only boards", () => {
+test("careerrat searches --from-targeting rejects a generated baseline containing only boards", () => {
   const home = tempHome();
   assert.equal(runData(["init"], home).status, 0);
 

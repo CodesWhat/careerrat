@@ -705,7 +705,7 @@ export function candidateApplicationLimitUpsert({ repoRoot, env, row } = {}) {
   return { ok: true, ...result };
 }
 
-// The same honesty/privacy backstop src/cli/evidence.mjs's `rolester evidence
+// The same honesty/privacy backstop src/cli/evidence.mjs's `careerrat evidence
 // add` path already enforces via evidence-writer.mjs's validateClaims()
 // (shared lintArtifact for residual placeholder text — [Company], {{x}},
 // <insert...> — and findCurrentBaseToken for the private current_base field

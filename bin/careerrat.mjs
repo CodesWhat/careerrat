@@ -47,6 +47,7 @@ import {
   findInstalledExecutable,
   INSTALLED_RUNTIME_DEFINITIONS,
 } from "../src/core/ai/installed-runtimes.mjs";
+import { readEnv } from "../src/core/env-compat.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../src/core/paths/workspace.mjs";
 import {
   extractOver,
@@ -288,7 +289,7 @@ function printManualAgentHandoff(dash) {
 // Spawn the tracker dev server as a detached local process. The PID/log live in
 // .internal/ so a future agent can tell whether CareerRat already has a server.
 async function startDashboard(port) {
-  const portCandidate = port ?? process.env.ROLESTER_DEV_PORT ?? 7777;
+  const portCandidate = port ?? readEnv("CAREERRAT_DEV_PORT") ?? 7777;
   const parsedPort = Number(portCandidate);
   const resolvedPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 7777;
   const url = `http://localhost:${resolvedPort}`;
@@ -502,7 +503,8 @@ function notifyUpdateAvailable() {
 
 function printHelp() {
   console.log(`careerrat — agentic job-search workspace
-(\`rolester\` still works as a compat alias for every command below)
+(\`rolester\` still works as a compat alias for every command below, for
+existing installs that scripted around the old name)
 
 Usage: careerrat <command> [options]
 

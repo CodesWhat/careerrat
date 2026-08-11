@@ -1,4 +1,4 @@
-// agent-guidance-snapshot.mjs — best-effort load of `rolester doctor --json`'s
+// agent-guidance-snapshot.mjs — best-effort load of `careerrat doctor --json`'s
 // `agentGuidance` block, for dashboard consumers (both the legacy render and
 // M10's GET /api/data/dashboard). Extracted (M10, no behavior change) out of
 // src/cli/tracker.mjs so the two callers share one implementation rather than

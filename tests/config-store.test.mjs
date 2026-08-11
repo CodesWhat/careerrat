@@ -19,7 +19,7 @@ import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-config-store-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-config-store-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

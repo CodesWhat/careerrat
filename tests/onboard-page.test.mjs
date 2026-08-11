@@ -22,7 +22,7 @@ import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 // tests/answer-page.test.mjs's tempRepoWithSkills() uses (no skills needed
 // here since /onboard never calls POST /api/skill/run).
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-onboard-page-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-onboard-page-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   return repoRoot;
 }

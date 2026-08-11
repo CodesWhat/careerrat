@@ -19,6 +19,7 @@ import {
   unlinkSync,
 } from "node:fs";
 import { join } from "node:path";
+import { readEnv } from "../env-compat.mjs";
 import { userPath } from "../paths/workspace.mjs";
 
 export const SNAPSHOT_SUBDIR = "workspace/.snapshots";
@@ -73,7 +74,7 @@ export function listSnapshots(pathCtx) {
 
 export function snapshotTracker(
   pathCtx,
-  { max = Number(process.env.ROLESTER_TRACKER_SNAPSHOTS) || 20, now = new Date() } = {}
+  { max = Number(readEnv("CAREERRAT_TRACKER_SNAPSHOTS")) || 20, now = new Date() } = {}
 ) {
   try {
     const trackerPath = absPath(pathCtx, "workspace/tracker.json");

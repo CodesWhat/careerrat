@@ -19,7 +19,7 @@ import {
 } from "../src/core/ai/ai-config.mjs";
 
 function tempRepo() {
-  return mkdtempSync(join(tmpdir(), "rolester-ai-config-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-ai-config-"));
 }
 
 function writeAiConfig(repoRoot, contents) {

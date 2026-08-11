@@ -13,8 +13,8 @@ async function waitForFile(path, timeoutMs = 2_000) {
 }
 
 test("refreshUpdateCacheInBackground forces Electron's detached child into Node mode", async () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-update-core-"));
-  const rolesterHome = join(repoRoot, "rolester-home");
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-update-core-"));
+  const careerratHome = join(repoRoot, "careerrat-home");
   const resultPath = join(repoRoot, "electron-run-as-node.txt");
 
   try {
@@ -26,7 +26,7 @@ test("refreshUpdateCacheInBackground forces Electron's detached child into Node 
 
     const pathCtx = {
       repoRoot,
-      env: { ...process.env, ROLESTER_HOME: rolesterHome },
+      env: { ...process.env, ROLESTER_HOME: careerratHome },
     };
     refreshUpdateCacheInBackground(pathCtx, repoRoot);
 

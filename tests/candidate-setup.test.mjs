@@ -49,7 +49,7 @@ const dbRoots = [];
 // ---------------------------------------------------------------------------
 
 function buildTempRoot() {
-  const tempRoot = mkdtempSync(join(tmpdir(), "rolester-test-"));
+  const tempRoot = mkdtempSync(join(tmpdir(), "careerrat-test-"));
 
   // Create templates/ and config/ dirs
   mkdirSync(join(tempRoot, "templates"), { recursive: true });
@@ -79,7 +79,7 @@ function candidatePath(root, relPath) {
 }
 
 function buildDbRoot() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-candidate-db-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-candidate-db-"));
   dbRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;
@@ -337,7 +337,7 @@ describe("candidate-setup", () => {
   // -------------------------------------------------------------------------
   it("lintPlaceholders — returns clean=true when no candidate files exist", () => {
     // Build a fresh temp root with no candidate/ dir
-    const emptyRoot = mkdtempSync(join(tmpdir(), "rolester-empty-"));
+    const emptyRoot = mkdtempSync(join(tmpdir(), "careerrat-empty-"));
     try {
       mkdirSync(join(emptyRoot, "templates"), { recursive: true });
       mkdirSync(join(emptyRoot, "config"), { recursive: true });

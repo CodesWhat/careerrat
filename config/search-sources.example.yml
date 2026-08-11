@@ -1,6 +1,6 @@
-# Rolester search-source configuration — EXAMPLE / TEMPLATE.
+# CareerRat search-source configuration — EXAMPLE / TEMPLATE.
 #
-# Rolester ships NO role, geography, or company defaults. Copy this file to
+# CareerRat ships NO role, geography, or company defaults. Copy this file to
 # config/search-sources.yml (gitignored) and replace every placeholder below with
 # YOUR OWN targets. The values here are illustrative placeholders, not recommendations.
 

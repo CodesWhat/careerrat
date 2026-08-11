@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://careerrat.local/schemas/profile.schema.json",
-  "title": "Rolester Candidate Profile",
+  "title": "CareerRat Candidate Profile",
   "type": "object",
   "required": ["candidate", "compensation", "location", "authorization"],
   "additionalProperties": false,

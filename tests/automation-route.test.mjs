@@ -7,7 +7,7 @@ import { test } from "node:test";
 import { mountAutomationRoutes } from "../src/cli/automation-route.mjs";
 
 test("GET automation settings returns the canonical Basic all-off matrix", () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-automation-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-automation-route-"));
   try {
     const routes = new Map();
     mountAutomationRoutes({

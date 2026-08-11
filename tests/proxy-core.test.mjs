@@ -40,7 +40,7 @@ test("authenticate accepts the map + legacy token union in Bearer and x-api-key 
   assert.equal(await authenticate({ "x-api-key": "wrong" }, entries), null);
 });
 
-test("header pipeline strips transport, auth, and Rolester labels and gates attribution", () => {
+test("header pipeline strips transport, auth, and CareerRat labels and gates attribution", () => {
   const inbound = {
     authorization: "Bearer caller-secret",
     "x-api-key": "caller-api-key",
@@ -48,8 +48,8 @@ test("header pipeline strips transport, auth, and Rolester labels and gates attr
     connection: "keep-alive",
     "content-length": "123",
     "transfer-encoding": "chunked",
-    "x-rolester-skill": "evaluate-job",
-    "x-rolester-action": "gate",
+    "x-careerrat-skill": "evaluate-job",
+    "x-careerrat-action": "gate",
     "x-safe": "kept",
   };
   const off = buildUpstreamHeaders(inbound, "fake-upstream-key", {}, { env: {} });
@@ -63,7 +63,7 @@ test("header pipeline strips transport, auth, and Rolester labels and gates attr
     "fake-upstream-key",
     {},
     {
-      env: { ROLESTER_UPSTREAM_REPORTING: "1" },
+      env: { CAREERRAT_UPSTREAM_REPORTING: "1" },
     }
   );
   assert.equal(on["ai-reporting-user"], reportingUserId("caller-secret"));

@@ -1,6 +1,6 @@
 // modes.mjs - optional mode switches for compute scope and pursuit posture.
 //
-// `usage_mode` controls how much discretionary work Rolester does. It never
+// `usage_mode` controls how much discretionary work CareerRat does. It never
 // lowers the quality of core gate/tailor/track/comms work.
 //
 // `application_mode` controls what happens after discovery. Discovery should stay

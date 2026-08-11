@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// rolester analytics — refresh and inspect the persisted outcome-analytics block.
+// careerrat analytics — refresh and inspect the persisted outcome-analytics block.
 //
 // The analytics block (tracker.json#analytics) is a DERIVED rollup: byStatus, per-family
 // rejection/advancement counts, and a reevaluation-due signal. It is written here and
@@ -50,7 +50,7 @@ if (opts.help) {
 }
 
 // Default verb to "refresh" when flags are present but no positional verb was given,
-// so `rolester analytics --write` works without an explicit "refresh" positional.
+// so `careerrat analytics --write` works without an explicit "refresh" positional.
 if (opts.positional.length === 0 && process.argv.length > 2) {
   opts.positional.push("refresh");
 }
@@ -182,7 +182,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester analytics — refresh and inspect the persisted outcome-analytics block
+  console.log(`careerrat analytics — refresh and inspect the persisted outcome-analytics block
 
 Usage:
   node src/cli/analytics.mjs refresh [--at ISO] [--write] [--json] [--root DIR]
@@ -197,7 +197,7 @@ refresh options:
   --at ISO    Override "now" timestamp (ISO 8601; default: current time).
   --write     Persist the computed block to tracker.json (stamp: false - no freshness bump).
   --json      Machine-readable output.
-  --root DIR  Repo root (default: the rolester install).
+  --root DIR  Repo root (default: the careerrat install).
 
 Thresholds come from candidate/targeting.yml#reevaluation:
   rejection_total:      <n>   Reevaluation fires when this many rejections accrue since last review (default 7).

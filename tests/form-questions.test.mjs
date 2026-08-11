@@ -659,7 +659,7 @@ function runCli(args, { input } = {}) {
 }
 
 function tempWorkspace() {
-  return mkdtempSync(join(tmpdir(), "rolester-questions-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-questions-"));
 }
 
 const FIXTURE_JOB_MD = `---
@@ -677,7 +677,7 @@ describe("questions CLI", () => {
   it("--help exits 0 and prints usage", () => {
     const result = runCli(["--help"]);
     assert.equal(result.status, 0);
-    assert.match(result.stdout, /rolester questions/);
+    assert.match(result.stdout, /careerrat questions/);
     assert.match(result.stdout, /--paste/);
   });
 

@@ -1,16 +1,16 @@
 #!/usr/bin/env node
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync, statSync, watch } from "node:fs";
-// Rolester tracker dev server — promoted (Productization Phase 0, P0-2) from a
+// CareerRat tracker dev server — promoted (Productization Phase 0, P0-2) from a
 // live-reloading dashboard preview into the embedded app server: /app is the
 // product shell serving the React SPA and its local APIs. The legacy
 // static-HTML dashboard and its compatibility pages have been retired.
 //
 // Usage:
-//   rolester tracker-dev                 Serve http://localhost:7777 with live reload
-//   rolester tracker-dev --port 8080  Pick a port (or ROLESTER_DEV_PORT=8080)
-//   rolester tracker-dev --open       Best-effort open the page in your browser
-//   rolester tracker-dev --help
+//   careerrat tracker-dev                 Serve http://localhost:7777 with live reload
+//   careerrat tracker-dev --port 8080  Pick a port (or ROLESTER_DEV_PORT=8080)
+//   careerrat tracker-dev --open       Best-effort open the page in your browser
+//   careerrat tracker-dev --help
 //
 // (`npm run serve` is an alias for the same entry point — the process is being
 // promoted to the app server; `tracker:dev` stays for the dashboard-preview name.)
@@ -21,7 +21,7 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 //   - src/core/tracker/*            (edit the dashboard code → page refreshes)
 // and on a tracker.json/activity.jsonl change re-renders via the canonical
 // `tracker.mjs` CLI in a child process (so the preview can never drift from
-// `rolester tracker`, and every render picks up fresh modules), then pushes a
+// `careerrat tracker`, and every render picks up fresh modules), then pushes a
 // reload to the open page.
 //
 // The pure, risk-bearing helpers (asset traversal guard, MIME, snippet
@@ -169,7 +169,7 @@ export function createDevServer({
 
   // -------------------------------------------------------------------------
   // Render: shell out to the canonical CLI so the dev preview is byte-identical
-  // to `rolester tracker` and always loads fresh modules.
+  // to `careerrat tracker` and always loads fresh modules.
 
   let rendering = false;
   let renderQueued = false;
@@ -324,7 +324,7 @@ export function createDevServer({
 
   // M6 — the sqlite-backed data layer's JSON API (src/cli/data-route.mjs).
   // Fail-closed per decision 7: every route 409s with a clear "no database
-  // yet" error until `rolester data init`/`import` creates one; there is no
+  // yet" error until `careerrat data init`/`import` creates one; there is no
   // page mounted here (no /data view), just the API surface CLI verbs mirror.
   mountDataRoutes({ addRoute, repoRoot, env });
   mountDeepIngestRoutes({ addRoute, repoRoot, env });
@@ -719,7 +719,7 @@ async function main() {
   });
   dev.server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
-      log(`port ${port} is in use. Pick another: rolester tracker-dev --port ${port + 1}`);
+      log(`port ${port} is in use. Pick another: careerrat tracker-dev --port ${port + 1}`);
     } else {
       log(`server error: ${err.message}`);
     }
@@ -759,12 +759,12 @@ function openBrowser(url) {
 }
 
 function printHelp() {
-  process.stdout.write(`rolester tracker-dev — the embedded /app server (React product shell + local APIs)
+  process.stdout.write(`careerrat tracker-dev — the embedded /app server (React product shell + local APIs)
 
 Usage:
-  rolester tracker-dev                 Serve http://localhost:7777 with live reload
-  rolester tracker-dev --port 8080  Pick a port (or set ROLESTER_DEV_PORT)
-  rolester tracker-dev --open       Open the page in your browser on start
+  careerrat tracker-dev                 Serve http://localhost:7777 with live reload
+  careerrat tracker-dev --port 8080  Pick a port (or set ROLESTER_DEV_PORT)
+  careerrat tracker-dev --open       Open the page in your browser on start
 
 Routes:
   GET  /app, /app/*                     Canonical Vite + React product shell (M7) — build via \`npm run app:build\`

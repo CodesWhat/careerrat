@@ -1,4 +1,4 @@
-// demo-seed.mjs — `rolester data init --demo`'s implementation. Imports
+// demo-seed.mjs — `careerrat data init --demo`'s implementation. Imports
 // examples/demo-workspace/ through the SAME importFromTracker code path as a
 // real migration (no bespoke seeder — decision: "SAME code path"), then
 // exports it straight back out so workspace/tracker.json exists immediately

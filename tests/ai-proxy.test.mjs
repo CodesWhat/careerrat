@@ -25,7 +25,7 @@ import { reportingUserId } from "../src/cli/proxy-core.mjs";
 import { computeCost, readUsageEvents, usageLogAbsPath } from "../src/core/ai/usage-log.mjs";
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "rolester-ai-proxy-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-ai-proxy-"));
 }
 
 const NON_STREAM_BODY = {
@@ -148,7 +148,7 @@ function sseFixture(model) {
 
 // Stands in for the real provider: records every request it receives (method,
 // url, headers, parsed body) so tests can assert on exactly what the proxy
-// forwarded — and never sees the client's own bearer token or x-rolester-*
+// forwarded — and never sees the client's own bearer token or x-careerrat-*
 // labels if the proxy is stripping correctly.
 function startMockUpstream() {
   const requests = [];
@@ -249,8 +249,8 @@ async function waitFor(predicate, message) {
 // ---------------------------------------------------------------------------
 
 test("createProxyServer: refuses to boot without a proxy token or an upstream key", () => {
-  assert.throws(() => createProxyServer({ upstreamKey: "sk-real" }), /ROLESTER_PROXY_TOKEN/);
-  assert.throws(() => createProxyServer({ proxyToken: "devtok" }), /ROLESTER_UPSTREAM_KEY/);
+  assert.throws(() => createProxyServer({ upstreamKey: "sk-real" }), /CAREERRAT_PROXY_TOKEN/);
+  assert.throws(() => createProxyServer({ proxyToken: "devtok" }), /CAREERRAT_UPSTREAM_KEY/);
 });
 
 // ---------------------------------------------------------------------------
@@ -381,10 +381,10 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
       headers: {
         authorization: "Bearer devtok",
         "content-type": "application/json",
-        "x-rolester-feature": "application-tailoring",
-        "x-rolester-skill": "apply-job",
-        "x-rolester-action": "tailor",
-        "x-rolester-operation": "packet.generate",
+        "x-careerrat-feature": "application-tailoring",
+        "x-careerrat-skill": "apply-job",
+        "x-careerrat-action": "tailor",
+        "x-careerrat-operation": "packet.generate",
       },
       body: reqBody,
     });
@@ -398,10 +398,10 @@ test("proxy (non-stream): injects upstream headers, strips client auth/labels, f
     assert.equal(upReq.headers["anthropic-version"], "2023-06-01");
     assert.equal(upReq.headers["x-portkey-config"], "cfg-1");
     assert.equal(upReq.headers.authorization, undefined);
-    assert.equal(upReq.headers["x-rolester-feature"], undefined);
-    assert.equal(upReq.headers["x-rolester-skill"], undefined);
-    assert.equal(upReq.headers["x-rolester-action"], undefined);
-    assert.equal(upReq.headers["x-rolester-operation"], undefined);
+    assert.equal(upReq.headers["x-careerrat-feature"], undefined);
+    assert.equal(upReq.headers["x-careerrat-skill"], undefined);
+    assert.equal(upReq.headers["x-careerrat-action"], undefined);
+    assert.equal(upReq.headers["x-careerrat-operation"], undefined);
     assert.equal(upReq.headers["ai-reporting-user"], undefined);
     assert.equal(upReq.headers["ai-reporting-tags"], undefined);
 
@@ -540,7 +540,7 @@ test("proxy: forwards while under cap, then 402s the next request without upstre
         headers: {
           authorization: `Bearer ${token}`,
           "content-type": "application/json",
-          "x-rolester-skill": "fake-skill",
+          "x-careerrat-skill": "fake-skill",
         },
         body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
       });
@@ -556,7 +556,7 @@ test("proxy: forwards while under cap, then 402s the next request without upstre
     assert.equal(JSON.stringify(body).includes(token), false);
     assert.equal(JSON.stringify(body).includes("cappedTester"), false);
     assert.equal(upstream.requests.length, 1);
-    assert.equal(upstream.requests[0].headers["x-rolester-skill"], undefined);
+    assert.equal(upstream.requests[0].headers["x-careerrat-skill"], undefined);
     assert.equal(upstream.requests[0].headers["ai-reporting-user"], undefined);
     assert.equal(upstream.requests[0].headers["ai-reporting-tags"], undefined);
   } finally {
@@ -729,10 +729,10 @@ test("proxy (non-stream): metered bounded calls write labels and allowed usage k
       headers: {
         authorization: "Bearer devtok",
         "content-type": "application/json",
-        "x-rolester-feature": "company-discovery",
-        "x-rolester-skill": "discover-companies",
-        "x-rolester-action": "seed-generate",
-        "x-rolester-operation": "company-seeds",
+        "x-careerrat-feature": "company-discovery",
+        "x-careerrat-skill": "discover-companies",
+        "x-careerrat-action": "seed-generate",
+        "x-careerrat-operation": "company-seeds",
       },
       body: reqBody,
     });
@@ -778,10 +778,10 @@ test("proxy: healthy meter DB receives metadata-only snake_case event and JSONL 
       headers: {
         authorization: "Bearer fake-db-token",
         "content-type": "application/json",
-        "x-rolester-feature": "company-discovery",
-        "x-rolester-skill": "discover-companies",
-        "x-rolester-action": "seed-generate",
-        "x-rolester-operation": "company-seeds",
+        "x-careerrat-feature": "company-discovery",
+        "x-careerrat-skill": "discover-companies",
+        "x-careerrat-action": "seed-generate",
+        "x-careerrat-operation": "company-seeds",
       },
       body: JSON.stringify({
         model: "claude-sonnet-5",
@@ -919,10 +919,10 @@ test("proxy: meter DB unset makes no DB fetch calls and retains JSONL behavior",
 });
 
 // ---------------------------------------------------------------------------
-// Opt-in Vercel AI Gateway attribution headers (ROLESTER_UPSTREAM_REPORTING)
+// Opt-in Vercel AI Gateway attribution headers (CAREERRAT_UPSTREAM_REPORTING)
 // ---------------------------------------------------------------------------
 
-test("proxy: ROLESTER_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, never the raw token", async () => {
+test("proxy: CAREERRAT_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, never the raw token", async () => {
   const upstream = await startMockUpstream();
   const root = tempRoot();
   const proxy = await startProxy({
@@ -930,7 +930,7 @@ test("proxy: ROLESTER_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, neve
     upstreamKey: "sk-real-upstream",
     upstreamUrl: upstream.url,
     meterRoot: root,
-    env: { ROLESTER_UPSTREAM_REPORTING: "1" },
+    env: { CAREERRAT_UPSTREAM_REPORTING: "1" },
   });
   try {
     const res = await fetch(`${proxy.url}/v1/messages`, {
@@ -938,10 +938,10 @@ test("proxy: ROLESTER_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, neve
       headers: {
         authorization: "Bearer devtok",
         "content-type": "application/json",
-        "x-rolester-feature": "job-evaluation",
-        "x-rolester-skill": "evaluate-job",
-        "x-rolester-action": "gate",
-        "x-rolester-operation": "job.gate",
+        "x-careerrat-feature": "job-evaluation",
+        "x-careerrat-skill": "evaluate-job",
+        "x-careerrat-action": "gate",
+        "x-careerrat-operation": "job.gate",
       },
       body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
     });
@@ -968,7 +968,7 @@ test("proxy: ROLESTER_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, neve
   }
 });
 
-test("proxy: reporting headers are absent when ROLESTER_UPSTREAM_REPORTING is unset (default off)", async () => {
+test("proxy: reporting headers are absent when CAREERRAT_UPSTREAM_REPORTING is unset (default off)", async () => {
   const upstream = await startMockUpstream();
   const root = tempRoot();
   const proxy = await startProxy({
@@ -983,7 +983,7 @@ test("proxy: reporting headers are absent when ROLESTER_UPSTREAM_REPORTING is un
       headers: {
         authorization: "Bearer devtok",
         "content-type": "application/json",
-        "x-rolester-skill": "evaluate-job",
+        "x-careerrat-skill": "evaluate-job",
       },
       body: JSON.stringify({ model: "claude-sonnet-5", max_tokens: 16, messages: [] }),
     });
@@ -1000,7 +1000,7 @@ test("proxy: reporting headers are absent when ROLESTER_UPSTREAM_REPORTING is un
   }
 });
 
-test("proxy: ai-reporting-tags omitted when no x-rolester-skill/-action headers are sent", async () => {
+test("proxy: ai-reporting-tags omitted when no x-careerrat-skill/-action headers are sent", async () => {
   const upstream = await startMockUpstream();
   const root = tempRoot();
   const proxy = await startProxy({
@@ -1008,7 +1008,7 @@ test("proxy: ai-reporting-tags omitted when no x-rolester-skill/-action headers 
     upstreamKey: "sk-real-upstream",
     upstreamUrl: upstream.url,
     meterRoot: root,
-    env: { ROLESTER_UPSTREAM_REPORTING: "1" },
+    env: { CAREERRAT_UPSTREAM_REPORTING: "1" },
   });
   try {
     const res = await fetch(`${proxy.url}/v1/messages`, {
@@ -1030,11 +1030,11 @@ test("proxy: ai-reporting-tags omitted when no x-rolester-skill/-action headers 
 });
 
 // Documents CURRENT precedence, not new behavior: a bearer-auth-style upstream
-// (ROLESTER_UPSTREAM_HEADERS carrying its own "authorization") rides through
+// (CAREERRAT_UPSTREAM_HEADERS carrying its own "authorization") rides through
 // the trailing Object.assign in buildUpstreamHeaders(), and x-api-key still
 // carries the upstream key set earlier in the same function — the two can
 // coexist for a gateway that wants both.
-test("proxy: ROLESTER_UPSTREAM_HEADERS carrying authorization rides through Object.assign; x-api-key still the upstream key", async () => {
+test("proxy: CAREERRAT_UPSTREAM_HEADERS carrying authorization rides through Object.assign; x-api-key still the upstream key", async () => {
   const upstream = await startMockUpstream();
   const root = tempRoot();
   const proxy = await startProxy({

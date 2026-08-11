@@ -19,7 +19,7 @@ const cleanupRoots = [];
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-onboard-public-sync-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-onboard-public-sync-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "templates"), { recursive: true });
   mkdirSync(join(repoRoot, "config"), { recursive: true });

@@ -26,7 +26,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-first-search-run-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-first-search-run-"));
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;

@@ -228,7 +228,7 @@ export function ingestCapturedSnapshot({
     savedAt: now,
   });
   if (!result) {
-    throw new Error("capture ingest requires a Rolester SQLite database");
+    throw new Error("capture ingest requires a CareerRat SQLite database");
   }
   return result;
 }

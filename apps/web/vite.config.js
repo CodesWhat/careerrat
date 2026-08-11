@@ -1,5 +1,6 @@
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
+import { readEnv } from "../../src/core/env-compat.mjs";
 
 // apps/web — source for the M7 SPA shell. Built output (dist/) is served in
 // production by src/cli/tracker-dev.mjs at /app/* (see that file's
@@ -12,7 +13,7 @@ import { defineConfig } from "vite";
 // the two-process loop. This covers both SSE shapes already in this codebase
 // (GET EventSource streams and hand-parsed POST streams): Vite's dev proxy
 // streams/pipes rather than buffering, so both pass through untouched.
-const TRACKER_DEV_TARGET = `http://127.0.0.1:${process.env.ROLESTER_DEV_PORT || 7777}`;
+const TRACKER_DEV_TARGET = `http://127.0.0.1:${readEnv("CAREERRAT_DEV_PORT") || 7777}`;
 const BASE_PATH = process.env.VITE_BASE_PATH || "/app/";
 
 // tracker-dev's request-security gate derives its expected origin from the

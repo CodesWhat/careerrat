@@ -27,7 +27,7 @@ import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-search-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-search-route-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   mkdirSync(join(repoRoot, "workspace"), { recursive: true });

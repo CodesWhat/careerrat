@@ -61,7 +61,7 @@ test("buildMinimalPdf fixture (shared with tests/resume-extract.test.mjs via tes
 test("INTEGRATION (skipped without ANTHROPIC_API_KEY): intake-extract reads a real PDF and emits schema-valid structured output", {
   skip: !process.env.ANTHROPIC_API_KEY,
 }, async () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-intake-extract-live-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-intake-extract-live-"));
   const skillDir = join(repoRoot, ".agents/skills/intake-extract");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(
@@ -70,7 +70,7 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): intake-extract reads a re
     "utf8"
   );
 
-  const fixtureDir = mkdtempSync(join(tmpdir(), "rolester-intake-extract-fixture-"));
+  const fixtureDir = mkdtempSync(join(tmpdir(), "careerrat-intake-extract-fixture-"));
   const pdfPath = join(fixtureDir, "upload.pdf");
   const { bytes } = buildMinimalPdf([
     "Subject: Staff Engineer at Acme",

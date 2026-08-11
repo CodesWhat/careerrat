@@ -26,7 +26,7 @@ const METHODS = [
 // workspace-paths.test.mjs), and writeTrackerJson's atomicWriteFile assumes the
 // target directory already exists, same as every real CLI call-site does.
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-storage-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-storage-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   return repoRoot;
 }

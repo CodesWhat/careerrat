@@ -14,7 +14,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-job-artifact-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-job-artifact-"));
   cleanupRoots.push(repoRoot);
   openDb({ repoRoot, env: {} });
   return repoRoot;

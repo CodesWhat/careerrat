@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 
-const DISMISS_KEY = "rolester.deepIngestToast.dismissed";
+const DISMISS_KEY = "careerrat.deepIngestToast.dismissed";
+const LEGACY_DISMISS_KEY = "rolester.deepIngestToast.dismissed";
 
 export function deepIngestNeeded(setup) {
   return Boolean(setup) && setup?.readiness?.deep_ingest_complete !== true;
@@ -9,7 +10,9 @@ export function deepIngestNeeded(setup) {
 
 function readDismissed() {
   try {
-    return localStorage.getItem(DISMISS_KEY) === "1";
+    return (
+      localStorage.getItem(DISMISS_KEY) === "1" || localStorage.getItem(LEGACY_DISMISS_KEY) === "1"
+    );
   } catch {
     return false;
   }

@@ -17,7 +17,7 @@ import { saveSearchPrompts } from "../src/core/search/search-prompts.mjs";
 const roots = [];
 
 function repo({ mode = "standard", prompts = 5 } = {}) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-ai-web-search-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-ai-web-search-"));
   roots.push(repoRoot);
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   copyFileSync(

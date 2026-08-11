@@ -83,7 +83,7 @@ all disappear at once. No resolve verb. No stale button possible.
 
 ## Durability (fixes the data loss)
 - **Raise the cap + env override.** Default retention raised to 2000
-  (`ROLESTER_ACTIVITY_MAX` overrides) so a normal cycle never silently trims —
+  (`CAREERRAT_ACTIVITY_MAX` overrides) so a normal cycle never silently trims —
   `src/core/tracker/activity-log.mjs`.
 - **Pre-prune backup.** `pruneActivity` snapshots `activity.jsonl.bak`
   before the destructive rewrite (one-generation recovery; `.bak` is under the
@@ -96,7 +96,7 @@ all disappear at once. No resolve verb. No stale button possible.
 - **tracker.json snapshot-on-render.** Every `careerrat tracker` call
   snapshots the current `workspace/tracker.json` into
   `workspace/.snapshots/tracker-<ISO>.json` before writing the new dashboard.
-  The newest ~20 are kept (override: `ROLESTER_TRACKER_SNAPSHOTS`); the copy is
+  The newest ~20 are kept (override: `CAREERRAT_TRACKER_SNAPSHOTS`); the copy is
   skipped when content is unchanged since the last snapshot. Recovery: copy any
   snapshot back over `tracker.json`. This is the agent-mutated-file analog of
   the `activity.jsonl.bak` — a one-generation rolling safety net for the source
@@ -111,7 +111,7 @@ all disappear at once. No resolve verb. No stale button possible.
 |---|---|---|---|
 | 1 | S | AGENTS.md: add sent-clears-draft invariant (Actionability Write-Back Contract); `needsUser` is history-only audit; note backfill now derives outbound events | `AGENTS.md` |
 | 2 | S | email-comms STEP 6b: set `comm.draft = null` (and `app.followUp.draft = null`) in the same write that advances status to `waiting` | `.claude/skills/email-comms/SKILL.md` |
-| 3 | S | Durability: raise cap → 2000 + `ROLESTER_ACTIVITY_MAX`, pre-prune `.bak` | `src/core/tracker/activity-log.mjs` |
+| 3 | S | Durability: raise cap → 2000 + `CAREERRAT_ACTIVITY_MAX`, pre-prune `.bak` | `src/core/tracker/activity-log.mjs` |
 | 4 | M | Extend `deriveActivityEvents`: drafted-from-comm + outbound-from-messages passes (idempotent ids) | `src/core/tracker/activity-backfill.mjs` |
 | 5a | M | Strip live CTAs from the pulse feed: `activityCta()` returns ""; rows get `data-detail-id`; drop `needsUser` tint / `ctaLabel` / `href` | `src/core/tracker/dashboard-data.js` |
 | 5b | M | Gate `comm.draft` **and** `app.followUp.draft` in `jobDetailFromRow` on `comm.status` not in {waiting, closed} | `src/core/tracker/dashboard-data.js` |

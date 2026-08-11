@@ -6,6 +6,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { accessSync, chmodSync, constants, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
+import { readEnv } from "../env-compat.mjs";
 
 export const INSTALLED_RUNTIME_DEFINITIONS = [
   {
@@ -128,7 +129,7 @@ export function runtimeSearchDirectories({
   const separator = platform === "win32" ? ";" : delimiter;
   const dirs = [];
   addUnique(dirs, splitPaths(env.PATH, separator));
-  addUnique(dirs, splitPaths(env.ROLESTER_RUNTIME_EXTRA_PATHS, separator));
+  addUnique(dirs, splitPaths(readEnv("CAREERRAT_RUNTIME_EXTRA_PATHS", { env }), separator));
 
   if (platform === "win32") {
     addUnique(dirs, [
@@ -257,7 +258,7 @@ export function buildInstalledRuntimeInvocation({
       // The app supplies the complete task/skill context in `prompt` below.
       // Loading a user's project hooks, plugins, MCP servers, auto-memory, and
       // CLAUDE.md here is both unnecessary and extremely expensive: in a real
-      // Rolester checkout it added ~136k input tokens and pushed a PDF extract
+      // CareerRat checkout it added ~136k input tokens and pushed a PDF extract
       // beyond the two-minute runtime limit. Safe mode keeps subscription auth
       // and built-in tools available while isolating this bounded app call.
       "--safe-mode",
@@ -610,7 +611,7 @@ export async function runInstalledRuntime({
   try {
     let schemaPath = null;
     if (runtime.id === "codex" && outputSchema) {
-      tempDir = mkdtempSync(join(tmpdir(), "rolester-runtime-schema-"));
+      tempDir = mkdtempSync(join(tmpdir(), "careerrat-runtime-schema-"));
       chmodSync(tempDir, 0o700);
       schemaPath = join(tempDir, "output-schema.json");
       writeFileSync(

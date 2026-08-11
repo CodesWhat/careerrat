@@ -1,5 +1,5 @@
 /**
- * Follow-up cadence rules and computation for the Rolester tracker dashboard.
+ * Follow-up cadence rules and computation for the CareerRat tracker dashboard.
  *
  * Each follow-up KIND can be independently toggled on/off and given its own
  * timing threshold, so a candidate decides which nudges they actually want

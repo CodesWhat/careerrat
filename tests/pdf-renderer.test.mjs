@@ -18,7 +18,7 @@ function close(server) {
 }
 
 test("ISSUE-028: renderPdf uses the authenticated desktop renderer when Electron provides it", async () => {
-  const root = mkdtempSync(join(tmpdir(), "rolester-desktop-pdf-client-"));
+  const root = mkdtempSync(join(tmpdir(), "careerrat-desktop-pdf-client-"));
   const outPath = join(root, "resume.pdf");
   const expectedPdf = Buffer.from("%PDF-1.7\nrendered-by-electron\n", "utf8");
   let received = null;
@@ -28,7 +28,7 @@ test("ISSUE-028: renderPdf uses the authenticated desktop renderer when Electron
     req.on("end", () => {
       received = {
         method: req.method,
-        token: req.headers["x-rolester-render-token"],
+        token: req.headers["x-careerrat-render-token"],
         body: JSON.parse(Buffer.concat(chunks).toString("utf8")),
       };
       res.writeHead(200, {
@@ -111,7 +111,7 @@ test("ISSUE-028: desktop renderer is loopback-only, authenticated, and prints wi
       method: "POST",
       headers: {
         "content-type": "application/json",
-        "x-rolester-render-token": renderer.token,
+        "x-careerrat-render-token": renderer.token,
       },
       body: JSON.stringify({ html: "<!doctype html><p>Electron résumé</p>" }),
     });

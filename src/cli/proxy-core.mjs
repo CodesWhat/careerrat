@@ -22,6 +22,7 @@
 // can drive this module directly without a live server.
 
 import { createHash, timingSafeEqual } from "node:crypto";
+import { readEnv } from "../core/env-compat.mjs";
 
 export const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -101,8 +102,8 @@ export function tokensMatch(provided, expected) {
 }
 
 // Builds the effective set of valid (label, token) pairs from the two config
-// surfaces: the single ROLESTER_PROXY_TOKEN (labeled "default" for usage-log
-// attribution) and the multi-tester ROLESTER_PROXY_TOKENS map. Both may be
+// surfaces: the single CAREERRAT_PROXY_TOKEN (labeled "default" for usage-log
+// attribution) and the multi-tester CAREERRAT_PROXY_TOKENS map. Both may be
 // set at once — the valid token set is their union. Labels are operator-
 // facing only and are never sent upstream.
 export function buildTokenEntries(proxyToken, proxyTokens) {
@@ -146,14 +147,14 @@ export function reportingUserId(token) {
   return createHash("sha256").update(String(token), "utf8").digest("hex").slice(0, 12);
 }
 
-// "skill:x,action:y" from the x-rolester-* labels, or null when neither is
+// "skill:x,action:y" from the x-careerrat-* labels, or null when neither is
 // present — never emit an empty ai-reporting-tags header.
 export function buildReportingTags(inboundHeaders) {
   const tags = [];
-  const feature = inboundHeaders["x-rolester-feature"];
-  const skill = inboundHeaders["x-rolester-skill"];
-  const action = inboundHeaders["x-rolester-action"];
-  const operation = inboundHeaders["x-rolester-operation"];
+  const feature = inboundHeaders["x-careerrat-feature"];
+  const skill = inboundHeaders["x-careerrat-skill"];
+  const action = inboundHeaders["x-careerrat-action"];
+  const operation = inboundHeaders["x-careerrat-operation"];
   if (feature) tags.push(`feature:${Array.isArray(feature) ? feature.join(",") : feature}`);
   if (skill) tags.push(`skill:${Array.isArray(skill) ? skill.join(",") : skill}`);
   if (action) tags.push(`action:${Array.isArray(action) ? action.join(",") : action}`);
@@ -173,16 +174,16 @@ export function buildUpstreamHeaders(
     if (value === undefined) continue;
     const k = key.toLowerCase();
     if (STRIPPED_INBOUND_HEADERS.has(k)) continue;
-    if (k.startsWith("x-rolester-")) continue;
+    if (k.startsWith("x-careerrat-")) continue;
     out[key] = Array.isArray(value) ? value.join(", ") : value;
   }
   out["x-api-key"] = upstreamKey;
   out["anthropic-version"] = inboundHeaders["anthropic-version"] || ANTHROPIC_VERSION;
   Object.assign(out, extraHeaders || {});
 
-  // Opt-in Vercel AI Gateway attribution headers — see the ROLESTER_UPSTREAM_REPORTING
+  // Opt-in Vercel AI Gateway attribution headers — see the CAREERRAT_UPSTREAM_REPORTING
   // doc in ai-proxy.mjs. Off by default; harmless to other upstreams.
-  if (String(env.ROLESTER_UPSTREAM_REPORTING || "").trim() === "1") {
+  if (String(readEnv("CAREERRAT_UPSTREAM_REPORTING", { env }) || "").trim() === "1") {
     const providedToken = extractProvidedToken(inboundHeaders);
     if (providedToken) out["ai-reporting-user"] = reportingUserId(providedToken);
     const tags = buildReportingTags(inboundHeaders);
@@ -417,12 +418,12 @@ function parseJsonObjectEnv(raw, { onError } = {}) {
   }
 }
 
-// ROLESTER_UPSTREAM_HEADERS — JSON object of extra headers to inject upstream.
+// CAREERRAT_UPSTREAM_HEADERS — JSON object of extra headers to inject upstream.
 export function parseUpstreamHeadersEnv(raw, opts) {
   return parseJsonObjectEnv(raw, opts);
 }
 
-// ROLESTER_PROXY_TOKENS — label -> token map for multi-tester auth.
+// CAREERRAT_PROXY_TOKENS — label -> token map for multi-tester auth.
 export function parseProxyTokensEnv(raw, opts) {
   const parsed = parseJsonObjectEnv(raw, opts);
   const out = {};
@@ -433,14 +434,14 @@ export function parseProxyTokensEnv(raw, opts) {
   return out;
 }
 
-// ROLESTER_PROXY_USER_CAP_USD — a single float, or null (absent/invalid/<=0
+// CAREERRAT_PROXY_USER_CAP_USD — a single float, or null (absent/invalid/<=0
 // all mean "no cap").
 export function parseUserCapUsdEnv(raw) {
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
-// ROLESTER_PROXY_USER_CAPS — label -> cap USD override map.
+// CAREERRAT_PROXY_USER_CAPS — label -> cap USD override map.
 export function parseUserCapsEnv(raw, opts) {
   const parsed = parseJsonObjectEnv(raw, opts);
   const out = {};

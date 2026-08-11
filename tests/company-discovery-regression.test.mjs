@@ -45,7 +45,7 @@ const PROPOSAL_CONTRACT_FIELDS = [
 ];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-company-discovery-regression-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-company-discovery-regression-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

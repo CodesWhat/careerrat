@@ -2,14 +2,14 @@
 //
 // All candidate state stays local. In the desktop/app runtime, the primary AI
 // route is a supported CLI already installed and authenticated on this
-// computer; Rolester invokes that executable with fixed argv and never copies
+// computer; CareerRat invokes that executable with fixed argv and never copies
 // its credentials. Provider routes remain explicit Advanced fallbacks.
 // resolveAIRoute() applies one fixed priority so callers never re-derive it:
 //
 //   1. selected/desktop installed CLI, unless provider fallback is explicit.
 //   2. ANTHROPIC_API_KEY set -> BYOK, direct to Anthropic.
-//   3. ROLESTER_AI_PROXY_URL set -> the managed-AI proxy (Bearer token +
-//      x-rolester-skill/x-rolester-action labels the proxy meters by).
+//   3. CAREERRAT_AI_PROXY_URL set -> the managed-AI proxy (Bearer token +
+//      x-careerrat-skill/x-careerrat-action labels the proxy meters by).
 //   4. none -> an actionable no-route error (manual operation stays available).
 //
 // The proxy meters server-side, so callAI() never writes a usage_event on that
@@ -22,6 +22,7 @@
 // shared with ai-proxy.mjs's byte-faithful tee, so the two places that ever
 // read raw Anthropic SSE agree on framing.
 
+import { readEnv } from "../env-compat.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { detectInstalledRuntimes, runInstalledRuntime } from "./installed-runtimes.mjs";
 import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
@@ -48,8 +49,8 @@ export function resolveAIRoute(
     const selection = loadInstalledRuntimeSelection({ repoRoot, env });
     const installedRuntimeEnabled =
       selection.runtimeId !== null ||
-      env.ROLESTER_DESKTOP_SHELL === "1" ||
-      env.ROLESTER_INSTALLED_AI === "1";
+      readEnv("CAREERRAT_DESKTOP_SHELL", { env }) === "1" ||
+      readEnv("CAREERRAT_INSTALLED_AI", { env }) === "1";
     if (installedRuntimeEnabled && !selection.providerFallback) {
       // "custom" isn't in the fixed registry detectInstalledRuntimes() scans
       // (see installed-runtimes.mjs's probeCustomRuntimeCommand /
@@ -83,18 +84,19 @@ export function resolveAIRoute(
     return {
       type: "byok",
       baseUrl: (
-        String(env.ROLESTER_ANTHROPIC_BASE_URL || "").trim() || "https://api.anthropic.com"
+        String(readEnv("CAREERRAT_ANTHROPIC_BASE_URL", { env }) || "").trim() ||
+        "https://api.anthropic.com"
       ).replace(/\/+$/, ""),
       apiKey,
     };
   }
 
-  const proxyUrl = String(env.ROLESTER_AI_PROXY_URL || "").trim();
+  const proxyUrl = String(readEnv("CAREERRAT_AI_PROXY_URL", { env }) || "").trim();
   if (proxyUrl) {
     return {
       type: "proxy",
       baseUrl: proxyUrl.replace(/\/+$/, ""),
-      token: String(env.ROLESTER_AI_PROXY_TOKEN || "").trim(),
+      token: String(readEnv("CAREERRAT_AI_PROXY_TOKEN", { env }) || "").trim(),
     };
   }
 
@@ -102,7 +104,7 @@ export function resolveAIRoute(
     type: "none",
     error:
       "no AI route configured: install and sign in to a supported AI CLI, or use the " +
-      "Advanced provider fallback with ANTHROPIC_API_KEY / ROLESTER_AI_PROXY_URL",
+      "Advanced provider fallback with ANTHROPIC_API_KEY / CAREERRAT_AI_PROXY_URL",
   };
 }
 
@@ -274,10 +276,10 @@ function buildRequest(
   } else {
     url = `${route.baseUrl}/v1/messages`;
     headers.authorization = `Bearer ${route.token}`;
-    if (feature) headers["x-rolester-feature"] = feature;
-    if (skill) headers["x-rolester-skill"] = skill;
-    if (action) headers["x-rolester-action"] = action;
-    if (operation) headers["x-rolester-operation"] = operation;
+    if (feature) headers["x-careerrat-feature"] = feature;
+    if (skill) headers["x-careerrat-skill"] = skill;
+    if (action) headers["x-careerrat-action"] = action;
+    if (operation) headers["x-careerrat-operation"] = operation;
   }
   return { url, headers, body };
 }
@@ -359,7 +361,7 @@ async function runInstalledAI({
     runtime: route.runtime,
     prompt: buildInstalledRuntimePrompt({ system, messages }),
     outputSchema,
-    model: String(env.ROLESTER_INSTALLED_AI_MODEL || "").trim() || undefined,
+    model: String(readEnv("CAREERRAT_INSTALLED_AI_MODEL", { env }) || "").trim() || undefined,
     cwd: root,
     env,
     signal,

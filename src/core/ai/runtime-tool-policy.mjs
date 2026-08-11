@@ -35,7 +35,7 @@ function requestedFilePath(toolName, input) {
 function pathDecision({ repoRoot, skill, toolName, input }) {
   const rawPath = requestedFilePath(toolName, input);
   if (typeof rawPath !== "string" || !rawPath.trim()) {
-    return deny(`${toolName} requires an explicit path inside an approved Rolester data root`);
+    return deny(`${toolName} requires an explicit path inside an approved CareerRat data root`);
   }
 
   const canonicalRepo = nearestCanonicalPath(resolve(repoRoot));
@@ -50,7 +50,7 @@ function pathDecision({ repoRoot, skill, toolName, input }) {
     leaf === ".env" ||
     leaf.startsWith(".env.")
   ) {
-    return deny(`${toolName} cannot access credentials, internal state, or paths outside Rolester`);
+    return deny(`${toolName} cannot access credentials, internal state, or paths outside CareerRat`);
   }
 
   const allowedRoots = [
@@ -66,7 +66,7 @@ function pathDecision({ repoRoot, skill, toolName, input }) {
     join(canonicalRepo, "package.json"),
   ]);
   if (!allowedFiles.has(target) && !allowedRoots.some((root) => isWithin(root, target))) {
-    return deny(`${toolName} path is outside the approved Rolester runtime roots`);
+    return deny(`${toolName} path is outside the approved CareerRat runtime roots`);
   }
   return { behavior: "allow" };
 }

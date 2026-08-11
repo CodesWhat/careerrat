@@ -8,7 +8,7 @@
 // This module adds the missing layer: a candidate-owned bank of STAR+R stories
 // (Situation, Task, Action, Result, Reflection) that interview-prep assembles into
 // packets and reuses across loops. The honesty firewall is the same one the rest of
-// Rolester uses, applied to narrative:
+// CareerRat uses, applied to narrative:
 //
 //   - **Trace, don't invent.** Every story must cite >=1 `evidence_ids`, and each id
 //     must resolve to a real claim in candidate/evidence.yml. The agent DRAFTS a
@@ -269,7 +269,7 @@ export function coverageGaps({ stories, competencies = COMMON_COMPETENCIES } = {
 export function renderStorySection(matched) {
   const items = Array.isArray(matched) ? matched : [];
   if (items.length === 0) {
-    return "_No prepared stories matched this role yet. Draft STAR+R stories from candidate/evidence.yml via interview-prep (`rolester stories gaps` shows what's uncovered)._";
+    return "_No prepared stories matched this role yet. Draft STAR+R stories from candidate/evidence.yml via interview-prep (`careerrat stories gaps` shows what's uncovered)._";
   }
   const blocks = items.map((m) => {
     const s = m?.story ? m.story : m;

@@ -10,7 +10,7 @@
 //
 // Also seeds meta(id=1) with version=0 so every write verb's meta bump
 // (`UPDATE meta SET version = version + 1 ... WHERE id = 1`) always has a row
-// to update, even on a freshly `rolester data init`ed (un-imported) DB — the
+// to update, even on a freshly `careerrat data init`ed (un-imported) DB — the
 // spec's DDL alone doesn't guarantee that row exists yet.
 export const migration001 = {
   id: 1,

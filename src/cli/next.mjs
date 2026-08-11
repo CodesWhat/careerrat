@@ -106,12 +106,12 @@ function readDoctorJson() {
 }
 
 function printHelp() {
-  console.log(`rolester next — show the next agent task
+  console.log(`careerrat next — show the next agent task
 
 Usage:
-  rolester next
-  rolester next --skip research-boards --write
-  rolester next --skip discover-companies --write
+  careerrat next
+  careerrat next --skip research-boards --write
+  careerrat next --skip discover-companies --write
 
 Options:
   --json                 Print machine-readable guidance

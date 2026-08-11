@@ -80,7 +80,7 @@ describe("desktop smoke PDF renderer verification", () => {
     const writes = [];
 
     const result = await desktopSmoke.verifySmokePdfExport({
-      outPath: "/tmp/rolester-smoke-export.pdf",
+      outPath: "/tmp/careerrat-smoke-export.pdf",
       renderPdf: async ({ markdown, outPath }) => {
         writes.push({ markdown, outPath });
       },
@@ -91,7 +91,7 @@ describe("desktop smoke PDF renderer verification", () => {
     assert.deepEqual(writes, [
       {
         markdown: "# CareerRat export smoke\n\nPackaged Electron renderer check.\n",
-        outPath: "/tmp/rolester-smoke-export.pdf",
+        outPath: "/tmp/careerrat-smoke-export.pdf",
       },
     ]);
     assert.deepEqual(result, { bytes: 15 });

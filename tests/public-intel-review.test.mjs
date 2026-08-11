@@ -10,7 +10,7 @@ const cleanupRoots = [];
 const NOW = new Date("2026-07-06T12:00:00.000Z");
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-public-review-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-public-review-"));
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;

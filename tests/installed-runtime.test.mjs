@@ -21,7 +21,7 @@ import {
 } from "../src/core/ai/runtime-selection.mjs";
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "rolester-installed-runtime-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-installed-runtime-"));
 }
 
 function executable(path) {
@@ -150,7 +150,7 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
     executablePath: "/safe/claude",
     schema: {
       $schema: "https://json-schema.org/draft/2020-12/schema",
-      $id: "https://rolester.local/schema.json",
+      $id: "https://careerrat.local/schema.json",
       type: "object",
       maxProperties: 2,
     },
@@ -253,7 +253,7 @@ test("Open Terminal runs only the allowlisted sign-in command on macOS", () => {
   assert.equal(calls[0].options.shell, false);
 });
 
-test("installed runtime selection persists under the active private Rolester home", () => {
+test("installed runtime selection persists under the active private CareerRat home", () => {
   const root = tempRoot();
   const env = { ROLESTER_HOME: join(root, "private") };
   try {

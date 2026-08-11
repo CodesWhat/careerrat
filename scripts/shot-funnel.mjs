@@ -2,8 +2,9 @@
 // One-off: screenshot the funnel section of the running tracker:dev page so we
 // can eyeball the stage-driven "Furthest stage" column.
 import { chromium } from "playwright";
+import { readEnv } from "../src/core/env-compat.mjs";
 
-const BASE = process.env.ROLESTER_DEV_URL || "http://localhost:7777";
+const BASE = readEnv("CAREERRAT_DEV_URL") || "http://localhost:7777";
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 1600 } });
 await page.goto(BASE, { waitUntil: "load" });

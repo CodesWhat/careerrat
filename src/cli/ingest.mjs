@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Rolester ingest CLI — guided candidate setup.
+// CareerRat ingest CLI — guided candidate setup.
 //
 // Modes:
 //   (default)        Initialize DB-backed candidate setup, then report readiness.
@@ -12,10 +12,10 @@
 //   --json           Machine-readable output for the current mode.
 //   --help           Show usage.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, relative, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { dbExists } from "../core/db/connection.mjs";
+import { dbExists, dbFilePath } from "../core/db/connection.mjs";
 import {
   candidateConfigGet,
   candidateSetupInitialize,
@@ -78,18 +78,20 @@ function runInit() {
     return 0;
   }
 
-  console.log("rolester ingest");
-  console.log("===============");
+  console.log("careerrat ingest");
+  console.log("================");
   console.log("");
-  console.log(
-    `Initialized SQLite-backed candidate setup at ${displayPath(pathCtx, ".rolester/db/rolester.db")}.`
-  );
+  const dbPath = dbFilePath(pathCtx);
+  const dbRel = relative(pathCtx.repoRoot, dbPath);
+  const dbDisplay =
+    dbRel && !dbRel.startsWith("..") && !isAbsolute(dbRel) ? dbRel.replaceAll(sep, "/") : dbPath;
+  console.log(`Initialized SQLite-backed candidate setup at ${dbDisplay}.`);
   reportDbStatus(readiness);
   console.log("");
   console.log("Next steps:");
   console.log("1. Use the onboarding wizard or ingest-profile to fill profile and targeting.");
-  console.log("2. Validate: rolester ingest --check");
-  console.log("3. Export compatibility files only when needed: rolester ingest --write-config");
+  console.log("2. Validate: careerrat ingest --check");
+  console.log("3. Export compatibility files only when needed: careerrat ingest --write-config");
   return 0;
 }
 
@@ -100,8 +102,8 @@ function runCheck() {
       console.log(JSON.stringify({ mode: "db", ok: readiness.ok, readiness }, null, 2));
       return readiness.ok ? 0 : 1;
     }
-    console.log("rolester ingest --check");
-    console.log("=======================");
+    console.log("careerrat ingest --check");
+    console.log("========================");
     console.log("");
     reportDbStatus(readiness);
     console.log("");
@@ -122,8 +124,8 @@ function runCheck() {
     return ok ? 0 : 1;
   }
 
-  console.log("rolester ingest --check");
-  console.log("=======================");
+  console.log("careerrat ingest --check");
+  console.log("========================");
   console.log("");
   reportStatus(load, lint);
   console.log("");
@@ -137,7 +139,7 @@ function runCheck() {
 
 function runResume(path) {
   if (!path) {
-    console.error("Usage: rolester ingest --resume <path-to-resume.md|.txt>");
+    console.error("Usage: careerrat ingest --resume <path-to-resume.md|.txt>");
     return 1;
   }
   const resolved = isAbsolute(path) ? path : join(process.cwd(), path);
@@ -342,14 +344,14 @@ function optValue(flag) {
 }
 
 function printHelp() {
-  console.log(`rolester ingest — guided candidate setup
+  console.log(`careerrat ingest — guided candidate setup
 
 Usage:
-  rolester ingest                       Initialize candidate/ from templates, then report status
-  rolester ingest --check            Validate candidate files + reject placeholders (exit 1 if not ready)
-  rolester ingest --resume <path>    Parse a resume into profile/evidence seed YAML (no writes)
-  rolester ingest --write-config     Generate config/search-sources.yml + candidate/AGENTS.md
-  rolester ingest --json             Machine-readable output for any mode
+  careerrat ingest                       Initialize candidate/ from templates, then report status
+  careerrat ingest --check            Validate candidate files + reject placeholders (exit 1 if not ready)
+  careerrat ingest --resume <path>    Parse a resume into profile/evidence seed YAML (no writes)
+  careerrat ingest --write-config     Generate config/search-sources.yml + candidate/AGENTS.md
+  careerrat ingest --json             Machine-readable output for any mode
 
 Candidate files (${CANDIDATE_FILES.length}): ${CANDIDATE_FILES.map((f) => f.name).join(", ")}
 All candidate/* output is private user-layer data and is gitignored.`);

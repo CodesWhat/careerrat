@@ -74,6 +74,7 @@ import {
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
 import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
+import { readEnv } from "../core/env-compat.mjs";
 import {
   countDeterministicSources,
   healSearchSourceConfig,
@@ -1235,7 +1236,7 @@ export function mountOnboardRoutes({
 
   // -------------------------------------------------------------------------
   // POST /api/onboard/public-sync-preference — local opt-in/out for sharing
-  // public company and board metadata back to future Rolester users. The
+  // public company and board metadata back to future CareerRat users. The
   // public-intel DB verbs are fail-closed scrubbed; this route only toggles
   // whether the local workspace should participate.
   // -------------------------------------------------------------------------
@@ -1426,7 +1427,7 @@ export function mountOnboardRoutes({
     }
 
     // AI upgrade — resolveAIRoute() never throws, it reports {type: "none"}
-    // when neither ANTHROPIC_API_KEY nor ROLESTER_AI_PROXY_URL is set (same
+    // when neither ANTHROPIC_API_KEY nor CAREERRAT_AI_PROXY_URL is set (same
     // check GET /api/onboard/state already uses for keyConfigured), so this
     // is a plain gate, not a try/catch. Skipping the AI call entirely when no
     // route is configured means a DOCX upload with no key behaves exactly
@@ -1848,7 +1849,7 @@ export function mountOnboardRoutes({
     // when the first attempt's reply failed schema validation) falls back
     // to the server's normally-configured default model instead — the
     // quality net for whatever tripped the fast model up the first time.
-    const fastModel = env.ROLESTER_RESUME_EXTRACT_MODEL || "claude-haiku-4-5-20251001";
+    const fastModel = readEnv("CAREERRAT_RESUME_EXTRACT_MODEL", { env }) || "claude-haiku-4-5-20251001";
 
     // Scoped per run (per call to runResumeExtractBounded), not per attempt
     // — "the first time" a system event batch arrives, across the whole

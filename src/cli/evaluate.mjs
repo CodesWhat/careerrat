@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Rolester evaluate CLI — run the body-read gate on a saved job posting.
+// CareerRat evaluate CLI — run the body-read gate on a saved job posting.
 //
 // Usage:
-//   rolester evaluate <path-to-job.md>     Emit GATE/FIT/COMP/ACTION
-//   rolester evaluate <path> --json        Full machine-readable verdict
-//   rolester evaluate --help
+//   careerrat evaluate <path-to-job.md>     Emit GATE/FIT/COMP/ACTION
+//   careerrat evaluate <path> --json        Full machine-readable verdict
+//   careerrat evaluate --help
 //
 // Reads candidate/targeting.yml, candidate/profile.yml, candidate/honesty.yml.
 import { existsSync, readFileSync } from "node:fs";
@@ -28,7 +28,7 @@ if (args.includes("--help") || args.includes("-h") || args.length === 0) {
 
 const jobArg = args.find((a) => !a.startsWith("-"));
 if (!jobArg) {
-  console.error("Provide a saved job markdown path. See: rolester evaluate --help");
+  console.error("Provide a saved job markdown path. See: careerrat evaluate --help");
   process.exit(1);
 }
 
@@ -91,12 +91,12 @@ process.exit(result.gate === "KEEP" ? 0 : result.gate === "REVIEW" ? 2 : 1);
 // ---------------------------------------------------------------------------
 
 function printHelp() {
-  console.log(`rolester evaluate — run the body-read gate on a saved job
+  console.log(`careerrat evaluate — run the body-read gate on a saved job
 
 Usage:
-  rolester evaluate <path-to-job.md>     Emit GATE / FIT / COMP / ACTION
-  rolester evaluate <path> --json        Full machine-readable verdict
-  rolester evaluate --help
+  careerrat evaluate <path-to-job.md>     Emit GATE / FIT / COMP / ACTION
+  careerrat evaluate <path> --json        Full machine-readable verdict
+  careerrat evaluate --help
 
 Exit codes: 0 KEEP, 2 REVIEW, 1 CUT (or error).
 Inputs: candidate/targeting.yml, candidate/profile.yml, candidate/honesty.yml.`);

@@ -48,6 +48,7 @@ import {
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets } from "../db/scan-context.mjs";
 import { candidateConfigGet } from "../db/verbs.mjs";
+import { readEnv } from "../env-compat.mjs";
 import { computeAllows } from "../profile/modes.mjs";
 import { captureAndPersistOffersIfDb } from "../scoring/sourced-persistence.mjs";
 import { extractReqId, normalizeCompanyRoleKey } from "../scoring/sourced-scanner.mjs";
@@ -203,19 +204,19 @@ function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError 
 
 // search-jobs is deliberately excluded from the embedded runtime's default
 // allowlist (see skill-runtime.mjs's own DEFAULT_RUNTIME_SKILLS comment) — a
-// blanket ROLESTER_RUNTIME_SKILLS opt-in shouldn't also hand every other
+// blanket CAREERRAT_RUNTIME_SKILLS opt-in shouldn't also hand every other
 // one-shot skill run WebSearch access. This lane is the one place search-jobs
 // may run, so it builds its own scoped env override for just this
 // runSkillStream call: whatever the operator already allows, plus
 // search-jobs — UNLESS the operator explicitly locked the runtime down
-// (ROLESTER_RUNTIME_SKILLS === "", resolveSkillAllowlist's own "empty means
+// (CAREERRAT_RUNTIME_SKILLS === "", resolveSkillAllowlist's own "empty means
 // nothing is allowed" contract), in which case this lane respects that and
 // lets runSkillStream reject with the standard SKILL_NOT_ALLOWED error rather
 // than silently punching a hole in an explicit lockdown.
 function buildAiWebSearchEnv({ repoRoot, env }) {
-  if (env.ROLESTER_RUNTIME_SKILLS === "") return env;
+  if (readEnv("CAREERRAT_RUNTIME_SKILLS", { env }) === "") return env;
   const allowed = resolveAllowedSkills({ repoRoot, env });
-  return { ...env, ROLESTER_RUNTIME_SKILLS: [...allowed, "search-jobs"].join(",") };
+  return { ...env, CAREERRAT_RUNTIME_SKILLS: [...allowed, "search-jobs"].join(",") };
 }
 
 // ---------------------------------------------------------------------------

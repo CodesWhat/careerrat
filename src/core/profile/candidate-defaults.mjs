@@ -90,7 +90,7 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
     style: { avoid: [] },
   },
   "form-defaults": {
-    source: "Rolester",
+    source: "CareerRat",
     work_authorization: "",
     requires_sponsorship: "",
     current_employer: null,

@@ -659,7 +659,7 @@ export function SettingsPage() {
           <div className="settings-advanced-provider__body">
             <p className="field__hint" style={{ margin: 0 }}>
               This explicitly switches AI calls away from an installed CLI. The key is never echoed
-              back after saving. With ROLESTER_HOME it lives under internal/ai.env; legacy repo-root
+              back after saving. With CAREERRAT_HOME it lives under internal/ai.env; legacy repo-root
               workspaces use .internal/ai.env.
             </p>
             <div className="field-row">

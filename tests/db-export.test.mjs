@@ -22,7 +22,7 @@ const SCHEMA_PATH = join(REPO_ROOT, "config/tracker.schema.json");
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-export-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-export-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

@@ -16,7 +16,7 @@
 //
 // Fail-closed 409 no-DB, same as data-route.mjs: intake_items is DB-native
 // (migration 002) — a legacy tracker.json-only workspace sees the same
-// NoDatabaseError "run rolester data import/init first" every other
+// NoDatabaseError "run careerrat data import/init first" every other
 // /api/data/* route already surfaces, not a silent fallback.
 //
 // ONE-WRITE-PATH + CONFIRM-FIRST: capture/classify never call a domain verb,

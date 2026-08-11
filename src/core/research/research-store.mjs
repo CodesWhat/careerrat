@@ -1,6 +1,6 @@
 // research-store.mjs — the safe read/write primitive for web-research artifacts.
 //
-// M11 lets Rolester "go find things out": skills web-search a company, a market
+// M11 lets CareerRat "go find things out": skills web-search a company, a market
 // comp band, or new job boards and persist the findings as cited markdown under
 // `workspace/research/` (see AGENTS.md → Research Memory). This module is the
 // single safe primitive those skills write through and other skills (interview-prep,

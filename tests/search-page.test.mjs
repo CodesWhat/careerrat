@@ -19,7 +19,7 @@ import { SEARCH_PAGE_HTML } from "../src/core/onboarding/search-page.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-search-page-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-search-page-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   return repoRoot;
 }

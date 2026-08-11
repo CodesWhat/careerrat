@@ -54,7 +54,7 @@ function bootServer({
   }
   mountDiscoveryRoutes({
     addRoute,
-    repoRoot: "/tmp/rolester-discovery-route-test",
+    repoRoot: "/tmp/careerrat-discovery-route-test",
     env: {},
     chatRuntime,
     prepareQuickStart,

@@ -1,6 +1,6 @@
 // export-to-tracker.mjs — regenerate workspace/tracker.json + activity.jsonl
 // from the db, keeping the legacy read pipeline alive (decision 8). The
-// existing dashboard render (`rolester tracker`) keeps reading tracker.json
+// existing dashboard render (`careerrat tracker`) keeps reading tracker.json
 // unchanged; this is the db's half of that contract. Every write verb calls
 // this once, OUTSIDE its own transaction, right after that transaction
 // commits (see verbs/shared.mjs's runVerb()).

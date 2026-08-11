@@ -352,7 +352,7 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   assert.equal(vm.calendar.metrics.dueToday, 2);
   assert.equal(vm.calendar.currentWeekIndex, 0);
   assert.equal(vm.calendar.weeks[0].label, "Jun 15-19");
-  assert.match(vm.calendar.weeks[0].export.filename, /rolester-calendar-jun-15-19\.ics/);
+  assert.match(vm.calendar.weeks[0].export.filename, /careerrat-calendar-jun-15-19\.ics/);
   assert.match(vm.calendar.weeks[0].export.ics, /BEGIN:VCALENDAR/);
   assert.match(vm.calendar.weeks[0].export.ics, /SUMMARY:Aperture interview/);
   assert.match(

@@ -8,7 +8,7 @@
 // Two run modes:
 //   dev  (`npm run desktop` from repo root) — unpackaged window over the live
 //        checkout; shares data with `npm run tracker:dev` (legacy in-checkout
-//        layout, no ROLESTER_HOME). The primary POC deliverable.
+//        layout, no CAREERRAT_HOME). The primary POC deliverable.
 //   dist (`npm run desktop:dist`) — signed .dmg via electron-builder, running
 //        against a staged copy of the engine (see scripts/stage.mjs) with its
 //        own per-user data root.
@@ -24,6 +24,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { readEnv } from "../../src/core/env-compat.mjs";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
 import {
   choosePreferredPort,
@@ -71,11 +72,11 @@ app.userAgentFallback = app.userAgentFallback.replace(/\s(CareerRat|Electron)\/[
 
 // --- Trap 3 -------------------------------------------------------------
 // Data root. A packaged app's Resources/ tree is read-only (code-signed) —
-// point ROLESTER_HOME at Electron's per-user data dir instead, and do it
-// BEFORE importing any rolester module: resolveUserPaths() reads
-// process.env.ROLESTER_HOME the moment it's called (src/core/paths/
+// point CAREERRAT_HOME at Electron's per-user data dir instead, and do it
+// BEFORE importing any careerrat module: resolveUserPaths() reads
+// process.env.CAREERRAT_HOME the moment it's called (src/core/paths/
 // workspace.mjs), so this must land before boot()'s dynamic imports below.
-// Dev keeps the legacy in-checkout layout (no ROLESTER_HOME) so it shares
+// Dev keeps the legacy in-checkout layout (no CAREERRAT_HOME) so it shares
 // data with `npm run tracker:dev` on the same checkout.
 const runtimePaths = resolveDesktopRuntimePaths({
   isPackaged: app.isPackaged,
@@ -83,8 +84,8 @@ const runtimePaths = resolveDesktopRuntimePaths({
   userDataPath: app.isPackaged ? app.getPath("userData") : undefined,
   resourcesPath: process.resourcesPath,
 });
-if (runtimePaths.rolesterHome) {
-  process.env.ROLESTER_HOME = runtimePaths.rolesterHome;
+if (runtimePaths.careerratHome) {
+  process.env.CAREERRAT_HOME = runtimePaths.careerratHome;
 }
 let repoRoot = runtimePaths.repoRoot;
 
@@ -93,7 +94,7 @@ let repoRoot = runtimePaths.repoRoot;
 // repoRoot already points at the live checkout, so `repoRoot/src/cli/
 // tracker-dev.mjs` is the same file a static `../../src/cli/tracker-dev.mjs`
 // import would resolve to. In a packaged app, repoRoot points at the staged
-// `resources/rolester` copy instead. Either way, a dynamic import off the
+// `resources/careerrat` copy instead. Either way, a dynamic import off the
 // already-resolved repoRoot is correct — no dev/packaged branch needed here.
 function loadEngineModule(relPath) {
   return import(pathToFileURL(join(repoRoot, relPath)).href);
@@ -163,9 +164,9 @@ if (isSmoke) {
 async function boot() {
   // Desktop flag the engine reads to enable installed-runtime AI routing
   // (see src/core/ai/call-ai.mjs's resolveAIRoute()). Set before
-  // createDevServer() — same placement style as the ROLESTER_HOME injection
+  // createDevServer() — same placement style as the CAREERRAT_HOME injection
   // above, which also must land before any engine module reads process.env.
-  process.env.ROLESTER_DESKTOP_SHELL = "1";
+  process.env.CAREERRAT_DESKTOP_SHELL = "1";
 
   // ISSUE-028: the packaged staged engine deliberately does not carry
   // Playwright or a second Chromium download. Start a token-authenticated,
@@ -173,8 +174,8 @@ async function boot() {
   // engine mounts packet/export routes, then let documents/export.mjs route
   // PDF work through it. No renderer token is written to disk or logged.
   pdfRenderer = await startDesktopPdfRenderer({ BrowserWindow });
-  process.env.ROLESTER_DESKTOP_PDF_RENDER_URL = pdfRenderer.url;
-  process.env.ROLESTER_DESKTOP_PDF_RENDER_TOKEN = pdfRenderer.token;
+  process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL = pdfRenderer.url;
+  process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN = pdfRenderer.token;
 
   const { createDevServer } = await loadEngineModule("src/cli/tracker-dev.mjs");
   const { resolveUserPaths, userPath } = await loadEngineModule("src/core/paths/workspace.mjs");
@@ -228,7 +229,7 @@ async function boot() {
   const pathCtx = { repoRoot };
   resolveUserPaths(pathCtx);
   const route = chooseDesktopRoute({
-    routeOverride: process.env.ROLESTER_DESKTOP_ROUTE,
+    routeOverride: readEnv("CAREERRAT_DESKTOP_ROUTE", { env: process.env }),
     forceOnboarding: !app.isPackaged,
     hasCandidateSetup:
       existsSync(userPath(pathCtx, "candidate/profile.yml")) ||
@@ -272,8 +273,8 @@ async function shutdown() {
 
   const activePdfRenderer = pdfRenderer;
   pdfRenderer = null;
-  delete process.env.ROLESTER_DESKTOP_PDF_RENDER_URL;
-  delete process.env.ROLESTER_DESKTOP_PDF_RENDER_TOKEN;
+  delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_URL;
+  delete process.env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN;
   if (activePdfRenderer) await activePdfRenderer.close();
 }
 

@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// update-live — operator tool: refresh an EXTERNAL live Rolester tree from the
+// update-live — operator tool: refresh an EXTERNAL live CareerRat tree from the
 // published npm package, without cd-ing into it. (To self-update the current tree,
-// use `rolester update` instead — both share src/core/update/update-core.mjs.)
+// use `careerrat update` instead — both share src/core/update/update-core.mjs.)
 //
-// Rolester's agent path runs in-tree, so a live install is a full repo tree with the
+// CareerRat's agent path runs in-tree, so a live install is a full repo tree with the
 // user's real candidate/ + workspace/ data co-located. This updates only the CODE by
 // extracting the published tarball over the target; the tarball ships code only (the
 // package.json `files` whitelist excludes candidate/ and workspace/), so live search
@@ -12,12 +12,13 @@
 //
 //   node scripts/update-live.mjs --target <dir> [--tag latest|rc|<version>] [--write]
 //
-// Dry run by default. Add --write to extract over the target. Set ROLESTER_LIVE_DIR
-// instead of --target if you prefer.
+// Dry run by default. Add --write to extract over the target. Set CAREERRAT_LIVE_DIR
+// instead of --target if you prefer (the legacy ROLESTER_LIVE_DIR still works too).
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { readEnv } from "../src/core/env-compat.mjs";
 import {
   extractOver,
   fetchTarball,
@@ -26,7 +27,7 @@ import {
 } from "../src/core/update/update-core.mjs";
 
 function parseArgs(argv) {
-  const out = { target: process.env.ROLESTER_LIVE_DIR || null, tag: "latest", write: false };
+  const out = { target: readEnv("CAREERRAT_LIVE_DIR") || null, tag: "latest", write: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--target") out.target = argv[++i] || out.target;
@@ -45,8 +46,14 @@ function die(msg) {
   process.exit(1);
 }
 
-function looksLikeRolesterTree(dir) {
-  return existsSync(join(dir, "bin", "rolester.mjs")) && existsSync(join(dir, "src"));
+// A target tree may still be on the pre-rename bin/rolester.mjs entry point
+// (an older live install that hasn't been updated yet) — accept either name
+// rather than rejecting a perfectly valid, just-not-yet-renamed target.
+function looksLikeCareerratTree(dir) {
+  return (
+    (existsSync(join(dir, "bin", "careerrat.mjs")) || existsSync(join(dir, "bin", "rolester.mjs"))) &&
+    existsSync(join(dir, "src"))
+  );
 }
 
 const opts = parseArgs(process.argv.slice(2));
@@ -54,21 +61,21 @@ const opts = parseArgs(process.argv.slice(2));
 if (opts.help) {
   console.log(
     "Usage: node scripts/update-live.mjs --target <dir> [--tag latest|rc|<version>] [--write]\n" +
-      "  Refreshes CODE in an external live Rolester tree from the published npm package.\n" +
+      "  Refreshes CODE in an external live CareerRat tree from the published npm package.\n" +
       "  candidate/ and workspace/ are never touched (they aren't in the package).\n" +
-      "  Dry run unless --write is passed. To self-update the current tree: rolester update."
+      "  Dry run unless --write is passed. To self-update the current tree: careerrat update."
   );
   process.exit(0);
 }
 
-if (!opts.target) die("no target — pass --target <dir> or set ROLESTER_LIVE_DIR");
+if (!opts.target) die("no target — pass --target <dir> or set CAREERRAT_LIVE_DIR");
 if (!existsSync(opts.target)) die(`target does not exist: ${opts.target}`);
-if (!looksLikeRolesterTree(opts.target))
+if (!looksLikeCareerratTree(opts.target))
   die(
-    `target does not look like a Rolester install tree (no bin/rolester.mjs + src/): ${opts.target}`
+    `target does not look like a CareerRat install tree (no bin/careerrat.mjs + src/): ${opts.target}`
   );
 
-const spec = `rolester@${opts.tag}`;
+const spec = `careerrat@${opts.tag}`;
 console.log(`• Fetching ${spec} from npm…`);
 
 let pkg;
@@ -113,7 +120,7 @@ try {
   const doc = spawnSync("node", [join(opts.target, "src/cli/doctor.mjs")], { stdio: "inherit" });
   if (doc.status !== 0) {
     console.log(
-      `  (doctor reported issues — review above; per RELEASE.md, re-run \`rolester ingest\` ` +
+      `  (doctor reported issues — review above; per RELEASE.md, re-run \`careerrat ingest\` ` +
         `in update mode if new required config fields were added.)`
     );
   }

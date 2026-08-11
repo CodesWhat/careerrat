@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://careerrat.local/schemas/stories.schema.json",
-  "title": "Rolester STAR+R Story Bank",
+  "title": "CareerRat STAR+R Story Bank",
   "description": "Candidate-owned behavioural story bank layered over evidence.yml. Each story is a STAR+R narrative (Situation, Task, Action, Result, Reflection) that traces back to one or more evidence.yml claim ids. Stories are drafted from evidence and confirmed by the candidate — never invented. interview-prep assembles them into packets and reuses them across interview loops.",
   "type": "object",
   "required": ["stories"],

@@ -23,7 +23,7 @@ import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/ver
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-packet-answers-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-answers-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "workspace/jobs"), { recursive: true });
   return repoRoot;

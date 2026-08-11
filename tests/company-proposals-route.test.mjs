@@ -23,7 +23,7 @@ const FIXED_NOW = new Date("2026-07-04T12:00:00.000Z");
 const PRIVATE_CURRENT_BASE = 145 * 1000;
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-company-proposals-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-company-proposals-route-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

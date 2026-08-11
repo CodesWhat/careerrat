@@ -36,7 +36,7 @@ const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-intake-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-intake-route-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   for (const relPath of [

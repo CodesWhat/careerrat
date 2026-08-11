@@ -12,7 +12,7 @@ const repo = join(import.meta.dirname, "..");
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-companies-cli-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-companies-cli-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -51,7 +51,7 @@ after(() => {
   }
 });
 
-test("rolester companies writes DB source config in DB mode and does not create sourced-scan.json", () => {
+test("careerrat companies writes DB source config in DB mode and does not create sourced-scan.json", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["candidate", "init"]);
 

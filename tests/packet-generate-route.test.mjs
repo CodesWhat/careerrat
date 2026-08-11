@@ -44,7 +44,7 @@ function typedGateVerdict({ gate = "keep" } = {}) {
 }
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-packet-generate-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-generate-route-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "workspace/jobs"), { recursive: true });
   mkdirSync(join(repoRoot, "workspace/tailored"), { recursive: true });

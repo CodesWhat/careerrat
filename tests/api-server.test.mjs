@@ -46,7 +46,7 @@ test("tracker-dev refuses non-loopback bind hosts instead of exposing local APIs
 // A fresh repoRoot with its resolved (non-legacy, .rolester-backed) workspace dir
 // pre-created — same convention as storage-adapter.test.mjs's tempRepo().
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-apiserver-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apiserver-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   return repoRoot;
 }

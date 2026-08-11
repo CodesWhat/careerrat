@@ -33,7 +33,7 @@
 //   - img.logo.dev (the image CDN) takes a PUBLISHABLE key as a `?token=`
 //     query param. /api/logos/img prefers an explicit
 //     `candidate/automation.yml#integrations.logo_dev_token` or
-//     ROLESTER_LOGO_DEV_TOKEN override, then falls back to Rolester's built-in
+//     CAREERRAT_LOGO_DEV_TOKEN override, then falls back to CareerRat's built-in
 //     publishable key so image lookup works out of the box and still caches
 //     locally.
 //   - api.logo.dev/search (Brand Search) instead requires a SEPARATE SECRET
@@ -44,7 +44,7 @@
 //     credential type for Brand Search; reusing it as designed would 401
 //     against the real API. This file reads a NEW, separate field,
 //     `candidate/automation.yml#integrations.logo_dev_secret_key` (plus an
-//     env override, ROLESTER_LOGO_DEV_SECRET_KEY, since no candidate write
+//     env override, CAREERRAT_LOGO_DEV_SECRET_KEY, since no candidate write
 //     path for it exists yet — adding one is Builder B/wizard territory,
 //     out of this scope). Absent → the same graceful
 //     `{ok:false, reason:"no-token"}` degrade the frozen contract already
@@ -59,6 +59,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { readEnv } from "../core/env-compat.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { demoLogoFilePath } from "../core/tracker/demo-logos.mjs";
@@ -92,12 +93,12 @@ function readAutomationDoc(pathCtx) {
 export function resolveLogoTokens(pathCtx, env = process.env) {
   const automation = readAutomationDoc(pathCtx);
   const publishableToken =
-    String(env.ROLESTER_LOGO_DEV_TOKEN || "").trim() ||
+    String(readEnv("CAREERRAT_LOGO_DEV_TOKEN", { env }) || "").trim() ||
     automation?.integrations?.logo_dev_token ||
     automation?.logo_dev_token ||
     DEFAULT_LOGO_DEV_PUBLIC_KEY;
   const secretKey =
-    String(env.ROLESTER_LOGO_DEV_SECRET_KEY || "").trim() ||
+    String(readEnv("CAREERRAT_LOGO_DEV_SECRET_KEY", { env }) || "").trim() ||
     automation?.integrations?.logo_dev_secret_key ||
     automation?.logo_dev_secret_key ||
     "";

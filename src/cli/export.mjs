@@ -1,9 +1,9 @@
 #!/usr/bin/env node
-// Rolester export CLI — render a tailored artifact or interview packet to PDF or DOCX.
+// CareerRat export CLI — render a tailored artifact or interview packet to PDF or DOCX.
 //
 // Usage:
-//   rolester export <input.md> [--pdf] [--docx] [--out <path-or-basename>] [--title "..."]
-//   rolester export --help
+//   careerrat export <input.md> [--pdf] [--docx] [--out <path-or-basename>] [--title "..."]
+//   careerrat export --help
 //
 // Default format: --pdf (when neither --pdf nor --docx is given).
 // Output location: alongside the input file (same dir + basename) unless --out is set.
@@ -29,7 +29,7 @@ const positional = args.filter((a) => !a.startsWith("-"));
 const inputArg = positional[0];
 
 if (!inputArg) {
-  console.error("Provide an input markdown file path. See: rolester export --help");
+  console.error("Provide an input markdown file path. See: careerrat export --help");
   process.exit(1);
 }
 
@@ -116,10 +116,10 @@ if (result.docx) {
 // ---------------------------------------------------------------------------
 
 function printHelp() {
-  console.log(`rolester export — render a tailored artifact or interview packet to PDF or DOCX
+  console.log(`careerrat export — render a tailored artifact or interview packet to PDF or DOCX
 
 Usage:
-  rolester export <input.md> [--pdf] [--docx] [--out <base>] [--title "..."]
+  careerrat export <input.md> [--pdf] [--docx] [--out <base>] [--title "..."]
 
 Options:
   --pdf          Render to PDF (default when no format flag given)
@@ -131,10 +131,10 @@ Options:
   --help         Show this message
 
 Examples:
-  rolester export workspace/tailored/Acme-Engineer.md --pdf
-  rolester export workspace/tailored/Acme-Engineer.md --pdf --ats   # ATS submission copy
-  rolester export workspace/tailored/Acme-Engineer.md --pdf --docx
-  rolester export workspace/interview-prep/acme-engineer.md --pdf --out /tmp/packet
+  careerrat export workspace/tailored/Acme-Engineer.md --pdf
+  careerrat export workspace/tailored/Acme-Engineer.md --pdf --ats   # ATS submission copy
+  careerrat export workspace/tailored/Acme-Engineer.md --pdf --docx
+  careerrat export workspace/interview-prep/acme-engineer.md --pdf --out /tmp/packet
 
 Exit codes: 0 success, 1 failure.
 PDF: uses the bundled Playwright Chromium — no setup needed.

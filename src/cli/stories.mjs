@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-// rolester stories — the safe read/validate/add helper for the STAR+R story bank.
+// careerrat stories — the safe read/validate/add helper for the STAR+R story bank.
 //
 // The story bank (candidate/stories.yml) is the behavioural-narrative layer over
 // evidence.yml: candidate-owned STAR+R stories that interview-prep assembles into
 // packets and reuses across interview loops (see AGENTS.md → Story Bank). Skills
 // call this instead of hand-editing the YAML, for the same reason they call
-// `rolester gate` / `rolester learnings`: one validator, one write path, one firewall.
+// `careerrat gate` / `careerrat learnings`: one validator, one write path, one firewall.
 //
 // Every story must trace to candidate/evidence.yml — `add` and `check` refuse a
 // story that cites no evidence, cites a claim id that doesn't exist, is missing a
@@ -238,7 +238,7 @@ function cmdGaps() {
   for (const g of gaps) console.log(`  - ${g}`);
   console.log("");
   console.log(
-    "Draft a story for each from candidate/evidence.yml via interview-prep, then `rolester stories add`."
+    "Draft a story for each from candidate/evidence.yml via interview-prep, then `careerrat stories add`."
   );
 }
 
@@ -286,7 +286,7 @@ function cmdMatch(rest) {
   }
   if (matched.length === 0) {
     console.log(
-      "No stories matched these signals. `rolester stories gaps` shows what's uncovered."
+      "No stories matched these signals. `careerrat stories gaps` shows what's uncovered."
     );
     return;
   }
@@ -504,7 +504,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester stories — safe read/validate/add for the STAR+R story bank
+  console.log(`careerrat stories — safe read/validate/add for the STAR+R story bank
 
 Usage:
   node src/cli/stories.mjs list [--json]
@@ -538,5 +538,5 @@ Options:
   --limit N          Max stories from match (default 6).
   --write            Commit the add (default: dry run).
   --json             Machine-readable output.
-  --root DIR         Repo root (default: the rolester install).`);
+  --root DIR         Repo root (default: the careerrat install).`);
 }

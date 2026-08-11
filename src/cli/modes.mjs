@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// rolester modes - safe read/write helper for optional mode switches.
+// careerrat modes - safe read/write helper for optional mode switches.
 //
 // Defaults are safe when candidate/modes.yml is absent:
 //   usage_mode: standard
@@ -207,18 +207,18 @@ function fail(message) {
 }
 
 function printHelp() {
-  console.log(`rolester modes - safe mode-switcher read/write helper
+  console.log(`careerrat modes - safe mode-switcher read/write helper
 
 Usage:
-  rolester modes status [--json]
-  rolester modes allows <operation> [--json]
-  rolester modes set usage <lean|standard|full> [--write]
-  rolester modes set application <selective|balanced|high-volume> [--write]
+  careerrat modes status [--json]
+  careerrat modes allows <operation> [--json]
+  careerrat modes set usage <lean|standard|full> [--write]
+  careerrat modes set application <selective|balanced|high-volume> [--write]
 
 Options:
   --write     Commit the change (default: dry run)
   --json      Machine-readable output
-  --root DIR  Repo root (default: the rolester install)
+  --root DIR  Repo root (default: the careerrat install)
 
 Absent candidate/modes.yml means usage_mode=standard and application_mode=balanced.
 Writes are schema-validated and atomic. Mode switches never relax honesty, privacy,

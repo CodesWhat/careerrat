@@ -18,7 +18,7 @@ const WORKER_SCRIPT = join(REPO_ROOT, "tests/fixtures/db-concurrency-worker.mjs"
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-concurrency-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-concurrency-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

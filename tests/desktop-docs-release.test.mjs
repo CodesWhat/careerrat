@@ -19,7 +19,7 @@ const STALE_DESKTOP_README_PATTERNS = Object.freeze([
   /notarization is off/i,
   /unidentified developer/i,
   /primary POC deliverable/i,
-  /native window over the same local server `rolester tracker-dev` already\s+serves in a browser/i,
+  /native window over the same local server `careerrat tracker-dev` already\s+serves in a browser/i,
 ]);
 
 test("desktop docs release guard is scoped to pilot-facing docs", () => {

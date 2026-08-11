@@ -1,13 +1,13 @@
 #!/usr/bin/env node
-// Rolester questions CLI — fetch a job's real application-form questions
+// CareerRat questions CLI — fetch a job's real application-form questions
 // without a browser (Greenhouse/Ashby API, or --paste for everything else).
 //
 // Usage:
-//   rolester questions <workspace/jobs/foo.md>   Fetch, write foo.md.questions.json
-//   rolester questions <job-posting-url>         Fetch, print JSON to stdout
-//   rolester questions <path|url> --json         Always print JSON to stdout
-//   rolester questions <path|url> --paste        Read questions from stdin instead of fetching
-//   rolester questions --help
+//   careerrat questions <workspace/jobs/foo.md>   Fetch, write foo.md.questions.json
+//   careerrat questions <job-posting-url>         Fetch, print JSON to stdout
+//   careerrat questions <path|url> --json         Always print JSON to stdout
+//   careerrat questions <path|url> --paste        Read questions from stdin instead of fetching
+//   careerrat questions --help
 //
 // Zero LLM cost: one HTTP GET (or stdin parse), no browser automation.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -28,7 +28,7 @@ if (args.includes("--help") || args.includes("-h") || args.length === 0) {
 const target = args.find((a) => !a.startsWith("-"));
 if (!target) {
   console.error(
-    "Provide a saved job .md path or a job posting URL. See: rolester questions --help"
+    "Provide a saved job .md path or a job posting URL. See: careerrat questions --help"
   );
   process.exit(1);
 }
@@ -130,16 +130,16 @@ function summarize(result) {
 }
 
 function printHelp() {
-  console.log(`rolester questions — fetch a job's real application-form questions, no browser
+  console.log(`careerrat questions — fetch a job's real application-form questions, no browser
 
 Usage:
-  rolester questions <workspace/jobs/foo.md>   Fetch, write foo.md.questions.json
-  rolester questions <job-posting-url>         Fetch, print JSON to stdout
-  rolester questions <path|url> --json         Always print JSON to stdout
-  rolester questions <path|url> --paste        Read questions from stdin instead of fetching
-  rolester questions --help
+  careerrat questions <workspace/jobs/foo.md>   Fetch, write foo.md.questions.json
+  careerrat questions <job-posting-url>         Fetch, print JSON to stdout
+  careerrat questions <path|url> --json         Always print JSON to stdout
+  careerrat questions <path|url> --paste        Read questions from stdin instead of fetching
+  careerrat questions --help
 
 Supported providers: Greenhouse, Ashby (deterministic API/page fetch).
 Anything else (Lever, Workday, ...): paste the questions instead.
-  cat questions.txt | rolester questions workspace/jobs/foo.md --paste`);
+  cat questions.txt | careerrat questions workspace/jobs/foo.md --paste`);
 }

@@ -21,7 +21,7 @@ import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 // directories for each name in `skillNames` — same convention
 // tests/answer-page.test.mjs's tempRepoWithSkills() uses.
 function tempRepoWithSkills(skillNames = []) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-chat-page-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-chat-page-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   for (const name of skillNames) {
     const dir = join(repoRoot, ".agents/skills", name);

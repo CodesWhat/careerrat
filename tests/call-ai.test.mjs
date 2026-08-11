@@ -18,7 +18,7 @@ import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "rolester-call-ai-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-call-ai-"));
 }
 
 const NON_STREAM_BODY = {
@@ -210,8 +210,30 @@ test("resolveAIRoute: BYOK wins when ANTHROPIC_API_KEY is set", () => {
 
 test("resolveAIRoute: falls back to the proxy when no API key is set", () => {
   const route = resolveAIRoute({
+    CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
+    CAREERRAT_AI_PROXY_TOKEN: "tok",
+  });
+  assert.equal(route.type, "proxy");
+  assert.equal(route.baseUrl, "http://127.0.0.1:7788");
+  assert.equal(route.token, "tok");
+});
+
+test("resolveAIRoute: the legacy ROLESTER_AI_PROXY_URL/TOKEN still resolve the proxy route", () => {
+  const route = resolveAIRoute({
     ROLESTER_AI_PROXY_URL: "http://127.0.0.1:7788",
     ROLESTER_AI_PROXY_TOKEN: "tok",
+  });
+  assert.equal(route.type, "proxy");
+  assert.equal(route.baseUrl, "http://127.0.0.1:7788");
+  assert.equal(route.token, "tok");
+});
+
+test("resolveAIRoute: CAREERRAT_AI_PROXY_URL wins over a legacy ROLESTER_AI_PROXY_URL", () => {
+  const route = resolveAIRoute({
+    CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
+    CAREERRAT_AI_PROXY_TOKEN: "tok",
+    ROLESTER_AI_PROXY_URL: "http://127.0.0.1:9999",
+    ROLESTER_AI_PROXY_TOKEN: "legacy-tok",
   });
   assert.equal(route.type, "proxy");
   assert.equal(route.baseUrl, "http://127.0.0.1:7788");
@@ -222,7 +244,7 @@ test("resolveAIRoute: neither set -> an actionable error naming both options", (
   const route = resolveAIRoute({});
   assert.equal(route.type, "none");
   assert.match(route.error, /ANTHROPIC_API_KEY/);
-  assert.match(route.error, /ROLESTER_AI_PROXY_URL/);
+  assert.match(route.error, /CAREERRAT_AI_PROXY_URL/);
 });
 
 test("resolveAIRoute: selected installed CLI wins in desktop even when a provider key exists", () => {
@@ -609,7 +631,7 @@ test("callAI (BYOK, stream): yields raw SSE events and appends a usage_event on 
 // Proxy path
 // ---------------------------------------------------------------------------
 
-test("callAI (proxy path): sends Bearer token + x-rolester-* labels, never appends client-side", async () => {
+test("callAI (proxy path): sends Bearer token + x-careerrat-* labels, never appends client-side", async () => {
   const upstream = await startMockUpstream();
   const root = tempRoot();
   try {
@@ -627,10 +649,10 @@ test("callAI (proxy path): sends Bearer token + x-rolester-* labels, never appen
     assert.equal(upstream.requests.length, 1);
     const [req] = upstream.requests;
     assert.equal(req.headers.authorization, "Bearer proxy-tok");
-    assert.equal(req.headers["x-rolester-feature"], "application-tailoring");
-    assert.equal(req.headers["x-rolester-skill"], "apply-job");
-    assert.equal(req.headers["x-rolester-action"], "tailor");
-    assert.equal(req.headers["x-rolester-operation"], "packet.generate");
+    assert.equal(req.headers["x-careerrat-feature"], "application-tailoring");
+    assert.equal(req.headers["x-careerrat-skill"], "apply-job");
+    assert.equal(req.headers["x-careerrat-action"], "tailor");
+    assert.equal(req.headers["x-careerrat-operation"], "packet.generate");
     assert.equal(req.headers["x-api-key"], undefined);
 
     // The proxy is the one that meters — callAI must not also write client-side.
@@ -664,10 +686,10 @@ test("callAI (proxy path, native output): forwards json_schema body plus auth an
     assert.equal(upstream.requests.length, 1);
     const [req] = upstream.requests;
     assert.equal(req.headers.authorization, "Bearer proxy-tok");
-    assert.equal(req.headers["x-rolester-feature"], "company-discovery");
-    assert.equal(req.headers["x-rolester-skill"], "discover-companies");
-    assert.equal(req.headers["x-rolester-action"], "seed-generate");
-    assert.equal(req.headers["x-rolester-operation"], "company-seeds");
+    assert.equal(req.headers["x-careerrat-feature"], "company-discovery");
+    assert.equal(req.headers["x-careerrat-skill"], "discover-companies");
+    assert.equal(req.headers["x-careerrat-action"], "seed-generate");
+    assert.equal(req.headers["x-careerrat-operation"], "company-seeds");
     assert.equal(req.body.output_config.format.type, "json_schema");
     // format.name is never sent natively — see the BYOK native-output test above.
     assert.equal(Object.hasOwn(req.body.output_config.format, "name"), false);

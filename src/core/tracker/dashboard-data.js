@@ -523,7 +523,7 @@ function modeStatusItem(kind, value, valid) {
       value: normalized || "invalid",
       label: "Invalid",
       tone: "warning",
-      title: "Mode config is invalid. Run rolester modes status.",
+      title: "Mode config is invalid. Run careerrat modes status.",
     };
   }
   return { value: normalized, ...MODE_STATUS_COPY[kind][normalized] };
@@ -554,7 +554,7 @@ function buildAgentGuidanceStatus(guidance = null) {
   const command = String(data.command || "").trim();
   const message =
     String(data.message || "").trim() ||
-    "Run rolester doctor, then ask the agent to follow the Agent guidance block.";
+    "Run careerrat doctor, then ask the agent to follow the Agent guidance block.";
   const reason =
     String(data.reason || "").trim() || "The dashboard could not load a specific handoff yet.";
   return {
@@ -1685,7 +1685,7 @@ function buildFocusCard(trackerData, { now, nextSteps, latestRoles } = {}) {
     kind: "clear",
     type: "",
     title: "No urgent action",
-    company: "Rolester",
+    company: "CareerRat",
     role: "",
     meta: clearMeta,
     dueText: "Clear",
@@ -1999,7 +1999,7 @@ function calendarEventDetails(event) {
   return [
     event.meta,
     [event.company, event.role].filter(Boolean).join(" - "),
-    event.cta ? `Rolester action: ${event.cta}` : "",
+    event.cta ? `CareerRat action: ${event.cta}` : "",
   ]
     .filter(Boolean)
     .join("\n");
@@ -2009,7 +2009,7 @@ function calendarEventVevent(event, timing = calendarEventTiming(event)) {
   const stamp = calendarUtcStamp(utcDateFromIso(event.iso));
   return [
     "BEGIN:VEVENT",
-    `UID:${calendarIcsEscape(`${event.id || calendarSlug(event.title)}@rolester.local`)}`,
+    `UID:${calendarIcsEscape(`${event.id || calendarSlug(event.title)}@careerrat.local`)}`,
     `DTSTAMP:${stamp}`,
     `SUMMARY:${calendarIcsEscape(event.title)}`,
     `DESCRIPTION:${calendarIcsEscape(calendarEventDetails(event))}`,
@@ -2023,7 +2023,7 @@ function calendarIcsDocument(vevents) {
   return [
     "BEGIN:VCALENDAR",
     "VERSION:2.0",
-    "PRODID:-//Rolester//Calendar Export//EN",
+    "PRODID:-//CareerRat//Calendar Export//EN",
     "CALSCALE:GREGORIAN",
     "METHOD:PUBLISH",
     ...vevents,
@@ -2067,7 +2067,7 @@ function calendarBundleExport(events, label) {
   const rows = objectList(events);
   return {
     count: rows.length,
-    filename: `rolester-calendar-${calendarSlug(label)}.ics`,
+    filename: `careerrat-calendar-${calendarSlug(label)}.ics`,
     ics: calendarIcsDocument(rows.map((event) => calendarEventVevent(event))),
   };
 }
@@ -3134,7 +3134,7 @@ function buildStrategyReviewTrigger(bucket, reviewSignal = {}) {
 }
 
 // Builds a compact view-model from tracker.json#analytics.reevaluation (the
-// persisted block written by `rolester analytics --write`). Fully defensive:
+// persisted block written by `careerrat analytics --write`). Fully defensive:
 // returns null when the block is absent, incomplete, or has no usable threshold,
 // so callers can short-circuit rendering safely on older trackers.
 function buildReevaluationProgress(reevaluationData) {
@@ -4251,7 +4251,7 @@ function jobDetailFromRow(
           icon: "mail",
           title: sourceRecord.followUp.kind || "Follow-up",
           desc:
-            firstSentence(sourceRecord.followUp.note) || "Follow-up action tracked by Rolester.",
+            firstSentence(sourceRecord.followUp.note) || "Follow-up action tracked by CareerRat.",
         }
       : null,
   ].filter((item) => item && (item.title || item.desc));

@@ -47,7 +47,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-verbs-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-verbs-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

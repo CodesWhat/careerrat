@@ -21,7 +21,7 @@ const cleanupRoots = [];
 const FIXED_NOW = new Date("2026-07-04T12:00:00.000Z");
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-company-proposal-decisions-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-company-proposal-decisions-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

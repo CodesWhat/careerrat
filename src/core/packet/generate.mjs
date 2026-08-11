@@ -901,7 +901,7 @@ function writeWorkspaceArtifacts({
           ? `coverLetter${format === "pdf" ? "Pdf" : "Docx"}`
           : `${key}${format === "pdf" ? "Pdf" : "Docx"}`;
       const full = join(tailoredDir, `${base}-${key}.${format}`);
-      const content = format === "pdf" ? `%PDF-1.4\n% Rolester packet artifact\n${body}\n` : body;
+      const content = format === "pdf" ? `%PDF-1.4\n% CareerRat packet artifact\n${body}\n` : body;
       writeFileSync(full, content, format === "pdf" ? "utf8" : "utf8");
       artifacts[artifactKey] = workspaceDisplayPath(relative(workspaceDir, full));
     }

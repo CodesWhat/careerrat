@@ -4,8 +4,9 @@
 // data-theme key and the computed --bg token, screenshots each, and fails on any
 // console error. Screenshots are written as tracker-theme-*.png (gitignored).
 import { chromium } from "playwright";
+import { readEnv } from "../src/core/env-compat.mjs";
 
-const BASE = process.env.ROLESTER_DEV_URL || "http://localhost:7777";
+const BASE = readEnv("CAREERRAT_DEV_URL") || "http://localhost:7777";
 
 // family → mode → expected resolved --bg (lowercased hex from styles.mjs)
 const EXPECT = {
@@ -31,8 +32,8 @@ for (const [family, modes] of Object.entries(EXPECT)) {
     // resolves the theme exactly as a real user's saved choice would.
     await page.evaluate(
       ([f, m]) => {
-        localStorage.setItem("rolester-theme", f);
-        localStorage.setItem("rolester-mode", m);
+        localStorage.setItem("careerrat-theme", f);
+        localStorage.setItem("careerrat-mode", m);
       },
       [family, mode]
     );

@@ -2,7 +2,7 @@
 //
 // Ported from santifer/career-ops (MIT License, Copyright (c) 2026 Santiago
 // Fernández de Valderrama — github.com/santifer/career-ops) providers/remoteok.mjs.
-// Same feed + field mapping; adapted to rolester's (entry, fetchImpl) → offers[]
+// Same feed + field mapping; adapted to careerrat's (entry, fetchImpl) → offers[]
 // contract (the sourced-scanner offer shape) instead of career-ops' {id, fetch}
 // Provider object. Fresh installs get at least one working deterministic source
 // even before any tracked_companies/RSS sources are configured — see AGENTS.md's

@@ -34,7 +34,7 @@ import { computeCost, readUsageEvents } from "../src/core/ai/usage-log.mjs";
 // silently under-assert the real default).
 function tempRepoWithSkill(skillNames = "test-skill") {
   const names = Array.isArray(skillNames) ? skillNames : [skillNames];
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-"));
   for (const skillName of names) {
     const skillDir = join(repoRoot, ".agents/skills", skillName);
     mkdirSync(skillDir, { recursive: true });
@@ -63,7 +63,7 @@ test("discoverSkillDirs: only lists directories that actually have a SKILL.md", 
 });
 
 test("discoverSkillDirs: returns [] when .agents/skills doesn't exist", () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-empty-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-empty-"));
   try {
     assert.deepEqual(discoverSkillDirs(repoRoot), []);
   } finally {
@@ -75,7 +75,7 @@ test("discoverSkillDirs: returns [] when .agents/skills doesn't exist", () => {
 // resolveAllowedSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedSkills: defaults to evaluate-job + answer-question + tailor-application + resume-extract when ROLESTER_RUNTIME_SKILLS is unset", () => {
+test("resolveAllowedSkills: defaults to evaluate-job + answer-question + tailor-application + resume-extract when CAREERRAT_RUNTIME_SKILLS is unset", () => {
   const repoRoot = tempRepoWithSkill([
     "evaluate-job",
     "answer-question",
@@ -150,10 +150,10 @@ test("buildChildEnv: proxy route sends the proxy TOKEN as ANTHROPIC_API_KEY and 
   assert.equal(
     childEnv.ANTHROPIC_CUSTOM_HEADERS,
     [
-      "x-rolester-feature: job-evaluation",
-      "x-rolester-skill: evaluate-job",
-      "x-rolester-action: gate",
-      "x-rolester-operation: job.gate",
+      "x-careerrat-feature: job-evaluation",
+      "x-careerrat-skill: evaluate-job",
+      "x-careerrat-action: gate",
+      "x-careerrat-operation: job.gate",
     ].join("\n")
   );
 });
@@ -192,7 +192,7 @@ test("buildChildEnv: forwards the explicit model-selection env vars when the ser
 // ---------------------------------------------------------------------------
 
 function tempRepoWithAiConfig(contents) {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-aiconfig-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-aiconfig-"));
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   writeFileSync(join(repoRoot, "config", "ai.json"), JSON.stringify(contents), "utf8");
   return repoRoot;
@@ -233,7 +233,7 @@ test("buildChildEnv: an explicit ANTHROPIC_MODEL in baseEnv wins over config/ai.
 });
 
 test("buildChildEnv: a missing config/ai.json falls back to the shipped default model", () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-noaiconfig-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-noaiconfig-"));
   try {
     const childEnv = buildChildEnv({
       route: { type: "byok", apiKey: "sk-ant-real", baseUrl: "https://api.anthropic.com" },
@@ -249,7 +249,7 @@ test("buildChildEnv: a missing config/ai.json falls back to the shipped default 
 });
 
 test("buildChildEnv: a malformed config/ai.json never throws, falls back to the shipped default model", () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-badaiconfig-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-badaiconfig-"));
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   writeFileSync(join(repoRoot, "config", "ai.json"), "{not valid json", "utf8");
   try {
@@ -880,7 +880,7 @@ test("loadClaudeAgentSdk: resolves the real devDependency and exposes query()", 
 test("INTEGRATION (skipped without ANTHROPIC_API_KEY): a real, tiny query against the live Agent SDK yields a result event", {
   skip: !process.env.ANTHROPIC_API_KEY,
 }, async () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-live-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-live-"));
   const skillDir = join(repoRoot, ".agents/skills/ping");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(

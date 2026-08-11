@@ -153,7 +153,7 @@ test("computeAppend refuses a private comp leak", () => {
 // ── fs round-trip ────────────────────────────────────────────────────────────
 
 test("appendLearning + readLearnings + listLearnings round-trip in a tmp root", () => {
-  const root = mkdtempSync(join(tmpdir(), "rolester-learn-"));
+  const root = mkdtempSync(join(tmpdir(), "careerrat-learn-"));
   try {
     // No file yet → readLearnings null, listLearnings empty.
     assert.equal(readLearnings("applied-ai", { root }), null);
@@ -196,7 +196,7 @@ test("appendLearning + readLearnings + listLearnings round-trip in a tmp root", 
 });
 
 test("appendLearning refuses placeholder/comp-leak entries and writes nothing new", () => {
-  const root = mkdtempSync(join(tmpdir(), "rolester-learn-"));
+  const root = mkdtempSync(join(tmpdir(), "careerrat-learn-"));
   try {
     const bad = appendLearning({
       family: "x",
@@ -223,7 +223,7 @@ test("appendLearning refuses placeholder/comp-leak entries and writes nothing ne
 });
 
 test("listLearnings ignores non-markdown files", () => {
-  const root = mkdtempSync(join(tmpdir(), "rolester-learn-"));
+  const root = mkdtempSync(join(tmpdir(), "careerrat-learn-"));
   try {
     mkdirSync(join(root, LEARNINGS_SUBDIR), { recursive: true });
     writeFileSync(

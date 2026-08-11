@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from "node:crypto";
+import { readEnv } from "../env-compat.mjs";
 
-const CAPABILITY_COOKIE = "rolester_local_capability";
+const CAPABILITY_COOKIE = "careerrat_local_capability";
 const LOOPBACK_HOSTS = Object.freeze(["localhost", "127.0.0.1", "::1"]);
 const STATE_CHANGING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
@@ -13,9 +14,9 @@ function normalizeHostname(value) {
 
 function configuredHosts(env) {
   const hosts = new Set(LOOPBACK_HOSTS);
-  const bindHost = normalizeHostname(env?.ROLESTER_TRACKER_HOST);
+  const bindHost = normalizeHostname(readEnv("CAREERRAT_TRACKER_HOST", { env }));
   if (bindHost) hosts.add(bindHost);
-  for (const value of String(env?.ROLESTER_TRACKER_ALLOWED_HOSTS || "").split(",")) {
+  for (const value of String(readEnv("CAREERRAT_TRACKER_ALLOWED_HOSTS", { env }) || "").split(",")) {
     const host = normalizeHostname(value);
     if (host) hosts.add(host);
   }
@@ -23,10 +24,10 @@ function configuredHosts(env) {
 }
 
 export function resolveTrackerBindHost(env = process.env) {
-  const requested = normalizeHostname(env?.ROLESTER_TRACKER_HOST || "127.0.0.1");
+  const requested = normalizeHostname(readEnv("CAREERRAT_TRACKER_HOST", { env }) || "127.0.0.1");
   if (!LOOPBACK_HOSTS.includes(requested)) {
     throw new Error(
-      `ROLESTER_TRACKER_HOST must be loopback-only (${LOOPBACK_HOSTS.join(", ")}); received ${requested}`
+      `CAREERRAT_TRACKER_HOST must be loopback-only (${LOOPBACK_HOSTS.join(", ")}); received ${requested}`
     );
   }
   return requested;

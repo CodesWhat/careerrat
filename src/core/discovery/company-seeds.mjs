@@ -145,7 +145,7 @@ function normalizeAICompanies(companies = []) {
 
 function seedPrompt({ context, maxCompanies, now }) {
   return [
-    "Generate candidate-specific company seeds for Rolester's discover-companies workflow.",
+    "Generate candidate-specific company seeds for CareerRat's discover-companies workflow.",
     "Return only companies worth resolving against supported ATS boards; do not include URLs, provider names, approval state, or write decisions.",
     "Avoid companies already tracked, sourced, applied to, or excluded.",
     JSON.stringify(
@@ -164,7 +164,7 @@ function seedPrompt({ context, maxCompanies, now }) {
 function domainFillPrompt({ context, names, now }) {
   return [
     "For each company name below, return its official primary domain (the one its careers page lives on) if you can identify it with confidence.",
-    "This fills in a bare company name typed or extracted from a resume for Rolester's discover-companies workflow; it is not a proposal to add a company.",
+    "This fills in a bare company name typed or extracted from a resume for CareerRat's discover-companies workflow; it is not a proposal to add a company.",
     "Use the candidate context only to disambiguate an ambiguous or generic name, never to invent a domain.",
     "Omit a company from the response entirely rather than guessing at a domain you are not confident about.",
     JSON.stringify(

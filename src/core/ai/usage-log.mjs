@@ -26,6 +26,7 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
+import { readEnv } from "../env-compat.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 
@@ -71,7 +72,7 @@ export function usageLogAbsPath(root = DEFAULT_ROOT) {
 // Pricing — USD per million tokens (MTok). Cache reads price at 0.1x the
 // model's input rate, cache writes (5-minute TTL, the default) at 1.25x —
 // mirrors Anthropic's prompt-caching discount/surcharge. Overridable wholesale
-// via ROLESTER_PRICING_JSON (JSON object of model -> {in, out}), merged over
+// via CAREERRAT_PRICING_JSON (JSON object of model -> {in, out}), merged over
 // the defaults and read fresh on every call (not cached at module load) so a
 // live env change — or a test setting process.env per-case — takes effect
 // immediately.
@@ -87,7 +88,7 @@ const DEFAULT_PRICING = {
 };
 
 function loadPricingOverride(env) {
-  const raw = String(env?.ROLESTER_PRICING_JSON || "").trim();
+  const raw = String(readEnv("CAREERRAT_PRICING_JSON", { env }) || "").trim();
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -360,8 +361,8 @@ export function readUsageEvents({ root = DEFAULT_ROOT } = {}) {
 }
 
 // Retention cap — a long-running proxy process could grow this unboundedly.
-// Overridable via ROLESTER_USAGE_MAX; default generous since rows are tiny.
-const DEFAULT_USAGE_MAX = Number(process.env.ROLESTER_USAGE_MAX) || 5000;
+// Overridable via CAREERRAT_USAGE_MAX; default generous since rows are tiny.
+const DEFAULT_USAGE_MAX = Number(readEnv("CAREERRAT_USAGE_MAX")) || 5000;
 
 // WRITE side: append one usage row. No dedupe (see header) — every call is a
 // real billable event.

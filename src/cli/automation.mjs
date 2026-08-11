@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
-// rolester automation — opt-in browser-automation config (status + safe write-back).
+// careerrat automation — opt-in browser-automation config (status + safe write-back).
 //
 // Authenticated browser automation is OPT-IN and DEFAULTS OFF. This CLI shows the
 // capability/platform/consent matrix and toggles individual switches, never running
@@ -580,8 +580,8 @@ function printStatus(asJson) {
     console.log(JSON.stringify({ ...status, session }, null, 2));
     return;
   }
-  console.log("rolester automation");
-  console.log("===================");
+  console.log("careerrat automation");
+  console.log("====================");
   console.log("");
   if (!status.exists) {
     console.log(`Not configured — every capability is OFF (opt-in default).`);
@@ -606,10 +606,10 @@ function printStatus(asJson) {
     console.log("");
   }
   console.log(
-    `Session browser: ${session.provider}${session.profileRoot ? ` (profiles: ${session.profileRoot})` : ""} - prefer extension, Playwright fallback. Change: \`rolester automation session <extension|playwright> --write\`.`
+    `Session browser: ${session.provider}${session.profileRoot ? ` (profiles: ${session.profileRoot})` : ""} - prefer extension, Playwright fallback. Change: \`careerrat automation session <extension|playwright> --write\`.`
   );
   console.log(
-    "Toggle: `rolester automation enable <capability> [platform] --write`, `consent <platform> --write`."
+    "Toggle: `careerrat automation enable <capability> [platform] --write`, `consent <platform> --write`."
   );
 }
 
@@ -628,7 +628,7 @@ function printList(asJson) {
 }
 
 function printHelp() {
-  console.log(`rolester automation — opt-in browser-automation config (defaults OFF)
+  console.log(`careerrat automation — opt-in browser-automation config (defaults OFF)
 
 Usage:
   node src/cli/automation.mjs status [--json]          Show the capability/consent matrix
@@ -648,7 +648,7 @@ with no platform flips the global switch; with a platform flips just that platfo
 Options:
   --write     Commit the change (default: dry run, writes nothing)
   --json      Machine-readable output
-  --root DIR  Repo root (default: the rolester install)
+  --root DIR  Repo root (default: the careerrat install)
 
 DB mode writes SQLite candidate_automation. Legacy mode patches
 candidate/automation.yml comment-preserving + schema-validated; the first legacy

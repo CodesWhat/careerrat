@@ -177,7 +177,7 @@ Engineers currently make $200k here per Glassdoor. [source: "Salaries" (https://
 // ── fs round-trip ─────────────────────────────────────────────────────────────
 
 test("writeResearch + readResearch + readCompanyResearch + listResearch round-trip in a tmp root", () => {
-  const root = mkdtempSync(join(tmpdir(), "rolester-research-"));
+  const root = mkdtempSync(join(tmpdir(), "careerrat-research-"));
   try {
     assert.equal(readCompanyResearch("Globex Logistics", { root }), null);
     assert.deepEqual(listResearch({ root }), []);
@@ -215,7 +215,7 @@ test("writeResearch + readResearch + readCompanyResearch + listResearch round-tr
 });
 
 test("writeResearch refuses to persist an invalid artifact (writes nothing)", () => {
-  const root = mkdtempSync(join(tmpdir(), "rolester-research-"));
+  const root = mkdtempSync(join(tmpdir(), "careerrat-research-"));
   try {
     const bad = writeResearch({ stem: "Globex", text: doc({ fm: { sources: [] } }), root });
     assert.equal(bad.ok, false);
@@ -226,7 +226,7 @@ test("writeResearch refuses to persist an invalid artifact (writes nothing)", ()
 });
 
 test("listResearch flags stale artifacts and ignores non-markdown files", () => {
-  const root = mkdtempSync(join(tmpdir(), "rolester-research-"));
+  const root = mkdtempSync(join(tmpdir(), "careerrat-research-"));
   try {
     mkdirSync(join(root, RESEARCH_SUBDIR), { recursive: true });
     writeFileSync(

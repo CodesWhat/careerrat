@@ -22,7 +22,7 @@ import { canonicalizeEvent, eventId } from "../src/core/tracker/activity-log.mjs
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-import-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-import-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

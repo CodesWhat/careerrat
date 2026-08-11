@@ -11,7 +11,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-onboard-ai-key-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-onboard-ai-key-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

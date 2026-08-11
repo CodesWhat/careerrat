@@ -25,7 +25,7 @@ import {
 const NOW = new Date("2026-07-01T12:00:00Z");
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "rolester-usage-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-usage-"));
 }
 
 // ---------------------------------------------------------------------------

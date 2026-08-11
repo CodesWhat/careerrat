@@ -20,7 +20,7 @@ const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-boards-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-boards-route-"));
   cleanupRoots.push(repoRoot);
   mkdirSync(join(repoRoot, "config"), { recursive: true });
   writeFileSync(

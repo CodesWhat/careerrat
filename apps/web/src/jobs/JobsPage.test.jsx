@@ -435,7 +435,7 @@ const JOBS_DATA = {
 function renderJobsPage({ route = "/jobs", snapshot = {}, storageState = null } = {}) {
   globalThis.localStorage.clear();
   if (storageState) {
-    globalThis.localStorage.setItem("rolester-jobs-next-explorer", JSON.stringify(storageState));
+    globalThis.localStorage.setItem("careerrat-jobs-next-explorer", JSON.stringify(storageState));
   }
   dashboardContext.useDashboardSnapshot.mockReturnValue({
     data: JOBS_DATA,

@@ -21,7 +21,7 @@ import { createChatRuntime } from "../src/core/ai/chat-runtime.mjs";
 
 function tempRepoWithSkill(skillNames = "ingest-profile") {
   const names = Array.isArray(skillNames) ? skillNames : [skillNames];
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-chat-route-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-chat-route-"));
   for (const skillName of names) {
     const skillDir = join(repoRoot, ".agents/skills", skillName);
     mkdirSync(skillDir, { recursive: true });

@@ -27,7 +27,7 @@ import {
 import { userPath } from "../src/core/paths/workspace.mjs";
 
 function buildTempRoot() {
-  return mkdtempSync(join(tmpdir(), "rolester-ai-env-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-ai-env-"));
 }
 
 function envFilePath(root) {
@@ -125,9 +125,9 @@ describe("ai-env", () => {
 
   it("writeLocalAiKey — uses ROLESTER_HOME/internal/ai.env when packaged home is set", () => {
     const root = buildTempRoot();
-    const repoRoot = join(root, "Resources", "rolester");
-    const rolesterHome = join(root, "Application Support", "Rolester", "data");
-    const env = { ROLESTER_HOME: rolesterHome };
+    const repoRoot = join(root, "Resources", "careerrat");
+    const careerratHome = join(root, "Application Support", "CareerRat", "data");
+    const env = { ROLESTER_HOME: careerratHome };
 
     const result = writeLocalAiKey({
       repoRoot,
@@ -135,7 +135,7 @@ describe("ai-env", () => {
       env,
     });
 
-    assert.equal(result.path, join(rolesterHome, "internal", "ai.env"));
+    assert.equal(result.path, join(careerratHome, "internal", "ai.env"));
     assert.equal(statSync(result.path).mode & 0o777, 0o600);
     assert.equal(existsSync(join(repoRoot, ".internal", "ai.env")), false);
     assert.equal(JSON.stringify(result).includes("sk-ant-packaged-home"), false);
@@ -215,18 +215,18 @@ describe("ai-env", () => {
     assert.equal(result.ok, true);
     assert.equal(
       readFileSync(result.path, "utf8"),
-      `ROLESTER_AI_PROXY_URL=https://proxy.example.test\nROLESTER_AI_PROXY_TOKEN=${token}\n`
+      `CAREERRAT_AI_PROXY_URL=https://proxy.example.test\nCAREERRAT_AI_PROXY_TOKEN=${token}\n`
     );
     assert.equal(statSync(result.path).mode & 0o777, 0o600);
-    assert.equal(env.ROLESTER_AI_PROXY_URL, "https://proxy.example.test");
-    assert.equal(env.ROLESTER_AI_PROXY_TOKEN, token);
+    assert.equal(env.CAREERRAT_AI_PROXY_URL, "https://proxy.example.test");
+    assert.equal(env.CAREERRAT_AI_PROXY_TOKEN, token);
     rmSync(root, { recursive: true, force: true });
   });
 
   it("writeManagedProxyEnv — preserves unrelated lines and an Anthropic key byte-for-byte", () => {
     const root = buildTempRoot();
     const path = envFilePath(root);
-    mkdirSync(join(root, ".rolester", "internal"), { recursive: true });
+    mkdirSync(join(root, ".careerrat", "internal"), { recursive: true });
     const original =
       "# keep this comment exactly\nexport OTHER_SETTING = spaced value\nANTHROPIC_API_KEY=sk-ant-existing-placeholder\nUNPARSEABLE LINE\n";
     writeFileSync(path, original, "utf8");
@@ -264,10 +264,10 @@ describe("ai-env", () => {
   it("writeManagedProxyEnv — replaces managed keys in place without changing line order", () => {
     const root = buildTempRoot();
     const path = envFilePath(root);
-    mkdirSync(join(root, ".rolester", "internal"), { recursive: true });
+    mkdirSync(join(root, ".careerrat", "internal"), { recursive: true });
     writeFileSync(
       path,
-      "BEFORE=one\nROLESTER_AI_PROXY_TOKEN=old-token\nMIDDLE=two\nROLESTER_AI_PROXY_URL=https://old.example.test\nAFTER=three\n",
+      "BEFORE=one\nCAREERRAT_AI_PROXY_TOKEN=old-token\nMIDDLE=two\nCAREERRAT_AI_PROXY_URL=https://old.example.test\nAFTER=three\n",
       "utf8"
     );
 
@@ -280,9 +280,36 @@ describe("ai-env", () => {
 
     assert.deepEqual(readFileSync(path, "utf8").trimEnd().split("\n"), [
       "BEFORE=one",
-      `ROLESTER_AI_PROXY_TOKEN=rlp_${"d".repeat(64)}`,
+      `CAREERRAT_AI_PROXY_TOKEN=rlp_${"d".repeat(64)}`,
       "MIDDLE=two",
-      "ROLESTER_AI_PROXY_URL=https://new.example.test",
+      "CAREERRAT_AI_PROXY_URL=https://new.example.test",
+      "AFTER=three",
+    ]);
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it("writeManagedProxyEnv — migrates a legacy ROLESTER_AI_PROXY_URL/TOKEN line to the new key in place", () => {
+    const root = buildTempRoot();
+    const path = envFilePath(root);
+    mkdirSync(join(root, ".careerrat", "internal"), { recursive: true });
+    writeFileSync(
+      path,
+      "BEFORE=one\nROLESTER_AI_PROXY_TOKEN=old-token\nMIDDLE=two\nROLESTER_AI_PROXY_URL=https://old.example.test\nAFTER=three\n",
+      "utf8"
+    );
+
+    writeManagedProxyEnv({
+      repoRoot: root,
+      proxyUrl: "https://new.example.test",
+      token: `rlp_${"e".repeat(64)}`,
+      env: {},
+    });
+
+    assert.deepEqual(readFileSync(path, "utf8").trimEnd().split("\n"), [
+      "BEFORE=one",
+      `CAREERRAT_AI_PROXY_TOKEN=rlp_${"e".repeat(64)}`,
+      "MIDDLE=two",
+      "CAREERRAT_AI_PROXY_URL=https://new.example.test",
       "AFTER=three",
     ]);
     rmSync(root, { recursive: true, force: true });
@@ -309,7 +336,7 @@ describe("ai-env", () => {
       const root = buildTempRoot();
       const env = {};
       writeManagedProxyEnv({ repoRoot: root, proxyUrl, token: "fake-token", env });
-      assert.equal(env.ROLESTER_AI_PROXY_URL, proxyUrl);
+      assert.equal(env.CAREERRAT_AI_PROXY_URL, proxyUrl);
       rmSync(root, { recursive: true, force: true });
     });
   }

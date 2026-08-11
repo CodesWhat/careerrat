@@ -22,8 +22,8 @@ Developing from a source checkout is the same command shape; link the local
 binary once:
 
 ```bash
-git clone https://github.com/CodesWhat/rolester
-cd rolester
+git clone https://github.com/CodesWhat/careerrat
+cd careerrat
 npm install
 npm link
 careerrat start claude    # or: careerrat start codex
@@ -155,14 +155,14 @@ the open page over Server-Sent Events.
 ## Workspace Directories
 
 By default `workspace/` and `candidate/` are created inside the cloned repo.
-Set `ROLESTER_HOME` to put them somewhere else:
+Set `CAREERRAT_HOME` to put them somewhere else:
 
 ```bash
-export ROLESTER_HOME=~/careerrat-data
+export CAREERRAT_HOME=~/careerrat-data
 careerrat start claude
 ```
 
-Everything under `ROLESTER_HOME` is gitignored and never touches the repo tree.
+Everything under `CAREERRAT_HOME` is gitignored and never touches the repo tree.
 Useful if you want to share one data directory across multiple checkouts or keep
 your personal files off a work machine's repo path.
 

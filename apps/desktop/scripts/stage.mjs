@@ -1,7 +1,7 @@
 #!/usr/bin/env node
-// apps/desktop/scripts/stage.mjs — builds staging/rolester, the tree
+// apps/desktop/scripts/stage.mjs — builds staging/careerrat, the tree
 // electron-builder's `extraResources` embeds into the packaged app's
-// Resources/rolester (see ../electron-builder.yml). Zero-dep node, mirrors
+// Resources/careerrat (see ../electron-builder.yml). Zero-dep node, mirrors
 // this repo's `npm run tracker:dev` build discipline: read the truth
 // (package.json's `files` allowlist — the same list `npm pack` ships) rather
 // than hand-maintaining a second copy that can drift.
@@ -21,7 +21,7 @@
 //     runtime can read its own version). Deliberately NOT a byte-for-byte
 //     copy of the root manifest: the root's `workspaces` field, matching
 //     `name`, and pre-listed `@anthropic-ai/claude-agent-sdk` devDependency
-//     all confused npm into treating `staging/rolester` as nested inside the
+//     all confused npm into treating `staging/careerrat` as nested inside the
 //     real repo's workspace tree — the SDK install below silently resolved
 //     against the ALREADY-installed root devDependency instead of writing
 //     its own node_modules here, and (worse) that same confusion made a
@@ -35,7 +35,7 @@
 // that list transitively reuses that guarantee.
 //
 // Explicitly excluded regardless of `files[]`: workspace/, candidate/,
-// .internal/, .rolester/, node_modules, tests, website, examples, docs — none
+// .internal/, .careerrat/, node_modules, tests, website, examples, docs — none
 // of those are in `files[]` in the first place except docs/examples, which
 // are filtered out above.
 //
@@ -48,7 +48,7 @@ import { fileURLToPath } from "node:url";
 
 const desktopDir = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const repoRoot = join(desktopDir, "../..");
-const stagingRoot = join(desktopDir, "staging", "rolester");
+const stagingRoot = join(desktopDir, "staging", "careerrat");
 const webDistIndex = join(repoRoot, "apps/web/dist/index.html");
 
 const EXCLUDE_EXACT = new Set(["examples"]);
@@ -160,7 +160,7 @@ function mirrorClaudeSkills() {
 }
 
 // Install the SDK's dependency tree PLUS the root package.json runtime
-// `dependencies` into staging/rolester's own node_modules — the packaged
+// `dependencies` into staging/careerrat's own node_modules — the packaged
 // runtime resolves `@anthropic-ai/claude-agent-sdk` from there, and the
 // engine is no longer zero-dep (mammoth landed with docx resume parsing;
 // shipping without root deps made the packaged server hang at boot on

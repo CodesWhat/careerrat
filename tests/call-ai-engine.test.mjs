@@ -17,7 +17,7 @@ import { callAI, describeAIEngine } from "../src/core/ai/call-ai.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 
 function tempRoot() {
-  return mkdtempSync(join(tmpdir(), "rolester-call-ai-engine-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-call-ai-engine-"));
 }
 
 function startMockUpstream() {

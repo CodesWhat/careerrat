@@ -4,11 +4,11 @@
 // remote build), so ONLY the static files in dist/demo are uploaded; the project link
 // and OIDC token under dist/.vercel never enter the served bundle.
 //
-//   Project: codeswhat/rolester-demo   (link lives at dist/.vercel, gitignored)
+//   Project: codeswhat/careerrat-demo   (link lives at dist/.vercel, gitignored)
 //   Scope:   codeswhat   (ALWAYS pass --scope explicitly; the CLI's default account is
 //                         a different, non-public org and must never receive this deploy)
 //
-// One-time setup already done: `cd dist && vercel link --project rolester-demo --scope codeswhat`
+// One-time setup already done: `cd dist && vercel link --project careerrat-demo --scope codeswhat`
 // and the demo.rolester.codeswhat.com domain + Cloudflare CNAME. Re-run this anytime to
 // refresh the demo (dates rebase to today on every build).
 import { execFileSync } from "node:child_process";
@@ -56,5 +56,5 @@ writeFileSync(
 );
 
 // 3. deploy prebuilt to production under the codeswhat scope
-console.log("\n▸ Deploy to Vercel (codeswhat/rolester-demo, prod)");
+console.log("\n▸ Deploy to Vercel (codeswhat/careerrat-demo, prod)");
 run("vercel", ["deploy", "--prebuilt", "--prod", "--yes", "--scope", "codeswhat"], DIST);

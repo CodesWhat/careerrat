@@ -25,7 +25,7 @@ import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-app-dist-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-app-dist-"));
   mkdirSync(resolveUserPaths({ repoRoot }).workspaceDir, { recursive: true });
   return repoRoot;
 }
@@ -39,7 +39,7 @@ function writeFakeDist(repoRoot) {
     '<!doctype html><html><body><div id="root"></div>' +
       '<script type="module" src="/app/assets/main-abc123.js"></script></body></html>'
   );
-  writeFileSync(join(assetsDir, "main-abc123.js"), "console.log('rolester app shell fixture');");
+  writeFileSync(join(assetsDir, "main-abc123.js"), "console.log('careerrat app shell fixture');");
 }
 
 function bootServer(repoRoot) {
@@ -171,7 +171,7 @@ test("GET /app/assets/main-abc123.js serves the real hashed asset with a JS cont
     assert.match(res.headers.get("content-type") || "", /javascript/);
     assert.match(res.headers.get("cache-control") || "", /immutable/);
     const body = await res.text();
-    assert.match(body, /rolester app shell fixture/);
+    assert.match(body, /careerrat app shell fixture/);
   } finally {
     teardown(dev, repoRoot);
   }

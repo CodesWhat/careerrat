@@ -29,7 +29,7 @@ function bootServer(overrides = {}) {
   }
   mountDiscoveryRoutes({
     addRoute,
-    repoRoot: "/tmp/rolester-public-intel-route-test",
+    repoRoot: "/tmp/careerrat-public-intel-route-test",
     env: {},
     chatRuntime,
     loadAgentGuidance: () => null,

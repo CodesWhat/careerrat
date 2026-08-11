@@ -11,7 +11,7 @@ const NOW = new Date("2026-07-06T12:00:00.000Z");
 const publicResolver = async () => [{ address: "93.184.216.34", family: 4 }];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-public-scanner-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-public-scanner-"));
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;

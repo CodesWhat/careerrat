@@ -2,9 +2,13 @@
 //
 // The db file lives at `<dataRoot>/db/rolester.db` — resolved through the same
 // path helpers the rest of the engine uses (workspace.mjs's dataPath/
-// privateDataRoot) so ROLESTER_HOME (the Electron packaged app's override)
-// keeps working, and so the db always lands inside the already-gitignored
-// `.rolester/` root, never a hardcoded path (M6 decision 2).
+// privateDataRoot) so CAREERRAT_HOME (the Electron packaged app's override,
+// with legacy ROLESTER_HOME still honored as a fallback) keeps working, and
+// so the db always lands inside the already-gitignored `.careerrat/` (or
+// legacy `.rolester/`) root, never a hardcoded path (M6 decision 2). The
+// filename itself (`rolester.db`) is intentionally NOT renamed — it's an
+// on-disk artifact identity, not product branding; renaming it would orphan
+// every existing user's database.
 //
 // One connection per data root, cached in a module-level Map (mirroring
 // storage-adapter.mjs's defaultAdapter() singleton pattern) — a process opens
@@ -18,7 +22,7 @@ import { runMigrations } from "./migrations.mjs";
 
 const DB_RELPATH = "db/rolester.db";
 
-// Keyed by resolved data root (not repoRoot alone) — ROLESTER_HOME can point
+// Keyed by resolved data root (not repoRoot alone) — CAREERRAT_HOME can point
 // two different repoRoots at the same data root, or the same repoRoot at two
 // different data roots across tests; the cache must key on the thing that
 // actually determines the db file.
@@ -74,7 +78,7 @@ export function closeAll() {
 }
 
 export const NO_DATABASE_MESSAGE =
-  "no database yet — run 'rolester data import' to migrate this workspace, or 'rolester data init' to start fresh";
+  "no database yet — run 'careerrat data import' to migrate this workspace, or 'careerrat data init' to start fresh";
 
 export class NoDatabaseError extends Error {
   constructor(message = NO_DATABASE_MESSAGE) {

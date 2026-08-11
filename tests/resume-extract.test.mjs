@@ -88,7 +88,7 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): resume-extract reads a re
   // verbatim, never re-typed) — mirrors skill-runtime.test.mjs's own
   // INTEGRATION test's "ping" fixture pattern: a minimal throwaway repoRoot
   // rather than pointing the live call at this checkout's full tree.
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-resume-extract-live-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-resume-extract-live-"));
   const skillDir = join(repoRoot, ".agents/skills/resume-extract");
   mkdirSync(skillDir, { recursive: true });
   writeFileSync(
@@ -97,7 +97,7 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): resume-extract reads a re
     "utf8"
   );
 
-  const fixtureDir = mkdtempSync(join(tmpdir(), "rolester-resume-extract-fixture-"));
+  const fixtureDir = mkdtempSync(join(tmpdir(), "careerrat-resume-extract-fixture-"));
   const pdfPath = join(fixtureDir, "resume.pdf");
   const { bytes } = buildMinimalPdf([
     "Jane Doe",

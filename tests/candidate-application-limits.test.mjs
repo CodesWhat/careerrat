@@ -9,7 +9,7 @@ import { candidateConfigPatch, candidateSetupInitialize } from "../src/core/db/v
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-candidate-limits-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-candidate-limits-"));
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;

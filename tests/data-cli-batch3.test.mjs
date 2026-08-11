@@ -10,7 +10,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-data-cli-batch3-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-data-cli-batch3-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -38,7 +38,7 @@ after(() => {
   }
 });
 
-test("rolester data calendar write records calendarWrites[] through the CLI", () => {
+test("careerrat data calendar write records calendarWrites[] through the CLI", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["init"]);
 
@@ -61,7 +61,7 @@ test("rolester data calendar write records calendarWrites[] through the CLI", ()
   assert.equal(tracker.calendarWrites[0].provider, "google_calendar");
 });
 
-test("rolester data source watermark updates sources[] and lastSweepAt without bumping version", () => {
+test("careerrat data source watermark updates sources[] and lastSweepAt without bumping version", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["init"]);
 
@@ -87,7 +87,7 @@ test("rolester data source watermark updates sources[] and lastSweepAt without b
   assert.equal(tracker.sources[0].id, "gmail-webmail");
 });
 
-test("rolester data relationship leads upsert and lead set-status update relationshipLeads[] and linked app CTA", () => {
+test("careerrat data relationship leads upsert and lead set-status update relationshipLeads[] and linked app CTA", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["init"]);
   dataCli(repoRoot, [

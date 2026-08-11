@@ -1,4 +1,4 @@
-// Resume parser for Rolester — ingests plain-text or markdown resumes into
+// Resume parser for CareerRat — ingests plain-text or markdown resumes into
 // structured data that seeds a candidate's profile and evidence bank.
 // CRITICAL: never invent facts. Only extract what is literally present in the text.
 

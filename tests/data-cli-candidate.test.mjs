@@ -10,7 +10,7 @@ import { userPath } from "../src/core/paths/workspace.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-data-cli-candidate-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-data-cli-candidate-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -38,7 +38,7 @@ after(() => {
   }
 });
 
-test("rolester data candidate init/get/patch/evidence use SQLite without writing candidate YAML", () => {
+test("careerrat data candidate init/get/patch/evidence use SQLite without writing candidate YAML", () => {
   const repoRoot = tempRepo();
 
   const init = dataCli(repoRoot, ["candidate", "init"]);
@@ -76,7 +76,7 @@ test("rolester data candidate init/get/patch/evidence use SQLite without writing
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
 });
 
-test("rolester data candidate limits upsert writes application limits in SQLite", () => {
+test("careerrat data candidate limits upsert writes application limits in SQLite", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["candidate", "init"]);
 

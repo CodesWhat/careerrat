@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Rolester managed-AI proxy — the one cloud surface in Shape 2 (see
+// CareerRat managed-AI proxy — the one cloud surface in Shape 2 (see
 // docs/ARCHITECTURE.md / Productization roadmap P0-3). Every other piece of
 // candidate data — resumes, JDs, tracker state — stays on the user's machine;
 // this process's only job is to sit between callAI()'s proxy route and the
@@ -16,7 +16,7 @@
 //
 // The upstream slot is generic on purpose (a base URL + a headers bag), not
 // hardcoded to Anthropic's first-party API, so a later drop-in — e.g. Portkey,
-// via ROLESTER_UPSTREAM_URL + ROLESTER_UPSTREAM_HEADERS carrying
+// via CAREERRAT_UPSTREAM_URL + CAREERRAT_UPSTREAM_HEADERS carrying
 // x-portkey-config — needs no code change here.
 //
 // The per-request pipeline (auth, upstream header injection/stripping, SSE
@@ -28,50 +28,50 @@
 // parsing + socket binding.
 //
 // Usage:
-//   ROLESTER_PROXY_TOKEN=devtoken ROLESTER_UPSTREAM_KEY=sk-ant-... npm run ai-proxy
+//   CAREERRAT_PROXY_TOKEN=devtoken CAREERRAT_UPSTREAM_KEY=sk-ant-... npm run ai-proxy
 //
 //   curl -s http://127.0.0.1:7788/v1/messages \
 //     -H "authorization: Bearer devtoken" -H "content-type: application/json" \
 //     -d '{"model":"claude-haiku-4-5","max_tokens":16,"messages":[{"role":"user","content":"hi"}]}'
 //
 //   # multiple beta testers, one process, per-tester spend caps:
-//   ROLESTER_PROXY_TOKENS='{"alice":"tok_alice","bob":"tok_bob"}' \
-//   ROLESTER_PROXY_USER_CAP_USD=10 ROLESTER_PROXY_USER_CAPS='{"alice":25}' \
-//   ROLESTER_UPSTREAM_KEY=sk-ant-... npm run ai-proxy
+//   CAREERRAT_PROXY_TOKENS='{"alice":"tok_alice","bob":"tok_bob"}' \
+//   CAREERRAT_PROXY_USER_CAP_USD=10 CAREERRAT_PROXY_USER_CAPS='{"alice":25}' \
+//   CAREERRAT_UPSTREAM_KEY=sk-ant-... npm run ai-proxy
 //
 // Env:
-//   ROLESTER_PROXY_TOKEN     the Bearer/x-api-key token a single tester presents
-//                            (dev-stub auth). Optional when ROLESTER_PROXY_TOKENS is
+//   CAREERRAT_PROXY_TOKEN     the Bearer/x-api-key token a single tester presents
+//                            (dev-stub auth). Optional when CAREERRAT_PROXY_TOKENS is
 //                            set — at least one of the two is required. Attributed to
 //                            userLabel "default" in the usage log.
-//   ROLESTER_PROXY_TOKENS    optional JSON object of label -> token for multiple beta
+//   CAREERRAT_PROXY_TOKENS    optional JSON object of label -> token for multiple beta
 //                            testers, e.g. {"alice":"tok_...","bob":"tok_..."}. Both
-//                            this and ROLESTER_PROXY_TOKEN may be set at once — the
+//                            this and CAREERRAT_PROXY_TOKEN may be set at once — the
 //                            valid token set is their union. A token's label is an
 //                            operator convenience recorded as userLabel in the usage
 //                            log; it is never sent upstream.
-//   ROLESTER_UPSTREAM_KEY    required — the real provider key injected into upstream calls.
-//   ROLESTER_UPSTREAM_URL    default https://api.anthropic.com — the gateway slot.
-//   ROLESTER_UPSTREAM_HEADERS  optional JSON object of extra headers to inject upstream
+//   CAREERRAT_UPSTREAM_KEY    required — the real provider key injected into upstream calls.
+//   CAREERRAT_UPSTREAM_URL    default https://api.anthropic.com — the gateway slot.
+//   CAREERRAT_UPSTREAM_HEADERS  optional JSON object of extra headers to inject upstream
 //                              (e.g. {"x-portkey-config":"..."} when fronting Portkey).
-//   ROLESTER_UPSTREAM_REPORTING  optional "1" to inject Vercel AI Gateway attribution
+//   CAREERRAT_UPSTREAM_REPORTING  optional "1" to inject Vercel AI Gateway attribution
 //                                headers on every outbound request: ai-reporting-user
 //                                (a stable pseudonymous id, sha256 of the caller's own
 //                                proxy token — never the raw token) and ai-reporting-tags
-//                                (skill:.../action:... from x-rolester-skill/-action when
+//                                (skill:.../action:... from x-careerrat-skill/-action when
 //                                present). Off by default; harmless to other upstreams.
-//   ROLESTER_PROXY_USER_CAP_USD  optional float — per-tester spend cap in USD, checked
+//   CAREERRAT_PROXY_USER_CAP_USD  optional float — per-tester spend cap in USD, checked
 //                                against that tester's own cumulative metered cost_usd
 //                                before every /v1/messages call. Absent or 0 = no cap.
-//   ROLESTER_PROXY_USER_CAPS  optional JSON object of label -> cap USD, overriding
-//                              ROLESTER_PROXY_USER_CAP_USD for specific testers, e.g.
+//   CAREERRAT_PROXY_USER_CAPS  optional JSON object of label -> cap USD, overriding
+//                              CAREERRAT_PROXY_USER_CAP_USD for specific testers, e.g.
 //                              {"alice": 25}. A tester at or over their cap gets HTTP 402
 //                              {"type":"error","error":{"type":"cap_exceeded",...}}
 //                              without the request ever reaching upstream.
-//   ROLESTER_PROXY_PORT      default 7788.
-//   ROLESTER_PROXY_METER_ROOT  default process.cwd() — root the usage log is written under.
-//   ROLESTER_METER_DB_URL    optional Supabase project URL (e.g. https://xyz.supabase.co).
-//                             When set together with ROLESTER_METER_DB_KEY, usage events
+//   CAREERRAT_PROXY_PORT      default 7788.
+//   CAREERRAT_PROXY_METER_ROOT  default process.cwd() — root the usage log is written under.
+//   CAREERRAT_METER_DB_URL    optional Supabase project URL (e.g. https://xyz.supabase.co).
+//                             When set together with CAREERRAT_METER_DB_KEY, usage events
 //                             are POSTed to that project's PostgREST API instead of the
 //                             local JSONL file — see src/cli/meter-db.mjs and
 //                             scripts/meter-db-schema.sql — so a proxy deployment needs no
@@ -80,10 +80,10 @@
 //                             (never both, and never silently dropped). Metadata-only, same
 //                             privacy invariant as above: no request/response body or raw
 //                             token ever reaches this column set.
-//   ROLESTER_METER_DB_KEY    the Supabase service-role key for ROLESTER_METER_DB_URL.
+//   CAREERRAT_METER_DB_KEY    the Supabase service-role key for CAREERRAT_METER_DB_URL.
 //                             Required alongside it; a service-role key is required (not an
 //                             anon key) since the schema has RLS enabled with no policies.
-//   ROLESTER_METER_DB_TABLE  default "usage_events" — the PostgREST table name.
+//   CAREERRAT_METER_DB_TABLE  default "usage_events" — the PostgREST table name.
 //
 // createProxyServer() below is a pure factory — no listen — so tests can construct
 // one against an isolated meter root and mock upstream and drive it directly.
@@ -93,6 +93,7 @@
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { extractSSEEvents } from "../core/ai/call-ai.mjs";
+import { readEnv } from "../core/env-compat.mjs";
 import {
   appendUsageEvent,
   canonicalizeUsageEvent,
@@ -174,12 +175,12 @@ export function createProxyServer({
 } = {}) {
   const tokenEntries = buildTokenEntries(proxyToken, proxyTokens);
   if (tokenEntries.length === 0)
-    throw new Error("ai-proxy: ROLESTER_PROXY_TOKEN or ROLESTER_PROXY_TOKENS is required");
+    throw new Error("ai-proxy: CAREERRAT_PROXY_TOKEN or CAREERRAT_PROXY_TOKENS is required");
   if (!String(upstreamKey || "").trim())
-    throw new Error("ai-proxy: ROLESTER_UPSTREAM_KEY is required");
+    throw new Error("ai-proxy: CAREERRAT_UPSTREAM_KEY is required");
 
-  // Per-tester spend cap: a global default (ROLESTER_PROXY_USER_CAP_USD) plus
-  // optional per-label overrides (ROLESTER_PROXY_USER_CAPS). 0/absent = no cap.
+  // Per-tester spend cap: a global default (CAREERRAT_PROXY_USER_CAP_USD) plus
+  // optional per-label overrides (CAREERRAT_PROXY_USER_CAPS). 0/absent = no cap.
   const globalUserCap = Number.isFinite(userCapUsd) && userCapUsd > 0 ? userCapUsd : null;
   function capForUser(label) {
     return resolveUserCap({ label, globalUserCap, userCaps });
@@ -190,7 +191,7 @@ export function createProxyServer({
   // drift visibility across providers) — never throws on a malformed URL.
   const upstreamHost = resolveUpstreamHost(base);
 
-  // Optional DB sink — see the ROLESTER_METER_DB_* env docs above. Both a URL
+  // Optional DB sink — see the CAREERRAT_METER_DB_* env docs above. Both a URL
   // and a key are required to enable it; either alone falls back to
   // JSONL-only, unchanged from today's behavior.
   const dbMeter =
@@ -317,10 +318,10 @@ export function createProxyServer({
   async function proxyPass(req, res, auth) {
     const url = new URL(req.url, "http://internal");
     const path = url.pathname;
-    const featureLabel = req.headers["x-rolester-feature"];
-    const skillLabel = req.headers["x-rolester-skill"];
-    const actionLabel = req.headers["x-rolester-action"];
-    const operationLabel = req.headers["x-rolester-operation"];
+    const featureLabel = req.headers["x-careerrat-feature"];
+    const skillLabel = req.headers["x-careerrat-skill"];
+    const actionLabel = req.headers["x-careerrat-action"];
+    const operationLabel = req.headers["x-careerrat-operation"];
 
     const userId = reportingUserId(auth.token);
     const userLabel = auth.label;
@@ -482,13 +483,13 @@ export { computeCost };
 // has always logged.
 function parseUpstreamHeaders(raw) {
   return parseUpstreamHeadersEnv(raw, {
-    onError: () => log("ROLESTER_UPSTREAM_HEADERS is not valid JSON — ignoring"),
+    onError: () => log("CAREERRAT_UPSTREAM_HEADERS is not valid JSON — ignoring"),
   });
 }
 
 function parseProxyTokens(raw) {
   return parseProxyTokensEnv(raw, {
-    onError: () => log("ROLESTER_PROXY_TOKENS is not valid JSON — ignoring"),
+    onError: () => log("CAREERRAT_PROXY_TOKENS is not valid JSON — ignoring"),
   });
 }
 
@@ -498,32 +499,32 @@ function parseUserCapUsd(raw) {
 
 function parseUserCaps(raw) {
   return parseUserCapsEnv(raw, {
-    onError: () => log("ROLESTER_PROXY_USER_CAPS is not valid JSON — ignoring"),
+    onError: () => log("CAREERRAT_PROXY_USER_CAPS is not valid JSON — ignoring"),
   });
 }
 
 async function main() {
-  const proxyToken = process.env.ROLESTER_PROXY_TOKEN;
-  const proxyTokens = parseProxyTokens(process.env.ROLESTER_PROXY_TOKENS);
-  const upstreamKey = process.env.ROLESTER_UPSTREAM_KEY;
+  const proxyToken = readEnv("CAREERRAT_PROXY_TOKEN");
+  const proxyTokens = parseProxyTokens(readEnv("CAREERRAT_PROXY_TOKENS"));
+  const upstreamKey = readEnv("CAREERRAT_UPSTREAM_KEY");
 
   const hasAnyProxyToken = String(proxyToken || "").trim() || Object.keys(proxyTokens).length > 0;
   if (!hasAnyProxyToken || !String(upstreamKey || "").trim()) {
     log(
-      "refusing to start: ROLESTER_PROXY_TOKEN or ROLESTER_PROXY_TOKENS, and ROLESTER_UPSTREAM_KEY, are required"
+      "refusing to start: CAREERRAT_PROXY_TOKEN or CAREERRAT_PROXY_TOKENS, and CAREERRAT_UPSTREAM_KEY, are required"
     );
     process.exit(1);
   }
 
-  const port = Number(process.env.ROLESTER_PROXY_PORT) || 7788;
-  const upstreamUrl = process.env.ROLESTER_UPSTREAM_URL || "https://api.anthropic.com";
-  const upstreamHeaders = parseUpstreamHeaders(process.env.ROLESTER_UPSTREAM_HEADERS);
-  const meterRoot = process.env.ROLESTER_PROXY_METER_ROOT || process.cwd();
-  const userCapUsd = parseUserCapUsd(process.env.ROLESTER_PROXY_USER_CAP_USD);
-  const userCaps = parseUserCaps(process.env.ROLESTER_PROXY_USER_CAPS);
-  const meterDbUrl = process.env.ROLESTER_METER_DB_URL || null;
-  const meterDbKey = process.env.ROLESTER_METER_DB_KEY || null;
-  const meterDbTable = process.env.ROLESTER_METER_DB_TABLE || "usage_events";
+  const port = Number(readEnv("CAREERRAT_PROXY_PORT")) || 7788;
+  const upstreamUrl = readEnv("CAREERRAT_UPSTREAM_URL") || "https://api.anthropic.com";
+  const upstreamHeaders = parseUpstreamHeaders(readEnv("CAREERRAT_UPSTREAM_HEADERS"));
+  const meterRoot = readEnv("CAREERRAT_PROXY_METER_ROOT") || process.cwd();
+  const userCapUsd = parseUserCapUsd(readEnv("CAREERRAT_PROXY_USER_CAP_USD"));
+  const userCaps = parseUserCaps(readEnv("CAREERRAT_PROXY_USER_CAPS"));
+  const meterDbUrl = readEnv("CAREERRAT_METER_DB_URL") || null;
+  const meterDbKey = readEnv("CAREERRAT_METER_DB_KEY") || null;
+  const meterDbTable = readEnv("CAREERRAT_METER_DB_TABLE") || "usage_events";
 
   const { server, dbHydration } = createProxyServer({
     proxyToken,
@@ -541,7 +542,7 @@ async function main() {
 
   // Let DB-sourced cap hydration finish before we start accepting requests —
   // see the long comment on `dbHydration` in createProxyServer(). A no-op
-  // when ROLESTER_METER_DB_URL/-KEY aren't set.
+  // when CAREERRAT_METER_DB_URL/-KEY aren't set.
   await dbHydration;
 
   server.listen(port, "127.0.0.1", () => {

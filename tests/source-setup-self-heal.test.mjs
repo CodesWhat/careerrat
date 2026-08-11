@@ -17,7 +17,7 @@ import { healSearchSourceConfig } from "../src/core/onboarding/first-search-run.
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-source-self-heal-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-source-self-heal-"));
   cleanupRoots.push(repoRoot);
   candidateSetupInitialize({ repoRoot });
   return repoRoot;

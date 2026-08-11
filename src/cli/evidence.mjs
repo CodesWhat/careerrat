@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-// rolester evidence — the safe read/validate/add helper for the evidence truth bank.
+// careerrat evidence — the safe read/validate/add helper for the evidence truth bank.
 //
 // candidate/evidence.yml is the source of truth every outbound artifact draws from
 // (résumés, cover letters, interview packets, STAR+R stories). This is the guarded
 // write path for ORIGINATING evidence — e.g. ingest-profile scanning a projects
 // folder and proposing claims — so new facts land with the same firewall the rest of
-// Rolester uses: placeholder lint, a private-`current_base` refusal, schema validity,
+// CareerRat uses: placeholder lint, a private-`current_base` refusal, schema validity,
 // and a stringify→parse round-trip check before the file is rewritten.
 //
 // Usage:
@@ -277,7 +277,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester evidence — safe read/validate/add for the evidence truth bank
+  console.log(`careerrat evidence — safe read/validate/add for the evidence truth bank
 
 Usage:
   node src/cli/evidence.mjs list [--json]
@@ -300,5 +300,5 @@ Options:
   --file FILE   YAML claim fragment for add (a claim mapping, or { claims: [ one ] }).
   --write       Commit the add (default: dry run).
   --json        Machine-readable output.
-  --root DIR    Repo root (default: the rolester install).`);
+  --root DIR    Repo root (default: the careerrat install).`);
 }

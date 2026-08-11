@@ -1,6 +1,7 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
+import { readEnv } from "../../src/core/env-compat.mjs";
 
 export const SAFE_EXTERNAL_PROTOCOLS = Object.freeze(["https:", "mailto:"]);
 
@@ -73,7 +74,7 @@ export async function startDesktopPdfRenderer({
       sendRendererText(res, 404, "Not found");
       return;
     }
-    if (!rendererTokensMatch(req.headers["x-rolester-render-token"], token)) {
+    if (!rendererTokensMatch(req.headers["x-careerrat-render-token"], token)) {
       sendRendererText(res, 401, "Unauthorized");
       return;
     }
@@ -153,7 +154,7 @@ export function resolveDesktopRuntimePaths({
 
     return {
       isPackaged: false,
-      rolesterHome: null,
+      careerratHome: null,
       repoRoot: join(appDir, "../.."),
     };
   }
@@ -168,8 +169,8 @@ export function resolveDesktopRuntimePaths({
 
     return {
       isPackaged: true,
-      rolesterHome: join(userDataPath, "data"),
-      repoRoot: join(resourcesPath, "rolester"),
+      careerratHome: join(userDataPath, "data"),
+      repoRoot: join(resourcesPath, "careerrat"),
     };
   }
 }
@@ -190,7 +191,7 @@ export const DEFAULT_PACKAGED_PORT = 46753;
 export function choosePreferredPort({ isPackaged, env } = {}) {
   if (!isPackaged) return 0;
 
-  const parsed = Number(env?.ROLESTER_DESKTOP_PORT);
+  const parsed = Number(readEnv("CAREERRAT_DESKTOP_PORT", { env }));
   if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) return parsed;
 
   return DEFAULT_PACKAGED_PORT;

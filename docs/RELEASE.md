@@ -46,7 +46,7 @@ For a desktop pilot release, add these checks before tagging:
    Fresh workspace should open `/app/onboarding`; existing workspace should open
    `/app`.
 5. Verify the packaged app runs without the source checkout and writes user data
-   under the packaged `ROLESTER_HOME` data root, not inside signed resources.
+   under the packaged `CAREERRAT_HOME` data root, not inside signed resources.
 6. Confirm no Apple credentials, candidate data, workspace files, private paths,
    or local keychain-profile values are tracked or included in release notes.
 7. Record final rollup evidence for the signed/notarized artifact, stapling,

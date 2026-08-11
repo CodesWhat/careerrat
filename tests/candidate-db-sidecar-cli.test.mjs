@@ -12,7 +12,7 @@ const repo = join(import.meta.dirname, "..");
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-candidate-cli-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-candidate-cli-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -50,7 +50,7 @@ after(() => {
   }
 });
 
-test("rolester gate writes DB candidate config in DB mode and does not create candidate YAML", () => {
+test("careerrat gate writes DB candidate config in DB mode and does not create candidate YAML", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["candidate", "init"]);
 
@@ -85,7 +85,7 @@ test("rolester gate writes DB candidate config in DB mode and does not create ca
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/targeting.yml")), false);
 });
 
-test("rolester automation writes DB candidate automation in DB mode and does not scaffold YAML", () => {
+test("careerrat automation writes DB candidate automation in DB mode and does not scaffold YAML", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["candidate", "init"]);
 
@@ -117,7 +117,7 @@ test("rolester automation writes DB candidate automation in DB mode and does not
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/automation.yml")), false);
 });
 
-test("rolester ingest greenfield init/check use DB setup instead of candidate YAML", () => {
+test("careerrat ingest greenfield init/check use DB setup instead of candidate YAML", () => {
   const repoRoot = tempRepo();
 
   const init = jsonCli(["src/cli/ingest.mjs", "--root", repoRoot, "--json"]);
@@ -154,7 +154,7 @@ test("rolester ingest greenfield init/check use DB setup instead of candidate YA
   assert.equal(complete.ok, true);
 });
 
-test("rolester ingest --write-config exports DB candidate setup to compatibility YAML", () => {
+test("careerrat ingest --write-config exports DB candidate setup to compatibility YAML", () => {
   const repoRoot = tempRepo();
   dataCli(repoRoot, ["candidate", "init"]);
   dataCli(repoRoot, [
@@ -192,23 +192,23 @@ test("rolester ingest --write-config exports DB candidate setup to compatibility
 
   assert.equal(result.mode, "db");
   assert.deepEqual(result.wrote, [
-    ".rolester/candidate/profile.yml",
-    ".rolester/candidate/targeting.yml",
-    ".rolester/candidate/evidence.yml",
-    ".rolester/candidate/honesty.yml",
-    ".rolester/candidate/form-defaults.yml",
-    ".rolester/candidate/modes.yml",
-    ".rolester/candidate/application-limits.yml",
-    ".rolester/config/search-sources.yml",
-    ".rolester/candidate/AGENTS.md",
+    ".careerrat/candidate/profile.yml",
+    ".careerrat/candidate/targeting.yml",
+    ".careerrat/candidate/evidence.yml",
+    ".careerrat/candidate/honesty.yml",
+    ".careerrat/candidate/form-defaults.yml",
+    ".careerrat/candidate/modes.yml",
+    ".careerrat/candidate/application-limits.yml",
+    ".careerrat/config/search-sources.yml",
+    ".careerrat/candidate/AGENTS.md",
   ]);
-  assert.ok(result.wrote.includes(".rolester/candidate/profile.yml"));
-  assert.ok(result.wrote.includes(".rolester/candidate/targeting.yml"));
-  assert.ok(result.wrote.includes(".rolester/candidate/application-limits.yml"));
-  assert.ok(result.wrote.includes(".rolester/candidate/evidence.yml"));
-  assert.ok(result.wrote.includes(".rolester/config/search-sources.yml"));
-  assert.equal(result.wrote.includes(".rolester/candidate/stories.yml"), false);
-  assert.equal(result.wrote.includes(".rolester/candidate/writing-style.md"), false);
+  assert.ok(result.wrote.includes(".careerrat/candidate/profile.yml"));
+  assert.ok(result.wrote.includes(".careerrat/candidate/targeting.yml"));
+  assert.ok(result.wrote.includes(".careerrat/candidate/application-limits.yml"));
+  assert.ok(result.wrote.includes(".careerrat/candidate/evidence.yml"));
+  assert.ok(result.wrote.includes(".careerrat/config/search-sources.yml"));
+  assert.equal(result.wrote.includes(".careerrat/candidate/stories.yml"), false);
+  assert.equal(result.wrote.includes(".careerrat/candidate/writing-style.md"), false);
   assert.ok(existsSync(userPath({ repoRoot }, "candidate/profile.yml")));
   assert.match(
     readFileSync(userPath({ repoRoot }, "candidate/profile.yml"), "utf8"),

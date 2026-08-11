@@ -22,7 +22,7 @@ import { closeAll, openDb } from "../src/core/db/connection.mjs";
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-workspace-agent-preview-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-workspace-agent-preview-"));
   cleanupRoots.push(repoRoot);
   openDb({ repoRoot, env: {} });
   return repoRoot;

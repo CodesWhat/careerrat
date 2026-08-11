@@ -297,8 +297,8 @@ function generatedRecency(targeting) {
 /**
  * buildSearchSources(targeting, profile) → plain JS object valid against search-sources.schema.json.
  *
- * @param {object} targeting - Rolester targeting config (role_buckets, keep_signals, cut_signals, …)
- * @param {object} profile   - Rolester candidate profile (candidate, compensation, location, …)
+ * @param {object} targeting - CareerRat targeting config (role_buckets, keep_signals, cut_signals, …)
+ * @param {object} profile   - CareerRat candidate profile (candidate, compensation, location, …)
  * @returns {object}
  */
 export function buildSearchSources(targeting, profile) {

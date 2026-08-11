@@ -5,6 +5,7 @@ import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { appRegisterPacketArtifacts as registerPacketArtifacts } from "../db/verbs.mjs";
 import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
+import { readEnv } from "../env-compat.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
 function cleanText(value) {
@@ -47,14 +48,14 @@ function titleFor(app, kind) {
 
 // tailor-application SKILL.md STEP 11b: every rendered resume/cover-letter
 // PDF also gets a convenience copy under the real OS home, organized by
-// company — never a workspace-relative location. ROLESTER_DOWNLOADS_DIR lets
-// tests redirect this away from the real home (mirroring the ROLESTER_HOME
+// company — never a workspace-relative location. CAREERRAT_DOWNLOADS_DIR lets
+// tests redirect this away from the real home (mirroring the CAREERRAT_HOME
 // override in paths/workspace.mjs); production always resolves the real
 // os.homedir().
 function downloadsRoot(env) {
-  const override = String(env?.ROLESTER_DOWNLOADS_DIR || "").trim();
+  const override = String(readEnv("CAREERRAT_DOWNLOADS_DIR", { env }) || "").trim();
   if (override) return override;
-  return join(homedir(), "Downloads", "rolester");
+  return join(homedir(), "Downloads", "careerrat");
 }
 
 // Only resume/coverLetter get the Downloads convenience copy per SKILL.md

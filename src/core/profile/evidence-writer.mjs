@@ -1,6 +1,6 @@
 // evidence-writer.mjs — the safe add/validate primitive for the evidence truth bank.
 //
-// candidate/evidence.yml is the highest-stakes file in Rolester: every résumé,
+// candidate/evidence.yml is the highest-stakes file in CareerRat: every résumé,
 // cover letter, interview packet, and STAR+R story draws its claims from here, and
 // nothing outbound may assert a fact that isn't in it. Until now evidence was only
 // written by hand-edit (ingest-profile) or résumé parse — there was no guarded
