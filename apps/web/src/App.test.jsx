@@ -185,6 +185,27 @@ describe("App — setup gate", () => {
     expect(html).not.toContain("jobs-page");
   });
 
+  // /settings is the forms-based way to FINISH setup — the onboarding hero
+  // links to it as "PREFER FORMS? OPEN THE CHECKLIST". Gating it sent the one
+  // escape hatch for people who don't want the chat interview straight back
+  // to the chat interview.
+  it("never gates /settings, so the onboarding escape hatch still opens the checklist", async () => {
+    const module = await loadApp();
+    routerState.pathname = "/settings";
+    apiMocks.getOnboardState.mockResolvedValue({ setupProgress: { complete: false } });
+
+    const html = renderApp(module);
+    await flushEffects();
+    const settled = renderApp(module);
+
+    // Reachable on the very first paint, with no redirect and no blank beat:
+    // an ungated route must not wait on the setup check at all.
+    expect(html).toContain("settings-page");
+    expect(settled).toContain("settings-page");
+    expect(settled).not.toContain("navigate:");
+    expect(apiMocks.getOnboardState).not.toHaveBeenCalled();
+  });
+
   it("renders the normal route table when setup reads complete", async () => {
     const module = await loadApp();
     routerState.pathname = "/jobs";

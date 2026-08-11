@@ -41,14 +41,23 @@ const RELEASED = { status: "released", forPath: null };
 // other than /onboarding itself redirects there instead of rendering a
 // broken/empty page. See CHECKING/RELEASED above for the state machine and
 // the module doc for the static-preview and fail-open carve-outs.
+// Routes the gate must never redirect away from, because each one is itself a
+// way to FINISH setup. /settings is the forms-based alternative to the chat
+// interview — the onboarding hero links straight to it ("PREFER FORMS? OPEN
+// THE CHECKLIST"), so gating it would bounce the one escape hatch for anyone
+// who doesn't want to answer questions in chat right back to the chat.
+const UNGATED_PATHS = new Set(["/settings"]);
+
 export function App() {
   const location = useLocation();
   const onOnboarding = location.pathname === "/onboarding";
+  const ungated = UNGATED_PATHS.has(location.pathname);
 
   const [gate, setGate] = useState(CHECKING);
 
   useEffect(() => {
     if (STATIC_PREVIEW) return;
+    if (ungated) return;
     if (gate.status === "released") return;
     if (gate.status === "blocked" && gate.forPath === location.pathname) return;
 
@@ -70,7 +79,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [location.pathname, gate.status, gate.forPath]);
+  }, [location.pathname, gate.status, gate.forPath, ungated]);
 
   if (onOnboarding) {
     return (
@@ -80,7 +89,7 @@ export function App() {
     );
   }
 
-  if (!STATIC_PREVIEW && gate.status !== "released") {
+  if (!STATIC_PREVIEW && !ungated && gate.status !== "released") {
     if (gate.status === "blocked" && gate.forPath === location.pathname) {
       return <Navigate to="/onboarding" replace />;
     }
