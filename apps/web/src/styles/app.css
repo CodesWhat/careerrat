@@ -2407,6 +2407,29 @@ button {
   color: var(--m-error);
 }
 
+.inline-alert__action {
+  display: block;
+  margin-top: 6px;
+  padding: 0;
+  border: none;
+  background: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.inline-alert__detail {
+  margin-top: 6px;
+  font-size: 11px;
+}
+
+.inline-alert__detail summary {
+  cursor: pointer;
+  color: var(--ink-faint, inherit);
+}
+
 /* ── Status badges (AI connection, etc.) ───────────────────────────────── */
 
 .badge {

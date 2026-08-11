@@ -12,6 +12,7 @@ import {
   saveCompanyBoard,
   updateSearchSource,
 } from "../lib/api.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 
 const SOURCE_API = {
   addBoard,
@@ -24,12 +25,7 @@ const SOURCE_API = {
 };
 
 function errorMessage(error) {
-  return (
-    error?.body?.error?.message ||
-    error?.body?.error ||
-    error?.message ||
-    "Source configuration could not be updated."
-  );
+  return resolveErrorCopy(error).message;
 }
 
 function formatWatermark(value) {

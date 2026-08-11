@@ -3,7 +3,6 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { Button, IconButton } from "../components/Button.jsx";
 import { ArrowUpIcon, PaperclipIcon } from "../components/icons.jsx";
 import {
-  ApiError,
   confirmIntake,
   createIntake,
   dismissIntake,
@@ -14,6 +13,7 @@ import {
   sendWorkspaceMessage,
   uploadIntakeFile,
 } from "../lib/api.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 import { kindLabel } from "../lib/intake-labels.js";
 import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
@@ -75,30 +75,18 @@ function sleep(ms) {
 }
 
 function describeAskBarError(err) {
-  if (err instanceof ApiError) {
-    const message = err.body?.error?.message || err.body?.error;
-    return typeof message === "string" && message
-      ? message
-      : `That didn't go through (${err.status}).`;
-  }
-  return err instanceof Error ? err.message : "That didn't go through.";
+  return resolveErrorCopy(err).message;
 }
 
 // Ported from the deleted CaptureBar.jsx (git show 95f27540~1) — the 409
 // NO_DATABASE hint every /api/data/* route already surfaces for a legacy
 // (pre-migration) workspace; intake is DB-native by construction
 // (migration 002), so this is expected on an un-migrated workspace, not a
-// bug. Show the server's own actionable message verbatim.
+// bug. resolveErrorCopy() maps this to the same good copy that used to be
+// hardcoded here, and maps everything else to human copy instead of the raw
+// server string.
 function describeCaptureError(err) {
-  if (err instanceof ApiError) {
-    if (err.status === 409) {
-      return (
-        err.body?.error || "This workspace hasn't finished setup yet. Finish setup, then try again."
-      );
-    }
-    return err.body?.error || `Capture failed (${err.status}).`;
-  }
-  return err instanceof Error ? err.message : "Capture failed.";
+  return resolveErrorCopy(err).message;
 }
 
 // Ported from the deleted inbox/IntakeCard.jsx's own inline catch.

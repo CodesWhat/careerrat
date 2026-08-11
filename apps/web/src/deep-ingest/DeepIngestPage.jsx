@@ -56,6 +56,7 @@ import {
   updateDeepIngestLaneState,
   uploadDeepIngestFile,
 } from "../lib/api.js";
+import { GENERIC_ERROR_MESSAGE, resolveErrorCopy } from "../lib/errorCopy.js";
 import { OnboardingNavButton } from "../onboarding/OnboardingShell.jsx";
 
 const INPUT_KIND_OPTIONS = [
@@ -156,9 +157,9 @@ const URL_LIKE_SOURCE_KINDS = new Set(["url", "linkedin", "portfolio", "project_
 const FILE_LIKE_SOURCE_KINDS = new Set(["file", "repo", "local_path"]);
 
 function errorMessage(err, fallback) {
-  const apiMessage = String(err?.body?.error || "").trim();
-  if (apiMessage) return apiMessage;
-  return err instanceof Error ? err.message : fallback;
+  const resolved = resolveErrorCopy(err);
+  if (resolved.message !== GENERIC_ERROR_MESSAGE) return resolved.message;
+  return fallback;
 }
 
 function asArray(value) {

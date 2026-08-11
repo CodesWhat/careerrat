@@ -39,6 +39,7 @@ import {
   updateDeepIngestConfirmedItem,
 } from "../lib/api.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { PREVIEW_DOCUMENTS, PREVIEW_LIBRARY } from "./libraryPreviewData.js";
 import "./LibraryPage.css";
 
@@ -489,7 +490,7 @@ export function LibraryPage() {
       emitDashboardChanged();
       await refetch();
     } catch (err) {
-      setActionError(err?.body?.error || (err instanceof Error ? err.message : `${key} failed`));
+      setActionError(resolveErrorCopy(err).message);
     } finally {
       setBusyKey(null);
     }

@@ -955,7 +955,11 @@ describe("AskBar — Lane B: capture receipt decide actions", () => {
     api.createIntake.mockRejectedValue(new api.ApiError(500, { error: "boom" }));
     const tree = await commitLongPaste();
 
-    expect(textOf(byClass(tree, "ask-bar__error"))).toBe("boom");
+    // The raw server string ("boom") must never render as the primary
+    // message — resolveErrorCopy() maps an unmapped 500 to human copy.
+    expect(textOf(byClass(tree, "ask-bar__error"))).toBe(
+      "Something went wrong on the server. Try again in a moment."
+    );
   });
 });
 

@@ -27,6 +27,7 @@ import {
   selectInstalledAiRuntime,
   validateAndSaveAiKey,
 } from "../lib/api.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 // buildQuickFactsSavePayload is the only export consumed here — the
 // individual pure helpers it composes (compensationPatch, authorizationPatch,
 // locationPatch, candidateLocationPatch, cleanLinkFields) are module-private
@@ -462,11 +463,7 @@ export function SettingsPage() {
       const ai = await getAiSettings();
       setAiStatus(ai);
     } catch (err) {
-      if (err instanceof ApiError && err.body?.error) {
-        setSectionBanner((b) => ({ ...b, ai: err.body.error }));
-      } else {
-        setSectionBanner((b) => ({ ...b, ai: err instanceof Error ? err.message : "Save failed" }));
-      }
+      setSectionBanner((b) => ({ ...b, ai: resolveErrorCopy(err).message }));
     } finally {
       setSaving((s) => ({ ...s, ai: false }));
     }
@@ -482,7 +479,7 @@ export function SettingsPage() {
     } catch (error) {
       setSectionBanner((state) => ({
         ...state,
-        aiRuntime: error?.body?.error || error?.body?.code || error?.message || "Selection failed",
+        aiRuntime: resolveErrorCopy(error).message,
       }));
     } finally {
       setSaving((state) => ({ ...state, aiRuntime: null }));
@@ -523,7 +520,7 @@ export function SettingsPage() {
     } catch (error) {
       setSectionBanner((state) => ({
         ...state,
-        automation: error?.body?.error || error?.message || "Permission update failed",
+        automation: resolveErrorCopy(error).message,
       }));
     } finally {
       setSaving((state) => ({ ...state, automation: false }));
