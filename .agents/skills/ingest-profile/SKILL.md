@@ -314,7 +314,7 @@ Treat this section as private by default. Capture and write each field separatel
    ```
    in DB mode, or confirm-block it in chat mode with both fields in the same patch:
    ```careerrat:confirm
-   {"kind":"candidate_patch","summary":"Current base (private, never shared)","payload":{"doc":"profile","patch":{"compensation":{"current_base":145000,"current_comp_shareable":false}}}}
+   {"kind":"candidate_patch","summary":"Current base (private, never shared)","payload":{"doc":"profile","patch":{"compensation":{"current_base":120000,"current_comp_shareable":false}}}}
    ```
    **NEVER surface current_base in any outbound artifact** (résumé, cover letter, form field, message, packet, tracker note, or any other candidate-facing or employer-facing output). This is a private gate input only; all outbound comp comes from the fields below.
 2. **(b) minimum_base** — Absolute walk-away floor; comp below this is a hard cut regardless of arrangement. Write with `rolester gate comp-floor <N> --write --confirm`.

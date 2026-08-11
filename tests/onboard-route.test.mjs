@@ -548,14 +548,18 @@ describe("GET /api/settings/usage", () => {
 });
 
 describe("GET /api/onboard/state", () => {
-  it("includes honesty prefill data from file fallback and SQLite state", async () => {
+  it("honesty prefill is genuinely empty from file fallback and SQLite state alike, never the example template", async () => {
+    // Before the fix, the file-fallback path read templates/honesty.example.yml
+    // ("Example Tool") as if it were the candidate's own confirmed tools, while
+    // the DB-backed path correctly reported empty. Both modes must now agree
+    // on "nothing answered yet" — neither may surface template/demo content.
     const repoRoot = buildTempRoot();
     const routes = mountDirectRoutes(repoRoot);
     try {
       const fileFallback = await getDirect(routes, "/api/onboard/state");
       assert.equal(fileFallback.status, 200);
       assert.equal(fileFallback.body.data.honesty.education.add_education_section, false);
-      assert.deepEqual(fileFallback.body.data.honesty.tools.confirmed, ["Example Tool"]);
+      assert.deepEqual(fileFallback.body.data.honesty.tools.confirmed, []);
 
       await postJsonDirect(routes, "/api/onboard/init", {});
       const dbBacked = await getDirect(routes, "/api/onboard/state");
@@ -583,13 +587,14 @@ describe("GET /api/onboard/state", () => {
       assert.equal(body.keyConfigured, false);
       assert.equal(body.searchSourcesPresent, false);
       assert.equal(body.data.honesty.education.add_education_section, false);
+      // The canonical empty default (config/honesty default do-not-fabricate
+      // list), not templates/honesty.example.yml's expanded illustrative list
+      // ("security clearances", "work authorization" are template-only).
       assert.deepEqual(body.data.honesty.claims.do_not_fabricate, [
         "degrees",
         "employers",
         "metrics",
         "tools",
-        "security clearances",
-        "work authorization",
       ]);
     } finally {
       await closeServer(server);

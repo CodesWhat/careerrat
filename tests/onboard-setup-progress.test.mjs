@@ -109,7 +109,7 @@ describe("computeSetupProgress", () => {
     assert.equal(progress.items.find((i) => i.key === "guardrails").done, true);
   });
 
-  it("quickFacts flips on home text OR any of remote/hybrid/onsite, independently", () => {
+  it("quickFacts flips on home text OR hybrid/onsite/relocation, independently", () => {
     assert.equal(
       computeSetupProgress({ data: { profile: { location: { home: "Austin, TX" } } } }).items.find(
         (i) => i.key === "quickFacts"
@@ -117,9 +117,21 @@ describe("computeSetupProgress", () => {
       true
     );
     assert.equal(
-      computeSetupProgress({ data: { profile: { location: { remote: true } } } }).items.find(
+      computeSetupProgress({ data: { profile: { location: { hybrid: true } } } }).items.find(
         (i) => i.key === "quickFacts"
       ).done,
+      true
+    );
+    assert.equal(
+      computeSetupProgress({ data: { profile: { location: { onsite: true } } } }).items.find(
+        (i) => i.key === "quickFacts"
+      ).done,
+      true
+    );
+    assert.equal(
+      computeSetupProgress({
+        data: { profile: { location: { relocation: ["Austin, TX"] } } },
+      }).items.find((i) => i.key === "quickFacts").done,
       true
     );
     assert.equal(
@@ -128,6 +140,18 @@ describe("computeSetupProgress", () => {
       }).items.find((i) => i.key === "quickFacts").done,
       false,
       "whitespace-only home must not count as set"
+    );
+    // `remote` is deliberately excluded — DEFAULTS.profile.location.remote
+    // defaults to true (a scanning/scoring recall default, see
+    // candidate-defaults.mjs), so a bare `remote: true` is never proof the
+    // candidate answered anything; only the fields that default false/empty
+    // count as real evidence here.
+    assert.equal(
+      computeSetupProgress({ data: { profile: { location: { remote: true } } } }).items.find(
+        (i) => i.key === "quickFacts"
+      ).done,
+      false,
+      "remote alone must not count as an answered quick fact (see candidate-defaults.mjs)"
     );
   });
 
@@ -235,7 +259,10 @@ describe("computeSetupProgress", () => {
           cut_signals: ["Below $200K"],
         },
         evidence: { claims: [{ claim: "Shipped a thing" }] },
-        profile: { location: { remote: true }, authorization: { work_authorized: true } },
+        profile: {
+          location: { home: "Austin, TX" },
+          authorization: { work_authorized: true },
+        },
       },
     });
     assert.equal(eightOfNine.completedCount, 8);
@@ -251,7 +278,10 @@ describe("computeSetupProgress", () => {
           cut_signals: ["Below $200K"],
         },
         evidence: { claims: [{ claim: "Shipped a thing" }] },
-        profile: { location: { remote: true }, authorization: { work_authorized: true } },
+        profile: {
+          location: { home: "Austin, TX" },
+          authorization: { work_authorized: true },
+        },
         automation: { setup_mode: "basic" },
       },
     });
@@ -382,16 +412,17 @@ describe("GET /api/onboard/state — setupProgress", () => {
       await postDirect(routes, "/api/onboard/init", {});
 
       // Unlike the file-fallback path above, candidateSetupInitialize()
-      // seeds SQLite rows without the illustrative example content — only
-      // quickFacts starts done (from the profile template's default
-      // location flags).
+      // seeds SQLite rows without the illustrative example content — and
+      // candidate-defaults.mjs's canonical empty shape leaves every location
+      // flag (including `remote`) unset, so nothing starts done on a
+      // genuinely untouched candidate.
       const initial = await getDirect(routes, "/api/onboard/state");
       assert.equal(initial.status, 200);
       const initialDoneKeys = initial.body.setupProgress.items
         .filter((i) => i.done)
         .map((i) => i.key);
-      assert.deepEqual(initialDoneKeys, ["quickFacts"]);
-      assert.equal(initial.body.setupProgress.completedCount, 1);
+      assert.deepEqual(initialDoneKeys, []);
+      assert.equal(initial.body.setupProgress.completedCount, 0);
       assert.equal(initial.body.setupProgress.complete, false);
 
       await postDirect(routes, "/api/onboard/candidate/targeting", {
@@ -406,8 +437,8 @@ describe("GET /api/onboard/state — setupProgress", () => {
       const doneKeys = afterTargeting.body.setupProgress.items
         .filter((i) => i.done)
         .map((i) => i.key);
-      assert.deepEqual(doneKeys.sort(), ["companies", "guardrails", "quickFacts", "roles"]);
-      assert.equal(afterTargeting.body.setupProgress.completedCount, 4);
+      assert.deepEqual(doneKeys.sort(), ["companies", "guardrails", "roles"]);
+      assert.equal(afterTargeting.body.setupProgress.completedCount, 3);
       assert.equal(afterTargeting.body.setupProgress.complete, false);
     } finally {
       closeAll();

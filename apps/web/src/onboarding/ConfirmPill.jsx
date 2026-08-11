@@ -37,6 +37,28 @@ import { flattenPatchLeaves } from "./patchFields.js";
 
 const DECLINABLE_KINDS = new Set(["authorization", "consent_mode"]);
 
+// candidate_patch labels list the patch's own leaf fields inline (see
+// candidatePatchPillLabel below) — capped so a patch with many fields can't
+// blow the pill out to three lines. The rest collapse into a trailing
+// "+N more" rather than being dropped silently.
+const MAX_VISIBLE_PATCH_FIELDS = 3;
+
+// The label and summary share one fixed-width pill (app.css caps
+// .confirm-pill's max-width). The label is code-owned and load-bearing, so
+// it always wins the room; once it's claimed most of the pill's rough
+// character budget, flex-shrink alone would crush the summary down to an
+// unreadable stub ("A.") rather than a real word. Better to not render it
+// at all than to render a rendering-bug-looking fragment, so it's dropped
+// in JS whenever the label hasn't left it a legible amount of room. app.css
+// also floors the summary's CSS min-width to the same figure as a second
+// line of defense for whatever room estimate turns out to be optimistic.
+const PILL_LABEL_SUMMARY_CHAR_BUDGET = 100;
+const MIN_LEGIBLE_SUMMARY_CHARS = 20;
+
+function summaryHasRoom(label) {
+  return PILL_LABEL_SUMMARY_CHAR_BUDGET - (label || "").length >= MIN_LEGIBLE_SUMMARY_CHARS;
+}
+
 const CONFIRM_LABELS = {
   authorization: "Work authorization",
   company_add: "Track company",
@@ -169,16 +191,23 @@ export function ConfirmPill({ block, automationStatus, onConfirm, onDecline }) {
   // every other single-click kind, but the field list itself is code-owned.
   const patchFields =
     block.kind === "candidate_patch" ? flattenPatchLeaves(block.payload?.patch) : [];
+  const visiblePatchFields = patchFields.slice(0, MAX_VISIBLE_PATCH_FIELDS);
+  const hiddenPatchFieldCount = patchFields.length - visiblePatchFields.length;
   const displayLabel =
     block.kind === "company_add" && block.payload?.name
       ? `${codeLabel} · ${block.payload.name}`
       : block.kind === "candidate_patch" && patchFields.length
-        ? [codeLabel, ...patchFields.map((leaf) => `${leaf.label}: ${leaf.value}`)].join(" · ")
+        ? [
+            codeLabel,
+            ...visiblePatchFields.map((leaf) => `${leaf.label}: ${leaf.value}`),
+            ...(hiddenPatchFieldCount > 0 ? [`+${hiddenPatchFieldCount} more`] : []),
+          ].join(" · ")
         : codeLabel;
+  const visibleSummary = summaryHasRoom(displayLabel) ? block.summary : null;
   const pillButton = (
     <ConfirmPillButton
       label={displayLabel}
-      summary={block.summary}
+      summary={visibleSummary}
       status={block.status}
       error={block.error}
       onClick={onConfirm}

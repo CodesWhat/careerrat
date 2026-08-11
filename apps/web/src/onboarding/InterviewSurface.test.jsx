@@ -712,9 +712,174 @@ describe("InterviewSurface — SSE events", () => {
     const tree = render({ runtime: RUNTIME });
     const receipts = byClass(tree, "onboarding-transcript__receipt").map(textOf);
     expect(receipts).toEqual([
-      "ENGINE ✓ · TARGETING.YML UPDATED · RESUME ✓ · EVIDENCE DRAFTED · 3 CLAIMS",
+      "ENGINE ✓ · RESUME ✓ · EVIDENCE DRAFTED · 3 CLAIMS",
       "ROLES ✓ · TARGETING.YML UPDATED",
     ]);
+  });
+
+  it("names the real file each item writes, never a hardcoded targeting.yml, and engine writes none", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-2", state: "running" });
+    const afterIdle = stateFixture({
+      doneKeys: ["engine", "evidence", "quickFacts", "authorization", "consent"],
+      data: { evidence: { claims: [{ id: "a" }] } },
+    });
+    api.getOnboardState.mockResolvedValueOnce(NOT_COMPLETE_STATE).mockResolvedValueOnce(afterIdle);
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+
+    onEvent("chat_state", JSON.stringify({ state: "idle" }));
+    await flush();
+
+    const tree = render({ runtime: RUNTIME });
+    const receipts = byClass(tree, "onboarding-transcript__receipt").map(textOf);
+    expect(receipts).toEqual([
+      "ENGINE ✓ · EVIDENCE ✓ · EVIDENCE.YML UPDATED · QUICK FACTS ✓ · PROFILE.YML UPDATED · " +
+        "WORK AUTHORIZATION ✓ · PROFILE.YML UPDATED · AUTOMATION CONSENT ✓ · AUTOMATION.YML UPDATED",
+    ]);
+  });
+
+  it("a résumé receipt reflects a declined résumé instead of claiming evidence was drafted", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-3", state: "running" });
+    const afterIdle = stateFixture({
+      doneKeys: ["resume"],
+      sourceResumePresent: false,
+      data: {
+        // Leftover template/demo claims — must never leak into the receipt
+        // when the user said they had no résumé.
+        evidence: { claims: [{ id: "a" }] },
+        "form-defaults": {
+          declined_fields: { resume: { declined_at: "2026-08-10T12:00:00Z" } },
+        },
+      },
+    });
+    api.getOnboardState.mockResolvedValueOnce(NOT_COMPLETE_STATE).mockResolvedValueOnce(afterIdle);
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+
+    onEvent("chat_state", JSON.stringify({ state: "idle" }));
+    await flush();
+
+    const tree = render({ runtime: RUNTIME });
+    const receipts = byClass(tree, "onboarding-transcript__receipt").map(textOf);
+    expect(receipts).toEqual(["RESUME ✓ · BUILT FROM YOUR ANSWERS"]);
+  });
+
+  it("a setup item already done at mount produces no receipt for it on the session's first idle event", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-4", state: "running" });
+    const alreadyDoneAtMount = stateFixture({ doneKeys: ["engine"] });
+    const afterFirstIdle = stateFixture({ doneKeys: ["engine", "roles"] });
+    api.getOnboardState
+      .mockResolvedValueOnce(alreadyDoneAtMount)
+      .mockResolvedValueOnce(afterFirstIdle);
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    // Same single-render-reuse pattern as above: this render's prevDoneRef
+    // gets synchronously seeded from `alreadyDoneAtMount` (engine already
+    // done) the moment it executes, since `state` has already loaded by now.
+    render({ runtime: RUNTIME });
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+
+    onEvent("chat_state", JSON.stringify({ state: "idle" }));
+    await flush();
+
+    const tree = render({ runtime: RUNTIME });
+    const receipts = byClass(tree, "onboarding-transcript__receipt").map(textOf);
+    // Only "roles" is a genuine within-session transition — "engine" was
+    // already done before this session started and must not be re-announced.
+    expect(receipts).toEqual(["ROLES ✓ · TARGETING.YML UPDATED"]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Inline markdown (Bug 1) — the transcript renders a safe subset of markdown
+// instead of literal asterisks/backticks, and never trusts model text enough
+// to inject raw HTML.
+// ---------------------------------------------------------------------------
+
+describe("InterviewSurface — inline markdown", () => {
+  it("renders bold/italic/inline code as real elements, not literal markup characters", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-md-1", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent("Do you want **Deep** setup, or *Shallow* setup with `git status`?")
+    );
+
+    const tree = render({ runtime: RUNTIME });
+    const textSpan = byClass(tree, "onboarding-transcript__text")[0];
+    expect(textOf(textSpan)).toBe("Do you want Deep setup, or Shallow setup with git status?");
+    expect(visit(textSpan, (n) => n.type === "strong").map(textOf)).toEqual(["Deep"]);
+    expect(visit(textSpan, (n) => n.type === "em").map(textOf)).toEqual(["Shallow"]);
+    expect(visit(textSpan, (n) => n.type === "code").map(textOf)).toEqual(["git status"]);
+  });
+
+  it("never injects raw HTML from model text — it renders as literal visible text, not markup", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-md-2", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent("assistant", assistantEvent('<img src=x onerror="alert(1)">'));
+
+    const tree = render({ runtime: RUNTIME });
+    const textSpan = byClass(tree, "onboarding-transcript__text")[0];
+    expect(textOf(textSpan)).toBe('<img src=x onerror="alert(1)">');
+    expect(visit(textSpan, (n) => n.type === "img")).toHaveLength(0);
+  });
+
+  it("only linkifies http(s) URLs — a javascript: scheme link stays plain text", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-md-3", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        "See [the board](https://example.com/jobs) or [click me](javascript:alert(1))"
+      )
+    );
+
+    const tree = render({ runtime: RUNTIME });
+    const textSpan = byClass(tree, "onboarding-transcript__text")[0];
+    const links = visit(textSpan, (n) => n.type === "a");
+    expect(links).toHaveLength(1);
+    expect(links[0].props.href).toBe("https://example.com/jobs");
+    expect(links[0].props.target).toBe("_blank");
+    expect(textOf(textSpan)).toContain("[click me](javascript:alert(1))");
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Assistant avatar (Bug 5) — no stale "R" brand-initial leftover.
+// ---------------------------------------------------------------------------
+
+describe("InterviewSurface — assistant avatar", () => {
+  it("does not show the old product's 'R' initial", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-avatar", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent("assistant", assistantEvent("Hi there."));
+
+    const tree = render({ runtime: RUNTIME });
+    const avatar = byClass(tree, "onboarding-transcript__avatar")[0];
+    expect(textOf(avatar)).not.toBe("R");
   });
 });
 

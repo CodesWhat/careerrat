@@ -13,6 +13,7 @@ import {
   evaluateDeepIngestReadiness,
 } from "../../deep-ingest/readiness.mjs";
 import { lintArtifact } from "../../documents/placeholder-lint.mjs";
+import { CANDIDATE_DEFAULTS } from "../../profile/candidate-defaults.mjs";
 import { findCurrentBaseToken } from "../../profile/comp-guard.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
@@ -41,93 +42,12 @@ const SCHEMA_PATHS = {
   "application-limits": "config/application-limits.schema.json",
 };
 
+// The candidate-defaults module is the single canonical "genuinely empty"
+// shape shared with legacy/YAML-mode onboarding (see onboard-route.mjs's
+// readBaseDoc()). "application-limits" has no legacy YAML-route counterpart
+// and no example template, so it stays defined only here.
 const DEFAULTS = {
-  profile: {
-    candidate: {
-      full_name: "",
-      email: "",
-      preferred_name: "",
-      headline: "",
-      phone: "",
-      location: "",
-      linkedin: "",
-      github: "",
-      portfolio: "",
-      domain: "",
-      toolchain: "markdown-only",
-    },
-    compensation: {
-      currency: "USD",
-      current_comp_shareable: false,
-      current_base: null,
-      target_base: null,
-      minimum_base: null,
-      target_total_comp: null,
-      cash_over_equity: true,
-      expected_base: null,
-      oe_min_base: null,
-      oe_max_base: null,
-      relo_package_needs: "",
-    },
-    location: {
-      home: "",
-      remote: true,
-      hybrid: false,
-      onsite: false,
-      relocation: [],
-      travel_tolerance: "",
-    },
-    authorization: {
-      work_authorized: false,
-      requires_sponsorship: false,
-      notice_period: "",
-    },
-  },
-  targeting: {
-    role_buckets: [],
-    keep_signals: [],
-    cut_signals: [],
-    excluded_companies: [],
-    tracked_companies: [],
-    degree_policy: "",
-    fit_bands: { high_min: 85, med_min: 65 },
-    search_preferences: {
-      posting_age: { mode: "since-last-run" },
-      cadence: { mode: "daily", recommended_from: "default" },
-    },
-  },
-  evidence: { claims: [] },
-  honesty: {
-    education: { highest_degree: null, add_education_section: false },
-    tools: { confirmed: [], adjacent: [], do_not_claim: [] },
-    claims: { do_not_fabricate: ["degrees", "employers", "metrics", "tools"] },
-    style: { avoid: [] },
-  },
-  "form-defaults": {
-    source: "Rolester",
-    work_authorization: "",
-    requires_sponsorship: "",
-    current_employer: null,
-    current_title: null,
-    expected_base: null,
-    linkedin: null,
-    github: null,
-    portfolio: null,
-    eeo_default: "Prefer not to answer",
-    screening_answers: {},
-    document_formats: {
-      default_packet_format: "pdf",
-      required_export_formats: [],
-    },
-    confirm_current_role: false,
-    auto_submit: false,
-  },
-  modes: {
-    usage_mode: "standard",
-    application_mode: "balanced",
-    agent_voice: "standard",
-  },
-  automation: {},
+  ...CANDIDATE_DEFAULTS,
   "application-limits": { companies: [] },
 };
 

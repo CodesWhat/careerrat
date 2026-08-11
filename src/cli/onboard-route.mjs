@@ -88,6 +88,7 @@ import {
   normalizeDocxResumeText,
 } from "../core/onboarding/resume-docx.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { cloneCandidateDefault } from "../core/profile/candidate-defaults.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
@@ -447,15 +448,20 @@ function nextAvailableId(usedIds, preferred) {
   return candidate;
 }
 
-// Read a candidate file's current YAML doc, falling back to its template
-// default when the candidate file doesn't exist yet — the same "seed from
-// template" behavior ensureCandidateFiles() copies onto disk, just read
-// in-memory here so a merge always has a valid base to start from.
-function readBaseDoc(repoRoot, entry, candidatePath) {
-  const text = existsSync(candidatePath)
-    ? readFileSync(candidatePath, "utf8")
-    : readFileSync(join(repoRoot, entry.templatePath), "utf8");
-  return parseYaml(text) || {};
+// Read a candidate file's current YAML doc, falling back to the canonical
+// genuinely-empty default (CANDIDATE_DEFAULTS) when the candidate file
+// doesn't exist yet — so a merge always has a valid base to start from.
+//
+// This is deliberately NOT entry.templatePath's illustrative "Jane
+// Candidate" example content. That template exists so CLI users can
+// scaffold a workspace and hand-edit the YAML (ensureCandidateFiles());
+// treating it as a real base here would both (a) hand the onboarding API's
+// callers demo data as if it were the candidate's own, and (b) — for the
+// write route below — merge a real field onto the demo persona and write
+// the whole thing to disk as the candidate's file.
+function readBaseDoc(entry, candidatePath) {
+  if (!existsSync(candidatePath)) return cloneCandidateDefault(entry.name);
+  return parseYaml(readFileSync(candidatePath, "utf8")) || {};
 }
 
 function readSchema(repoRoot, entry) {
@@ -611,11 +617,17 @@ export function computeSetupProgress({
     companies: (targeting.tracked_companies ?? []).length > 0,
     evidence: (data.evidence?.claims ?? []).length > 0,
     guardrails: (targeting.cut_signals ?? []).length > 0,
+    // `remote` deliberately does NOT count as evidence here: unlike hybrid/
+    // onsite (which default false, so `true` is unambiguous), DEFAULTS.
+    // profile.location.remote defaults to true for the scanning/scoring
+    // subsystem's own recall-maximizing purposes (see candidate-defaults.mjs)
+    // — reading it here would flip quickFacts "done" for a candidate who
+    // never touched their location at all.
     quickFacts:
       !!String(profileLocation.home || "").trim() ||
-      !!profileLocation.remote ||
       !!profileLocation.hybrid ||
-      !!profileLocation.onsite,
+      !!profileLocation.onsite ||
+      (Array.isArray(profileLocation.relocation) && profileLocation.relocation.length > 0),
     authorization: authorizationValuePresent(data),
     consent: consentValuePresent(data),
   };
@@ -1124,33 +1136,31 @@ export function mountOnboardRoutes({
     }));
     const sourceResumeEntry = COPY_ONLY_CANDIDATE_FILES.find((f) => f.name === "source-resume");
 
-    // Settings-page prefill data — parsed current (or template-default, via
-    // readBaseDoc()'s existing fallback) YAML for the curated subset of
-    // candidate files the M7 Settings surface reads (see
-    // SETTINGS_DATA_FILES above). This extends the existing state read
-    // rather than adding a parallel GET /api/onboard/candidate/:name route:
-    // the M7 design explicitly prefers extending state when it's missing a
-    // needed read, over growing the route surface.
+    // Settings-page prefill data for the curated subset of candidate files
+    // the M7 Settings surface reads (see SETTINGS_DATA_FILES above). This
+    // extends the existing state read rather than adding a parallel
+    // GET /api/onboard/candidate/:name route: the M7 design explicitly
+    // prefers extending state when it's missing a needed read, over growing
+    // the route surface.
+    //
+    // readBaseDoc() falls back to the canonical genuinely-empty doc (never
+    // the illustrative "Jane Candidate" example template) when a candidate
+    // file doesn't exist yet, so `data` is always safe to feed straight into
+    // computeSetupProgress below: an unanswered field reads as unset, not as
+    // demo content the candidate never supplied.
     const data = {};
-    // setupProgress must only ever see docs the user actually saved:
-    // readBaseDoc() falls back to the illustrative templates ("Jane
-    // Candidate") when a candidate file is missing, which is right for
-    // Settings prefill but would mark steps done on a fresh workspace.
-    const progressData = {};
     for (const name of SETTINGS_DATA_FILES) {
       const entry = CANDIDATE_ROUTE_ENTRIES.find((f) => f.name === name);
       if (!entry) continue;
       const candidatePath = userPath(pathCtx, entry.candidatePath);
       try {
-        data[name] = readBaseDoc(repoRoot, entry, candidatePath);
+        data[name] = readBaseDoc(entry, candidatePath);
       } catch {
-        // Neither the candidate file nor its template exists in this
-        // repoRoot (e.g. a minimal test fixture, or a workspace mid-setup
-        // before ensureCandidateFiles() has run) — degrade to an empty
-        // prefill rather than 500ing the whole state read.
+        // The candidate file doesn't parse (e.g. a minimal test fixture, or
+        // hand-edited YAML mid-repair) — degrade to an empty prefill rather
+        // than 500ing the whole state read.
         data[name] = {};
       }
-      if (existsSync(candidatePath)) progressData[name] = data[name];
     }
     // Lane A / R1, R5 — same credential-echo guard as the DB path above:
     // automation.integrations is never handed back, even in the non-DB
@@ -1161,7 +1171,6 @@ export function mountOnboardRoutes({
         capabilities: data.automation.capabilities,
         consent: data.automation.consent,
       };
-      if (progressData.automation) progressData.automation = data.automation;
     }
 
     // M8 additive (Builder B): logo.dev credential presence, never the values
@@ -1187,7 +1196,7 @@ export function mountOnboardRoutes({
       logoSearchTokenConfigured: !!secretKey,
       publicSyncPreference: DEFAULT_PUBLIC_SYNC_PREFERENCE,
       setupProgress: computeSetupProgress({
-        data: progressData,
+        data,
         sourceResumePresent: fallbackSourceResumePresent,
         keyConfigured: fallbackKeyConfigured,
       }),
@@ -1975,7 +1984,7 @@ export function mountOnboardRoutes({
       }
 
       const candidatePath = userPath(pathCtx, entry.candidatePath);
-      const base = readBaseDoc(repoRoot, entry, candidatePath);
+      const base = readBaseDoc(entry, candidatePath);
       const merged = deepMerge(base, patch);
 
       const schema = readSchema(repoRoot, entry);
@@ -2055,7 +2064,7 @@ export function mountOnboardRoutes({
 
     const entry = CANDIDATE_FILES.find((f) => f.name === "evidence");
     const candidatePath = userPath(pathCtx, entry.candidatePath);
-    const doc = readBaseDoc(repoRoot, entry, candidatePath);
+    const doc = readBaseDoc(entry, candidatePath);
     const existingClaims = Array.isArray(doc.claims) ? doc.claims : [];
 
     const existingClaimTexts = new Set(existingClaims.map((c) => String(c?.claim ?? "").trim()));

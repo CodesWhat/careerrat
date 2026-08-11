@@ -188,6 +188,22 @@ describe("resumeDetailLine", () => {
     ).toBe("Built from your answers");
   });
 
+  it("Bug 4: suppresses 'Built from your answers' when form-defaults.yml hasn't actually been written", () => {
+    expect(
+      resumeDetailLine({
+        state: {
+          sourceResumePresent: false,
+          files: [{ name: "form-defaults", exists: false }],
+          data: {
+            "form-defaults": {
+              declined_fields: { resume: { declined_at: "2026-08-10T12:00:00Z" } },
+            },
+          },
+        },
+      })
+    ).toBeNull();
+  });
+
   it("returns 'Uploaded' when present with zero claims", () => {
     expect(resumeDetailLine({ state: { sourceResumePresent: true, data: {} } })).toBe("Uploaded");
   });
@@ -225,6 +241,17 @@ describe("rolesDetailLine", () => {
     const singleState = { data: { targeting: { role_buckets: [{ titles: ["A"] }] } } };
     expect(rolesDetailLine({ state: singleState })).toBe("1 bucket · 1 title");
   });
+
+  it("Bug 4: returns null when state.files marks targeting.yml as not existing, even with role data present", () => {
+    expect(
+      rolesDetailLine({
+        state: {
+          files: [{ name: "targeting", exists: false }],
+          data: { targeting: { role_buckets: [{ titles: ["A"] }] } },
+        },
+      })
+    ).toBeNull();
+  });
 });
 
 describe("companiesDetailLine", () => {
@@ -233,6 +260,17 @@ describe("companiesDetailLine", () => {
     expect(
       companiesDetailLine({ state: { data: { targeting: { tracked_companies: ["Stripe"] } } } })
     ).toBe("1 tracked");
+  });
+
+  it("Bug 4: returns null when state.files marks targeting.yml as not existing", () => {
+    expect(
+      companiesDetailLine({
+        state: {
+          files: [{ name: "targeting", exists: false }],
+          data: { targeting: { tracked_companies: ["Stripe"] } },
+        },
+      })
+    ).toBeNull();
   });
 });
 
@@ -245,6 +283,17 @@ describe("evidenceDetailLine", () => {
     expect(evidenceDetailLine({ state: { data: { evidence: { claims: [1, 2] } } } })).toBe(
       "2 claims kept"
     );
+  });
+
+  it("Bug 4: returns null when state.files marks evidence.yml as not existing", () => {
+    expect(
+      evidenceDetailLine({
+        state: {
+          files: [{ name: "evidence", exists: false }],
+          data: { evidence: { claims: [1, 2] } },
+        },
+      })
+    ).toBeNull();
   });
 });
 
@@ -259,6 +308,17 @@ describe("guardrailsDetailLine", () => {
         state: { data: { targeting: { cut_signals: ["Below $200K", "No remote"] } } },
       })
     ).toBe("2 dealbreakers");
+  });
+
+  it("Bug 4: returns null when state.files marks targeting.yml as not existing", () => {
+    expect(
+      guardrailsDetailLine({
+        state: {
+          files: [{ name: "targeting", exists: false }],
+          data: { targeting: { cut_signals: ["Below $200K"] } },
+        },
+      })
+    ).toBeNull();
   });
 });
 
@@ -279,6 +339,17 @@ describe("quickFactsDetailLine", () => {
         state: { data: { profile: { location: { remote: true, hybrid: true, onsite: true } } } },
       })
     ).toBe("Remote · Hybrid · On-site");
+  });
+
+  it("Bug 4: returns null when state.files marks profile.yml as not existing", () => {
+    expect(
+      quickFactsDetailLine({
+        state: {
+          files: [{ name: "profile", exists: false }],
+          data: { profile: { location: { remote: true } } },
+        },
+      })
+    ).toBeNull();
   });
 });
 
@@ -312,6 +383,28 @@ describe("authorizationDetailLine", () => {
       })
     ).toBe("Needs sponsorship");
   });
+
+  it("Bug 4: suppresses 'Authorized'/'Needs sponsorship' when profile.yml doesn't exist", () => {
+    expect(
+      authorizationDetailLine({
+        state: {
+          files: [{ name: "profile", exists: false }],
+          data: { profile: { authorization: { work_authorized: true } } },
+        },
+      })
+    ).toBeNull();
+  });
+
+  it("Bug 4: suppresses 'Declined' when form-defaults.yml doesn't exist, even with a decline in the data", () => {
+    expect(
+      authorizationDetailLine({
+        state: {
+          files: [{ name: "form-defaults", exists: false }],
+          data: { "form-defaults": { declined_fields: { authorization: {} } } },
+        },
+      })
+    ).toBeNull();
+  });
 });
 
 describe("consentDetailLine", () => {
@@ -334,6 +427,17 @@ describe("consentDetailLine", () => {
     expect(consentDetailLine({ state: { data: { automation: { setup_mode: "advanced" } } } })).toBe(
       "Advanced"
     );
+  });
+
+  it("Bug 4: returns null when state.files marks automation.yml as not existing", () => {
+    expect(
+      consentDetailLine({
+        state: {
+          files: [{ name: "automation", exists: false }],
+          data: { automation: { setup_mode: "basic" } },
+        },
+      })
+    ).toBeNull();
   });
 });
 

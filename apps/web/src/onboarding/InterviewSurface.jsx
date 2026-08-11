@@ -24,8 +24,10 @@ import { ConfirmDialog, ConfirmPill } from "./ConfirmPill.jsx";
 import { unionCompanyNames } from "./companyUnion.js";
 import { parseConfirmBlocks } from "./confirmBlocks.js";
 import { FilePane } from "./FilePane.jsx";
+import { renderInlineMarkdown } from "./inlineMarkdown.jsx";
 import { OnboardingBar } from "./OnboardingBar.jsx";
 import {
+  SETUP_ITEM_FILE,
   SETUP_ITEM_LABELS,
   SETUP_ITEM_ORDER,
   setupCompletedCount,
@@ -117,7 +119,19 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   // input, borrowed so the upload chip opens the same picker.
   const [heroDragOver, setHeroDragOver] = useState(false);
   const heroFileInputRef = useRef(null);
-  const prevDoneRef = useRef({});
+  // Bug 3 fix ("already-done steps get announced as if they just happened")
+  // — null means "not yet seeded". checkProgressDelta's first diff must
+  // compare against whatever setup was already complete BEFORE this session
+  // (e.g. the engine, picked in an earlier session), not against an empty
+  // baseline — otherwise every already-done item reads as newly-flipped on
+  // turn one. Seeded synchronously here (a one-time lazy ref init, safe to do
+  // during render) the moment `state` first loads, rather than in a
+  // useEffect, so it's ready before any SSE-driven checkProgressDelta call
+  // can run.
+  const prevDoneRef = useRef(null);
+  if (prevDoneRef.current === null && state) {
+    prevDoneRef.current = setupProgressFromState(state);
+  }
   const resumedRef = useRef(false);
 
   const reloadState = useCallback(async () => {
@@ -204,15 +218,29 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   const checkProgressDelta = useCallback(async () => {
     const next = await reloadState();
     const nextDone = setupProgressFromState(next);
-    const flipped = SETUP_ITEM_ORDER.filter((key) => !prevDoneRef.current[key] && nextDone[key]);
+    const prevDone = prevDoneRef.current || {};
+    const flipped = SETUP_ITEM_ORDER.filter((key) => !prevDone[key] && nextDone[key]);
     prevDoneRef.current = nextDone;
     if (flipped.length) {
       const claimCount = next?.data?.evidence?.claims?.length ?? 0;
       const receiptText = flipped
         .map((key) => {
           const label = SETUP_ITEM_LABELS[key].toUpperCase();
-          if (key === "resume") return `RESUME ✓ · EVIDENCE DRAFTED · ${claimCount} CLAIMS`;
-          return `${label} ✓ · TARGETING.YML UPDATED`;
+          // Bug 2 fix ("receipt lines state things that are not true") — a
+          // résumé receipt must reflect what actually happened: real evidence
+          // only got drafted when a résumé was genuinely uploaded
+          // (sourceResumePresent), never when the user said they had none.
+          if (key === "resume") {
+            if (next?.sourceResumePresent) {
+              return `RESUME ✓ · EVIDENCE DRAFTED · ${claimCount} CLAIM${claimCount === 1 ? "" : "S"}`;
+            }
+            return "RESUME ✓ · BUILT FROM YOUR ANSWERS";
+          }
+          // Every other item names the file it actually writes (or none, for
+          // engine, which writes no candidate file at all) — never a
+          // hardcoded "TARGETING.YML UPDATED" regardless of reality.
+          const file = SETUP_ITEM_FILE[key];
+          return file ? `${label} ✓ · ${file.toUpperCase()} UPDATED` : `${label} ✓`;
         })
         .join(" · ");
       setMessages((m) => [...m, { role: "receipt", text: receiptText }]);
@@ -747,10 +775,12 @@ function TranscriptTurn({ message, index, automationStatus, onConfirmBlock, onDe
   return (
     <div className="onboarding-transcript__turn onboarding-transcript__turn--assistant">
       <span className="onboarding-transcript__avatar" aria-hidden="true">
-        R
+        P
       </span>
       <div className="onboarding-transcript__body">
-        {message.text ? <span className="onboarding-transcript__text">{message.text}</span> : null}
+        {message.text ? (
+          <span className="onboarding-transcript__text">{renderInlineMarkdown(message.text)}</span>
+        ) : null}
         {message.blocks?.length ? (
           <div className="onboarding-transcript__pills">
             {message.blocks.map((block, blockIndex) => (

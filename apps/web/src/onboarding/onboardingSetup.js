@@ -36,6 +36,27 @@ export const SETUP_ITEM_LABELS = {
   consent: "Automation consent",
 };
 
+// Bug 2 fix ("receipt lines state things that are not true") — the real
+// candidate file each item's completion actually writes, for the interview's
+// ✓ receipt lines (InterviewSurface.jsx's checkProgressDelta). Every prior
+// receipt hardcoded "TARGETING.YML UPDATED" for every non-resume item, which
+// was wrong for engine (writes nothing at all) and for quickFacts/
+// authorization (write profile.yml, not targeting.yml). `null` means the
+// item's completion writes no candidate file. resume is intentionally
+// omitted — its receipt line depends on whether a résumé was actually
+// uploaded vs. declined, which checkProgressDelta handles as a special case
+// rather than a single static file label.
+export const SETUP_ITEM_FILE = {
+  engine: null,
+  roles: "targeting.yml",
+  companies: "targeting.yml",
+  evidence: "evidence.yml",
+  guardrails: "targeting.yml",
+  quickFacts: "profile.yml",
+  authorization: "profile.yml",
+  consent: "automation.yml",
+};
+
 // The compact mono-caps chip row shown in 3a (centered, before docking) —
 // same items, just uppercase short labels.
 export const SETUP_CHIP_LABELS = {
@@ -86,6 +107,28 @@ export function setupIsComplete(state) {
   return state?.setupProgress?.complete === true;
 }
 
+// Bug 4 fix ("the file pane presents data the user never entered") —
+// GET /api/onboard/state's files[] array (state.files) carries {name,
+// exists} per raw candidate YAML doc (profile/targeting/evidence/honesty/
+// form-defaults — see CANDIDATE_FILES in src/core/profile/candidate-setup.mjs).
+// A detail line whose backing file hasn't actually been written yet must
+// never surface data as if the candidate entered it — that data is either
+// the template's illustrative fallback content or (per the QA report) a
+// leaked demo-persona row, neither of which the user typed. Permissive
+// (renders normally) whenever the signal isn't there: `state.files` missing
+// or not an array, or no entry for the given name — so callers that don't
+// pass `files` (every existing fixture in this module's own tests) and files
+// with no files[] entry at all (automation.yml is deliberately never
+// scaffolded — see AUTOMATION_ROUTE_ENTRY's own comment in
+// src/cli/onboard-route.mjs, so it has no files[] entry today) keep behaving
+// exactly as before.
+function fileWritten(state, fileName) {
+  const files = state?.files;
+  if (!Array.isArray(files)) return true;
+  const entry = files.find((f) => f?.name === fileName);
+  return entry ? entry.exists !== false : true;
+}
+
 // Detail lines for each file-pane row (design's grey sub-line under the
 // title, e.g. "Claude Code v2.3 · launch probe", "2 buckets · 5 titles").
 // Best-effort: falls back to null (row renders without a sub-line) rather
@@ -100,13 +143,17 @@ export function resumeDetailLine({ state } = {}) {
   const claimCount = (state?.data?.evidence?.claims ?? []).length;
   if (!state?.sourceResumePresent) {
     // No résumé is a supported way in (the interview builds the history by
-    // asking) — say so rather than leaving the row blank like an unstarted one.
-    return state?.data?.["form-defaults"]?.declined_fields?.resume ? "Built from your answers" : null;
+    // asking) — say so rather than leaving the row blank like an unstarted
+    // one, but only once the decline is actually recorded in form-defaults.yml.
+    const declined = state?.data?.["form-defaults"]?.declined_fields?.resume;
+    if (!declined) return null;
+    return fileWritten(state, "form-defaults") ? "Built from your answers" : null;
   }
   return claimCount ? `${claimCount} claim${claimCount === 1 ? "" : "s"} extracted` : "Uploaded";
 }
 
 export function rolesDetailLine({ state } = {}) {
+  if (!fileWritten(state, "targeting")) return null;
   const buckets = state?.data?.targeting?.role_buckets ?? [];
   if (!buckets.length) return null;
   const titleCount = buckets.reduce((sum, b) => sum + (b.titles?.length ?? 0), 0);
@@ -114,24 +161,28 @@ export function rolesDetailLine({ state } = {}) {
 }
 
 export function companiesDetailLine({ state } = {}) {
+  if (!fileWritten(state, "targeting")) return null;
   const companies = state?.data?.targeting?.tracked_companies ?? [];
   if (!companies.length) return null;
   return `${companies.length} tracked`;
 }
 
 export function evidenceDetailLine({ state } = {}) {
+  if (!fileWritten(state, "evidence")) return null;
   const claims = state?.data?.evidence?.claims ?? [];
   if (!claims.length) return null;
   return `${claims.length} claim${claims.length === 1 ? "" : "s"} kept`;
 }
 
 export function guardrailsDetailLine({ state } = {}) {
+  if (!fileWritten(state, "targeting")) return null;
   const signals = state?.data?.targeting?.cut_signals ?? [];
   if (!signals.length) return null;
   return `${signals.length} dealbreaker${signals.length === 1 ? "" : "s"}`;
 }
 
 export function quickFactsDetailLine({ state } = {}) {
+  if (!fileWritten(state, "profile")) return null;
   const location = state?.data?.profile?.location ?? {};
   const modes = [
     location.remote ? "Remote" : null,
@@ -143,18 +194,24 @@ export function quickFactsDetailLine({ state } = {}) {
 }
 
 export function authorizationDetailLine({ state } = {}) {
-  const auth = state?.data?.profile?.authorization ?? {};
   const declined = !!state?.data?.["form-defaults"]?.declined_fields?.authorization;
-  if (declined) return "Declined";
+  if (declined) return fileWritten(state, "form-defaults") ? "Declined" : null;
+  if (!fileWritten(state, "profile")) return null;
+  const auth = state?.data?.profile?.authorization ?? {};
   if (auth.work_authorized === true) return "Authorized";
   if (auth.requires_sponsorship === true) return "Needs sponsorship";
   return null;
 }
 
 export function consentDetailLine({ state } = {}) {
-  const automation = state?.data?.automation ?? {};
   const declined = !!state?.data?.["form-defaults"]?.declined_fields?.consent;
-  if (declined) return "Declined";
+  if (declined) return fileWritten(state, "form-defaults") ? "Declined" : null;
+  // automation.yml has no files[] entry today (its absence is load-bearing —
+  // see AUTOMATION_ROUTE_ENTRY's comment in src/cli/onboard-route.mjs), so
+  // fileWritten() is permissive here; this call stays so the gate applies
+  // automatically the moment that changes server-side.
+  if (!fileWritten(state, "automation")) return null;
+  const automation = state?.data?.automation ?? {};
   if (automation.setup_mode === "advanced") return "Advanced";
   if (automation.setup_mode === "basic") return "Basic";
   return null;

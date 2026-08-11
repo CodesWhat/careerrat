@@ -6990,6 +6990,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   border-radius: var(--pill-radius);
   padding: 6px 8px 6px 14px;
   cursor: pointer;
+  max-width: min(480px, 100%);
 }
 
 .confirm-pill:disabled {
@@ -7001,16 +7002,39 @@ a.onboarding-engine__not-found-chip:focus-visible {
   border-color: var(--m-error);
 }
 
+/* Label and summary hold the line together instead of wrapping — a long
+ * label (many patch fields) or a long model summary each truncate with an
+ * ellipsis rather than pushing the pill to two or three lines. The label
+ * wins the tug-of-war for space (lower flex-shrink) since it's the
+ * code-owned, load-bearing text; the summary is secondary and shrinks
+ * first. */
 .confirm-pill__label {
   font-weight: 600;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 0;
+  flex: 2 1 auto;
 }
 
+/* 20ch matches ConfirmPill.jsx's MIN_LEGIBLE_SUMMARY_CHARS — that JS check
+ * already skips rendering the summary at all once the label hasn't left it
+ * a legible amount of room, but this min-width is the second line of
+ * defense: it stops flex-shrink from ever crushing whatever summary DOES
+ * render down to an unreadable stub, on any screen width that estimate
+ * didn't account for. */
 .confirm-pill__summary {
   color: var(--ink-faint);
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  min-width: 20ch;
+  flex: 1 3 auto;
 }
 
 .confirm-pill__action {
   flex-shrink: 0;
+  margin-left: auto;
   font-family: var(--label-font);
   font-size: 9.5px;
   letter-spacing: var(--label-tracking);

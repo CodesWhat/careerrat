@@ -242,6 +242,52 @@ describe("FilePane — rows", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Bug 4 — a row's detail line must not surface data the user never entered.
+// state.files[] carries {name, exists} per candidate YAML doc; a row whose
+// backing file doesn't exist yet must render as unstarted (no detail line),
+// even when `done`/`data` claims otherwise (template fallback, DB-seed
+// leakage, etc.).
+// ---------------------------------------------------------------------------
+
+describe("FilePane — detail-line gating on state.files[].exists", () => {
+  it("renders no detail line for rows whose backing file doesn't exist, on a completely empty workspace", () => {
+    const state = {
+      ...stateWith(["roles", "companies", "guardrails", "evidence", "quickFacts"], {
+        targeting: {
+          role_buckets: [{ titles: ["Applied AI Engineer"] }],
+          tracked_companies: ["Stripe"],
+          cut_signals: ["Below $200K"],
+        },
+        evidence: { claims: [{ id: "a" }] },
+        profile: { location: { remote: true, hybrid: true } },
+      }),
+      files: [
+        { name: "targeting", exists: false },
+        { name: "evidence", exists: false },
+        { name: "profile", exists: false },
+      ],
+    };
+    const tree = render({ state });
+    for (const label of ["Roles", "Companies", "Guardrails", "Evidence", "Quick facts"]) {
+      const row = rowByLabel(tree, label);
+      expect(byClass(row, "file-pane__row-detail")).toHaveLength(0);
+    }
+  });
+
+  it("renders the detail line normally once the backing file actually exists", () => {
+    const state = {
+      ...stateWith(["roles"], {
+        targeting: { role_buckets: [{ titles: ["Applied AI Engineer"] }] },
+      }),
+      files: [{ name: "targeting", exists: true }],
+    };
+    const tree = render({ state });
+    const roles = rowByLabel(tree, "Roles");
+    expect(textOf(byClass(roles, "file-pane__row-detail")[0])).toBe("1 bucket · 1 title");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Editors — save-on-blur (form submit) wiring
 // ---------------------------------------------------------------------------
 

@@ -238,6 +238,120 @@ describe("ConfirmPill — single-click kinds", () => {
 });
 
 // ---------------------------------------------------------------------------
+// Confirm-pill rendering bugs found by live QA — [object Object] leaves,
+// bookkeeping fields shown as user answers, and label overflow.
+// ---------------------------------------------------------------------------
+
+describe("ConfirmPill — candidate_patch leaf-field rendering fixes", () => {
+  it("never renders '[object Object]' for an array-of-objects leaf", () => {
+    const tree = render({
+      block: {
+        kind: "candidate_patch",
+        payload: {
+          doc: "targeting",
+          patch: {
+            targeting: {
+              role_buckets: [
+                { name: "Backend engineering", priority: 1 },
+                { name: "Platform", priority: 2 },
+              ],
+            },
+          },
+        },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    const label = textOf(byClass(tree, "confirm-pill__label")[0]);
+    expect(label).not.toContain("[object Object]");
+    expect(label).toBe("Update targeting · Role buckets: Backend engineering, Platform");
+  });
+
+  it("a declined_fields-only patch falls back to the plain code-owned label", () => {
+    const tree = render({
+      block: {
+        kind: "candidate_patch",
+        payload: {
+          doc: "form-defaults",
+          patch: { declined_fields: { resume: { declined_at: "2026-08-10T00:00:00-04:00" } } },
+        },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Update form defaults");
+  });
+
+  it("caps the visible leaf field list and appends a '+N more' count", () => {
+    const tree = render({
+      block: {
+        kind: "candidate_patch",
+        payload: {
+          doc: "profile",
+          patch: { a: "1", b: "2", c: "3", d: "4", e: "5" },
+        },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe(
+      "Update profile · A: 1 · B: 2 · C: 3 · +2 more"
+    );
+  });
+
+  it("does not append a '+N more' segment when every leaf fits under the cap", () => {
+    const tree = render({
+      block: {
+        kind: "candidate_patch",
+        payload: { doc: "profile", patch: { a: "1", b: "2" } },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Update profile · A: 1 · B: 2");
+  });
+
+  // Bug fix round 2 — a long label left the model summary so little room
+  // that flex-shrink crushed it down to an unreadable stub ("A."). A
+  // summary that can't render as a real fragment must not render at all.
+  it("drops the model summary entirely once a long label hasn't left it room, instead of rendering a stub", () => {
+    const tree = render({
+      block: {
+        kind: "candidate_patch",
+        summary: "Applied AI engineering targets with customer-facing work",
+        payload: {
+          doc: "targeting",
+          patch: {
+            targeting: { role_buckets: [{ priority: 1 }] },
+            keep_signals: "Customer-facing responsibilities",
+          },
+        },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    expect(byClass(tree, "confirm-pill__summary")).toHaveLength(0);
+    expect(textOf(tree)).not.toContain("Applied AI engineering targets");
+  });
+
+  it("still renders the model summary alongside a short label", () => {
+    const tree = render({
+      block: {
+        kind: "candidate_patch",
+        summary: "Told me their name and email",
+        payload: {
+          doc: "profile",
+          patch: { candidate: { full_name: "Ada Lovelace", email: "ada@example.com" } },
+        },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+    });
+    expect(textOf(byClass(tree, "confirm-pill__summary")[0])).toBe("Told me their name and email");
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Decline UX — "I'd rather not say" on authorization/consent_mode only
 // (coordinator-mandated close: without this, a decline said INSIDE the chat
 // has no way to become a real declined_fields write — the agent has no
