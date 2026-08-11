@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
+import { UploadIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
   createCompanyProposals,
@@ -685,6 +686,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
                   else handleSend(chip.label);
                 }}
               >
+                {chip.kind === "upload" ? <UploadIcon /> : null}
                 {chip.label}
               </button>
             ))}

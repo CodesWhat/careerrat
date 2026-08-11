@@ -6775,6 +6775,9 @@ a.onboarding-engine__not-found-chip:focus-visible {
 }
 
 .onboarding-suggestions__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   border: 1px solid var(--input-border);
   border-radius: var(--pill-radius);
   padding: 6px 13px;
@@ -6783,6 +6786,14 @@ a.onboarding-engine__not-found-chip:focus-visible {
   font-size: 12px;
   color: var(--ink-soft);
   cursor: pointer;
+}
+
+/* The icon reads as "pick a file off your computer", so it holds its own size
+   rather than inheriting the chip's small label size. */
+.onboarding-suggestions__chip svg {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
 }
 
 .onboarding-suggestions__chip:hover {
