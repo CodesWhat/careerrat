@@ -129,15 +129,23 @@ describe("OnboardingBar — mode", () => {
     expect(byClass(tree, "ask-bar--centered")).toBeUndefined();
   });
 
-  it("shows the résumé attach button only in centered mode with onDropResume wired", () => {
+  it("shows no upload button of its own — the hero chip owns that affordance", () => {
     const centered = render({ mode: "centered", onDropResume: vi.fn() });
-    expect(byClass(centered, "onboarding-bar__attach")).toBeTruthy();
+    expect(byClass(centered, "onboarding-bar__attach")).toBeUndefined();
 
     const docked = render({ mode: "docked", onDropResume: vi.fn() });
     expect(byClass(docked, "onboarding-bar__attach")).toBeUndefined();
+  });
+
+  it("still wires the hidden file input in centered mode, so the hero chip has a picker to open", () => {
+    const centered = render({ mode: "centered", onDropResume: vi.fn() });
+    expect(byClass(centered, "onboarding-bar__file-input")).toBeTruthy();
+
+    const docked = render({ mode: "docked", onDropResume: vi.fn() });
+    expect(byClass(docked, "onboarding-bar__file-input")).toBeUndefined();
 
     const noHandler = render({ mode: "centered" });
-    expect(byClass(noHandler, "onboarding-bar__attach")).toBeUndefined();
+    expect(byClass(noHandler, "onboarding-bar__file-input")).toBeUndefined();
   });
 
   it("never registers a global shortcut — ⌘K belongs to the app-shell bar only", () => {
@@ -252,13 +260,6 @@ describe("OnboardingBar — résumé drop", () => {
     expect(fileInput).toBeTruthy();
     fileInput.props.onChange({ target: { files: [{ name: "resume.pdf" }] } });
     expect(onDropResume).toHaveBeenCalledWith({ name: "resume.pdf" });
-
-    const resumeButton = visit(
-      tree,
-      (n) => n.type === "button" && hasClass(n, "onboarding-bar__attach")
-    )[0];
-    expect(typeof resumeButton.props.onClick).toBe("function");
-    resumeButton.props.onClick();
   });
 
   it("drag-over/leave toggle the drag-over class, and drop calls onDropResume with the first file", () => {

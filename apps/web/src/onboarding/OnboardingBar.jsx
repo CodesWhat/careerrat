@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowUpIcon, UploadIcon } from "../components/icons.jsx";
+import { ArrowUpIcon } from "../components/icons.jsx";
 
 // OnboardingBar — the W4 chat-first onboarding surface's interview bar.
 // Per the finalized "Bar reuse" section of the W4 spec: the W3 AskBar.jsx
@@ -23,11 +23,9 @@ import { ArrowUpIcon, UploadIcon } from "../components/icons.jsx";
 //     bottom-center) — the same physical bar, just relocated by CSS, per the
 //     spec's "docking is a layout change in the onboarding surface, not a
 //     new component."
-// The accepted formats used to be spelled out in a mono-caps band above the
-// input ("DROP A RÉSUMÉ · PDF DOCX TXT MD"). They live here instead: the file
-// picker already filters by `accept`, so on screen it was noise stacked on top
-// of a second upload button.
-const RESUME_ATTACH_LABEL = "Attach a résumé (PDF, DOCX, TXT, or MD)";
+// The bar keeps the hidden file input and the drop target, but shows no upload
+// button of its own: the hero's "Upload my résumé" chip opens that same input,
+// and two upload buttons a few pixels apart read as two different things.
 
 export function OnboardingBar({
   mode = "centered",
@@ -104,17 +102,6 @@ export function OnboardingBar({
           />
         ) : null}
         <div className="ask-bar__row">
-          {showResumeAffordance ? (
-            <button
-              type="button"
-              className="onboarding-bar__attach"
-              aria-label={RESUME_ATTACH_LABEL}
-              title={RESUME_ATTACH_LABEL}
-              onClick={() => fileInputRef.current?.click()}
-            >
-              <UploadIcon />
-            </button>
-          ) : null}
           <input
             ref={inputRef}
             type="text"
