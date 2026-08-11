@@ -890,6 +890,9 @@ function CompletionScreen({ state, runtime, onSend, reloadState }) {
             </span>
           </div>
         ) : null}
+        <Link className="btn btn--primary" to="/">
+          Go to your dashboard
+        </Link>
       </main>
       <OnboardingBar
         mode="docked"

@@ -1377,4 +1377,34 @@ describe("InterviewSurface — completion screen (3e)", () => {
       vi.useRealTimers();
     }
   });
+
+  // Without this link the completion screen is a dead end: App.jsx's setup
+  // gate sends every route here until setup reads complete, so finishing
+  // setup would strand the user on a screen with no way into the app but
+  // hand-editing the URL. Asserts `to` reached the DOM (the mocked Link
+  // renders <a href={to}>) rather than a raw href that would resolve
+  // outside the BrowserRouter basename.
+  it("offers a way into the app once setup is complete", async () => {
+    vi.useFakeTimers();
+    try {
+      api.getOnboardState.mockResolvedValue(
+        stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+      );
+      api.startFirstSearchRun.mockResolvedValue({ status: "running" });
+
+      render({ runtime: RUNTIME });
+      await runEffects();
+      render({ runtime: RUNTIME });
+      await runEffects();
+      await flush();
+      const tree = render({ runtime: RUNTIME });
+
+      const cta = visit(tree, (n) => n.type === "a" && n.props?.href === "/")[0];
+      expect(cta).toBeTruthy();
+      expect(textOf(cta)).toBe("Go to your dashboard");
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
 });
