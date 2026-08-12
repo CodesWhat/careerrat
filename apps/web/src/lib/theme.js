@@ -2,20 +2,18 @@
 // src/core/tracker/dashboard-shell.html already uses: a "data-theme"
 // attribute on <html> ("light"|"dark"), driven by localStorage +
 // prefers-color-scheme on first load. Shares the same localStorage key
-// ("careerrat-theme", falling back to the legacy "rolester-theme" so an
-// existing choice isn't lost) so a theme choice made in the legacy dashboard
-// or the SPA is remembered in both. apps/web/index.html applies the initial
-// value before paint (see its inline <script>); this hook only owns runtime
+// ("careerrat-theme") so a theme choice made in the legacy dashboard or the
+// SPA is remembered in both. apps/web/index.html applies the initial value
+// before paint (see its inline <script>); this hook only owns runtime
 // toggling.
 
 import { useCallback, useEffect, useState } from "react";
 
 const STORAGE_KEY = "careerrat-theme";
-const LEGACY_STORAGE_KEY = "rolester-theme";
 
 function readInitialTheme() {
   try {
-    const stored = localStorage.getItem(STORAGE_KEY) ?? localStorage.getItem(LEGACY_STORAGE_KEY);
+    const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === "dark" || stored === "light") return stored;
   } catch {
     /* localStorage unavailable — fall through to media-query detection */

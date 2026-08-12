@@ -4,9 +4,8 @@
 // data-theme key and the computed --bg token, screenshots each, and fails on any
 // console error. Screenshots are written as tracker-theme-*.png (gitignored).
 import { chromium } from "playwright";
-import { readEnv } from "../src/core/env-compat.mjs";
 
-const BASE = readEnv("CAREERRAT_DEV_URL") || "http://localhost:7777";
+const BASE = process.env.CAREERRAT_DEV_URL || "http://localhost:7777";
 
 // family → mode → expected resolved --bg (lowercased hex from styles.mjs)
 const EXPECT = {

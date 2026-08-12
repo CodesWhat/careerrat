@@ -2064,28 +2064,6 @@ describe("POST /api/onboard/resume-ai-stream", () => {
     }
   });
 
-  it("honors ROLESTER_RESUME_EXTRACT_MODEL on the first attempt only", async () => {
-    const repoRoot = buildTempRoot();
-    const calls = [];
-    const runSkillStream = fakeRunSkillStream(["not JSON", VALID_REPLY], {
-      onCall: (call) => calls.push(call),
-    });
-    const env = {
-      ANTHROPIC_API_KEY: "test-key",
-      ROLESTER_RESUME_EXTRACT_MODEL: "custom-fast-model",
-    };
-    const routes = mountDirectRoutes(repoRoot, env, { runSkillStream });
-    try {
-      await postJsonDirect(routes, "/api/onboard/init", {});
-      await postResumeAiStreamDirect(routes, "resume.pdf", FAKE_PDF_BYTES);
-
-      assert.equal(calls[0].env.ANTHROPIC_MODEL, "custom-fast-model");
-      assert.equal(calls[1].env, env);
-      assert.equal(calls[1].env.ANTHROPIC_MODEL, undefined);
-    } finally {
-      closeAll();
-    }
-  });
 });
 
 describe("extractResumeAi", () => {

@@ -48,7 +48,6 @@ import {
 import { dbExists } from "../db/connection.mjs";
 import { buildDbSeenSets } from "../db/scan-context.mjs";
 import { candidateConfigGet } from "../db/verbs.mjs";
-import { readEnv } from "../env-compat.mjs";
 import { computeAllows } from "../profile/modes.mjs";
 import { captureAndPersistOffersIfDb } from "../scoring/sourced-persistence.mjs";
 import { extractReqId, normalizeCompanyRoleKey } from "../scoring/sourced-scanner.mjs";
@@ -214,7 +213,7 @@ function normalizeQueryResults({ selected, queriesRun, toolTrace, fallbackError 
 // lets runSkillStream reject with the standard SKILL_NOT_ALLOWED error rather
 // than silently punching a hole in an explicit lockdown.
 function buildAiWebSearchEnv({ repoRoot, env }) {
-  if (readEnv("CAREERRAT_RUNTIME_SKILLS", { env }) === "") return env;
+  if (env.CAREERRAT_RUNTIME_SKILLS === "") return env;
   const allowed = resolveAllowedSkills({ repoRoot, env });
   return { ...env, CAREERRAT_RUNTIME_SKILLS: [...allowed, "search-jobs"].join(",") };
 }

@@ -26,7 +26,6 @@ import { randomUUID } from "node:crypto";
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readEnv } from "../env-compat.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 
@@ -88,7 +87,7 @@ const DEFAULT_PRICING = {
 };
 
 function loadPricingOverride(env) {
-  const raw = String(readEnv("CAREERRAT_PRICING_JSON", { env }) || "").trim();
+  const raw = String(env.CAREERRAT_PRICING_JSON || "").trim();
   if (!raw) return null;
   try {
     const parsed = JSON.parse(raw);
@@ -362,7 +361,7 @@ export function readUsageEvents({ root = DEFAULT_ROOT } = {}) {
 
 // Retention cap — a long-running proxy process could grow this unboundedly.
 // Overridable via CAREERRAT_USAGE_MAX; default generous since rows are tiny.
-const DEFAULT_USAGE_MAX = Number(readEnv("CAREERRAT_USAGE_MAX")) || 5000;
+const DEFAULT_USAGE_MAX = Number(process.env.CAREERRAT_USAGE_MAX) || 5000;
 
 // WRITE side: append one usage row. No dedupe (see header) — every call is a
 // real billable event.

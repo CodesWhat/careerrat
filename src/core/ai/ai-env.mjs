@@ -8,9 +8,8 @@
 // src/core/onboarding/onboard-page.mjs) needs a way to let someone paste a
 // key once and have it survive a server restart without editing shell rc
 // files. `.internal/ai.env` is the logical seam: in a legacy repo-root
-// workspace it resolves to repo `.internal/ai.env`; with CAREERRAT_HOME (or
-// the legacy ROLESTER_HOME) set it resolves to `<home>/internal/ai.env` (no
-// dot) via userPath(). It is a
+// workspace it resolves to repo `.internal/ai.env`; with CAREERRAT_HOME set
+// it resolves to `<home>/internal/ai.env` (no dot) via userPath(). It is a
 // file-mode-0600 dotenv this module reads at server boot and writes to when
 // the wizard's BYOK step submits a key.
 //
@@ -76,11 +75,10 @@ function parseEnvLines(text) {
 
 /**
  * Read the logical `.internal/ai.env` path (repo `.internal/ai.env` in legacy
- * mode, `<CAREERRAT_HOME>/internal/ai.env` with CAREERRAT_HOME, or the legacy
- * ROLESTER_HOME) and set any keys it defines into
- * `env` that are not already set there. Called once at server boot
- * (tracker-dev.mjs's createDevServer factory) so a stored key works without
- * shell sourcing.
+ * mode, `<CAREERRAT_HOME>/internal/ai.env` with CAREERRAT_HOME) and set any
+ * keys it defines into `env` that are not already set there. Called once at
+ * server boot (tracker-dev.mjs's createDevServer factory) so a stored key
+ * works without shell sourcing.
  *
  * @param {{ repoRoot: string, env?: object }} options
  * @returns {{ loaded: string[], path: string }} `loaded` is key NAMES only —
@@ -171,10 +169,8 @@ const MANAGED_PROXY_URL_RE = /^(https:\/\/|http:\/\/(127\.0\.0\.1|localhost)(:\d
 
 /**
  * Validate and persist the desktop app's automatically-provisioned managed-AI
- * proxy credentials (CAREERRAT_AI_PROXY_URL + CAREERRAT_AI_PROXY_TOKEN — a
- * legacy ROLESTER_AI_PROXY_URL/TOKEN line already on disk is migrated to the
- * new key name in place rather than left to accumulate a second, stale line)
- * to the logical `.internal/ai.env` path, chmod'd 0600, preserving any unrelated
+ * proxy credentials (CAREERRAT_AI_PROXY_URL + CAREERRAT_AI_PROXY_TOKEN) to
+ * the logical `.internal/ai.env` path, chmod'd 0600, preserving any unrelated
  * existing lines in the file — same round-trip discipline as
  * writeLocalAiKey() above, applied to two keys instead of one. Sets both onto
  * `env` immediately so the current process's resolveAIRoute() (call-ai.mjs)
@@ -216,11 +212,11 @@ export function writeManagedProxyEnv({ repoRoot, proxyUrl, token, env = process.
   let urlReplaced = false;
   let tokenReplaced = false;
   const nextLines = entries.map((entry) => {
-    if (entry.key === "CAREERRAT_AI_PROXY_URL" || entry.key === "ROLESTER_AI_PROXY_URL") {
+    if (entry.key === "CAREERRAT_AI_PROXY_URL") {
       urlReplaced = true;
       return `CAREERRAT_AI_PROXY_URL=${url}`;
     }
-    if (entry.key === "CAREERRAT_AI_PROXY_TOKEN" || entry.key === "ROLESTER_AI_PROXY_TOKEN") {
+    if (entry.key === "CAREERRAT_AI_PROXY_TOKEN") {
       tokenReplaced = true;
       return `CAREERRAT_AI_PROXY_TOKEN=${tok}`;
     }

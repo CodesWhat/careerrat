@@ -9,7 +9,6 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
 import sanitizeHtml from "sanitize-html";
-import { readEnv } from "../env-compat.mjs";
 
 const repoRoot = join(fileURLToPath(new URL("../../..", import.meta.url)));
 const ARTIFACT_HTML_TAGS = [
@@ -726,8 +725,8 @@ export async function renderPdf({
 }
 
 function desktopPdfRendererConfig(env) {
-  const rawUrl = String(readEnv("CAREERRAT_DESKTOP_PDF_RENDER_URL", { env }) || "").trim();
-  const token = String(readEnv("CAREERRAT_DESKTOP_PDF_RENDER_TOKEN", { env }) || "").trim();
+  const rawUrl = String(env.CAREERRAT_DESKTOP_PDF_RENDER_URL || "").trim();
+  const token = String(env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN || "").trim();
   if (!rawUrl && !token) return null;
   if (!rawUrl || !token) {
     const err = new Error("Desktop PDF renderer configuration is incomplete");

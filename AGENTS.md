@@ -139,8 +139,8 @@ tarball extract so your `candidate/` and `workspace/` data are never touched.
 ## Local AI Key Storage
 
 The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`.
-Path resolution follows the active CareerRat home: with `CAREERRAT_HOME` set
-(legacy `ROLESTER_HOME` still honored), the file is `<CAREERRAT_HOME>/internal/ai.env`
+Path resolution follows the active CareerRat home: with `CAREERRAT_HOME` set,
+the file is `<CAREERRAT_HOME>/internal/ai.env`
 (no dot); in legacy repo-root mode it
 is `.internal/ai.env`. The value is chmod `0600`, loaded at server boot, and
 never echoed back by the API.
@@ -1219,8 +1219,7 @@ session is user-initiated with the agent in the loop.
 logins: **prefer the Chrome extension** (Claude-in-Chrome / Codex — it already has the
 user's logins + password store), fall back to a **Playwright persistent profile** the
 user signs into once per platform (`~/.careerrat/board-profiles/<platform>` —
-falls back to an existing `~/.rolester/board-profiles/<platform>` in place, the
-`scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
+the `scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
 the session browser," never an MCP namespace or vendor tool name. See
 `src/core/automation/session.mjs` and `docs/BROWSER.md`.
 

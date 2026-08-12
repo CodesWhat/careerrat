@@ -1,5 +1,3 @@
-import { readEnv } from "../env-compat.mjs";
-
 const ANTHROPIC_VERSION = "2023-06-01";
 
 export function normalizeAiProvider(provider) {
@@ -116,7 +114,7 @@ export async function validateAiProviderKey({
 
   return validateAnthropicApiKey({
     apiKey,
-    baseUrl: String(readEnv("CAREERRAT_ANTHROPIC_BASE_URL", { env }) || "").trim() || undefined,
+    baseUrl: String(env.CAREERRAT_ANTHROPIC_BASE_URL || "").trim() || undefined,
     fetchImpl,
   });
 }

@@ -44,8 +44,6 @@ Options:
   --limit N            Max offers to keep. Default: 250.
   --browser NAME       Playwright browser channel. Use "chrome" for Google OAuth. Default: chromium.
   --profile-root DIR   Persistent browser profile root. Default: ~/.careerrat/board-profiles
-                       (falls back to ~/.rolester/board-profiles if that's where your
-                       signed-in profiles already live).
   --out FILE           Output JSON file. Default: scan-results/<provider>-browser-<timestamp>.json.
   --ingest             After capture, write offers to SQLite sourced rows and JD artifacts.
 

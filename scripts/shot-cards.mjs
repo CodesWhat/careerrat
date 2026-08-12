@@ -2,9 +2,8 @@
 // One-off: screenshot the running tracker:dev page so we can eyeball company
 // logos on the card avatars and the status badges in the jobs table.
 import { chromium } from "playwright";
-import { readEnv } from "../src/core/env-compat.mjs";
 
-const BASE = readEnv("CAREERRAT_DEV_URL") || "http://localhost:7777";
+const BASE = process.env.CAREERRAT_DEV_URL || "http://localhost:7777";
 const browser = await chromium.launch();
 const page = await browser.newPage({ viewport: { width: 1280, height: 1700 } });
 // `load` not `networkidle` — the dev server holds an SSE hot-reload connection

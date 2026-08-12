@@ -6,7 +6,6 @@ import { spawn, spawnSync } from "node:child_process";
 import { accessSync, chmodSync, constants, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
-import { readEnv } from "../env-compat.mjs";
 
 export const INSTALLED_RUNTIME_DEFINITIONS = [
   {
@@ -129,7 +128,7 @@ export function runtimeSearchDirectories({
   const separator = platform === "win32" ? ";" : delimiter;
   const dirs = [];
   addUnique(dirs, splitPaths(env.PATH, separator));
-  addUnique(dirs, splitPaths(readEnv("CAREERRAT_RUNTIME_EXTRA_PATHS", { env }), separator));
+  addUnique(dirs, splitPaths(env.CAREERRAT_RUNTIME_EXTRA_PATHS, separator));
 
   if (platform === "win32") {
     addUnique(dirs, [

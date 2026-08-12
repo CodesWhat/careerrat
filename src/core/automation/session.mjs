@@ -38,15 +38,8 @@ export const PROVIDERS = {
 
 // The persistent-profile root must match scripts/capture-board-snapshot.mjs so the
 // session browser and the headless capture path share one set of logged-in profiles.
-// `.careerrat/board-profiles` is the default for fresh installs; a pre-existing
-// `.rolester/board-profiles` (live logged-in browser sessions — cookies/credentials
-// for LinkedIn and the job boards) keeps being read/written in place rather than
-// silently orphaned, exactly like DEFAULT_PRIVATE_DIR in workspace.mjs.
 export function defaultProfileRoot() {
-  const careerratRoot = join(homedir(), ".careerrat", "board-profiles");
-  const legacyRoot = join(homedir(), ".rolester", "board-profiles");
-  if (!existsSync(careerratRoot) && existsSync(legacyRoot)) return legacyRoot;
-  return careerratRoot;
+  return join(homedir(), ".careerrat", "board-profiles");
 }
 
 // Per-provider/per-platform profile dir, e.g. ~/.careerrat/board-profiles/linkedin.

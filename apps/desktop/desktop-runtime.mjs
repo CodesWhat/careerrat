@@ -1,7 +1,6 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { createServer } from "node:http";
 import { join } from "node:path";
-import { readEnv } from "../../src/core/env-compat.mjs";
 
 export const SAFE_EXTERNAL_PROTOCOLS = Object.freeze(["https:", "mailto:"]);
 
@@ -191,7 +190,7 @@ export const DEFAULT_PACKAGED_PORT = 46753;
 export function choosePreferredPort({ isPackaged, env } = {}) {
   if (!isPackaged) return 0;
 
-  const parsed = Number(readEnv("CAREERRAT_DESKTOP_PORT", { env }));
+  const parsed = Number(env.CAREERRAT_DESKTOP_PORT);
   if (Number.isInteger(parsed) && parsed > 0 && parsed <= 65535) return parsed;
 
   return DEFAULT_PACKAGED_PORT;

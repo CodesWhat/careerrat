@@ -78,17 +78,12 @@ docs/COMPARISON.md
 .internal/
 
 # Consolidated local user data root (candidate/workspace/generated config/internal).
-# .careerrat/ is the default for fresh installs; .rolester/ is the retired name —
-# a pre-existing one keeps being read/written in place, never moved/copied/deleted,
-# so it must stay ignored too (see DEFAULT_PRIVATE_DIR in src/core/paths/workspace.mjs).
 .careerrat/
-.rolester/
 
 # Alternate CAREERRAT_HOME used by `npm run desktop:fresh` to boot the desktop
 # app against a clean data root (fresh onboarding / fresh-db smoke tests)
 # without touching the real .careerrat/ data root.
 .careerrat-fresh/
-.rolester-fresh/
 
 # Local candidate data
 /candidate/

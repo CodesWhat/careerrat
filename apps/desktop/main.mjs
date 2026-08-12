@@ -24,7 +24,6 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { get as httpGet } from "node:http";
 import { join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { readEnv } from "../../src/core/env-compat.mjs";
 import { chooseDesktopRoute } from "./desktop-routing.mjs";
 import {
   choosePreferredPort,
@@ -229,7 +228,7 @@ async function boot() {
   const pathCtx = { repoRoot };
   resolveUserPaths(pathCtx);
   const route = chooseDesktopRoute({
-    routeOverride: readEnv("CAREERRAT_DESKTOP_ROUTE", { env: process.env }),
+    routeOverride: process.env.CAREERRAT_DESKTOP_ROUTE,
     forceOnboarding: !app.isPackaged,
     hasCandidateSetup:
       existsSync(userPath(pathCtx, "candidate/profile.yml")) ||

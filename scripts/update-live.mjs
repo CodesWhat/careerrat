@@ -13,12 +13,11 @@
 //   node scripts/update-live.mjs --target <dir> [--tag latest|rc|<version>] [--write]
 //
 // Dry run by default. Add --write to extract over the target. Set CAREERRAT_LIVE_DIR
-// instead of --target if you prefer (the legacy ROLESTER_LIVE_DIR still works too).
+// instead of --target if you prefer.
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { readEnv } from "../src/core/env-compat.mjs";
 import {
   extractOver,
   fetchTarball,
@@ -27,7 +26,7 @@ import {
 } from "../src/core/update/update-core.mjs";
 
 function parseArgs(argv) {
-  const out = { target: readEnv("CAREERRAT_LIVE_DIR") || null, tag: "latest", write: false };
+  const out = { target: process.env.CAREERRAT_LIVE_DIR || null, tag: "latest", write: false };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === "--target") out.target = argv[++i] || out.target;
@@ -46,14 +45,8 @@ function die(msg) {
   process.exit(1);
 }
 
-// A target tree may still be on the pre-rename bin/rolester.mjs entry point
-// (an older live install that hasn't been updated yet) — accept either name
-// rather than rejecting a perfectly valid, just-not-yet-renamed target.
 function looksLikeCareerratTree(dir) {
-  return (
-    (existsSync(join(dir, "bin", "careerrat.mjs")) || existsSync(join(dir, "bin", "rolester.mjs"))) &&
-    existsSync(join(dir, "src"))
-  );
+  return existsSync(join(dir, "bin", "careerrat.mjs")) && existsSync(join(dir, "src"));
 }
 
 const opts = parseArgs(process.argv.slice(2));

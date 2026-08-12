@@ -1,0 +1,35 @@
+candidate:
+  full_name: Dana Okonkwo
+  email: ""
+  preferred_name: ""
+  headline: ""
+  phone: ""
+  location: ""
+  linkedin: ""
+  github: ""
+  portfolio: ""
+  domain: ""
+  toolchain: markdown-only
+compensation:
+  currency: USD
+  current_comp_shareable: false
+  current_base:
+  target_base:
+  minimum_base:
+  target_total_comp:
+  cash_over_equity: true
+  expected_base:
+  oe_min_base:
+  oe_max_base:
+  relo_package_needs: ""
+location:
+  home: ""
+  remote: true
+  hybrid: false
+  onsite: false
+  relocation: []
+  travel_tolerance: ""
+authorization:
+  work_authorized: false
+  requires_sponsorship: false
+  notice_period: ""

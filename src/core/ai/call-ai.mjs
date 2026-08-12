@@ -22,7 +22,6 @@
 // shared with ai-proxy.mjs's byte-faithful tee, so the two places that ever
 // read raw Anthropic SSE agree on framing.
 
-import { readEnv } from "../env-compat.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { detectInstalledRuntimes, runInstalledRuntime } from "./installed-runtimes.mjs";
 import { loadInstalledRuntimeSelection } from "./runtime-selection.mjs";
@@ -49,8 +48,8 @@ export function resolveAIRoute(
     const selection = loadInstalledRuntimeSelection({ repoRoot, env });
     const installedRuntimeEnabled =
       selection.runtimeId !== null ||
-      readEnv("CAREERRAT_DESKTOP_SHELL", { env }) === "1" ||
-      readEnv("CAREERRAT_INSTALLED_AI", { env }) === "1";
+      env.CAREERRAT_DESKTOP_SHELL === "1" ||
+      env.CAREERRAT_INSTALLED_AI === "1";
     if (installedRuntimeEnabled && !selection.providerFallback) {
       // "custom" isn't in the fixed registry detectInstalledRuntimes() scans
       // (see installed-runtimes.mjs's probeCustomRuntimeCommand /
@@ -84,19 +83,19 @@ export function resolveAIRoute(
     return {
       type: "byok",
       baseUrl: (
-        String(readEnv("CAREERRAT_ANTHROPIC_BASE_URL", { env }) || "").trim() ||
+        String(env.CAREERRAT_ANTHROPIC_BASE_URL || "").trim() ||
         "https://api.anthropic.com"
       ).replace(/\/+$/, ""),
       apiKey,
     };
   }
 
-  const proxyUrl = String(readEnv("CAREERRAT_AI_PROXY_URL", { env }) || "").trim();
+  const proxyUrl = String(env.CAREERRAT_AI_PROXY_URL || "").trim();
   if (proxyUrl) {
     return {
       type: "proxy",
       baseUrl: proxyUrl.replace(/\/+$/, ""),
-      token: String(readEnv("CAREERRAT_AI_PROXY_TOKEN", { env }) || "").trim(),
+      token: String(env.CAREERRAT_AI_PROXY_TOKEN || "").trim(),
     };
   }
 
@@ -361,7 +360,7 @@ async function runInstalledAI({
     runtime: route.runtime,
     prompt: buildInstalledRuntimePrompt({ system, messages }),
     outputSchema,
-    model: String(readEnv("CAREERRAT_INSTALLED_AI_MODEL", { env }) || "").trim() || undefined,
+    model: String(env.CAREERRAT_INSTALLED_AI_MODEL || "").trim() || undefined,
     cwd: root,
     env,
     signal,

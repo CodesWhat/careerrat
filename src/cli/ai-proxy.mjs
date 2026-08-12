@@ -93,7 +93,6 @@
 import { createServer } from "node:http";
 import { pathToFileURL } from "node:url";
 import { extractSSEEvents } from "../core/ai/call-ai.mjs";
-import { readEnv } from "../core/env-compat.mjs";
 import {
   appendUsageEvent,
   canonicalizeUsageEvent,
@@ -504,9 +503,9 @@ function parseUserCaps(raw) {
 }
 
 async function main() {
-  const proxyToken = readEnv("CAREERRAT_PROXY_TOKEN");
-  const proxyTokens = parseProxyTokens(readEnv("CAREERRAT_PROXY_TOKENS"));
-  const upstreamKey = readEnv("CAREERRAT_UPSTREAM_KEY");
+  const proxyToken = process.env.CAREERRAT_PROXY_TOKEN;
+  const proxyTokens = parseProxyTokens(process.env.CAREERRAT_PROXY_TOKENS);
+  const upstreamKey = process.env.CAREERRAT_UPSTREAM_KEY;
 
   const hasAnyProxyToken = String(proxyToken || "").trim() || Object.keys(proxyTokens).length > 0;
   if (!hasAnyProxyToken || !String(upstreamKey || "").trim()) {
@@ -516,15 +515,15 @@ async function main() {
     process.exit(1);
   }
 
-  const port = Number(readEnv("CAREERRAT_PROXY_PORT")) || 7788;
-  const upstreamUrl = readEnv("CAREERRAT_UPSTREAM_URL") || "https://api.anthropic.com";
-  const upstreamHeaders = parseUpstreamHeaders(readEnv("CAREERRAT_UPSTREAM_HEADERS"));
-  const meterRoot = readEnv("CAREERRAT_PROXY_METER_ROOT") || process.cwd();
-  const userCapUsd = parseUserCapUsd(readEnv("CAREERRAT_PROXY_USER_CAP_USD"));
-  const userCaps = parseUserCaps(readEnv("CAREERRAT_PROXY_USER_CAPS"));
-  const meterDbUrl = readEnv("CAREERRAT_METER_DB_URL") || null;
-  const meterDbKey = readEnv("CAREERRAT_METER_DB_KEY") || null;
-  const meterDbTable = readEnv("CAREERRAT_METER_DB_TABLE") || "usage_events";
+  const port = Number(process.env.CAREERRAT_PROXY_PORT) || 7788;
+  const upstreamUrl = process.env.CAREERRAT_UPSTREAM_URL || "https://api.anthropic.com";
+  const upstreamHeaders = parseUpstreamHeaders(process.env.CAREERRAT_UPSTREAM_HEADERS);
+  const meterRoot = process.env.CAREERRAT_PROXY_METER_ROOT || process.cwd();
+  const userCapUsd = parseUserCapUsd(process.env.CAREERRAT_PROXY_USER_CAP_USD);
+  const userCaps = parseUserCaps(process.env.CAREERRAT_PROXY_USER_CAPS);
+  const meterDbUrl = process.env.CAREERRAT_METER_DB_URL || null;
+  const meterDbKey = process.env.CAREERRAT_METER_DB_KEY || null;
+  const meterDbTable = process.env.CAREERRAT_METER_DB_TABLE || "usage_events";
 
   const { server, dbHydration } = createProxyServer({
     proxyToken,

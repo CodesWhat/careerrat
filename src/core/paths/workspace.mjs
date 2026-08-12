@@ -1,13 +1,8 @@
 import { existsSync, readdirSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { readEnv } from "../env-compat.mjs";
 
 export const DEFAULT_PRIVATE_DIR = ".careerrat";
-// Retired default dir name (Rolester -> CareerRat rename). A pre-existing
-// `.rolester` directory is never silently moved, copied, or deleted — if it's
-// there and `.careerrat` isn't, new installs keep reading/writing it in place.
-const LEGACY_PRIVATE_DIR = ".rolester";
 
 const DEFAULT_REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 const GENERATED_CONFIG_FILES = [
@@ -46,26 +41,17 @@ function cleanRel(relPath) {
 }
 
 function envHome({ repoRoot, env = process.env } = {}) {
-  const raw = String(readEnv("CAREERRAT_HOME", { env }) || "").trim();
+  const raw = String(env.CAREERRAT_HOME || "").trim();
   if (!raw) return null;
   return isAbsolute(raw) ? normalize(raw) : resolve(repoRoot, raw);
 }
 
-// A pre-existing `.rolester` dir with no `.careerrat` sibling yet keeps being
-// the default — never a silent move/copy/delete of the user's workspace.
-function defaultPrivateDirFor(repoRoot) {
-  if (!existsSync(join(repoRoot, DEFAULT_PRIVATE_DIR)) && existsSync(join(repoRoot, LEGACY_PRIVATE_DIR))) {
-    return LEGACY_PRIVATE_DIR;
-  }
-  return DEFAULT_PRIVATE_DIR;
-}
-
 export function privateDataRoot({ repoRoot = DEFAULT_REPO_ROOT, env = process.env } = {}) {
-  return envHome({ repoRoot, env }) || join(repoRoot, defaultPrivateDirFor(repoRoot));
+  return envHome({ repoRoot, env }) || join(repoRoot, DEFAULT_PRIVATE_DIR);
 }
 
 function hasExplicitHome(env = process.env) {
-  return !!String(readEnv("CAREERRAT_HOME", { env }) || "").trim();
+  return !!String(env.CAREERRAT_HOME || "").trim();
 }
 
 function legacyGeneratedConfigExists(repoRoot) {

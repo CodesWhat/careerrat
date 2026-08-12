@@ -5,7 +5,6 @@ import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { appRegisterPacketArtifacts as registerPacketArtifacts } from "../db/verbs.mjs";
 import { exportArtifact as documentExportArtifact } from "../documents/export.mjs";
-import { readEnv } from "../env-compat.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 
 function cleanText(value) {
@@ -53,7 +52,7 @@ function titleFor(app, kind) {
 // override in paths/workspace.mjs); production always resolves the real
 // os.homedir().
 function downloadsRoot(env) {
-  const override = String(readEnv("CAREERRAT_DOWNLOADS_DIR", { env }) || "").trim();
+  const override = String(env.CAREERRAT_DOWNLOADS_DIR || "").trim();
   if (override) return override;
   return join(homedir(), "Downloads", "careerrat");
 }

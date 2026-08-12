@@ -74,7 +74,6 @@ import {
   sourceConfigPut,
 } from "../core/db/verbs.mjs";
 import { buildDeepIngestViewModel } from "../core/deep-ingest/view-model.mjs";
-import { readEnv } from "../core/env-compat.mjs";
 import {
   countDeterministicSources,
   healSearchSourceConfig,
@@ -1859,7 +1858,7 @@ export function mountOnboardRoutes({
     // when the first attempt's reply failed schema validation) falls back
     // to the server's normally-configured default model instead — the
     // quality net for whatever tripped the fast model up the first time.
-    const fastModel = readEnv("CAREERRAT_RESUME_EXTRACT_MODEL", { env }) || "claude-haiku-4-5-20251001";
+    const fastModel = env.CAREERRAT_RESUME_EXTRACT_MODEL || "claude-haiku-4-5-20251001";
 
     // Scoped per run (per call to runResumeExtractBounded), not per attempt
     // — "the first time" a system event batch arrives, across the whole

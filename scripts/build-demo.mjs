@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // build:demo — build the intentionally public, fictional React preview into a
-// self-contained static bundle for demo.rolester.codeswhat.com.
+// self-contained static bundle for demo.careerrat.codeswhat.com.
 //
 // Pipeline:
 //   1. Build the supported React static-preview target at the deployment root.

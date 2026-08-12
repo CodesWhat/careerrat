@@ -29,7 +29,6 @@ import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync } fro
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
-import { readEnv } from "../env-compat.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
@@ -240,7 +239,7 @@ export function listActivity({ root = DEFAULT_ROOT, limit = null } = {}) {
 // events (drafted/tailored/sourced) have no tracker.json anchor so backfill can't
 // rebuild them. Default high (2000) and overridable so a normal job-search cycle
 // never silently loses history; lower it via CAREERRAT_ACTIVITY_MAX if needed.
-const DEFAULT_ACTIVITY_MAX = Number(readEnv("CAREERRAT_ACTIVITY_MAX")) || 2000;
+const DEFAULT_ACTIVITY_MAX = Number(process.env.CAREERRAT_ACTIVITY_MAX) || 2000;
 
 // WRITE side (the mutating skills): append one event. Refuses on schema / lint /
 // comp-leak. Dedupes on the content-derived id so backfill is idempotent.

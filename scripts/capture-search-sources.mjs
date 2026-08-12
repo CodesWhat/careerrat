@@ -749,8 +749,6 @@ Options:
   --browser NAME         Playwright channel. Use chrome for saved auth. Default: chromium.
   --headless             Run without a visible browser.
   --profile-root DIR     Persistent profile root. Default: ~/.careerrat/board-profiles
-                         (falls back to ~/.rolester/board-profiles if that's where your
-                         signed-in profiles already live).
   --per-source-limit N   Max offers per source. Default: 250.
   --limit N              Max offers in the combined snapshot. Default: unlimited.
   --scroll-pages N       Scroll result pages before extraction. Default: 0.

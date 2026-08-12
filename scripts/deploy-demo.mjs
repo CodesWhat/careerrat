@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // deploy:demo — (re)build the evergreen static demo bundle and ship it to the live demo
-// at demo.rolester.codeswhat.com. Deploys via Vercel's Build Output API (prebuilt — no
+// at demo.careerrat.codeswhat.com. Deploys via Vercel's Build Output API (prebuilt — no
 // remote build), so ONLY the static files in dist/demo are uploaded; the project link
 // and OIDC token under dist/.vercel never enter the served bundle.
 //
@@ -9,7 +9,7 @@
 //                         a different, non-public org and must never receive this deploy)
 //
 // One-time setup already done: `cd dist && vercel link --project careerrat-demo --scope codeswhat`
-// and the demo.rolester.codeswhat.com domain + Cloudflare CNAME. Re-run this anytime to
+// and the demo.careerrat.codeswhat.com domain + Cloudflare CNAME. Re-run this anytime to
 // refresh the demo (dates rebase to today on every build).
 import { execFileSync } from "node:child_process";
 import { cpSync, mkdirSync, rmSync, writeFileSync } from "node:fs";

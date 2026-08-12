@@ -18,8 +18,7 @@
     "url": "https://github.com/CodesWhat/careerrat/issues"
   },
   "bin": {
-    "careerrat": "bin/careerrat.mjs",
-    "rolester": "bin/careerrat.mjs"
+    "careerrat": "bin/careerrat.mjs"
   },
   "workspaces": [
     "website",

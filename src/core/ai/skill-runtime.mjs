@@ -32,7 +32,6 @@
 
 import { existsSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { readEnv } from "../env-compat.mjs";
 import { resolveModelConfig } from "./ai-config.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
@@ -92,7 +91,7 @@ const DEFAULT_RUNTIME_SKILLS =
 // falls back to the default" semantics documented above.
 export function resolveSkillAllowlist({ repoRoot, env = process.env, envVar, defaultValue } = {}) {
   const discovered = new Set(discoverSkillDirs(repoRoot));
-  const raw = String(readEnv(envVar, { env }) ?? defaultValue);
+  const raw = String(env[envVar] ?? defaultValue);
   const requested = raw
     .split(",")
     .map((s) => s.trim())
@@ -151,7 +150,6 @@ const CHILD_RUNTIME_ENV_VARS = [
   "PATHEXT",
   "COMSPEC",
   "CAREERRAT_HOME",
-  "ROLESTER_HOME", // legacy fallback name — see src/core/env-compat.mjs
 ];
 
 // Pure + exported so the routing decision is unit-testable without spawning
@@ -557,9 +555,8 @@ export async function runSkillStream({
         env,
         signal,
         model:
-          String(
-            readEnv("CAREERRAT_INSTALLED_AI_MODEL", { env }) || env.ANTHROPIC_MODEL || ""
-          ).trim() || undefined,
+          String(env.CAREERRAT_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() ||
+          undefined,
         tools: runtimeTools,
         outputSchema,
       });

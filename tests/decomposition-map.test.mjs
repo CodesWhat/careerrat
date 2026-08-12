@@ -51,7 +51,6 @@ const privateOwnerRoots = new Set([
   "workspace",
   ".internal",
   ".careerrat",
-  ".rolester",
   "tmp-skill-conversion",
 ]);
 const plannedCapableOwnerTypes = new Set(["planned_ts_module", "planned_policy", "api_route"]);

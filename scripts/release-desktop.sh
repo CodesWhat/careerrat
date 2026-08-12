@@ -52,11 +52,9 @@ if [ -f "$LOCAL_ENV" ]; then
   # shellcheck disable=SC1090
   . "$LOCAL_ENV"
 fi
-# CAREERRAT_NOTARY_* is the current name; a shell profile or .internal/release.env
-# still exporting the retired ROLESTER_NOTARY_* names keeps working.
-NOTARY_KEY="${CAREERRAT_NOTARY_KEY:-${ROLESTER_NOTARY_KEY:-}}"
-NOTARY_KEY_ID="${CAREERRAT_NOTARY_KEY_ID:-${ROLESTER_NOTARY_KEY_ID:-}}"
-NOTARY_ISSUER="${CAREERRAT_NOTARY_ISSUER:-${ROLESTER_NOTARY_ISSUER:-}}"
+NOTARY_KEY="${CAREERRAT_NOTARY_KEY:-}"
+NOTARY_KEY_ID="${CAREERRAT_NOTARY_KEY_ID:-}"
+NOTARY_ISSUER="${CAREERRAT_NOTARY_ISSUER:-}"
 if [ -z "$NOTARY_KEY" ] || [ -z "$NOTARY_KEY_ID" ] || [ -z "$NOTARY_ISSUER" ]; then
   echo "error: set CAREERRAT_NOTARY_KEY, CAREERRAT_NOTARY_KEY_ID, and CAREERRAT_NOTARY_ISSUER" >&2
   echo "       (export them or put them in .internal/release.env — untracked)" >&2

@@ -218,28 +218,6 @@ test("resolveAIRoute: falls back to the proxy when no API key is set", () => {
   assert.equal(route.token, "tok");
 });
 
-test("resolveAIRoute: the legacy ROLESTER_AI_PROXY_URL/TOKEN still resolve the proxy route", () => {
-  const route = resolveAIRoute({
-    ROLESTER_AI_PROXY_URL: "http://127.0.0.1:7788",
-    ROLESTER_AI_PROXY_TOKEN: "tok",
-  });
-  assert.equal(route.type, "proxy");
-  assert.equal(route.baseUrl, "http://127.0.0.1:7788");
-  assert.equal(route.token, "tok");
-});
-
-test("resolveAIRoute: CAREERRAT_AI_PROXY_URL wins over a legacy ROLESTER_AI_PROXY_URL", () => {
-  const route = resolveAIRoute({
-    CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
-    CAREERRAT_AI_PROXY_TOKEN: "tok",
-    ROLESTER_AI_PROXY_URL: "http://127.0.0.1:9999",
-    ROLESTER_AI_PROXY_TOKEN: "legacy-tok",
-  });
-  assert.equal(route.type, "proxy");
-  assert.equal(route.baseUrl, "http://127.0.0.1:7788");
-  assert.equal(route.token, "tok");
-});
-
 test("resolveAIRoute: neither set -> an actionable error naming both options", () => {
   const route = resolveAIRoute({});
   assert.equal(route.type, "none");

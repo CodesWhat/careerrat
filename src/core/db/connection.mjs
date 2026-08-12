@@ -2,41 +2,21 @@
 //
 // The db file lives at `<dataRoot>/db/careerrat.db` — resolved through the same
 // path helpers the rest of the engine uses (workspace.mjs's dataPath/
-// privateDataRoot) so CAREERRAT_HOME (the Electron packaged app's override,
-// with legacy ROLESTER_HOME still honored as a fallback) keeps working, and
-// so the db always lands inside the already-gitignored `.careerrat/` (or
-// legacy `.rolester/`) root, never a hardcoded path (M6 decision 2).
-// `careerrat.db` is the filename for fresh installs; a data root that already
-// has a `rolester.db` (and no `careerrat.db` yet) keeps reading/writing that
-// file in place — same never-move/copy/delete rule as DEFAULT_PRIVATE_DIR in
-// workspace.mjs. Pointing an existing install at a new empty database would
-// orphan every existing user's data, so this fallback is load-bearing.
+// privateDataRoot) so CAREERRAT_HOME (the Electron packaged app's override)
+// keeps working, and so the db always lands inside the already-gitignored
+// `.careerrat/` root, never a hardcoded path (M6 decision 2).
 //
 // One connection per data root, cached in a module-level Map (mirroring
 // storage-adapter.mjs's defaultAdapter() singleton pattern) — a process opens
 // each distinct data root's db exactly once, applies its per-connection
 // PRAGMAs, and runs pending migrations, all on first open.
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { dataPath, privateDataRoot } from "../paths/workspace.mjs";
 import { runMigrations } from "./migrations.mjs";
 
-const DB_DIR = "db";
-const DB_FILENAME = "careerrat.db";
-const LEGACY_DB_FILENAME = "rolester.db";
-
-// A pre-existing `db/rolester.db` with no `db/careerrat.db` sibling yet keeps
-// being used in place — never a silent move/copy/delete of the user's data.
-function dbRelPathFor(dataRoot) {
-  if (
-    !existsSync(join(dataRoot, DB_DIR, DB_FILENAME)) &&
-    existsSync(join(dataRoot, DB_DIR, LEGACY_DB_FILENAME))
-  ) {
-    return `${DB_DIR}/${LEGACY_DB_FILENAME}`;
-  }
-  return `${DB_DIR}/${DB_FILENAME}`;
-}
+const DB_REL_PATH = "db/careerrat.db";
 
 // Keyed by resolved data root (not repoRoot alone) — CAREERRAT_HOME can point
 // two different repoRoots at the same data root, or the same repoRoot at two
@@ -45,8 +25,7 @@ function dbRelPathFor(dataRoot) {
 const _connections = new Map();
 
 export function dbFilePath({ repoRoot, env } = {}) {
-  const dataRoot = privateDataRoot({ repoRoot, env });
-  return dataPath({ repoRoot, env }, dbRelPathFor(dataRoot));
+  return dataPath({ repoRoot, env }, DB_REL_PATH);
 }
 
 export function dbExists({ repoRoot, env } = {}) {

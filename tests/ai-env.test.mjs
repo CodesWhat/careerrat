@@ -288,33 +288,6 @@ describe("ai-env", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("writeManagedProxyEnv — migrates a legacy ROLESTER_AI_PROXY_URL/TOKEN line to the new key in place", () => {
-    const root = buildTempRoot();
-    const path = envFilePath(root);
-    mkdirSync(join(root, ".careerrat", "internal"), { recursive: true });
-    writeFileSync(
-      path,
-      "BEFORE=one\nROLESTER_AI_PROXY_TOKEN=old-token\nMIDDLE=two\nROLESTER_AI_PROXY_URL=https://old.example.test\nAFTER=three\n",
-      "utf8"
-    );
-
-    writeManagedProxyEnv({
-      repoRoot: root,
-      proxyUrl: "https://new.example.test",
-      token: `rlp_${"e".repeat(64)}`,
-      env: {},
-    });
-
-    assert.deepEqual(readFileSync(path, "utf8").trimEnd().split("\n"), [
-      "BEFORE=one",
-      `CAREERRAT_AI_PROXY_TOKEN=rlp_${"e".repeat(64)}`,
-      "MIDDLE=two",
-      "CAREERRAT_AI_PROXY_URL=https://new.example.test",
-      "AFTER=three",
-    ]);
-    rmSync(root, { recursive: true, force: true });
-  });
-
   for (const [name, proxyUrl, token, error] of [
     ["non-loopback HTTP", "http://proxy.example.test", "token", /proxyUrl/],
     ["garbage URL", "not a URL", "token", /proxyUrl/],

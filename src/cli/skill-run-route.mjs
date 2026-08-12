@@ -36,7 +36,6 @@ import {
   RUNTIME_TOOL_PROFILES,
 } from "../core/ai/runtime-tools.mjs";
 import { resolveAllowedSkills } from "../core/ai/skill-runtime.mjs";
-import { readEnv } from "../core/env-compat.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB cap per the P0-4 spec.
 const HEARTBEAT_MS = 15000;
@@ -218,7 +217,7 @@ export function mountSkillRunRoute({ addRoute, repoRoot, runSkillStream, env = p
       // means nothing is allowed" contract, which ai-web-search.mjs's own
       // scoped override respects too rather than punching through it).
       aiWebSearch: {
-        available: route.type !== "none" && readEnv("CAREERRAT_RUNTIME_SKILLS", { env }) !== "",
+        available: route.type !== "none" && env.CAREERRAT_RUNTIME_SKILLS !== "",
       },
     });
   });

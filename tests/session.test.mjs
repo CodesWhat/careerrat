@@ -1,11 +1,8 @@
-// tests/session.test.mjs — defaultProfileRoot()'s rename-safe fallback
-// (src/core/automation/session.mjs). `~/.careerrat/board-profiles` is the
-// default for fresh installs; an existing `~/.rolester/board-profiles` — LIVE
-// logged-in browser sessions (cookies/credentials for LinkedIn and the job
-// boards) — keeps being read in place, never silently orphaned. Controls
+// tests/session.test.mjs — defaultProfileRoot() (src/core/automation/session.mjs).
+// `~/.careerrat/board-profiles` is the default for fresh installs. Controls
 // os.homedir() via the HOME env var, which Node honors on POSIX.
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, beforeEach, test } from "node:test";
@@ -38,19 +35,6 @@ after(() => {
 
 test("defaultProfileRoot resolves under ~/.careerrat/board-profiles for a fresh home", () => {
   const home = tempHome();
-  assert.equal(defaultProfileRoot(), join(home, ".careerrat", "board-profiles"));
-});
-
-test("defaultProfileRoot keeps using a pre-existing ~/.rolester/board-profiles in place when no .careerrat sibling exists", () => {
-  const home = tempHome();
-  mkdirSync(join(home, ".rolester", "board-profiles"), { recursive: true });
-  assert.equal(defaultProfileRoot(), join(home, ".rolester", "board-profiles"));
-});
-
-test("defaultProfileRoot prefers .careerrat when both legacy .rolester and .careerrat profile roots exist", () => {
-  const home = tempHome();
-  mkdirSync(join(home, ".rolester", "board-profiles"), { recursive: true });
-  mkdirSync(join(home, ".careerrat", "board-profiles"), { recursive: true });
   assert.equal(defaultProfileRoot(), join(home, ".careerrat", "board-profiles"));
 });
 

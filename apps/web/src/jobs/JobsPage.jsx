@@ -29,7 +29,6 @@ import { GateBadge } from "./PacketGateCard.jsx";
 import { deriveJobCta, useApplicationGates } from "./useApplicationGates.js";
 
 const STORAGE_KEY = "careerrat-jobs-next-explorer";
-const LEGACY_STORAGE_KEY = "rolester-jobs-next-explorer";
 
 const TAB_OPTIONS = [
   { key: "pipeline", label: "Pipeline" },
@@ -96,7 +95,7 @@ function loadExplorerState() {
   try {
     const storage = globalThis.localStorage;
     if (!storage) return DEFAULT_EXPLORER_STATE;
-    const raw = storage.getItem(STORAGE_KEY) ?? storage.getItem(LEGACY_STORAGE_KEY);
+    const raw = storage.getItem(STORAGE_KEY);
     return sanitizeExplorerState(JSON.parse(raw || "{}"));
   } catch (_error) {
     return DEFAULT_EXPLORER_STATE;

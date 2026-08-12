@@ -10,8 +10,7 @@
  *
  * Theming mechanism is unchanged and frozen: a `data-theme` attribute on
  * <html> ("light"|"dark"), driven by localStorage key "careerrat-theme"
- * (falling back to the legacy "rolester-theme" so an existing choice isn't
- * lost) + prefers-color-scheme on first load (see ../lib/theme.js and
+ * + prefers-color-scheme on first load (see ../lib/theme.js and
  * ../../public/theme-init.js). Do not rename the storage key again.
  *
  * Fonts: Archivo (display/headings) ships as a local npm dep

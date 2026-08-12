@@ -46,57 +46,6 @@ test("privateDataRoot honors CAREERRAT_HOME for portable/private instance data",
   }
 });
 
-test("privateDataRoot still honors legacy ROLESTER_HOME when CAREERRAT_HOME is unset", () => {
-  const repoRoot = tempRepo();
-  const home = join(tempRepo(), "instance");
-  try {
-    const env = { ROLESTER_HOME: home };
-    assert.equal(privateDataRoot({ repoRoot, env }), home);
-    assert.equal(
-      dataPath({ repoRoot, env }, "candidate/profile.yml"),
-      join(home, "candidate", "profile.yml")
-    );
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-    rmSync(home, { recursive: true, force: true });
-  }
-});
-
-test("CAREERRAT_HOME wins over legacy ROLESTER_HOME when both are set", () => {
-  const repoRoot = tempRepo();
-  const newHome = join(tempRepo(), "new-instance");
-  const oldHome = join(tempRepo(), "old-instance");
-  try {
-    const env = { CAREERRAT_HOME: newHome, ROLESTER_HOME: oldHome };
-    assert.equal(privateDataRoot({ repoRoot, env }), newHome);
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-    rmSync(newHome, { recursive: true, force: true });
-    rmSync(oldHome, { recursive: true, force: true });
-  }
-});
-
-test("privateDataRoot keeps using a pre-existing .rolester dir when .careerrat doesn't exist yet", () => {
-  const repoRoot = tempRepo();
-  try {
-    mkdirSync(join(repoRoot, ".rolester"), { recursive: true });
-    assert.equal(privateDataRoot({ repoRoot }), join(repoRoot, ".rolester"));
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
-test("privateDataRoot prefers .careerrat when both legacy .rolester and .careerrat exist", () => {
-  const repoRoot = tempRepo();
-  try {
-    mkdirSync(join(repoRoot, ".rolester"), { recursive: true });
-    mkdirSync(join(repoRoot, ".careerrat"), { recursive: true });
-    assert.equal(privateDataRoot({ repoRoot }), join(repoRoot, ".careerrat"));
-  } finally {
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
-
 test("resolveUserPaths prefers legacy repo-root data only when it already exists", () => {
   const repoRoot = tempRepo();
   try {

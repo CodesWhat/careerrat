@@ -1,0 +1,19 @@
+source: Rolester
+work_authorization: ""
+requires_sponsorship: ""
+current_employer:
+current_title:
+expected_base:
+linkedin:
+github:
+portfolio:
+eeo_default: Prefer not to answer
+screening_answers: {}
+document_formats:
+  default_packet_format: pdf
+  required_export_formats: []
+confirm_current_role: false
+auto_submit: false
+declined_fields:
+  resume:
+    declined_at: 2026-08-11

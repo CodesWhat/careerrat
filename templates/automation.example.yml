@@ -159,8 +159,6 @@ capabilities:
 # ── Session browser (tool-agnostic) ───────────────────────────────────────────
 # provider: extension (preferred — holds your logins) | playwright (persistent
 # profile you log into once per platform). profile_root null = ~/.careerrat/board-profiles
-# (falls back to ~/.rolester/board-profiles if that's where your signed-in profiles
-# already live).
 session:
   provider: extension
   profile_root: null

@@ -65,10 +65,8 @@ test("docs website source uses the public careerrat CLI convention", async () =>
   assert.match(combined, /careerrat update/);
 
   // Frozen internal contracts stay literally "careerrat" — these are real
-  // runtime strings (env var, hardcoded paths), not CLI convention.
-  assert.match(combined, /ROLESTER_HOME/);
+  // runtime strings (hardcoded paths), not CLI convention.
   assert.match(combined, /~\/Downloads\/careerrat\//);
-  assert.match(combined, /~\/\.rolester\/board-profiles/);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });

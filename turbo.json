@@ -6,8 +6,6 @@
     "BOARD_BROWSER",
     "CAREERRAT_DEV_PORT",
     "CAREERRAT_TRACKER_HOST",
-    "ROLESTER_DEV_PORT",
-    "ROLESTER_TRACKER_HOST",
     "PATHEXT"
   ],
   "tasks": {

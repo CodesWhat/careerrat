@@ -48,7 +48,6 @@
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { candidateConfigGet } from "../db/verbs.mjs";
-import { readEnv } from "../env-compat.mjs";
 import { resolveAIRoute } from "./call-ai.mjs";
 import { runInstalledRuntime } from "./installed-runtimes.mjs";
 import { createRuntimeToolPolicy } from "./runtime-tool-policy.mjs";
@@ -255,7 +254,7 @@ function createPushQueue() {
 // ---------------------------------------------------------------------------
 
 function envNumber(env, key, fallback) {
-  const raw = readEnv(key, { env });
+  const raw = env[key];
   if (raw === undefined || raw === null || raw === "") return fallback;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : fallback;
@@ -473,9 +472,8 @@ export function createChatRuntime({
         env,
         signal: turnController.signal,
         model:
-          String(
-            readEnv("CAREERRAT_INSTALLED_AI_MODEL", { env }) || env.ANTHROPIC_MODEL || ""
-          ).trim() || undefined,
+          String(env.CAREERRAT_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() ||
+          undefined,
         tools: resolveChatRuntimeTools({ skill: session.skill }),
       });
 

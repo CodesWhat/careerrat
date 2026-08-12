@@ -59,7 +59,6 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
-import { readEnv } from "../core/env-compat.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { demoLogoFilePath } from "../core/tracker/demo-logos.mjs";
@@ -93,12 +92,12 @@ function readAutomationDoc(pathCtx) {
 export function resolveLogoTokens(pathCtx, env = process.env) {
   const automation = readAutomationDoc(pathCtx);
   const publishableToken =
-    String(readEnv("CAREERRAT_LOGO_DEV_TOKEN", { env }) || "").trim() ||
+    String(env.CAREERRAT_LOGO_DEV_TOKEN || "").trim() ||
     automation?.integrations?.logo_dev_token ||
     automation?.logo_dev_token ||
     DEFAULT_LOGO_DEV_PUBLIC_KEY;
   const secretKey =
-    String(readEnv("CAREERRAT_LOGO_DEV_SECRET_KEY", { env }) || "").trim() ||
+    String(env.CAREERRAT_LOGO_DEV_SECRET_KEY || "").trim() ||
     automation?.integrations?.logo_dev_secret_key ||
     automation?.logo_dev_secret_key ||
     "";

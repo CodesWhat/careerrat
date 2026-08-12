@@ -22,7 +22,6 @@
 // can drive this module directly without a live server.
 
 import { createHash, timingSafeEqual } from "node:crypto";
-import { readEnv } from "../core/env-compat.mjs";
 
 export const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -183,7 +182,7 @@ export function buildUpstreamHeaders(
 
   // Opt-in Vercel AI Gateway attribution headers — see the CAREERRAT_UPSTREAM_REPORTING
   // doc in ai-proxy.mjs. Off by default; harmless to other upstreams.
-  if (String(readEnv("CAREERRAT_UPSTREAM_REPORTING", { env }) || "").trim() === "1") {
+  if (String(env.CAREERRAT_UPSTREAM_REPORTING || "").trim() === "1") {
     const providedToken = extractProvidedToken(inboundHeaders);
     if (providedToken) out["ai-reporting-user"] = reportingUserId(providedToken);
     const tags = buildReportingTags(inboundHeaders);

@@ -102,7 +102,7 @@ tailwind.config = {
 // B10: apply the saved/preferred theme before paint to avoid a flash.
 (function () {
   try {
-    var t = localStorage.getItem("careerrat-theme") || localStorage.getItem("rolester-theme");
+    var t = localStorage.getItem("careerrat-theme");
     if (t !== "dark" && t !== "light") {
       t = window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
     }

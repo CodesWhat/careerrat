@@ -58,7 +58,7 @@ const FORBIDDEN_KEYS = new Set([
 ]);
 
 const LOCAL_PATH_RE =
-  /(^|[\s"'])(\/Users\/|\/home\/|\/var\/folders\/|workspace\/|candidate\/|\.careerrat\/|\.rolester\/|\.internal\/)/i;
+  /(^|[\s"'])(\/Users\/|\/home\/|\/var\/folders\/|workspace\/|candidate\/|\.careerrat\/|\.internal\/)/i;
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
