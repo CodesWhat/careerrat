@@ -84,9 +84,19 @@ pkg.version = version;
 // SKILL.md instructions keep resolving.
 pkg.bin = { careerrat: entry, rolester: entry };
 
+// The repo URLs must name careerrat, not rolester. This is not cosmetic:
+// npm verifies the sigstore provenance bundle against repository.url and
+// rejects the publish outright (E422) when it names a different repo than
+// the workflow that built it. GitHub redirects the old name, npm does not.
+const REPO = "https://github.com/CodesWhat/careerrat";
+if (pkg.repository?.url) pkg.repository.url = `git+${REPO}.git`;
+if (pkg.homepage) pkg.homepage = `${REPO}#readme`;
+if (pkg.bugs?.url) pkg.bugs.url = `${REPO}/issues`;
+
 writeFileSync(file, `${JSON.stringify(pkg, null, 2)}\n`);
 console.log(`    package: ${pkg.name}@${pkg.version}`);
 console.log(`    bin:     ${Object.keys(pkg.bin).join(", ")} -> ${entry}`);
+console.log(`    repo:    ${pkg.repository?.url ?? "(none)"}`);
 NODE
 
 # Rewrite `rolester <verb>` command instructions to `careerrat <verb>` so the
