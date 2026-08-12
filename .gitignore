@@ -46,6 +46,8 @@ venv/
 
 # Agent worktrees / local agent state (the .claude/skills symlink stays tracked)
 .claude/worktrees/
+# Staged release tarballs from scripts/stage-skills-release.sh
+.claude/skills-release-out/
 
 # Browser-automation / Playwright / verification screenshots are SCRATCH by
 # default. They belong under workspace/captures/ (ignored below) and must never
