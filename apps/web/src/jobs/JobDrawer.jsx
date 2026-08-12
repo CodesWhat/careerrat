@@ -35,6 +35,7 @@ import {
   setSourcedStatus,
 } from "../lib/api.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { ArtifactViewerModal } from "./ArtifactViewerModal.jsx";
 import { InterviewDossierCard } from "./InterviewDossierCard.jsx";
 import { PacketDocumentsCard } from "./PacketDocumentsCard.jsx";
@@ -107,6 +108,16 @@ export function trapDrawerTab({ dialog, event, activeElement }) {
   }
 }
 
+// Threads a real retry callback through a resolveErrorCopy() result — the
+// resolved `action` carries {label, retry: true} with no callback of its
+// own, so every catch below that wants the "Try again" button to actually do
+// something supplies the exact call that just failed.
+function withRetryAction(resolved, onRetry) {
+  return resolved.action?.retry
+    ? { ...resolved, action: { ...resolved.action, onRetry } }
+    : resolved;
+}
+
 function toDatetimeLocal(iso) {
   if (!iso) return "";
   const d = new Date(iso);
@@ -138,6 +149,10 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setComms((commsRes.data || []).filter((c) => c.applicationId === row.id));
   }
 
+  // loadRaw is a plain closure over row.id (already a dependency below), not
+  // a stable reference — adding it to the array would re-fire this
+  // reset-and-fetch effect on every render.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: loadRaw closes over row.id, already covered below
   useEffect(() => {
     let cancelled = false;
     setApp(null);
@@ -149,6 +164,13 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setJdHint(null);
     setJdMeta(null);
     if (!isApplication) return undefined;
+    function retryLoad() {
+      if (cancelled) return;
+      setLoadError(null);
+      loadRaw().catch((err) => {
+        if (!cancelled) setLoadError(withRetryAction(resolveErrorCopy(err), retryLoad));
+      });
+    }
     (async () => {
       try {
         const [appRes, commsRes] = await Promise.all([getApplication(row.id), getCommunications()]);
@@ -157,7 +179,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
         setComms((commsRes.data || []).filter((c) => c.applicationId === row.id));
       } catch (err) {
         if (!cancelled) {
-          setLoadError(err instanceof Error ? err.message : "Failed to load application details");
+          setLoadError(withRetryAction(resolveErrorCopy(err), retryLoad));
         }
       }
     })();
@@ -210,12 +232,16 @@ export function JobDrawer({ row, onClose, initialSection }) {
       const packet = await getPacket(row.id);
       const artifact = packet?.artifacts?.[kind];
       if (!artifact) {
-        setActionError(`${label} isn't available to preview yet.`);
+        setActionError({
+          message: `${label} isn't available to preview yet.`,
+          action: null,
+          detail: null,
+        });
         return;
       }
       setViewer({ title: `${label}: preview`, artifact });
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : `Could not load ${label.toLowerCase()}`);
+      setActionError(withRetryAction(resolveErrorCopy(err), () => handleViewArtifact(label)));
     }
   }
 
@@ -239,7 +265,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
       if (code === "JD_NOT_CAPTURED" || code === "JD_FILE_MISSING") {
         setJdHint("No job description was captured for this role.");
       } else {
-        setActionError(err instanceof Error ? err.message : "Could not load the job description");
+        setActionError(withRetryAction(resolveErrorCopy(err), handleViewJobDescription));
       }
     }
   }
@@ -254,7 +280,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
       await Promise.all([refetch(), loadRaw()]);
       if (successNote) setNotice(successNote);
     } catch (err) {
-      setActionError(err?.body?.error || (err instanceof Error ? err.message : `${key} failed`));
+      setActionError(withRetryAction(resolveErrorCopy(err), () => runWrite(key, fn, successNote)));
     } finally {
       setBusyKey(null);
     }
@@ -319,8 +345,20 @@ export function JobDrawer({ row, onClose, initialSection }) {
             </Button>
           ) : null}
 
-          {loadError ? <InlineAlert message={loadError} /> : null}
-          {actionError ? <InlineAlert message={actionError} /> : null}
+          {loadError ? (
+            <InlineAlert
+              message={loadError.message}
+              action={loadError.action}
+              detail={loadError.detail}
+            />
+          ) : null}
+          {actionError ? (
+            <InlineAlert
+              message={actionError.message}
+              action={actionError.action}
+              detail={actionError.detail}
+            />
+          ) : null}
           {notice ? <p className="field__hint">{notice}</p> : null}
 
           {/* Evaluate (Phase B) — explicit-click packet gate, only meaningful once a

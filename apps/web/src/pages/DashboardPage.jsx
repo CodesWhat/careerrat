@@ -52,7 +52,9 @@ export function DashboardPage() {
         <DashboardScoreboard metrics={model.metrics} />
       </header>
 
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
       {deepIngest.needed && !deepIngest.dismissed ? (

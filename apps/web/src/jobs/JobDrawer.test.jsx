@@ -31,6 +31,7 @@ const hooks = vi.hoisted(() => ({
 
 const dashboard = vi.hoisted(() => ({ refetch: vi.fn() }));
 const api = vi.hoisted(() => ({
+  ApiError: class ApiError extends Error {},
   applyOnSite: vi.fn(),
   appendCommMessage: vi.fn(),
   draftCommunication: vi.fn(),
@@ -377,5 +378,61 @@ describe("JobDrawer", () => {
     await runEffects();
     tree = renderDrawer(applicationRow);
     expect(JSON.stringify(tree)).not.toMatch(/Send|Deliver/);
+  });
+
+  it("routes runWrite failures through resolveErrorCopy — a friendly message, never the raw server string — and wires a working retry", async () => {
+    api.runPacketGate.mockRejectedValueOnce(
+      Object.assign(new api.ApiError("boom"), {
+        status: 500,
+        body: { error: "SQLite table applications is locked at /Users/x/workspace" },
+      })
+    );
+    api.runPacketGate.mockResolvedValueOnce({ data: { gate: "keep" } });
+    renderDrawer(applicationRow);
+    await runEffects();
+    let tree = renderDrawer(applicationRow);
+    const gateCard = visit(tree, (node) => node.type === "packet-gate-card")[0];
+    await gateCard.props.onEvaluate();
+
+    tree = renderDrawer(applicationRow);
+    const alert = visit(tree, (node) => node.type === "inline-alert")[0];
+    expect(alert.props.message).toBe("Something went wrong on the server. Try again in a moment.");
+    expect(alert.props.message).not.toContain("SQLite");
+    expect(alert.props.message).not.toContain("/Users/x/workspace");
+    expect(alert.props.detail).toBe("SQLite table applications is locked at /Users/x/workspace");
+    expect(alert.props.action.label).toBe("Try again");
+    expect(alert.props.action.retry).toBe(true);
+    expect(typeof alert.props.action.onRetry).toBe("function");
+
+    api.runPacketGate.mockClear();
+    await alert.props.action.onRetry();
+    expect(api.runPacketGate).toHaveBeenCalledWith({ applicationId: "app-1" });
+  });
+
+  it("routes the initial application-load failure through resolveErrorCopy — a friendly message, never the raw server string — and wires a working retry", async () => {
+    api.getApplication.mockRejectedValueOnce(
+      Object.assign(new api.ApiError("boom"), {
+        status: 500,
+        body: { error: "SQLite table applications is locked at /Users/x/workspace" },
+      })
+    );
+    renderDrawer(applicationRow);
+    await runEffects();
+    const tree = renderDrawer(applicationRow);
+    const alert = visit(tree, (node) => node.type === "inline-alert")[0];
+
+    expect(alert.props.message).toBe("Something went wrong on the server. Try again in a moment.");
+    expect(alert.props.message).not.toContain("SQLite");
+    expect(alert.props.message).not.toContain("/Users/x/workspace");
+    expect(alert.props.detail).toBe("SQLite table applications is locked at /Users/x/workspace");
+    expect(alert.props.action.retry).toBe(true);
+    expect(typeof alert.props.action.onRetry).toBe("function");
+
+    api.getApplication.mockClear();
+    api.getApplication.mockResolvedValue({
+      data: { id: "app-1", status: "reviewed-hold", artifacts: {} },
+    });
+    await alert.props.action.onRetry();
+    expect(api.getApplication).toHaveBeenCalledWith("app-1");
   });
 });

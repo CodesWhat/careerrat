@@ -22,6 +22,7 @@ vi.mock("../components/Button.jsx", async (importOriginal) => {
 });
 
 vi.mock("../lib/api.js", () => ({
+  ApiError: class ApiError extends Error {},
   getApplication: vi.fn(async () => ({ data: null })),
   getCommunications: vi.fn(async () => ({ data: [] })),
   getDashboard: vi.fn(async () => ({ setup: null })),
@@ -49,9 +50,10 @@ vi.mock("../lib/api.js", () => ({
   runAiWebSearchStream: vi.fn(async () => {}),
 }));
 
-import { setSourcedStatus } from "../lib/api.js";
+import { ApiError, setSourcedStatus } from "../lib/api.js";
 import {
   describeAiSearchStatusText,
+  describeJobsSearchError,
   describeManualRunSummary,
   JobsPage,
   sourceSetupSummary,
@@ -79,6 +81,59 @@ describe("describeAiSearchStatusText", () => {
         errors: [],
       })
     ).toBe("AI web search: 0 found, 0 new, 0 duplicates.");
+  });
+});
+
+describe("describeJobsSearchError", () => {
+  it("resolves a raw server error into a friendly message, never the raw string, with detail preserved", () => {
+    const err = Object.assign(new ApiError("boom"), {
+      status: 500,
+      body: { error: "SQLite table search_sources is locked at /Users/x/workspace" },
+    });
+
+    const resolved = describeJobsSearchError(err, () => {});
+
+    expect(resolved.message).toBe("Something went wrong on the server. Try again in a moment.");
+    expect(resolved.message).not.toContain("SQLite");
+    expect(resolved.message).not.toContain("/Users/x/workspace");
+    expect(resolved.detail).toBe("SQLite table search_sources is locked at /Users/x/workspace");
+  });
+
+  it("wires the given onRetry into a retry action", async () => {
+    const err = Object.assign(new ApiError("boom"), {
+      status: 500,
+      body: { error: "boom" },
+    });
+    const onRetry = vi.fn();
+
+    const resolved = describeJobsSearchError(err, onRetry);
+
+    expect(resolved.action.retry).toBe(true);
+    expect(resolved.action.onRetry).toBe(onRetry);
+  });
+
+  it("keeps the original bespoke fallback wording for an unmapped error, instead of the generic bucket text", () => {
+    const err = Object.assign(new ApiError("boom"), {
+      status: 400,
+      body: { error: "some novel unmapped backend string" },
+    });
+
+    const resolved = describeJobsSearchError(err, () => {});
+
+    expect(resolved.message).toBe(
+      "Search setup could not be read. Review Search setup, then try again."
+    );
+  });
+
+  it("does not attach onRetry when the resolved action isn't a retry action", () => {
+    const err = Object.assign(new ApiError("boom"), {
+      status: 400,
+      body: { error: "No search config found for this workspace" },
+    });
+
+    const resolved = describeJobsSearchError(err, () => {});
+
+    expect(resolved.action).toEqual({ label: "Open Settings", to: "/settings" });
   });
 });
 
@@ -539,5 +594,38 @@ describe("JobsPage", () => {
 
     expect(setSourcedStatus).toHaveBeenCalledWith({ id: "sourced-triage", to: "cut" });
     expect(refetch).toHaveBeenCalledOnce();
+  });
+
+  it("a rejected skip resolves through resolveErrorCopy without throwing, and still calls setSourcedStatus with the right payload", async () => {
+    setSourcedStatus.mockRejectedValueOnce(
+      Object.assign(new ApiError("boom"), {
+        status: 500,
+        body: { error: "SQLite table sourced is locked at /Users/x/workspace" },
+      })
+    );
+    renderJobsPage({ route: "/jobs?tab=search" });
+    const skip = capturedButtons.find((props) => props.children === "Skip");
+    expect(skip).toBeTruthy();
+
+    await expect(skip.onClick()).resolves.toBeUndefined();
+    expect(setSourcedStatus).toHaveBeenCalledWith({ id: "sourced-triage", to: "cut" });
+  });
+
+  // JobsPage renders via real React + MemoryRouter (unlike JobDrawer/
+  // InterviewSurface's hand-rolled hook harness), so a click handler's local
+  // setState calls here never produce an observable re-render within this
+  // test file — renderToStaticMarkup mounts a fresh, discarded instance every
+  // call (see DashboardContext.test.jsx / JobDrawer.test.jsx for the
+  // behavioral equivalent, run against components using the harness). This
+  // mirrors the existing "does not restore the persisted query" test above:
+  // a direct source check for the exact invariant that matters here.
+  it("routes the skip failure through resolveErrorCopy and renders skipError.message/action/detail, never a raw body.error string", () => {
+    const source = readFileSync(new URL("./JobsPage.jsx", import.meta.url), "utf8");
+
+    expect(source).toContain("resolveErrorCopy(err)");
+    expect(source).not.toMatch(/setSkipError\(err\?\.body\?\.error/);
+    expect(source).toMatch(
+      /skipError\.message\}\s*action=\{skipError\.action\}\s*detail=\{skipError\.detail\}/
+    );
   });
 });

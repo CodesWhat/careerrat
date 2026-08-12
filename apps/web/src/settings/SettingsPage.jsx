@@ -463,7 +463,13 @@ export function SettingsPage() {
       const ai = await getAiSettings();
       setAiStatus(ai);
     } catch (err) {
-      setSectionBanner((b) => ({ ...b, ai: resolveErrorCopy(err).message }));
+      const resolved = resolveErrorCopy(err);
+      setSectionBanner((b) => ({
+        ...b,
+        ai: resolved.action?.retry
+          ? { ...resolved, action: { ...resolved.action, onRetry: handleSaveAiKey } }
+          : resolved,
+      }));
     } finally {
       setSaving((s) => ({ ...s, ai: false }));
     }
@@ -477,9 +483,15 @@ export function SettingsPage() {
       setInstalledAi(await getInstalledAiRuntimes());
       showToast("Installed AI tool selected.");
     } catch (error) {
+      const resolved = resolveErrorCopy(error);
       setSectionBanner((state) => ({
         ...state,
-        aiRuntime: resolveErrorCopy(error).message,
+        aiRuntime: resolved.action?.retry
+          ? {
+              ...resolved,
+              action: { ...resolved.action, onRetry: () => handleSelectInstalledAi(runtimeId) },
+            }
+          : resolved,
       }));
     } finally {
       setSaving((state) => ({ ...state, aiRuntime: null }));
@@ -518,9 +530,18 @@ export function SettingsPage() {
       setAutomationStatus(await getAutomationSettings());
       showToast(successMessage);
     } catch (error) {
+      const resolved = resolveErrorCopy(error);
       setSectionBanner((state) => ({
         ...state,
-        automation: resolveErrorCopy(error).message,
+        automation: resolved.action?.retry
+          ? {
+              ...resolved,
+              action: {
+                ...resolved.action,
+                onRetry: () => saveAutomationPatch(patch, successMessage),
+              },
+            }
+          : resolved,
       }));
     } finally {
       setSaving((state) => ({ ...state, automation: false }));
@@ -641,7 +662,13 @@ export function SettingsPage() {
         title="AI connection"
         actions={<span className={`badge ${aiBadgeTone}`}>{aiBadgeLabel}</span>}
       >
-        {sectionBanner.aiRuntime ? <InlineAlert message={sectionBanner.aiRuntime} /> : null}
+        {sectionBanner.aiRuntime ? (
+          <InlineAlert
+            message={sectionBanner.aiRuntime.message}
+            action={sectionBanner.aiRuntime.action}
+            detail={sectionBanner.aiRuntime.detail}
+          />
+        ) : null}
         {InstalledRuntimeChoices({
           state: installedAi,
           busyId: saving.aiRuntime,
@@ -650,7 +677,13 @@ export function SettingsPage() {
           onOpenTerminal: handleOpenInstalledAiTerminal,
           showAdvancedHint: false,
         })}
-        {sectionBanner.ai ? <InlineAlert message={sectionBanner.ai} /> : null}
+        {sectionBanner.ai ? (
+          <InlineAlert
+            message={sectionBanner.ai.message}
+            action={sectionBanner.ai.action}
+            detail={sectionBanner.ai.detail}
+          />
+        ) : null}
         <details
           className="settings-advanced-provider"
           open={installedAi?.providerFallback === true}
@@ -659,8 +692,8 @@ export function SettingsPage() {
           <div className="settings-advanced-provider__body">
             <p className="field__hint" style={{ margin: 0 }}>
               This explicitly switches AI calls away from an installed CLI. The key is never echoed
-              back after saving. With CAREERRAT_HOME it lives under internal/ai.env; legacy repo-root
-              workspaces use .internal/ai.env.
+              back after saving. With CAREERRAT_HOME it lives under internal/ai.env; legacy
+              repo-root workspaces use .internal/ai.env.
             </p>
             <div className="field-row">
               <Field label="Anthropic API key" htmlFor="ai-key">
@@ -691,7 +724,13 @@ export function SettingsPage() {
           </span>
         }
       >
-        {sectionBanner.automation ? <InlineAlert message={sectionBanner.automation} /> : null}
+        {sectionBanner.automation ? (
+          <InlineAlert
+            message={sectionBanner.automation.message}
+            action={sectionBanner.automation.action}
+            detail={sectionBanner.automation.detail}
+          />
+        ) : null}
         {AutomationModeChooser({
           status: automationStatus || {
             mode: "basic",

@@ -10,6 +10,20 @@ import { ApiError } from "./api.js";
 export const GENERIC_ERROR_MESSAGE =
   "Something went wrong on this computer. Try again, and if it keeps happening, restart CareerRat.";
 
+// A guard clause the UI throws before any request leaves the browser. Its
+// message is copy we wrote for the candidate, so it is already safe to show
+// and passes through untranslated. Throwing this type rather than a plain
+// Error is what makes it safe: matching on the sentence instead would put the
+// same copy in two files and silently fall back to the generic message the
+// moment either one was reworded.
+export class UserFacingError extends Error {
+  constructor(message, action = null) {
+    super(message);
+    this.name = "UserFacingError";
+    this.action = action;
+  }
+}
+
 function normalize(err) {
   if (err instanceof ApiError) {
     const body = err.body || {};
@@ -113,6 +127,9 @@ function startsWith(raw, prefix) {
 }
 
 export function resolveErrorCopy(err) {
+  if (err instanceof UserFacingError) {
+    return { message: err.message, action: err.action, detail: null };
+  }
   const { raw, code, status } = normalize(err);
   const rule = RULES.find((candidate) => candidate.match({ raw, code, status }));
   if (rule) {

@@ -241,7 +241,9 @@ export function NetworkPage() {
     <div className="network">
       <NetworkHero needsTouchCount={model.needsTouchCount} peopleCount={model.peopleCount} />
 
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
       <PeopleList onOpen={openDrawer} people={model.people} />

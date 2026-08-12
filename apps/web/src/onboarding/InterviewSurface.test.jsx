@@ -108,6 +108,7 @@ vi.mock("../lib/sse.js", () => ({
 }));
 
 const api = vi.hoisted(() => ({
+  ApiError: class ApiError extends Error {},
   createCompanyProposals: vi.fn(),
   decideCompanyProposal: vi.fn(),
   extractResumeAi: vi.fn(),
@@ -636,6 +637,45 @@ describe("InterviewSurface — 409-reconnect", () => {
     expect(captured.onboardingBar.mode).toBe("docked");
     expect(captured.filePane).toBeTruthy();
   });
+
+  it("a non-409 startChat failure renders the resolved friendly message, not a raw server string, with a working retry", async () => {
+    api.startChat.mockRejectedValueOnce(
+      Object.assign(new api.ApiError("boom"), {
+        status: 500,
+        body: { error: "SQLite table onboarding_state is locked at /Users/x/workspace" },
+      })
+    );
+    api.startChat.mockResolvedValueOnce({ chatId: "chat-retry-1", state: "running" });
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    await captured.onboardingBar.onSend("I'm hunting applied AI roles");
+    await flush();
+
+    let tree = render({ runtime: RUNTIME });
+    const alert = byTag(tree, "inline-alert");
+    expect(alert).toBeTruthy();
+    expect(alert.props.message).toBe("Something went wrong on the server. Try again in a moment.");
+    expect(alert.props.message).not.toContain("SQLite");
+    expect(alert.props.message).not.toContain("/Users/x/workspace");
+    expect(alert.props.detail).toBe(
+      "SQLite table onboarding_state is locked at /Users/x/workspace"
+    );
+    expect(alert.props.action.retry).toBe(true);
+    expect(typeof alert.props.action.onRetry).toBe("function");
+    expect(captured.onboardingBar.mode).toBe("centered");
+
+    await alert.props.action.onRetry();
+    await flush();
+
+    tree = render({ runtime: RUNTIME });
+    expect(captured.onboardingBar.mode).toBe("docked");
+    expect(byTag(tree, "inline-alert")).toBeUndefined();
+    expect(api.startChat).toHaveBeenLastCalledWith("ingest-profile", {
+      input: "I'm hunting applied AI roles",
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -847,9 +887,7 @@ describe("InterviewSurface — inline markdown", () => {
     const onEvent = sse.calls.at(-1).opts.onEvent;
     onEvent(
       "assistant",
-      assistantEvent(
-        "See [the board](https://example.com/jobs) or [click me](javascript:alert(1))"
-      )
+      assistantEvent("See [the board](https://example.com/jobs) or [click me](javascript:alert(1))")
     );
 
     const tree = render({ runtime: RUNTIME });
@@ -1074,6 +1112,82 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
     expect(pill.props.block.status).toBe("resolved");
     expect(pill.props.block.resultSummary).toBe("Noted, won't ask again");
+  });
+
+  it("a confirm-pill save failure sets the block's error to the resolved friendly message, never the raw server string (pill error slot is one line, no action/detail room — see ConfirmPill.jsx)", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockRejectedValueOnce(
+      Object.assign(new api.ApiError("boom"), {
+        status: 500,
+        body: { error: "SQLite table candidate_files is locked at /Users/x/workspace" },
+      })
+    );
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "authorization",
+          patch: { work_authorized: true, requires_sponsorship: false },
+        })
+      )
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onConfirm();
+    await flush();
+
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("error");
+    expect(pill.props.block.error).toBe(
+      "Something went wrong on the server. Try again in a moment."
+    );
+    expect(pill.props.block.error).not.toContain("SQLite");
+    expect(pill.props.block.error).not.toContain("/Users/x/workspace");
+  });
+
+  it("a decline-pill save failure sets the block's error to the resolved friendly message, never the raw server string", async () => {
+    api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
+    api.saveCandidateFile.mockRejectedValueOnce(
+      Object.assign(new api.ApiError("boom"), {
+        status: 500,
+        body: { error: "SQLite table candidate_files is locked at /Users/x/workspace" },
+      })
+    );
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      assistantEvent(
+        confirmFence({
+          kind: "authorization",
+          patch: { work_authorized: false, requires_sponsorship: false },
+        })
+      )
+    );
+
+    let tree = render({ runtime: RUNTIME });
+    let pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    await pill.props.onDecline();
+    await flush();
+
+    tree = render({ runtime: RUNTIME });
+    pill = visit(tree, (n) => n.type === "mock-confirm-pill")[0];
+    expect(pill.props.block.status).toBe("error");
+    expect(pill.props.block.error).toBe(
+      "Something went wrong on the server. Try again in a moment."
+    );
+    expect(pill.props.block.error).not.toContain("SQLite");
+    expect(pill.props.block.error).not.toContain("/Users/x/workspace");
   });
 
   it("consent_mode pill confirm writes automation.setup_mode via buildAutomationModePatch", async () => {

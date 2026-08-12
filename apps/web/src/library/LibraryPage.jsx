@@ -490,7 +490,12 @@ export function LibraryPage() {
       emitDashboardChanged();
       await refetch();
     } catch (err) {
-      setActionError(resolveErrorCopy(err).message);
+      const resolved = resolveErrorCopy(err);
+      setActionError(
+        resolved.action?.retry
+          ? { ...resolved, action: { ...resolved.action, onRetry: () => runWrite(key, fn) } }
+          : resolved
+      );
     } finally {
       setBusyKey(null);
     }
@@ -547,7 +552,9 @@ export function LibraryPage() {
         tab={tab}
       />
 
-      {error && !model.preview ? <InlineAlert message={error} /> : null}
+      {error && !model.preview ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {loading && !data ? <p className="dashboard-home__loading">Loading…</p> : null}
 
       {tab === "internal" ? (
@@ -919,7 +926,13 @@ function LibraryDrawer({
           {disclaimer ? <p className="field__hint">{disclaimer}</p> : null}
         </div>
 
-        {actionError ? <InlineAlert message={actionError} /> : null}
+        {actionError ? (
+          <InlineAlert
+            message={actionError.message}
+            action={actionError.action}
+            detail={actionError.detail}
+          />
+        ) : null}
 
         <section className="library__drawer-section">
           <h3>Reusable text</h3>

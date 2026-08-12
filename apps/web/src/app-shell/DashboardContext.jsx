@@ -15,6 +15,7 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { PREVIEW_MOCK_DATA } from "../design/previewMockData.js";
 import { ApiError, getDashboard } from "../lib/api.js";
 import { subscribeDashboardChanged } from "../lib/dashboard-events.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { subscribeIntakeChanged } from "../lib/intake-events.js";
 import { DASHBOARD_PREVIEW } from "../pages/dashboardPreviewData.js";
 
@@ -108,7 +109,18 @@ function LiveDashboardProvider({ children }) {
         noDatabaseRef.current = true;
         setError(null);
       } else {
-        setError(err instanceof Error ? err.message : "Failed to load the dashboard");
+        // resolveErrorCopy's raw server-error strings are a developer-facing
+        // contract (file paths, SQLite/CLI names) — every consumer of this
+        // context's `error` renders the resolved {message, action, detail}
+        // object through InlineAlert, never a bare string. `load` itself is
+        // the real retry for a failed dashboard fetch, so it's wired
+        // straight through when the resolved action calls for one.
+        const resolved = resolveErrorCopy(err);
+        setError(
+          resolved.action?.retry
+            ? { ...resolved, action: { ...resolved.action, onRetry: load } }
+            : resolved
+        );
       }
     } finally {
       setLoading(false);

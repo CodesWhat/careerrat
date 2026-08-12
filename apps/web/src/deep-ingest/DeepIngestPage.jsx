@@ -156,10 +156,24 @@ const LANE_NOT_AVAILABLE_REASON = "Nothing to add here.";
 const URL_LIKE_SOURCE_KINDS = new Set(["url", "linkedin", "portfolio", "project_link"]);
 const FILE_LIKE_SOURCE_KINDS = new Set(["file", "repo", "local_path"]);
 
-function errorMessage(err, fallback) {
+// Same fallback-message convention as before: resolveErrorCopy's generic
+// bucket is real friendly copy, but each catch site below carries more
+// specific context worth keeping when nothing more specific was mapped. Now
+// returns the whole {message, action, detail} shape (not just .message) so
+// InlineAlert can render the action/detail resolveErrorCopy already builds.
+function errorState(err, fallback) {
   const resolved = resolveErrorCopy(err);
-  if (resolved.message !== GENERIC_ERROR_MESSAGE) return resolved.message;
-  return fallback;
+  return resolved.message === GENERIC_ERROR_MESSAGE ? { ...resolved, message: fallback } : resolved;
+}
+
+// Threads a real retry callback through a resolveErrorCopy() result — the
+// resolved `action` carries {label, retry: true} with no callback of its
+// own, so every catch site below that wants the "Try again" button to
+// actually do something supplies the exact call that just failed.
+function withRetryAction(resolved, onRetry) {
+  return resolved.action?.retry
+    ? { ...resolved, action: { ...resolved.action, onRetry } }
+    : resolved;
 }
 
 function asArray(value) {
@@ -404,7 +418,7 @@ export function DeepIngestPage({ initialState = null }) {
       })
       .catch((err) => {
         if (cancelled) return;
-        setError(errorMessage(err, "Could not load deep ingest state."));
+        setError(withRetryAction(errorState(err, "Could not load deep ingest state."), refresh));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -420,7 +434,7 @@ export function DeepIngestPage({ initialState = null }) {
       setState(next);
       return next;
     } catch (err) {
-      setError(errorMessage(err, "Could not refresh deep ingest state."));
+      setError(withRetryAction(errorState(err, "Could not refresh deep ingest state."), refresh));
       return null;
     }
   }
@@ -436,7 +450,22 @@ export function DeepIngestPage({ initialState = null }) {
       await refresh();
       setDraft(emptyDraft());
     } catch (err) {
-      setError(errorMessage(err, "Could not add that source."));
+      setError(withRetryAction(errorState(err, "Could not add that source."), handleAddSource));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function uploadFile(file) {
+    setSubmitting(true);
+    setError(null);
+    try {
+      await uploadDeepIngestFile(file, { targetShape: "auto" });
+      await refresh();
+    } catch (err) {
+      setError(
+        withRetryAction(errorState(err, "Could not upload that file."), () => uploadFile(file))
+      );
     } finally {
       setSubmitting(false);
     }
@@ -446,16 +475,7 @@ export function DeepIngestPage({ initialState = null }) {
     const file = event.target.files?.[0] || null;
     event.target.value = "";
     if (!file) return;
-    setSubmitting(true);
-    setError(null);
-    try {
-      await uploadDeepIngestFile(file, { targetShape: "auto" });
-      await refresh();
-    } catch (err) {
-      setError(errorMessage(err, "Could not upload that file."));
-    } finally {
-      setSubmitting(false);
-    }
+    await uploadFile(file);
   }
 
   async function handleRetrySource(source) {
@@ -473,7 +493,11 @@ export function DeepIngestPage({ initialState = null }) {
       await submitDeepIngestSource(payload);
       await refresh();
     } catch (err) {
-      setError(errorMessage(err, "Could not retry that source."));
+      setError(
+        withRetryAction(errorState(err, "Could not retry that source."), () =>
+          handleRetrySource(source)
+        )
+      );
     } finally {
       setBusySourceId(null);
     }
@@ -486,7 +510,11 @@ export function DeepIngestPage({ initialState = null }) {
       await removeDeepIngestSource({ sourceId: source.id });
       await refresh();
     } catch (err) {
-      setError(errorMessage(err, "Could not remove that source."));
+      setError(
+        withRetryAction(errorState(err, "Could not remove that source."), () =>
+          handleRemoveSource(source)
+        )
+      );
     } finally {
       setBusySourceId(null);
     }
@@ -506,7 +534,12 @@ export function DeepIngestPage({ initialState = null }) {
       }
       await refresh();
     } catch (err) {
-      setError(errorMessage(err, "Could not draft proposals for one or more sources."));
+      setError(
+        withRetryAction(
+          errorState(err, "Could not draft proposals for one or more sources."),
+          handleDraftProposals
+        )
+      );
     } finally {
       setDraftingAll(false);
     }
@@ -541,7 +574,11 @@ export function DeepIngestPage({ initialState = null }) {
       });
       await refresh();
     } catch (err) {
-      setError(errorMessage(err, "Could not save those edits."));
+      setError(
+        withRetryAction(errorState(err, "Could not save those edits."), () =>
+          handleSaveProposalEdits(proposal)
+        )
+      );
     } finally {
       setBusyProposalId(null);
     }
@@ -583,7 +620,11 @@ export function DeepIngestPage({ initialState = null }) {
       });
       await refreshAndMaybeAdvanceLane(laneKey);
     } catch (err) {
-      setError(errorMessage(err, "Could not confirm that proposal."));
+      setError(
+        withRetryAction(errorState(err, "Could not confirm that proposal."), () =>
+          handleConfirmProposal(proposal, laneKey)
+        )
+      );
     } finally {
       setBusyProposalId(null);
     }
@@ -601,7 +642,11 @@ export function DeepIngestPage({ initialState = null }) {
       });
       await refreshAndMaybeAdvanceLane(laneKey);
     } catch (err) {
-      setError(errorMessage(err, "Could not discard that proposal."));
+      setError(
+        withRetryAction(errorState(err, "Could not discard that proposal."), () =>
+          handleDiscardProposal(proposal, laneKey)
+        )
+      );
     } finally {
       setBusyProposalId(null);
     }
@@ -615,7 +660,11 @@ export function DeepIngestPage({ initialState = null }) {
       await refresh();
       setStepIndex((i) => Math.min(i + 1, WIZARD_STEPS.length - 1));
     } catch (err) {
-      setError(errorMessage(err, "Could not update that lane."));
+      setError(
+        withRetryAction(errorState(err, "Could not update that lane."), () =>
+          handleLaneQuickSkip(laneKey, status, reason)
+        )
+      );
     } finally {
       setBusyLane(null);
     }
@@ -656,7 +705,9 @@ export function DeepIngestPage({ initialState = null }) {
 
   return (
     <div className="deep-wizard">
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {loading ? (
         <p className="deep-wizard__loading">Loading…</p>
       ) : (

@@ -174,4 +174,39 @@ describe("DashboardContext", () => {
     });
     expect(apiMocks.getDashboard).not.toHaveBeenCalled();
   });
+
+  it("resolves a failed non-409 dashboard fetch into a friendly {message, action, detail} error, with retry wired to load", async () => {
+    const dashboardContext = await loadDashboardContext();
+    const { ApiError } = await import("../lib/api.js");
+    const err = Object.assign(new ApiError("boom"), {
+      status: 500,
+      body: { error: "SQLite table applications is locked at /Users/x/workspace" },
+    });
+    apiMocks.getDashboard
+      .mockRejectedValueOnce(err)
+      .mockResolvedValueOnce({ data: { stats: { active: 5 } }, setup: null });
+
+    renderProvider(dashboardContext);
+    await flushEffects();
+    let provider = renderProvider(dashboardContext);
+    hookHarness.contextValue = provider.props.value;
+    let snapshot = dashboardContext.useDashboardSnapshot();
+
+    expect(snapshot.error.message).toBe(
+      "Something went wrong on the server. Try again in a moment."
+    );
+    expect(snapshot.error.message).not.toContain("SQLite");
+    expect(snapshot.error.message).not.toContain("/Users/x/workspace");
+    expect(snapshot.error.detail).toBe("SQLite table applications is locked at /Users/x/workspace");
+    expect(snapshot.error.action.retry).toBe(true);
+    expect(typeof snapshot.error.action.onRetry).toBe("function");
+
+    await snapshot.error.action.onRetry();
+    provider = renderProvider(dashboardContext);
+    hookHarness.contextValue = provider.props.value;
+    snapshot = dashboardContext.useDashboardSnapshot();
+
+    expect(snapshot.error).toBeNull();
+    expect(snapshot.data).toEqual({ stats: { active: 5 } });
+  });
 });

@@ -13,6 +13,7 @@ import {
   getSourcingRun,
   setSourcedStatus,
 } from "../lib/api.js";
+import { GENERIC_ERROR_MESSAGE, resolveErrorCopy } from "../lib/errorCopy.js";
 import { FunnelSankey } from "./FunnelSankey.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
 import {
@@ -251,16 +252,24 @@ export function JobsPage() {
       return undefined;
 
     let cancelled = false;
-    getSearchSources()
-      .then((body) => {
-        if (cancelled) return;
-        setLoadedSearchSources(body);
-        setSourceSetupError(null);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setSourceSetupError(describeJobsSearchError(err));
-      });
+    function retryLoadSearchSources() {
+      if (cancelled) return;
+      loadSearchSources();
+    }
+    function loadSearchSources() {
+      setSourceSetupError(null);
+      getSearchSources()
+        .then((body) => {
+          if (cancelled) return;
+          setLoadedSearchSources(body);
+          setSourceSetupError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setSourceSetupError(describeJobsSearchError(err, retryLoadSearchSources));
+        });
+    }
+    loadSearchSources();
 
     return () => {
       cancelled = true;
@@ -340,7 +349,12 @@ export function JobsPage() {
       await setSourcedStatus({ id, to: "cut" });
       await refetch();
     } catch (err) {
-      setSkipError(err?.body?.error || (err instanceof Error ? err.message : "Skip failed"));
+      const resolved = resolveErrorCopy(err);
+      setSkipError(
+        resolved.action?.retry
+          ? { ...resolved, action: { ...resolved.action, onRetry: () => handleSkipSourced(id) } }
+          : resolved
+      );
     } finally {
       setSkippingId(null);
     }
@@ -447,11 +461,25 @@ export function JobsPage() {
         </div>
       </header>
 
-      {error ? <InlineAlert message={error} /> : null}
-      {sourceSetupError ? <InlineAlert message={sourceSetupError} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
+      {sourceSetupError ? (
+        <InlineAlert
+          message={sourceSetupError.message}
+          action={sourceSetupError.action}
+          detail={sourceSetupError.detail}
+        />
+      ) : null}
       {visibleManualSearchError ? <InlineAlert message={visibleManualSearchError} /> : null}
       {visibleAiSearchError ? <InlineAlert message={visibleAiSearchError} /> : null}
-      {skipError ? <InlineAlert message={skipError} /> : null}
+      {skipError ? (
+        <InlineAlert
+          message={skipError.message}
+          action={skipError.action}
+          detail={skipError.detail}
+        />
+      ) : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
       {snapshot && tab === "pipeline" ? (
@@ -1298,13 +1326,28 @@ export function sourceSetupSummary(sourceSetup, ready) {
     : "Sources are ready for the next sweep.";
 }
 
-function describeJobsSearchError(error) {
-  return (
-    error?.body?.error ||
-    error?.body?.message ||
-    error?.message ||
-    "Search setup could not be read. Review Search setup, then try again."
-  );
+// Only caller is the search-sources load effect above — sourceSetupError
+// renders straight through InlineAlert (message/action/detail), so this
+// keeps the same resolveErrorCopy() shape every other catch site in this
+// file uses instead of a bespoke string. The old fallback wording survives
+// as the unmapped case only (resolveErrorCopy's own GENERIC_ERROR_MESSAGE),
+// same as errorState()'s pattern in JobDrawer.jsx/InterviewSurface.jsx.
+// Exported (like describeAiSearchStatusText/describeManualRunSummary below)
+// so it's directly unit-testable — JobsPage.test.jsx renders through
+// renderToStaticMarkup, which never runs effects, so the load effect that
+// calls this can't be exercised end to end.
+export function describeJobsSearchError(error, onRetry) {
+  const resolved = resolveErrorCopy(error);
+  const withFallback =
+    resolved.message === GENERIC_ERROR_MESSAGE
+      ? {
+          ...resolved,
+          message: "Search setup could not be read. Review Search setup, then try again.",
+        }
+      : resolved;
+  return withFallback.action?.retry
+    ? { ...withFallback, action: { ...withFallback.action, onRetry } }
+    : withFallback;
 }
 
 // Status text for the AI lane, rendered through the SAME SearchStatusStrip

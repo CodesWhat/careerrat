@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 import { Field, TextField, Toggle } from "../components/form.jsx";
@@ -24,8 +24,15 @@ const SOURCE_API = {
   updateSearchSource,
 };
 
-function errorMessage(error) {
-  return resolveErrorCopy(error).message;
+// Threads a real retry callback through a resolveErrorCopy() result — the
+// resolved `action` carries {label, retry: true} with no callback of its
+// own, so every catch below that wants the "Try again" button to actually do
+// something supplies the exact call that just failed.
+function errorState(error, onRetry) {
+  const resolved = resolveErrorCopy(error);
+  return resolved.action?.retry
+    ? { ...resolved, action: { ...resolved.action, onRetry } }
+    : resolved;
 }
 
 function formatWatermark(value) {
@@ -60,10 +67,22 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
   const [urlDraft, setUrlDraft] = useState({ label: "", url: "" });
   const [companyDraft, setCompanyDraft] = useState({ name: "", url: "" });
 
-  async function reload() {
+  const reload = useCallback(async () => {
     const next = await api.getSourceMaintenance();
     setModel({ searches: next.searches || [], companies: next.companies || [] });
-  }
+  }, [api]);
+
+  const loadSources = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      await reload();
+    } catch (err) {
+      setError(errorState(err, loadSources));
+    } finally {
+      setLoading(false);
+    }
+  }, [reload]);
 
   useEffect(() => {
     let cancelled = false;
@@ -74,7 +93,7 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
           setModel({ searches: next.searches || [], companies: next.companies || [] });
       })
       .catch((err) => {
-        if (!cancelled) setError(errorMessage(err));
+        if (!cancelled) setError(errorState(err, loadSources));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -82,7 +101,7 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
     return () => {
       cancelled = true;
     };
-  }, [api]);
+  }, [api, loadSources]);
 
   async function mutate(key, action, after) {
     setBusy(key);
@@ -96,7 +115,7 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
       }
       after?.();
     } catch (err) {
-      setError(errorMessage(err));
+      setError(errorState(err, () => mutate(key, action, after)));
     } finally {
       setBusy(null);
     }
@@ -197,7 +216,9 @@ export function SourceMaintenanceView({
         These are the exact broad searches and company ATS boards used by Electron and the
         <code> careerrat searches</code> / <code>careerrat companies</code> commands.
       </p>
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {loading ? <p>Loading source configuration…</p> : null}
 
       <section className="settings-sources__section" aria-labelledby="broad-sources-heading">

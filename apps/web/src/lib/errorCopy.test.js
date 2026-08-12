@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { ApiError } from "./api.js";
-import { GENERIC_ERROR_MESSAGE, resolveErrorCopy } from "./errorCopy.js";
+import { GENERIC_ERROR_MESSAGE, resolveErrorCopy, UserFacingError } from "./errorCopy.js";
 
 const RULE_CASES = [
   {
@@ -132,6 +132,12 @@ const RULE_CASES = [
     message: "That couldn't be found.",
     action: null,
   },
+  {
+    name: "a UserFacingError (copy we wrote, not a server string)",
+    err: new UserFacingError("Advanced mode must be turned on first."),
+    message: "Advanced mode must be turned on first.",
+    action: null,
+  },
 ];
 
 describe("resolveErrorCopy — mapped rules", () => {
@@ -189,6 +195,20 @@ describe("resolveErrorCopy — unmapped/generic fallback", () => {
   it("gives the generic fallback a retry action", () => {
     const err = new ApiError(400, { error: "flux capacitor desynchronized at row 42" });
     expect(resolveErrorCopy(err).action).toEqual({ label: "Try again", retry: true });
+  });
+
+  // The passthrough is earned by the TYPE, never by the sentence. A plain
+  // Error carrying identical text is still an untrusted string and must be
+  // translated, otherwise a server that happened to echo that wording would
+  // render straight to the candidate.
+  it("does not pass through a plain Error carrying UserFacingError's wording", () => {
+    const err = new Error("Advanced mode must be turned on first.");
+    expect(resolveErrorCopy(err).message).toBe(GENERIC_ERROR_MESSAGE);
+  });
+
+  it("keeps a UserFacingError's raw text out of the technical-details slot", () => {
+    const err = new UserFacingError("Advanced mode must be turned on first.");
+    expect(resolveErrorCopy(err).detail).toBeNull();
   });
 });
 

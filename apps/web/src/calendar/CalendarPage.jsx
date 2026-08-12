@@ -40,7 +40,9 @@ export function CalendarPage() {
     <div className="calendar">
       <CalendarHero metrics={model.metrics} />
 
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
       {calendar ? <CalendarBody model={model} /> : null}

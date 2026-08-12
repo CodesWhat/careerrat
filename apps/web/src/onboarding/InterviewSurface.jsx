@@ -19,6 +19,7 @@ import {
   startChat,
   startFirstSearchRun,
 } from "../lib/api.js";
+import { GENERIC_ERROR_MESSAGE, resolveErrorCopy, UserFacingError } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
 import { buildAutomationModePatch } from "../settings/AutomationControls.jsx";
 import { ConfirmDialog, ConfirmPill } from "./ConfirmPill.jsx";
@@ -73,6 +74,25 @@ function fileExtension(name) {
     .split(".")
     .pop()
     ?.toLowerCase();
+}
+
+// Threads a real retry callback through a resolveErrorCopy() result — the
+// resolved `action` carries {label, retry: true} with no callback of its
+// own, so every catch below that wants the "Try again" button to actually do
+// something supplies the exact call that just failed.
+function withRetryAction(resolved, onRetry) {
+  return resolved.action?.retry
+    ? { ...resolved, action: { ...resolved.action, onRetry } }
+    : resolved;
+}
+
+// Same fallback-message convention DeepIngestPage.jsx uses: resolveErrorCopy's
+// generic bucket is real friendly copy, but this component's own catch sites
+// carry more specific context worth keeping when nothing more specific was
+// mapped.
+function errorState(err, fallback) {
+  const resolved = resolveErrorCopy(err);
+  return resolved.message === GENERIC_ERROR_MESSAGE ? { ...resolved, message: fallback } : resolved;
 }
 
 // Lane A / R1, R4 — immutably flips one parsed confirm block's status within
@@ -280,7 +300,13 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
         if (data.state === "idle") void checkProgressDelta();
       }
     } else if (type === "error") {
-      setError(data?.message || "The interview hit a snag.");
+      // Stream-level notification, not a caught request error — there's no
+      // single "the" request to retry from here, so this carries no action.
+      setError({
+        message: data?.message || "The interview hit a snag.",
+        action: null,
+        detail: null,
+      });
     }
   }
 
@@ -311,11 +337,25 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
         return err.body.chatId;
       }
       setError(
-        err?.body?.error || (err instanceof Error ? err.message : "Could not start the interview.")
+        withRetryAction(errorState(err, "Could not start the interview."), () =>
+          ensureChatStarted(kickoffText)
+        )
       );
       return null;
     } finally {
       setStarting(false);
+    }
+  }
+
+  async function sendMessageWithErrorHandling(id, text) {
+    try {
+      await sendChatMessage(id, text);
+    } catch (err) {
+      setError(
+        withRetryAction(errorState(err, "Message failed to send."), () =>
+          sendMessageWithErrorHandling(id, text)
+        )
+      );
     }
   }
 
@@ -325,11 +365,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     if (!id) return;
     setMessages((m) => [...m, { role: "user", text }]);
     if (existingId) {
-      try {
-        await sendChatMessage(id, text);
-      } catch (err) {
-        setError(err instanceof Error ? err.message : "Message failed to send");
-      }
+      await sendMessageWithErrorHandling(id, text);
     }
   }
 
@@ -397,7 +433,9 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
         `[SYSTEM] The résumé "${file.name}" was uploaded and parsed (${claims.length} claims extracted). Continue the interview using it.`
       );
     } catch (err) {
-      setError(err?.body?.error || (err instanceof Error ? err.message : "Résumé upload failed."));
+      setError(
+        withRetryAction(errorState(err, "Résumé upload failed."), () => handleResumeDrop(file))
+      );
     } finally {
       setUploading(false);
     }
@@ -459,7 +497,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       // advanced mode is on (R1); this guards the same call reaching here
       // from a stale render.
       if (automationStatus?.mode !== "advanced") {
-        throw new Error("Advanced mode must be turned on first.");
+        throw new UserFacingError("Advanced mode must be turned on first.");
       }
       const { capability, platform } = block.payload;
       // R1 — one write sets capabilities.<cap>.platforms.<platform>=true,
@@ -514,8 +552,18 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
         setBlockStatus(m, messageIndex, blockIndex, "resolved", { resultSummary })
       );
     } catch (err) {
-      const message = err?.body?.error || (err instanceof Error ? err.message : "Save failed.");
-      setMessages((m) => setBlockStatus(m, messageIndex, blockIndex, "error", { error: message }));
+      // The confirm pill's error slot is one line of text under a
+      // fixed-width pill (ConfirmPill.jsx's own character-budget comments)
+      // and re-clicking the pill (status "error" -> label flips to "Retry")
+      // already re-fires onConfirm — that IS the retry, so there's no room
+      // for and no need for a second action affordance or a details
+      // disclosure here. Only the raw-string-to-candidate defect is in
+      // scope: swap it for the resolved friendly message and stop.
+      setMessages((m) =>
+        setBlockStatus(m, messageIndex, blockIndex, "error", {
+          error: errorState(err, "Save failed.").message,
+        })
+      );
     }
   }
 
@@ -566,8 +614,14 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
         setBlockStatus(m, messageIndex, blockIndex, "resolved", { resultSummary })
       );
     } catch (err) {
-      const message = err?.body?.error || (err instanceof Error ? err.message : "Save failed.");
-      setMessages((m) => setBlockStatus(m, messageIndex, blockIndex, "error", { error: message }));
+      // Same one-line pill error slot and click-to-retry affordance as
+      // handleConfirmAction above — see that catch for why no action/detail
+      // is threaded through here.
+      setMessages((m) =>
+        setBlockStatus(m, messageIndex, blockIndex, "error", {
+          error: errorState(err, "Save failed.").message,
+        })
+      );
     }
   }
 
@@ -673,7 +727,9 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
               hand, any time.
             </p>
           </div>
-          {error ? <InlineAlert message={error} /> : null}
+          {error ? (
+            <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+          ) : null}
           <OnboardingBar
             mode="centered"
             placeholder="Tell Paul what you're hunting, or paste your résumé text here."
@@ -722,7 +778,9 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
                 <div className="onboarding-transcript__thinking">Thinking…</div>
               ) : null}
             </div>
-            {error ? <InlineAlert message={error} /> : null}
+            {error ? (
+              <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+            ) : null}
           </div>
           <FilePane
             state={state}
