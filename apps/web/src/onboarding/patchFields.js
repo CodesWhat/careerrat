@@ -44,12 +44,28 @@ const MONTH_NAMES = [
   "Dec",
 ];
 
+function isLeapYear(year) {
+  return (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
+}
+
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+// Literal calendar-math validation (no `Date` parsing) — `new Date` silently
+// rolls an out-of-range day/month over into the next one (e.g.
+// "2026-02-30" becomes March 2) instead of rejecting it, which would let an
+// impossible date get formatted as if it were real.
+function isValidCalendarDate(year, month, day) {
+  if (month < 1 || month > 12) return false;
+  const maxDay = month === 2 && isLeapYear(year) ? 29 : DAYS_IN_MONTH[month - 1];
+  return day >= 1 && day <= maxDay;
+}
+
 function formatIsoDate(value) {
   const match = ISO_DATE_RE.exec(value);
   if (!match) return null;
   const [, year, month, day] = match;
+  if (!isValidCalendarDate(Number(year), Number(month), Number(day))) return null;
   const monthName = MONTH_NAMES[Number(month) - 1];
-  if (!monthName) return null;
   return `${monthName} ${Number(day)}, ${year}`;
 }
 
@@ -103,8 +119,12 @@ function formatArrayValue(value, path) {
 const MAX_VALUE_LENGTH = 48;
 
 function truncateValue(text) {
-  if (text.length <= MAX_VALUE_LENGTH) return text;
-  return `${text.slice(0, MAX_VALUE_LENGTH - 1).trimEnd()}…`;
+  // Iterate whole code points rather than UTF-16 code units — a fixed-length
+  // `.slice()` can land inside a surrogate pair (an emoji, some CJK/astral
+  // characters) and emit a lone surrogate that renders as a replacement glyph.
+  const chars = Array.from(text);
+  if (chars.length <= MAX_VALUE_LENGTH) return text;
+  return `${chars.slice(0, MAX_VALUE_LENGTH - 1).join("").trimEnd()}…`;
 }
 
 function formatLeafValue(value, path) {

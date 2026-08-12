@@ -149,6 +149,51 @@ describe("flattenPatchLeaves", () => {
         { path: ["email"], label: "Email", value: "ada@example.com" },
       ]);
     });
+
+    // Bug 4 — the shape-only regex used to accept any digit-shaped string,
+    // so an impossible calendar date (bad month, bad day-of-month, Feb 30,
+    // Feb 29 outside a leap year) got formatted into a plausible-looking but
+    // fabricated date instead of being rejected. `formatIsoDate` falls back
+    // to the raw value on a `null` (see formatLeafValue's `|| value`), so
+    // "left untouched" is the same fallback every other non-date string
+    // already gets — no new behavior for callers to special-case.
+    describe("rejects impossible calendar dates instead of fabricating them", () => {
+      it("leaves a bad month untouched", () => {
+        expect(flattenPatchLeaves({ start_date: "2026-13-01" })).toEqual([
+          { path: ["start_date"], label: "Start date", value: "2026-13-01" },
+        ]);
+      });
+
+      it("leaves an out-of-range day untouched", () => {
+        expect(flattenPatchLeaves({ start_date: "2026-01-45" })).toEqual([
+          { path: ["start_date"], label: "Start date", value: "2026-01-45" },
+        ]);
+      });
+
+      it("leaves Feb 30 untouched rather than rolling it into March", () => {
+        expect(flattenPatchLeaves({ start_date: "2026-02-30" })).toEqual([
+          { path: ["start_date"], label: "Start date", value: "2026-02-30" },
+        ]);
+      });
+
+      it("leaves Feb 29 untouched in a non-leap year", () => {
+        expect(flattenPatchLeaves({ start_date: "2026-02-29" })).toEqual([
+          { path: ["start_date"], label: "Start date", value: "2026-02-29" },
+        ]);
+      });
+
+      it("still formats Feb 29 in a leap year", () => {
+        expect(flattenPatchLeaves({ start_date: "2024-02-29" })).toEqual([
+          { path: ["start_date"], label: "Start date", value: "Feb 29, 2024" },
+        ]);
+      });
+
+      it("formats a valid year-end date without shifting a day", () => {
+        expect(flattenPatchLeaves({ start_date: "2026-12-31" })).toEqual([
+          { path: ["start_date"], label: "Start date", value: "Dec 31, 2026" },
+        ]);
+      });
+    });
   });
 
   // Bug 3 — a single very long leaf value shouldn't be able to blow out
@@ -165,6 +210,28 @@ describe("flattenPatchLeaves", () => {
       expect(flattenPatchLeaves({ notes: "short note" })).toEqual([
         { path: ["notes"], label: "Notes", value: "short note" },
       ]);
+    });
+
+    // Bug 5 — truncating by UTF-16 code unit (bare `.slice()`) can cut an
+    // astral character in half and emit a lone surrogate, which renders as a
+    // replacement glyph. A lone surrogate is unpaired: a high surrogate
+    // (\uD800-\uDBFF) with no low surrogate right after it, or a low
+    // surrogate with no high surrogate right before it.
+    const LONE_SURROGATE_RE =
+      /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+    it("truncates a long run of astral emoji on whole code points, never emitting a lone surrogate", () => {
+      const longValue = "\u{1F600}".repeat(60); // 60 code points, each a 2-unit surrogate pair
+      const result = flattenPatchLeaves({ notes: longValue });
+      expect(result[0].value.endsWith("…")).toBe(true);
+      expect(LONE_SURROGATE_RE.test(result[0].value)).toBe(false);
+    });
+
+    it("truncates a long run of a multi-code-point grapheme (flag emoji) without splitting a surrogate pair", () => {
+      const longValue = "\u{1F1FA}\u{1F1F8}".repeat(30); // flag = 2 code points / 4 UTF-16 units each
+      const result = flattenPatchLeaves({ notes: longValue });
+      expect(result[0].value.endsWith("…")).toBe(true);
+      expect(LONE_SURROGATE_RE.test(result[0].value)).toBe(false);
     });
   });
 });
