@@ -15,14 +15,23 @@
 # text instead would mean redoing, on the frozen lineage, the rename that
 # dev/v0.7 already did.
 #
-# This script does NOT publish. It builds and verifies a tarball, then prints
-# the exact commands to run. Publishing needs `npm login` and is your call.
+# This script does NOT publish. It builds a release BRANCH and verifies the
+# tarball that branch would produce, then prints the remaining steps.
+#
+# Why a branch and not a local `npm publish`: .github/workflows/publish.yml
+# publishes on GitHub Release via npm Trusted Publishing (OIDC), which needs no
+# stored token and attaches a signed provenance attestation. A hand-publish from
+# a laptop gets neither. But that workflow publishes whatever the repo contains
+# at the release tag: dev/v0.7 would ship the unfinished 0.7.0 web app, and the
+# skills tag still says `name: rolester`, so it would publish the OLD package.
+# This branch is the missing piece, the skills release carrying careerrat's name.
 
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SRC_TAG="rolester-skills-lock"
 PKG_VERSION="0.5.2"
+RELEASE_BRANCH="release/careerrat-$PKG_VERSION"
 WORKTREE="$REPO_ROOT/.claude/worktrees/skills-release"
 OUT_DIR="$REPO_ROOT/.claude/skills-release-out"
 
@@ -43,9 +52,14 @@ cleanup_worktree
 rm -rf "$OUT_DIR"
 mkdir -p "$OUT_DIR"
 
-# Detached worktree: reads the frozen tag, never moves a branch ref.
-git -C "$REPO_ROOT" worktree add --detach "$WORKTREE" "$SRC_TAG" >/dev/null
-echo "    worktree: $WORKTREE (detached at $SRC_TAG)"
+# Branch off the frozen tag. main is never touched, and re-running replaces the
+# release branch rather than stacking commits on it.
+if git -C "$REPO_ROOT" show-ref -q --verify "refs/heads/$RELEASE_BRANCH"; then
+  git -C "$REPO_ROOT" branch -D "$RELEASE_BRANCH" >/dev/null
+fi
+git -C "$REPO_ROOT" worktree add -b "$RELEASE_BRANCH" "$WORKTREE" "$SRC_TAG" >/dev/null
+echo "    worktree: $WORKTREE"
+echo "    branch:   $RELEASE_BRANCH (from $SRC_TAG)"
 
 # Rename the package and expose both bin names. node over sed so we fail loudly
 # on an unexpected shape instead of silently writing nothing.
@@ -159,22 +173,45 @@ if grep -qE '^(\.rolester|\.careerrat|candidate/|workspace/)' "$OUT_DIR/filelist
 fi
 echo "    private:   none found (good)"
 
+# The verified tree becomes the release branch's commit. Committed in the
+# worktree so the branch ref moves, then the worktree itself is disposable.
+git -C "$WORKTREE" add -A
+git -C "$WORKTREE" -c user.name="CodesWhat" -c user.email="sbenson@sypartners.com" \
+  commit -q -m "chore(release): publish the skills release as careerrat@$PKG_VERSION
+
+Republishes $SRC_TAG under the careerrat name so \`npm install -g careerrat\`
+resolves to the working product instead of the 0.0.1 placeholder.
+
+Renames the package, exposes both careerrat and rolester bins, and rewrites
+printed \`rolester <verb>\` instructions to \`careerrat <verb>\`. The bin alias
+stays because this release's own skills invoke it. Data paths (.rolester,
+rolester.db) and ROLESTER_* env names are deliberately untouched."
+
+COMMIT="$(git -C "$WORKTREE" rev-parse --short HEAD)"
 cleanup_worktree
 
 cat <<EOF
 
-==> Staged. Nothing has been published.
+==> Release branch built. Nothing has been published or pushed.
 
-  tarball:  $TARBALL
+  branch:   $RELEASE_BRANCH ($COMMIT)
+  tarball:  $TARBALL   (verification only, not the publish artifact)
   filelist: $OUT_DIR/filelist.txt
 
-Inspect the file list, then run these yourself:
+Publishing goes through CI, not a laptop, so the package gets a signed
+provenance attestation and no npm token is stored anywhere.
 
-  npm login
-  npm publish $TARBALL --access public
-  npm deprecate rolester "Renamed to careerrat. Install careerrat instead: npm i -g careerrat"
+  1. npmjs.com -> careerrat -> Settings -> Trusted Publisher:
+       GitHub Actions | CodesWhat/careerrat | publish.yml
+     careerrat@0.0.1 was hand-published and has no attestation, so this
+     binding does not exist yet. rolester has one; careerrat does not.
 
-Note: npm's trusted-publisher binding still points at CodesWhat/rolester and
-publish.yml. Fix that in the npmjs.com UI before any CI-driven publish, or the
-automated release will fail even though this manual one succeeds.
+  2. git push -u origin $RELEASE_BRANCH
+
+  3. Cut a GitHub Release targeting $RELEASE_BRANCH, tag v$PKG_VERSION-careerrat.
+     publish.yml fires on release:published and publishes to the "latest"
+     dist-tag (no hyphen in the package version, so it is not treated as an rc).
+
+  4. Once it is live, retire the old name:
+       npm deprecate rolester "Renamed to careerrat. Install careerrat instead: npm i -g careerrat"
 EOF
