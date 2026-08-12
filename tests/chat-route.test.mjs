@@ -330,7 +330,7 @@ test("POST /api/chat/start: 429 once maxSessions is reached", async () => {
   const repoRoot = tempRepoWithSkill(["a", "b"]);
   const chatRuntime = createChatRuntime({
     repoRoot,
-    env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_CHAT_SKILLS: "a,b" },
+    env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_CHAT_SKILLS: "a,b" },
     maxSessions: 1,
     loadSdk: async () => fakeStreamingSdk([[]]),
   });

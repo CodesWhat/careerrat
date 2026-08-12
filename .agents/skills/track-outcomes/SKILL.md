@@ -15,15 +15,15 @@ Identify the target application by company + role title (or `id` if known). Read
 
 ## STEP 1 — Read gate files
 
-**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — every
-write step below gives the `rolester data <verb>` command (Data Write Contract,
+**Mode detection:** run `careerrat data status`. Exit 0 → DB workspace — every
+write step below gives the `careerrat data <verb>` command (Data Write Contract,
 AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
 gives the existing direct JSON-edit instructions, unchanged.
 
 Read in order:
 
 1. `candidate/targeting.yml` — `role_buckets`, `role_families` (if present), `cut_signals`, `excluded_companies`, and `reevaluation` thresholds (`rejection_total`, `rejection_per_family`).
-2. Application limits — DB mode: `rolester data candidate get --json` (`application-limits.companies[]`); legacy mode: `candidate/application-limits.yml`.
+2. Application limits — DB mode: `careerrat data candidate get --json` (`application-limits.companies[]`); legacy mode: `candidate/application-limits.yml`.
 3. `workspace/tracker.json` — the full applications array for current status, fitScore, channel, mode, appliedAt, note, and conversations[].
 
 If `candidate/targeting.yml#reevaluation` is absent, use defaults: `rejection_total: 7`, `rejection_per_family: 3`.
@@ -72,7 +72,7 @@ Apply the transition:
 
 - **DB workspace:** run
   ```
-  rolester data app set-status <id> <to> --note "<statusNote text>" \
+  careerrat data app set-status <id> <to> --note "<statusNote text>" \
     [--follow-up-due <iso>] [--clear-interview|--no-clear-interview]
   ```
   One call sets `status` and `statusNote` (via `--note`) and `followUp.dueAt`
@@ -85,7 +85,7 @@ Apply the transition:
   auto-detection for the edge case of advancing rounds while `status` stays
   `interview`. For `appliedAt` on a new submission, or any other field not
   covered by `set-status`, follow with
-  `rolester data app set-fields <id> --data '{"<field>": "<value>"}'` (shallow
+  `careerrat data app set-fields <id> --data '{"<field>": "<value>"}'` (shallow
   merge one level; not outcome-changing, so it does not re-refresh analytics —
   the preceding `set-status` call already did).
 - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly —
@@ -141,14 +141,14 @@ draft that backed it is gone — then append a note recording what happened.
      `nextActionDue: null` / `draft: null` rules above), then persist the whole
      row:
      ```
-     rolester data comm upsert --data '<patched full comm row JSON>'
+     careerrat data comm upsert --data '<patched full comm row JSON>'
      ```
   2. Append the outcome note:
      ```
-     rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO timestamp>","summary":"<one-liner, e.g. Rejection received — recorded by track-outcomes>"}'
+     careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO timestamp>","summary":"<one-liner, e.g. Rejection received — recorded by track-outcomes>"}'
      ```
   If `app.followUp.draft` is set and step 1 wasn't itself a `comm mark-sent`
-  call, clear it too: `rolester data app set-fields <app-id> --data
+  call, clear it too: `careerrat data app set-fields <app-id> --data
   '{"followUp": {"draft": null}}'`. Neither call refreshes analytics (not
   outcome-changing) — STEP 2's `app set-status` already did.
 - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly, in the
@@ -165,25 +165,25 @@ draft that backed it is gone — then append a note recording what happened.
 ## STEP 3 — Persist and validate
 
 - **DB workspace:** STEP 2 and STEP 2b already persisted the state — each
-  `rolester data <verb>` call is its own atomic transaction, and each
+  `careerrat data <verb>` call is its own atomic transaction, and each
   auto-exports `workspace/tracker.json` + `workspace/activity.jsonl`
   afterward (Data Write Contract, AGENTS.md). There is no single combined
   app+comm transaction, so the completeness guarantee is on the sequence of
   calls, not one write — run the STEP 2 and STEP 2b calls back-to-back, never
   deferring the comm call. Validate what landed:
   ```
-  rolester data verify          # re-exports, then domain integrity: status/score/modes/channels/dupes
-  rolester tracker --verify     # JSON shape/structure vs tracker.schema.json (data verify doesn't run this)
+  careerrat data verify          # re-exports, then domain integrity: status/score/modes/channels/dupes
+  careerrat tracker --verify     # JSON shape/structure vs tracker.schema.json (data verify doesn't run this)
   ```
   If either reports errors, the DB row itself is wrong — fix it with another
-  `rolester data app set-fields` / `comm upsert` call (never hand-edit
+  `careerrat data app set-fields` / `comm upsert` call (never hand-edit
   `tracker.json`, it is a regenerated file and the next export overwrites it).
   Do not continue until both exit clean.
 
   **Analytics:** `app set-status` (and `sourced promote`) already refreshed
   `tracker.json#analytics` as part of their own transaction — no separate call
   needed. If STEP 2 wrote only via `app set-fields` (e.g. a manual note with no
-  status change), run `rolester data analytics-refresh` explicitly so STEP 6
+  status change), run `careerrat data analytics-refresh` explicitly so STEP 6
   reads a current reevaluation gate.
 - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly (the tracker CLI has no mutation subcommands — JSON edits are the only write path).
 
@@ -193,7 +193,7 @@ draft that backed it is gone — then append a note recording what happened.
   replaces the other (see RULES):
 
   ```
-  rolester tracker --verify   # JSON shape/structure vs tracker.schema.json
+  careerrat tracker --verify   # JSON shape/structure vs tracker.schema.json
   npm run verify:tracker              # domain integrity: status/score/modes/channels/dupes
   ```
 
@@ -202,23 +202,23 @@ draft that backed it is gone — then append a note recording what happened.
   **Refresh the analytics block (required — this is an outcome-changing write).** After both validators pass and BEFORE re-rendering, recompute and persist `tracker.json#analytics` so STEP 6 reads a current reevaluation gate. Skipping this leaves the block one run stale, so a threshold crossed by the rejection you just logged is invisible to STEP 6 and the `reevaluate-strategy` handoff fires late or not at all:
 
   ```
-  rolester analytics --write   # recompute tracker.json#analytics: rejection/advance counts + reevaluation.due/dueReasons
+  careerrat analytics --write   # recompute tracker.json#analytics: rejection/advance counts + reevaluation.due/dueReasons
   ```
 
 ## STEP 4 — Re-render the dashboard
 
-- **DB workspace:** every `rolester data <verb>` call in STEP 2/2b already
+- **DB workspace:** every `careerrat data <verb>` call in STEP 2/2b already
   re-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write
-  Contract, AGENTS.md). If `rolester tracker-dev` is running, its `fs.watch` on
+  Contract, AGENTS.md). If `careerrat tracker-dev` is running, its `fs.watch` on
   `tracker.json` already picked this up and live-reloaded the open page —
   nothing further to do. For a static snapshot, or to confirm the render by
   hand, still run:
   ```
-  rolester tracker
+  careerrat tracker
   ```
 - **Legacy workspace (no DB):** run:
   ```
-  rolester tracker
+  careerrat tracker
   ```
 
 Confirm the status change appears correctly in `workspace/tracker.html`. If the render output looks wrong, diagnose before proceeding.
@@ -226,7 +226,7 @@ Confirm the status change appears correctly in `workspace/tracker.html`. If the 
 If the outcome creates or extends a follow-up cadence (e.g., interview scheduled, offer pending response, ghosted application to chase), also run (a read, unaffected by DB vs legacy mode):
 
 ```
-rolester tracker --followups
+careerrat tracker --followups
 ```
 
 Review any follow-ups now due and hand off to `email-comms` if a draft is needed.
@@ -241,34 +241,34 @@ Log the outcome to the Activity Pulse feed (the dashboard's live timeline — se
   type below, log an additional event — this verb only logs, it never bumps the
   stamp, and there is no `--write`/dry-run flag, every call is a real write:
   ```
-  rolester data activity append --data '{"type":"interview","actor":"world","title":"Interview stage — <Company>","summary":"<stage / detail>","refs":{"applicationId":"<application id>","company":"<Company>"}}'
+  careerrat data activity append --data '{"type":"interview","actor":"world","title":"Interview stage — <Company>","summary":"<stage / detail>","refs":{"applicationId":"<application id>","company":"<Company>"}}'
   ```
   Swap `type`/`title`/`summary`/`actor` per the categories below (`offer`,
   `status_change`, `failure` with `"needsUser":true` for a blocker).
 - **Legacy workspace (no DB):**
   ```
   # interview / screen / onsite advance:
-  rolester activity append --type interview --actor world \
+  careerrat activity append --type interview --actor world \
     --title "Interview stage — <Company>" --summary "<stage / detail>" \
     --company "<Company>" --app-id <application id> --write
 
   # offer:
-  rolester activity append --type offer --actor world \
+  careerrat activity append --type offer --actor world \
     --title "Offer — <Company>" --summary "<detail>" \
     --company "<Company>" --app-id <application id> --write
 
   # rejection / closed:
-  rolester activity append --type status_change --actor world \
+  careerrat activity append --type status_change --actor world \
     --title "Closed — <Company>" --summary "<reason>" \
     --company "<Company>" --app-id <application id> --write
 
   # candidate withdrawal (neutral tone — candidate exited, market did not close):
-  rolester activity append --type status_change --actor agent \
+  careerrat activity append --type status_change --actor agent \
     --title "Withdrew — <Company>" --summary "<reason: comp gap / competing offer / culture read / role-scope mismatch / proactive exit>" \
     --company "<Company>" --app-id <application id> --write
 
   # blocker needing the user:
-  rolester activity append --type failure --actor world --needs-user \
+  careerrat activity append --type failure --actor world --needs-user \
     --title "Blocked — <Company>" --summary "<what's blocking>" \
     --company "<Company>" --app-id <application id> --write
   ```
@@ -290,18 +290,18 @@ Write the entry body to a temp file (e.g. `/tmp/learning-body.md`), then:
 
 1. Dry-run (preview + lint):
    ```
-   rolester learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md
+   careerrat learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md
    ```
 2. If the preview looks correct, commit the entry:
    ```
-   rolester learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md --write
+   careerrat learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md --write
    ```
 
 The helper creates `candidate/learnings/` and the family file on first `--write`. A missing family file is normal — the helper handles it silently.
 
 ## STEP 6 — Check reevaluation thresholds
 
-The analytics block in `tracker.json#analytics.reevaluation` already applies the threshold comparison — it is refreshed automatically by `app set-status`/`sourced promote` in a DB workspace, or by `rolester analytics --write` as part of the Tracker Write Contract in a legacy workspace (STEP 3/4). STEP 6 reads; it does not recompute.
+The analytics block in `tracker.json#analytics.reevaluation` already applies the threshold comparison — it is refreshed automatically by `app set-status`/`sourced promote` in a DB workspace, or by `careerrat analytics --write` as part of the Tracker Write Contract in a legacy workspace (STEP 3/4). STEP 6 reads; it does not recompute.
 
 Read `tracker.json#analytics.reevaluation`:
 
@@ -323,11 +323,11 @@ If `reevaluation.due` is `false` but `advanced.byFamily` shows a strong concentr
 
 If the user states any new constraint during the outcome flow ("never apply to X again", "add this as a cut signal", "cap this company at 1 app"), persist it through the owning DB-aware command immediately:
 
-- Exclusion → `rolester gate exclude-company "<Company>" --write --confirm`
-- Cut signal → `rolester gate cut-signal "<signal>" --write`
-- Keep signal → `rolester gate keep-signal "<signal>" --write`
-- Per-company cap or cooldown → after confirmation, write `rolester data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
-- Comp floor or anchor change → `rolester gate comp-floor <N> --write --confirm` or `rolester gate comp-target <N> --write --confirm`
+- Exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
+- Cut signal → `careerrat gate cut-signal "<signal>" --write`
+- Keep signal → `careerrat gate keep-signal "<signal>" --write`
+- Per-company cap or cooldown → after confirmation, write `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`
+- Comp floor or anchor change → `careerrat gate comp-floor <N> --write --confirm` or `careerrat gate comp-target <N> --write --confirm`
 
 **Friction rule:** write-and-report for unambiguous, low-blast-radius changes (one clear cut signal). Confirm-first for consequential changes (broad exclusion, comp floor drop, large re-rank). After writing, echo the CLI confirmation.
 
@@ -347,10 +347,10 @@ Include the role family and threshold status in the commit body if a reevaluatio
 
 ## RULES
 
-- Tracker mutations: **DB workspace** (`rolester data status` exits 0) — go through `rolester data <verb>` (Data Write Contract, AGENTS.md); never hand-edit `tracker.json`/`activity.jsonl`, they are regenerated files. **Legacy workspace** (no DB) — direct JSON edits + two complementary validation checks + `rolester tracker` re-render: run `rolester tracker --verify` (validates JSON shape/structure against config/tracker.schema.json — required keys, field presence) AND `npm run verify:tracker` (validates domain integrity — status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Both must pass; they check different things and neither replaces the other; the legacy tracker CLI itself is read-only (no mutation subcommands). Never fabricate a mutation subcommand beyond what `node src/cli/data.mjs --help` documents.
+- Tracker mutations: **DB workspace** (`careerrat data status` exits 0) — go through `careerrat data <verb>` (Data Write Contract, AGENTS.md); never hand-edit `tracker.json`/`activity.jsonl`, they are regenerated files. **Legacy workspace** (no DB) — direct JSON edits + two complementary validation checks + `careerrat tracker` re-render: run `careerrat tracker --verify` (validates JSON shape/structure against config/tracker.schema.json — required keys, field presence) AND `npm run verify:tracker` (validates domain integrity — status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Both must pass; they check different things and neither replaces the other; the legacy tracker CLI itself is read-only (no mutation subcommands). Never fabricate a mutation subcommand beyond what `node src/cli/data.mjs --help` documents.
 - **Never write `current_base` into any tracker field, note, conversations entry, or learning file.** Use `expected_base`, `target_base`, or `minimum_base` only (the `learnings` helper enforces this).
 - Notes must be factual. No superlatives, no invented lessons, no editorializing.
 - Use `email-comms` for drafting follow-ups or replies. This skill records the outcome; it does not draft outbound text.
-- Do not check reevaluation thresholds from prose in AGENTS.md — always read `tracker.json#analytics.reevaluation` (refreshed automatically by `app set-status`/`sourced promote` in a DB workspace, or by `rolester analytics --write` in a legacy workspace). The block applies the threshold comparison; the agent reads `reevaluation.due` and `reevaluation.dueReasons`, it does not recompute.
+- Do not check reevaluation thresholds from prose in AGENTS.md — always read `tracker.json#analytics.reevaluation` (refreshed automatically by `app set-status`/`sourced promote` in a DB workspace, or by `careerrat analytics --write` in a legacy workspace). The block applies the threshold comparison; the agent reads `reevaluation.due` and `reevaluation.dueReasons`, it does not recompute.
 - Role-family taxonomy is driven by `candidate/targeting.yml` (`role_families` or `role_buckets`); `classifyRoleFamily` in `outcome-analysis.mjs` accepts a `targeting` arg and prefers candidate-supplied families over the built-in tech slugs, which apply only when no candidate config is present. `analyze-outcomes.mjs` wires targeting through, so non-tech candidates get correct family files.
 - Reevaluation threshold fields (`reevaluation.rejection_total`, `reevaluation.rejection_per_family`) live in `candidate/targeting.yml` (schema'd) and are resolved into `tracker.json#analytics.reevaluation.thresholds` by `buildReevaluationAnalytics()`. The threshold comparison is done by the analytics block — do not manually read the YAML values and branch on them in STEP 6. Read the block, trust `reevaluation.due`.

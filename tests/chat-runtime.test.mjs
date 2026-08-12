@@ -210,7 +210,7 @@ function stripJavaScriptComments(source) {
 // resolveAllowedChatSkills
 // ---------------------------------------------------------------------------
 
-test("resolveAllowedChatSkills: defaults to onboarding, discovery, and intake chat skills when ROLESTER_CHAT_SKILLS is unset", () => {
+test("resolveAllowedChatSkills: defaults to onboarding, discovery, and intake chat skills when CAREERRAT_CHAT_SKILLS is unset", () => {
   const repoRoot = tempRepoWithSkill([
     "ingest-profile",
     "research-boards",
@@ -236,7 +236,7 @@ test("resolveAllowedChatSkills: defaults to onboarding, discovery, and intake ch
 test("resolveAllowedChatSkills: an explicit empty env value locks everything out", () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   try {
-    assert.deepEqual(resolveAllowedChatSkills({ repoRoot, env: { ROLESTER_CHAT_SKILLS: "" } }), []);
+    assert.deepEqual(resolveAllowedChatSkills({ repoRoot, env: { CAREERRAT_CHAT_SKILLS: "" } }), []);
   } finally {
     cleanup(repoRoot);
   }
@@ -248,7 +248,7 @@ test("resolveAllowedChatSkills: respects a comma-list override and filters to wh
     assert.deepEqual(
       resolveAllowedChatSkills({
         repoRoot,
-        env: { ROLESTER_CHAT_SKILLS: "ingest-profile, evaluate-job" },
+        env: { CAREERRAT_CHAT_SKILLS: "ingest-profile, evaluate-job" },
       }),
       ["ingest-profile"] // evaluate-job has no SKILL.md under this fixture repoRoot
     );
@@ -433,7 +433,7 @@ test("createChatRuntime.startSession: the session past maxSessions is rejected M
   try {
     const chatRuntime = createChatRuntime({
       repoRoot,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_CHAT_SKILLS: "a,b,c" },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_CHAT_SKILLS: "a,b,c" },
       maxSessions: 2,
       loadSdk: async () => fakeStreamingSdk([[]]),
     });
@@ -466,7 +466,7 @@ test("createChatRuntime.startSession: discovery gets network-only tools while on
       repoRoot,
       env: {
         ANTHROPIC_API_KEY: "sk-ant-test",
-        ROLESTER_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies",
+        CAREERRAT_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies",
       },
       loadSdk: async () => ({
         query: (args) => {
@@ -549,7 +549,7 @@ test("createChatRuntime: proxy route writes NO usage_event of its own (the proxy
   try {
     const chatRuntime = createChatRuntime({
       repoRoot,
-      env: { ROLESTER_AI_PROXY_URL: "http://127.0.0.1:7788", ROLESTER_AI_PROXY_TOKEN: "devtoken" },
+      env: { CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788", CAREERRAT_AI_PROXY_TOKEN: "devtoken" },
       loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
     });
     try {
@@ -891,7 +891,7 @@ test("createChatRuntime.shutdown: closes every live session (fake close called f
       repoRoot,
       env: {
         ANTHROPIC_API_KEY: "sk-ant-test",
-        ROLESTER_CHAT_SKILLS: "ingest-profile,evaluate-job",
+        CAREERRAT_CHAT_SKILLS: "ingest-profile,evaluate-job",
       },
       loadSdk: async () => fakeStreamingSdk([[]], { onClose: () => closeCount++ }),
     });
@@ -1221,7 +1221,7 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): a real 2-turn ping/pong c
   );
   const chatRuntime = createChatRuntime({
     repoRoot,
-    env: { ...process.env, ROLESTER_CHAT_SKILLS: "pingpong" },
+    env: { ...process.env, CAREERRAT_CHAT_SKILLS: "pingpong" },
   });
   try {
     const { chatId } = await chatRuntime.startSession({ skill: "pingpong", input: "ping" });

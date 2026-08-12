@@ -3,7 +3,7 @@ import { basename, dirname, isAbsolute, join, relative, resolve } from "node:pat
 import { validatePublicHttpUrl } from "../deep-ingest/source-fetch.mjs";
 
 const FILE_TOOLS = new Set(["Read", "Glob", "Grep"]);
-const BLOCKED_SEGMENTS = new Set([".git", ".internal", ".rolester", "node_modules"]);
+const BLOCKED_SEGMENTS = new Set([".git", ".internal", ".careerrat", ".rolester", "node_modules"]);
 
 function deny(message) {
   return { behavior: "deny", message, interrupt: false };

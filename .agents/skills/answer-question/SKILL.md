@@ -80,7 +80,7 @@ again verbatim on other applications: work authorization, sponsorship,
 relocation, notice period, security clearance status, start date, and
 similar. Write the normalized question fragment → exact answer into candidate
 form defaults `screening_answers`: in DB mode use
-`rolester data candidate patch form-defaults --data ...`; in legacy mode use the
+`careerrat data candidate patch form-defaults --data ...`; in legacy mode use the
 guarded compatibility config path. When it is a legal/disclosure answer, also
 capture a local note/artifact through the owning skill; do not hand-edit
 candidate YAML in DB mode.
@@ -97,7 +97,7 @@ append the new Q&A to that file and stamp
 `applications[<id>].artifacts.answers` with its path. That is a tracker
 write, so it follows the **Tracker Write Contract**: stamp
 `meta.lastUpdatedAt`, increment `meta.version`, then
-`rolester tracker --verify && rolester tracker` before reporting done. Skip
+`careerrat tracker --verify && careerrat tracker` before reporting done. Skip
 this sub-step entirely when the question doesn't map to a tracked row with an
 existing answers artifact — there is nothing to stamp.
 
@@ -105,7 +105,7 @@ Always append one Activity Pulse event, regardless of whether a tracker stamp
 happened:
 
 ```
-rolester activity append --type system --actor agent \
+careerrat activity append --type system --actor agent \
   --title "Answered a screening question" --summary "<question fragment, truncated>" \
   --company "<Company>" --role "<Role>" --app-id <application id> --write
 ```

@@ -7,6 +7,7 @@ node_modules
 .git
 
 # Consolidated local user data root
+.careerrat
 .rolester
 
 # Internal local runtime/planning artifacts

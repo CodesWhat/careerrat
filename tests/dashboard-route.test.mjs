@@ -151,13 +151,13 @@ test("loadAgentGuidanceSnapshot forces Electron's child into Node mode and prese
     join(repoRoot, "src/cli/doctor.mjs"),
     `console.log(JSON.stringify({ agentGuidance: {
       electronRunAsNode: process.env.ELECTRON_RUN_AS_NODE,
-      callerEnv: process.env.ROLESTER_TEST_CALLER_ENV,
+      callerEnv: process.env.CAREERRAT_TEST_CALLER_ENV,
     } }));\n`
   );
 
   const snapshot = loadAgentGuidanceSnapshot({
     root: repoRoot,
-    env: { ROLESTER_TEST_CALLER_ENV: "preserved" },
+    env: { CAREERRAT_TEST_CALLER_ENV: "preserved" },
   });
 
   assert.deepEqual(snapshot, {

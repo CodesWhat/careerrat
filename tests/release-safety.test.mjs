@@ -12,6 +12,7 @@ test("local user data roots are excluded from git, docker, and Vercel surfaces",
   const dockerignore = await readText(".dockerignore");
   const vercelignore = await readText(".vercelignore");
 
+  assert.match(gitignore, /^\.careerrat\/$/m);
   assert.match(gitignore, /^\.rolester\/$/m);
   assert.match(gitignore, /^\/candidate\/$/m);
   assert.match(gitignore, /^workspace\/tracker\.\*$/m);
@@ -19,6 +20,7 @@ test("local user data roots are excluded from git, docker, and Vercel surfaces",
   assert.match(gitignore, /^config\/sourced-scan\.json$/m);
 
   for (const pattern of [
+    ".careerrat",
     ".rolester",
     ".internal",
     "candidate",
@@ -31,7 +33,7 @@ test("local user data roots are excluded from git, docker, and Vercel surfaces",
   assert.doesNotMatch(dockerignore, /^\*\.png$/m);
   assert.match(dockerignore, /^tracker-\*\.png$/m);
 
-  for (const pattern of [".rolester", ".internal", "candidate", "workspace", ".agents", "config"]) {
+  for (const pattern of [".careerrat", ".rolester", ".internal", "candidate", "workspace", ".agents", "config"]) {
     assert.match(vercelignore, new RegExp(`^/${escapeRegExp(pattern)}$`, "m"));
   }
 

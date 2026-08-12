@@ -1,6 +1,6 @@
 ---
 name: research-boards
-description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families -> propose adding through `rolester searches`, confirm-first.
+description: Web-search + legitimacy-screen NEW job boards for the candidate's domain/role families -> propose adding through `careerrat searches`, confirm-first.
 tier_1_inputs: [profile.candidate.domain, targeting role families, STEP 0 dedup set, modes verdict]
 tier_2_inputs: [per-board WebFetch bodies]
 ---
@@ -8,7 +8,7 @@ tier_2_inputs: [per-board WebFetch bodies]
 # research-boards
 
 Discovers new job boards and aggregators relevant to the candidate's domain and role
-families. Source config is accessed through `rolester searches` (`--json` for reads,
+families. Source config is accessed through `careerrat searches` (`--json` for reads,
 `--add-url` for writes). In DB workspaces this is DB-backed source config; in legacy
 workspaces it persists to `config/search-sources.yml`. Do not edit source YAML
 directly. Never writes a source without explicit user confirmation. Never duplicates
@@ -24,18 +24,18 @@ an already-configured board.
 |---|---|
 | Candidate targeting via DB-first accessor/compat export | `role_buckets[].name`, `role_buckets[].titles`, `role_buckets[].priority` |
 | Candidate profile via DB-first accessor/compat export | `candidate.domain`, `location.remote`, `location.home` |
-| Source config via `rolester searches --json` | `searches[].label`, `searches[].target`, `searches[].url`, `searches[].rssUrl` - build the already-configured URL+label set to dedupe against |
+| Source config via `careerrat searches --json` | `searches[].label`, `searches[].target`, `searches[].url`, `searches[].rssUrl` - build the already-configured URL+label set to dedupe against |
 
 ---
 
 ## STEP 0 — Load context
 
-Run `rolester doctor` and confirm it exits clean. If it fails, stop and report.
+Run `careerrat doctor` and confirm it exits clean. If it fails, stop and report.
 
 Check usage mode:
 
 ```
-rolester modes allows research:boards
+careerrat modes allows research:boards
 ```
 
 If it returns `skip`, do not run board discovery by default; explain that lean usage
@@ -43,7 +43,7 @@ mode treats board discovery as discretionary and offer to proceed only if the us
 explicitly overrides. If it returns `run`, continue.
 
 Read candidate context through DB-first accessors/compat exports and read source
-config with `rolester searches --json`. Extract:
+config with `careerrat searches --json`. Extract:
 
 - **Domain** — `profile.candidate.domain` (e.g. "software engineering", "finance", "logistics")
 - **Role families** — the `name` of every bucket in `targeting.role_buckets` (not titles; families drive query breadth)
@@ -186,7 +186,7 @@ boards the user wants added.
 For each board being added (auto or confirmed), use the existing searches CLI:
 
 ```
-rolester searches --add-url "<url>" --label "<label>"
+careerrat searches --add-url "<url>" --label "<label>"
 ```
 
 Where `<url>` is:
@@ -202,7 +202,7 @@ discovered board is candidate-specific (it matches *this* user's domain and role
 it must never touch `docs/SOURCES.md` — that file is shipped and published, and writing a
 discovered board there leaks one user's targeting into the public package. The durable record
 of every added board is:
-- its entry in source config through `rolester searches` (DB-backed in DB workspaces,
+- its entry in source config through `careerrat searches` (DB-backed in DB workspaces,
   legacy `config/search-sources.yml` otherwise), plus
 - the research log recorded in the next step (gitignored `workspace/research/`).
 
@@ -213,13 +213,13 @@ if a candidate-discovered board lands in it.
 After adding all boards, run:
 
 ```
-rolester searches
+careerrat searches
 ```
 
 Then run:
 
 ```
-rolester doctor
+careerrat doctor
 ```
 
 Confirm source config passes schema validation before reporting done.
@@ -227,7 +227,7 @@ Confirm source config passes schema validation before reporting done.
 **Optional — record a board-discovery audit note:**
 
 ```
-rolester research record "boards" --name board-discovery-<yyyy-mm-dd> --file <draft.md> --write
+careerrat research record "boards" --name board-discovery-<yyyy-mm-dd> --file <draft.md> --write
 ```
 
 where `<draft.md>` contains:
@@ -248,7 +248,7 @@ optional — skip if the user did not request it and no persistent audit record 
 When the audit note is written (or when boards are added even without an audit note), log the discovery to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
 
 ```
-rolester activity append --type research --actor agent \
+careerrat activity append --type research --actor agent \
   --title "Discovered <N> job boards" --summary "<one-line: what kind of boards / for what track>" --write
 ```
 
@@ -257,7 +257,7 @@ rolester activity append --type research --actor agent \
 ## Scope boundary
 
 `research-boards` discovers, screens, proposes, and (on confirmation) adds SOURCES
-through `rolester searches`. It does not:
+through `careerrat searches`. It does not:
 
 - scan sources for job postings (that is `search-jobs`)
 - evaluate individual postings for fit (that is `evaluate-job`)
@@ -271,14 +271,14 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 ```
 
 After board discovery, hand off to `discover-companies` so employer ATS boards are
-wired into tracked-company source config through `rolester companies` before the first `search-jobs` sweep. Only go
+wired into tracked-company source config through `careerrat companies` before the first `search-jobs` sweep. Only go
 straight to `search-jobs` if the user explicitly wants to skip company discovery.
 
 ## Final handoff
 
 End every run with the next agent task: `discover-companies` next. If the user
 explicitly skipped employer ATS discovery, record it with
-`rolester next --skip discover-companies --write`. Do not hand straight to
+`careerrat next --skip discover-companies --write`. Do not hand straight to
 `search-jobs` unless that skip is recorded or the workspace already has tracked companies.
 
 ---
@@ -315,9 +315,9 @@ REGISTRY-UPDATED: <yes | no>
   configured sources loaded in STEP 0.
 - **Quality gate.** A board must show at least one real, dated, domain-relevant listing
   to be proposed. An evergreen landing page or talent-pool gate is a rejection.
-- **Use the existing CLI.** Additions go through `rolester searches --add-url "<url>" --label "<label>"`. Do not edit `config/search-sources.yml` directly.
+- **Use the existing CLI.** Additions go through `careerrat searches --add-url "<url>" --label "<label>"`. Do not edit `config/search-sources.yml` directly.
 - **Registry write-back.** Record every added board in candidate-owned source config only -
-  through `rolester searches` plus the `workspace/research/` log. NEVER write
+  through `careerrat searches` plus the `workspace/research/` log. NEVER write
   discovered boards to `docs/SOURCES.md`; it ships and is published, so it stays field-neutral.
 
 ---
@@ -326,6 +326,6 @@ REGISTRY-UPDATED: <yes | no>
 
 | Intent | Command |
 |---|---|
-| See currently configured sources | `rolester searches` |
-| Add a confirmed board URL | `rolester searches --add-url "<url>" --label "<label>"` |
-| Health check after additions | `rolester doctor` |
+| See currently configured sources | `careerrat searches` |
+| Add a confirmed board URL | `careerrat searches --add-url "<url>" --label "<label>"` |
+| Health check after additions | `careerrat doctor` |

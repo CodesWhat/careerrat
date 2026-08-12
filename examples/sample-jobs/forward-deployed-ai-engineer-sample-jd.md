@@ -97,4 +97,4 @@ Send us your resume and, if you have one, a link to something you've built — a
 
 We're an equal opportunity employer. We don't discriminate based on race, religion, national origin, gender identity, sexual orientation, age, disability, or veteran status.
 
-*Thornfield Labs is a fictional company created for Rolester sample and testing purposes.*
+*Thornfield Labs is a fictional company created for CareerRat sample and testing purposes.*

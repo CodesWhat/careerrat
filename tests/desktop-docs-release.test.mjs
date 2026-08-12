@@ -46,7 +46,7 @@ test("desktop README teaches the app-first signed and notarized pilot path", asy
     /\/app\b/,
     /\/app\/onboarding\b/,
     /signed and notarized macOS DMG/i,
-    /ROLESTER_HOME/i,
+    /CAREERRAT_HOME/i,
     /internal\/ai\.env/i,
     /auto-update readiness/i,
   ]);

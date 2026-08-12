@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
@@ -8,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
+import { defaultProfileRoot } from "../src/core/automation/session.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { parseYaml } from "../src/core/profile/yaml.mjs";
 import { captureAndPersistOffersIfDb } from "../src/core/scoring/sourced-persistence.mjs";
@@ -15,7 +15,7 @@ import { extractReqId } from "../src/core/scoring/sourced-scanner.mjs";
 
 const pathCtx = { repoRoot: ROOT };
 const DEFAULT_CONFIG = userPath(pathCtx, "config/search-sources.yml");
-const DEFAULT_PROFILE_ROOT = join(homedir(), ".rolester", "board-profiles");
+const DEFAULT_PROFILE_ROOT = defaultProfileRoot();
 
 export function hiringCafeSearchUrl(searchQuery, searchState = {}) {
   const url = new URL("https://hiring.cafe/");
@@ -748,7 +748,9 @@ Options:
   --manual               Pause before every configured source capture.
   --browser NAME         Playwright channel. Use chrome for saved auth. Default: chromium.
   --headless             Run without a visible browser.
-  --profile-root DIR     Persistent profile root. Default: ~/.rolester/board-profiles.
+  --profile-root DIR     Persistent profile root. Default: ~/.careerrat/board-profiles
+                         (falls back to ~/.rolester/board-profiles if that's where your
+                         signed-in profiles already live).
   --per-source-limit N   Max offers per source. Default: 250.
   --limit N              Max offers in the combined snapshot. Default: unlimited.
   --scroll-pages N       Scroll result pages before extraction. Default: 0.

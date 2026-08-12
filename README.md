@@ -138,8 +138,8 @@ passed a real read of the posting.** Titles and keywords are triage, not truth.
 ## Running from source
 
 ```bash
-git clone https://github.com/CodesWhat/rolester
-cd rolester
+git clone https://github.com/CodesWhat/careerrat
+cd careerrat
 npm install
 npm link
 careerrat start claude

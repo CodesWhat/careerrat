@@ -9,7 +9,7 @@ tier_2_inputs: [per-company WebSearch/WebFetch bodies, careers-page resolution]
 
 Discovers **companies** likely to be hiring the candidate's target roles, resolves
 each to a careers board the scanner can sweep, screens them, and proposes adding them
-to the CareerRat source config (`rolester companies`: SQLite in DB workspaces,
+to the CareerRat source config (`careerrat companies`: SQLite in DB workspaces,
 legacy `config/sourced-scan.json` otherwise). Never writes a company without explicit
 user confirmation. Never duplicates a company already tracked, applied to, sourced,
 or excluded.
@@ -18,7 +18,7 @@ or excluded.
 
 This is the company analog of `research-boards`. `research-boards` finds **boards/aggregators**;
 `discover-companies` finds **employers** and wires their ATS board into the sweep. The sweep
-(`search-jobs` → `scan:sourced`) only ever scans configured tracked companies (`rolester
+(`search-jobs` → `scan:sourced`) only ever scans configured tracked companies (`careerrat
 companies`: SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) — it has no
 discovery of its own. This skill is what grows that list, so future sweeps reach beyond the set
 the candidate has already exhausted.
@@ -37,19 +37,19 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 |---|---|
 | `candidate/targeting.yml` | `role_buckets[].name`, `role_buckets[].titles`, `role_buckets[].priority`, `keep_signals`, `cut_signals`, `excluded_companies` |
 | `candidate/profile.yml` | `candidate.domain`, `location.remote`/`home`/`relocation`, `compensation.minimum_base` (comp-plausibility filter — never surface the figure outbound) |
-| Source config | `rolester companies` / `tracked_companies[].name`, `tracked_companies[].careers_url` — the company dedup + write target. In DB mode, `rolester companies` reads/writes SQLite; in legacy mode it reads/writes `config/sourced-scan.json`. |
+| Source config | `careerrat companies` / `tracked_companies[].name`, `tracked_companies[].careers_url` — the company dedup + write target. In DB mode, `careerrat companies` reads/writes SQLite; in legacy mode it reads/writes `config/sourced-scan.json`. |
 | `workspace/tracker.json` | `applications[].company`, `sourced[].company` — companies already in play; never re-propose |
 
 ---
 
 ## STEP 0 — Load context (load to decide)
 
-Run `rolester doctor` and confirm it exits clean. If it fails, stop and report.
+Run `careerrat doctor` and confirm it exits clean. If it fails, stop and report.
 
 Check usage mode:
 
 ```
-rolester modes allows research:companies
+careerrat modes allows research:companies
 ```
 
 If it returns `skip` / `downshift`, treat company discovery as discretionary: explain that
@@ -66,7 +66,7 @@ Read the input files above. Extract:
 
 Build the **dedup set** — the union of every company name the candidate is already engaged with, so nothing is re-proposed:
 
-- every `tracked_companies[].name` from `rolester companies` (already swept), **and**
+- every `tracked_companies[].name` from `careerrat companies` (already swept), **and**
 - every `applications[].company` and `sourced[].company` in `workspace/tracker.json` (already applied/sourced), **and**
 - every `targeting.excluded_companies` entry (hard-excluded).
 
@@ -202,8 +202,8 @@ For each company being added (auto or confirmed), use the companies helper — *
 SQLite source tables or `config/sourced-scan.json`**:
 
 ```
-rolester companies --add "<Company Name>" --url "<careers_url>"          # dry-run preview
-rolester companies --add "<Company Name>" --url "<careers_url>" --write  # commit
+careerrat companies --add "<Company Name>" --url "<careers_url>"          # dry-run preview
+careerrat companies --add "<Company Name>" --url "<careers_url>" --write  # commit
 ```
 
 The helper infers the provider from the host, **rejects any URL not on a supported ATS**, dedups
@@ -214,8 +214,8 @@ writes SQLite source config; in legacy workspaces it writes `config/sourced-scan
 After adding, confirm the result and validate:
 
 ```
-rolester companies
-rolester doctor
+careerrat companies
+careerrat doctor
 ```
 
 Confirm source config still validates before reporting done.
@@ -224,7 +224,7 @@ Then log the discovery to the Activity Pulse feed (see **Activity Pulse** in AGE
 summary event, not one per company:
 
 ```
-rolester activity append --type research --actor agent \
+careerrat activity append --type research --actor agent \
   --title "Discovered <N> companies to track" \
   --summary "<one line: what kind of companies / for which role families>" \
   --skill discover-companies --operation companies:add --write
@@ -255,7 +255,7 @@ growing the tracked-company list.
 ## Scope boundary
 
 `discover-companies` discovers employers, resolves their ATS board, screens, proposes, and (on
-confirmation) adds them to source config through `rolester companies`. It does not:
+confirmation) adds them to source config through `careerrat companies`. It does not:
 
 - scan boards for postings (that is `search-jobs`)
 - find boards/aggregators (that is `research-boards`)
@@ -306,7 +306,7 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
   silently never sweep).
 - **Comp screen stays internal.** Use `minimum_base` to filter implausible employers; never write
   the figure into the table, an artifact, or any outbound text (Privacy Invariant).
-- **Use the helper.** Additions go through `rolester companies --add … --write`. Do not edit
+- **Use the helper.** Additions go through `careerrat companies --add … --write`. Do not edit
   SQLite source tables or `config/sourced-scan.json` directly.
 - **Quality gate.** A company must be a real employer with at least one current, dated, relevant
   role on a resolvable board to be proposed. An inferred board with no visible roles is borderline
@@ -318,9 +318,9 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 
 | Intent | Command |
 |---|---|
-| See currently tracked companies | `rolester companies` |
-| Preview adding a company (dry run) | `rolester companies --add "<name>" --url "<careers_url>"` |
-| Add a confirmed company | `rolester companies --add "<name>" --url "<careers_url>" --write` |
-| Remove a tracked company | `rolester companies --remove "<name>" --write` |
+| See currently tracked companies | `careerrat companies` |
+| Preview adding a company (dry run) | `careerrat companies --add "<name>" --url "<careers_url>"` |
+| Add a confirmed company | `careerrat companies --add "<name>" --url "<careers_url>" --write` |
+| Remove a tracked company | `careerrat companies --remove "<name>" --write` |
 | Scan the newly added companies | `npm run scan:sourced -- --company "<name>" --write --intake --summary --verify` |
-| Health check after additions | `rolester doctor` |
+| Health check after additions | `careerrat doctor` |

@@ -105,12 +105,12 @@ describe("desktop packaged CAREERRAT_HOME storage", () => {
       const env = { CAREERRAT_HOME: runtime.careerratHome };
 
       const db = openDb({ repoRoot: runtime.repoRoot, env });
-      const expectedDbPath = join(runtime.careerratHome, "db", "rolester.db");
+      const expectedDbPath = join(runtime.careerratHome, "db", "careerrat.db");
 
       assert.equal(dbFilePath({ repoRoot: runtime.repoRoot, env }), expectedDbPath);
       assert.ok(existsSync(expectedDbPath), "database must be created under CAREERRAT_HOME");
       assert.equal(
-        existsSync(join(runtime.repoRoot, ".careerrat", "db", "rolester.db")),
+        existsSync(join(runtime.repoRoot, ".careerrat", "db", "careerrat.db")),
         false,
         "packaged startup must not create the database under staged resources"
       );
@@ -246,7 +246,7 @@ describe("desktop preferred port selection", () => {
     assert.equal(
       choosePreferredPort({
         isPackaged: true,
-        env: { ROLESTER_DESKTOP_PORT: "48123" },
+        env: { CAREERRAT_DESKTOP_PORT: "48123" },
       }),
       48123
     );
@@ -257,7 +257,7 @@ describe("desktop preferred port selection", () => {
       assert.equal(
         choosePreferredPort({
           isPackaged: true,
-          env: { ROLESTER_DESKTOP_PORT: value },
+          env: { CAREERRAT_DESKTOP_PORT: value },
         }),
         DEFAULT_PACKAGED_PORT,
         `${value} should use the packaged default`
@@ -269,7 +269,7 @@ describe("desktop preferred port selection", () => {
     assert.equal(
       choosePreferredPort({
         isPackaged: false,
-        env: { ROLESTER_DESKTOP_PORT: "48123" },
+        env: { CAREERRAT_DESKTOP_PORT: "48123" },
       }),
       0
     );

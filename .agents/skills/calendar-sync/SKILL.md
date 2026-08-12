@@ -20,7 +20,7 @@ calendar write remains confirm-first.
 Run:
 
 ```bash
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.calendar_sync`. Applicable platforms:
@@ -37,10 +37,10 @@ If the requested platform is not allowed, stop before opening a browser or
 running local automation and explain the opt-in path:
 
 ```bash
-rolester automation consent <platform> --write
-rolester automation enable calendar_sync --write
-rolester automation enable calendar_sync <platform> --write
-rolester automation status --json
+careerrat automation consent <platform> --write
+careerrat automation enable calendar_sync --write
+careerrat automation enable calendar_sync <platform> --write
+careerrat automation status --json
 ```
 
 The user must read the provider/platform terms themselves before recording
@@ -107,8 +107,8 @@ asked for that specific mutation.
 
 ## STEP 4 — Write back and render
 
-**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — use the
-`rolester data <verb>` command below (Data Write Contract, AGENTS.md). Nonzero
+**Mode detection:** run `careerrat data status`. Exit 0 → DB workspace — use the
+`careerrat data <verb>` command below (Data Write Contract, AGENTS.md). Nonzero
 exit → legacy workspace (no DB yet) — use the direct `tracker.json` write path
 below.
 
@@ -130,25 +130,25 @@ Avoid duplicates by normalized `provider + eventId + eventIso + title`.
 **DB workspace:**
 
 ```bash
-rolester data calendar write --data '<calendar write JSON>'
-rolester data verify
-rolester tracker --verify
+careerrat data calendar write --data '<calendar write JSON>'
+careerrat data verify
+careerrat tracker --verify
 ```
 
-`rolester data calendar write` bumps `meta.lastUpdatedAt`/`meta.version`, writes
+`careerrat data calendar write` bumps `meta.lastUpdatedAt`/`meta.version`, writes
 the Activity Pulse event, exports `workspace/tracker.json` +
 `workspace/activity.jsonl`, and dedupes by normalized
-`provider + eventId + eventIso + title`. Run `rolester tracker` afterward only
+`provider + eventId + eventIso + title`. Run `careerrat tracker` afterward only
 when a static snapshot is needed or the dev server is not running.
 
 **Legacy workspace (no DB):** append the record directly to
 `workspace/tracker.json#calendarWrites[]`, then run:
 
 ```bash
-rolester tracker --verify
+careerrat tracker --verify
 npm run verify:tracker
-rolester activity append --type system --title "Calendar event synced" --summary "Confirmed event written to the selected calendar provider." --tag calendar --write
-rolester tracker
+careerrat activity append --type system --title "Calendar event synced" --summary "Confirmed event written to the selected calendar provider." --tag calendar --write
+careerrat tracker
 ```
 
 Add concrete `--company`, `--role`, or `--app-id` refs when the synced event maps

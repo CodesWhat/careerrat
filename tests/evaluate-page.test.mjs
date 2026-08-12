@@ -68,10 +68,10 @@ test("GET /api/runtime/config returns the evaluate-job-only default allowlist", 
   }
 });
 
-test("GET /api/runtime/config reflects ROLESTER_RUNTIME_SKILLS opting more skills in", async () => {
+test("GET /api/runtime/config reflects CAREERRAT_RUNTIME_SKILLS opting more skills in", async () => {
   const repoRoot = tempRepoWithSkills(["evaluate-job", "track-outcomes"]);
   const dev = await bootServer(repoRoot, {
-    env: { ROLESTER_RUNTIME_SKILLS: "evaluate-job,track-outcomes" },
+    env: { CAREERRAT_RUNTIME_SKILLS: "evaluate-job,track-outcomes" },
   });
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);
@@ -85,7 +85,7 @@ test("GET /api/runtime/config reflects ROLESTER_RUNTIME_SKILLS opting more skill
 test("GET /api/runtime/config never lists a skill directory without a SKILL.md", async () => {
   const repoRoot = tempRepoWithSkills(["evaluate-job"]);
   const dev = await bootServer(repoRoot, {
-    env: { ROLESTER_RUNTIME_SKILLS: "evaluate-job,not-a-real-skill" },
+    env: { CAREERRAT_RUNTIME_SKILLS: "evaluate-job,not-a-real-skill" },
   });
   try {
     const res = await fetch(`${baseUrl(dev)}/api/runtime/config`);

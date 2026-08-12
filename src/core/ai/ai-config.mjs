@@ -74,8 +74,9 @@ function trimmedOrNull(v) {
   return s === "" ? null : s;
 }
 
-// fs touchpoint: read + parse config/ai.json (respects ROLESTER_HOME via
-// userPath, same generated-config redirect as config/sourced-scan.json).
+// fs touchpoint: read + parse config/ai.json (respects CAREERRAT_HOME, legacy
+// ROLESTER_HOME still honored, via userPath, same generated-config redirect
+// as config/sourced-scan.json).
 // Missing file, invalid JSON, or a schema violation all silently fall back to
 // { model: null, smallFastModel: null } — see the file-header note above.
 export function loadAiConfigFile({ root = DEFAULT_ROOT } = {}) {

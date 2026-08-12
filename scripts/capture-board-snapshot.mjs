@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { mkdirSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
@@ -10,6 +9,7 @@ const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 import { chromium } from "playwright";
 
+import { defaultProfileRoot } from "../src/core/automation/session.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { captureAndPersistOffersIfDb } from "../src/core/scoring/sourced-persistence.mjs";
 import { extractReqId } from "../src/core/scoring/sourced-scanner.mjs";
@@ -22,7 +22,7 @@ const waitForUser =
 const limit = Number(valueAfter("--limit") || 250);
 const outPath = valueAfter("--out");
 const ingest = args.includes("--ingest");
-const profileRoot = valueAfter("--profile-root") || join(homedir(), ".rolester", "board-profiles");
+const profileRoot = valueAfter("--profile-root") || defaultProfileRoot();
 const browserChannel = (
   valueAfter("--browser") ||
   valueAfter("--channel") ||
@@ -43,7 +43,9 @@ Options:
   --no-manual          Do not pause for login/filter adjustment.
   --limit N            Max offers to keep. Default: 250.
   --browser NAME       Playwright browser channel. Use "chrome" for Google OAuth. Default: chromium.
-  --profile-root DIR   Persistent browser profile root. Default: ~/.rolester/board-profiles.
+  --profile-root DIR   Persistent browser profile root. Default: ~/.careerrat/board-profiles
+                       (falls back to ~/.rolester/board-profiles if that's where your
+                       signed-in profiles already live).
   --out FILE           Output JSON file. Default: scan-results/<provider>-browser-<timestamp>.json.
   --ingest             After capture, write offers to SQLite sourced rows and JD artifacts.
 

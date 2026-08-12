@@ -123,11 +123,11 @@ describe("ai-env", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
-  it("writeLocalAiKey — uses ROLESTER_HOME/internal/ai.env when packaged home is set", () => {
+  it("writeLocalAiKey — uses CAREERRAT_HOME/internal/ai.env when packaged home is set", () => {
     const root = buildTempRoot();
     const repoRoot = join(root, "Resources", "careerrat");
     const careerratHome = join(root, "Application Support", "CareerRat", "data");
-    const env = { ROLESTER_HOME: careerratHome };
+    const env = { CAREERRAT_HOME: careerratHome };
 
     const result = writeLocalAiKey({
       repoRoot,

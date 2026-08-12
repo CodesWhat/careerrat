@@ -19,13 +19,13 @@ Use this skill when the user asks why they're getting filtered, to review their 
 
 **Trigger sources.** This skill is entered either:
 - Explicitly by the user ("why am I getting filtered", "review my strategy", "re-rank prospects", "what should I change").
-- Via handoff from `track-outcomes` STEP 6, which reads the persisted reevaluation gate at `tracker.json#analytics.reevaluation` (refreshed by `rolester analytics --write` as part of the Tracker Write Contract) and hands off here when `reevaluation.due` is true — passing `reevaluation.dueReasons` (the tripped threshold names and counts).
+- Via handoff from `track-outcomes` STEP 6, which reads the persisted reevaluation gate at `tracker.json#analytics.reevaluation` (refreshed by `careerrat analytics --write` as part of the Tracker Write Contract) and hands off here when `reevaluation.due` is true — passing `reevaluation.dueReasons` (the tripped threshold names and counts).
 
 **Read the persisted gate; do not recompute the trip.** The threshold comparison is already applied by `buildReevaluationAnalytics()` and stored in `tracker.json#analytics.reevaluation` — thresholds resolved from candidate targeting config `reevaluation.rejection_total` / `reevaluation.rejection_per_family` (defaults: 7 total, 3 per family if absent). This mirrors `track-outcomes` STEP 6 and the AGENTS.md Tracker Write Contract — read the block, trust `reevaluation.due`.
 
 Pre-flight: `analytics.mjs` reads `workspace/tracker.json` (the source of truth) and resolves it relative to the repo root, so it runs from any cwd — no dashboard render is required first. If the file is missing, seed it: `cp templates/tracker.json workspace/tracker.json`.
 
-Run: `rolester analytics refresh --json` (dry-run read; use `-- --write` if you also want to persist the refresh to `tracker.json#analytics`).
+Run: `careerrat analytics refresh --json` (dry-run read; use `-- --write` if you also want to persist the refresh to `tracker.json#analytics`).
 
 The output (from `buildReevaluationAnalytics` in `src/core/tracker/outcome-analysis.mjs`) includes:
 - `byStatus` — counts keyed by `status` value (e.g. `rejected`, `offer`, `awaiting`, `interview`).
@@ -41,7 +41,7 @@ The output (from `buildReevaluationAnalytics` in `src/core/tracker/outcome-analy
 - If `reevaluation.due` is false AND the user did NOT explicitly request a review: report current counts, state "below threshold — no action needed," and exit.
 - If `reevaluation.due` is true OR user explicitly requested: continue to STEP 1.
 
-Also read application limits now. In DB mode use `rolester data candidate get --json` (`application-limits.companies[]`); in legacy mode read `candidate/application-limits.yml`. Identify any per-company caps or cooldowns that could be inflating rejection counts — exclude cap-blocked entries from reject-pattern tallies (a cap block is not a strategy signal).
+Also read application limits now. In DB mode use `careerrat data candidate get --json` (`application-limits.companies[]`); in legacy mode read `candidate/application-limits.yml`. Identify any per-company caps or cooldowns that could be inflating rejection counts — exclude cap-blocked entries from reject-pattern tallies (a cap block is not a strategy signal).
 
 ---
 
@@ -92,7 +92,7 @@ Tally rejection counts by `kind` value. Name the **dominant choke point** (the `
 For each affected role-family, check whether this rejection pattern was already logged (avoid surfacing the same recommendation twice if it was already actioned). Read via the CLI:
 
 ```
-rolester learnings read "<role title or family>" --family
+careerrat learnings read "<role title or family>" --family
 ```
 
 (Pass the family slug with `--family`, or pass a role title without it and the CLI will resolve the slug. If the family has no file yet the CLI prints a note to stderr and exits 0 — a missing file is normal and not an error.)
@@ -147,7 +147,7 @@ Construct the recommendation block as follows:
 1. **Re-rank sourced prospects** — `<specific family/channel to promote or deprioritize>` (affects `workspace/tracker.json` `priority`/`status` fields). N = `<N>`. [confirm-first if > 5 rows]
 2. **Tighten targeting.yml cut-signals** — add `"<proposed signal string>"` to `cut_signals`. N = `<N>`. [write-and-report if N ≥ 3 and single clear signal; confirm-first if broad]
 3. **Re-anchor comp** — propose new candidate profile `compensation.target_base` or `compensation.minimum_base`. [confirm-first — consequential]
-4. **Fit recalibration** — `<high-fit-rejects pattern>`: spot-check with `rolester evaluate` on 2–3 rejecting roles, then propose `fit_bands` or `keep_signals` tweak. [confirm-first — re-scores board]
+4. **Fit recalibration** — `<high-fit-rejects pattern>`: spot-check with `careerrat evaluate` on 2–3 rejecting roles, then propose `fit_bands` or `keep_signals` tweak. [confirm-first — re-scores board]
 5. **Double-down signal** — `<family or channel converting>`: increase sourcing weight here.
 
 **Your call:** Accept all / accept some / decline. State which items to apply and I will write them now.
@@ -175,7 +175,7 @@ If comp-stage rejections cluster, or `warn` flags appear on below-floor applicat
 
 **(d) Fit recalibration**
 If high-fit roles (score ≥ high_min from targeting.fit_bands) reject while stretch roles (< med_min) advance, the scoring prior is off.
-Spot-check: run `rolester evaluate <path-to-job.md>` on a sample of 2–3 of the rejecting high-fit roles to see what would re-score them to med. Propose a targeted `keep_signals` or `fit_bands` threshold adjustment based on what those runs show. Do not silently re-score the whole board.
+Spot-check: run `careerrat evaluate <path-to-job.md>` on a sample of 2–3 of the rejecting high-fit roles to see what would re-score them to med. Propose a targeted `keep_signals` or `fit_bands` threshold adjustment based on what those runs show. Do not silently re-score the whole board.
 
 **(e) Writing/positioning adjustment**
 If transcripts or rejection notes reveal a recurring overclaim or framing gap: propose a concrete change to `candidate/writing-style.md` (a specific line or section to add/modify, not vague advice). Note that `npm run calibrate:style` must run if new writing samples were added to `workspace/writing-samples/`.
@@ -190,22 +190,22 @@ Present all recommendations together as a numbered list with evidence for each.
 
 **Confirm-first (consequential):** dropping the comp floor, adding a broad excluded-company entry, large re-rank (> 5 sourced roles), or any change to candidate targeting `fit_bands` (a threshold change re-scores the entire board — always confirm first). Propose the exact change and get explicit user yes before writing.
 
-If the user states a new gate mid-flow ("never apply to X", "below $Y is a no", "add Z as a cut signal"), write it through `rolester gate` immediately (write-and-report for unambiguous; confirm-first for broad-exclusion/comp-drop) — a stated gate must never live only in chat.
+If the user states a new gate mid-flow ("never apply to X", "below $Y is a no", "add Z as a cut signal"), write it through `careerrat gate` immediately (write-and-report for unambiguous; confirm-first for broad-exclusion/comp-drop) — a stated gate must never live only in chat.
 
 ---
 
 ## STEP 7 — WRITE-BACK (on accept)
 
 **(a) Targeting signal changes**
-Use `rolester gate keep-signal "<signal>" --write` or `rolester gate cut-signal "<signal>" --write` for accepted signals. For fit-band threshold changes, use `rolester data candidate patch targeting --data ...` in DB mode after explicit confirmation; legacy YAML is fallback only when no DB exists. Run `rolester doctor`.
+Use `careerrat gate keep-signal "<signal>" --write` or `careerrat gate cut-signal "<signal>" --write` for accepted signals. For fit-band threshold changes, use `careerrat data candidate patch targeting --data ...` in DB mode after explicit confirmation; legacy YAML is fallback only when no DB exists. Run `careerrat doctor`.
 
 **(b) Profile comp re-anchor**
-If comp re-anchor accepted, use `rolester gate comp-target <N> --write --confirm` or `rolester gate comp-floor <N> --write --confirm`.
+If comp re-anchor accepted, use `careerrat gate comp-target <N> --write --confirm` or `careerrat gate comp-floor <N> --write --confirm`.
 **Do NOT touch `compensation.current_base`** — it is a private gate input, not an output.
 
 **(c) Re-rank write-back**
 
-**DB workspaces:** never hand-edit `workspace/tracker.json`. Apply each accepted re-rank through the owning verbs — `rolester data app set-status` for status changes, `rolester data app set-fields` for `priority` and the `followUp` clears, `rolester data comm upsert` / `comm append-message` for the comm-side clears and the note (`node src/cli/data.mjs --help` for exact syntax).
+**DB workspaces:** never hand-edit `workspace/tracker.json`. Apply each accepted re-rank through the owning verbs — `careerrat data app set-status` for status changes, `careerrat data app set-fields` for `priority` and the `followUp` clears, `careerrat data comm upsert` / `comm append-message` for the comm-side clears and the note (`node src/cli/data.mjs --help` for exact syntax).
 
 **Legacy workspaces:** edit `workspace/tracker.json` directly for any accepted re-rank changes (update `priority` or `status` fields on the affected rows).
 
@@ -217,7 +217,7 @@ If comp re-anchor accepted, use `rolester gate comp-target <N> --write --confirm
 
 Echo the cleared fields for each affected row: `Cleared CTAs on <company>/<role>: followUp.due, comm.nextActionDue, comm.draft → null; note appended.`
 
-Run `rolester data verify` (DB mode) or `rolester tracker --verify` (legacy) immediately after.
+Run `careerrat data verify` (DB mode) or `careerrat tracker --verify` (legacy) immediately after.
 
 **(d) learnings/<family>.md — append dated entry**
 For each affected role-family, compose the entry body as markdown using this template:
@@ -233,11 +233,11 @@ The `## <ISO-DATE> — <label>` heading is produced by the CLI (`--title` / `--d
 
 1. Dry-run (lints for placeholders and comp leaks):
    ```
-   rolester learnings append "<role title or family>" --title "<short pattern label>" --body-file <path-to-temp-file>
+   careerrat learnings append "<role title or family>" --title "<short pattern label>" --body-file <path-to-temp-file>
    ```
 2. Commit on success:
    ```
-   rolester learnings append "<role title or family>" --title "<short pattern label>" --body-file <path-to-temp-file> --write
+   careerrat learnings append "<role title or family>" --title "<short pattern label>" --body-file <path-to-temp-file> --write
    ```
 
 Pass `--family` if providing an explicit slug rather than a role title. Pass `--date YYYY-MM-DD` to override today's date. The CLI derives the family slug from candidate targeting config and creates `candidate/learnings/` and the file on first `--write`.
@@ -250,7 +250,7 @@ A completed review must clear the dashboard "review ready" nudge whether or not 
 adjustment was accepted — running the analysis *is* the review. Stamp the marker:
 
 ```
-rolester strategy-review stamp --write
+careerrat strategy-review stamp --write
 ```
 
 This records `tracker.json#strategyReview` = `{ lastReviewedAt, snapshot: { applied,
@@ -270,10 +270,10 @@ counts stay above threshold regardless of whether a review just ran.
 
 Run in sequence:
 
-1. `rolester tracker --verify` — schema check passes with zero errors.
+1. `careerrat tracker --verify` — schema check passes with zero errors.
 2. `npm run verify:tracker` — tracker integrity check (foundations-spec §6, distinct from schema check above).
-3. `rolester tracker` — re-render `workspace/tracker.html` so any re-ranking changes appear in the dashboard.
-4. `node src/cli/lint-placeholders.mjs candidate/learnings/` — belt-and-suspenders final sweep for placeholder strings in learning files. (`rolester learnings append` already lints each entry on write; this is a backstop for the whole directory.)
+3. `careerrat tracker` — re-render `workspace/tracker.html` so any re-ranking changes appear in the dashboard.
+4. `node src/cli/lint-placeholders.mjs candidate/learnings/` — belt-and-suspenders final sweep for placeholder strings in learning files. (`careerrat learnings append` already lints each entry on write; this is a backstop for the whole directory.)
 5. If `candidate/writing-style.md` was changed: `node src/cli/lint-placeholders.mjs candidate/writing-style.md`.
 
 All steps must pass before declaring the skill complete.
@@ -281,7 +281,7 @@ All steps must pass before declaring the skill complete.
 Then log the strategy review to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
 
 ```
-rolester activity append --type system --actor agent \
+careerrat activity append --type system --actor agent \
   --title "Strategy review" --summary "<what changed and why>" --write
 ```
 

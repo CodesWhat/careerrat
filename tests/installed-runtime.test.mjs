@@ -92,7 +92,7 @@ test("detectInstalledRuntimes finds multiple CLIs outside the inherited PATH", (
   executable(codexPath);
   try {
     const inventory = detectInstalledRuntimes({
-      env: { PATH: "", ROLESTER_RUNTIME_EXTRA_PATHS: brewDir },
+      env: { PATH: "", CAREERRAT_RUNTIME_EXTRA_PATHS: brewDir },
       platform: "darwin",
       homeDir,
     });
@@ -255,7 +255,7 @@ test("Open Terminal runs only the allowlisted sign-in command on macOS", () => {
 
 test("installed runtime selection persists under the active private CareerRat home", () => {
   const root = tempRoot();
-  const env = { ROLESTER_HOME: join(root, "private") };
+  const env = { CAREERRAT_HOME: join(root, "private") };
   try {
     assert.deepEqual(loadInstalledRuntimeSelection({ repoRoot: root, env }), {
       runtimeId: null,

@@ -99,7 +99,7 @@
     "app:dev": "npm run dev --workspace apps/web",
     "app:build": "npm run build --workspace apps/web",
     "desktop": "npm --workspace apps/desktop run dev",
-    "desktop:fresh": "ROLESTER_HOME=.rolester-fresh npm run desktop",
+    "desktop:fresh": "CAREERRAT_HOME=.careerrat-fresh npm run desktop",
     "desktop:dist": "npm --workspace apps/desktop run dist",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",

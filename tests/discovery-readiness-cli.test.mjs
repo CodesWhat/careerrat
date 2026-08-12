@@ -16,7 +16,7 @@ function tempHome() {
 function runCli(script, args, home) {
   return spawnSync(process.execPath, [script, ...args], {
     cwd: ROOT,
-    env: { ...process.env, ROLESTER_HOME: home },
+    env: { ...process.env, CAREERRAT_HOME: home },
     encoding: "utf8",
   });
 }
@@ -24,7 +24,7 @@ function runCli(script, args, home) {
 function runCareerRat(args, home) {
   return spawnSync(process.execPath, ["bin/careerrat.mjs", ...args], {
     cwd: ROOT,
-    env: { ...process.env, ROLESTER_HOME: home },
+    env: { ...process.env, CAREERRAT_HOME: home },
     encoding: "utf8",
   });
 }
@@ -302,7 +302,7 @@ test("doctor reads company ATS readiness from DB source config when legacy confi
 
 test("doctor reads broad search readiness from DB source config when legacy config is absent", () => {
   const home = tempHome();
-  const env = { ...process.env, ROLESTER_HOME: home };
+  const env = { ...process.env, CAREERRAT_HOME: home };
   try {
     candidateSetupInitialize({ repoRoot: ROOT, env });
     sourceConfigPut({
@@ -394,7 +394,7 @@ test("router tells agents to follow doctor Agent guidance instead of raw list co
 
   assert.match(text, /Agent guidance/);
   assert.match(text, /canonical next handoff/);
-  assert.match(text, /do not treat `rolester searches` or `rolester companies` as the workflow/);
+  assert.match(text, /do not treat `careerrat searches` or `careerrat companies` as the workflow/);
 });
 
 test("router makes proactive next-skill recommendations beyond cold start", () => {

@@ -125,7 +125,8 @@ mail login wall, mail 2FA prompt, captcha, or unexpected interstitial.
 Which provider drives the live session is itself a setting — `extension` (the
 **recommended default**; it already holds your logins and stores no credentials) or
 `playwright` (the fallback: a one-time interactive login per platform, persistent
-profile at `~/.rolester/board-profiles/<platform>`). It's a *how-it-runs* choice and
+profile at `~/.careerrat/board-profiles/<platform>` — falls back to an existing
+`~/.rolester/board-profiles/<platform>` in place). It's a *how-it-runs* choice and
 never affects `mayRun()` — provider does not gate whether a capability is allowed.
 Change it the same safe way as the toggles (dry-run by default, schema-validated,
 comment-preserving; first `--write` scaffolds the file):

@@ -50,6 +50,7 @@ const privateOwnerRoots = new Set([
   "candidate",
   "workspace",
   ".internal",
+  ".careerrat",
   ".rolester",
   "tmp-skill-conversion",
 ]);

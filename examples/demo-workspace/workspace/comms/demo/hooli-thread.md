@@ -1,13 +1,13 @@
 # Email Thread — Hooli, Principal Engineer AI Platform
 **Thread status:** Closed (declined 2026-06-13)
-**Parties:** Riley Chen (riley.chen@rolester.dev) ↔ Dana Park, Technical Recruiter (dana.park@hooli.example)
+**Parties:** Riley Chen (riley.chen@careerrat.dev) ↔ Dana Park, Technical Recruiter (dana.park@hooli.example)
 
 ---
 
 ## Message 1 — Inbound | 2026-05-08
 
 **From:** dana.park@hooli.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Principal Engineer, AI Platform — Hooli (referral from Marcus Webb)
 
 Hi Riley,
@@ -27,7 +27,7 @@ dana.park@hooli.example
 
 ## Message 2 — Outbound | 2026-05-09
 
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** dana.park@hooli.example
 **Subject:** Re: Principal Engineer, AI Platform — Hooli (referral from Marcus Webb)
 
@@ -48,7 +48,7 @@ Riley
 ## Message 3 — Inbound | 2026-05-10
 
 **From:** dana.park@hooli.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Re: Principal Engineer, AI Platform — Hooli (referral from Marcus Webb)
 
 Riley,
@@ -66,7 +66,7 @@ Dana
 ## Message 4 — Inbound | 2026-06-09
 
 **From:** dana.park@hooli.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Hooli — Offer: Principal Engineer, AI Platform
 
 Hi Riley,
@@ -98,7 +98,7 @@ Dana
 
 ## Message 5 — Outbound | 2026-06-13
 
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** dana.park@hooli.example
 **Subject:** Re: Hooli — Offer: Principal Engineer, AI Platform
 
@@ -119,7 +119,7 @@ Riley
 ## Message 6 — Inbound | 2026-06-13
 
 **From:** dana.park@hooli.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Re: Hooli — Offer: Principal Engineer, AI Platform
 
 Riley,

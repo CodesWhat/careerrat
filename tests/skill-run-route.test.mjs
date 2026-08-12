@@ -103,8 +103,8 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
     {
       repoRoot,
       env: {
-        ROLESTER_RUNTIME_SKILLS: "evaluate-job,answer-question,search-jobs",
-        ROLESTER_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies,search-jobs",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job,answer-question,search-jobs",
+        CAREERRAT_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies,search-jobs",
         ANTHROPIC_API_KEY: "sk-ant-test",
       },
     }
@@ -147,8 +147,8 @@ test("GET /api/runtime/config: reports no AI route and no discovery chat handoff
   const server = await bootRouteServer(async () => {}, {
     repoRoot,
     env: {
-      ROLESTER_RUNTIME_SKILLS: "evaluate-job",
-      ROLESTER_CHAT_SKILLS: "ingest-profile",
+      CAREERRAT_RUNTIME_SKILLS: "evaluate-job",
+      CAREERRAT_CHAT_SKILLS: "ingest-profile",
     },
   });
   try {
@@ -185,7 +185,7 @@ test("GET /api/runtime/config: reports unsandboxed tool-heavy execution as unava
   const server = await bootRouteServer(async () => {}, {
     repoRoot,
     env: {
-      ROLESTER_RUNTIME_SKILLS: "apply-job,sync-status,evaluate-job",
+      CAREERRAT_RUNTIME_SKILLS: "apply-job,sync-status,evaluate-job",
       ANTHROPIC_API_KEY: "sk-ant-secret",
       APPLE_ID_PASSWORD: "apple-secret",
     },

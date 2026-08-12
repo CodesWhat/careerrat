@@ -90,7 +90,7 @@
       "id": "employer-wishlist",
       "whatTheyPasted": "A wishlist of employers to target / \"find companies like X to add\"",
       "routeTo": "`discover-companies`",
-      "capturesInto": "tracked-company source config through `rolester companies` (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) (confirm-first)",
+      "capturesInto": "tracked-company source config through `careerrat companies` (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) (confirm-first)",
       "m9": { "status": "deferred", "kinds": [], "lane": null, "skill": "discover-companies" }
     },
     {

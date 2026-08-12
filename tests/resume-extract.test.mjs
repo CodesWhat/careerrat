@@ -124,7 +124,7 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): resume-extract reads a re
           ? `Read the file at this exact path: ${pdfPath}\n\n${correction}`
           : { path: pdfPath },
         repoRoot,
-        env: { ...process.env, ROLESTER_RUNTIME_SKILLS: "resume-extract" },
+        env: { ...process.env, CAREERRAT_RUNTIME_SKILLS: "resume-extract" },
         tools: ["Read"],
         onEvent: (evt) => {
           if (evt.type !== "assistant") return;

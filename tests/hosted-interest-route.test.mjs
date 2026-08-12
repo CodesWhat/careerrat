@@ -24,7 +24,7 @@ afterEach(() => {
   roots.clear();
 });
 
-function boot({ env = { ROLESTER_DESKTOP_SHELL: "1" } } = {}) {
+function boot({ env = { CAREERRAT_DESKTOP_SHELL: "1" } } = {}) {
   const repoRoot = root();
   const routes = new Map();
   mountHostedInterestRoutes({

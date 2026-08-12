@@ -188,8 +188,8 @@ function buildMinimalDocx(paragraphs) {
 }
 
 const PROXY_ENV = {
-  ROLESTER_AI_PROXY_URL: "http://127.0.0.1:7788",
-  ROLESTER_AI_PROXY_TOKEN: "devtoken",
+  CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
+  CAREERRAT_AI_PROXY_TOKEN: "devtoken",
 };
 
 function fakeSdk(messages) {

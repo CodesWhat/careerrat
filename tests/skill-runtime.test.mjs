@@ -97,7 +97,7 @@ test("resolveAllowedSkills: defaults to evaluate-job + answer-question + tailor-
 test("resolveAllowedSkills: an explicit empty env value locks everything out", () => {
   const repoRoot = tempRepoWithSkill("evaluate-job");
   try {
-    assert.deepEqual(resolveAllowedSkills({ repoRoot, env: { ROLESTER_RUNTIME_SKILLS: "" } }), []);
+    assert.deepEqual(resolveAllowedSkills({ repoRoot, env: { CAREERRAT_RUNTIME_SKILLS: "" } }), []);
   } finally {
     rmSync(repoRoot, { recursive: true, force: true });
   }
@@ -109,7 +109,7 @@ test("resolveAllowedSkills: respects a comma list and never allows an undiscover
     assert.deepEqual(
       resolveAllowedSkills({
         repoRoot,
-        env: { ROLESTER_RUNTIME_SKILLS: "evaluate-job, apply-job , not-a-skill" },
+        env: { CAREERRAT_RUNTIME_SKILLS: "evaluate-job, apply-job , not-a-skill" },
       }),
       ["evaluate-job"] // apply-job/not-a-skill have no SKILL.md under this fixture repoRoot
     );
@@ -729,7 +729,7 @@ test("runSkillStream: proxy route writes NO usage_event of its own (the proxy al
       skill: "evaluate-job",
       input: "hi",
       repoRoot,
-      env: { ROLESTER_AI_PROXY_URL: "http://127.0.0.1:7788", ROLESTER_AI_PROXY_TOKEN: "devtoken" },
+      env: { CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788", CAREERRAT_AI_PROXY_TOKEN: "devtoken" },
       onEvent: () => {},
       loadSdk: async () => fakeSdk(SAMPLE_RUN),
     });
@@ -769,7 +769,7 @@ test("runSkillStream: aborting mid-run (client disconnect) stops the loop and re
 
 test("runSkillStream: a selected installed CLI bypasses the Agent SDK and streams bounded events", async () => {
   const repoRoot = tempRepoWithSkill("resume-extract");
-  const env = { ROLESTER_RUNTIME_SKILLS: "resume-extract" };
+  const env = { CAREERRAT_RUNTIME_SKILLS: "resume-extract" };
   writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
   try {
     const events = [];
@@ -895,7 +895,7 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): a real, tiny query agains
       skill: "ping",
       input: "ping",
       repoRoot,
-      env: { ...process.env, ROLESTER_RUNTIME_SKILLS: "ping" },
+      env: { ...process.env, CAREERRAT_RUNTIME_SKILLS: "ping" },
       onEvent: (evt) => events.push(evt.type),
     });
     assert.ok(events.includes("result"), `expected a "result" event, got: ${events.join(", ")}`);

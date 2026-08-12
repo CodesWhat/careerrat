@@ -132,11 +132,11 @@ test("safeAssetPath custom prefix keeps traversal blocked", () => {
 // ── resolvePort ──────────────────────────────────────────────────────────────
 
 test("resolvePort: --port flag wins", () => {
-  assert.equal(resolvePort(["--port", "8080"], { ROLESTER_DEV_PORT: "9000" }), 8080);
+  assert.equal(resolvePort(["--port", "8080"], { CAREERRAT_DEV_PORT: "9000" }), 8080);
 });
 
 test("resolvePort: env used when no flag", () => {
-  assert.equal(resolvePort([], { ROLESTER_DEV_PORT: "9000" }), 9000);
+  assert.equal(resolvePort([], { CAREERRAT_DEV_PORT: "9000" }), 9000);
 });
 
 test("resolvePort: default 7777 when nothing set", () => {
@@ -144,7 +144,7 @@ test("resolvePort: default 7777 when nothing set", () => {
 });
 
 test("resolvePort: invalid flag falls through to env then default", () => {
-  assert.equal(resolvePort(["--port", "abc"], { ROLESTER_DEV_PORT: "9000" }), 9000);
+  assert.equal(resolvePort(["--port", "abc"], { CAREERRAT_DEV_PORT: "9000" }), 9000);
   assert.equal(resolvePort(["--port", "99999"], {}), 7777);
   assert.equal(resolvePort(["--port", "0"], {}), 7777);
 });

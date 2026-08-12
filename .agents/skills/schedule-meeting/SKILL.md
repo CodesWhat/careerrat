@@ -32,7 +32,7 @@ scheduling, hand it back to `email-comms`. This skill draws on the same comms ma
 ## Outputs
 
 - a complete availability / confirmation reply (subject + body, no placeholders)
-- an optional calendar-ready hold (`.ics`) written to `~/Downloads/rolester/`
+- an optional calendar-ready hold (`.ics`) written to `~/Downloads/careerrat/`
 - updated `workspace/tracker.json` — `communications[].messages[]` + status, a
   `applications[].conversations[]` entry when a meeting is booked, and
   `interviewAt` / `nextInterviewAt` + `interviewNote` on the application row
@@ -59,8 +59,8 @@ external calendar without explicit confirmation (see RULES).
 
 ## STEP 1 — Match to tracker thread
 
-**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — every
-write step below gives the `rolester data <verb>` command (Data Write Contract,
+**Mode detection:** run `careerrat data status`. Exit 0 → DB workspace — every
+write step below gives the `careerrat data <verb>` command (Data Write Contract,
 AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
 gives the existing direct JSON-edit instructions, unchanged.
 
@@ -70,7 +70,7 @@ a real thread, create one (same shape as `email-comms` STEP 1: `id`, `applicatio
 `company`, `role`, `channel`, `status: "needs-reply"`, `summary`) and write it before
 drafting. Don't draft against a thread that isn't recorded.
 
-- **DB workspace:** `rolester data comm upsert --data '<the new record JSON>'` (full-row insert).
+- **DB workspace:** `careerrat data comm upsert --data '<the new record JSON>'` (full-row insert).
 - **Legacy workspace (no DB):** write the updated `workspace/tracker.json` directly.
 
 ---
@@ -104,7 +104,7 @@ they do not assert the candidate is actually free.
 If the `availability` block is absent or thin, **ask the user for their real availability
 once** (which days/times work, meeting length, timezone), then — confirm-first — offer to
 persist it to candidate profile config (`availability`) so future runs don't ask again.
-In DB mode use `rolester data candidate patch profile --data ...`; in legacy mode use
+In DB mode use `careerrat data candidate patch profile --data ...`; in legacy mode use
 the guarded candidate-config write path. Echo the CLI confirmation.
 
 **Honesty (hard): never invent availability.** Only propose windows the candidate's
@@ -124,7 +124,7 @@ calendar, or whenever `calendar_read` is already enabled.
 **Consent gate.** Free/busy ingestion runs only under the `calendar_read` capability:
 
 ```bash
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.calendar_read`. Platforms:
@@ -140,9 +140,9 @@ that platform's consent all true). If the requested platform is not allowed, **d
 calendar** — fall back to the draft-only path in STEP 4 and surface the opt-in commands:
 
 ```bash
-rolester automation consent <platform> --write
-rolester automation enable calendar_read <platform> --write
-rolester automation status --json
+careerrat automation consent <platform> --write
+careerrat automation enable calendar_read <platform> --write
+careerrat automation status --json
 ```
 
 **Read free/busy — read-only and opaque.** Through the session browser (Browser Automation
@@ -164,15 +164,15 @@ note when it was taken, and re-ingest before relying on it for a fresh decision.
   `tracker.json`:
 
   ```bash
-  rolester data calendar busy --data '<JSON array of opaque blocks>' --source calendar_read
+  careerrat data calendar busy --data '<JSON array of opaque blocks>' --source calendar_read
   ```
 
   The verb stores `calendarBusy[]` as top-level tracker state, dedupes on
   `provider + startIso + endIso`, forces `label: "Busy"`, stamps
   `ingestedAt`, bumps meta, logs one activity event, and exports the generated
   legacy files.
-- **Legacy workspace (no DB):** after writing, validate + re-render (`rolester tracker --verify`
-  then `rolester tracker`); the Calendar then shows the windows as muted "Busy" blocks alongside
+- **Legacy workspace (no DB):** after writing, validate + re-render (`careerrat tracker --verify`
+  then `careerrat tracker`); the Calendar then shows the windows as muted "Busy" blocks alongside
   actionable events.
 
 ---
@@ -231,7 +231,7 @@ When a slot is settled (or proposed for the candidate's own hold), prepare a cal
 hold so it lands cleanly:
 
 - **Always-available, dependency-free:** write a valid `.ics` (VEVENT) to the
-  company's Downloads folder — `~/Downloads/rolester/<Company>/<Company> - <Round> Invite.ics`
+  company's Downloads folder — `~/Downloads/careerrat/<Company>/<Company> - <Round> Invite.ics`
   (per the Artifact Contract: organized by company, then by round; real company
   name, no brackets) — `UID`, `DTSTART`/`DTEND`
   with the correct timezone (or UTC `Z`), `SUMMARY` (e.g. "<Company> — <stage> with <who>"),
@@ -243,7 +243,7 @@ hold so it lands cleanly:
   confirm-first action — show what you'll create and wait for an explicit yes. Never create,
   move, or delete a calendar event silently.
 
-Keep `.ics` content local (`~/Downloads/rolester/` or `workspace/`). Never put
+Keep `.ics` content local (`~/Downloads/careerrat/` or `workspace/`). Never put
 `current_base` or any private comp field in a hold.
 
 ---
@@ -261,10 +261,10 @@ set `comm.draft = null` (and `app.followUp.draft = null` if the reply was backed
 A partial write — messages[] updated but draft still set — leaves the "Ready to send" CTA
 live after the reply has gone out.
 
-- **DB workspace:** `rolester data comm append-message <comm-id> --data '<message JSON above>'`
+- **DB workspace:** `careerrat data comm append-message <comm-id> --data '<message JSON above>'`
   appends the message and auto-rolls `lastInboundAt`/`lastOutboundAt` from `direction`. If this
   call flips `direction` to `outbound-sent` and the status is advancing to `waiting`, follow with
-  `rolester data comm mark-sent <comm-id> [--at <iso>]` — it clears `comm.draft` (and
+  `careerrat data comm mark-sent <comm-id> [--at <iso>]` — it clears `comm.draft` (and
   `app.followUp.draft` when linked) automatically in the same transaction; do not hand-write that
   clear. For any other status target, use the read-patch-persist pattern in (b) below instead.
 - **Legacy workspace (no DB):** append to `communications[].messages[]` directly in
@@ -284,7 +284,7 @@ live after the reply has gone out.
   `mark-sent`'s narrow send case (used in (a) above). For `status: scheduled`/`needs-reply`, or
   to set `nextActionDue`/`nextAction` explicitly, read the current row from
   `workspace/tracker.json#communications[]`, apply the fields above (carrying every other field
-  over unchanged), and persist the whole row: `rolester data comm upsert --data '<patched full
+  over unchanged), and persist the whole row: `careerrat data comm upsert --data '<patched full
   comm row JSON>'`.
 - **Legacy workspace (no DB):** edit the fields above directly on the communications record, in
   the same write as (a).
@@ -328,7 +328,7 @@ none, use `interviewAt`.
 **DB workspace — (c-i)/(c-ii)/(c-iii) composition.** No single verb covers all three, so
 compose, back-to-back in the same turn as (a)/(b):
 1. ```
-   rolester data app schedule-interview <id> --at <iso> --round "<kind>" --note "<interviewNote text>"
+   careerrat data app schedule-interview <id> --at <iso> --round "<kind>" --note "<interviewNote text>"
    ```
    In one transaction this sets `interviewAt` (or `nextInterviewAt`, auto-detected from whether
    a future `interviewAt` already exists — same "first round vs. follow-on" rule above), sets
@@ -340,10 +340,10 @@ compose, back-to-back in the same turn as (a)/(b):
 2. Patch the `who` field (and, if needed, a fuller `notes` string) onto the conversations entry
    `schedule-interview` just appended: read the current row's `conversations[]`, update that one
    entry, then persist the whole array (wholesale array replace, same pattern as
-   `track-outcomes`' STEP 2 routing table): `rolester data app set-fields <id> --data
+   `track-outcomes`' STEP 2 routing table): `careerrat data app set-fields <id> --data
    '{"conversations":[...]}'`.
 3. ```
-   rolester data app set-status <id> "<stage>"
+   careerrat data app set-status <id> "<stage>"
    ```
    Advances `applications[].status` to the matching stage (`recruiter screen`, `technical`,
    `onsite`, etc.) — outcome-changing, refreshes analytics, and (since entering, not leaving, the
@@ -355,10 +355,10 @@ in the SAME `tracker.json` write as (a) and (b).
 
 **(d) Validate + re-render:**
 - **DB workspace:** the calls in (a)–(c) already persisted and auto-exported. Run
-  `rolester data verify` (re-exports + domain integrity) and `rolester tracker --verify`
+  `careerrat data verify` (re-exports + domain integrity) and `careerrat tracker --verify`
   (schema-level parity).
-- **Legacy workspace (no DB):** `rolester tracker --verify` (must exit clean), then
-  `rolester tracker`.
+- **Legacy workspace (no DB):** `careerrat tracker --verify` (must exit clean), then
+  `careerrat tracker`.
 
 **(e) Out-of-band completion.** If the user reports "I already confirmed / scheduled /
 rescheduled this" without the agent having sent the reply: record it immediately in the same
@@ -370,7 +370,7 @@ single write — do not leave the CTA live because the agent did not perform the
   - Set `comm.draft = null`; null `nextActionDue`, then set a fresh value if the next event
     is known; advance `comm.status` to `scheduled` / `waiting` as appropriate.
   - Run verify + re-render (STEP 7d).
-  - **DB workspace:** `rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"<user-reported completion>"}'`, then the same (c) composition above if a meeting was booked, then read-patch-persist `rolester data comm upsert --data '<patched full comm row JSON>'` for `draft`/`nextActionDue`/`status`, then STEP 7(d)'s DB verify.
+  - **DB workspace:** `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"<user-reported completion>"}'`, then the same (c) composition above if a meeting was booked, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `draft`/`nextActionDue`/`status`, then STEP 7(d)'s DB verify.
   - **Legacy workspace (no DB):** apply the bullets above directly in `workspace/tracker.json`, then run STEP 7(d)'s legacy verify.
 
 **(f) Log to the Activity Pulse feed** (see **Activity Pulse** in AGENTS.md). The reply is a
@@ -378,11 +378,11 @@ draft awaiting send → log it as needing the user:
 - **DB workspace:** the (a)/(c) calls above already auto-logged their own generic events. For
   the richer, scheduling-specific type, log an additional event:
   ```
-  rolester data activity append --data '{"type":"drafted","actor":"agent","needsUser":true,"title":"Scheduling reply — <Company>","summary":"<one line: proposed/confirmed slot>","refs":{"applicationId":"<application id>","company":"<Company>"},"cta":{"label":"Review & send"}}'
+  careerrat data activity append --data '{"type":"drafted","actor":"agent","needsUser":true,"title":"Scheduling reply — <Company>","summary":"<one line: proposed/confirmed slot>","refs":{"applicationId":"<application id>","company":"<Company>"},"cta":{"label":"Review & send"}}'
   ```
 - **Legacy workspace (no DB):**
   ```
-  rolester activity append --type drafted --actor agent --needs-user \
+  careerrat activity append --type drafted --actor agent --needs-user \
     --title "Scheduling reply — <Company>" \
     --summary "<one line: proposed/confirmed slot>" \
     --company "<Company>" --app-id <application id> --cta-label "Review & send" --write
@@ -395,10 +395,10 @@ draft awaiting send → log it as needing the user:
 | Condition | Action | DB-mode command |
 |---|---|---|
 | Meeting booked / confirmed | `applications[].status` + `conversations[]` entry are already written in STEP 7(c). Hand off to `interview-prep` for prep materials using that conversations[] entry as the anchor. No additional write needed here. | Already covered by STEP 7(c)'s DB composition — no additional call. |
-| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + re-render. Without updating the datetime fields the dashboard Focus card still shows the old time. | `rolester data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `rolester data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `rolester data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `rolester data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
+| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + re-render. Without updating the datetime fields the dashboard Focus card still shows the old time. | `careerrat data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `careerrat data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
 | They go quiet after your proposal | Leave `status: waiting`; STEP 7b's `nextActionDue` surfaces it as a follow-up (handled by `email-comms` / the follow-up timer). | No write here — this is a read/no-op branch. |
 | Thread turns to comp / general reply | Hand off to `email-comms` (general comms / negotiation surface). | No write here — hand-off only. |
-| User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to candidate profile config `availability` (STEP 3 write-back). | DB mode: `rolester data candidate patch profile --data ...`; legacy mode: guarded candidate-config write path. Never hand-edit YAML in DB mode. |
+| User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to candidate profile config `availability` (STEP 3 write-back). | DB mode: `careerrat data candidate patch profile --data ...`; legacy mode: guarded candidate-config write path. Never hand-edit YAML in DB mode. |
 
 ---
 
@@ -428,7 +428,7 @@ draft awaiting send → log it as needing the user:
   scheduling state and the conversations[] entry, then hands the stage change + prep off — it
   does not own interview outcomes.
 - **Privacy + local-only.** No `current_base` or private comp in any reply, hold, or note.
-  `.ics` and raw thread bodies stay under `~/Downloads/rolester/` / `workspace/`.
+  `.ics` and raw thread bodies stay under `~/Downloads/careerrat/` / `workspace/`.
 - **No placeholder brackets.** Unknown detail → generic or omit; never a bracket token.
 - **Domain-neutral.** No hardcoded companies, names, or times. The candidate's
   `availability` block + the thread make it specific; absent config stays neutral (derive +

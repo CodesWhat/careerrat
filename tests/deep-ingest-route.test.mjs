@@ -229,7 +229,7 @@ function assertVisibleOutcome(body) {
 }
 
 function tempHomeEnv() {
-  return { ROLESTER_HOME: tempRepo() };
+  return { CAREERRAT_HOME: tempRepo() };
 }
 
 function setAllRequiredLanes(repoRoot, overrides = {}, env) {

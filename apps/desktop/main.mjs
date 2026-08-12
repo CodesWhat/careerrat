@@ -469,7 +469,7 @@ app.whenReady().then(async () => {
       // app window mounts: destroying a temporary renderer as Electron's only
       // window would otherwise emit window-all-closed and stop the server.
       const { renderPdf } = await loadEngineModule("src/core/documents/export.mjs");
-      const smokePdfPath = join(app.getPath("temp"), `rolester-export-smoke-${process.pid}.pdf`);
+      const smokePdfPath = join(app.getPath("temp"), `careerrat-export-smoke-${process.pid}.pdf`);
       await verifySmokePdfExport({
         outPath: smokePdfPath,
         renderPdf,

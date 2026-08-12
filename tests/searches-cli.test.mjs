@@ -19,7 +19,7 @@ function tempHome() {
 function runCli(script, args, home) {
   return spawnSync(process.execPath, [script, ...args], {
     cwd: ROOT,
-    env: { ...process.env, ROLESTER_HOME: home },
+    env: { ...process.env, CAREERRAT_HOME: home },
     encoding: "utf8",
   });
 }
@@ -35,7 +35,7 @@ function runSearches(args, home) {
 function sourceConfig(home) {
   return sourceConfigGet({
     repoRoot: ROOT,
-    env: { ...process.env, ROLESTER_HOME: home },
+    env: { ...process.env, CAREERRAT_HOME: home },
     name: "search-sources",
   });
 }

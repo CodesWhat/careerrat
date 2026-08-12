@@ -107,7 +107,7 @@ test("the Generate packet run POSTs the local packet generate API by default", (
   assert.match(script, /excludedQuestionIds/);
   assert.doesNotMatch(script, /\/api\/skill\/run/);
   assert.doesNotMatch(script, /tailor-application/);
-  assert.doesNotMatch(script, /tailorAllowed|ROLESTER_RUNTIME_SKILLS/);
+  assert.doesNotMatch(script, /tailorAllowed|CAREERRAT_RUNTIME_SKILLS/);
 });
 
 test("packet page captures application questions before local generation", () => {

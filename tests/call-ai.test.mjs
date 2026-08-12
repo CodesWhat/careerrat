@@ -3,7 +3,7 @@
 //
 // A mock "Anthropic-shaped" upstream (plain node:http) stands in for both the
 // real Anthropic API (BYOK path) and the managed-AI proxy (proxy path) — the
-// test just points ROLESTER_ANTHROPIC_BASE_URL / ROLESTER_AI_PROXY_URL at it
+// test just points CAREERRAT_ANTHROPIC_BASE_URL / CAREERRAT_AI_PROXY_URL at it
 // and inspects what callAI() actually sent. Hermetic: ephemeral port, temp
 // dirs for the usage log, no network.
 
@@ -201,7 +201,7 @@ function startMockUpstream({ status = 200, responseBody = null } = {}) {
 test("resolveAIRoute: BYOK wins when ANTHROPIC_API_KEY is set", () => {
   const route = resolveAIRoute({
     ANTHROPIC_API_KEY: "sk-ant-test",
-    ROLESTER_AI_PROXY_URL: "http://proxy",
+    CAREERRAT_AI_PROXY_URL: "http://proxy",
   });
   assert.equal(route.type, "byok");
   assert.equal(route.apiKey, "sk-ant-test");
@@ -252,7 +252,7 @@ test("resolveAIRoute: selected installed CLI wins in desktop even when a provide
   try {
     writeInstalledRuntimeSelection({ repoRoot: root, env: {}, runtimeId: "codex" });
     const route = resolveAIRoute(
-      { ROLESTER_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
         runtimeInventory: [
@@ -279,7 +279,7 @@ test("resolveAIRoute: explicit Advanced provider fallback retains BYOK", () => {
       providerFallback: true,
     });
     const route = resolveAIRoute(
-      { ROLESTER_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
+      { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
         runtimeInventory: [
@@ -312,7 +312,7 @@ test("callAI: routes a structured request through the selected CLI without a pro
       outputSchema: OUTPUT_SCHEMA,
       outputMode: "native",
       root,
-      env: { ROLESTER_DESKTOP_SHELL: "1" },
+      env: { CAREERRAT_DESKTOP_SHELL: "1" },
       runtimeInventory: [
         { id: "codex", name: "Codex", path: "/safe/codex", available: true },
       ],
@@ -360,7 +360,7 @@ test("callAI: maps proxy cap responses to a friendly non-retryable AI_CAP_EXCEED
           model: "claude-haiku-4-5",
           messages: [],
           maxTokens: 8,
-          env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "fake-token" },
+          env: { CAREERRAT_AI_PROXY_URL: upstream.url, CAREERRAT_AI_PROXY_TOKEN: "fake-token" },
         }),
       (err) => {
         assert.equal(err.code, "AI_CAP_EXCEEDED");
@@ -386,7 +386,7 @@ test("callAI: non-cap proxy errors retain the generic failure behavior", async (
           model: "claude-haiku-4-5",
           messages: [],
           maxTokens: 8,
-          env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "fake-token" },
+          env: { CAREERRAT_AI_PROXY_URL: upstream.url, CAREERRAT_AI_PROXY_TOKEN: "fake-token" },
         }),
       (err) => {
         assert.equal(err.code, undefined);
@@ -410,7 +410,7 @@ test("callAI (BYOK, non-stream): hits the mock Anthropic base URL with x-api-key
       model: "claude-haiku-4-5",
       messages: [{ role: "user", content: "hi" }],
       maxTokens: 16,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
     assert.equal(result.stopReason, "end_turn");
     assert.equal(result.usage.input_tokens, 25);
@@ -439,7 +439,7 @@ test("callAI (BYOK, native output): sends Anthropic json_schema output_config", 
       outputSchema: OUTPUT_SCHEMA,
       skill: "discover-companies",
       action: "seed-generate",
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
 
     assert.equal(upstream.requests.length, 1);
@@ -479,7 +479,7 @@ test("callAI (BYOK, native output): usage rows preserve labels and metadata-only
       action: "seed-generate",
       operation: "company-seeds",
       root,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
 
     const events = readUsageEvents({ root });
@@ -505,7 +505,7 @@ test("callAI (BYOK, non-native): omits output_config when no outputSchema is pro
       messages: [{ role: "user", content: "hi" }],
       maxTokens: 16,
       outputMode: "native",
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
 
     assert.equal(upstream.requests.length, 1);
@@ -528,7 +528,7 @@ test("callAI (BYOK, non-stream): appends a usage_event when root is given", asyn
       action: "tailor",
       operation: "packet.generate",
       root,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
     const events = readUsageEvents({ root });
     assert.equal(events.length, 1);
@@ -562,7 +562,7 @@ test("callAI: falls back to config/ai.json#model when the caller passes no model
       messages: [{ role: "user", content: "hi" }],
       maxTokens: 16,
       root,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
     assert.equal(upstream.requests.length, 1);
     assert.equal(upstream.requests[0].body.model, "claude-sonnet-5");
@@ -587,7 +587,7 @@ test("callAI: an explicit model always wins over config/ai.json", async () => {
       messages: [{ role: "user", content: "hi" }],
       maxTokens: 16,
       root,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
     assert.equal(upstream.requests.length, 1);
     assert.equal(upstream.requests[0].body.model, "claude-opus-4-8");
@@ -607,7 +607,7 @@ test("callAI (BYOK, stream): yields raw SSE events and appends a usage_event on 
       maxTokens: 16,
       stream: true,
       root,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
     const events = [];
     for await (const event of iterator) events.push(event);
@@ -644,7 +644,7 @@ test("callAI (proxy path): sends Bearer token + x-careerrat-* labels, never appe
       action: "tailor",
       operation: "packet.generate",
       root,
-      env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "proxy-tok" },
+      env: { CAREERRAT_AI_PROXY_URL: upstream.url, CAREERRAT_AI_PROXY_TOKEN: "proxy-tok" },
     });
     assert.equal(upstream.requests.length, 1);
     const [req] = upstream.requests;
@@ -680,7 +680,7 @@ test("callAI (proxy path, native output): forwards json_schema body plus auth an
       action: "seed-generate",
       operation: "company-seeds",
       root,
-      env: { ROLESTER_AI_PROXY_URL: upstream.url, ROLESTER_AI_PROXY_TOKEN: "proxy-tok" },
+      env: { CAREERRAT_AI_PROXY_URL: upstream.url, CAREERRAT_AI_PROXY_TOKEN: "proxy-tok" },
     });
 
     assert.equal(upstream.requests.length, 1);

@@ -24,7 +24,7 @@ afterEach(() => {
 function boot({
   inventory,
   probes,
-  env = { ROLESTER_DESKTOP_SHELL: "1" },
+  env = { CAREERRAT_DESKTOP_SHELL: "1" },
   openTerminalImpl,
   probeCustomImpl,
 }) {

@@ -58,15 +58,15 @@ Append the **full JD body** below the frontmatter — the complete role text, no
 
 Mirror the same body onto the tracker row so it travels with the application: when this posting has (or gets) an `applications[]` row, set `artifacts.jd` to the full body text (the saved `workspace/jobs/` file stays the source of truth; `artifacts.jd` is the embedded durable copy the dashboard can render without the live page).
 
-- **DB workspace:** `rolester data app set-fields <id> --data-file <patch.json>` with `{"artifacts": {"jd": "<full body text>"}}` (shallow merge one level — merges into the existing `artifacts` object without disturbing `artifacts.resume`/`artifacts.coverLetter`). Use `--data-file` given the body length. Not outcome-changing.
+- **DB workspace:** `careerrat data app set-fields <id> --data-file <patch.json>` with `{"artifacts": {"jd": "<full body text>"}}` (shallow merge one level — merges into the existing `artifacts` object without disturbing `artifacts.resume`/`artifacts.coverLetter`). Use `--data-file` given the body length. Not outcome-changing.
 - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set `artifacts.jd` on the matching `applications[]` row.
 
 ---
 
 ## STEP 2 — LOAD CANDIDATE CONFIG
 
-**Mode detection:** run `rolester data status`. Exit 0 → DB workspace — every
-write step below gives the `rolester data <verb>` command (Data Write Contract,
+**Mode detection:** run `careerrat data status`. Exit 0 → DB workspace — every
+write step below gives the `careerrat data <verb>` command (Data Write Contract,
 AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
 gives the existing direct JSON-edit instructions, unchanged.
 
@@ -77,12 +77,12 @@ Read the following files (all under `candidate/`):
 | `targeting.yml` | `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands` (default `{high_min:85, med_min:65}`), `role_buckets[].priority` |
 | `profile.yml` | `compensation.comp_floors` (arrangement floors: `remote`/`hybrid`/`onsite`/`relocation` + `home_metro` + `relocation_by_metro[]` — the HARD comp gate; relocation miss = cut), `compensation.minimum_base` (fallback floor), `compensation.target_base`, `compensation.expected_base`, `compensation.oe_min_base`, `compensation.oe_max_base`, `location.remote`, `location.relocation`, `location.travel_tolerance` — **NEVER read `compensation.current_base` for any outbound purpose** |
 | `honesty.yml` | honesty boundaries (education policy, do_not_claim, do_not_fabricate) |
-| `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `rolester modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. |
+| `modes.yml` | optional `application_mode`; absent = `balanced`. Read via `careerrat modes status`. It changes pursuit posture after discovery/evaluation, never the evidence/honesty/comp gates. |
 | `application-limits` config | `companies[].status`, `companies[].reapply_after`, `companies[].cooldown_days`, `companies[].bypass` |
-| `learnings/<role-family>.md` | if present — prior outcomes for this track. Read via `rolester learnings read "<JD title>"` — the helper classifies the family from `targeting.yml` (role_families → role_buckets → neutral-slug ladder), prints the file, or skips silently when absent. |
+| `learnings/<role-family>.md` | if present — prior outcomes for this track. Read via `careerrat learnings read "<JD title>"` — the helper classifies the family from `targeting.yml` (role_families → role_buckets → neutral-slug ladder), prints the file, or skips silently when absent. |
 
 Also read any **company research** artifact for FIT context (it lives under
-`workspace/research/`, not `candidate/`): `rolester research read "<company>"` —
+`workspace/research/`, not `candidate/`): `careerrat research read "<company>"` —
 skips silently when absent. Use its sourced signals to sharpen the FIT narrative in
 STEP 6; treat anything marked `[AGENT-INFERRED ...]` as a hypothesis, never an
 evidence-backed claim. If absent and the user wants company context, suggest
@@ -98,7 +98,7 @@ but does not relax this skill's honesty, comp, legitimacy, or consent gates.
 ## STEP 3 — APPLICATION-LIMITS PRE-CHECK
 
 Look up the posting company in application limits. In DB mode, read
-`rolester data candidate get --json` and use `application-limits.companies[]`.
+`careerrat data candidate get --json` and use `application-limits.companies[]`.
 In legacy mode, read `candidate/application-limits.yml` if present.
 
 - **`status: blocked` and today < `reapply_after`** → emit `ACTION: hold - <bypass note from config>` and stop. Do not proceed to gate.
@@ -144,7 +144,7 @@ Before the body-read gate, screen the posting for ghost-job / evergreen / staffi
 farm / staleness signals. This is a **flag, never an auto-cut**: a suspect posting
 goes to REVIEW so you and the body-read decide.
 
-A deterministic pass runs inside the gate — `rolester evaluate <path> --json`
+A deterministic pass runs inside the gate — `careerrat evaluate <path> --json`
 returns `result.legitimacy` — reading thresholds and phrase lists from
 `targeting.yml#legitimacy` (defaults are field-agnostic; no config needed). It checks:
 
@@ -201,7 +201,7 @@ On `CUT`: open the saved JD file and set `fitBucket: "cut"` in its YAML frontmat
 Extract the comp band from the JD (may be missing; note "unlisted" if so).
 
 1. **OE bucket check**: if the matching `role_buckets[]` entry has `priority: oe`, emit `COMP: OE-bucket - use profile.compensation.oe_min_base / oe_max_base range`. The regular floor does not apply to OE buckets.
-2. **Arrangement-floor check (HARD GATE)**: the floor is **not** a single number — it depends on the posting's work arrangement, read from `profile.compensation.comp_floors` (set at ingestion). The deterministic check in `rolester evaluate <path> --json` already resolves this via `resolveCompFloor`; honor its `comp.verdict` / `comp.relo` and do not loosen it. Resolution:
+2. **Arrangement-floor check (HARD GATE)**: the floor is **not** a single number — it depends on the posting's work arrangement, read from `profile.compensation.comp_floors` (set at ingestion). The deterministic check in `careerrat evaluate <path> --json` already resolves this via `resolveCompFloor`; honor its `comp.verdict` / `comp.relo` and do not loosen it. Resolution:
    - **Remote** posting → floor = `comp_floors.remote`.
    - **Onsite/hybrid in the home metro** (JD location matches `comp_floors.home_metro`) → floor = `comp_floors.onsite` / `comp_floors.hybrid`.
    - **Onsite/hybrid requiring relocation** (location not in `home_metro`) → floor = the matching `comp_floors.relocation_by_metro[].floor`, else `comp_floors.relocation`. This is a **relocation floor**.
@@ -212,12 +212,12 @@ Extract the comp band from the JD (may be missing; note "unlisted" if so).
      - **`estimated`** (estimate midpoint clears the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) from <N> comparables; confirm live before anchoring`. This is ADVISORY; action stays `manual`, never a hard cut.
      - **`estimated-below-floor`** (estimate midpoint falls under the arrangement floor) → `COMP: review - estimated $<low>K–$<high>K (mid $<mid>K) likely below floor; hold unless strong non-cash benefits`. ADVISORY; action is `hold`, never a hard cut. An estimate is a guess, not a posted band — never trigger `cut` on an estimate.
      - **Persist the estimate** onto the tracker `sourced[]` row as `compEstimate` so the dashboard renders it with provenance ("Built from data"). Shape: `{source:"comparables", lowK, midpointK, highK, floorK, askK, sampleSize, tier, confidence, basis, asOf}`. Stamp `asOf` with today's date (`YYYY-MM-DD`) so staleness is detectable — the dashboard surfaces it as "as of <date>".
-       - **DB workspace:** there is no single-field patch verb for `sourced[]` — read the current row from `workspace/tracker.json#sourced[]`, set `compEstimate` on it (carrying every other field over unchanged), then persist the whole row: `rolester data sourced upsert-batch --data '[<patched full sourced row JSON>]'` (a one-element batch).
+       - **DB workspace:** there is no single-field patch verb for `sourced[]` — read the current row from `workspace/tracker.json#sourced[]`, set `compEstimate` on it (carrying every other field over unchanged), then persist the whole row: `careerrat data sourced upsert-batch --data '[<patched full sourced row JSON>]'` (a one-element batch).
        - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set `compEstimate` on the matching `sourced[]` row.
      - **Freshness / decay (mirror `company_health`).** A comp estimate drifts as the tracker accumulates comparables. If the row already carries a `compEstimate` whose `asOf` is newer than `modes.comp_estimate.recheck_days` ago (default 30), reuse it as-is — don't recompute. Older than that, or the row just crossed into a deeper stage (screen/interview/offer), re-run the estimate and bump `asOf`. Never leave an estimate un-dated.
      - The `renderGateBlock` output includes a `COMP ESTIMATE: $<low>K–$<high>K (mid $<mid>K) - <N> <tier> comparables...; confidence <X> (confirm live before anchoring)` line when an estimate exists. Emit it in the Required Output block.
      - The estimate strengthens as more tracker rows accumulate (tighter tier match: `family` → `arrangement` → `metro`; higher confidence: `low` → `medium` → `high`). Encourage the user to confirm the real band in the first screen call to ground the anchor.
-   - **No comparables available** → fall back to a market benchmark artifact. Run `rolester research list` (or `read --name comp-bench-<role-slug>-<loc-slug>-<yyyy-mm>`) to find a non-stale `comp-benchmark` artifact for this role+location. If one exists, fold its `benchmark` floor/mid/ceiling in as the market reference → `COMP: review - market data: <floor>/<mid>/<ceiling> [artifact]`. If neither comparables nor a benchmark artifact exist, emit `COMP: review - band unclear` and offer to benchmark it via `research-comp`.
+   - **No comparables available** → fall back to a market benchmark artifact. Run `careerrat research list` (or `read --name comp-bench-<role-slug>-<loc-slug>-<yyyy-mm>`) to find a non-stale `comp-benchmark` artifact for this role+location. If one exists, fold its `benchmark` floor/mid/ceiling in as the market reference → `COMP: review - market data: <floor>/<mid>/<ceiling> [artifact]`. If neither comparables nor a benchmark artifact exist, emit `COMP: review - band unclear` and offer to benchmark it via `research-comp`.
 4. Otherwise → `COMP: clear - band max <X> clears the <arrangement> floor`.
 
 Emit:
@@ -234,7 +234,7 @@ Read FIT bands from `targeting.fit_bands` (default: `high_min: 85`, `med_min: 65
 
 **Fit-floor auto-drop (config-driven).** If `targeting.fit_bands.fit_floor` is set, a body-read score below that threshold is an automatic hard CUT — emit `GATE: CUT - fit <score> below your fit floor <fit_floor> (auto-drop)` and `ACTION: cut`. No manual triage, no hold, no review. This takes precedence over the med-tier review logic. The threshold is domain-neutral and lives entirely in config; when `fit_floor` is absent, nothing auto-drops and the default behavior below applies unchanged.
 
-Score the role using the programmatic proxy as a starting point (`rolester evaluate <path-to-job.md>` exits 0=KEEP, 2=REVIEW, 1=CUT), then **override with the body-read assessment** — the agent's judgment is authoritative.
+Score the role using the programmatic proxy as a starting point (`careerrat evaluate <path-to-job.md>` exits 0=KEEP, 2=REVIEW, 1=CUT), then **override with the body-read assessment** — the agent's judgment is authoritative.
 
 Factor in:
 - Matched `keep_signals` (raises score)
@@ -320,27 +320,27 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - Also write company-history cautions from STEP 3.25 into `warn`/`note`, and set `action: "manual"` when same-company active/recent history forced manual review.
    - **DB workspace:** the role stays in `sourced[]` here — this is a field patch, not a promotion (`sourced promote` is for the later apply-time move into `applications[]`). There is no single-field patch verb for `sourced[]`, so read the current row from `workspace/tracker.json#sourced[]`, apply every field above (carrying the rest of the row over unchanged), and persist the whole row in one call:
      ```
-     rolester data sourced upsert-batch --data '[<patched full sourced row JSON>]'
+     careerrat data sourced upsert-batch --data '[<patched full sourced row JSON>]'
      ```
      This is outcome-changing per the Data Write Contract — it bumps the stamp, logs its own activity event, and refreshes analytics in the same transaction.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `sourced[]` row.
 3. **For roles evaluated directly (not from a sourced[] row):** scan `applications[]` for an entry where `id` matches the reqId (if known), else where `company` and `role` match. If no matching row exists, do **not** create one here — `applications[]` rows are created at submission; skip to STEP 10.
    - In that object set `fitScore: <N>`, `fitBucket: "<high|med|stretch>"`, `fitBasis: "evaluated"`.
-   - **DB workspace:** `rolester data app set-fields <id> --data '{"fitScore":<N>,"fitBucket":"<high|med|stretch>","fitBasis":"evaluated"}'`. Not outcome-changing (no analytics refresh) — this is a fit-score annotation on an existing row, not a status transition.
+   - **DB workspace:** `careerrat data app set-fields <id> --data '{"fitScore":<N>,"fitBucket":"<high|med|stretch>","fitBasis":"evaluated"}'`. Not outcome-changing (no analytics refresh) — this is a fit-score annotation on an existing row, not a status transition.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `applications[]` row.
 4. Validate and re-render:
    - **DB workspace:** sub-step 2's `sourced upsert-batch` call (or sub-step 3's `app set-fields` call) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run:
      ```
-     rolester data verify
-     rolester tracker --verify
+     careerrat data verify
+     careerrat tracker --verify
      ```
-     `rolester data verify` re-exports then runs the same domain-integrity check as `npm run verify:tracker`; `rolester tracker --verify` covers the ajv schema-level check `data verify` doesn't run. Both should pass clean.
+     `careerrat data verify` re-exports then runs the same domain-integrity check as `npm run verify:tracker`; `careerrat tracker --verify` covers the ajv schema-level check `data verify` doesn't run. Both should pass clean.
    - **Legacy workspace (no DB):** run in sequence:
      ```
-     rolester tracker --verify
-     rolester tracker
+     careerrat tracker --verify
+     careerrat tracker
      ```
-     These are two complementary checks and both should be run: `rolester tracker --verify` validates JSON shape/structure against config/tracker.schema.json (required keys, field presence), while `npm run verify:tracker` validates domain integrity (status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Neither replaces the other.
+     These are two complementary checks and both should be run: `careerrat tracker --verify` validates JSON shape/structure against config/tracker.schema.json (required keys, field presence), while `npm run verify:tracker` validates domain integrity (status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Neither replaces the other.
 
 This promotes the row from a coarse scanner estimate to an authoritative body-read fit.
 
@@ -352,11 +352,11 @@ Then log the verdict to the Activity Pulse feed (the dashboard's live timeline �
   the richer, evaluation-specific type, log an additional event (this verb only
   logs, it never bumps the stamp):
   ```
-  rolester data activity append --data '{"type":"evaluated","actor":"agent","title":"Evaluated — <Company>","summary":"<GATE verdict>: <short reason>","refs":{"applicationId":"<application id>","company":"<Company>","role":"<Role>","url":"<posting URL>"}}'
+  careerrat data activity append --data '{"type":"evaluated","actor":"agent","title":"Evaluated — <Company>","summary":"<GATE verdict>: <short reason>","refs":{"applicationId":"<application id>","company":"<Company>","role":"<Role>","url":"<posting URL>"}}'
   ```
 - **Legacy workspace (no DB):**
   ```
-  rolester activity append --type evaluated --actor agent \
+  careerrat activity append --type evaluated --actor agent \
     --title "Evaluated — <Company>" --summary "<GATE verdict>: <short reason>" \
     --company "<Company>" --role "<Role>" --app-id <application id> --url "<posting URL>" --write
   ```
@@ -365,7 +365,7 @@ Then log the verdict to the Activity Pulse feed (the dashboard's live timeline �
 
 ## STEP 10 — GATE WRITE-BACK (new limits discovered)
 
-If a new application blocker was encountered during this evaluation (e.g., a posted cap, cooldown, or portal blocker that should affect future roles), capture it on the tracker row and persist it after confirmation. DB mode writes use `rolester data candidate limits upsert --data '<json row>'`; legacy mode writes `candidate/application-limits.yml`.
+If a new application blocker was encountered during this evaluation (e.g., a posted cap, cooldown, or portal blocker that should affect future roles), capture it on the tracker row and persist it after confirmation. DB mode writes use `careerrat data candidate limits upsert --data '<json row>'`; legacy mode writes `candidate/application-limits.yml`.
 
 **Write-back friction rule**: blocker facts are low-blast-radius to record on the row, but durable application-limit config is confirm-first.
 
@@ -403,7 +403,7 @@ ACTION: apply-now|hold|manual|cut
 
 ## Gate-Config Write-back Rule
 
-> See **Gates › Write-back rule** in AGENTS.md for the friction model (write-and-report vs confirm-first), the routing table, and the `rolester gate` mechanism. STEP 9–10 apply it to this skill's writes.
+> See **Gates › Write-back rule** in AGENTS.md for the friction model (write-and-report vs confirm-first), the routing table, and the `careerrat gate` mechanism. STEP 9–10 apply it to this skill's writes.
 
 ---
 

@@ -32,14 +32,14 @@ function tempRepo() {
   return repoRoot;
 }
 
-// A stub AI route that's cheap and side-effect-free: ROLESTER_AI_PROXY_URL
+// A stub AI route that's cheap and side-effect-free: CAREERRAT_AI_PROXY_URL
 // (not ANTHROPIC_API_KEY) so resolveAIRoute() resolves to "proxy" and
 // runBareOneshot() never attempts writeByokUsage()'s usage-log write — this
 // suite only cares about the request/response contract, not usage metering
 // (already covered by skill-runtime.test.mjs).
 const PROXY_ENV = {
-  ROLESTER_AI_PROXY_URL: "http://127.0.0.1:7788",
-  ROLESTER_AI_PROXY_TOKEN: "devtoken",
+  CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
+  CAREERRAT_AI_PROXY_TOKEN: "devtoken",
 };
 const FORBIDDEN_CONTENT = [
   "PROMPT_SECRET_02_07",

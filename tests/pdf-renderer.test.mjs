@@ -45,8 +45,8 @@ test("ISSUE-028: renderPdf uses the authenticated desktop renderer when Electron
       markdown: "# Evidence-backed résumé",
       outPath,
       env: {
-        ROLESTER_DESKTOP_PDF_RENDER_URL: `http://127.0.0.1:${port}/render`,
-        ROLESTER_DESKTOP_PDF_RENDER_TOKEN: "local-render-secret",
+        CAREERRAT_DESKTOP_PDF_RENDER_URL: `http://127.0.0.1:${port}/render`,
+        CAREERRAT_DESKTOP_PDF_RENDER_TOKEN: "local-render-secret",
       },
     });
 

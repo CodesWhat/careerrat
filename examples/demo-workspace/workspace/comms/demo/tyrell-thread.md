@@ -1,12 +1,12 @@
 # Email Thread — Tyrell Corporation · Senior Platform Engineer
-## riley.chen@rolester.dev ↔ priya.anand@tyrell.example
+## riley.chen@careerrat.dev ↔ priya.anand@tyrell.example
 
 ---
 
 ### Message 1 — Inbound recruiter outreach
 **Date:** 2026-05-06  
 **From:** Priya Anand <priya.anand@tyrell.example>  
-**To:** riley.chen@rolester.dev  
+**To:** riley.chen@careerrat.dev  
 **Subject:** Senior Platform Engineer at Tyrell — think you'd be a strong fit
 
 Hi Riley,
@@ -26,7 +26,7 @@ priya.anand@tyrell.example
 
 ### Message 2 — Outbound reply
 **Date:** 2026-05-08  
-**From:** riley.chen@rolester.dev  
+**From:** riley.chen@careerrat.dev  
 **To:** priya.anand@tyrell.example  
 **Subject:** Re: Senior Platform Engineer at Tyrell — think you'd be a strong fit
 
@@ -46,7 +46,7 @@ Riley
 ### Message 3 — Inbound: confirm recruiter screen + 2nd interview invite
 **Date:** 2026-05-21  
 **From:** priya.anand@tyrell.example  
-**To:** riley.chen@rolester.dev  
+**To:** riley.chen@careerrat.dev  
 **Subject:** Re: Senior Platform Engineer — next step: HM + Integration Lead panel
 
 Hi Riley,

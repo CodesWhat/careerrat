@@ -1,6 +1,6 @@
 # E Corp — Email Thread Export
 **Thread:** Staff Software Engineer — E Corp
-**Participants:** Riley Chen (riley.chen@rolester.dev), Morgan Hayes (mhayes@e-corp.example)
+**Participants:** Riley Chen (riley.chen@careerrat.dev), Morgan Hayes (mhayes@e-corp.example)
 **Period:** 2026-04-12 → 2026-06-12
 
 ---
@@ -8,7 +8,7 @@
 ## Message 1 — Inbound | 2026-04-12
 
 **From:** Morgan Hayes <mhayes@e-corp.example>
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Staff Software Engineer — E Corp (referral from Alex Winters)
 
 Hi Riley,
@@ -27,7 +27,7 @@ Senior Technical Recruiter — E Corp
 
 ## Message 2 — Outbound | 2026-04-13
 
-**From:** Riley Chen <riley.chen@rolester.dev>
+**From:** Riley Chen <riley.chen@careerrat.dev>
 **To:** mhayes@e-corp.example
 **Subject:** Re: Staff Software Engineer — E Corp (referral from Alex Winters)
 
@@ -44,7 +44,7 @@ Riley Chen
 ## Message 3 — Inbound | 2026-04-22
 
 **From:** Morgan Hayes <mhayes@e-corp.example>
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Next step: Hiring-manager intro w/ Jordan Park | E Corp
 
 Hi Riley,
@@ -68,7 +68,7 @@ Morgan
 
 ## Message 4 — Outbound | 2026-04-29
 
-**From:** Riley Chen <riley.chen@rolester.dev>
+**From:** Riley Chen <riley.chen@careerrat.dev>
 **To:** mhayes@e-corp.example
 **Subject:** Re: Next step — thanks + technical round
 
@@ -86,7 +86,7 @@ Riley
 ## Message 5 — Inbound | 2026-05-14
 
 **From:** Morgan Hayes <mhayes@e-corp.example>
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Onsite panel details — E Corp | Staff SWE
 
 Hi Riley,
@@ -107,7 +107,7 @@ Morgan
 
 ## Message 6 — Outbound | 2026-05-15
 
-**From:** Riley Chen <riley.chen@rolester.dev>
+**From:** Riley Chen <riley.chen@careerrat.dev>
 **To:** mhayes@e-corp.example
 **Subject:** Re: Onsite panel details — confirmed
 
@@ -125,7 +125,7 @@ Riley
 ## Message 7 — Inbound | 2026-06-02
 
 **From:** Morgan Hayes <mhayes@e-corp.example>
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** E Corp offer — Staff Software Engineer
 
 Hi Riley,
@@ -151,7 +151,7 @@ Morgan
 
 ## Message 8 — Outbound | 2026-06-05
 
-**From:** Riley Chen <riley.chen@rolester.dev>
+**From:** Riley Chen <riley.chen@careerrat.dev>
 **To:** mhayes@e-corp.example
 **Subject:** Re: E Corp offer — counter proposal
 
@@ -177,7 +177,7 @@ Riley
 ## Message 9 — Inbound | 2026-06-09
 
 **From:** Morgan Hayes <mhayes@e-corp.example>
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Re: E Corp offer — revised terms
 
 Hi Riley,
@@ -202,7 +202,7 @@ Morgan
 
 ## Message 10 — Outbound | 2026-06-12
 
-**From:** Riley Chen <riley.chen@rolester.dev>
+**From:** Riley Chen <riley.chen@careerrat.dev>
 **To:** mhayes@e-corp.example
 **Subject:** Re: E Corp offer — acceptance
 

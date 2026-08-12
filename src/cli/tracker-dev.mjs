@@ -8,7 +8,7 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 //
 // Usage:
 //   careerrat tracker-dev                 Serve http://localhost:7777 with live reload
-//   careerrat tracker-dev --port 8080  Pick a port (or ROLESTER_DEV_PORT=8080)
+//   careerrat tracker-dev --port 8080  Pick a port (or CAREERRAT_DEV_PORT=8080)
 //   careerrat tracker-dev --open       Best-effort open the page in your browser
 //   careerrat tracker-dev --help
 //
@@ -763,7 +763,7 @@ function printHelp() {
 
 Usage:
   careerrat tracker-dev                 Serve http://localhost:7777 with live reload
-  careerrat tracker-dev --port 8080  Pick a port (or set ROLESTER_DEV_PORT)
+  careerrat tracker-dev --port 8080  Pick a port (or set CAREERRAT_DEV_PORT)
   careerrat tracker-dev --open       Open the page in your browser on start
 
 Routes:

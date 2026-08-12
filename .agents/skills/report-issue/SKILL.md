@@ -21,12 +21,12 @@ The report target is the upstream project tracker: **`CodesWhat/careerrat`**. (A
 
 Offer this skill when something looks like a **CareerRat defect**, not a user error:
 
-- A `rolester` CLI command throws, prints a stack trace, or exits non-zero unexpectedly.
+- A `careerrat` CLI command throws, prints a stack trace, or exits non-zero unexpectedly.
 - A skill workflow hits a tool crash, an unhandled exception, or produces clearly-wrong output (a mangled artifact, a gate that scores impossibly, a dashboard that won't render).
 - The user says "this is broken", "report a bug", "file an issue", "tell the devs", "this doesn't work", or "open a ticket".
 - A reproducible failure survives the obvious fixes.
 
-**Do NOT use it for** missing or invalid config, an un-ingested profile, a gate the user simply disagrees with, or a ToS/permission block — those route to `configure`, `ingest-profile`, or `rolester doctor`. Diagnose first; only escalate to an issue once you're confident it's a code defect, and say *why* you think so.
+**Do NOT use it for** missing or invalid config, an un-ingested profile, a gate the user simply disagrees with, or a ToS/permission block — those route to `configure`, `ingest-profile`, or `careerrat doctor`. Diagnose first; only escalate to an issue once you're confident it's a code defect, and say *why* you think so.
 
 Offer, don't auto-run. The user opts in every time.
 
@@ -37,8 +37,8 @@ Offer, don't auto-run. The user opts in every time.
 Run the cheap diagnostics and read the actual error before deciding anything:
 
 ```
-rolester doctor
-rolester --version
+careerrat doctor
+careerrat --version
 node --version
 ```
 
@@ -55,10 +55,10 @@ Build the report from these, and **redact every one** per the rules below:
 
 | Field | Source | Redaction |
 |---|---|---|
-| CareerRat version | `rolester --version` | none (safe) |
+| CareerRat version | `careerrat --version` | none (safe) |
 | Node + OS | `node --version`, `process.platform` | none (safe) |
 | Install method | in-tree clone vs global npm | none (safe) |
-| Failing command | the `rolester <cmd>` that broke | strip data args (names, paths, URLs) — keep the verb + flags |
+| Failing command | the `careerrat <cmd>` that broke | strip data args (names, paths, URLs) — keep the verb + flags |
 | Error / stack trace | the thrown output | normalize home paths, drop any candidate data in the message |
 | Expected vs actual | your diagnosis | generic phrasing, no candidate specifics |
 

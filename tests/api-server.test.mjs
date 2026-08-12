@@ -31,19 +31,19 @@ const MINIMAL_TRACKER = {
 
 test("tracker-dev refuses non-loopback bind hosts instead of exposing local APIs to a LAN", () => {
   assert.equal(resolveTrackerBindHost({}), "127.0.0.1");
-  assert.equal(resolveTrackerBindHost({ ROLESTER_TRACKER_HOST: "localhost" }), "localhost");
-  assert.equal(resolveTrackerBindHost({ ROLESTER_TRACKER_HOST: "::1" }), "::1");
+  assert.equal(resolveTrackerBindHost({ CAREERRAT_TRACKER_HOST: "localhost" }), "localhost");
+  assert.equal(resolveTrackerBindHost({ CAREERRAT_TRACKER_HOST: "::1" }), "::1");
   assert.throws(
-    () => resolveTrackerBindHost({ ROLESTER_TRACKER_HOST: "0.0.0.0" }),
+    () => resolveTrackerBindHost({ CAREERRAT_TRACKER_HOST: "0.0.0.0" }),
     /loopback-only/
   );
   assert.throws(
-    () => resolveTrackerBindHost({ ROLESTER_TRACKER_HOST: "192.168.1.20" }),
+    () => resolveTrackerBindHost({ CAREERRAT_TRACKER_HOST: "192.168.1.20" }),
     /loopback-only/
   );
 });
 
-// A fresh repoRoot with its resolved (non-legacy, .rolester-backed) workspace dir
+// A fresh repoRoot with its resolved (non-legacy, .careerrat-backed) workspace dir
 // pre-created — same convention as storage-adapter.test.mjs's tempRepo().
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-apiserver-"));

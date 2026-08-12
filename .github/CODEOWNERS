@@ -1,4 +1,4 @@
-# Code owners for CodesWhat/rolester.
+# Code owners for CodesWhat/careerrat.
 #
 # The "Main branch protection" ruleset (scripts/protect-main.sh) turns on
 # require_code_owner_review, which resolves against this file. Without an entry

@@ -7,7 +7,7 @@ description: Show current settings and route changes to the validated CLI or own
 
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
-> **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing settings summaries. Apply the register from AGENTS.md#mode-switches. `exec-summary` = changed setting + confirmation in one line; `standard` = current state + change + confirmation as short bullets; `verbose` = full settings matrix. To change `agent_voice` itself: `rolester modes set agent_voice <value> --write`.
+> **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing settings summaries. Apply the register from AGENTS.md#mode-switches. `exec-summary` = changed setting + confirmation in one line; `standard` = current state + change + confirmation as short bullets; `verbose` = full settings matrix. To change `agent_voice` itself: `careerrat modes set agent_voice <value> --write`.
 
 ## Core Principle
 
@@ -35,9 +35,9 @@ Consequential writes (comp floor/target, broad company exclusions) are confirm-f
 Before offering to change anything, run these checks and report what they show:
 
 ```
-rolester doctor
-rolester modes status
-rolester automation status
+careerrat doctor
+careerrat modes status
+careerrat automation status
 ```
 
 Report a brief summary of each setting's current value and where it lives. Never print `current_base` — it is a private gate input and must never appear in any output, shared artifact, or report from this skill.
@@ -58,21 +58,21 @@ Run the CLI confirm-first. The default is a **dry run** — it shows the exact l
 
 | What to change | Command | Friction |
 |---|---|---|
-| Comp floor (walk-away minimum) | `rolester gate comp-floor <N> --write --confirm` | confirm-first |
-| Comp target (negotiation anchor) | `rolester gate comp-target <N> --write --confirm` | confirm-first |
-| Comp expected (form-field value) | `rolester gate comp-expected <N> --write` | write-and-report |
-| Excluded company | `rolester gate exclude-company "<Name>" --write --confirm` | confirm-first |
-| Cut signal | `rolester gate cut-signal "<signal>" --write` | write-and-report |
-| Keep signal | `rolester gate keep-signal "<signal>" --write` | write-and-report |
-| Honesty: do not claim a tool | `rolester gate do-not-claim "<tool>" --write` | write-and-report |
-| Honesty: do not fabricate a claim | `rolester gate do-not-fabricate "<claim>" --write` | write-and-report |
-| Usage mode (compute/scope) | `rolester modes set usage <lean\|standard\|full> --write` | write-and-report |
-| Application mode (pursuit posture after discovery) | `rolester modes set application <selective\|balanced\|high-volume> --write` | write-and-report |
-| Record ToS consent for a platform | `rolester automation consent <platform> --write` | write-and-report |
-| Withdraw ToS consent for a platform | `rolester automation revoke <platform> --write` | write-and-report |
-| Enable a capability (globally or per-platform) | `rolester automation enable <capability> [platform] --write` | write-and-report |
-| Disable a capability | `rolester automation disable <capability> [platform] --write` | write-and-report |
-| Session browser provider | `rolester automation session <extension\|playwright> --write` | write-and-report |
+| Comp floor (walk-away minimum) | `careerrat gate comp-floor <N> --write --confirm` | confirm-first |
+| Comp target (negotiation anchor) | `careerrat gate comp-target <N> --write --confirm` | confirm-first |
+| Comp expected (form-field value) | `careerrat gate comp-expected <N> --write` | write-and-report |
+| Excluded company | `careerrat gate exclude-company "<Name>" --write --confirm` | confirm-first |
+| Cut signal | `careerrat gate cut-signal "<signal>" --write` | write-and-report |
+| Keep signal | `careerrat gate keep-signal "<signal>" --write` | write-and-report |
+| Honesty: do not claim a tool | `careerrat gate do-not-claim "<tool>" --write` | write-and-report |
+| Honesty: do not fabricate a claim | `careerrat gate do-not-fabricate "<claim>" --write` | write-and-report |
+| Usage mode (compute/scope) | `careerrat modes set usage <lean\|standard\|full> --write` | write-and-report |
+| Application mode (pursuit posture after discovery) | `careerrat modes set application <selective\|balanced\|high-volume> --write` | write-and-report |
+| Record ToS consent for a platform | `careerrat automation consent <platform> --write` | write-and-report |
+| Withdraw ToS consent for a platform | `careerrat automation revoke <platform> --write` | write-and-report |
+| Enable a capability (globally or per-platform) | `careerrat automation enable <capability> [platform] --write` | write-and-report |
+| Disable a capability | `careerrat automation disable <capability> [platform] --write` | write-and-report |
+| Session browser provider | `careerrat automation session <extension\|playwright> --write` | write-and-report |
 
 **Capabilities:** `status_polling`, `authenticated_search`, `messaging`, `one_click_apply`, `profile_optimize`, `profile_apply`, `mail_access`.
 
@@ -113,17 +113,17 @@ For `ingest-profile`-owned settings: tell the user which step to target. `ingest
 The session browser is the Layer 3 interactive provider (`docs/BROWSER.md`). Two options:
 
 - **Extension (recommended default):** Claude-in-Chrome or equivalent. It already holds the user's logins and password store, so authenticated portals just work. No credentials are stored by CareerRat.
-- **Playwright (fallback):** A persistent profile at `~/.rolester/board-profiles/<platform>`. The user signs in once per platform; the session persists across runs.
+- **Playwright (fallback):** A persistent profile at `~/.careerrat/board-profiles/<platform>`. The user signs in once per platform; the session persists across runs.
 
 Switch the provider with:
 
 ```
-rolester automation session <extension|playwright> --write
+careerrat automation session <extension|playwright> --write
 ```
 
 Dry-run by default; `--write` commits. In DB mode this writes `candidate_automation`; in legacy mode the first `--write` scaffolds `candidate/automation.yml` from the template if it doesn't exist yet. The change is schema-validated in both modes.
 
-`rolester doctor` now surfaces the configured provider and a best-effort presence probe (whether the provider looks reachable). See `docs/BROWSER.md` for the full substrate map and the Browser Automation Contract in `AGENTS.md` for the permission model.
+`careerrat doctor` now surfaces the configured provider and a best-effort presence probe (whether the provider looks reachable). See `docs/BROWSER.md` for the full substrate map and the Browser Automation Contract in `AGENTS.md` for the permission model.
 
 ---
 
@@ -132,13 +132,13 @@ Dry-run by default; `--write` commits. In DB mode this writes `candidate_automat
 After every write, run:
 
 ```
-rolester doctor
+careerrat doctor
 ```
 
 For changes to candidate config files, also run:
 
 ```
-rolester ingest --check
+careerrat ingest --check
 ```
 
 Report what changed. If validation fails, surface the exact error and fix it before closing.

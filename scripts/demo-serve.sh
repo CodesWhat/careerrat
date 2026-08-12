@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Serve the enriched demo dashboard WITHOUT touching your real data or the live
-# 7777 instance. Seeds an isolated demo workspace (ROLESTER_HOME=./.demo-home) from
+# 7777 instance. Seeds an isolated demo workspace (CAREERRAT_HOME=./.demo-home) from
 # examples/demo-workspace, then boots the tracker-dev backend on :7788 and the Vite
 # dev SPA on :5173 (whose /api proxy is pointed at :7788, not your live 7777).
 #
@@ -10,10 +10,10 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-export ROLESTER_HOME="$PWD/.demo-home"   # isolated — never your default workspace
-export ROLESTER_DEV_PORT=7788            # read by BOTH the backend and vite's proxy
+export CAREERRAT_HOME="$PWD/.demo-home"   # isolated — never your default workspace
+export CAREERRAT_DEV_PORT=7788            # read by BOTH the backend and vite's proxy
 
-echo "→ Seeding demo into $ROLESTER_HOME (isolated, safe) ..."
+echo "→ Seeding demo into $CAREERRAT_HOME (isolated, safe) ..."
 node src/cli/data.mjs init --demo
 
 # clear any stale demo backend so a re-run doesn't hit EADDRINUSE on 7788

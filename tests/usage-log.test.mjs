@@ -4,7 +4,7 @@
 // This ledger backs monetization, so the load-bearing behaviors are: the
 // append/read JSONL round-trip, computeCost's exact + prefix model matching
 // and cache multipliers, the "never fabricate a price" fallback for an unknown
-// model, and the ROLESTER_PRICING_JSON override.
+// model, and the CAREERRAT_PRICING_JSON override.
 
 import assert from "node:assert/strict";
 import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
@@ -76,9 +76,9 @@ test("computeCost: unknown model never fabricates a price", () => {
   assert.equal(cost_usd, null);
 });
 
-test("computeCost: ROLESTER_PRICING_JSON overrides/extends the default table", () => {
-  const prior = process.env.ROLESTER_PRICING_JSON;
-  process.env.ROLESTER_PRICING_JSON = JSON.stringify({
+test("computeCost: CAREERRAT_PRICING_JSON overrides/extends the default table", () => {
+  const prior = process.env.CAREERRAT_PRICING_JSON;
+  process.env.CAREERRAT_PRICING_JSON = JSON.stringify({
     "claude-sonnet-5": { in: 1, out: 1 }, // override an existing entry
     "custom-model-x": { in: 2, out: 4 }, // add a new one
   });
@@ -97,14 +97,14 @@ test("computeCost: ROLESTER_PRICING_JSON overrides/extends the default table", (
     const unaffected = computeCost("claude-haiku-4-5", { tokens_in: 1_000_000, tokens_out: 0 });
     assert.equal(unaffected.cost_usd, 1);
   } finally {
-    if (prior === undefined) delete process.env.ROLESTER_PRICING_JSON;
-    else process.env.ROLESTER_PRICING_JSON = prior;
+    if (prior === undefined) delete process.env.CAREERRAT_PRICING_JSON;
+    else process.env.CAREERRAT_PRICING_JSON = prior;
   }
 });
 
-test("computeCost: malformed ROLESTER_PRICING_JSON falls back to defaults, never throws", () => {
-  const prior = process.env.ROLESTER_PRICING_JSON;
-  process.env.ROLESTER_PRICING_JSON = "{not valid json";
+test("computeCost: malformed CAREERRAT_PRICING_JSON falls back to defaults, never throws", () => {
+  const prior = process.env.CAREERRAT_PRICING_JSON;
+  process.env.CAREERRAT_PRICING_JSON = "{not valid json";
   try {
     const { cost_usd, priced } = computeCost("claude-sonnet-5", {
       tokens_in: 1_000_000,
@@ -113,8 +113,8 @@ test("computeCost: malformed ROLESTER_PRICING_JSON falls back to defaults, never
     assert.equal(priced, true);
     assert.equal(cost_usd, 3);
   } finally {
-    if (prior === undefined) delete process.env.ROLESTER_PRICING_JSON;
-    else process.env.ROLESTER_PRICING_JSON = prior;
+    if (prior === undefined) delete process.env.CAREERRAT_PRICING_JSON;
+    else process.env.CAREERRAT_PRICING_JSON = prior;
   }
 });
 

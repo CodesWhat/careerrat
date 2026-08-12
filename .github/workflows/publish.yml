@@ -1,10 +1,10 @@
 name: publish
 
-# Publishes rolester to npm when a GitHub Release is published (or run manually).
+# Publishes careerrat to npm when a GitHub Release is published (or run manually).
 #
 # Auth: npm Trusted Publishing (OIDC) — NO token is stored. npm trusts this exact
 # workflow via the trusted-publisher connection configured on the package
-# (Settings → Trusted Publisher: GitHub Actions → CodesWhat/rolester → publish.yml,
+# (Settings → Trusted Publisher: GitHub Actions → CodesWhat/careerrat → publish.yml,
 # permission "npm publish"). The job mints a short-lived credential from GitHub's
 # OIDC token at run time, so there is nothing to rotate or leak. If you ever rename
 # this file or move the repo, update the trusted-publisher connection to match.
@@ -13,8 +13,8 @@ name: publish
 # existing version, so the release tag must be a new version (0.1.0 is already live).
 #
 # Dist-tags: a prerelease version (any version containing "-", e.g. 0.2.0-rc.1) is
-# published to the "rc" dist-tag, so `npm i rolester` / `npm pack rolester@latest`
-# stay on the last stable release while testers opt in with `rolester@rc`. A plain
+# published to the "rc" dist-tag, so `npm i careerrat` / `npm pack careerrat@latest`
+# stay on the last stable release while testers opt in with `careerrat@rc`. A plain
 # version (0.2.0) publishes to "latest" as usual. Mark the GitHub Release as a
 # pre-release when cutting an -rc build for clarity (the trigger fires either way).
 #

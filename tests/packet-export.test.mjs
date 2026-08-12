@@ -23,12 +23,12 @@ function tempRepo() {
 
 // exportPacketArtifacts now also copies rendered resume/cover-letter PDFs to
 // a Downloads convenience folder (tailor-application SKILL.md STEP 11b).
-// ROLESTER_DOWNLOADS_DIR redirects that away from the real OS home so these
+// CAREERRAT_DOWNLOADS_DIR redirects that away from the real OS home so these
 // tests never write into the machine's actual ~/Downloads.
 function tempDownloadsEnv() {
   const dir = mkdtempSync(join(tmpdir(), "careerrat-packet-downloads-"));
   cleanupRoots.push(dir);
-  return { ROLESTER_DOWNLOADS_DIR: dir };
+  return { CAREERRAT_DOWNLOADS_DIR: dir };
 }
 
 function writeWorkspaceFile(repoRoot, relPath, content) {
@@ -232,9 +232,9 @@ test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources
     false,
     "source markdown is tracked internally but not returned as the normal user-facing export"
   );
-  const resumeDownload = join(downloadsEnv.ROLESTER_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
+  const resumeDownload = join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
   const coverDownload = join(
-    downloadsEnv.ROLESTER_DOWNLOADS_DIR,
+    downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
     "Acme",
     "Acme - Cover Letter.pdf"
   );
@@ -248,7 +248,7 @@ test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources
     "answers PDFs are workspace artifacts only"
   );
   assert.equal(
-    existsSync(join(downloadsEnv.ROLESTER_DOWNLOADS_DIR, "Acme", "Acme - Answers.pdf")),
+    existsSync(join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "Acme - Answers.pdf")),
     false
   );
 });
@@ -267,7 +267,7 @@ test("exportPacketArtifacts archives a prior same-named Downloads PDF on re-expo
     packetSources: { resumeSource: sources.resumeSource },
     exportArtifact: fakeExporter([]),
   });
-  const live = join(downloadsEnv.ROLESTER_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
+  const live = join(downloadsEnv.CAREERRAT_DOWNLOADS_DIR, "Acme", "Acme - Resume.pdf");
   writeFileSync(live, "%PDF-1.4\nprior export marker\n", "utf8");
 
   await exportPacketArtifacts({
@@ -279,7 +279,7 @@ test("exportPacketArtifacts archives a prior same-named Downloads PDF on re-expo
   });
 
   const archived = join(
-    downloadsEnv.ROLESTER_DOWNLOADS_DIR,
+    downloadsEnv.CAREERRAT_DOWNLOADS_DIR,
     "Acme",
     "archive",
     "Acme - Resume.pdf"
@@ -299,7 +299,7 @@ test("exportPacketArtifacts reports Downloads copy failures without failing work
 
   const result = await exportPacketArtifacts({
     repoRoot,
-    env: { ROLESTER_DOWNLOADS_DIR: blockedRoot },
+    env: { CAREERRAT_DOWNLOADS_DIR: blockedRoot },
     appId: "app-export",
     packetSources: { resumeSource: sources.resumeSource },
     exportArtifact: fakeExporter([]),

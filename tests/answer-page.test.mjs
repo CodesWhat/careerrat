@@ -119,7 +119,7 @@ test("answer page drafts through the local packet answers API by default", () =>
   assert.match(script, /persistedLineEl/);
   assert.doesNotMatch(script, /\/api\/skill\/run/);
   assert.doesNotMatch(script, /answer-question/);
-  assert.doesNotMatch(script, /answerQuestionAllowed|ROLESTER_RUNTIME_SKILLS/);
+  assert.doesNotMatch(script, /answerQuestionAllowed|CAREERRAT_RUNTIME_SKILLS/);
 });
 
 // ---------------------------------------------------------------------------

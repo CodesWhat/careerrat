@@ -16,7 +16,7 @@
 --   is a reserved-ish identifier in Postgres/PostgREST, avoided here on
 --   purpose; src/cli/meter-db.mjs maps both directions).
 --
--- Default table name is "usage_events" (ROLESTER_METER_DB_TABLE default) —
+-- Default table name is "usage_events" (CAREERRAT_METER_DB_TABLE default) —
 -- rename the table below to match if you point the proxy at a different one.
 
 create table if not exists usage_events (
@@ -45,7 +45,7 @@ create table if not exists usage_events (
 create index if not exists usage_events_user_id_idx on usage_events (user_id);
 
 -- No RLS policy is defined on purpose: the proxy only ever talks to this
--- table with the service-role key (ROLESTER_METER_DB_KEY), which bypasses
+-- table with the service-role key (CAREERRAT_METER_DB_KEY), which bypasses
 -- RLS entirely. Enabling RLS with zero policies just means an anon/
 -- authenticated key (if one ever leaked) reads and writes nothing here.
 alter table usage_events enable row level security;

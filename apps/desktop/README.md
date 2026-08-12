@@ -35,14 +35,14 @@ npm run desktop:dist
 ```
 
 This runs the web app build, stages a self-contained engine copy into
-`staging/rolester`, then runs `electron-builder --mac dmg`. The pilot target is
+`staging/careerrat`, then runs `electron-builder --mac dmg`. The pilot target is
 a signed and notarized macOS DMG. The staged runtime uses the same allowlist
 `npm pack` ships, plus its own Agent SDK install, so the packaged app does not
 reach back into the source checkout or root `node_modules`.
 
 ## Data root and AI runtime
 
-In packaged mode, `ROLESTER_HOME` is set before any Rolester module is
+In packaged mode, `CAREERRAT_HOME` is set before any CareerRat module is
 imported. It points at Electron's per-user data directory:
 `app.getPath("userData")/data`. Candidate setup, workspace state, SQLite data,
 and `internal/ai.env` live there, outside the signed resources tree.

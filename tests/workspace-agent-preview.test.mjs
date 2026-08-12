@@ -95,7 +95,7 @@ test("previewWorkspaceIntent: long text truncates in the answer label", () => {
 
 test("previewWorkspaceIntent: engineAvailable is false when resolveAIRoute finds no route", () => {
   // No repoRoot (skips the installed-runtime lookup entirely) and an env with
-  // no ANTHROPIC_API_KEY / ROLESTER_AI_PROXY_URL — resolveAIRoute() falls all
+  // no ANTHROPIC_API_KEY / CAREERRAT_AI_PROXY_URL — resolveAIRoute() falls all
   // the way through to type "none".
   const result = previewWorkspaceIntent({ text: "sweep my boards", env: {} });
   assert.equal(result.engineAvailable, false);

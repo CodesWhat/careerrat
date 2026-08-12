@@ -21,7 +21,7 @@ const METHODS = [
   "writeFile",
 ];
 
-// A fresh repoRoot with its resolved (non-legacy, .rolester-backed) workspace dir
+// A fresh repoRoot with its resolved (non-legacy, .careerrat-backed) workspace dir
 // pre-created — resolveUserPaths never creates directories on its own (see
 // workspace-paths.test.mjs), and writeTrackerJson's atomicWriteFile assumes the
 // target directory already exists, same as every real CLI call-site does.

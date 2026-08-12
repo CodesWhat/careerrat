@@ -88,7 +88,7 @@ test("callAI (installed runtime): result carries numeric elapsedMs and the insta
       system: "Answer briefly.",
       maxTokens: 16,
       root,
-      env: { ROLESTER_DESKTOP_SHELL: "1" },
+      env: { CAREERRAT_DESKTOP_SHELL: "1" },
       runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
       runInstalledRuntimeImpl: async () => ({
         text: "hello from codex",
@@ -113,7 +113,7 @@ test("callAI (BYOK): result carries numeric elapsedMs and the Anthropic API engi
       model: "claude-haiku-4-5",
       messages: [{ role: "user", content: "hi" }],
       maxTokens: 16,
-      env: { ANTHROPIC_API_KEY: "sk-ant-test", ROLESTER_ANTHROPIC_BASE_URL: upstream.url },
+      env: { ANTHROPIC_API_KEY: "sk-ant-test", CAREERRAT_ANTHROPIC_BASE_URL: upstream.url },
     });
 
     assert.equal(typeof result.elapsedMs, "number");

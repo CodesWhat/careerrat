@@ -92,7 +92,7 @@ test("INTEGRATION (skipped without ANTHROPIC_API_KEY): intake-extract reads a re
           ? `Read the file at this exact path: ${pdfPath}\n\n${correction}`
           : { path: pdfPath },
         repoRoot,
-        env: { ...process.env, ROLESTER_RUNTIME_SKILLS: "intake-extract" },
+        env: { ...process.env, CAREERRAT_RUNTIME_SKILLS: "intake-extract" },
         tools: ["Read"],
         onEvent: (evt) => {
           if (evt.type !== "assistant") return;
