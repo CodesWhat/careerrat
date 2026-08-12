@@ -725,6 +725,10 @@ section {
   max-width: 900px;
   margin-top: 40px;
 }
+.pricing-grid-single {
+  grid-template-columns: 1fr;
+  max-width: 440px;
+}
 .pricing-card {
   background: var(--card);
   border-radius: var(--radius-lg);

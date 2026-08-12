@@ -24,11 +24,11 @@ export default function DashboardPreview() {
           </span>
         </div>
         <div className="dash-card-row">
-          <span className="dash-card-row-label">2 · OVERNIGHT FINDS</span>
+          <span className="dash-card-row-label">2 · NEW FINDS</span>
           <span className="dash-card-row-text">Review 4 new high-fit roles</span>
         </div>
         <div className="dash-card-ask">
-          <span>Ask your rat: &ldquo;why did Stripe get cut?&rdquo;</span>
+          <span>Ask your rat: &ldquo;why did Globex get cut?&rdquo;</span>
           <span className="dash-card-ask-send" aria-hidden="true">
             <svg
               viewBox="0 0 24 24"
@@ -46,7 +46,7 @@ export default function DashboardPreview() {
           </span>
         </div>
         <span className="dash-card-footer">
-          OVERNIGHT · 41 SCANNED · 7 NEW · AI · CLAUDE CODE
+          LATEST SWEEP · 41 SCANNED · 7 NEW · AI · CLAUDE CODE
         </span>
       </div>
     </div>

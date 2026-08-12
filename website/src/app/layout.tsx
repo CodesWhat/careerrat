@@ -33,7 +33,7 @@ const siteDescription =
   "CareerRat is a chat-first job-search tracker. Rate the jobs worth chasing, apply with honest evidence-backed artifacts, and track every outcome. Free, local-first, and run by the AI CLI you already have.";
 
 export const metadata: Metadata = {
-  title: "CareerRat — Rate. Apply. Track.",
+  title: "CareerRat: Rate. Apply. Track.",
   description: siteDescription,
   applicationName: "CareerRat",
   keywords: [
@@ -45,14 +45,14 @@ export const metadata: Metadata = {
     "privacy",
   ],
   openGraph: {
-    title: "CareerRat — Rate. Apply. Track.",
+    title: "CareerRat: Rate. Apply. Track.",
     description: siteDescription,
     siteName: "CareerRat",
     type: "website",
   },
   twitter: {
     card: "summary_large_image",
-    title: "CareerRat — Rate. Apply. Track.",
+    title: "CareerRat: Rate. Apply. Track.",
     description: siteDescription,
   },
 };

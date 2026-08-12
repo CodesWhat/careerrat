@@ -87,8 +87,7 @@ export default function Home() {
               </span>
             </div>
             <div className="hero-cli-note receipt reveal reveal-delay-4">
-              Works with Claude Code · Codex · Gemini · any text-in, text-out
-              command
+              Works with Claude Code · Codex · any CLI already on your PATH
             </div>
           </div>
           <div className="hero-visual reveal reveal-delay-2">
@@ -119,7 +118,7 @@ export default function Home() {
                 one: your subscription, your machine, nothing leaves it.
               </p>
               <span className="step-chip step-chip-success">
-                CLAUDE CODE · DETECTED · V2.3
+                CLAUDE CODE · DETECTED
               </span>
             </div>
 
@@ -140,12 +139,12 @@ export default function Home() {
               <div className="step-index receipt">03</div>
               <h3 className="step-h3">It hunts, you decide</h3>
               <p className="step-p">
-                Sweeps run in the background: pull, dedupe, cut, rank, prep.
+                Say the word and it sweeps: pull, dedupe, cut, rank, prep.
                 Everything it does leaves a receipt, and nothing is sent
                 without you.
               </p>
               <span className="step-chip">
-                SWEEP 6:12 AM · 9 CUT · 12 RANKED · AI · CLAUDE CODE
+                SWEEP · 9 CUT · 12 RANKED · AI · CLAUDE CODE
               </span>
             </div>
           </div>
@@ -465,7 +464,7 @@ export default function Home() {
               included. No account, no sign-in, no trial clock.
             </p>
           </div>
-          <div className="pricing-grid">
+          <div className="pricing-grid pricing-grid-single">
             <div className="pricing-card reveal reveal-delay-1">
               <div className="pricing-card-head">
                 <h3 className="pricing-card-name">Free</h3>
@@ -486,31 +485,6 @@ export default function Home() {
               </ul>
               <a href="#get" className="btn-primary pricing-cta">
                 Get started free
-              </a>
-            </div>
-            <div className="pricing-card reveal reveal-delay-2">
-              <div className="pricing-card-head">
-                <h3 className="pricing-card-name">Hosted AI</h3>
-                <span className="pricing-card-tag pricing-card-tag-soon receipt">
-                  Coming soon
-                </span>
-              </div>
-              <p className="pricing-card-p">
-                No CLI, no setup. We run the model. Same app, same
-                receipts.
-              </p>
-              <ul className="pricing-list pricing-list-faint">
-                <li>Everything in Free</li>
-                <li>No CLI required: sign in and go</li>
-                <li>Pricing announced at launch</li>
-              </ul>
-              <a
-                href="https://github.com/CodesWhat/careerrat/discussions"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="btn-secondary pricing-cta"
-              >
-                Join the waitlist
               </a>
             </div>
           </div>
@@ -580,7 +554,7 @@ export default function Home() {
                 <div style={{ marginTop: "28px" }}>
                   <div className="prereq-label">Prerequisites</div>
                   <ul className="prereq-list">
-                    <li>Node.js 24 or newer</li>
+                    <li>Node.js 18 or newer</li>
                     <li style={{ marginTop: "8px" }}>
                       An AI coding CLI on your PATH:
                       <ul className="prereq-sublist">
