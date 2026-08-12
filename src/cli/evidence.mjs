@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// rolester evidence — the safe read/validate/add helper for the evidence truth bank.
+// careerrat evidence — the safe read/validate/add helper for the evidence truth bank.
 //
 // candidate/evidence.yml is the source of truth every outbound artifact draws from
 // (résumés, cover letters, interview packets, STAR+R stories). This is the guarded
@@ -251,7 +251,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester evidence — safe read/validate/add for the evidence truth bank
+  console.log(`careerrat evidence — safe read/validate/add for the evidence truth bank
 
 Usage:
   node src/cli/evidence.mjs list [--json]
@@ -274,5 +274,5 @@ Options:
   --file FILE   YAML claim fragment for add (a claim mapping, or { claims: [ one ] }).
   --write       Commit the add (default: dry run).
   --json        Machine-readable output.
-  --root DIR    Repo root (default: the rolester install).`);
+  --root DIR    Repo root (default: the careerrat install).`);
 }

@@ -17,12 +17,12 @@ cp -r examples/sample-candidate/ candidate/
 **Option B — start fresh with the init wizard:**
 
 ```
-rolester init
+careerrat init
 # Follow the prompts to fill out your profile interactively.
 ```
 
-After setting up `candidate/`, run `rolester doctor` to verify everything is
-valid, then `rolester searches --from-targeting` to build your search sources.
+After setting up `candidate/`, run `careerrat doctor` to verify everything is
+valid, then `careerrat searches --from-targeting` to build your search sources.
 
 ## Files in this directory
 

@@ -1,5 +1,5 @@
 {
-  "name": "rolester",
+  "name": "careerrat",
   "version": "0.5.2",
   "private": false,
   "publishConfig": {
@@ -10,13 +10,14 @@
   "author": "CodesWhat",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CodesWhat/rolester.git"
+    "url": "git+https://github.com/CodesWhat/careerrat.git"
   },
-  "homepage": "https://github.com/CodesWhat/rolester#readme",
+  "homepage": "https://github.com/CodesWhat/careerrat#readme",
   "bugs": {
-    "url": "https://github.com/CodesWhat/rolester/issues"
+    "url": "https://github.com/CodesWhat/careerrat/issues"
   },
   "bin": {
+    "careerrat": "bin/rolester.mjs",
     "rolester": "bin/rolester.mjs"
   },
   "workspaces": [

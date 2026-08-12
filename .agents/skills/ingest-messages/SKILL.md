@@ -19,7 +19,7 @@ until consent is confirmed.
 Run:
 
 ```
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect the `capabilities.messaging` entry. The applicable platforms are `linkedin`
@@ -34,10 +34,10 @@ stop — do not open a browser:
 
 1. Read the platform's terms of service yourself to confirm automated messaging reads
    are permitted.
-2. Record consent: `rolester automation consent <platform> --write`
-3. Enable the capability global switch: `rolester automation enable messaging --write`
-4. Enable for the specific platform: `rolester automation enable messaging <platform> --write`
-5. Verify: `rolester automation status --json`
+2. Record consent: `careerrat automation consent <platform> --write`
+3. Enable the capability global switch: `careerrat automation enable messaging --write`
+4. Enable for the specific platform: `careerrat automation enable messaging <platform> --write`
+5. Verify: `careerrat automation status --json`
 
 State clearly: this capability is OFF by default; enabling it is a deliberate choice.
 The user must read the platform ToS themselves before recording consent — Rolester
@@ -255,7 +255,7 @@ Route each gate type to its canonical file:
 Then log each inbound thread to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). One event per inbound thread captured, actor `world`:
 
 ```
-rolester activity append --type message --actor world \
+careerrat activity append --type message --actor world \
   --title "<Company> messaged" --summary "<one-line summary>" \
   --company "<Company>" --app-id <application id> --write
 ```
@@ -316,26 +316,26 @@ Write the changes directly to `workspace/tracker.json`.
 Run in sequence:
 
 ```bash
-rolester tracker --verify
+careerrat tracker --verify
 ```
 
 Must exit 0. If it fails, do not proceed — show the validation errors and ask the
 user how to resolve them.
 
 ```bash
-rolester tracker --followups
+careerrat tracker --followups
 ```
 
 Confirm new threads appear in the follow-ups surface.
 
 ```bash
-rolester tracker --summary
+careerrat tracker --summary
 ```
 
 Confirm message counts incremented for the matched applications.
 
 ```bash
-rolester tracker
+careerrat tracker
 ```
 
 Re-renders `workspace/tracker.html`.
@@ -360,7 +360,7 @@ Ingest complete:
 
 ## RULES
 
-- **Opt-in, OFF by default.** Only poll platforms where `rolester automation status --json`
+- **Opt-in, OFF by default.** Only poll platforms where `careerrat automation status --json`
   shows `messaging` `allowed: true` for that platform. The `allowed` field encodes the
   three-part AND (global switch · platform switch · ToS consent) from `mayRun()` in
   `src/core/automation/consent.mjs` — never re-derive the predicate in prose.

@@ -85,7 +85,7 @@ function runList() {
       `Until this is populated, search-jobs can use broad board searches but will not scan company ATS boards like ${ATS_FAMILIES}.`
     );
     console.log(
-      `Add one: rolester companies --add "Acme" --url "https://jobs.ashbyhq.com/acme" --write`
+      `Add one: careerrat companies --add "Acme" --url "https://jobs.ashbyhq.com/acme" --write`
     );
     return 0;
   }
@@ -102,7 +102,7 @@ function runAdd() {
   const url = optValue("--url");
 
   if (!name || !url) {
-    console.error('Usage: rolester companies --add "<name>" --url "<careers_url>" [--write]');
+    console.error('Usage: careerrat companies --add "<name>" --url "<careers_url>" [--write]');
     return 2;
   }
 
@@ -176,7 +176,7 @@ function runAdd() {
 function runRemove() {
   const name = optValue("--remove");
   if (!name) {
-    console.error('Usage: rolester companies --remove "<name>" [--write]');
+    console.error('Usage: careerrat companies --remove "<name>" [--write]');
     return 2;
   }
 
@@ -246,7 +246,7 @@ function companyAtsReadiness(companies) {
     providers,
     missingAction:
       companies.length === 0
-        ? "Run discover-companies, or add a scannable ATS board with rolester companies --add."
+        ? "Run discover-companies, or add a scannable ATS board with careerrat companies --add."
         : null,
   };
 }
@@ -264,15 +264,15 @@ function optValue(flag) {
 }
 
 function printHelp() {
-  console.log(`rolester companies — manage config/sourced-scan.json#tracked_companies
+  console.log(`careerrat companies — manage config/sourced-scan.json#tracked_companies
 
 Usage:
-  rolester companies                                        List tracked companies (default)
-  rolester companies --add "<name>" --url "<url>"           Dry-run add (print what would be added)
-  rolester companies --add "<name>" --url "<url>" --write   Append a company and save
-  rolester companies --remove "<name>"                      Dry-run remove
-  rolester companies --remove "<name>" --write              Remove a company and save
-  rolester companies --json                                 Machine-readable output for any mode
+  careerrat companies                                        List tracked companies (default)
+  careerrat companies --add "<name>" --url "<url>"           Dry-run add (print what would be added)
+  careerrat companies --add "<name>" --url "<url>" --write   Append a company and save
+  careerrat companies --remove "<name>"                      Dry-run remove
+  careerrat companies --remove "<name>" --write              Remove a company and save
+  careerrat companies --json                                 Machine-readable output for any mode
 
 Supported ATS hosts: ${SUPPORTED_HOSTS.join(", ")}
 

@@ -47,7 +47,7 @@ separate from in-platform messaging.
 Run:
 
 ```bash
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.mail_access` for the requested platform. `allowed: true`
@@ -60,10 +60,10 @@ If `mail_access` is not allowed, stop before opening a browser and show the exac
 opt-in steps:
 
 1. Read the provider's terms of service yourself.
-2. `rolester automation consent <gmail|outlook> --write`
-3. `rolester automation enable mail_access --write`
-4. `rolester automation enable mail_access <gmail|outlook> --write`
-5. `rolester automation status --json`
+2. `careerrat automation consent <gmail|outlook> --write`
+3. `careerrat automation enable mail_access --write`
+4. `careerrat automation enable mail_access <gmail|outlook> --write`
+5. `careerrat automation status --json`
 
 If allowed, use the session browser. Read only job-search/recruiting messages in
 the resolved window from STEP 2; do not browse personal mail outside that scope.
@@ -266,7 +266,7 @@ Route each gate type to its canonical file:
 Then log each inbound thread to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). One event per inbound thread captured, actor `world`:
 
 ```
-rolester activity append --type message --actor world \
+careerrat activity append --type message --actor world \
   --title "<Company> replied" --summary "<subject or one-line summary>" \
   --company "<Company>" --app-id <application id> --write
 ```
@@ -334,26 +334,26 @@ Write the change directly to `workspace/tracker.json`.
 Run in sequence:
 
 ```bash
-rolester tracker --verify
+careerrat tracker --verify
 ```
 
 Must exit 0. If it fails, do not proceed — show the validation errors and ask
 the user how to resolve them.
 
 ```bash
-rolester tracker --followups
+careerrat tracker --followups
 ```
 
 Confirm new threads appear in the follow-ups surface.
 
 ```bash
-rolester tracker --summary
+careerrat tracker --summary
 ```
 
 Confirm message counts incremented for the matched applications.
 
 ```bash
-rolester tracker
+careerrat tracker
 ```
 
 Re-renders `workspace/tracker.html`.

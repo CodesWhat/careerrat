@@ -45,7 +45,7 @@ Treat this as an `outbound-follow-up` (or `thank-you` if the notification kind i
 2. Capture the outbound draft message (STEP 6a/b).
 3. Advance the record status and reset `nextActionDue` (STEP 6b / STEP 8 timer reset).
 4. Persist the baked draft onto the record (STEP 8 — `comm.draft` or `app.followUp.draft`) so the notification bell can show it ready to send.
-5. Validate and re-render (`rolester tracker --verify` then `rolester tracker`) — this clears the timer from the Needs Attention panel for that item.
+5. Validate and re-render (`careerrat tracker --verify` then `careerrat tracker`) — this clears the timer from the Needs Attention panel for that item.
 
 ---
 
@@ -60,7 +60,7 @@ When the user says they already sent a message, already replied, or already comp
    - Set `nextActionDue = null` — the CTA is satisfied.
    - Set `nextAction` to the next expected event (e.g. "Await recruiter reply"), or `null` if none.
    - Set `comm.draft = null` (and `app.followUp.draft = null` if a draft was staged) — the draft is no longer pending.
-3. **Run `rolester tracker --verify`**, confirm clean exit, then **re-render** (`rolester tracker`).
+3. **Run `careerrat tracker --verify`**, confirm clean exit, then **re-render** (`careerrat tracker`).
 
 The agent not having performed the action is not a reason to leave the CTA up. Record it immediately and clear state.
 
@@ -292,22 +292,22 @@ Execute the following mutation sequence in order:
 
 **(c) Save long raw body** to `workspace/comms/<thread-id>.md` if the body exceeds one paragraph. Reference the path in `artifactPath`. `workspace/comms/` files are local-only and must not appear in any outbound artifact.
 
-**(d) Validate:** `rolester tracker --verify`
+**(d) Validate:** `careerrat tracker --verify`
 
 Confirm it exits clean before proceeding. If it fails, fix the JSON and re-run.
 
-**(e) Re-render:** `rolester tracker`
+**(e) Re-render:** `careerrat tracker`
 
 Then log it to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). If the message is a draft awaiting the user to send, log it as needing the user; if it was already sent, log it sent:
 
 ```
 # draft awaiting send:
-rolester activity append --type drafted --actor agent --needs-user \
+careerrat activity append --type drafted --actor agent --needs-user \
   --title "Drafted reply — <Company>" --summary "<one line: what the message does>" \
   --company "<Company>" --app-id <application id> --cta-label "Review & send" --write
 
 # already sent:
-rolester activity append --type message --actor agent \
+careerrat activity append --type message --actor agent \
   --title "Sent — <Company>" --summary "<one line: what the message does>" \
   --company "<Company>" --app-id <application id> --write
 ```
@@ -324,7 +324,7 @@ Branch on message type after capture:
 | Offer received | Before surfacing the comp comparison, write to `tracker.json` in one operation: comm `status → waiting`, `nextActionDue = null`, `nextAction = 'Evaluate offer and respond'` (set a real deadline if the employer gave one, else null), `comm.draft = null` if a draft was staged. Append a `note`-direction message to `messages[]` summarising the offer receipt. Then read `candidate/profile.yml#compensation.minimum_base` and `target_base`, surface whether the stated comp clears the floor, and recommend accept/negotiate/decline. Do not accept on the user's behalf. |
 | Rejection or withdrawal | In the SAME `tracker.json` write as the STEP 6 capture: set `status = closed`, `nextActionDue = null`, `nextAction = null`, `comm.draft = null` (if any draft was staged). Do not rely on STEP 6's generic status field alone — state it explicitly here. Then hand off to `track-outcomes` for durable outcome recording and reevaluation-threshold check. |
 | Ghosting / no response after follow-up | In the SAME `tracker.json` write: set `status = closed` (or `blocked` if appropriate), `nextActionDue = null`, `nextAction = null`, `comm.draft = null` if a draft was staged. The due-date CTA must clear together with the status in one write. Hand off to `track-outcomes`. |
-| User states new exclusion mid-thread (e.g., "never email this company again") | Confirm-first, then append to `candidate/targeting.yml#excluded_companies` (field confirmed in `targeting.schema.json`). Echo: `Written to candidate/targeting.yml: excluded_companies += <company>`. Run `rolester doctor` to verify schema after write. |
+| User states new exclusion mid-thread (e.g., "never email this company again") | Confirm-first, then append to `candidate/targeting.yml#excluded_companies` (field confirmed in `targeting.schema.json`). Echo: `Written to candidate/targeting.yml: excluded_companies += <company>`. Run `careerrat doctor` to verify schema after write. |
 | User states new comp floor mid-thread | See STEP 4 comp write-back rule. |
 
 ---
@@ -338,7 +338,7 @@ After every `outbound-sent` or `outbound-draft` capture, set `nextActionDue`:
 
 **Stale threshold:** A `waiting` thread with no update for **7 days** is stale and surfaces as a follow-up. Applied-with-no-response threads surface after **10 days**. These defaults come from `cadence.mjs` — if the candidate's `follow_up:` config block in `candidate/targeting.yml` provides custom thresholds for a kind, those take precedence over the code defaults.
 
-When the user asks to work follow-ups (or `rolester tracker --followups` surfaces them):
+When the user asks to work follow-ups (or `careerrat tracker --followups` surfaces them):
 
 1. Read the stale thread via STEP 2.
 2. Apply STEP 3 style gate.
@@ -349,8 +349,8 @@ When the user asks to work follow-ups (or `rolester tracker --followups` surface
    - For application-based kinds (`app-nudge`, `post-interview-nudge`, `thank-you`): set `app.followUp = { kind, dueAt, draft: { subject, body }, generatedAt }` on the application record.
    The dashboard notification bell reads these fields directly; a baked draft appears as "ready to send." A baked draft is only valid for the DRAFT/awaiting-send state; once the message is sent, it must be nulled per the sent-clears-draft invariant (STEP 6b) so the "Ready to send" panel clears.
    **Also write a convenience copy** to the company's Downloads folder — `~/Downloads/rolester/<Company>/<Company> - <what> Email.txt` (e.g. `Aperture Science - Follow-up Email.txt`), per the Artifact Contract (organized by company, then by round). Use the real company name for the folder and file (never a bracket placeholder; if the company is somehow unknown, use `unknown`). File content: subject line on the first line, a blank line, then the body. `workspace/` stays the source of truth; Downloads is for the user's convenience. Body must NEVER contain `current_base` or any private comp field (per the Privacy Invariant).
-6. Validate: `rolester tracker --verify` (also: `npm run verify:tracker`). Confirm clean exit before proceeding.
-7. Re-render: `rolester tracker` (so the timer clears from the dashboard).
+6. Validate: `careerrat tracker --verify` (also: `npm run verify:tracker`). Confirm clean exit before proceeding.
+7. Re-render: `careerrat tracker` (so the timer clears from the dashboard).
 
 ---
 
@@ -367,7 +367,7 @@ For each item returned by `computeFollowUps`:
    - `thank-you`: warm, specific thank-you referencing one detail from `applications[].conversations[]`; keep to 3–5 lines.
    - `needs-reply` / `comm-due` / `waiting-stale`: advance the existing thread per STEP 5's follow-up guidance.
 3. **Persist** the draft to the record (see STEP 8 — "Persist a baked draft" above).
-4. **Validate and re-render** after all drafts are written (`rolester tracker --verify` then `rolester tracker`).
+4. **Validate and re-render** after all drafts are written (`careerrat tracker --verify` then `careerrat tracker`).
 
 ---
 

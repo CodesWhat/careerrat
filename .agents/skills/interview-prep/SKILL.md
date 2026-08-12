@@ -50,13 +50,13 @@ Read all of the following before doing anything else:
 7. Read prior lessons for this role family before building the packet — they
    sharpen fit signals, likely questions, and comp anchoring. Run:
    ```
-   rolester learnings read "<role title or family>"
+   careerrat learnings read "<role title or family>"
    ```
    A missing file is normal — the CLI prints a skip note to stderr and exits 0.
 8. Read any company research artifact before building the packet — it sharpens the
    Positioning Thesis and the questions-to-ask. Run:
    ```
-   rolester research read "<company>"
+   careerrat research read "<company>"
    ```
    A missing file is normal (skip note to stderr, exit 0). If present, fold its
    sourced signals into the Positioning Thesis and Questions To Ask as **context to
@@ -67,17 +67,17 @@ Read all of the following before doing anything else:
 9. Read the STAR+R **story bank** before building the packet — it holds reusable
    behavioural answers that already trace to evidence. Run:
    ```
-   rolester stories match "workspace/jobs/<jd-file>.md.json"
+   careerrat stories match "workspace/jobs/<jd-file>.md.json"
    ```
    (or `--signals "a,b,c"` when you don't have the JD JSON path). A missing or empty
    bank is normal. The matched stories become the packet's **Prepared Stories**
-   section (STEP 2); uncovered behavioural themes (`rolester stories gaps`) are
+   section (STEP 2); uncovered behavioural themes (`careerrat stories gaps`) are
    candidates to draft in STEP 2b. Never treat a story as more than its `evidence_ids`
    back.
-10. Run `rolester tracker --summary` to confirm funnel state.
+10. Run `careerrat tracker --summary` to confirm funnel state.
 11. Check usage mode before building a deep multi-audience packet:
    ```
-   rolester modes allows interview:packet:deep
+   careerrat modes allows interview:packet:deep
    ```
    If it returns `downshift`, build one lighter packet focused on the actual next
    round rather than recruiter + hiring-manager + panel variants. If it returns
@@ -216,7 +216,7 @@ to retrieve it under pressure. Pull each "say" line from the strongest backing i
    they are not what you show the candidate. Translate every match into the JD's
    own language and the candidate's real work.
 4. **Prepared Stories (STAR+R)** — matched stories from `candidate/stories.yml`
-   (`rolester stories match`), rendered Situation/Task/Action/Result/Reflection.
+   (`careerrat stories match`), rendered Situation/Task/Action/Result/Reflection.
    These are the answer anchors for the Likely Questions below. Omitted when the
    bank is empty. Each story already traces to evidence — use it as written; never
    improvise past its `evidence_ids`.
@@ -326,7 +326,7 @@ The story bank compounds across loops — build it as you prep, don't restart ea
 round. After writing the packet, check behavioural coverage:
 
 ```
-rolester stories gaps
+careerrat stories gaps
 ```
 
 Every 🔴 behavioural-gap question from STEP 2 section 5 lands here. **Surface gaps to
@@ -348,7 +348,7 @@ For each uncovered competency (or a Likely Question with no Prepared Story):
    confirms. If no claim backs it, it is an **Evidence Gap** (STEP 2 section 9) — surface
    it for the candidate to fill; do **not** invent a story to cover it. If the candidate
    has built relevant projects that simply aren't in evidence yet, offer to scan them
-   (`ingest-profile` STEP 2b, `rolester evidence add`) to originate the claims first,
+   (`ingest-profile` STEP 2b, `careerrat evidence add`) to originate the claims first,
    then draft the story. New biographical detail the candidate gives you on the call
    (an origin, an outcome) is their real account — fold it into the narrative even when
    it isn't yet a separate evidence claim, but keep `evidence_ids` pointed at claims
@@ -359,13 +359,13 @@ For each uncovered competency (or a Likely Question with no Prepared Story):
    (never bracket placeholders). List every claim id used in `evidence_ids`.
 3. Write the draft to a temp YAML file and propose it (dry run):
    ```
-   rolester stories add --file <draft.yml>
+   careerrat stories add --file <draft.yml>
    ```
    The firewall refuses a story that cites no or unknown evidence, drops a STAR+R
    field, carries placeholder residue, or leaks comp. On the candidate's
    confirmation, commit (atomic upsert by id):
    ```
-   rolester stories add --file <draft.yml> --write
+   careerrat stories add --file <draft.yml> --write
    ```
 4. **Set `open_questions[]` for anything the story is still missing — don't block
    on it.** The candidate's account is truth: bank the story now, then list the
@@ -378,7 +378,7 @@ For each uncovered competency (or a Likely Question with no Prepared Story):
    card in the dashboard Next Steps queue (one per thin story, "Give context"
    action). When the candidate fills a gap, drop that string from `open_questions`
    and re-`add --write`; the card clears on the next sync. (If you edit
-   `stories.yml` outside the CLI, run `rolester stories sync-enrichment --write`
+   `stories.yml` outside the CLI, run `careerrat stories sync-enrichment --write`
    to refresh the mirror.) Frame each `open_questions` entry as the actionable ask
    you'd put to the candidate, not an accusation — the candidate's account is the
    source of truth; the gap is just what would sharpen it.
@@ -580,7 +580,7 @@ After a walk-away, close the app row immediately — do not defer to a later STE
 - `comm.nextActionDue → null`
 - Append a terminal `conversations[]` entry: `{ "kind": "offer", "notes": "Walk-away executed — offer below comp floor.", ... }`
 
-Run `rolester tracker --verify` immediately after. Then write the outcome to the debrief file (STEP 5) and log lessons (STEP 7).
+Run `careerrat tracker --verify` immediately after. Then write the outcome to the debrief file (STEP 5) and log lessons (STEP 7).
 
 **After the call — hand off to email-comms.** Every substantive verbal exchange
 (offer received, counter indicated, concession offered) must be persisted:
@@ -599,10 +599,10 @@ Run `rolester tracker --verify` immediately after. Then write the outcome to the
    - Per-offer walk-away floor ("I won't go below $X on this one"): write to
      `candidate/profile.yml#compensation.minimum_base` directly. Echo:
      `Written to candidate/profile.yml: compensation.minimum_base: <value>`.
-   - Permanent sourcing floor change: `rolester gate comp-floor <N>` (dry-run);
-     `rolester gate comp-floor <N> --write --confirm` to commit.
-   - Comp target change: `rolester gate comp-target <N>` (dry-run);
-     `rolester gate comp-target <N> --write --confirm` to commit.
+   - Permanent sourcing floor change: `careerrat gate comp-floor <N>` (dry-run);
+     `careerrat gate comp-floor <N> --write --confirm` to commit.
+   - Comp target change: `careerrat gate comp-target <N>` (dry-run);
+     `careerrat gate comp-target <N> --write --confirm` to commit.
 
 ---
 
@@ -626,7 +626,7 @@ After lint passes clean (STEP 4), render the styled PDF — the only export the
 packet ships:
 
 ```
-rolester export workspace/interview-prep/<company>-<role>.md --pdf
+careerrat export workspace/interview-prep/<company>-<role>.md --pdf
 ```
 
 Uses the Playwright Chromium bundled with the repo — no setup required. The PDF
@@ -694,7 +694,7 @@ Blockers: <open items>
 **Bank what landed.** For each story under "Stories That Landed", record it back to
 the bank so the next loop opens with it ranked. Re-`add` the story (an upsert by id)
 with this round appended to its `landed` list:
-`rolester stories add --file <updated.yml> --write`. If a sharper framing emerged,
+`careerrat stories add --file <updated.yml> --write`. If a sharper framing emerged,
 update the story's narrative too — still tracing to the same `evidence_ids`. A story
 that didn't land or got refuted is a note for the candidate, not a silent edit.
 
@@ -787,9 +787,9 @@ This makes the Focus card and Next Steps CTA reflect the actual next event. A pa
 After editing `tracker.json`, run in sequence:
 
 ```
-rolester tracker --verify
+careerrat tracker --verify
 npm run verify:tracker
-rolester tracker
+careerrat tracker
 ```
 
 Both verify commands must pass clean before re-rendering.
@@ -797,7 +797,7 @@ Both verify commands must pass clean before re-rendering.
 Then log the packet or debrief to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
 
 ```
-rolester activity append --type interview --actor agent \
+careerrat activity append --type interview --actor agent \
   --title "Interview prep — <Company>" --summary "<packet built / debrief captured>" \
   --company "<Company>" --app-id <application id> --write
 ```
@@ -824,10 +824,10 @@ first write):
 
 ```
 # dry run — lints for placeholders and comp leaks, prints what would be appended
-rolester learnings append "<role>" --title "<short label>" --body-file <path>
+careerrat learnings append "<role>" --title "<short label>" --body-file <path>
 
 # commit
-rolester learnings append "<role>" --title "<short label>" --body-file <path> --write
+careerrat learnings append "<role>" --title "<short label>" --body-file <path> --write
 ```
 
 Never include `current_base` or "currently make" language in the entry body —
@@ -851,7 +851,7 @@ the CLI will refuse it.
   sections by hand.
 - **Stories trace to evidence and compound.** The STAR+R bank
   (`candidate/stories.yml`) is drafted from `evidence.yml`, never invented; reuse it
-  across loops via `rolester stories` and bank what lands. A behavioural gap with no
+  across loops via `careerrat stories` and bank what lands. A behavioural gap with no
   backing evidence is an Evidence Gap, not a story.
 - **Never include `current_base` in any packet section, debrief, or tracker
   note.** Anchor outbound comp on `target_base` (or `oe_max_base` for OE roles);
@@ -921,7 +921,7 @@ the CLI will refuse it.
   array (from `loadStories()` in `src/core/interview/story-bank.mjs`) and renders a
   "Prepared Stories (STAR+R)" section by matching stories to JD signals — rendering
   only provided stories, never inventing one. The bank is validated by
-  `rolester stories check`; every story traces to `evidence.yml` claim ids.
+  `careerrat stories check`; every story traces to `evidence.yml` claim ids.
 - **`buildLikelyQuestionsSection()` scripted-answer scaffold + gap flagging.** In
   `src/core/interview/packet.mjs`, this renders each likely question with a
   deterministic anchor: a banked story (matched via `findStoryForQuestion()` against

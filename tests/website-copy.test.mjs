@@ -125,11 +125,11 @@ test("website install copy uses the public rolester CLI convention", async () =>
   const combined = `${page}\n${publicAgents}`;
 
   assert.match(page, /npm install -g rolester/);
-  assert.match(page, /rolester start claude/);
-  assert.match(page, /rolester update/);
-  assert.match(publicAgents, /rolester start claude/);
-  assert.match(publicAgents, /rolester ingest/);
-  assert.match(publicAgents, /rolester update/);
+  assert.match(page, /careerrat start claude/);
+  assert.match(page, /careerrat update/);
+  assert.match(publicAgents, /careerrat start claude/);
+  assert.match(publicAgents, /careerrat ingest/);
+  assert.match(publicAgents, /careerrat update/);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });
@@ -140,10 +140,10 @@ test("docs website source uses the public rolester CLI convention", async () => 
   const combined = docs.join("\n");
 
   assert.match(combined, /npm install -g rolester/);
-  assert.match(combined, /rolester start claude/);
-  assert.match(combined, /rolester tracker-dev/);
-  assert.match(combined, /rolester automation status/);
-  assert.match(combined, /rolester update/);
+  assert.match(combined, /careerrat start claude/);
+  assert.match(combined, /careerrat tracker-dev/);
+  assert.match(combined, /careerrat automation status/);
+  assert.match(combined, /careerrat update/);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });

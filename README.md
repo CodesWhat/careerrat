@@ -41,7 +41,7 @@ Then:
 
 ```bash
 npm install -g rolester
-rolester start claude    # or: rolester start codex
+careerrat start claude    # or: careerrat start codex
 ```
 
 That sets up your workspace, opens the dashboard at `http://localhost:7777`, and
@@ -66,7 +66,7 @@ hands you off to the agent. From there you just talk to it.
    does the work, the dashboard shows it.
 
 **One first-run thing that looks broken but isn't:** before you've onboarded,
-`rolester doctor` will report that your setup is incomplete and list
+`careerrat doctor` will report that your setup is incomplete and list
 `candidate/*.yml` files to create. That's expected. Onboarding fills them in.
 
 ## What it does
@@ -101,16 +101,16 @@ their own way and get the same loop.
 ## Everyday commands
 
 ```bash
-rolester next       # the one thing worth doing next
-rolester doctor     # check your setup is healthy
-rolester update     # pull the latest code; your data is untouched
+careerrat next       # the one thing worth doing next
+careerrat doctor     # check your setup is healthy
+careerrat update     # pull the latest code; your data is untouched
 ```
 
-The dashboard comes up with `rolester start`. To run it on its own:
+The dashboard comes up with `careerrat start`. To run it on its own:
 
 ```bash
-rolester tracker        # write a static snapshot to workspace/tracker.html
-rolester tracker-dev    # serve http://localhost:7777 with live reload
+careerrat tracker        # write a static snapshot to workspace/tracker.html
+careerrat tracker-dev    # serve http://localhost:7777 with live reload
 ```
 
 **Useful flags on `start`:** `--no-agent` (workspace + dashboard only),
@@ -142,7 +142,7 @@ git clone https://github.com/CodesWhat/rolester
 cd rolester
 npm install
 npm link
-rolester start claude
+careerrat start claude
 ```
 
 MIT licensed.

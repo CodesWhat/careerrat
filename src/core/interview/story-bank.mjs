@@ -269,7 +269,7 @@ export function coverageGaps({ stories, competencies = COMMON_COMPETENCIES } = {
 export function renderStorySection(matched) {
   const items = Array.isArray(matched) ? matched : [];
   if (items.length === 0) {
-    return "_No prepared stories matched this role yet. Draft STAR+R stories from candidate/evidence.yml via interview-prep (`rolester stories gaps` shows what's uncovered)._";
+    return "_No prepared stories matched this role yet. Draft STAR+R stories from candidate/evidence.yml via interview-prep (`careerrat stories gaps` shows what's uncovered)._";
   }
   const blocks = items.map((m) => {
     const s = m?.story ? m.story : m;

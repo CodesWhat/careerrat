@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // Background update check — spawned detached by the update-notifier. Looks up the
-// latest published rolester version and caches it under the workspace internal dir
-// so the NEXT `rolester <cmd>` run can print a "newer version available" notice
+// latest published careerrat version and caches it under the workspace internal dir
+// so the NEXT `careerrat <cmd>` run can print a "newer version available" notice
 // without ever blocking on the network. Best-effort: stays silent on any failure.
 
 import { fileURLToPath } from "node:url";

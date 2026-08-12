@@ -182,7 +182,7 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
 2. Bump `meta.lastUpdatedAt` (the freshness stamp every writing skill bumps).
 3. Verify + re-render (the dashboard handoff):
    ```
-   rolester tracker --verify
+   careerrat tracker --verify
    ```
    Fix and re-run until it passes clean. Render must never write `tracker.json`.
 
@@ -191,7 +191,7 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
 ## STEP 6 — Log to Activity Pulse
 
 ```
-rolester activity append --type research --actor agent \
+careerrat activity append --type research --actor agent \
   --title "Company health: <Company> — <rating>" \
   --summary "<function>-scoped: <the one driving signal>" \
   --company "<Company>" --write

@@ -2,7 +2,7 @@
 
 > **For humans:** this file is the AI agent's operating manual, not a setup guide for people.
 > If you're trying to install Rolester, see the README at
-> https://github.com/CodesWhat/rolester or the site at rolester.codeswhat.com instead.
+> https://github.com/CodesWhat/careerrat or the site at rolester.codeswhat.com instead.
 
 > **For AI agents:** you landed in the right place. Read this file, then follow the steps
 > below to set the user up. The full operating contract ships inside the repo.
@@ -27,7 +27,7 @@ Install the package and launch it with the public `rolester` binary:
 
 ```
 npm install -g rolester
-rolester start claude        # or: rolester start codex
+careerrat start claude        # or: careerrat start codex
 ```
 
 `start` scaffolds a local `workspace/`, installs the skills (so `/evaluate-job`,
@@ -41,7 +41,7 @@ The loop is **paste → route → tune**: the user pastes something (a job descr
 recruiter email, a LinkedIn URL), you classify it and run the owning skill, the tracker and
 dashboard update. To get going:
 
-1. **Onboard** — run `ingest-profile` (or `rolester ingest`) to read the user's resume and
+1. **Onboard** — run `ingest-profile` (or `careerrat ingest`) to read the user's resume and
    generate their `candidate/*.yml` config plus a personalized `candidate/AGENTS.md`.
 2. **Vet a job** — when the user pastes a JD, run `evaluate-job` before anything else.
 3. **Apply** — `apply-job` (it verifies `evaluate-job` first, then `tailor-application`).
@@ -80,7 +80,7 @@ This file only gets you to the front door — don't improvise procedures it cove
 
 ## Keeping current
 
-- **Update an install:** run `rolester update`.
+- **Update an install:** run `careerrat update`.
   It fetches the latest published code via npm; your `workspace/` and `candidate/` data are
   untouched.
 - **This file** is maintained by hand and versioned with Rolester releases — a short

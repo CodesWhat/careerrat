@@ -141,7 +141,7 @@ if (asJson) {
   process.exit(result.ok || soft ? 0 : 1);
 }
 
-log("rolester install-skills");
+log("careerrat install-skills");
 log("=======================");
 log("");
 if (checkOnly) {

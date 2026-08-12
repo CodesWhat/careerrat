@@ -13,7 +13,7 @@ description: Interview a new candidate to produce all user-layer config files: p
 
 - The `candidate/` directory is missing or any required file is absent.
 - The user says "set me up", "start fresh", or "update my profile".
-- `rolester ingest --check --json` reports schema failures or placeholder values.
+- `careerrat ingest --check --json` reports schema failures or placeholder values.
 - The AGENTS router detects an incomplete workspace and routes here.
 - The user says "resume setup" or "continue onboarding" — resume from `workspace/setup-state.json`.
 
@@ -29,10 +29,10 @@ Before asking anything:
    - If present and `complete: false`: tell the user where they left off — show `mode`, `depth`, completed steps, and deferred steps. Resume from the next incomplete step rather than restarting. Re-confirm completed sections ("I already have you as X — still right?") rather than re-asking them in full.
    - If present and `complete: true`: setup is already done. Confirm which section the user wants to revisit and jump there directly.
    - If absent: this is a fresh setup — proceed normally.
-2. Run `rolester ingest --check --json` to see which fields fail validation or still hold placeholder values.
+2. Run `careerrat ingest --check --json` to see which fields fail validation or still hold placeholder values.
 3. Read any existing `candidate/` files (`profile.yml`, `targeting.yml`, `honesty.yml`, `form-defaults.yml`, `application-limits.yml`, `evidence.yml`). Note what is already populated.
 4. Check session memory and any pasted or attached documents (résumé, LinkedIn export, notes).
-5. If the user supplied a résumé file path: run `rolester ingest --resume <path> --json` to seed profile and evidence YAML from the parsed content.
+5. If the user supplied a résumé file path: run `careerrat ingest --resume <path> --json` to seed profile and evidence YAML from the parsed content.
 6. For each section below, **open with a confirmation of what you already know** ("I have you as X — right?") rather than a cold question. Only ask for what is genuinely missing or unconfirmed.
 
 ---
@@ -44,7 +44,7 @@ Ask these questions before the interview begins. Record answers into `workspace/
 **Basic vs Advanced:**
 
 > "Do you want **Basic** or **Advanced** setup?
-> - **Basic** — read-only / manual job search. Nothing logs into a site on your behalf. You can switch on automation later anytime via `rolester automation status`.
+> - **Basic** — read-only / manual job search. Nothing logs into a site on your behalf. You can switch on automation later anytime via `careerrat automation status`.
 > - **Advanced** — you'll be offered authenticated browser automation (status polling, search, messaging, one-click apply, profile optimization, and session webmail access for verification codes / webmail mail ingest) and mail capture during setup. Each capability is still individually opt-in and defaults OFF until you explicitly consent."
 
 Record the answer as `mode: "basic"` or `mode: "advanced"`.
@@ -89,7 +89,7 @@ Record which areas the user opts into as `optional_areas: ["benefits", "lifestyl
 Record the answer as `agent_voice: "exec-summary"` | `"standard"` | `"technical"` | `"verbose"`. If the user skips or is unsure, default to `"standard"`. Write it to `candidate/modes.yml` via:
 
 ```
-rolester modes set agent_voice <value> --write
+careerrat modes set agent_voice <value> --write
 ```
 
 (If modes.yml doesn't exist yet, the `--write` flag creates it from the template. Confirm: "Agent voice set to `<value>`.")
@@ -115,7 +115,7 @@ Write (or update) the file now with:
 
 Tell the user:
 
-> "Progress is saved to `workspace/setup-state.json`. You can stop at any point and resume later — just re-run `ingest-profile` (or `rolester ingest`) and setup will pick up where you left off."
+> "Progress is saved to `workspace/setup-state.json`. You can stop at any point and resume later — just re-run `ingest-profile` (or `careerrat ingest`) and setup will pick up where you left off."
 
 ---
 
@@ -131,7 +131,7 @@ Tell the user:
 
 1. Confirm or capture: `full_name`, `email`, `phone`, `location.city`/`state`/`country`, `linkedin`, `github` (if applicable), `portfolio` (if applicable). Replace every placeholder string from the template (`Jane Candidate`, `jane@example.com`, `+1-555-0100`, etc.).
 2. Ask where the source résumé lives (file path, paste, or URL) if not already provided.
-3. **Corrupt/bad-paste gate:** If `rolester ingest --resume <path>` produced empty contact or empty sections, say so and ask for a screenshot, plain-text paste, or different export before continuing. Never proceed on an unreadable parse.
+3. **Corrupt/bad-paste gate:** If `careerrat ingest --resume <path>` produced empty contact or empty sections, say so and ask for a screenshot, plain-text paste, or different export before continuing. Never proceed on an unreadable parse.
 4. Write all identity fields to `candidate/profile.yml`.
 
 ---
@@ -171,8 +171,8 @@ résumés, cover letters, **and** the STAR+R story bank.
 5. **Bank each confirmed claim via the guarded helper** (dry-run, then commit). Write the
    claim to a temp YAML fragment and:
    ```
-   rolester evidence add --file <claim.yml>          # preview + firewall check
-   rolester evidence add --file <claim.yml> --write   # commit (append / upsert by id)
+   careerrat evidence add --file <claim.yml>          # preview + firewall check
+   careerrat evidence add --file <claim.yml> --write   # commit (append / upsert by id)
    ```
    The helper refuses a claim missing `id`/`claim`/`evidence`, carrying placeholder
    residue, or holding the private `current_base` field, and won't rewrite the bank
@@ -345,7 +345,7 @@ After writing all comp fields: run `grep -i current_comp_shareable candidate/pro
 
 ## STEP 14b — CAPABILITY OPT-IN (Advanced mode only)
 
-**Basic mode:** skip this step entirely. Note once: "Browser automation and mail capture are available whenever you want them — run `rolester automation status` to see the full capability matrix and enable what you need."
+**Basic mode:** skip this step entirely. Note once: "Browser automation and mail capture are available whenever you want them — run `careerrat automation status` to see the full capability matrix and enable what you need."
 
 **Advanced mode:** surface each capability below, ask for each opt-in, then record decisions via the CLI (never hand-edit `candidate/automation.yml`). Everything stays OFF until the user explicitly goes through the CLI steps.
 
@@ -383,13 +383,13 @@ After writing all comp fields: run `grep -i current_comp_shareable candidate/pro
 Warn the user: automating a logged-in platform may violate that platform's terms of service — they must read those terms themselves before proceeding. Then, for each capability+platform they choose:
 
 ```
-rolester automation consent <platform> --write
-rolester automation enable <capability> --write
-rolester automation enable <capability> <platform> --write
-rolester automation status
+careerrat automation consent <platform> --write
+careerrat automation enable <capability> --write
+careerrat automation enable <capability> <platform> --write
+careerrat automation status
 ```
 
-Dry-run is the default (prints the change without writing); `--write` commits. Run `rolester automation status` at the end to confirm the live verdict. Rolester records the decision; it does not make it for you. **Never auto-run and never run on a schedule** — every automated session is user-initiated.
+Dry-run is the default (prints the change without writing); `--write` commits. Run `careerrat automation status` at the end to confirm the live verdict. Rolester records the decision; it does not make it for you. **Never auto-run and never run on a schedule** — every automated session is user-initiated.
 
 After running through all capabilities the user wants: set `automationOffered: true` in `workspace/setup-state.json` and append `capabilities` to `completed[]`.
 
@@ -399,17 +399,17 @@ After running through all capabilities the user wants: set `automationOffered: t
 
 Run these commands in sequence. Fix any failure before proceeding to the next.
 
-1. Run `rolester ingest --check --json`. Inspect the JSON output to identify any fields with placeholder values or schema errors. Fix each one before continuing.
+1. Run `careerrat ingest --check --json`. Inspect the JSON output to identify any fields with placeholder values or schema errors. Fix each one before continuing.
 2. Run `node src/cli/lint-placeholders.mjs candidate/` to confirm no template placeholder strings remain.
-3. Run `rolester ingest --write-config`. Confirm:
+3. Run `careerrat ingest --write-config`. Confirm:
    - `config/search-sources.yml` was written with N search definitions (domain-appropriate, NOT hardcoded tech boards).
    - `candidate/AGENTS.md` was written.
    - Neither file contains `current_base` data — verify by grepping: `grep -i current_base candidate/AGENTS.md config/search-sources.yml`.
-4. Run `rolester doctor` to confirm overall workspace health (skill discoverability, schema validity, tracker state).
+4. Run `careerrat doctor` to confirm overall workspace health (skill discoverability, schema validity, tracker state).
 5. Once materialization succeeds and the user confirms they are satisfied: set `complete: true` and `updatedAt` in `workspace/setup-state.json` (read-modify-write).
 6. **Shallow mode:** if `deferred[]` is non-empty, report which steps remain and how to resume them:
 
-   > "Deferred steps: `<list>`. To continue, re-run `ingest-profile` (or `rolester ingest`) and setup will resume from the first deferred step."
+   > "Deferred steps: `<list>`. To continue, re-run `ingest-profile` (or `careerrat ingest`) and setup will resume from the first deferred step."
 
 7. Report a summary: list every file written, call out any known limitations that apply to this candidate (e.g. board-preference persistence, `word` toolchain manual build), and confirm `current_base` did not appear in any outbound-facing file.
 
@@ -427,7 +427,7 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 ```
 
 1. `setup-searches` — confirm or refresh the baseline `config/search-sources.yml` from
-   targeting and show `rolester searches` readiness.
+   targeting and show `careerrat searches` readiness.
 2. `research-boards` — find additional boards/aggregators for this candidate's domain.
    This is confirm-first; run it unless the user explicitly says the baseline sources are
    enough for now.
@@ -466,12 +466,12 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
 
 ## Rules
 
-- **Persistence cadence.** After completing each major step, append its step key to `completed[]` in `workspace/setup-state.json` and refresh `updatedAt` (read-modify-write; keep the JSON minimal). Step keys: `domain`, `identity`, `projects-scan`, `work-history`, `targets`, `keep-cut`, `comp`, `location`, `authorization`, `education`, `exclusions`, `form-defaults`, `proof-points`, `toolchain`, `writing-samples`, `capabilities`, `materialize`, `discovery-handoff`. The `setup-state.json` shape also carries `question_style`, `optional_areas`, and `agent_voice` (set in STEP 0a). On a deliberate pause, do the same and tell the user: "Progress saved — re-run `ingest-profile` (or `rolester ingest`) to resume."
+- **Persistence cadence.** After completing each major step, append its step key to `completed[]` in `workspace/setup-state.json` and refresh `updatedAt` (read-modify-write; keep the JSON minimal). Step keys: `domain`, `identity`, `projects-scan`, `work-history`, `targets`, `keep-cut`, `comp`, `location`, `authorization`, `education`, `exclusions`, `form-defaults`, `proof-points`, `toolchain`, `writing-samples`, `capabilities`, `materialize`, `discovery-handoff`. The `setup-state.json` shape also carries `question_style`, `optional_areas`, and `agent_voice` (set in STEP 0a). On a deliberate pause, do the same and tell the user: "Progress saved — re-run `ingest-profile` (or `careerrat ingest`) to resume."
 - Never invent facts. Ask or omit — do not guess.
 - Keep `current_base` private. Store it with `current_comp_shareable: false`. It must never appear in any résumé, cover letter, form field, ATS entry, recruiter message, interview packet, or shareable tracker note. This is enforced by field path: always read outbound comp from `expected_base`, `target_base`, or `minimum_base`.
 - Keep `current_base` separate from `expected_base`. They are different fields and must never be conflated. `expected_base` is what goes on forms; `current_base` is a private gate input only.
 - Translate stated preferences into explicit keep/cut signal lists in `targeting.yml`. Vague preferences are not signals.
-- Replace all placeholder identity values from the templates (`Jane Candidate`, `jane@example.com`, `+1-555-0100`, etc.). `rolester ingest --check --json` runs `lint:placeholders` and will reject any file that still contains known placeholder strings.
+- Replace all placeholder identity values from the templates (`Jane Candidate`, `jane@example.com`, `+1-555-0100`, etc.). `careerrat ingest --check --json` runs `lint:placeholders` and will reject any file that still contains known placeholder strings.
 - Treat all `candidate/` files as private user-layer data — they are gitignored and must never be committed to the system repo.
 - Never surface domain-specific assumptions (tech/AI titles, specific cities, specific tool names) from skill prose. Every candidate-specific value lives in their config files.
 
@@ -483,13 +483,13 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
 |---|---|---|
 | `candidate/profile.yml` | direct edit (confirmed from template) | `config/profile.schema.json` |
 | `candidate/targeting.yml` | direct edit (confirmed from template) | `config/targeting.schema.json` |
-| `candidate/evidence.yml` | direct edit, or `rolester evidence add` (STEP 2b folder/repo scan) | `config/evidence.schema.json` |
+| `candidate/evidence.yml` | direct edit, or `careerrat evidence add` (STEP 2b folder/repo scan) | `config/evidence.schema.json` |
 | `candidate/honesty.yml` | direct edit (confirmed from template) | `config/honesty.schema.json` |
 | `candidate/form-defaults.yml` | direct edit (confirmed from template) | `config/form-defaults.schema.json` |
 | `candidate/application-limits.yml` | direct edit on gate capture | (schema if present) |
 | `candidate/writing-style.md` | `npm run calibrate:style` from `workspace/writing-samples/` | — |
-| `candidate/AGENTS.md` | `rolester ingest --write-config` | — |
-| `config/search-sources.yml` | `rolester ingest --write-config` (domain-appropriate boards) | `config/search-sources.schema.json` |
+| `candidate/AGENTS.md` | `careerrat ingest --write-config` | — |
+| `config/search-sources.yml` | `careerrat ingest --write-config` (domain-appropriate boards) | `config/search-sources.schema.json` |
 | `workspace/setup-state.json` | this skill (the agent writes it directly — no CLI mutation) | none — small JSON progress record |
 
 ---
@@ -501,7 +501,7 @@ A stated gate must never live only in chat. It must never be hardcoded into a sk
   `profile.schema.json` (Foundation B) — write them as their native types
   (numbers for the comp values, string for `relo_package_needs`), not as freeform
   notes.
-- **Board selection is domain-gated (shipped).** `rolester ingest --write-config`
+- **Board selection is domain-gated (shipped).** `careerrat ingest --write-config`
   routes through `generate-search-sources.mjs`, which gates tech aggregators (e.g.
   RemoteVibeCodingJobs) behind `isTechDomain(candidate.domain)` and keeps
   HiringCafe as a general aggregator. Still spot-check the written

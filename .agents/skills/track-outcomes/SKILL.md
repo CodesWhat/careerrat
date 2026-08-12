@@ -116,7 +116,7 @@ After editing, run BOTH validators — they check different things and neither
 replaces the other (see RULES):
 
 ```
-rolester tracker --verify   # JSON shape/structure vs tracker.schema.json
+careerrat tracker --verify   # JSON shape/structure vs tracker.schema.json
 npm run verify:tracker              # domain integrity: status/score/modes/channels/dupes
 ```
 
@@ -125,7 +125,7 @@ If either reports errors, fix the JSON before proceeding. Do not continue to the
 **Refresh the analytics block (required — this is an outcome-changing write).** After both validators pass and BEFORE re-rendering, recompute and persist `tracker.json#analytics` so STEP 6 reads a current reevaluation gate. Skipping this leaves the block one run stale, so a threshold crossed by the rejection you just logged is invisible to STEP 6 and the `reevaluate-strategy` handoff fires late or not at all:
 
 ```
-rolester analytics --write   # recompute tracker.json#analytics: rejection/advance counts + reevaluation.due/dueReasons
+careerrat analytics --write   # recompute tracker.json#analytics: rejection/advance counts + reevaluation.due/dueReasons
 ```
 
 ## STEP 4 — Re-render the dashboard
@@ -133,7 +133,7 @@ rolester analytics --write   # recompute tracker.json#analytics: rejection/advan
 Run:
 
 ```
-rolester tracker
+careerrat tracker
 ```
 
 Confirm the status change appears correctly in `workspace/tracker.html`. If the render output looks wrong, diagnose before proceeding.
@@ -141,7 +141,7 @@ Confirm the status change appears correctly in `workspace/tracker.html`. If the 
 If the outcome creates or extends a follow-up cadence (e.g., interview scheduled, offer pending response, ghosted application to chase), also run:
 
 ```
-rolester tracker --followups
+careerrat tracker --followups
 ```
 
 Review any follow-ups now due and hand off to `email-comms` if a draft is needed.
@@ -152,27 +152,27 @@ Then log the outcome to the Activity Pulse feed (the dashboard's live timeline �
 
 ```
 # interview / screen / onsite advance:
-rolester activity append --type interview --actor world \
+careerrat activity append --type interview --actor world \
   --title "Interview stage — <Company>" --summary "<stage / detail>" \
   --company "<Company>" --app-id <application id> --write
 
 # offer:
-rolester activity append --type offer --actor world \
+careerrat activity append --type offer --actor world \
   --title "Offer — <Company>" --summary "<detail>" \
   --company "<Company>" --app-id <application id> --write
 
 # rejection / closed:
-rolester activity append --type status_change --actor world \
+careerrat activity append --type status_change --actor world \
   --title "Closed — <Company>" --summary "<reason>" \
   --company "<Company>" --app-id <application id> --write
 
 # candidate withdrawal (neutral tone — candidate exited, market did not close):
-rolester activity append --type status_change --actor agent \
+careerrat activity append --type status_change --actor agent \
   --title "Withdrew — <Company>" --summary "<reason: comp gap / competing offer / culture read / role-scope mismatch / proactive exit>" \
   --company "<Company>" --app-id <application id> --write
 
 # blocker needing the user:
-rolester activity append --type failure --actor world --needs-user \
+careerrat activity append --type failure --actor world --needs-user \
   --title "Blocked — <Company>" --summary "<what's blocking>" \
   --company "<Company>" --app-id <application id> --write
 ```
@@ -194,18 +194,18 @@ Write the entry body to a temp file (e.g. `/tmp/learning-body.md`), then:
 
 1. Dry-run (preview + lint):
    ```
-   rolester learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md
+   careerrat learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md
    ```
 2. If the preview looks correct, commit the entry:
    ```
-   rolester learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md --write
+   careerrat learnings append "<role title>" --title "<short label>" --body-file /tmp/learning-body.md --write
    ```
 
 The helper creates `candidate/learnings/` and the family file on first `--write`. A missing family file is normal — the helper handles it silently.
 
 ## STEP 6 — Check reevaluation thresholds
 
-The analytics block in `tracker.json#analytics.reevaluation` already applies the threshold comparison — it is refreshed by `rolester analytics --write` as part of the Tracker Write Contract (STEP 3/4). STEP 6 reads; it does not recompute.
+The analytics block in `tracker.json#analytics.reevaluation` already applies the threshold comparison — it is refreshed by `careerrat analytics --write` as part of the Tracker Write Contract (STEP 3/4). STEP 6 reads; it does not recompute.
 
 Read `tracker.json#analytics.reevaluation`:
 
@@ -251,10 +251,10 @@ Include the role family and threshold status in the commit body if a reevaluatio
 
 ## RULES
 
-- Tracker mutations are direct JSON edits + two complementary validation checks + `rolester tracker` re-render: run `rolester tracker --verify` (validates JSON shape/structure against config/tracker.schema.json — required keys, field presence) AND `npm run verify:tracker` (validates domain integrity — status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Both must pass; they check different things and neither replaces the other. The tracker CLI is read-only (no mutation subcommands). Never fabricate a mutation subcommand.
+- Tracker mutations are direct JSON edits + two complementary validation checks + `careerrat tracker` re-render: run `careerrat tracker --verify` (validates JSON shape/structure against config/tracker.schema.json — required keys, field presence) AND `npm run verify:tracker` (validates domain integrity — status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Both must pass; they check different things and neither replaces the other. The tracker CLI is read-only (no mutation subcommands). Never fabricate a mutation subcommand.
 - **Never write `current_base` into any tracker field, note, conversations entry, or learning file.** Use `expected_base`, `target_base`, or `minimum_base` only (the `learnings` helper enforces this).
 - Notes must be factual. No superlatives, no invented lessons, no editorializing.
 - Use `email-comms` for drafting follow-ups or replies. This skill records the outcome; it does not draft outbound text.
-- Do not check reevaluation thresholds from prose in AGENTS.md — always read `tracker.json#analytics.reevaluation` (refreshed by `rolester analytics --write` in the write contract). The block applies the threshold comparison; the agent reads `reevaluation.due` and `reevaluation.dueReasons`, it does not recompute.
+- Do not check reevaluation thresholds from prose in AGENTS.md — always read `tracker.json#analytics.reevaluation` (refreshed by `careerrat analytics --write` in the write contract). The block applies the threshold comparison; the agent reads `reevaluation.due` and `reevaluation.dueReasons`, it does not recompute.
 - Role-family taxonomy is driven by `candidate/targeting.yml` (`role_families` or `role_buckets`); `classifyRoleFamily` in `outcome-analysis.mjs` accepts a `targeting` arg and prefers candidate-supplied families over the built-in tech slugs, which apply only when no candidate config is present. `analyze-outcomes.mjs` wires targeting through, so non-tech candidates get correct family files.
 - Reevaluation threshold fields (`reevaluation.rejection_total`, `reevaluation.rejection_per_family`) live in `candidate/targeting.yml` (schema'd) and are resolved into `tracker.json#analytics.reevaluation.thresholds` by `buildReevaluationAnalytics()`. The threshold comparison is done by the analytics block — do not manually read the YAML values and branch on them in STEP 6. Read the block, trust `reevaluation.due`.

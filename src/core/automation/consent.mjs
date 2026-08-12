@@ -201,15 +201,15 @@ export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {})
 
   if (!globalOn)
     reasons.push(
-      `capability "${capability}" is disabled (enable: \`rolester automation enable ${capability} --write\`)`
+      `capability "${capability}" is disabled (enable: \`careerrat automation enable ${capability} --write\`)`
     );
   if (!platformOn)
     reasons.push(
-      `platform "${platform}" is off for ${capability} (enable: \`rolester automation enable ${capability} ${platform} --write\`)`
+      `platform "${platform}" is off for ${capability} (enable: \`careerrat automation enable ${capability} ${platform} --write\`)`
     );
   if (!consentOn)
     reasons.push(
-      `ToS consent for "${platform}" not recorded (record: \`rolester automation consent ${platform} --write\`)`
+      `ToS consent for "${platform}" not recorded (record: \`careerrat automation consent ${platform} --write\`)`
     );
 
   const allowed = globalOn && platformOn && consentOn;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { existsSync, readFileSync } from "node:fs";
-// rolester gate — the safe write-back helper for gates-as-data.
+// careerrat gate — the safe write-back helper for gates-as-data.
 //
 // Persists a gate the user stated mid-flow ("never Palantir", "$190K floor",
 // "don't claim Kubernetes") to the canonical candidate config, schema-validated
@@ -8,11 +8,11 @@ import { existsSync, readFileSync } from "node:fs";
 // hand-editing YAML (see AGENTS.md → Write-back rule).
 //
 // Usage:
-//   rolester gate <type> <value>            Propose the change (dry run)
-//   rolester gate <type> <value> --write    Commit it
-//   rolester gate exclude-company Palantir --write --confirm
-//   rolester gate --list                    Show gate types
-//   rolester gate --help
+//   careerrat gate <type> <value>            Propose the change (dry run)
+//   careerrat gate <type> <value> --write    Commit it
+//   careerrat gate exclude-company Palantir --write --confirm
+//   careerrat gate --list                    Show gate types
+//   careerrat gate --help
 //
 // Default is a DRY RUN: it prints the target file, the exact line that would
 // change, schema validity, and the friction level — and writes nothing. Pass
@@ -84,7 +84,7 @@ const candidatePath = userPath(pathCtx, fileEntry.candidatePath);
 const candidateDisplay = displayPath(pathCtx, fileEntry.candidatePath);
 if (!existsSync(candidatePath)) {
   fail(
-    `${candidateDisplay} not found — run \`rolester ingest\` to create your candidate config first.`
+    `${candidateDisplay} not found — run \`careerrat ingest\` to create your candidate config first.`
   );
 }
 const currentText = readFileSync(candidatePath, "utf8");
@@ -209,7 +209,7 @@ function printList(asJson) {
 }
 
 function printHelp() {
-  console.log(`rolester gate — safe, schema-validated gate write-back
+  console.log(`careerrat gate — safe, schema-validated gate write-back
 
 Usage:
   node src/cli/gate.mjs <type> <value>             Propose (dry run; writes nothing)
@@ -222,7 +222,7 @@ Options:
   --write     Commit the change (default: dry run)
   --confirm   Required to --write a confirm-first gate (after the user agrees)
   --json      Machine-readable output
-  --root DIR  Repo root (default: the rolester install)
+  --root DIR  Repo root (default: the careerrat install)
 
 The change is patched into the file's TEXT (comments preserved), validated against
 the file's schema, and committed atomically. A change that would invalidate the

@@ -2,12 +2,12 @@
 // Rolester tracker CLI — publish the live dashboard, summarize, check follow-ups, verify.
 //
 // Usage:
-//   rolester tracker                 Publish workspace/tracker.html from the dashboard shell
-//   rolester tracker --summary    Print a plaintext status summary
-//   rolester tracker --followups  List follow-ups due now
-//   rolester tracker --verify     Validate tracker.json against config/tracker.schema.json
-//   rolester tracker --json       Machine-readable output for the current mode
-//   rolester tracker --help
+//   careerrat tracker                 Publish workspace/tracker.html from the dashboard shell
+//   careerrat tracker --summary    Print a plaintext status summary
+//   careerrat tracker --followups  List follow-ups due now
+//   careerrat tracker --verify     Validate tracker.json against config/tracker.schema.json
+//   careerrat tracker --json       Machine-readable output for the current mode
+//   careerrat tracker --help
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -240,15 +240,15 @@ function loadFollowUpRules() {
 }
 
 function printHelp() {
-  console.log(`rolester tracker — dashboard, summary, follow-ups, verify
+  console.log(`careerrat tracker — dashboard, summary, follow-ups, verify
 
 Usage:
-  rolester tracker                 Publish workspace/tracker.html (also snapshots tracker.json)
-  rolester tracker --summary    Plaintext status summary
-  rolester tracker --followups  Follow-ups due now
-  rolester tracker --verify     Validate against config/tracker.schema.json
-  rolester tracker --snapshots  List rolling tracker.json snapshots (workspace/.snapshots/)
-  rolester tracker --json       Machine-readable output
+  careerrat tracker                 Publish workspace/tracker.html (also snapshots tracker.json)
+  careerrat tracker --summary    Plaintext status summary
+  careerrat tracker --followups  Follow-ups due now
+  careerrat tracker --verify     Validate against config/tracker.schema.json
+  careerrat tracker --snapshots  List rolling tracker.json snapshots (workspace/.snapshots/)
+  careerrat tracker --json       Machine-readable output
 
 Reads workspace/tracker.json (seed from templates/tracker.json).
 Snapshots: workspace/.snapshots/tracker-<timestamp>.json, newest-20 kept.

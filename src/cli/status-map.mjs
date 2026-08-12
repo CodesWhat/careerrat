@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// rolester status-map — deterministically normalize a raw ATS-portal status string
+// careerrat status-map — deterministically normalize a raw ATS-portal status string
 // into the tracker's canonical status, and (with --current) classify the change as
 // a transition. The sync-status skill calls this so portal labels map the same way
 // every time instead of being eyeballed. Read-only: prints, never writes.
@@ -25,7 +25,7 @@ function parseArgs(argv) {
 const opts = parseArgs(process.argv.slice(2));
 
 if (opts.help || opts.positional.length === 0) {
-  console.log(`rolester status-map — normalize a raw ATS status into the tracker vocabulary
+  console.log(`careerrat status-map — normalize a raw ATS status into the tracker vocabulary
 
 Usage:
   node src/cli/status-map.mjs "<raw status>"                    Normalize one status

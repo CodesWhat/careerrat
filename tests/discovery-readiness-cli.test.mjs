@@ -186,7 +186,7 @@ test("doctor --json exposes the next agent skill after onboarding search setup",
   }
 });
 
-test("rolester next prints the next agent skill without the full doctor report", () => {
+test("careerrat next prints the next agent skill without the full doctor report", () => {
   const home = tempHome();
   try {
     seedCandidateFiles(home);
@@ -214,7 +214,7 @@ test("rolester next prints the next agent skill without the full doctor report",
   }
 });
 
-test("rolester next can record skipped discovery steps and advance the handoff", () => {
+test("careerrat next can record skipped discovery steps and advance the handoff", () => {
   const home = tempHome();
   try {
     seedCandidateFiles(home);
@@ -293,7 +293,7 @@ test("router tells agents to follow doctor Agent guidance instead of raw list co
 
   assert.match(text, /Agent guidance/);
   assert.match(text, /canonical next handoff/);
-  assert.match(text, /do not treat `rolester searches` or `rolester companies` as the workflow/);
+  assert.match(text, /do not treat `careerrat searches` or `careerrat companies` as the workflow/);
 });
 
 test("router makes proactive next-skill recommendations beyond cold start", () => {
@@ -325,7 +325,7 @@ test("user-facing docs use default list commands instead of npm -- --list noise"
   assert.deepEqual(offenders, []);
 });
 
-test("rolester exposes discovery helper commands directly", () => {
+test("careerrat exposes discovery helper commands directly", () => {
   const home = tempHome();
   try {
     const companies = runRolester(["companies", "--json"], home);
@@ -334,17 +334,17 @@ test("rolester exposes discovery helper commands directly", () => {
 
     const searchesHelp = runRolester(["searches", "--help"], home);
     assert.equal(searchesHelp.status, 0);
-    assert.match(searchesHelp.stdout, /Usage:\s+rolester searches/);
+    assert.match(searchesHelp.stdout, /Usage:\s+careerrat searches/);
 
     const companiesHelp = runRolester(["companies", "--help"], home);
     assert.equal(companiesHelp.status, 0);
-    assert.match(companiesHelp.stdout, /Usage:\s+rolester companies/);
+    assert.match(companiesHelp.stdout, /Usage:\s+careerrat companies/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("product-facing search and company guidance leads with rolester commands", () => {
+test("product-facing search and company guidance leads with careerrat commands", () => {
   const files = [
     "bin/rolester.mjs",
     "src/core/agent-guidance.mjs",
@@ -370,7 +370,7 @@ test("product-facing search and company guidance leads with rolester commands", 
   assert.deepEqual(offenders, []);
 });
 
-test("public setup docs teach the rolester binary instead of source-file invocations", () => {
+test("public setup docs teach the careerrat binary instead of source-file invocations", () => {
   const files = ["README.md", "docs/SETUP.md"];
   const offenders = [];
 
@@ -385,22 +385,22 @@ test("public setup docs teach the rolester binary instead of source-file invocat
   assert.deepEqual(offenders, []);
 });
 
-test("rolester start prompt anchors the agent to doctor and the discovery order", () => {
+test("careerrat start prompt anchors the agent to doctor and the discovery order", () => {
   const text = readFileSync(join(ROOT, "bin/rolester.mjs"), "utf8");
 
-  assert.match(text, /run rolester doctor/);
+  assert.match(text, /run careerrat doctor/);
   assert.match(text, /next unfinished Rolester skill/);
   assert.match(text, /setup-searches -> research-boards -> discover-companies -> search-jobs/);
 });
 
-test("rolester start --no-agent prints the manual agent handoff", () => {
+test("careerrat start --no-agent prints the manual agent handoff", () => {
   const home = tempHome();
   try {
     const result = runRolester(["start", "--no-agent", "--no-dashboard"], home);
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /Open your agent in this folder and say:/);
-    assert.match(result.stdout, /run rolester doctor/);
+    assert.match(result.stdout, /run careerrat doctor/);
     assert.match(result.stdout, /next unfinished Rolester skill/);
   } finally {
     rmSync(home, { recursive: true, force: true });

@@ -1,6 +1,6 @@
 name: publish
 
-# Publishes rolester to npm when a GitHub Release is published (or run manually).
+# Publishes careerrat to npm when a GitHub Release is published (or run manually).
 #
 # Auth: npm Trusted Publishing (OIDC) — NO token is stored. npm trusts this exact
 # workflow via the trusted-publisher connection configured on the package

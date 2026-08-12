@@ -21,17 +21,17 @@
 # yes here, and NEVER runs on a schedule or without you in the loop.
 #
 # Don't hand-edit blindly — use the CLI (it validates + preserves these comments):
-#   rolester automation status                     show the full matrix
-#   rolester automation consent <platform> --write       record ToS consent
-#   rolester automation enable <capability> [platform] --write
-#   rolester automation disable <capability> [platform] --write
-#   rolester automation revoke <platform> --write        withdraw consent
+#   careerrat automation status                     show the full matrix
+#   careerrat automation consent <platform> --write       record ToS consent
+#   careerrat automation enable <capability> [platform] --write
+#   careerrat automation disable <capability> [platform] --write
+#   careerrat automation revoke <platform> --write        withdraw consent
 
 version: 1
 
 # ── ToS consent — one-time, per platform ──────────────────────────────────────
 # Set a platform true ONLY after you've read its automation terms. Withdraw with
-# `rolester automation revoke <platform> --write`.
+# `careerrat automation revoke <platform> --write`.
 consent:
   linkedin: false
   indeed: false

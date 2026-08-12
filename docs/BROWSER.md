@@ -26,7 +26,7 @@ scripts** — no agent in the loop, no setup (Chromium ships with the package).
 Used by:
 - `npm run capture:search-sources` / `npm run capture:board` — bulk-scrape a
   board's listing DOM into the workspace.
-- Document & packet PDF export (`rolester export`, interview packets, tailored
+- Document & packet PDF export (`careerrat export`, interview packets, tailored
   résumés/cover letters).
 
 This is the layer for **batch, non-interactive** rendering where the agent does
@@ -69,7 +69,7 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 | Read a plain-HTML JD body | 1 | `WebFetch` |
 | Read a JS-rendered / SPA JD body | 3 | evaluate `document.body.innerText` in the session browser (or the Lever JSON API, below) |
 | Bulk-scrape a board into the workspace | 2 | `npm run capture:search-sources` / `capture:board` |
-| Export a résumé / packet to PDF | 2 | `rolester export` (bundled Playwright) |
+| Export a résumé / packet to PDF | 2 | `careerrat export` (bundled Playwright) |
 | Fill / submit an application form | 3 | session browser, modal-first uploads, confirm-first submit |
 | Drive a portal that needs the user's login | 3 | session browser — extension preferred, Playwright-with-login-pause fallback |
 | Read one emailed verification code or opted-in webmail recruiting messages | 3 | session browser gated by `mail_access`; generic `webmail` for one-code reads, Gmail/Outlook for one-code reads and webmail ingest |
@@ -102,9 +102,9 @@ Toggle it through the CLI (dry-run by default, `--write` to commit; comment-pres
 + schema-validated):
 
 ```
-rolester automation status                          # the live matrix
-rolester automation consent <platform> --write      # record ToS consent
-rolester automation enable <capability> [platform] --write
+careerrat automation status                          # the live matrix
+careerrat automation consent <platform> --write      # record ToS consent
+careerrat automation enable <capability> [platform] --write
 ```
 
 No credentials are ever stored — the session browser (extension, or a Playwright
@@ -131,10 +131,10 @@ Change it the same safe way as the toggles (dry-run by default, schema-validated
 comment-preserving; first `--write` scaffolds the file):
 
 ```
-rolester automation session <extension|playwright> --write
+careerrat automation session <extension|playwright> --write
 ```
 
-`rolester doctor` reports the configured provider plus a best-effort "is it ready?"
+`careerrat doctor` reports the configured provider plus a best-effort "is it ready?"
 probe — Playwright profiles you've signed into, or whether a Chrome-family browser is
 even installed (it can't see inside the browser, so the extension itself must be
 confirmed there). The **`configure`** skill is the always-available settings surface

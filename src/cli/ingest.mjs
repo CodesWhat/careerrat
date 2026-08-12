@@ -75,7 +75,7 @@ function runInit() {
     return 0;
   }
 
-  console.log("rolester ingest");
+  console.log("careerrat ingest");
   console.log("===============");
   console.log("");
   if (ensure.created.length > 0) {
@@ -97,8 +97,8 @@ function runInit() {
   console.log(
     "3. Drop writing samples into workspace/writing-samples/ and run: npm run calibrate:style"
   );
-  console.log("4. Validate: rolester ingest --check");
-  console.log("5. Generate search config + local router: rolester ingest --write-config");
+  console.log("4. Validate: careerrat ingest --check");
+  console.log("5. Generate search config + local router: careerrat ingest --write-config");
   return 0;
 }
 
@@ -112,7 +112,7 @@ function runCheck() {
     return ok ? 0 : 1;
   }
 
-  console.log("rolester ingest --check");
+  console.log("careerrat ingest --check");
   console.log("=======================");
   console.log("");
   reportStatus(load, lint);
@@ -127,7 +127,7 @@ function runCheck() {
 
 function runResume(path) {
   if (!path) {
-    console.error("Usage: rolester ingest --resume <path-to-resume.md|.txt>");
+    console.error("Usage: careerrat ingest --resume <path-to-resume.md|.txt>");
     return 1;
   }
   const resolved = isAbsolute(path) ? path : join(process.cwd(), path);
@@ -254,14 +254,14 @@ function optValue(flag) {
 }
 
 function printHelp() {
-  console.log(`rolester ingest — guided candidate setup
+  console.log(`careerrat ingest — guided candidate setup
 
 Usage:
-  rolester ingest                       Initialize candidate/ from templates, then report status
-  rolester ingest --check            Validate candidate files + reject placeholders (exit 1 if not ready)
-  rolester ingest --resume <path>    Parse a resume into profile/evidence seed YAML (no writes)
-  rolester ingest --write-config     Generate config/search-sources.yml + candidate/AGENTS.md
-  rolester ingest --json             Machine-readable output for any mode
+  careerrat ingest                       Initialize candidate/ from templates, then report status
+  careerrat ingest --check            Validate candidate files + reject placeholders (exit 1 if not ready)
+  careerrat ingest --resume <path>    Parse a resume into profile/evidence seed YAML (no writes)
+  careerrat ingest --write-config     Generate config/search-sources.yml + candidate/AGENTS.md
+  careerrat ingest --json             Machine-readable output for any mode
 
 Candidate files (${CANDIDATE_FILES.length}): ${CANDIDATE_FILES.map((f) => f.name).join(", ")}
 All candidate/* output is private user-layer data and is gitignored.`);

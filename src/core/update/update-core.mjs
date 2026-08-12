@@ -1,4 +1,4 @@
-// Shared update plumbing for `rolester update` (self-update) and
+// Shared update plumbing for `careerrat update` (self-update) and
 // scripts/update-live.mjs (operator updates an external live tree).
 //
 // Both refresh CODE ONLY from the published npm package — the package.json `files`
@@ -149,7 +149,7 @@ export function readUpdateNotice(pathCtx, currentVersion) {
   const cache = readUpdateCache(pathCtx);
   if (!cache?.latest || !currentVersion) return null;
   if (!isNewer(currentVersion, cache.latest)) return null;
-  return `⬆ rolester ${currentVersion} → ${cache.latest} available — run \`rolester update\``;
+  return `⬆ careerrat ${currentVersion} → ${cache.latest} available — run \`careerrat update\``;
 }
 
 // Refresh the cache in a detached child if it's missing or stale. Returns immediately;

@@ -495,7 +495,7 @@ function modeStatusItem(kind, value, valid) {
       value: normalized || "invalid",
       label: "Invalid",
       tone: "warning",
-      title: "Mode config is invalid. Run rolester modes status.",
+      title: "Mode config is invalid. Run careerrat modes status.",
     };
   }
   return { value: normalized, ...MODE_STATUS_COPY[kind][normalized] };
@@ -526,7 +526,7 @@ function buildAgentGuidanceStatus(guidance = null) {
   const command = String(data.command || "").trim();
   const message =
     String(data.message || "").trim() ||
-    "Run rolester doctor, then ask the agent to follow the Agent guidance block.";
+    "Run careerrat doctor, then ask the agent to follow the Agent guidance block.";
   const reason =
     String(data.reason || "").trim() || "The dashboard could not load a specific handoff yet.";
   return {
@@ -2833,7 +2833,7 @@ function buildStrategyReviewTrigger(bucket, reviewSignal = {}) {
 }
 
 // Builds a compact view-model from tracker.json#analytics.reevaluation (the
-// persisted block written by `rolester analytics --write`). Fully defensive:
+// persisted block written by `careerrat analytics --write`). Fully defensive:
 // returns null when the block is absent, incomplete, or has no usable threshold,
 // so callers can short-circuit rendering safely on older trackers.
 function buildReevaluationProgress(reevaluationData) {
@@ -5741,7 +5741,7 @@ function renderAgentGuidance(root, guidance) {
     cta.dataset.agentGuidanceAction = guidance.nextSkill || guidance.command || "doctor";
     cta.title = guidance.nextSkill
       ? `Ask your agent to run ${guidance.nextSkill}.`
-      : guidance.command || "Run rolester doctor.";
+      : guidance.command || "Run careerrat doctor.";
   }
 }
 

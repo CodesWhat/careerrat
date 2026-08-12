@@ -115,7 +115,7 @@ calendar, or whenever `calendar_read` is already enabled.
 **Consent gate.** Free/busy ingestion runs only under the `calendar_read` capability:
 
 ```bash
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.calendar_read`. Platforms:
@@ -131,9 +131,9 @@ that platform's consent all true). If the requested platform is not allowed, **d
 calendar** — fall back to the draft-only path in STEP 4 and surface the opt-in commands:
 
 ```bash
-rolester automation consent <platform> --write
-rolester automation enable calendar_read <platform> --write
-rolester automation status --json
+careerrat automation consent <platform> --write
+careerrat automation enable calendar_read <platform> --write
+careerrat automation status --json
 ```
 
 **Read free/busy — read-only and opaque.** Through the session browser (Browser Automation
@@ -150,7 +150,7 @@ Contract applies: halt on login wall / 2FA / captcha / account-picker confusion)
 `source`, `ingestedAt`). Dedupe on normalized `provider + startIso + endIso`. The `label` stays
 `"Busy"`; never substitute the real meeting subject. These are a **snapshot, not a live feed** —
 note when it was taken, and re-ingest before relying on it for a fresh decision. After writing,
-validate + re-render (`rolester tracker --verify` then `rolester tracker`); the
+validate + re-render (`careerrat tracker --verify` then `careerrat tracker`); the
 Calendar then shows the windows as muted "Busy" blocks alongside actionable events.
 
 ---
@@ -285,8 +285,8 @@ If you don't know whether this is the first or a follow-on round, check `convers
 if a prior entry exists with a `kind` matching an interview stage, use `nextInterviewAt`; if
 none, use `interviewAt`.
 
-**(d) Validate + re-render:** `rolester tracker --verify` (must exit clean), then
-`rolester tracker`.
+**(d) Validate + re-render:** `careerrat tracker --verify` (must exit clean), then
+`careerrat tracker`.
 
 **(e) Out-of-band completion.** If the user reports "I already confirmed / scheduled /
 rescheduled this" without the agent having sent the reply: record it immediately in the same
@@ -302,7 +302,7 @@ single write — do not leave the CTA live because the agent did not perform the
 **(f) Log to the Activity Pulse feed** (see **Activity Pulse** in AGENTS.md). The reply is a
 draft awaiting send → log it as needing the user:
 ```
-rolester activity append --type drafted --actor agent --needs-user \
+careerrat activity append --type drafted --actor agent --needs-user \
   --title "Scheduling reply — <Company>" \
   --summary "<one line: proposed/confirmed slot>" \
   --company "<Company>" --app-id <application id> --cta-label "Review & send" --write

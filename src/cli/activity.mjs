@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-// rolester activity — the safe read/append helper for the dashboard Activity Pulse feed.
+// careerrat activity — the safe read/append helper for the dashboard Activity Pulse feed.
 //
 // The Command Center's marquee panel is a reverse-chronological timeline of what the
 // agent did and what happened (workspace/activity.jsonl). Skills append one event at
 // the end of each action via this primitive instead of hand-writing JSONL — the same
-// reason they call `rolester gate` / `rolester learnings` instead of editing files in
+// reason they call `careerrat gate` / `careerrat learnings` instead of editing files in
 // prose. The CLI/dashboard only RENDER the feed; skills are the only writers
 // (AGENTS.md → capture-is-skills-not-cli).
 //
@@ -278,7 +278,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester activity — safe read/append for the dashboard Activity Pulse feed
+  console.log(`careerrat activity — safe read/append for the dashboard Activity Pulse feed
 
 Usage:
   node src/cli/activity.mjs list [--limit N] [--json]
@@ -307,7 +307,7 @@ append options:
   --tag X         Chip; repeat for several.
   --at ISO        Event time (default now).  --id ID  Override the derived id.
   --write         Commit (default dry run).  --json  Machine-readable output.
-  --root DIR      Repo root (default: the rolester install).
+  --root DIR      Repo root (default: the careerrat install).
 
 Events render on the dashboard (outbound): each is schema-validated against
 config/activity-event.schema.json, checked for placeholder residue, and refused if it

@@ -26,7 +26,7 @@ Offer this skill when something looks like a **Rolester defect**, not a user err
 - The user says "this is broken", "report a bug", "file an issue", "tell the devs", "this doesn't work", or "open a ticket".
 - A reproducible failure survives the obvious fixes.
 
-**Do NOT use it for** missing or invalid config, an un-ingested profile, a gate the user simply disagrees with, or a ToS/permission block — those route to `configure`, `ingest-profile`, or `rolester doctor`. Diagnose first; only escalate to an issue once you're confident it's a code defect, and say *why* you think so.
+**Do NOT use it for** missing or invalid config, an un-ingested profile, a gate the user simply disagrees with, or a ToS/permission block — those route to `configure`, `ingest-profile`, or `careerrat doctor`. Diagnose first; only escalate to an issue once you're confident it's a code defect, and say *why* you think so.
 
 Offer, don't auto-run. The user opts in every time.
 
@@ -37,8 +37,8 @@ Offer, don't auto-run. The user opts in every time.
 Run the cheap diagnostics and read the actual error before deciding anything:
 
 ```
-rolester doctor
-rolester --version
+careerrat doctor
+careerrat --version
 node --version
 ```
 
@@ -55,10 +55,10 @@ Build the report from these, and **redact every one** per the rules below:
 
 | Field | Source | Redaction |
 |---|---|---|
-| Rolester version | `rolester --version` | none (safe) |
+| Rolester version | `careerrat --version` | none (safe) |
 | Node + OS | `node --version`, `process.platform` | none (safe) |
 | Install method | in-tree clone vs global npm | none (safe) |
-| Failing command | the `rolester <cmd>` that broke | strip data args (names, paths, URLs) — keep the verb + flags |
+| Failing command | the `careerrat <cmd>` that broke | strip data args (names, paths, URLs) — keep the verb + flags |
 | Error / stack trace | the thrown output | normalize home paths, drop any candidate data in the message |
 | Expected vs actual | your diagnosis | generic phrasing, no candidate specifics |
 
@@ -78,7 +78,7 @@ When in doubt, leave it out. A vaguer-but-clean report beats a precise leak.
 Search before filing so we don't pile on duplicates:
 
 ```
-gh issue list --repo CodesWhat/rolester --state open --search "<short error signature>"
+gh issue list --repo CodesWhat/careerrat --state open --search "<short error signature>"
 ```
 
 If a matching open issue exists, offer to **add a comment** with the user's redacted repro instead of opening a new one. Only open a fresh issue when nothing matches.
@@ -118,7 +118,7 @@ Title: <one-line summary of the failure>
 _Filed via the Rolester `report-issue` skill. Diagnostics were redacted of personal data._
 ```
 
-Tell the user plainly: "this posts publicly to CodesWhat/rolester under your GitHub account (`<gh username>`)." Get an explicit **yes** before filing. Nothing publishes without it.
+Tell the user plainly: "this posts publicly to CodesWhat/careerrat under your GitHub account (`<gh username>`)." Get an explicit **yes** before filing. Nothing publishes without it.
 
 ---
 

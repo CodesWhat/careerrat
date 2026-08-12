@@ -33,7 +33,7 @@ Read `candidate/application-limits.yml` (if absent, skip silently and proceed).
 - If `status: caution`: warn and confirm before proceeding.
 - If a new cap or cooldown is stated by the user mid-flow (e.g. "limit me to 2 apps there per quarter"): write it back to `application-limits.yml` using *confirm-first* friction (propose the exact change, get a yes, write, echo `Written to application-limits.yml: <key: value>`).
 
-Run `rolester tracker --summary` to confirm current application-limits context and echo the result.
+Run `careerrat tracker --summary` to confirm current application-limits context and echo the result.
 
 ---
 
@@ -56,7 +56,7 @@ ACTION: apply-now|hold|manual|cut
 
 - **GATE: KEEP** → proceed.
 - **GATE: REVIEW** → confirm with user before proceeding.
-- **GATE: CUT** → write `status: cut` to the tracker row. In the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is not already `closed`). If one exists, set `comm.status = "closed"`, `comm.nextActionDue = null`, `comm.nextAction = null`, `comm.draft = null`, and append to `comm.messages[]`: `{ direction: "note", at: "<ISO>", body: "Role cut — <reason from GATE line>. No further action." }`. Run `npm run verify:tracker && rolester tracker --verify && rolester tracker` after the write. Halt, stop.
+- **GATE: CUT** → write `status: cut` to the tracker row. In the same `tracker.json` write, check for a backing comm thread (`jobs[id].comm` where `comm.status` is not already `closed`). If one exists, set `comm.status = "closed"`, `comm.nextActionDue = null`, `comm.nextAction = null`, `comm.draft = null`, and append to `comm.messages[]`: `{ direction: "note", at: "<ISO>", body: "Role cut — <reason from GATE line>. No further action." }`. Run `npm run verify:tracker && careerrat tracker --verify && careerrat tracker` after the write. Halt, stop.
 
 ---
 
@@ -85,7 +85,7 @@ Apply priority logic:
 
 Check if `workspace/writing-samples/` contains files newer than `candidate/writing-style.md`. If so: run `npm run calibrate:style` first, then confirm it completed before continuing.
 
-Read: `candidate/writing-style.md`, `candidate/honesty.yml`, `candidate/evidence.yml`. Then run `rolester learnings read "<role>"` (the helper resolves the family from `targeting.yml` and exits 0 silently if no file exists yet — a missing file is normal).
+Read: `candidate/writing-style.md`, `candidate/honesty.yml`, `candidate/evidence.yml`. Then run `careerrat learnings read "<role>"` (the helper resolves the family from `targeting.yml` and exits 0 silently if no file exists yet — a missing file is normal).
 
 Invoke `tailor-application` to produce `workspace/tailored/<Company>_<Role>.md` and a cover letter whenever the application accepts one (a cover-letter field — required or optional — or an email/attachment channel). Default to including a cover letter; it is a second ATS keyword-matching surface. Only skip it when the application has no way to accept one.
 
@@ -172,7 +172,7 @@ Enter this step when `isEasyApply(url)` returns true OR `hostnameToPortal(url) =
 Run:
 
 ```
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.one_click_apply`. The applicable platform is `linkedin`. `allowed: true` means all three conditions are simultaneously true: the `one_click_apply` capability global switch is on, LinkedIn's per-capability switch is on, and LinkedIn's one-time ToS consent is recorded. This is the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` — never re-derive it in prose.
@@ -180,10 +180,10 @@ Inspect `capabilities.one_click_apply`. The applicable platform is `linkedin`. `
 If `capabilities.one_click_apply` does not show `allowed: true` for `linkedin`, explain exactly how to opt in, then **stop** — do not open a browser:
 
 1. Read LinkedIn's terms of service yourself to confirm that automated Easy Apply is permitted under your account's usage.
-2. Record consent: `rolester automation consent linkedin --write`
-3. Enable the capability global switch: `rolester automation enable one_click_apply --write`
-4. Enable for LinkedIn: `rolester automation enable one_click_apply linkedin --write`
-5. Verify: `rolester automation status --json`
+2. Record consent: `careerrat automation consent linkedin --write`
+3. Enable the capability global switch: `careerrat automation enable one_click_apply --write`
+4. Enable for LinkedIn: `careerrat automation enable one_click_apply linkedin --write`
+5. Verify: `careerrat automation status --json`
 
 State clearly: this capability is OFF by default; enabling it is a deliberate choice. The user must read LinkedIn's ToS themselves before recording consent — Rolester records the decision, it does not make it. This step is always user-initiated and must never run on a schedule or unattended.
 
@@ -238,14 +238,14 @@ After submitting, confirm the application advanced past the submit step:
 
 1. Read the current URL and page text. Check both the URL path (segments: `/confirmation`, `/thank-you`, `/submitted`, `/complete`, `/success`) AND the visible page text ("Application received", "We got your application", "Thanks for applying", or similar) — a match on either constitutes a confirmation signal. `confirmationCheck(pageText, currentUrl)` in `src/core/apply/form-fill.mjs` encodes this logic; mirror that dual-signal check when evaluating manually.
 2. **Verification-code protocol (M17):** if the page shows an emailed verification-code prompt (detected by `submitGuard`/BLOCKER_SIGNALS in `form-fill.mjs` — phrases such as "verification code", "enter the code", "check your email"), handle it through the narrow mail-access path:
-   - Run `rolester automation status --json` and inspect `capabilities.mail_access`.
+   - Run `careerrat automation status --json` and inspect `capabilities.mail_access`.
    - Infer the mail platform from the recipient address when obvious using `inferMailAccessPlatformFromEmail()` from `src/core/automation/mail-access.mjs`: `gmail.com` / `googlemail.com` → `gmail`; `outlook.com` / `hotmail.com` / `live.com` / `msn.com` → `outlook`; other real email domains → `webmail`. If there is no recipient address, ask the user which provider holds the code. Use `webmail` for any provider other than Gmail/Outlook.
    - If `mail_access` is not `allowed: true` for that platform, halt and ask the user to provide the code manually. Also show the opt-in steps:
      1. Read the mail provider's terms yourself.
-     2. `rolester automation consent <gmail|outlook|webmail> --write`
-     3. `rolester automation enable mail_access --write`
-     4. `rolester automation enable mail_access <gmail|outlook|webmail> --write`
-     5. `rolester automation status --json`
+     2. `careerrat automation consent <gmail|outlook|webmail> --write`
+     3. `careerrat automation enable mail_access --write`
+     4. `careerrat automation enable mail_access <gmail|outlook|webmail> --write`
+     5. `careerrat automation status --json`
    - If `mail_access` is allowed, use the session browser to open the provider and follow `buildVerificationCodeMailPlan()` / `classifyMailAccessBlocker()` / `extractVerificationCodes()` from `src/core/automation/mail-access.mjs`. For `webmail`, pass the visible provider name as `providerName` when known. Read only the specific recent verification-code message for this current application or sign-in flow. Do not browse the broader inbox. Do not send, delete, reply, archive, or mark messages read.
    - Halt immediately on a mail login wall, mail 2FA prompt, captcha, or unexpected interstitial. Set `status: "manual-apply"` with a note such as `"manual-apply: mail_access blocked — Gmail login wall, provide code manually"` and ask the user to provide the code manually.
    - Once the code is obtained, return to the original application page, enter the code, and continue verification.
@@ -308,7 +308,7 @@ Run validation and re-render in sequence:
 
 ```
 npm run verify:tracker
-rolester tracker --verify && rolester tracker
+careerrat tracker --verify && careerrat tracker
 ```
 
 Both must exit 0 **and** the row must now be present (confirm by `id`). If the row
@@ -332,7 +332,7 @@ Then log the submission to the Activity Pulse feed (the dashboard's live timelin
 a re-run never double-logs:
 
 ```
-rolester activity append --type applied --actor agent \
+careerrat activity append --type applied --actor agent \
   --title "Applied — <Company>" --summary "<Role> · via <channel>" \
   --company "<Company>" --role "<Role>" --app-id <application id> --url "<posting URL>" --write
 ```

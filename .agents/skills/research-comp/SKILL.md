@@ -41,7 +41,7 @@ Read `candidate/profile.yml`. Extract:
 Then check usage mode:
 
 ```
-rolester modes allows research:comp
+careerrat modes allows research:comp
 ```
 
 If it returns `downshift`, use one credible source or a non-stale existing benchmark
@@ -173,7 +173,7 @@ Market data only; no private candidate compensation inputs are present in this a
 **Dry-run first** (validates frontmatter, ≥1 cited source, placeholder lint, `current_base` guard):
 
 ```
-rolester research record "<role title>" --name comp-bench-<role-slug>-<loc-slug>-<yyyy-mm> --file /tmp/comp-bench-draft.md
+careerrat research record "<role title>" --name comp-bench-<role-slug>-<loc-slug>-<yyyy-mm> --file /tmp/comp-bench-draft.md
 ```
 
 Inspect the dry-run output. If `record` reports any refusal (missing citation, placeholder bracket, `current_base` token, missing required frontmatter), fix the draft and re-run dry.
@@ -181,13 +181,13 @@ Inspect the dry-run output. If `record` reports any refusal (missing citation, p
 **Commit when clean:**
 
 ```
-rolester research record "<role title>" --name comp-bench-<role-slug>-<loc-slug>-<yyyy-mm> --file /tmp/comp-bench-draft.md --write
+careerrat research record "<role title>" --name comp-bench-<role-slug>-<loc-slug>-<yyyy-mm> --file /tmp/comp-bench-draft.md --write
 ```
 
 Log the benchmark to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md). The summary describes market data only — never the candidate's current compensation:
 
 ```
-rolester activity append --type research --actor agent \
+careerrat activity append --type research --actor agent \
   --title "Comp benchmark — <Role> (<location>)" --summary "<floor / midpoint / ceiling synthesized>" \
   --role "<Role>" --write
 ```
@@ -238,12 +238,12 @@ When the market benchmark reveals that `profile.minimum_base` or `profile.target
 ```text
 GATE PROPOSAL (confirm to apply):
   Market mid ($<N>) is <above|below> profile.target_base by ~<pct>%.
-  To update the comp floor:   rolester gate comp-floor <N>
-  To update the comp target:  rolester gate comp-target <N>
+  To update the comp floor:   careerrat gate comp-floor <N>
+  To update the comp target:  careerrat gate comp-target <N>
   Run with --write --confirm to commit. Do not auto-apply.
 ```
 
-Show both commands only when both are misaligned. Show neither when the market and profile targets are in range. Never invoke `rolester gate` automatically — only propose the commands.
+Show both commands only when both are misaligned. Show neither when the market and profile targets are in range. Never invoke `careerrat gate` automatically — only propose the commands.
 
 ---
 

@@ -5,16 +5,16 @@ import { existsSync, readFileSync, statSync, watch } from "node:fs";
 // tracker data or the dashboard UI itself.
 //
 // Usage:
-//   rolester tracker-dev                 Serve http://localhost:7777 with live reload
-//   rolester tracker-dev --port 8080  Pick a port (or ROLESTER_DEV_PORT=8080)
-//   rolester tracker-dev --open       Best-effort open the page in your browser
-//   rolester tracker-dev --help
+//   careerrat tracker-dev                 Serve http://localhost:7777 with live reload
+//   careerrat tracker-dev --port 8080  Pick a port (or ROLESTER_DEV_PORT=8080)
+//   careerrat tracker-dev --open       Best-effort open the page in your browser
+//   careerrat tracker-dev --help
 //
 // Zero runtime deps: node:http + node:fs.watch + Server-Sent Events. Watches
 //   - workspace/tracker.json        (edit the data → page refreshes)
 //   - src/core/tracker/*            (edit the dashboard code → page refreshes)
 // and on any change re-renders via the canonical `tracker.mjs` CLI in a child
-// process (so the preview can never drift from `rolester tracker`, and every
+// process (so the preview can never drift from `careerrat tracker`, and every
 // render picks up fresh modules), then pushes a reload to the open page.
 //
 // The pure, risk-bearing helpers (asset traversal guard, MIME, snippet
@@ -55,7 +55,7 @@ const clients = new Set();
 
 // ---------------------------------------------------------------------------
 // Render: shell out to the canonical CLI so the dev preview is byte-identical
-// to `rolester tracker` and always loads fresh modules.
+// to `careerrat tracker` and always loads fresh modules.
 
 let rendering = false;
 let renderQueued = false;
@@ -348,7 +348,7 @@ async function main() {
   });
   server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {
-      log(`port ${port} is in use. Pick another: rolester tracker-dev --port ${port + 1}`);
+      log(`port ${port} is in use. Pick another: careerrat tracker-dev --port ${port + 1}`);
     } else {
       log(`server error: ${err.message}`);
     }
@@ -399,12 +399,12 @@ function log(msg) {
 }
 
 function printHelp() {
-  process.stdout.write(`rolester tracker-dev — live-reloading dashboard
+  process.stdout.write(`careerrat tracker-dev — live-reloading dashboard
 
 Usage:
-  rolester tracker-dev                 Serve http://localhost:7777 with live reload
-  rolester tracker-dev --port 8080  Pick a port (or set ROLESTER_DEV_PORT)
-  rolester tracker-dev --open       Open the page in your browser on start
+  careerrat tracker-dev                 Serve http://localhost:7777 with live reload
+  careerrat tracker-dev --port 8080  Pick a port (or set ROLESTER_DEV_PORT)
+  careerrat tracker-dev --open       Open the page in your browser on start
 
 Watches workspace/tracker.json, candidate/modes.yml, and src/core/tracker/*.mjs;
 re-renders via the canonical tracker CLI and pushes a reload over Server-Sent Events.

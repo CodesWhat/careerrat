@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // update-live — operator tool: refresh an EXTERNAL live Rolester tree from the
 // published npm package, without cd-ing into it. (To self-update the current tree,
-// use `rolester update` instead — both share src/core/update/update-core.mjs.)
+// use `careerrat update` instead — both share src/core/update/update-core.mjs.)
 //
 // Rolester's agent path runs in-tree, so a live install is a full repo tree with the
 // user's real candidate/ + workspace/ data co-located. This updates only the CODE by
@@ -56,7 +56,7 @@ if (opts.help) {
     "Usage: node scripts/update-live.mjs --target <dir> [--tag latest|rc|<version>] [--write]\n" +
       "  Refreshes CODE in an external live Rolester tree from the published npm package.\n" +
       "  candidate/ and workspace/ are never touched (they aren't in the package).\n" +
-      "  Dry run unless --write is passed. To self-update the current tree: rolester update."
+      "  Dry run unless --write is passed. To self-update the current tree: careerrat update."
   );
   process.exit(0);
 }
@@ -113,7 +113,7 @@ try {
   const doc = spawnSync("node", [join(opts.target, "src/cli/doctor.mjs")], { stdio: "inherit" });
   if (doc.status !== 0) {
     console.log(
-      `  (doctor reported issues — review above; per RELEASE.md, re-run \`rolester ingest\` ` +
+      `  (doctor reported issues — review above; per RELEASE.md, re-run \`careerrat ingest\` ` +
         `in update mode if new required config fields were added.)`
     );
   }

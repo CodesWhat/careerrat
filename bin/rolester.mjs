@@ -1,18 +1,18 @@
 #!/usr/bin/env node
-// Rolester launcher — the `npx rolester <command>` entrypoint.
+// Rolester launcher — the `npx careerrat <command>` entrypoint.
 //
-//   rolester start [ai]  One command: scaffold + skills + live dashboard + agent
-//   rolester init        Scaffold candidate/ + workspace dirs, print next steps
-//   rolester doctor      Environment health check
-//   rolester next        Show the next agent task
-//   rolester ingest      Guided candidate setup
-//   rolester searches    Build/curate the search-source config
-//   rolester companies   Manage tracked employer ATS boards
-//   rolester evaluate    Run the body-read gate on a saved job
-//   rolester tracker     One-shot tracker snapshot (use `start` for the live dev server)
-//   rolester restore     Recover workspace/tracker.json from a rolling snapshot
-//   rolester export      Render a tailored artifact / packet to PDF or DOCX
-//   rolester help        Show this list
+//   careerrat start [ai]  One command: scaffold + skills + live dashboard + agent
+//   careerrat init        Scaffold candidate/ + workspace dirs, print next steps
+//   careerrat doctor      Environment health check
+//   careerrat next        Show the next agent task
+//   careerrat ingest      Guided candidate setup
+//   careerrat searches    Build/curate the search-source config
+//   careerrat companies   Manage tracked employer ATS boards
+//   careerrat evaluate    Run the body-read gate on a saved job
+//   careerrat tracker     One-shot tracker snapshot (use `start` for the live dev server)
+//   careerrat restore     Recover workspace/tracker.json from a rolling snapshot
+//   careerrat export      Render a tailored artifact / packet to PDF or DOCX
+//   careerrat help        Show this list
 //
 // Each subcommand delegates to the matching src/cli script, forwarding args.
 
@@ -21,7 +21,7 @@
   const major = parseInt(process.versions.node.split(".")[0], 10);
   if (major < 18) {
     process.stderr.write(
-      `rolester requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
+      `careerrat requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
     );
     process.exit(1);
   }
@@ -96,7 +96,7 @@ const WORKSPACE_DIRS = [
 // The single starter message that hands a freshly-scaffolded workspace to the
 // agent. It anchors every new session to doctor-driven next-step routing.
 const STARTER_PROMPT =
-  "Read AGENTS.md, run rolester doctor, then guide me through the next unfinished Rolester skill. If setup is complete, follow setup-searches -> research-boards -> discover-companies -> search-jobs before the first job sweep.";
+  "Read AGENTS.md, run careerrat doctor, then guide me through the next unfinished Rolester skill. If setup is complete, follow setup-searches -> research-boards -> discover-companies -> search-jobs before the first job sweep.";
 
 // Agent CLIs we know how to launch, in preference order. Each is started with
 // the starter prompt as a single positional argument (the seed-a-session form
@@ -159,13 +159,13 @@ function runInit(extra) {
     console.log("");
     console.log("Workspace ready. Open your agent in this folder and say:");
     console.log(`    ${STARTER_PROMPT}`);
-    console.log("Use `rolester next` anytime to print the current next agent task.");
+    console.log("Use `careerrat next` anytime to print the current next agent task.");
   }
   return code;
 }
 
 // Parse `start` args. The first bare word is the agent to launch
-// (`rolester start claude`); `--agent <name>` is an equivalent alias. Both
+// (`careerrat start claude`); `--agent <name>` is an equivalent alias. Both
 // accept any CLI on your PATH, not just claude/codex.
 function parseStartArgs(extra) {
   const out = { agent: null, port: null, noAgent: false, noDashboard: false };
@@ -182,10 +182,10 @@ function parseStartArgs(extra) {
   return out;
 }
 
-// `rolester start [agent]` — the one-command front door:
+// `careerrat start [agent]` — the one-command front door:
 //   scaffold workspace → install skills → boot the live dashboard (:7777) →
 //   hand off to the named agent (or first found on PATH) with the starter prompt.
-// Usage: rolester start [claude|codex|<any-cli>]
+// Usage: careerrat start [claude|codex|<any-cli>]
 //        [--agent <name>] [--no-agent] [--no-dashboard] [--port <n>]
 async function runStart(extra) {
   const opts = parseStartArgs(extra);
@@ -269,7 +269,7 @@ function printManualAgentHandoff(dash) {
   console.log("");
   console.log(`    ${STARTER_PROMPT}`);
   console.log("");
-  console.log("For a terse CLI handoff, run `rolester next`.");
+  console.log("For a terse CLI handoff, run `careerrat next`.");
   if (dash) {
     console.log(
       `The dashboard is running separately; stop it with the PID in ${displayPath(pathCtx, ".internal/tracker-dev.pid")}.`
@@ -427,7 +427,7 @@ function parseUpdateArgs(extra) {
   return out;
 }
 
-// `rolester update` — refresh THIS install's code from the published npm package.
+// `careerrat update` — refresh THIS install's code from the published npm package.
 // Code only: candidate/ and workspace/ are never in the package, so a user's real
 // data is preserved; a privacy guard refuses any tarball that carries user data.
 function runUpdate(extra) {
@@ -447,7 +447,7 @@ function runUpdate(extra) {
   if (opts.check) {
     console.log(
       newer
-        ? `Update available: ${current} → ${latest} — run \`rolester update\` to install.`
+        ? `Update available: ${current} → ${latest} — run \`careerrat update\` to install.`
         : `Up to date (v${current}; latest@${opts.tag} = v${latest}).`
     );
     return 0;
@@ -508,9 +508,9 @@ function notifyUpdateAvailable() {
 }
 
 function printHelp() {
-  console.log(`rolester — agentic job-search workspace
+  console.log(`careerrat — agentic job-search workspace
 
-Usage: rolester <command> [options]
+Usage: careerrat <command> [options]
 
 Commands:
   start [ai]  Scaffold + install skills + live dashboard + launch your agent
@@ -522,7 +522,7 @@ Commands:
   searches    Build and curate the search-source config
   companies   Manage tracked employer ATS boards
   evaluate    Run the body-read gate on a saved job (GATE/FIT/COMP/ACTION)
-  tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'rolester start')
+  tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat start')
   tracker-dev  Serve the live hot-reloading dashboard without launching an agent
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
@@ -543,7 +543,7 @@ Commands:
 
 start [ai]:
   the first bare word picks the agent to launch — claude, codex, or any CLI on
-  your PATH (e.g. rolester start claude). Omit it to use the first found.
+  your PATH (e.g. careerrat start claude). Omit it to use the first found.
   --agent <name>      same as the positional, alternate spelling
   --no-agent          scaffold + dashboard only, don't launch an agent
   --no-dashboard      skip the live dashboard

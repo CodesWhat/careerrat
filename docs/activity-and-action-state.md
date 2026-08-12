@@ -93,7 +93,7 @@ all disappear at once. No resolve verb. No stale button possible.
   (from `messages[]` with direction `outbound-sent` / `outbound-draft`) — both
   passes implemented in `src/core/tracker/activity-backfill.mjs`, steps 4 and 5
   of `deriveActivityEvents`.
-- **tracker.json snapshot-on-render.** Every `rolester tracker` call
+- **tracker.json snapshot-on-render.** Every `careerrat tracker` call
   snapshots the current `workspace/tracker.json` into
   `workspace/.snapshots/tracker-<ISO>.json` before writing the new dashboard.
   The newest ~20 are kept (override: `ROLESTER_TRACKER_SNAPSHOTS`); the copy is
@@ -117,7 +117,7 @@ all disappear at once. No resolve verb. No stale button possible.
 | 5b | M | Gate `comm.draft` **and** `app.followUp.draft` in `jobDetailFromRow` on `comm.status` not in {waiting, closed} | `src/core/tracker/dashboard-data.js` |
 | 6a | S | **Prereq:** `export` `renderNextSteps`; add an **uncapped** `allNextSteps` view-model field (current `nextSteps` is `.slice(0,3)`) | `src/core/tracker/dashboard-data.js` |
 | 6b | M | Replace the hardcoded Aperture/Cyberdyne/Hooli fixtures in the Action Queue drawer with a live slot populated from `allNextSteps` via `renderNextSteps()` | `src/core/tracker/dashboard-shell.html` |
-| 7 | S | **Migration — must run AFTER #4:** `rolester activity backfill --write`; audit live `needsUser` events each map to a `tracker.json` condition; null any `comm.draft` where status is `waiting` | `workspace/*` |
+| 7 | S | **Migration — must run AFTER #4:** `careerrat activity backfill --write`; audit live `needsUser` events each map to a `tracker.json` condition; null any `comm.draft` where status is `waiting` | `workspace/*` |
 
 ### Implementation notes
 1. `renderNextSteps` isn't exported — added as explicit prereq 6a.

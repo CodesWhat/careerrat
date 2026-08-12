@@ -17,11 +17,11 @@ Read all gate files before touching anything else:
 2. `candidate/profile.yml` — `compensation.minimum_base`, `location.*`, `candidate.domain` — used for salary floor and location triage. **Do not read or use `compensation.current_base` for any purpose in this skill.**
 3. `candidate/application-limits.yml` — per-company caps and cooldowns. Build a blocked/capped company set now so the scan can flag them at triage time.
 4. `workspace/tracker.json` — existing `applications[]` and `sourced[]`. Build company-history sets now: active applications, recent rejections, prior cuts/closed sourced rows, and exact req/company-role duplicates. Company history is not the same as an application-limit block, but it must affect warnings and priority.
-5. For a classifiable role, read its learnings via `rolester learnings read "<role>"` — the helper resolves the family from targeting.yml and skips silently when no file exists. Improves triage scoring.
-6. `candidate/modes.yml` — optional. Run `rolester modes status`; absent = `usage_mode: standard`, `application_mode: balanced`.
+5. For a classifiable role, read its learnings via `careerrat learnings read "<role>"` — the helper resolves the family from targeting.yml and skips silently when no file exists. Improves triage scoring.
+6. `candidate/modes.yml` — optional. Run `careerrat modes status`; absent = `usage_mode: standard`, `application_mode: balanced`.
 7. `config/search-sources.yml` — `searches[]`, per-source `lastRunAt` watermarks, `recency.postFilterAfter`.
 
-Run `rolester doctor` and confirm it exits clean. Read the `Discovery pipeline`
+Run `careerrat doctor` and confirm it exits clean. Read the `Discovery pipeline`
 section before scanning. The post-onboarding order is:
 
 ```
@@ -36,13 +36,13 @@ has no enabled entries, stop and run `setup-searches` first:
 > **Available portals:** Wellfound (`wellfound.com`) is auto-seeded for tech-domain candidates; Lever (`jobs.lever.co`) is seeded one entry per company in `targeting.tracked_companies`. Pasting a `wellfound.com` or `jobs.lever.co` URL via `setup-searches` routes it automatically to the correct provider.
 
 ```
-rolester searches
+careerrat searches
 ```
 
 If sources are present but haven't been derived from targeting yet, optionally rebuild:
 
 ```
-rolester searches --from-targeting
+careerrat searches --from-targeting
 ```
 
 Privacy gate: `profile.compensation.current_base` is private. It must not appear in any scan output, intake file, tracker note, or JD frontmatter produced by this skill. Use `minimum_base` / `target_base` / `expected_base` as the comp floor only.
@@ -53,7 +53,7 @@ keeps medium fits in review), not which plausible roles are discovered. Before a
 multi-source sweep, run:
 
 ```
-rolester modes allows search:sweep:broad
+careerrat modes allows search:sweep:broad
 ```
 
 If it returns `downshift`, run fewer enabled sources or a narrower recency window and state
@@ -95,7 +95,7 @@ Sources in `config/search-sources.yml` with `source_type: "browser"`, `auth: tru
 **Two gates, both required.** For each such source, run it only if:
 
 1. The source's own `enabled` is `true` in `config/search-sources.yml`, AND
-2. `rolester automation status --json` shows `authenticated_search` `allowed: true` for that source's `platform`.
+2. `careerrat automation status --json` shows `authenticated_search` `allowed: true` for that source's `platform`.
 
 The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` (capability global switch · per-platform switch · per-platform ToS consent). Never re-derive that predicate here.
 
@@ -103,11 +103,11 @@ The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/auto
 
 To enable a source:
 1. Read that platform's terms of service yourself.
-2. Record ToS consent: `rolester automation consent <platform> --write`
-3. Enable the capability global switch: `rolester automation enable authenticated_search --write`
-4. Enable for the specific platform: `rolester automation enable authenticated_search <platform> --write`
+2. Record ToS consent: `careerrat automation consent <platform> --write`
+3. Enable the capability global switch: `careerrat automation enable authenticated_search --write`
+4. Enable for the specific platform: `careerrat automation enable authenticated_search <platform> --write`
 5. Set `enabled: true` for the source entry in `config/search-sources.yml`.
-6. Verify: `rolester automation status --json`
+6. Verify: `careerrat automation status --json`
 
 Then stop for that source and continue with the next.
 
@@ -152,7 +152,7 @@ npm run delta:sourced -- --source <provider> --repo-new-only --write --baseline-
 For each sourced entry in the intake, emit a triage block before writing it to the tracker. Score using:
 
 - `candidate/targeting.yml` — `role_buckets.priority`, `keep_signals`, `cut_signals`, `excluded_companies`
-- `rolester learnings read "<role>"` — when the sourced role's family is classifiable; skips silently if no file exists
+- `careerrat learnings read "<role>"` — when the sourced role's family is classifiable; skips silently if no file exists
 - `candidate/profile.yml#compensation.minimum_base` — salary floor (use this field, not `current_base`)
 - `candidate/application-limits.yml` — blocked/capped companies
 
@@ -220,7 +220,7 @@ For each source that ran:
 2. Edit `config/search-sources.yml` directly — set `lastRunAt` to the ISO timestamp of this run.
 3. Print the new (after) `lastRunAt` value as confirmation: `Written lastRunAt for <source>: <before> → <after>`.
 
-Then run `rolester doctor` to confirm the file still validates.
+Then run `careerrat doctor` to confirm the file still validates.
 
 ## STEP 6 — Gate write-back (if user stated a new gate mid-session)
 
@@ -249,7 +249,7 @@ Contract** in AGENTS.md.
 For each sourced entry with `fitBucket: high` and no `excluded-company` / `app-limit-blocked` / `likely-cut` flag, offer to run `evaluate-job` for a full body-read gate:
 
 ```
-rolester evaluate workspace/jobs/<company>-<slug>.md
+careerrat evaluate workspace/jobs/<company>-<slug>.md
 ```
 
 Exit 0 = KEEP, exit 2 = REVIEW, exit 1 = CUT.
@@ -275,14 +275,14 @@ npm run verify:tracker
 Report the summary. List any issues found. Re-render the dashboard:
 
 ```
-rolester tracker
+careerrat tracker
 ```
 
 Then log the source run to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md). One summary event per source run, not per role:
 
 ```
-rolester activity append --type sourced --actor agent \
+careerrat activity append --type sourced --actor agent \
   --title "Sourced <N> roles — <source>" --summary "<one-line triage note, e.g. 'M passed coarse triage'>" \
   --tag "<source>" --write
 ```
@@ -307,7 +307,7 @@ coverage before another refresh.
 
 ## Rules — authenticated browser sources
 
-- **Both gates required.** Never scrape an authenticated source unless the source's `enabled` is `true` AND `rolester automation status --json` shows `authenticated_search` `allowed: true` for its platform. If either is false, skip and explain the opt-in steps; do not open a browser.
+- **Both gates required.** Never scrape an authenticated source unless the source's `enabled` is `true` AND `careerrat automation status --json` shows `authenticated_search` `allowed: true` for its platform. If either is false, skip and explain the opt-in steps; do not open a browser.
 - **`allowed` encodes the three-part AND.** The `allowed` field from `mayRun()` in `src/core/automation/consent.mjs` is the single predicate (capability global · platform · ToS consent). Never re-derive it in prose.
 - **Same pipeline, no parallel track.** Postings scraped from authenticated sources flow through the same intake → dedupe → liveness → triage pipeline as every other source. No special path.
 - **User-initiated only. Never on a schedule.**

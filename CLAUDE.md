@@ -3,7 +3,7 @@
 Follow [AGENTS.md](AGENTS.md). It is the source of truth for intent routing,
 the body-read gate, artifact completeness, and submit safety. If
 `candidate/AGENTS.md` exists, read it too for candidate-specific context; if the
-workspace is not set up yet, run `ingest-profile` (or `rolester ingest`) first.
+workspace is not set up yet, run `ingest-profile` (or `careerrat ingest`) first.
 
 Key rule: when the user asks to apply, run the `apply-job` workflow. `apply-job`
 must run or verify `evaluate-job` before tailoring, filling, or submitting.

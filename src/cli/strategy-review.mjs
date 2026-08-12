@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-// rolester strategy-review — stamp the "last reviewed" marker on the tracker.
+// careerrat strategy-review — stamp the "last reviewed" marker on the tracker.
 //
 // reevaluate-strategy calls this on completion so the dashboard "review ready" nudge
 // self-clears. It records when the review happened (lastReviewedAt) and a snapshot of
@@ -10,7 +10,7 @@
 // render forever, since the rolling 30-day counts stay above threshold regardless of
 // whether a review just ran.
 //
-// Like `rolester activity` / `rolester learnings`, the CLI only WRITES this mechanical
+// Like `careerrat activity` / `careerrat learnings`, the CLI only WRITES this mechanical
 // marker — it makes no strategy judgement (AGENTS.md → capture-is-skills-not-cli). The
 // snapshot is computed with buildStrategyReviewStamp, the SAME predicate the render gate
 // reads, so the stored count and the live count can never diverge.
@@ -20,7 +20,7 @@
 //   node src/cli/strategy-review.mjs status [--json]
 //
 // stamp is a DRY RUN by default: it computes the marker and prints it, writing nothing.
-// Pass --write to commit. Re-render afterwards (rolester tracker) so the cleared
+// Pass --write to commit. Re-render afterwards (careerrat tracker) so the cleared
 // banner shows.
 
 import { existsSync, readFileSync } from "node:fs";
@@ -104,7 +104,7 @@ function cmdStamp() {
       console.log("Proposed strategyReview marker for workspace/tracker.json:");
       console.log(`  ${JSON.stringify(marker)}`);
       console.log("");
-      console.log("Dry run - pass --write to commit, then re-render (rolester tracker).");
+      console.log("Dry run - pass --write to commit, then re-render (careerrat tracker).");
     }
     process.exit(0);
   }
@@ -117,7 +117,7 @@ function cmdStamp() {
     console.log(
       `Stamped strategyReview at ${marker.lastReviewedAt} (outcomes: ${marker.snapshot.outcomes}).`
     );
-    console.log("Re-render to clear the banner: rolester tracker");
+    console.log("Re-render to clear the banner: careerrat tracker");
   }
   process.exit(0);
 }
@@ -154,7 +154,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester strategy-review — stamp the last-reviewed marker on the tracker
+  console.log(`careerrat strategy-review — stamp the last-reviewed marker on the tracker
 
 Usage:
   node src/cli/strategy-review.mjs stamp [--at ISO] [--write] [--json]
@@ -168,7 +168,7 @@ Commands:
 stamp options:
   --at ISO    Review timestamp (default: now).
   --write     Commit (default dry run).  --json  Machine-readable output.
-  --root DIR  Repo root (default: the rolester install).
+  --root DIR  Repo root (default: the careerrat install).
 
 reevaluate-strategy calls \`stamp --write\` on completion, then re-renders. The marker
 is mechanical (timestamp + outcome snapshot); the skill owns the strategy judgement.`);

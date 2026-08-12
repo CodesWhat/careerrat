@@ -38,7 +38,7 @@ touch the profile until consent is confirmed.
 Run:
 
 ```
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.profile_optimize` and `capabilities.profile_apply` for platform
@@ -60,12 +60,12 @@ Resolve the run mode from the two verdicts:
 
   1. Read LinkedIn's terms yourself to confirm automated profile reads (and, for
      write-back, automated edits) are acceptable to you.
-  2. Record consent: `rolester automation consent linkedin --write`
-  3. Enable read+suggest: `rolester automation enable profile_optimize --write` then
-     `rolester automation enable profile_optimize linkedin --write`
-  4. Only if you also want write-back: `rolester automation enable profile_apply --write`
-     then `rolester automation enable profile_apply linkedin --write`
-  5. Verify: `rolester automation status --json`
+  2. Record consent: `careerrat automation consent linkedin --write`
+  3. Enable read+suggest: `careerrat automation enable profile_optimize --write` then
+     `careerrat automation enable profile_optimize linkedin --write`
+  4. Only if you also want write-back: `careerrat automation enable profile_apply --write`
+     then `careerrat automation enable profile_apply linkedin --write`
+  5. Verify: `careerrat automation status --json`
 
 State clearly: both capabilities are OFF by default; enabling either is a deliberate
 choice, and write-back is a separate switch from suggestions. The user reads the ToS
@@ -83,7 +83,7 @@ The profile is rewritten **from the candidate's own data**, never invented. Read
 - `candidate/targeting.yml` — `role_buckets` / target titles, `keep_signals`,
   `cut_signals`. This is what the profile should *read for* — the target side.
 - `candidate/evidence.yml` — the claim bank. **Every proposed line must trace to a claim
-  here** (run `rolester evidence list` if useful). No claim → no line. This is the same
+  here** (run `careerrat evidence list` if useful). No claim → no line. This is the same
   honesty firewall `tailor-application` enforces.
 - `candidate/honesty.yml` — `education` policy, `tools.confirmed` / `tools.do_not_claim`,
   `claims.do_not_fabricate`. Overclaim caps apply to profile copy exactly as they do to a
@@ -245,7 +245,7 @@ Then log one event to the Activity Pulse feed (the dashboard's live timeline —
 **Activity Pulse** in AGENTS.md), actor `agent`:
 
 ```
-rolester activity append --type system --actor agent \
+careerrat activity append --type system --actor agent \
   --title "LinkedIn profile pass" \
   --summary "<N surfaces reviewed, M fields applied (or 'suggest-only')>" \
   --url "<profile url>" --write
@@ -259,7 +259,7 @@ changes. The point is an honest profile that reads for the target roles, not a l
 ## RULES
 
 - **Opt-in, OFF by default, two separate gates.** Run a browser pass only where
-  `rolester automation status --json` shows the capability `allowed: true` for
+  `careerrat automation status --json` shows the capability `allowed: true` for
   `linkedin`. `profile_optimize` gates reading + suggesting; `profile_apply` separately
   gates write-back. The `allowed` field encodes the three-part AND (global switch ·
   platform switch · ToS consent) from `mayRun()` in `src/core/automation/consent.mjs` —
