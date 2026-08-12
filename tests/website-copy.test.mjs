@@ -34,8 +34,21 @@ test("root layout suppresses the intentional early html class hydration delta", 
 test("website metadata is CareerRat-branded", async () => {
   const layout = await readFile("website/src/app/layout.tsx", "utf8");
 
-  assert.match(layout, /CareerRat — Rate\. Apply\. Track\./);
+  assert.match(layout, /CareerRat: Rate\. Apply\. Track\./);
   assert.doesNotMatch(layout, /rolester/i);
+  // Product copy carries no em dashes, and page/OG/Twitter titles and
+  // descriptions are product copy: they are the first thing anyone sees in a
+  // shared link preview. Scoped to the metadata strings so an em dash in a
+  // code comment (which no user reads) does not fail the suite.
+  const metadataCopy = [
+    ...layout.matchAll(/^\s*(?:title|description):\s*"([^"]*)"/gm),
+    ...layout.matchAll(/^\s*"(CareerRat is [^"]*)"/gm),
+  ].map((match) => match[1]);
+  // Three titles (page, OG, Twitter) plus the shared siteDescription.
+  assert.equal(metadataCopy.length, 4);
+  for (const copy of metadataCopy) {
+    assert.doesNotMatch(copy, /—/);
+  }
 });
 
 test("website install copy uses the public careerrat CLI convention", async () => {

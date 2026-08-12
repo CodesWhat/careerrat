@@ -24,7 +24,7 @@ import { Readable } from "node:stream";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
-import { mountOnboardRoutes, normalizeOnboardingDraft } from "../src/cli/onboard-route.mjs";
+import { deepMerge, mountOnboardRoutes, normalizeOnboardingDraft } from "../src/cli/onboard-route.mjs";
 import { appendUsageEvent } from "../src/core/ai/usage-log.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
@@ -39,6 +39,7 @@ import {
   extractDocxResumeText,
 } from "../src/core/onboarding/resume-docx.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { CANDIDATE_DEFAULTS } from "../src/core/profile/candidate-defaults.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
@@ -2270,6 +2271,226 @@ describe("POST /api/onboard/candidate/:name", () => {
 });
 
 // ---------------------------------------------------------------------------
+// POST /api/onboard/candidate/:name — file-fallback write path: readBaseDoc's
+// merge base (P0 regression guard, src/cli/onboard-route.mjs's readBaseDoc,
+// called from this route around line 1997). None of these tests call
+// POST /api/onboard/init, so no SQLite db file exists, dbExists(pathCtx) is
+// false, and the route falls through past the DB branch into the legacy/YAML
+// branch — readBaseDoc -> deepMerge -> validate -> writeYamlDoc — exactly the
+// path a non-DB/legacy workspace exercises in production.
+//
+// The bug this locks out: for a candidate file that doesn't exist yet,
+// readBaseDoc() must return cloneCandidateDefault(entry.name) — the neutral
+// CANDIDATE_DEFAULTS skeleton — and must NEVER fall back to
+// entry.templatePath's illustrative "Jane Candidate" demo persona. Merging a
+// real one-field patch onto the template and writing the result back would
+// silently hand the candidate someone else's data (names, employers, comp
+// numbers, locations) for every field they never touched. See
+// candidate-defaults.mjs's own header comment for the full rationale.
+// ---------------------------------------------------------------------------
+
+// One case per CANDIDATE_ROUTE_ENTRIES member that has a template
+// counterpart (the 5 CANDIDATE_FILES plus the "modes" and "automation"
+// extras onboard-route.mjs adds — see its own CANDIDATE_ROUTE_ENTRIES).
+// Each patch touches exactly one field. `forbidden` is a set of distinctive
+// strings read straight out of that entry's real templates/*.example.yml
+// demo content (verified by hand against the shipped template files) that
+// must never appear in a file-fallback write.
+const FRESH_WORKSPACE_WRITE_CASES = [
+  {
+    name: "profile",
+    candidatePath: "candidate/profile.yml",
+    patch: { candidate: { email: "regression-candidate@example.com" } },
+    forbidden: [
+      "Jane Candidate",
+      "jane@example.com",
+      "New York, NY",
+      "Senior AI Engineer",
+      "+1-555-0100",
+      "janecandidate",
+      "165000",
+      "140000",
+    ],
+  },
+  {
+    name: "targeting",
+    candidatePath: "candidate/targeting.yml",
+    patch: { keep_signals: ["regression-suite keep signal"] },
+    forbidden: [
+      "Palantir",
+      "Tesla",
+      "SpaceX",
+      "xAI",
+      "Neuralink",
+      "Ramp",
+      "Brex",
+      "Forward Deployed Engineer",
+      "Solutions Engineer",
+      "Solutions Architect",
+      "core platform SWE",
+    ],
+  },
+  // NOTE: "evidence" is deliberately NOT a case here. evidence.yml's only
+  // top-level field is `claims`, and deepMerge() replaces arrays wholesale
+  // rather than merging them — so any single-field claims patch through
+  // THIS route produces byte-identical output regardless of whether the
+  // base was CANDIDATE_DEFAULTS or the template (verified: adding an
+  // "evidence" case here with a claims-array patch stayed green even with
+  // the P0 bug deliberately reintroduced into readBaseDoc). The real
+  // regression-sensitive coverage for evidence is the dedicated
+  // "POST /api/onboard/evidence-seed" file-fallback test below, which reads
+  // base.claims and additively merges onto it — that call site DOES leak
+  // the template's demo claim when the bug is present.
+  {
+    name: "honesty",
+    candidatePath: "candidate/honesty.yml",
+    patch: { education: { highest_degree: "BS Computer Science" } },
+    forbidden: [
+      "Example Tool",
+      "Adjacent Tool",
+      "Tool Never Used",
+      "buzzword-heavy summaries",
+      "unsupported superlatives",
+      "security clearances",
+    ],
+  },
+  {
+    name: "form-defaults",
+    candidatePath: "candidate/form-defaults.yml",
+    patch: { current_employer: "Regression Co" },
+    forbidden: ["Job Board"],
+  },
+  {
+    name: "modes",
+    candidatePath: "candidate/modes.yml",
+    patch: { usage_mode: "lean" },
+    // company_health/comp_estimate are real, schema-valid modes.yml keys the
+    // template ships with real values for — but CANDIDATE_DEFAULTS.modes
+    // omits them entirely, so their presence at all is the tell.
+    forbidden: ["company_health", "comp_estimate", "fire_at_stage"],
+  },
+  {
+    name: "automation",
+    candidatePath: "candidate/automation.yml",
+    patch: { consent: { linkedin: true } },
+    // CANDIDATE_DEFAULTS.automation is {} — none of the template's
+    // version/setup_mode/capabilities/session top-level keys exist there.
+    forbidden: ["setup_mode", "profile_root", "capabilities"],
+  },
+];
+
+describe("POST /api/onboard/candidate/:name — file-fallback merge base (readBaseDoc)", () => {
+  for (const testCase of FRESH_WORKSPACE_WRITE_CASES) {
+    it(`${testCase.name}: merges the patch onto CANDIDATE_DEFAULTS, never the template's demo persona, when the candidate file doesn't exist yet`, async () => {
+      const repoRoot = buildTempRoot();
+      const filePath = candidatePath(repoRoot, testCase.candidatePath);
+      assert.equal(existsSync(filePath), false, "fixture must start without this candidate file");
+
+      const { server } = await bootServer(repoRoot);
+      try {
+        const { status, body } = await postJson(server, `/api/onboard/candidate/${testCase.name}`, {
+          data: testCase.patch,
+        });
+        assert.equal(status, 200);
+        assert.equal(body.ok, true);
+        assert.equal(existsSync(filePath), true);
+
+        const rawWritten = readFileSync(filePath, "utf8");
+        for (const banned of testCase.forbidden) {
+          assert.equal(
+            rawWritten.includes(banned),
+            false,
+            `written ${testCase.candidatePath} must not contain template demo content "${banned}"`
+          );
+        }
+
+        // Positive check: the write is EXACTLY the patch deep-merged onto
+        // CANDIDATE_DEFAULTS[name] — not a subset match, the whole doc. If
+        // readBaseDoc ever fell back to the template again, this doc would
+        // carry every untouched template field too and fail here even if
+        // the `forbidden` substring list above missed one.
+        const written = parseYaml(rawWritten);
+        const expected = deepMerge(CANDIDATE_DEFAULTS[testCase.name], testCase.patch);
+        assert.deepEqual(written, expected);
+      } finally {
+        await closeServer(server);
+      }
+    });
+  }
+});
+
+describe("POST /api/onboard/candidate/:name — file-fallback merge base preserves an existing on-disk doc (readBaseDoc)", () => {
+  it("profile: an existing candidate/profile.yml is the merge base — unrelated fields survive, and neither CANDIDATE_DEFAULTS nor the template clobbers values the candidate already wrote", async () => {
+    const repoRoot = buildTempRoot();
+    const filePath = candidatePath(repoRoot, "candidate/profile.yml");
+    const existingDoc = deepMerge(CANDIDATE_DEFAULTS.profile, {
+      candidate: { full_name: "Existing Candidate", phone: "+1-000-0000" },
+      compensation: { target_base: 199000 },
+    });
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${stringifyYaml(existingDoc)}\n`);
+
+    const { server } = await bootServer(repoRoot);
+    try {
+      const { status, body } = await postJson(server, "/api/onboard/candidate/profile", {
+        data: { candidate: { email: "second-pass@example.com" } },
+      });
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+
+      const written = parseYaml(readFileSync(filePath, "utf8"));
+      // The field this write actually touched.
+      assert.equal(written.candidate.email, "second-pass@example.com");
+      // Unrelated fields the candidate already answered survive untouched —
+      // proof the on-disk doc, not a fresh default/template, was the base.
+      assert.equal(written.candidate.full_name, "Existing Candidate");
+      assert.equal(written.candidate.phone, "+1-000-0000");
+      assert.equal(written.compensation.target_base, 199000);
+      // Neither CANDIDATE_DEFAULTS ("" / null) nor the template's demo
+      // values ("Jane Candidate" / 165000) clobber what already existed.
+      assert.notEqual(written.candidate.full_name, "");
+      assert.notEqual(written.candidate.full_name, "Jane Candidate");
+      assert.notEqual(written.compensation.target_base, 165000);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  it("automation: an existing candidate/automation.yml is the merge base — not the empty CANDIDATE_DEFAULTS {} shape and not the template's all-off matrix", async () => {
+    const repoRoot = buildTempRoot();
+    const filePath = candidatePath(repoRoot, "candidate/automation.yml");
+    const existingDoc = {
+      consent: { linkedin: true },
+      capabilities: { status_polling: { enabled: true, platforms: { greenhouse: true } } },
+    };
+    mkdirSync(dirname(filePath), { recursive: true });
+    writeFileSync(filePath, `${stringifyYaml(existingDoc)}\n`);
+
+    const { server } = await bootServer(repoRoot);
+    try {
+      const { status, body } = await postJson(server, "/api/onboard/candidate/automation", {
+        data: { integrations: { logo_dev_token: "pk_test" } },
+      });
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+
+      const written = parseYaml(readFileSync(filePath, "utf8"));
+      assert.equal(written.integrations.logo_dev_token, "pk_test");
+      // Prior consent/capabilities the candidate had already recorded
+      // survive — the base was the on-disk doc, not the empty
+      // CANDIDATE_DEFAULTS.automation shape (which has no `consent` key at
+      // all) and not the template's all-off matrix (which would report
+      // consent.linkedin: false and status_polling.enabled: false).
+      assert.equal(written.consent.linkedin, true);
+      assert.equal(written.capabilities.status_polling.enabled, true);
+      assert.equal(written.capabilities.status_polling.platforms.greenhouse, true);
+    } finally {
+      await closeServer(server);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/onboard/evidence-seed
 // ---------------------------------------------------------------------------
 
@@ -2324,6 +2545,50 @@ describe("POST /api/onboard/evidence-seed", () => {
       const { status, body } = await postJson(server, "/api/onboard/evidence-seed", {});
       assert.equal(status, 400);
       assert.match(body.error, /claims must be an array/);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
+  // File-fallback write path (readBaseDoc's other call site,
+  // src/cli/onboard-route.mjs around line 2077): no POST /api/onboard/init
+  // here, so dbExists(pathCtx) is false and this hits the same
+  // readBaseDoc -> ...merge... -> writeYamlDoc branch as the generic
+  // candidate route above, but through evidence-seed's own doc read instead
+  // of the shared per-name loop. Same P0 regression guard: a candidate.yml
+  // that doesn't exist yet must merge onto CANDIDATE_DEFAULTS.evidence
+  // (claims: []), never templates/evidence.example.yml's "project-001" demo
+  // claim.
+  it("file-fallback path (no init): merges onto CANDIDATE_DEFAULTS.evidence, never templates/evidence.example.yml's demo claim", async () => {
+    const repoRoot = buildTempRoot();
+    const filePath = candidatePath(repoRoot, "candidate/evidence.yml");
+    assert.equal(existsSync(filePath), false, "fixture must start without candidate/evidence.yml");
+
+    const { server } = await bootServer(repoRoot);
+    try {
+      const { status, body } = await postJson(server, "/api/onboard/evidence-seed", {
+        claims: [
+          { claim: "Shipped a regression test via evidence-seed.", evidence: "Verified by this suite." },
+        ],
+      });
+      assert.equal(status, 200);
+      assert.equal(body.ok, true);
+      assert.equal(body.added, 1);
+      assert.equal(existsSync(filePath), true);
+
+      const rawWritten = readFileSync(filePath, "utf8");
+      for (const banned of [
+        "project-001",
+        "Built production AI workflows from prototype to deployment.",
+        "Describe the real project",
+        "https://example.com/project",
+      ]) {
+        assert.equal(rawWritten.includes(banned), false, `must not contain template demo content "${banned}"`);
+      }
+
+      const written = parseYaml(rawWritten);
+      assert.equal(written.claims.length, 1);
+      assert.equal(written.claims[0].claim, "Shipped a regression test via evidence-seed.");
     } finally {
       await closeServer(server);
     }
