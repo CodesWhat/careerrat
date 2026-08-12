@@ -137,7 +137,6 @@ const EMPTY_STATE = {
       { key: "guardrails", done: false },
       { key: "quickFacts", done: false },
       { key: "authorization", done: false },
-      { key: "consent", done: false },
     ],
   },
   sourceResumePresent: false,
@@ -167,12 +166,12 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("FilePane — rows", () => {
-  it("renders exactly 9 rows in the fixed order with the pane heading", () => {
+  it("renders exactly 8 rows in the fixed order with the pane heading", () => {
     const tree = render({ state: EMPTY_STATE });
     expect(textOf(byClass(tree, "file-pane__title")[0])).toBe("PAUL'S FILE");
     expect(textOf(byClass(tree, "file-pane__subtitle")[0])).toBe("LIVE · ~/CANDIDATE");
     const rows = byClass(tree, "file-pane__row");
-    expect(rows).toHaveLength(9);
+    expect(rows).toHaveLength(8);
     expect(rows.map((r) => textOf(byClass(r, "file-pane__row-title")[0]))).toEqual([
       "Engine",
       "Resume",
@@ -182,7 +181,6 @@ describe("FilePane — rows", () => {
       "Guardrails",
       "Quick facts",
       "Work authorization",
-      "Automation consent",
     ]);
   });
 
@@ -359,6 +357,30 @@ describe("FilePane — inline editors commit through onFieldSaved", () => {
       location: { home: "Austin, TX", remote: true, hybrid: false, onsite: false },
     });
     expect(onFieldSaved).toHaveBeenCalledWith({ key: "quickFacts", summary: "quick facts" });
+  });
+
+  it("Quick facts editor: saving without touching Remote never persists remote:true from the untouched default", async () => {
+    api.saveCandidateFile.mockResolvedValue({ ok: true });
+    const onFieldSaved = vi.fn();
+    // location.remote defaults to true (candidate-defaults.mjs's ambient
+    // recall-maximizing default) even though the candidate never confirmed
+    // anything — a save that only changes the home city must not echo that
+    // default back as though it were a real answer.
+    const state = stateWith([], { profile: { location: { home: "", remote: true } } });
+    let tree = render({ state, onReload: vi.fn(), onFieldSaved });
+    rowByLabel(tree, "Quick facts").props.onClick();
+    tree = render({ state, onReload: vi.fn(), onFieldSaved });
+
+    const textField = byTag(tree, "mock-textfield");
+    textField.props.onChange("Austin, TX");
+    tree = render({ state, onReload: vi.fn(), onFieldSaved });
+
+    await byClass(tree, "file-pane__editor")[0].props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+
+    expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
+      location: { home: "Austin, TX", hybrid: false, onsite: false },
+    });
   });
 
   it("Resume editor: pasting text calls parseResumeText and still commits through onFieldSaved", async () => {
@@ -610,55 +632,6 @@ describe("FilePane — Authorization editor (R3, R6)", () => {
     tree = render({ state, onReload });
     const editingRow = byClass(tree, "file-pane__row--editing")[0];
     expect(textOf(byClass(editingRow, "file-pane__row-title")[0])).toBe("Work authorization");
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Lane A / R5, R6 — consent row
-// ---------------------------------------------------------------------------
-
-describe("FilePane — Consent editor (R5, R6)", () => {
-  it("saving a mode writes automation.setup_mode through the normal commit path", async () => {
-    api.saveCandidateFile.mockResolvedValue({ ok: true });
-    const onFieldSaved = vi.fn();
-    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
-    rowByLabel(tree, "Automation consent").props.onClick();
-    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
-
-    const advancedRadio = visit(
-      tree,
-      (n) => n.type === "input" && n.props.type === "radio" && !n.props.checked
-    )[0];
-    advancedRadio.props.onChange();
-    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
-
-    const form = byClass(tree, "file-pane__editor")[0];
-    await form.props.onSubmit({ preventDefault: vi.fn() });
-    await flush();
-
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("automation", { setup_mode: "advanced" });
-    expect(onFieldSaved).toHaveBeenCalledWith({ key: "consent", summary: "advanced mode" });
-  });
-
-  it("Decline to answer records declined_fields.consent with no automation write", async () => {
-    api.saveCandidateFile.mockResolvedValue({ ok: true });
-    const onFieldSaved = vi.fn();
-    let tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
-    rowByLabel(tree, "Automation consent").props.onClick();
-    tree = render({ state: EMPTY_STATE, onReload: vi.fn(), onFieldSaved });
-
-    const declineButton = visit(
-      tree,
-      (n) => n.type === "button" && textOf(n) === "Decline to answer"
-    )[0];
-    await declineButton.props.onClick();
-    await flush();
-
-    expect(api.saveCandidateFile).toHaveBeenCalledTimes(1);
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("form-defaults", {
-      declined_fields: { consent: { declined_at: expect.any(String) } },
-    });
-    expect(onFieldSaved).toHaveBeenCalledWith({ key: "consent", summary: "declined" });
   });
 });
 

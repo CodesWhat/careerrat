@@ -601,7 +601,7 @@ describe("GET /api/onboard/state", () => {
     }
   });
 
-  it("reflects state after init: DB setup docs exist+validate, no resume yet", async () => {
+  it("reflects state after init: DB setup docs validate but report exists:false until the candidate writes something, no resume yet", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
@@ -609,7 +609,11 @@ describe("GET /api/onboard/state", () => {
       const res = await fetch(`${baseUrl(server)}/api/onboard/state`);
       const body = await res.json();
       for (const f of body.files) {
-        assert.equal(f.exists, true, `${f.name} should exist after init`);
+        // candidateSetupInitialize() pre-seeds every singleton row with the
+        // canonical empty default (see candidate-defaults.mjs) — a row
+        // existing is never proof the candidate wrote anything, so exists
+        // stays false until the doc actually differs from that default.
+        assert.equal(f.exists, false, `${f.name} should not exist yet — untouched default`);
         assert.equal(f.valid, true, `${f.name} should validate from DB defaults`);
       }
       assert.equal(body.sourceResumePresent, false);

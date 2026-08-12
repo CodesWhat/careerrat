@@ -131,3 +131,28 @@ export function cloneCandidateDefault(name) {
   const doc = CANDIDATE_DEFAULTS[name];
   return doc ? JSON.parse(JSON.stringify(doc)) : {};
 }
+
+/**
+ * True when `doc` is deep-equal to the canonical empty default for `name` —
+ * i.e. the candidate has not actually written anything to this config yet,
+ * even though a DB row may already exist for it. candidateSetupInitialize()
+ * pre-inserts every singleton table with exactly this default at
+ * DB-creation time (see ensureSetupRows/putSingletonIfMissing in
+ * src/core/db/verbs/candidate.mjs), so "the row exists" is never proof the
+ * candidate answered anything — only "the row differs from the default" is.
+ * Both the DB-backed doc (readSingleton's untouched-row shape) and the
+ * legacy/YAML-mode fallback (readBaseDoc's cloneCandidateDefault() base)
+ * produce this exact same default shape, so a plain structural comparison
+ * (JSON round-trip normalizes key order/undefined the same way
+ * cloneCandidateDefault's own JSON.parse(JSON.stringify(...)) does) is
+ * enough — no bespoke per-field emptiness logic needed here.
+ *
+ * @param {string} name
+ * @param {object} doc
+ * @returns {boolean}
+ */
+export function isCandidateDefault(name, doc) {
+  const defaultDoc = CANDIDATE_DEFAULTS[name];
+  if (!defaultDoc) return false;
+  return JSON.stringify(doc) === JSON.stringify(defaultDoc);
+}

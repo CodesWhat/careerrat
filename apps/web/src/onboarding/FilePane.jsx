@@ -38,8 +38,8 @@ export function FilePane({
   async function commitPatch({ key, entry, patch, summary }) {
     // `entry: null` is the established bypass an editor uses when it already
     // made its own API call(s) directly (ResumeRowEditor/EvidenceRowEditor,
-    // and now AuthorizationRowEditor/ConsentRowEditor's decline path) — skip
-    // the generic save rather than calling saveCandidateFile(null, patch).
+    // and now AuthorizationRowEditor's decline path) — skip the generic
+    // save rather than calling saveCandidateFile(null, patch).
     if (entry) await saveCandidateFile(entry, patch);
     await onReload?.();
     setEditingKey(null);
@@ -93,12 +93,11 @@ const EDITABLE_KEYS = new Set([
   "guardrails",
   "quickFacts",
   "authorization",
-  "consent",
 ]);
 
-// Lane A / R6 — the two setup items that can be recorded as declined
-// (never re-asked) instead of answered.
-const DECLINABLE_KEYS = new Set(["authorization", "consent"]);
+// Lane A / R6 — the setup item that can be recorded as declined (never
+// re-asked) instead of answered.
+const DECLINABLE_KEYS = new Set(["authorization"]);
 
 function FilePaneRow({
   item,
@@ -209,8 +208,6 @@ function RowEditor({
     return <QuickFactsRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
   if (itemKey === "authorization")
     return <AuthorizationRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
-  if (itemKey === "consent")
-    return <ConsentRowEditor state={state} onCommit={onCommit} onCancel={onCancel} />;
   return null;
 }
 
@@ -480,6 +477,15 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
   const location = state?.data?.profile?.location ?? {};
   const [home, setHome] = useState(location.home || "");
   const [remote, setRemote] = useState(!!location.remote);
+  // `remote` defaults to true even for a candidate who has answered nothing
+  // (candidate-defaults.mjs's own ambient recall-maximizing default — see
+  // that module's header comment) — unlike hybrid/onsite below, whose false
+  // default is unambiguous, a bare `remote: true` is never proof the
+  // candidate confirmed anything. Track whether the candidate actually
+  // touched this toggle during THIS edit, so a save that only changes the
+  // home city doesn't silently persist the untouched default as though it
+  // were a confirmed answer.
+  const [remoteTouched, setRemoteTouched] = useState(false);
   const [hybrid, setHybrid] = useState(!!location.hybrid);
   const [onsite, setOnsite] = useState(!!location.onsite);
   const [saving, setSaving] = useState(false);
@@ -491,7 +497,20 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
       await onCommit({
         key: "quickFacts",
         entry: "profile",
-        patch: { location: { ...location, home, remote, hybrid, onsite } },
+        // No `...location` spread — the server's deepMerge already merges
+        // this partial location object onto the existing doc, preserving
+        // any field this editor doesn't own (relocation, travel_tolerance).
+        // `remote` is included only when the candidate actually touched the
+        // toggle, so an untouched ambient default never gets written back
+        // as a confirmed answer.
+        patch: {
+          location: {
+            home,
+            hybrid,
+            onsite,
+            ...(remoteTouched ? { remote } : {}),
+          },
+        },
         summary: "quick facts",
       });
     } finally {
@@ -505,7 +524,14 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
       <TextField value={home} onChange={setHome} placeholder="City, State" />
       <div className="file-pane__toggle-row">
         <label className="file-pane__toggle">
-          <input type="checkbox" checked={remote} onChange={(e) => setRemote(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={remote}
+            onChange={(e) => {
+              setRemoteTouched(true);
+              setRemote(e.target.checked);
+            }}
+          />
           Remote
         </label>
         <label className="file-pane__toggle">
@@ -593,90 +619,6 @@ function AuthorizationRowEditor({ state, onCommit, onCancel }) {
             onChange={(e) => setRequiresSponsorship(e.target.checked)}
           />
           Needs sponsorship
-        </label>
-      </div>
-      <div className="file-pane__editor-actions">
-        <button
-          type="button"
-          className="btn btn--secondary"
-          onClick={handleDecline}
-          disabled={saving}
-        >
-          Decline to answer
-        </button>
-        <button type="button" className="btn btn--secondary" onClick={onCancel} disabled={saving}>
-          Cancel
-        </button>
-        <button type="submit" className="btn btn--primary" disabled={saving}>
-          {saving ? "Saving…" : "Save"}
-        </button>
-      </div>
-    </form>
-  );
-}
-
-// Lane A / R5, R6 — consent row. Deliberately a lighter mode-only toggle
-// (setup_mode: "basic"|"advanced") rather than the full capability × platform
-// matrix — that already lives on the Settings page
-// (AutomationControls.jsx's AutomationConsentMatrix); this row only needs to
-// answer "is a mode picked yet" for computeSetupProgress's consent item.
-// Switching TO basic here only sets setup_mode, unlike
-// buildAutomationModePatch's Settings-page behavior of also zeroing every
-// capability/platform/consent flag — a quick file-pane toggle shouldn't
-// silently revoke permissions the user granted elsewhere.
-function ConsentRowEditor({ state, onCommit, onCancel }) {
-  const automation = state?.data?.automation ?? {};
-  const [mode, setMode] = useState(automation.setup_mode === "advanced" ? "advanced" : "basic");
-  const [saving, setSaving] = useState(false);
-
-  async function handleSubmit(e) {
-    e.preventDefault();
-    setSaving(true);
-    try {
-      await onCommit({
-        key: "consent",
-        entry: "automation",
-        patch: { setup_mode: mode },
-        summary: mode === "advanced" ? "advanced mode" : "basic mode",
-      });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDecline() {
-    setSaving(true);
-    try {
-      await saveCandidateFile("form-defaults", {
-        declined_fields: { consent: { declined_at: new Date().toISOString() } },
-      });
-      await onCommit({ key: "consent", entry: null, patch: null, summary: "declined" });
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  return (
-    <form onSubmit={handleSubmit} className="file-pane__editor">
-      <span className="field__hint">How hands-on should automation be?</span>
-      <div className="file-pane__toggle-row">
-        <label className="file-pane__toggle">
-          <input
-            type="radio"
-            name="file-pane-consent-mode"
-            checked={mode === "basic"}
-            onChange={() => setMode("basic")}
-          />
-          Basic — read-only, manual
-        </label>
-        <label className="file-pane__toggle">
-          <input
-            type="radio"
-            name="file-pane-consent-mode"
-            checked={mode === "advanced"}
-            onChange={() => setMode("advanced")}
-          />
-          Advanced — individual opt-ins
         </label>
       </div>
       <div className="file-pane__editor-actions">

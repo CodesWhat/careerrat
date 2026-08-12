@@ -211,7 +211,6 @@ const ALL_SETUP_KEYS = [
   "guardrails",
   "quickFacts",
   "authorization",
-  "consent",
 ];
 
 function progressItems(doneKeys) {
@@ -720,7 +719,7 @@ describe("InterviewSurface — SSE events", () => {
   it("names the real file each item writes, never a hardcoded targeting.yml, and engine writes none", async () => {
     api.findChatBySkill.mockResolvedValue({ chatId: "resumed-2", state: "running" });
     const afterIdle = stateFixture({
-      doneKeys: ["engine", "evidence", "quickFacts", "authorization", "consent"],
+      doneKeys: ["engine", "evidence", "quickFacts", "authorization"],
       data: { evidence: { claims: [{ id: "a" }] } },
     });
     api.getOnboardState.mockResolvedValueOnce(NOT_COMPLETE_STATE).mockResolvedValueOnce(afterIdle);
@@ -737,7 +736,7 @@ describe("InterviewSurface — SSE events", () => {
     const receipts = byClass(tree, "onboarding-transcript__receipt").map(textOf);
     expect(receipts).toEqual([
       "ENGINE ✓ · EVIDENCE ✓ · EVIDENCE.YML UPDATED · QUICK FACTS ✓ · PROFILE.YML UPDATED · " +
-        "WORK AUTHORIZATION ✓ · PROFILE.YML UPDATED · AUTOMATION CONSENT ✓ · AUTOMATION.YML UPDATED",
+        "WORK AUTHORIZATION ✓ · PROFILE.YML UPDATED",
     ]);
   });
 
@@ -1333,7 +1332,7 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     await runEffects();
     const tree = render({ runtime: RUNTIME });
     expect(textOf(byClass(tree, "onboarding-app__status")[0])).toBe(
-      "SETUP · 0 OF 9 · INTERVIEW IN PROGRESS"
+      "SETUP · 0 OF 8 · INTERVIEW IN PROGRESS"
     );
   });
 });
@@ -1343,7 +1342,7 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
 // ---------------------------------------------------------------------------
 
 describe("InterviewSurface — completion screen (3e)", () => {
-  it("renders 'Setup complete · 9 of 9', expands the disclosure, and kicks off the first sweep once", async () => {
+  it("renders 'Setup complete · 8 of 8', expands the disclosure, and kicks off the first sweep once", async () => {
     vi.useFakeTimers();
     try {
       const completeState = stateFixture({
@@ -1360,7 +1359,7 @@ describe("InterviewSurface — completion screen (3e)", () => {
       await flush();
       tree = render({ runtime: RUNTIME });
 
-      expect(textOf(byClass(tree, "onboarding-app__status")[0])).toBe("SETUP · 9 OF 9 · DONE");
+      expect(textOf(byClass(tree, "onboarding-app__status")[0])).toBe("SETUP · 8 OF 8 · DONE");
       expect(textOf(byTag(tree, "h1"))).toBe("Your rat is set.");
       expect(api.startFirstSearchRun).toHaveBeenCalledTimes(1);
 

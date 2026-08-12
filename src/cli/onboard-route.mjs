@@ -89,7 +89,7 @@ import {
   normalizeDocxResumeText,
 } from "../core/onboarding/resume-docx.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
-import { cloneCandidateDefault } from "../core/profile/candidate-defaults.mjs";
+import { cloneCandidateDefault, isCandidateDefault } from "../core/profile/candidate-defaults.mjs";
 import {
   CANDIDATE_FILES,
   COPY_ONLY_CANDIDATE_FILES,
@@ -204,7 +204,11 @@ const SETTINGS_DATA_FILES = [
   "honesty",
   "evidence",
   // Lane A / R1, R5 — same reason as the DB-path stateData.automation above:
-  // computeSetupProgress's consent item reads data.automation.setup_mode.
+  // scrubbed automation prefill (setup_mode/capabilities/consent only, never
+  // automation.integrations credentials). No longer read by
+  // computeSetupProgress — consent was removed from the setup checklist
+  // (see SETUP_PROGRESS_ITEMS's own comment) — kept here for parity with
+  // the DB-backed response shape.
   "automation",
 ];
 const DEFAULT_PUBLIC_SYNC_PREFERENCE = Object.freeze({
@@ -534,7 +538,14 @@ function dbCandidateFiles(repoRoot, pathCtx, config) {
     return {
       name: entry.name,
       path: displayPath(pathCtx, entry.candidatePath),
-      exists: true,
+      // candidateSetupInitialize() pre-inserts every singleton row at
+      // DB-creation time (see ensureSetupRows in
+      // src/core/db/verbs/candidate.mjs), so the row's mere existence is
+      // never proof the candidate answered anything — a row that is
+      // byte-identical to the untouched default (isCandidateDefault) means
+      // "nothing written yet," same as the legacy/YAML-mode fallback's
+      // missing-file case below.
+      exists: !isCandidateDefault(entry.name, data),
       valid,
       errors,
     };
@@ -555,11 +566,24 @@ function dbSourceResumePresent(pathCtx) {
 // reads — no new store, per the W4 spec's server-scope note. `complete`
 // mirrors the design's "Setup complete · 7 of 7" line; the caller can leave
 // at any point (nothing here gates app routes, it's report-only).
-// Lane A / R5 — authorization and consent join the original 7 as glanceable
-// "quick facts"-style setup items (the interview's confirm-pill kinds that
-// aren't tied to a multi-field editor). Appended at the end rather than
-// interleaved so every pre-existing index/order assumption (MiniProgressRow,
-// FilePane's row list) keeps reading the first 7 exactly as before.
+// Lane A / R5 — authorization joins the original 7 as a glanceable "quick
+// facts"-style setup item (the interview's confirm-pill kinds that aren't
+// tied to a multi-field editor). Appended at the end rather than interleaved
+// so every pre-existing index/order assumption (MiniProgressRow, FilePane's
+// row list) keeps reading the first 7 exactly as before.
+//
+// `consent` (automation setup_mode) was REMOVED from this list — asking a
+// brand-new, non-power-user candidate to consent to browser automation
+// before they've seen a single job is a decision they have no context for
+// yet, and gating setup completion on it was also a live lockout bug: the
+// ingest-profile skill's Basic mode never writes candidate/automation.yml at
+// all, so a CLI/Basic-mode-onboarded candidate could never flip this item
+// and sat at 8 of 9 forever, permanently redirected to /onboarding. The
+// underlying automation-consent feature is untouched and still works —
+// Settings' automation controls, src/core/automation/consent.mjs, and the
+// interview's own consent_mode/consent_capability confirm pills all still
+// read/write candidate/automation.yml exactly as before. It's just no
+// longer part of the SETUP CHECKLIST or setupProgress.complete.
 const SETUP_PROGRESS_ITEMS = [
   "engine",
   "resume",
@@ -569,7 +593,6 @@ const SETUP_PROGRESS_ITEMS = [
   "guardrails",
   "quickFacts",
   "authorization",
-  "consent",
 ];
 
 // "Value present" for authorization reuses candidate.mjs's own declared-split
@@ -580,26 +603,14 @@ function authorizationValuePresent(data = {}) {
   return authorizationDeclared(data.profile || {}, data["form-defaults"] || {});
 }
 
-// "Value present" for consent = setup_mode has been explicitly written at
-// least once (candidate/automation.yml's absence is load-bearing — see
-// AUTOMATION_ROUTE_ENTRY's own comment — so the DB default is `{}`, no
-// setup_mode key, until the user picks basic/advanced) OR a decline was
-// recorded (the decline leaves setup_mode untouched — see the spec's Decline
-// UX section — so it needs its own OR branch here).
 // "Value present" for resume = a source résumé was saved, OR the candidate
 // told the interview they don't have one (same declined_fields mechanism as
-// authorization/consent). Without the second branch a résumé-less candidate
-// can never reach 9 of 9, so setup never completes for them — and "I don't
-// have a résumé" is a supported way to start, not a failure state.
+// authorization). Without the second branch a résumé-less candidate can
+// never reach 8 of 8, so setup never completes for them — and "I don't have
+// a résumé" is a supported way to start, not a failure state.
 function resumeValuePresent(data = {}, sourceResumePresent = false) {
   if (sourceResumePresent) return true;
   return !!data["form-defaults"]?.declined_fields?.resume;
-}
-
-function consentValuePresent(data = {}) {
-  const automation = data.automation || {};
-  const declinedFields = data["form-defaults"]?.declined_fields || {};
-  return typeof automation.setup_mode === "string" || !!declinedFields.consent;
 }
 
 export function computeSetupProgress({
@@ -630,7 +641,6 @@ export function computeSetupProgress({
       !!profileLocation.onsite ||
       (Array.isArray(profileLocation.relocation) && profileLocation.relocation.length > 0),
     authorization: authorizationValuePresent(data),
-    consent: consentValuePresent(data),
   };
 
   const completedCount = SETUP_PROGRESS_ITEMS.filter((key) => done[key]).length;

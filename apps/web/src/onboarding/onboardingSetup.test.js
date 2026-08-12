@@ -9,7 +9,6 @@ import {
   authorizationDetailLine,
   buildSetupItemViewModels,
   companiesDetailLine,
-  consentDetailLine,
   detailLineFor,
   engineDetailLine,
   evidenceDetailLine,
@@ -26,7 +25,7 @@ import {
 } from "./onboardingSetup.js";
 
 describe("SETUP_ITEM_ORDER / SETUP_ITEM_LABELS", () => {
-  it("has exactly the 9 setup items in the documented order (Lane A adds authorization, consent)", () => {
+  it("has exactly the 8 setup items in the documented order (Lane A adds authorization; consent was removed from the checklist)", () => {
     expect(SETUP_ITEM_ORDER).toEqual([
       "engine",
       "resume",
@@ -36,7 +35,6 @@ describe("SETUP_ITEM_ORDER / SETUP_ITEM_LABELS", () => {
       "guardrails",
       "quickFacts",
       "authorization",
-      "consent",
     ]);
   });
 
@@ -51,7 +49,7 @@ describe("SETUP_ITEM_ORDER / SETUP_ITEM_LABELS", () => {
 describe("buildSetupItemViewModels", () => {
   it("marks every item not-done, and the FIRST item as UP NEXT, when doneByKey is empty", () => {
     const items = buildSetupItemViewModels({});
-    expect(items).toHaveLength(9);
+    expect(items).toHaveLength(8);
     expect(items.every((item) => item.done === false)).toBe(true);
     expect(items[0].key).toBe("engine");
     expect(items[0].isNext).toBe(true);
@@ -401,40 +399,6 @@ describe("authorizationDetailLine", () => {
         state: {
           files: [{ name: "form-defaults", exists: false }],
           data: { "form-defaults": { declined_fields: { authorization: {} } } },
-        },
-      })
-    ).toBeNull();
-  });
-});
-
-describe("consentDetailLine", () => {
-  it("returns null with no setup_mode and no decline", () => {
-    expect(consentDetailLine({ state: {} })).toBeNull();
-  });
-
-  it("returns 'Declined' when declined_fields.consent is recorded", () => {
-    expect(
-      consentDetailLine({
-        state: { data: { "form-defaults": { declined_fields: { consent: {} } } } },
-      })
-    ).toBe("Declined");
-  });
-
-  it("returns 'Basic' or 'Advanced' from automation.setup_mode", () => {
-    expect(consentDetailLine({ state: { data: { automation: { setup_mode: "basic" } } } })).toBe(
-      "Basic"
-    );
-    expect(consentDetailLine({ state: { data: { automation: { setup_mode: "advanced" } } } })).toBe(
-      "Advanced"
-    );
-  });
-
-  it("Bug 4: returns null when state.files marks automation.yml as not existing", () => {
-    expect(
-      consentDetailLine({
-        state: {
-          files: [{ name: "automation", exists: false }],
-          data: { automation: { setup_mode: "basic" } },
         },
       })
     ).toBeNull();

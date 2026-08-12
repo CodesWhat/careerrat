@@ -5,12 +5,19 @@
 // the engine gate, the file pane, and the mini-progress row without either
 // component re-deriving the same shape.
 //
-// The 9 setup items (engine, resume, roles, companies, evidence, guardrails,
-// quickFacts, authorization, consent — the last two added for Lane A / R5)
-// mirror src/cli/onboard-route.mjs's computeSetupProgress() — GET
+// The 8 setup items (engine, resume, roles, companies, evidence, guardrails,
+// quickFacts, authorization — the last added for Lane A / R5) mirror
+// src/cli/onboard-route.mjs's computeSetupProgress() — GET
 // /api/onboard/state's `setupProgress` field is the source of truth for
 // which items are "done"; this module only adds display copy (labels,
 // detail lines, UP NEXT) on top of that server-computed done/undone shape.
+//
+// `consent` (automation setup_mode) was REMOVED from the setup checklist —
+// see computeSetupProgress's own SETUP_PROGRESS_ITEMS comment in
+// onboard-route.mjs for why. Automation consent still works everywhere it
+// already lived (Settings' automation controls, the interview's own
+// consent_mode/consent_capability confirm pills) — it's just no longer a
+// setup row here.
 
 export const SETUP_ITEM_ORDER = [
   "engine",
@@ -21,7 +28,6 @@ export const SETUP_ITEM_ORDER = [
   "guardrails",
   "quickFacts",
   "authorization",
-  "consent",
 ];
 
 export const SETUP_ITEM_LABELS = {
@@ -33,7 +39,6 @@ export const SETUP_ITEM_LABELS = {
   guardrails: "Guardrails",
   quickFacts: "Quick facts",
   authorization: "Work authorization",
-  consent: "Automation consent",
 };
 
 // Bug 2 fix ("receipt lines state things that are not true") — the real
@@ -54,7 +59,6 @@ export const SETUP_ITEM_FILE = {
   guardrails: "targeting.yml",
   quickFacts: "profile.yml",
   authorization: "profile.yml",
-  consent: "automation.yml",
 };
 
 // The compact mono-caps chip row shown in 3a (centered, before docking) —
@@ -68,7 +72,6 @@ export const SETUP_CHIP_LABELS = {
   guardrails: "GUARDRAILS",
   quickFacts: "QUICK FACTS",
   authorization: "AUTHORIZATION",
-  consent: "CONSENT",
 };
 
 // Builds the ordered row view model the mini-progress row and the file
@@ -203,20 +206,6 @@ export function authorizationDetailLine({ state } = {}) {
   return null;
 }
 
-export function consentDetailLine({ state } = {}) {
-  const declined = !!state?.data?.["form-defaults"]?.declined_fields?.consent;
-  if (declined) return fileWritten(state, "form-defaults") ? "Declined" : null;
-  // automation.yml has no files[] entry today (its absence is load-bearing —
-  // see AUTOMATION_ROUTE_ENTRY's comment in src/cli/onboard-route.mjs), so
-  // fileWritten() is permissive here; this call stays so the gate applies
-  // automatically the moment that changes server-side.
-  if (!fileWritten(state, "automation")) return null;
-  const automation = state?.data?.automation ?? {};
-  if (automation.setup_mode === "advanced") return "Advanced";
-  if (automation.setup_mode === "basic") return "Basic";
-  return null;
-}
-
 const DETAIL_LINE_BUILDERS = {
   engine: engineDetailLine,
   resume: resumeDetailLine,
@@ -226,7 +215,6 @@ const DETAIL_LINE_BUILDERS = {
   guardrails: guardrailsDetailLine,
   quickFacts: quickFactsDetailLine,
   authorization: authorizationDetailLine,
-  consent: consentDetailLine,
 };
 
 export function detailLineFor(key, ctx) {

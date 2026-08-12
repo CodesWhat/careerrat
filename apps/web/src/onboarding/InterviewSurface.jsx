@@ -539,9 +539,16 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     await checkProgressDelta();
     if (chatId) {
       try {
+        // "consent" is no longer a setup item (see onboardingSetup.js's own
+        // note), so it has no SETUP_ITEM_LABELS entry — the consent_mode
+        // confirm pill itself is still a live, working part of the
+        // interview, so its decline copy falls back to a literal label
+        // instead of depending on the removed checklist entry.
+        const label =
+          key === "consent" ? "automation consent" : SETUP_ITEM_LABELS[key].toLowerCase();
         await sendChatMessage(
           chatId,
-          `[SYSTEM] The user declined to answer ${SETUP_ITEM_LABELS[key].toLowerCase()} (won't ask again). Acknowledge this and move on.`
+          `[SYSTEM] The user declined to answer ${label} (won't ask again). Acknowledge this and move on.`
         );
       } catch {
         // Best-effort — the decline is already recorded; the assistant
