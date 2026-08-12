@@ -85,7 +85,14 @@ docs/COMPARISON.md
 # Alternate CAREERRAT_HOME used by `npm run desktop:fresh` to boot the desktop
 # app against a clean data root (fresh onboarding / fresh-db smoke tests)
 # without touching the real .careerrat/ data root.
+#
+# Match ANY *-fresh data root, not just the current product name. The literal
+# `.rolester-fresh/` was left unignored by the rename and a later `git add -A`
+# committed a real candidate profile (name, email, phone, home address, comp)
+# to this public repo. A name-specific pattern is one rename away from doing
+# that again.
 .careerrat-fresh/
+*-fresh/
 
 # Local candidate data
 /candidate/
