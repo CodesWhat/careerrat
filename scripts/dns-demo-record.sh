@@ -10,26 +10,24 @@
 # dotfile, never a literal in this script. Wrangler cannot do this — its OAuth
 # scope list has no DNS scope, only zone:read — so flarectl is the tool.
 #
-# The Keychain entry `cloudflare / api-token` is a general infrastructure token,
-# not a DNS-only one, so anything else we run against Cloudflare reads the same
-# entry instead of accumulating a drawer of half-scoped keys. It covers Zone
-# DNS/Zone/Zone Settings/Cache Purge/SSL/Workers Routes and account-level
-# Workers Scripts/KV/R2/Pages/D1/Account Settings read.
+# The Keychain entry `cloudflare / api-token` holds DNS:Edit + Zone:Read on
+# codeswhat.com and nothing else. If a later job needs a different Cloudflare
+# product, widen this token or add a separate entry rather than reaching for the
+# Global API Key, which grants everything on the account and cannot be scoped.
 #
-# It deliberately does NOT carry Billing, Memberships, User Details write, or
-# API Tokens. A leaked token that edits DNS is recoverable; one that can mint
-# further tokens or reach billing is a different class of problem, and neither
-# permission buys this project anything.
-#
-# Name the token in the dashboard for what it actually grants. The pre-existing
-# token named "Edit zone DNS" also carried Email Routing permissions, which is
-# the failure mode to avoid: the name understated the blast radius.
+# Whatever the scope ends up being, name the token in the dashboard for what it
+# actually grants. The pre-existing token named "Edit zone DNS" also carries
+# Email Routing permissions, which is the failure mode to avoid: the name
+# understates the blast radius, so nobody can reason about the damage if it
+# leaks.
 #
 # One-time setup, if the Keychain lookup below fails:
 #
-#   1. https://dash.cloudflare.com/profile/api-tokens -> Create Custom Token,
-#      with the permissions listed above, Include / All accounts and
-#      Include / All zones.
+#   1. https://dash.cloudflare.com/profile/api-tokens -> Create Token
+#      -> "Edit zone DNS" template -> Use template.
+#      The template presets Zone / DNS / Edit. Add one row, Zone / Zone / Read,
+#      so flarectl can resolve the zone ID by name. Zone Resources:
+#      Include / Specific zone / codeswhat.com.
 #   2. Store it (prompts with hidden input, so it never lands in shell history):
 #        security add-generic-password -U -s cloudflare -a api-token -w
 #   3. Re-run this script.
