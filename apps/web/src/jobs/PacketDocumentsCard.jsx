@@ -19,20 +19,13 @@ import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { exportPacketDocuments, generatePacketDocuments, getPacket } from "../lib/api.js";
+import { errorState, withRetryAction } from "../lib/errorCopy.js";
 
 const ARTIFACT_KINDS = [
   { key: "resume", label: "Resume" },
   { key: "coverLetter", label: "Cover letter" },
   { key: "answers", label: "Answers" },
 ];
-
-function describePacketError(err) {
-  return (
-    err?.body?.error?.message ||
-    (typeof err?.body?.error === "string" ? err.body.error : null) ||
-    (err instanceof Error ? err.message : "Packet action failed")
-  );
-}
 
 export function PacketDocumentsCard({ applicationId, gate, onView }) {
   const [packet, setPacket] = useState(null);
@@ -72,7 +65,7 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
       );
       await loadPacket();
     } catch (err) {
-      setError(describePacketError(err));
+      setError(withRetryAction(errorState(err, "Packet action failed"), handleGenerate));
     } finally {
       setBusy(null);
     }
@@ -87,7 +80,7 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
       setExportedFiles(res?.data?.userFacing || null);
       await loadPacket();
     } catch (err) {
-      setError(describePacketError(err));
+      setError(withRetryAction(errorState(err, "Packet action failed"), handleExport));
     } finally {
       setBusy(null);
     }
@@ -110,7 +103,9 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
       {!canGenerate ? (
         <p className="field__hint">A KEEP evaluation is required before tailoring documents.</p>
       ) : null}
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {notice ? <p className="field__hint">{notice}</p> : null}
       <div className="job-drawer__inline-actions">
         <Button disabled={!canGenerate || busy === "generate"} onClick={handleGenerate}>

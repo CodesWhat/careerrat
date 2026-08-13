@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import { ApiError } from "../lib/api.js";
 import { runAiWebSearchLane, runJobsPageSearch } from "./jobsSearch.js";
 
 const FAILED_SEARCH_FALLBACK =
@@ -182,6 +183,26 @@ describe("runJobsPageSearch", () => {
     expect(state.refetch).not.toHaveBeenCalled();
   });
 
+  it("routes a thrown start-request failure through resolveErrorCopy, never the raw server string", async () => {
+    const state = manualSearchSpies();
+    // 422 deliberately isn't one of resolveErrorCopy's mapped statuses (401/
+    // 403/404/5xx all have their own rule-provided message) — this exercises
+    // the true generic bucket, where describeJobsPageSearchError's own
+    // fallback (not resolveErrorCopy's GENERIC_ERROR_MESSAGE) applies.
+    const startSearchRun = vi.fn(async () => {
+      throw new ApiError(422, { error: "column workspace.jobs_new does not exist" });
+    });
+
+    const result = await runJobsPageSearch({ ...state, startSearchRun });
+
+    const friendly = "Search could not start. Review Search setup, then try again.";
+    expect(result).toEqual({ ok: false, error: friendly });
+    expect(state.setSearchError).toHaveBeenLastCalledWith(friendly);
+    expect(state.setSearchError).not.toHaveBeenCalledWith(
+      expect.stringContaining("workspace.jobs_new")
+    );
+  });
+
   it("aborts during polling without making later state updates", async () => {
     const state = manualSearchSpies();
     const controller = new AbortController();
@@ -311,6 +332,26 @@ describe("runAiWebSearchLane", () => {
     expect(state.setCounts).toHaveBeenLastCalledWith(done);
     expect(state.setStatus).toHaveBeenLastCalledWith("error");
     expect(state.setError).toHaveBeenLastCalledWith("query timed out");
+  });
+
+  it("routes a thrown stream failure through resolveErrorCopy, never the raw server string", async () => {
+    const state = stateSpies();
+    // 422 deliberately isn't one of resolveErrorCopy's mapped statuses — see
+    // the matching runJobsPageSearch test above for why.
+    const result = await runAiWebSearchLane({
+      ...state,
+      ...freshPromptsStub(),
+      runAiWebSearchStream: async () => {
+        throw new ApiError(422, { error: "SEARCH_PROMPTS_NO_TARGETING" });
+      },
+    });
+
+    const friendly = "AI web search could not start. Review saved prompts, then try again.";
+    expect(result).toEqual({ ok: false, error: friendly });
+    expect(state.setError).toHaveBeenLastCalledWith(friendly);
+    expect(state.setError).not.toHaveBeenCalledWith(
+      expect.stringContaining("SEARCH_PROMPTS_NO_TARGETING")
+    );
   });
 
   it("treats abort as a clean return to idle", async () => {

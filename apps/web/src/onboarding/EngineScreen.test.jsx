@@ -52,7 +52,24 @@ vi.mock("../components/icons.jsx", () => ({
   ChevronDownIcon: () => null,
 }));
 
+// Mocked as a plain host tag (same convention as JobDrawer.test.jsx) so a
+// test can read the resolved {message, action, detail} straight off
+// alert.props instead of parsing rendered text — necessary now that the
+// refresh() error carries a real action/detail, not just a string.
+vi.mock("../components/Toast.jsx", () => ({ InlineAlert: "inline-alert" }));
+
 const api = vi.hoisted(() => ({
+  // resolveErrorCopy() (lib/errorCopy.js) checks `err instanceof ApiError` —
+  // real callers throw the real class, so this mock has to supply one too,
+  // same as AskBar.test.jsx's own local ApiError fixture.
+  ApiError: class ApiError extends Error {
+    constructor(status, body) {
+      super(`request failed with status ${status}`);
+      this.name = "ApiError";
+      this.status = status;
+      this.body = body;
+    }
+  },
   getInstalledAiRuntimes: vi.fn(),
   openInstalledAiRuntimeTerminal: vi.fn(),
   probeInstalledAiRuntime: vi.fn(),
@@ -312,9 +329,13 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     // Not the legitimate-empty-probe gate copy — a fetch failure (network,
     // 401/403, 500) must not masquerade as "the rat looked and found nothing".
     expect(textOf(byTag(tree, "h1"))).not.toBe("No AI engine found.");
-    const alert = byClass(tree, "inline-alert");
+    const alert = byTag(tree, "inline-alert");
     expect(alert).toBeTruthy();
-    expect(textOf(alert)).toBe("Couldn't reach this computer to check for AI CLIs.");
+    // The friendly fallback is the primary message — the raw Error("network
+    // down") text is never it, only ever available (unmapped) via `detail`.
+    expect(alert.props.message).toBe("Couldn't reach this computer to check for AI CLIs.");
+    expect(alert.props.detail).toBe("network down");
+    expect(alert.props.action?.retry).toBe(true);
     // No fake rows rendered off the swallowed failure.
     expect(
       visit(
@@ -327,15 +348,16 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     expect(button(tree, "CHECK AGAIN")).toBeTruthy();
   });
 
-  it("surfaces the server's own error message from an ApiError-shaped failure (e.g. a 403)", async () => {
-    const apiError = new Error("request failed with status 403");
-    apiError.body = { error: "Forbidden — sign in and try again." };
+  it("maps a real ApiError-shaped 403 failure to the mapped 'not authorized' copy, keeping the raw body only in `detail`", async () => {
+    const apiError = new api.ApiError(403, { error: "Forbidden — sign in and try again." });
     api.getInstalledAiRuntimes.mockRejectedValue(apiError);
     let tree = render({ mode: "gate", onReady: vi.fn() });
     await runEffects();
     tree = render({ mode: "gate", onReady: vi.fn() });
 
-    expect(textOf(byClass(tree, "inline-alert"))).toBe("Forbidden — sign in and try again.");
+    const alert = byTag(tree, "inline-alert");
+    expect(alert.props.message).toBe("That request wasn't authorized.");
+    expect(alert.props.detail).toBe("Forbidden — sign in and try again.");
   });
 
   it("a probe failure in picker mode also renders the inline error with a CHECK AGAIN recovery action", async () => {
@@ -345,7 +367,7 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     tree = render({ mode: "picker", onReady: vi.fn() });
 
     expect(textOf(byTag(tree, "h1"))).not.toBe("Pick your engine.");
-    expect(byClass(tree, "inline-alert")).toBeTruthy();
+    expect(byTag(tree, "inline-alert")).toBeTruthy();
     // Picker mode normally hides CHECK AGAIN entirely (it's the gate-only
     // recovery affordance) — an error state must still offer a way back.
     expect(button(tree, "CHECK AGAIN")).toBeTruthy();
@@ -356,13 +378,13 @@ describe("EngineScreen — gate mode (0 ready CLIs)", () => {
     let tree = render({ mode: "gate", onReady: vi.fn() });
     await runEffects();
     tree = render({ mode: "gate", onReady: vi.fn() });
-    expect(byClass(tree, "inline-alert")).toBeTruthy();
+    expect(byTag(tree, "inline-alert")).toBeTruthy();
 
     api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([COPILOT_NOT_FOUND, CUSTOM_EMPTY]));
     await button(tree, "CHECK AGAIN").props.onClick();
     tree = render({ mode: "gate", onReady: vi.fn() });
 
-    expect(byClass(tree, "inline-alert")).toBeFalsy();
+    expect(byTag(tree, "inline-alert")).toBeFalsy();
     expect(textOf(byTag(tree, "h1"))).toBe("No AI engine found.");
     expect(textOf(byClass(tree, "onboarding-engine__not-found-label"))).toBe("NOT INSTALLED · 1");
     notFoundToggle(tree).props.onClick();
@@ -1005,8 +1027,10 @@ describe("EngineScreen — hosted CareerRat AI card", () => {
 
   it("leaves the email input in place with an inline error when the hosted-interest call fails, so the user can retry", async () => {
     api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([CLAUDE_READY, CUSTOM_EMPTY]));
-    const apiError = new Error("request failed with status 500");
-    apiError.body = { error: "Could not reach the server." };
+    // 422 deliberately isn't one of resolveErrorCopy's mapped statuses (401/
+    // 403/404/5xx all have their own rule-provided message) — this exercises
+    // the true generic bucket, where the bespoke fallback below applies.
+    const apiError = new api.ApiError(422, { error: "Could not reach the server." });
     api.requestHostedInterest.mockRejectedValue(apiError);
     let tree = render({ mode: "picker", onReady: vi.fn() });
     await runEffects();
@@ -1025,8 +1049,11 @@ describe("EngineScreen — hosted CareerRat AI card", () => {
     const input = hostedEmailInput(tree);
     expect(input).toBeTruthy();
     expect(input.props.value).toBe("morgan@example.com");
+    // hostedInterest.error is a plain one-line string (no action/detail slot
+    // in this receipt) — the raw "Could not reach the server." server string
+    // never renders here at all, only the bespoke fallback.
     expect(textOf(byClass(tree, "onboarding-engine__hosted-error"))).toBe(
-      "Could not reach the server."
+      "Could not send that. Try again."
     );
     expect(byClass(tree, "onboarding-engine__hosted-confirm")).toBeFalsy();
     expect(button(tree, "REQUESTED ✓")).toBeUndefined();

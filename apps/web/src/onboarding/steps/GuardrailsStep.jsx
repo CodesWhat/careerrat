@@ -3,6 +3,7 @@ import { ChipInput, Field, filterChipSuggestions } from "../../components/form.j
 import { InfoIcon } from "../../components/icons.jsx";
 import { InlineAlert } from "../../components/Toast.jsx";
 import { saveCandidateFile } from "../../lib/api.js";
+import { errorState, withRetryAction } from "../../lib/errorCopy.js";
 import { OnboardingNavButton, OnboardingShell } from "../OnboardingShell.jsx";
 
 export const GUARDRAIL_PRESETS = [
@@ -485,7 +486,7 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
       showToast("Saved.");
       goNext();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Save failed");
+      setError(withRetryAction(errorState(err, "Save failed"), handleSaveAndNext));
     } finally {
       setSaving(false);
     }
@@ -541,7 +542,9 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
           </section>
 
           <div className="onboarding-step-card__content onboarding-step-card__content--dense onboarding-targeting__content onboarding-targeting__content--signals">
-            {error ? <InlineAlert message={error} /> : null}
+            {error ? (
+              <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+            ) : null}
             <section className="onboarding-guardrails__panel" aria-label="Guardrail choices">
               <div className="onboarding-guardrails__presets">
                 <div className="onboarding-guardrails__preset-header">

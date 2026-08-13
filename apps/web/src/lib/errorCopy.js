@@ -137,3 +137,25 @@ export function resolveErrorCopy(err) {
   }
   return { message: GENERIC_ERROR_MESSAGE, action: { label: "Try again", retry: true }, detail: raw };
 }
+
+// Shared by every catch site across the app that resolves an error through
+// resolveErrorCopy() and wants a call-site-specific fallback instead of the
+// generic bucket's copy when nothing more specific was mapped — ported here
+// from InterviewSurface.jsx's own errorState() (the first site to need it)
+// so later sites reuse one definition instead of copy-pasting it per file.
+export function errorState(err, fallback) {
+  const resolved = resolveErrorCopy(err);
+  return resolved.message === GENERIC_ERROR_MESSAGE ? { ...resolved, message: fallback } : resolved;
+}
+
+// Threads a real retry callback through a resolveErrorCopy()/errorState()
+// result — the resolved `action` carries {label, retry: true} with no
+// callback of its own, so every catch site that wants the "Try again" button
+// to actually do something supplies the exact call that just failed. Ported
+// here from JobDrawer.jsx/InterviewSurface.jsx's own withRetryAction() for
+// the same reason as errorState() above.
+export function withRetryAction(resolved, onRetry) {
+  return resolved.action?.retry
+    ? { ...resolved, action: { ...resolved.action, onRetry } }
+    : resolved;
+}

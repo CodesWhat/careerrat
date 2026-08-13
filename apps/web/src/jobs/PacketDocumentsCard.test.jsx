@@ -34,6 +34,17 @@ const hooks = vi.hoisted(() => {
 });
 
 const api = vi.hoisted(() => ({
+  // resolveErrorCopy() (lib/errorCopy.js) checks `err instanceof ApiError` —
+  // real callers throw the real class, so this mock has to supply one too,
+  // same as AskBar.test.jsx's own local ApiError fixture.
+  ApiError: class ApiError extends Error {
+    constructor(status, body) {
+      super(`request failed with status ${status}`);
+      this.name = "ApiError";
+      this.status = status;
+      this.body = body;
+    }
+  },
   exportPacketDocuments: vi.fn(),
   generatePacketDocuments: vi.fn(),
   getPacket: vi.fn(),
@@ -50,6 +61,10 @@ vi.mock("react", async (importOriginal) => {
 });
 
 vi.mock("../lib/api.js", () => api);
+// Mocked as a plain host tag (JobDrawer.test.jsx's own convention) so a test
+// can read the resolved {message, action, detail} straight off a node's
+// props instead of parsing rendered text.
+vi.mock("../components/Toast.jsx", () => ({ InlineAlert: "inline-alert" }));
 
 import { PacketDocumentsCard } from "./PacketDocumentsCard.jsx";
 
@@ -85,6 +100,17 @@ function buttons(node, found = []) {
   }
   if (node.type === "button") found.push(node);
   buttons(node.children, found);
+  return found;
+}
+
+function findByType(node, type, found = []) {
+  if (!node) return found;
+  if (Array.isArray(node)) {
+    for (const child of node) findByType(child, type, found);
+    return found;
+  }
+  if (node.type === type) found.push(node);
+  findByType(node.children, type, found);
   return found;
 }
 
@@ -181,10 +207,14 @@ describe("PacketDocumentsCard", () => {
     expect(textOf(materialize(renderCard()))).toContain("workspace/tailored/resume.pdf");
   });
 
-  it("renders the server error body through InlineAlert", async () => {
-    api.generatePacketDocuments.mockRejectedValueOnce({
-      body: { error: { message: "Question capture is malformed" } },
-    });
+  it("routes a generate failure through resolveErrorCopy — the fallback message renders, the raw server string only ever lives in `detail` — and wires a working retry", async () => {
+    // 422 deliberately isn't one of resolveErrorCopy's mapped statuses (401/
+    // 403/404/5xx all have their own rule-provided message) — this exercises
+    // the true generic bucket, where the bespoke "Packet action failed"
+    // fallback (not resolveErrorCopy's own GENERIC_ERROR_MESSAGE) applies.
+    api.generatePacketDocuments.mockRejectedValueOnce(
+      new api.ApiError(422, { error: { message: "Question capture is malformed" } })
+    );
     renderCard();
     await runInitialEffect();
     const tree = materialize(renderCard());
@@ -192,8 +222,40 @@ describe("PacketDocumentsCard", () => {
       .find((button) => textOf(button) === "Generate documents")
       .props.onClick();
 
-    const failed = materialize(renderCard());
-    expect(textOf(failed)).toContain("Question capture is malformed");
-    expect(JSON.stringify(failed)).toContain("inline-alert");
+    let failed = materialize(renderCard());
+    const alert = findByType(failed, "inline-alert")[0];
+    expect(alert).toBeTruthy();
+    expect(alert.props.message).toBe("Packet action failed");
+    expect(alert.props.detail).toBe("Question capture is malformed");
+    // The raw server string is never the primary on-screen text.
+    expect(textOf(failed)).not.toContain("Question capture is malformed");
+
+    api.generatePacketDocuments.mockResolvedValueOnce({ data: { status: "reviewable", gaps: [] } });
+    await alert.props.action.onRetry();
+    failed = materialize(renderCard());
+    expect(findByType(failed, "inline-alert")).toHaveLength(0);
+    expect(textOf(failed)).toContain("Packet reviewable: 0 gaps.");
+  });
+
+  it("routes an export failure through resolveErrorCopy the same way, with retry wired to Export specifically", async () => {
+    api.exportPacketDocuments.mockRejectedValueOnce(new api.ApiError(422, { error: "boom" }));
+    renderCard();
+    await runInitialEffect();
+    let tree = materialize(renderCard());
+    await buttons(tree)
+      .find((button) => textOf(button) === "Export")
+      .props.onClick();
+
+    tree = materialize(renderCard());
+    const alert = findByType(tree, "inline-alert")[0];
+    expect(alert.props.message).toBe("Packet action failed");
+    expect(alert.props.detail).toBe("boom");
+    expect(textOf(tree)).not.toContain("boom");
+
+    api.exportPacketDocuments.mockResolvedValueOnce({
+      data: { userFacing: { resume: [{ format: "pdf", path: "workspace/tailored/resume.pdf" }] } },
+    });
+    await alert.props.action.onRetry();
+    expect(api.exportPacketDocuments).toHaveBeenCalledTimes(2);
   });
 });

@@ -6,6 +6,7 @@ import {
   saveSearchPrompts,
   startSearchRun,
 } from "../lib/api.js";
+import { errorState } from "../lib/errorCopy.js";
 
 export function hasDbSourceSetup(sourceSetup) {
   if (!sourceSetup || typeof sourceSetup !== "object") return false;
@@ -32,13 +33,13 @@ function unwrapRun(value) {
   return value;
 }
 
+// setSearchError (JobsPage.jsx's manualSearchError) is a plain string
+// rendered through InlineAlert's `message` prop alone — no action/detail
+// slot wired up at that call site — so this stays message-only, translated
+// through resolveErrorCopy() rather than the raw server string, with the
+// existing fallback wording preserved for the unmapped case.
 function describeJobsPageSearchError(error) {
-  return (
-    error?.body?.error ||
-    error?.body?.message ||
-    error?.message ||
-    "Search could not start. Review Search setup, then try again."
-  );
+  return errorState(error, "Search could not start. Review Search setup, then try again.").message;
 }
 
 // Resolves after `ms`, or immediately if `signal` aborts first — the poll
@@ -168,13 +169,11 @@ export async function runJobsPageSearch({
   }
 }
 
+// Same one-line, message-only treatment as describeJobsPageSearchError above
+// — setError (JobsPage.jsx's aiSearchError) is a plain string too.
 function describeAiWebSearchError(error) {
-  return (
-    error?.body?.error?.message ||
-    error?.body?.message ||
-    error?.message ||
-    "AI web search could not start. Review saved prompts, then try again."
-  );
+  return errorState(error, "AI web search could not start. Review saved prompts, then try again.")
+    .message;
 }
 
 // Non-technical, single honest message for every way the invisible prep step

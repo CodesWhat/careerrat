@@ -27,7 +27,7 @@ import {
   selectInstalledAiRuntime,
   validateAndSaveAiKey,
 } from "../lib/api.js";
-import { resolveErrorCopy } from "../lib/errorCopy.js";
+import { errorState, resolveErrorCopy } from "../lib/errorCopy.js";
 // buildQuickFactsSavePayload is the only export consumed here — the
 // individual pure helpers it composes (compensationPatch, authorizationPatch,
 // locationPatch, candidateLocationPatch, cleanLinkFields) are module-private
@@ -401,7 +401,7 @@ export function SettingsPage() {
       } else {
         setSectionBanner((b) => ({
           ...b,
-          [section]: err instanceof Error ? err.message : "Save failed",
+          [section]: errorState(err, "Save failed").message,
         }));
       }
     } finally {

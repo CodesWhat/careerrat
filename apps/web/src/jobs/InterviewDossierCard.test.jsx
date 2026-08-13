@@ -30,6 +30,17 @@ const hooks = vi.hoisted(() => ({
 }));
 
 const api = vi.hoisted(() => ({
+  // resolveErrorCopy() (lib/errorCopy.js) checks `err instanceof ApiError` —
+  // real callers throw the real class, so this mock has to supply one too,
+  // same as AskBar.test.jsx's own local ApiError fixture.
+  ApiError: class ApiError extends Error {
+    constructor(status, body) {
+      super(`request failed with status ${status}`);
+      this.name = "ApiError";
+      this.status = status;
+      this.body = body;
+    }
+  },
   buildInterviewDossier: vi.fn(),
   getInterviewDossier: vi.fn(),
 }));
@@ -161,17 +172,56 @@ describe("InterviewDossierCard", () => {
     expect(visit(tree, (node) => node.type === "inline-alert")).toHaveLength(0);
   });
 
-  it("shows the error banner for a genuine failure other than DOSSIER_NOT_FOUND", async () => {
-    api.getInterviewDossier.mockRejectedValue({
-      status: 409,
-      body: { code: "NO_DATABASE", error: { message: "no database" } },
-    });
+  it("routes a genuine load failure (other than DOSSIER_NOT_FOUND) through resolveErrorCopy — the fallback message renders, the raw server string only ever lives in `detail` — and wires a working retry", async () => {
+    // 409/NO_DATABASE deliberately isn't one of resolveErrorCopy's mapped
+    // statuses/strings, so this exercises the true generic bucket, where the
+    // bespoke "Interview prep failed" fallback (not resolveErrorCopy's own
+    // GENERIC_ERROR_MESSAGE) applies.
+    api.getInterviewDossier.mockRejectedValue(
+      new api.ApiError(409, { code: "NO_DATABASE", error: { message: "no database" } })
+    );
 
     renderCard({ applicationId: "app-4" });
     await runEffects();
-    const tree = renderCard({ applicationId: "app-4" });
+    let tree = renderCard({ applicationId: "app-4" });
 
-    expect(visit(tree, (node) => node.type === "inline-alert").length).toBeGreaterThan(0);
+    const alert = visit(tree, (node) => node.type === "inline-alert")[0];
+    expect(alert).toBeTruthy();
+    expect(alert.props.message).toBe("Interview prep failed");
+    expect(alert.props.detail).toBe("no database");
     expect(button(tree, "Build prep dossier")).toBeTruthy();
+
+    api.getInterviewDossier.mockResolvedValueOnce({
+      data: { dossier: { round: "Screen", markdown: "# Prep" } },
+    });
+    await alert.props.action.onRetry();
+    tree = renderCard({ applicationId: "app-4" });
+    expect(visit(tree, (node) => node.type === "inline-alert")).toHaveLength(0);
+    expect(JSON.stringify(tree)).toContain("# Prep");
+  });
+
+  it("routes a build (Rebuild) failure through resolveErrorCopy the same way, with retry wired to Build specifically", async () => {
+    api.getInterviewDossier.mockRejectedValue({
+      status: 404,
+      body: { code: "DOSSIER_NOT_FOUND", error: { message: "not built" } },
+    });
+    api.buildInterviewDossier.mockRejectedValueOnce(new api.ApiError(422, { error: "boom" }));
+
+    renderCard({ applicationId: "app-5" });
+    await runEffects();
+    let tree = renderCard({ applicationId: "app-5" });
+    await button(tree, "Build prep dossier").props.onClick();
+
+    tree = renderCard({ applicationId: "app-5" });
+    const alert = visit(tree, (node) => node.type === "inline-alert")[0];
+    expect(alert.props.message).toBe("Interview prep failed");
+    expect(alert.props.detail).toBe("boom");
+    expect(alert.props.message).not.toBe(alert.props.detail);
+
+    api.buildInterviewDossier.mockResolvedValueOnce({
+      data: { dossier: { round: "Screen", markdown: "# Prep" } },
+    });
+    await alert.props.action.onRetry();
+    expect(api.buildInterviewDossier).toHaveBeenCalledTimes(2);
   });
 });

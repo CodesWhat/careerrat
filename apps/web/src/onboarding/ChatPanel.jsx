@@ -3,6 +3,7 @@ import { Button } from "../components/Button.jsx";
 import { TextArea } from "../components/form.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { closeChat, sendChatMessage, startChat } from "../lib/api.js";
+import { errorState, withRetryAction } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
 
 // ChatPanel — an embedded live-transcript chat session over the existing
@@ -94,10 +95,29 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
         setChatId(err.body.chatId);
         setChatState("running");
       } else {
-        setError(err?.body?.error || (err instanceof Error ? err.message : "Could not start"));
+        setError(withRetryAction(errorState(err, "Could not start"), handleStart));
       }
     } finally {
       setStarting(false);
+    }
+  }
+
+  // Same shape as InterviewSurface.jsx's own sendMessageWithErrorHandling —
+  // a dedicated helper (rather than inlining the catch in handleSend) so the
+  // retry callback can re-post the exact text that failed.
+  async function sendMessageWithErrorHandling(id, text) {
+    // Cleared here (not just by handleSend) so a retry click — this same
+    // function, wired as the error's action.onRetry — doesn't leave a stale
+    // banner showing through a successful resend.
+    setError(null);
+    try {
+      await sendChatMessage(id, text);
+    } catch (err) {
+      setError(
+        withRetryAction(errorState(err, "Message failed to send."), () =>
+          sendMessageWithErrorHandling(id, text)
+        )
+      );
     }
   }
 
@@ -106,11 +126,7 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
     if (!text || !chatId) return;
     setInputText("");
     setMessages((m) => [...m, { role: "user", text }]);
-    try {
-      await sendChatMessage(chatId, text);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Message failed to send");
-    }
+    await sendMessageWithErrorHandling(chatId, text);
   }
 
   async function handleClose() {
@@ -129,7 +145,9 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
   if (!chatId) {
     return (
       <div className="chat-panel">
-        {error ? <InlineAlert message={error} /> : null}
+        {error ? (
+          <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+        ) : null}
         <Button variant="secondary" onClick={handleStart} disabled={starting}>
           {starting ? "Starting…" : kickoffLabel}
         </Button>
@@ -147,7 +165,9 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
 
   return (
     <div className="chat-panel">
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       <div className="chat-transcript">
         {messages.map((m, i) =>
           m.role === "activity" ? (

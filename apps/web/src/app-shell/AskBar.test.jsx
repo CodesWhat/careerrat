@@ -951,6 +951,29 @@ describe("AskBar — Lane B: capture receipt decide actions", () => {
     expect(api.dismissIntake).toHaveBeenCalledWith("intake-1");
   });
 
+  it("a Confirm failure renders a friendly one-line message, never the raw server string", async () => {
+    api.createIntake.mockResolvedValue({ item: intakeItem({ status: "proposed" }) });
+    // 422 deliberately isn't one of resolveErrorCopy's mapped statuses (401/
+    // 403/404/5xx all have their own rule-provided message) — this exercises
+    // the true generic bucket, where describeDecideError's own "Confirm
+    // failed" fallback (not resolveErrorCopy's GENERIC_ERROR_MESSAGE) applies.
+    api.confirmIntake.mockRejectedValue(new api.ApiError(422, { error: "boom" }));
+    let tree = await commitLongPaste();
+
+    const confirm = buttonByText(tree, "Confirm");
+    confirm.props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    // describeDecideError() routes through resolveErrorCopy() — the raw
+    // server string ("boom") must never render as the primary message, and
+    // this receipt's error slot is a plain one-line <p>, so there is no
+    // action/detail to check either.
+    const errorLine = byClass(tree, "ask-bar__error");
+    expect(textOf(errorLine)).toBe("Confirm failed");
+    expect(textOf(errorLine)).not.toContain("boom");
+  });
+
   it("a capture error is shown inline and does not clobber the previous turn silently", async () => {
     api.createIntake.mockRejectedValue(new api.ApiError(500, { error: "boom" }));
     const tree = await commitLongPaste();

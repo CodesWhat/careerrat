@@ -13,7 +13,7 @@ import {
   sendWorkspaceMessage,
   uploadIntakeFile,
 } from "../lib/api.js";
-import { resolveErrorCopy } from "../lib/errorCopy.js";
+import { errorState, resolveErrorCopy } from "../lib/errorCopy.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 import { kindLabel } from "../lib/intake-labels.js";
 import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
@@ -89,9 +89,12 @@ function describeCaptureError(err) {
   return resolveErrorCopy(err).message;
 }
 
-// Ported from the deleted inbox/IntakeCard.jsx's own inline catch.
+// Ported from the deleted inbox/IntakeCard.jsx's own inline catch. Renders
+// into AskBarIntakeReceipt's one-line error slot (a plain <p>, no room for an
+// action or a details disclosure) — resolveErrorCopy's message only, never
+// the raw server string.
 function describeDecideError(err, label) {
-  return err?.body?.error || (err instanceof Error ? err.message : `${label} failed`);
+  return errorState(err, `${label} failed`).message;
 }
 
 // Mirrors executeLaneA/executeLaneB's own result shapes (intake-route.mjs) —

@@ -17,14 +17,7 @@ import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { buildInterviewDossier, getInterviewDossier } from "../lib/api.js";
-
-function describeDossierError(err) {
-  return (
-    err?.body?.error?.message ||
-    (typeof err?.body?.error === "string" ? err.body.error : null) ||
-    (err instanceof Error ? err.message : "Interview prep failed")
-  );
-}
+import { errorState, withRetryAction } from "../lib/errorCopy.js";
 
 function isNotBuiltYet(err) {
   return err?.body?.code === "DOSSIER_NOT_FOUND" || err?.status === 404;
@@ -44,11 +37,17 @@ export function InterviewDossierCard({ applicationId }) {
   const [error, setError] = useState(null);
 
   const loadDossier = useCallback(async () => {
+    // Cleared here (not just by the mount effect below) so a retry click
+    // — this same function, wired as the error's action.onRetry — doesn't
+    // leave a stale banner showing through a successful reload.
+    setError(null);
     try {
       const res = await getInterviewDossier(applicationId);
       setDossier(res?.data?.dossier || null);
     } catch (err) {
-      if (!isNotBuiltYet(err)) setError(describeDossierError(err));
+      if (!isNotBuiltYet(err)) {
+        setError(withRetryAction(errorState(err, "Interview prep failed"), loadDossier));
+      }
       setDossier(null);
     } finally {
       setLoaded(true);
@@ -69,7 +68,7 @@ export function InterviewDossierCard({ applicationId }) {
       const res = await buildInterviewDossier({ applicationId });
       setDossier(res?.data?.dossier || null);
     } catch (err) {
-      setError(describeDossierError(err));
+      setError(withRetryAction(errorState(err, "Interview prep failed"), handleBuild));
     } finally {
       setBusy(false);
     }
@@ -79,7 +78,9 @@ export function InterviewDossierCard({ applicationId }) {
 
   return (
     <Card title="Interview prep dossier">
-      {error ? <InlineAlert message={error} /> : null}
+      {error ? (
+        <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+      ) : null}
       {dossier ? (
         <>
           <p className="field__hint">

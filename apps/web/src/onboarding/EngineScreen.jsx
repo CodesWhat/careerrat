@@ -11,6 +11,7 @@ import {
   selectInstalledAiRuntime,
   testCustomAiRuntime,
 } from "../lib/api.js";
+import { errorState, withRetryAction } from "../lib/errorCopy.js";
 import { ProviderIcon } from "./ProviderIcon.jsx";
 
 // Basic email-shape check for the hosted card's inline capture — deliberately
@@ -103,7 +104,12 @@ export function EngineScreen({ mode, onReady, onBack }) {
       setError(null);
       if (next.selectedId) setPendingId(next.selectedId);
     } catch (err) {
-      setError(err?.body?.error || "Couldn't reach this computer to check for AI CLIs.");
+      setError(
+        withRetryAction(
+          errorState(err, "Couldn't reach this computer to check for AI CLIs."),
+          refresh
+        )
+      );
     }
   }
 
@@ -167,7 +173,10 @@ export function EngineScreen({ mode, onReady, onBack }) {
       const result = await testCustomAiRuntime(command);
       setCustomTest(result);
     } catch (err) {
-      setCustomTest({ ok: false, error: err?.body?.error || "Could not run the test." });
+      // customTest.error renders into onboarding-engine__custom-receipt--error,
+      // a fixed one-line receipt under the Test button — no room for an
+      // action or a details disclosure, so this stays message-only.
+      setCustomTest({ ok: false, error: errorState(err, "Could not run the test.").message });
     } finally {
       setCustomTesting(false);
     }
@@ -199,9 +208,12 @@ export function EngineScreen({ mode, onReady, onBack }) {
       setHostedEmail("");
       setHostedInterest({ requested: true, error: null });
     } catch (err) {
+      // hostedInterest.error renders as a single line under the hosted-email
+      // capture, same one-line-only reasoning as handleTestCustom's catch
+      // above.
       setHostedInterest({
         requested: false,
-        error: err?.body?.error || "Could not send that. Try again.",
+        error: errorState(err, "Could not send that. Try again.").message,
       });
     }
   }
@@ -246,7 +258,7 @@ export function EngineScreen({ mode, onReady, onBack }) {
         {error ? (
           <div className="onboarding-engine__intro">
             <h1>Couldn't check this computer.</h1>
-            <InlineAlert message={error} />
+            <InlineAlert message={error.message} action={error.action} detail={error.detail} />
           </div>
         ) : (
           <>
