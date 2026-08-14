@@ -79,16 +79,6 @@ const RULE_CASES = [
     action: null,
   },
   {
-    name: "application executor unavailable",
-    err: new ApiError(409, {
-      code: "APPLICATION_EXECUTOR_UNAVAILABLE",
-      error: "The authenticated Apply on site executor is not connected.",
-    }),
-    message:
-      "CareerRat can't control the application site in this session, so nothing was submitted. Use “I applied elsewhere” after you finish on the site.",
-    action: null,
-  },
-  {
     name: "application submission not verified",
     err: new ApiError(409, {
       code: "APPLICATION_NOT_VERIFIED",
@@ -96,6 +86,45 @@ const RULE_CASES = [
     }),
     message:
       "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
+    action: null,
+  },
+  {
+    name: "job body requires browser",
+    err: new ApiError(409, {
+      code: "JOB_BODY_REQUIRES_BROWSER",
+      error: "The full job description could not be read from this URL.",
+    }),
+    message:
+      "CareerRat couldn't read the full posting from that link. Open the job in your connected browser or paste the job description here.",
+    action: null,
+  },
+  {
+    name: "job identity required",
+    err: new ApiError(400, {
+      code: "JOB_IDENTITY_REQUIRED",
+      error: "The company and role could not be determined.",
+    }),
+    message:
+      "CareerRat read the page but couldn't identify the company and role. Paste the job description or use the direct posting link.",
+    action: null,
+  },
+  {
+    name: "job capture failed",
+    err: new ApiError(409, {
+      code: "JOB_CAPTURE_FAILED",
+      error: "The posting could not be captured.",
+    }),
+    message:
+      "CareerRat couldn't save that posting. Try the direct job link or paste the description.",
+    action: { label: "Try again", retry: true },
+  },
+  {
+    name: "job URL required",
+    err: new ApiError(400, {
+      code: "JOB_URL_REQUIRED",
+      error: "A job URL is required.",
+    }),
+    message: "Paste the direct job-posting link so CareerRat can read and save it.",
     action: null,
   },
   {

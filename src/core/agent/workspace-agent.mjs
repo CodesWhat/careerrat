@@ -1,7 +1,12 @@
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { requireDb } from "../db/connection.mjs";
-import { appCaptureInterviewIntake, appScheduleInterview, appSetStatus } from "../db/verbs/app.mjs";
+import {
+  appCaptureInterviewIntake,
+  appScheduleInterview,
+  appSetFields,
+  appSetStatus,
+} from "../db/verbs/app.mjs";
 import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import {
   commAppendMessage,
@@ -10,12 +15,20 @@ import {
   commSetDraft,
 } from "../db/verbs/comm.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
-import { sourcedPromote, sourcedSetStatus } from "../db/verbs/sourced.mjs";
+import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { matchTrackerRecord } from "../intake/match.mjs";
+import { resolveJobUrl } from "../intake/resolve.mjs";
 import { buildInterviewDossier } from "../interview/dossier.mjs";
 import { startFirstSearchRun, startManualSearchRun } from "../onboarding/first-search-run.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import { generateApplicationPacket } from "../packet/generate-operation.mjs";
+import { platformForHost } from "../providers/search-sources.mjs";
+import {
+  offersWithCapturedJobs,
+  sourcedRowsFromScanOffers,
+} from "../scoring/sourced-persistence.mjs";
+import { inferProvider } from "../scoring/sourced-scanner.mjs";
 import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
@@ -29,6 +42,8 @@ const EXECUTABLE_INTENTS = new Set([
   "interview.schedule",
   "interview.capture-context",
   "job.evaluate",
+  "job.evaluate-request",
+  "job.prepare-request",
   "job.generate-documents",
   "job.export-documents",
   "search.run",
@@ -187,6 +202,293 @@ function sourcedForIntent({ repoRoot, env, id }) {
   const row = db.prepare("SELECT data FROM sourced WHERE id = ?").get(String(id));
   if (!row) throw actionError(`Sourced role not found: ${id}`, "NOT_FOUND");
   return JSON.parse(row.data);
+}
+
+function requestDate(now) {
+  const value = typeof now === "function" ? now() : now;
+  const date = value instanceof Date ? value : new Date(value || Date.now());
+  return Number.isFinite(date.getTime()) ? date : new Date();
+}
+
+function safeExternalHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fetchImpl, now }) {
+  const resolved = await resolveJobUrlImpl(jobUrl, { fetchImpl });
+  const bodyText = String(resolved?.bodyText || "").trim();
+  if (resolved?.bodyFetchStatus !== "resolved" || !bodyText) {
+    throw actionError(
+      `CareerRat could not read the full job description from this link yet. ${resolved?.reason || "Open it in the signed-in browser or paste the job description."}`,
+      "JOB_BODY_REQUIRES_BROWSER"
+    );
+  }
+
+  const canonicalUrl = String(resolved.url || jobUrl).trim();
+  const db = requireDb({ repoRoot, env });
+  const match = matchTrackerRecord({
+    db,
+    url: canonicalUrl,
+    company: resolved.company,
+    role: resolved.title,
+  });
+  const company = String(resolved.company || match.company || "").trim();
+  const title = String(resolved.title || match.role || "").trim();
+  if (!company || !title) {
+    throw actionError(
+      "CareerRat captured the page but could not identify both the company and role without guessing.",
+      "JOB_IDENTITY_REQUIRED"
+    );
+  }
+
+  const savedAt = requestDate(now);
+  const [captured] = offersWithCapturedJobs({
+    repoRoot,
+    env,
+    savedAt,
+    offers: [
+      {
+        company,
+        title,
+        url: canonicalUrl,
+        location: resolved.location || "",
+        comp: resolved.comp || "verify",
+        bodyText,
+        source: "ask",
+        sourceProvider: resolved.provider || null,
+        capturedUrl: jobUrl,
+        gate: "review",
+        fit: "",
+        score: 0,
+      },
+    ],
+  });
+  if (!captured?.artifacts?.jd) {
+    throw actionError("CareerRat could not save the job description.", "JOB_CAPTURE_FAILED");
+  }
+
+  const exactPostingMatch = new Set(["exact_req_id", "exact_url"]).has(match.confidence);
+  let applicationId;
+  if (match.matched && exactPostingMatch && match.recordType === "application") {
+    applicationId = match.id;
+    appSetFields({
+      repoRoot,
+      env,
+      id: applicationId,
+      patch: { artifacts: { jd: captured.artifacts.jd } },
+    });
+  } else if (match.matched && exactPostingMatch && match.recordType === "sourced") {
+    const sourced = sourcedForIntent({ repoRoot, env, id: match.id });
+    sourcedUpsertBatch({
+      repoRoot,
+      env,
+      rows: [
+        {
+          ...sourced,
+          company,
+          role: title,
+          link: canonicalUrl,
+          loc: resolved.location || sourced.loc || "",
+          base: resolved.comp || sourced.base || "verify",
+          artifacts: { ...(sourced.artifacts || {}), jd: captured.artifacts.jd },
+          scanner: {
+            ...(sourced.scanner || {}),
+            bodyChars: bodyText.length,
+          },
+          updatedAt: savedAt.toISOString(),
+        },
+      ],
+    });
+    applicationId = sourcedPromote({ repoRoot, env, id: match.id }).id;
+  } else {
+    const rows = sourcedRowsFromScanOffers([captured], savedAt.toISOString());
+    if (!rows.length) {
+      throw actionError(
+        "CareerRat could not create a tracked job from this link.",
+        "JOB_CAPTURE_FAILED"
+      );
+    }
+    sourcedUpsertBatch({ repoRoot, env, rows });
+    applicationId = sourcedPromote({ repoRoot, env, id: rows[0].id }).id;
+  }
+
+  return {
+    applicationId,
+    application: applicationForIntent({ repoRoot, env, id: applicationId }),
+    bodyText,
+    jobUrl: canonicalUrl,
+    jdPath: captured.artifacts.jd,
+    match,
+  };
+}
+
+function resolveSavedJobRequest({ repoRoot, env, jobId }) {
+  let application;
+  try {
+    application = applicationForIntent({ repoRoot, env, id: jobId });
+  } catch (error) {
+    if (error?.code !== "NOT_FOUND") throw error;
+    const sourced = sourcedForIntent({ repoRoot, env, id: jobId });
+    const promoted = sourcedPromote({ repoRoot, env, id: sourced.id });
+    application = applicationForIntent({ repoRoot, env, id: promoted.id });
+  }
+  return {
+    applicationId: application.id,
+    application,
+    bodyText: null,
+    jobUrl: application.link || application.url || application.sourceUrl || null,
+    jdPath: application.artifacts?.jd || null,
+    match: { matched: true, recordType: "application", id: application.id },
+  };
+}
+
+async function evaluateApplicationRequest({
+  repoRoot,
+  env,
+  applicationId,
+  jobBody,
+  jobUrl,
+  evaluateJobImpl,
+}) {
+  const application = applicationForIntent({ repoRoot, env, id: applicationId });
+  const body = { applicationId };
+  if (jobBody) body.jobBody = String(jobBody);
+  if (jobUrl) body.jobUrl = String(jobUrl);
+  const operation = await evaluateJobImpl({ repoRoot, env, body });
+  const evaluation = operation?.body?.data;
+  if (operation?.status !== 200 || !operation?.body?.ok || !evaluation) {
+    throw actionError(
+      operation?.body?.error?.message || "The job evaluation could not be completed.",
+      operation?.body?.code || "JOB_EVALUATION_FAILED"
+    );
+  }
+  const gate = String(evaluation.gate || "review").toLowerCase();
+  const gateLabel = gate.charAt(0).toUpperCase() + gate.slice(1);
+  return {
+    application,
+    evaluation,
+    gate,
+    gateLabel,
+    text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
+    artifact: {
+      kind: "job_evaluation",
+      title: `${applicationLabel(application)} — ${gateLabel}`,
+      applicationId,
+      evaluation,
+    },
+  };
+}
+
+function evaluationNextActions(gate, applicationId) {
+  if (gate === "keep") {
+    return [
+      {
+        label: "Prepare application",
+        intent: {
+          type: "job.generate-documents",
+          entity: { type: "application", id: applicationId },
+          input: { applyIntent: true, formats: ["pdf"] },
+        },
+      },
+    ];
+  }
+  return [
+    {
+      label: gate === "cut" ? "Review why this was cut" : "Review this job",
+      href: `/jobs?open=${encodeURIComponent(applicationId)}`,
+    },
+  ];
+}
+
+const QUESTION_CAPTURE_DEFERRED = "QUESTION_CAPTURE_DEFERRED";
+
+function isQuestionCaptureGap(gap) {
+  return (
+    String(gap?.kind || "").toLowerCase() === "answers" &&
+    String(gap?.code || "").toUpperCase() === QUESTION_CAPTURE_DEFERRED
+  );
+}
+
+function blockingPacketGaps(gaps) {
+  return gaps.filter((gap) => !isQuestionCaptureGap(gap));
+}
+
+function applicationHandoffArtifact(application, applicationId) {
+  const url = safeExternalHttpUrl(application.link || application.url || application.sourceUrl);
+  if (!url) return null;
+  return {
+    kind: "application_handoff",
+    title: `${applicationLabel(application)} — Application site`,
+    applicationId,
+    url,
+    submissionVerified: false,
+  };
+}
+
+function packetNextActions(gaps, applicationId, hasHandoff) {
+  const blockingGaps = gaps.filter((gap) => !isQuestionCaptureGap(gap));
+  if (blockingGaps.length === 0 && hasHandoff) {
+    return [
+      {
+        label: "I applied",
+        intent: {
+          type: "application.record-external",
+          entity: { type: "application", id: applicationId },
+        },
+      },
+    ];
+  }
+  return [
+    {
+      label: "Review application",
+      href: `/jobs?open=${encodeURIComponent(applicationId)}`,
+    },
+  ];
+}
+
+function packetGapText(gaps, questionCaptureDeferred) {
+  const blockingCount = blockingPacketGaps(gaps).length;
+  const questionsPending = questionCaptureDeferred || gaps.some(isQuestionCaptureGap);
+  if (questionsPending && blockingCount === 0) {
+    return "The base documents are ready. Application questions will be completed on the application site.";
+  }
+  if (blockingCount > 0) {
+    return `${blockingCount} item${blockingCount === 1 ? "" : "s"} still needs review${
+      questionsPending ? "; application questions will be completed on the site" : ""
+    }.`;
+  }
+  return "It is ready for your submission handoff.";
+}
+
+async function generateDocumentsWithQuestionFallback({
+  repoRoot,
+  env,
+  applicationId,
+  formats,
+  applyIntent,
+  generateDocumentsImpl,
+}) {
+  const invoke = (nextApplyIntent) =>
+    generateDocumentsImpl({
+      repoRoot,
+      env,
+      body: {
+        applicationId,
+        applyIntent: nextApplyIntent,
+        formats,
+      },
+    });
+  try {
+    return { packet: await invoke(applyIntent), questionCaptureDeferred: false };
+  } catch (error) {
+    if (!applyIntent || error?.code !== "BAD_QUESTION_CAPTURE") throw error;
+    return { packet: await invoke(false), questionCaptureDeferred: true };
+  }
 }
 
 function resolvedDate(value, now) {
@@ -485,6 +787,7 @@ export async function executeWorkspaceIntent({
   intent,
   buildInterviewDossierImpl = buildInterviewDossier,
   evaluateJobImpl = evaluateAndPersistPacketGate,
+  resolveJobUrlImpl = resolveJobUrl,
   generateDocumentsImpl = generateApplicationPacket,
   exportDocumentsImpl = exportPacketArtifacts,
   packetExportArtifact,
@@ -653,6 +956,102 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "job.evaluate-request" || normalized.type === "job.prepare-request") {
+      const jobUrl = String(input.jobUrl || "").trim();
+      const jobId = String(input.jobId || "").trim();
+      if (!jobUrl && !jobId) {
+        throw actionError("A job URL or saved job is required.", "JOB_URL_REQUIRED");
+      }
+      const captured = jobUrl
+        ? await captureJobRequest({
+            repoRoot,
+            env,
+            jobUrl,
+            resolveJobUrlImpl,
+            fetchImpl: searchFetchImpl,
+            now,
+          })
+        : resolveSavedJobRequest({ repoRoot, env, jobId });
+      const evaluated = await evaluateApplicationRequest({
+        repoRoot,
+        env,
+        applicationId: captured.applicationId,
+        jobBody: captured.bodyText,
+        jobUrl: captured.jobUrl,
+        evaluateJobImpl,
+      });
+      const evaluationMetadata = {
+        applicationId: captured.applicationId,
+        gate: evaluated.gate,
+        fitScore: evaluated.evaluation.fitScore ?? null,
+        manualRequired: Boolean(evaluated.evaluation.manual?.required),
+      };
+
+      if (normalized.type === "job.evaluate-request" || evaluated.gate !== "keep") {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: evaluated.text,
+          artifacts: [evaluated.artifact],
+          metadata: {
+            ...evaluationMetadata,
+            state: evaluated.gate,
+            nextActions: evaluationNextActions(evaluated.gate, captured.applicationId),
+          },
+          now,
+        });
+      }
+
+      const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
+        repoRoot,
+        env,
+        applicationId: captured.applicationId,
+        applyIntent: true,
+        formats: ["pdf"],
+        generateDocumentsImpl,
+      });
+      const gaps = Array.isArray(packet.gaps) ? packet.gaps : [];
+      const blockingGapCount = blockingPacketGaps(gaps).length;
+      const handoffArtifact =
+        blockingGapCount === 0
+          ? applicationHandoffArtifact(evaluated.application, captured.applicationId)
+          : null;
+      const packetArtifact = {
+        kind: "packet_generation",
+        title: `${applicationLabel(evaluated.application)} — Documents`,
+        applicationId: captured.applicationId,
+        status: packet.status || "reviewable",
+        uploadReady: Boolean(packet.uploadReady),
+        artifacts: packet.artifacts || {},
+        gaps,
+        blockingGapCount,
+      };
+      const nextActions = packetNextActions(gaps, captured.applicationId, Boolean(handoffArtifact));
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${evaluated.text} Generated the application packet. ${packetGapText(
+          gaps,
+          questionCaptureDeferred
+        )}`,
+        artifacts: [evaluated.artifact, packetArtifact, handoffArtifact].filter(Boolean),
+        metadata: {
+          ...evaluationMetadata,
+          state: packet.status || "reviewable",
+          uploadReady: Boolean(packet.uploadReady),
+          gapCount: gaps.length,
+          blockingGapCount,
+          nextActions,
+        },
+        operationResult: packet,
+        now,
+      });
+    }
+
     if (normalized.type === "job.evaluate") {
       if (normalized.entity.type !== "application") {
         throw actionError(
@@ -660,38 +1059,27 @@ export async function executeWorkspaceIntent({
           "EVALUATION_APPLICATION_REQUIRED"
         );
       }
-      const application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
-      const body = { applicationId: normalized.entity.id };
-      if (input.jobBody) body.jobBody = String(input.jobBody);
-      if (input.jobUrl) body.jobUrl = String(input.jobUrl);
-      const operation = await evaluateJobImpl({ repoRoot, env, body });
-      const evaluation = operation?.body?.data;
-      if (operation?.status !== 200 || !operation?.body?.ok || !evaluation) {
-        throw actionError(
-          operation?.body?.error?.message || "The job evaluation could not be completed.",
-          operation?.body?.code || "JOB_EVALUATION_FAILED"
-        );
-      }
-      const gate = String(evaluation.gate || "review").toLowerCase();
-      const gateLabel = gate.charAt(0).toUpperCase() + gate.slice(1);
+      const evaluated = await evaluateApplicationRequest({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+        jobBody: input.jobBody,
+        jobUrl: input.jobUrl,
+        evaluateJobImpl,
+      });
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `Evaluated ${applicationLabel(application)}: ${gateLabel}${evaluation.fitScore == null ? "" : ` (${evaluation.fitScore}/100 fit)`}.`,
-        artifacts: [
-          {
-            kind: "job_evaluation",
-            title: `${applicationLabel(application)} — ${gateLabel}`,
-            applicationId: normalized.entity.id,
-            evaluation,
-          },
-        ],
+        text: evaluated.text,
+        artifacts: [evaluated.artifact],
         metadata: {
-          state: gate,
-          fitScore: evaluation.fitScore ?? null,
-          manualRequired: Boolean(evaluation.manual?.required),
+          state: evaluated.gate,
+          applicationId: normalized.entity.id,
+          fitScore: evaluated.evaluation.fitScore ?? null,
+          manualRequired: Boolean(evaluated.evaluation.manual?.required),
+          nextActions: evaluationNextActions(evaluated.gate, normalized.entity.id),
         },
         now,
       });
@@ -704,19 +1092,22 @@ export async function executeWorkspaceIntent({
             ["pdf", "docx"].includes(value)
           )
         : ["pdf"];
-      const operation = await generateDocumentsImpl({
-        repoRoot,
-        env,
-        body: {
+      const { packet: operation, questionCaptureDeferred } =
+        await generateDocumentsWithQuestionFallback({
+          repoRoot,
+          env,
           applicationId: normalized.entity.id,
           applyIntent: input.applyIntent === true,
           formats: formats.length ? formats : ["pdf"],
-        },
-      });
+          generateDocumentsImpl,
+        });
       const gaps = Array.isArray(operation.gaps) ? operation.gaps : [];
-      const gapText = gaps.length
-        ? `${gaps.length} item${gaps.length === 1 ? "" : "s"} needs review before the packet is submission-ready.`
-        : "No review gaps remain.";
+      const blockingGapCount = blockingPacketGaps(gaps).length;
+      const handoffArtifact =
+        blockingGapCount === 0
+          ? applicationHandoffArtifact(application, normalized.entity.id)
+          : null;
+      const gapText = packetGapText(gaps, questionCaptureDeferred);
       return appendActionResult({
         repoRoot,
         env,
@@ -732,12 +1123,16 @@ export async function executeWorkspaceIntent({
             uploadReady: Boolean(operation.uploadReady),
             artifacts: operation.artifacts || {},
             gaps,
+            blockingGapCount,
           },
-        ],
+          handoffArtifact,
+        ].filter(Boolean),
         metadata: {
           state: operation.status || "reviewable",
           uploadReady: Boolean(operation.uploadReady),
           gapCount: gaps.length,
+          blockingGapCount,
+          nextActions: packetNextActions(gaps, normalized.entity.id, Boolean(handoffArtifact)),
         },
         operationResult: operation,
         now,
@@ -1171,10 +1566,40 @@ export async function executeWorkspaceIntent({
     }
 
     if (typeof applyJobImpl !== "function") {
-      throw actionError(
-        "The authenticated Apply on site executor is not connected, so this application was not marked Applied.",
-        "APPLICATION_EXECUTOR_UNAVAILABLE"
+      const postingUrl = safeExternalHttpUrl(
+        application.link || application.url || application.sourceUrl
       );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `CareerRat prepared the handoff for ${applicationLabel(application)}, but the authenticated submission executor is not connected. Open the posting to submit it; this application was not marked Applied.`,
+        artifacts: [
+          {
+            kind: "application_handoff",
+            title: `${applicationLabel(application)} — Application site`,
+            applicationId: normalized.entity.id,
+            url: postingUrl,
+            submissionVerified: false,
+          },
+        ],
+        metadata: {
+          state: "manual-handoff",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+          ],
+        },
+        now,
+      });
     }
     const execution = await applyJobImpl({
       repoRoot,
@@ -1330,9 +1755,101 @@ export async function captureWorkspaceIntake({
 // arbitrary reference, since it answers in plain text rather than acting.
 // ---------------------------------------------------------------------------
 
+function firstHttpUrl(text) {
+  const match = String(text || "").match(/https?:\/\/[^\s<>"']+/i);
+  if (!match) return null;
+  const candidate = match[0].replace(/[),.;!?\]}]+$/g, "");
+  try {
+    return new URL(candidate).toString();
+  } catch {
+    return null;
+  }
+}
+
+function looksLikeJobUrl(value) {
+  try {
+    const url = new URL(value);
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.toLowerCase();
+    if (inferProvider({ careers_url: url.toString() })) return true;
+    const platform = platformForHost(host);
+    if (new Set(["linkedin", "wellfound"]).has(platform) && path.includes("/jobs/")) return true;
+    return /\/(?:jobs?|careers?|positions?|openings?)\//.test(path) || /\/viewjob\b/.test(path);
+  } catch {
+    return false;
+  }
+}
+
 const ACTION_PREVIEW_RULES = [
   {
-    test: /\b(sweep|scan|run|check|refresh|search|find|look for)\b.{0,40}\b(jobs?|roles?|postings?|boards?|sources?)\b/i,
+    test: (text) => {
+      const jobUrl = firstHttpUrl(text);
+      return /\b(apply|submit)\b/i.test(text) && Boolean(jobUrl) && looksLikeJobUrl(jobUrl);
+    },
+    label: "Evaluate and prepare this application",
+    intent: (text) => ({
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl: firstHttpUrl(text) },
+    }),
+  },
+  {
+    test: (text) => {
+      const jobUrl = firstHttpUrl(text);
+      return (
+        /\b(rate|evaluate|review|assess)\b/i.test(text) &&
+        Boolean(jobUrl) &&
+        looksLikeJobUrl(jobUrl)
+      );
+    },
+    label: "Capture and evaluate this job",
+    intent: (text) => ({
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl: firstHttpUrl(text) },
+    }),
+  },
+  {
+    test: (text, context) =>
+      Boolean(openJobId(context)) &&
+      /\b(apply|submit)\b/i.test(text) &&
+      /\b(?:this|the)\s+(?:job|role|posting)\b/i.test(text),
+    label: "Evaluate and prepare this saved job",
+    intent: (_text, context) => ({
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: openJobId(context) },
+    }),
+  },
+  {
+    test: (text, context) =>
+      Boolean(openJobId(context)) &&
+      /\b(rate|evaluate|review|assess)\b/i.test(text) &&
+      /\b(?:this|the)\s+(?:job|role|posting)\b/i.test(text),
+    label: "Evaluate this saved job",
+    intent: (_text, context) => ({
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: openJobId(context) },
+    }),
+  },
+  {
+    test: (text) => {
+      const jobUrl = firstHttpUrl(text);
+      return Boolean(jobUrl && text.trim() === jobUrl && looksLikeJobUrl(jobUrl));
+    },
+    label: "Capture and evaluate this job",
+    intent: (text) => ({
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl: firstHttpUrl(text) },
+    }),
+  },
+  {
+    test: (text) =>
+      /\b(sweep|scan|run|check|refresh|search|find|look for)\b.{0,40}\b(jobs?|roles?|postings?|boards?|sources?)\b/i.test(
+        text
+      ),
     label: "Run a job search sweep",
     intent: () => ({
       type: "search.run",
@@ -1341,6 +1858,11 @@ const ACTION_PREVIEW_RULES = [
     }),
   },
 ];
+
+function openJobId(context) {
+  if (context?.pathname !== "/jobs") return null;
+  return String(context?.jobId || "").trim() || null;
+}
 
 function previewAnswerLabel(text) {
   const compact = text.replace(/\s+/g, " ").trim();
@@ -1352,14 +1874,14 @@ function previewAnswerLabel(text) {
 // classification against ACTION_PREVIEW_RULES above. `engineAvailable` lets
 // the ask bar render the NO ENGINE receipt state up front (before a turn
 // even runs) rather than only after a failed AI call.
-export function previewWorkspaceIntent({ text, repoRoot, env = process.env } = {}) {
+export function previewWorkspaceIntent({ text, context, repoRoot, env = process.env } = {}) {
   const trimmed = String(text || "").trim();
   const engineAvailable = resolveAIRoute(env, { repoRoot }).type !== "none";
   if (!trimmed) {
     return { action: null, answer: { label: "Ask the workspace agent." }, engineAvailable };
   }
-  const rule = ACTION_PREVIEW_RULES.find((candidate) => candidate.test.test(trimmed));
-  const action = rule ? { label: rule.label, intent: rule.intent() } : null;
+  const rule = ACTION_PREVIEW_RULES.find((candidate) => candidate.test(trimmed, context));
+  const action = rule ? { label: rule.label, intent: rule.intent(trimmed, context) } : null;
   return { action, answer: { label: previewAnswerLabel(trimmed) }, engineAvailable };
 }
 
@@ -1436,6 +1958,7 @@ export function createWorkspaceAgentRuntime({
   callAIImpl = callAI,
   buildInterviewDossierImpl = buildInterviewDossier,
   evaluateJobImpl = evaluateAndPersistPacketGate,
+  resolveJobUrlImpl = resolveJobUrl,
   generateDocumentsImpl = generateApplicationPacket,
   exportDocumentsImpl = exportPacketArtifacts,
   packetExportArtifact,
@@ -1468,6 +1991,7 @@ export function createWorkspaceAgentRuntime({
           env,
           buildInterviewDossierImpl,
           evaluateJobImpl,
+          resolveJobUrlImpl,
           generateDocumentsImpl,
           exportDocumentsImpl,
           packetExportArtifact,

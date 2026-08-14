@@ -17,9 +17,11 @@ const ARTIFACT_KINDS = [
 ];
 
 function isDeferredAnswersGap(gap) {
+  const code = String(gap?.code || "").toUpperCase();
   return (
     String(gap?.kind || "").toLowerCase() === "answers" &&
-    /no application questions captured/i.test(String(gap?.message || ""))
+    (code === "QUESTION_CAPTURE_DEFERRED" ||
+      (!code && /no application questions captured/i.test(String(gap?.message || ""))))
   );
 }
 

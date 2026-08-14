@@ -83,9 +83,11 @@ The app must:
    asks only for the missing decision, and `CUT` explains why and offers archive or
    gate correction.
 
-Today a short single-line URL is treated as ordinary answer text, and free-form Ask
-can only preview `search.run` as a typed action. A long JD can enter intake, but the
-result returns as a generic skill-finished receipt instead of the evaluation card.
+Current implementation recognizes short job URLs and an explicitly open saved job,
+captures or reuses the full JD, promotes sourced roles, runs the gate, saves the
+verdict, and renders a structured result plus the correct typed next action in Ask.
+The remaining parity work is pasted/attached JD routing, natural references to saved
+jobs that are not already open, and clean-home plus packaged-app acceptance coverage.
 
 ### "Apply to this job"
 
@@ -101,10 +103,13 @@ The app must:
    give a concrete supervised/manual handoff when it is not; and
 8. mark the application applied only after verified confirmation.
 
-Today Ask cannot resolve this phrase into a typed job action, and the default app
-server does not connect the `job.apply` executor. The visible Apply on site action
-therefore reaches `APPLICATION_EXECUTOR_UNAVAILABLE` instead of a functional
-handoff.
+Current implementation resolves a short job URL or explicitly open saved job into
+the evaluate-to-packet chain, stops on `CUT`/`REVIEW`, generates base documents on
+`KEEP`, keeps moving when application questions are not discoverable until the form
+opens, and returns a concrete manual handoff without marking the job Applied. A
+verified executor result is still the only path that writes Applied. Remaining work
+is the connected authenticated executor, automatic form-question capture, broader
+natural references, and packaged-app acceptance coverage.
 
 ## Original skill inventory
 
@@ -124,9 +129,9 @@ Status meanings:
 | `research-boards` | Guided onboarding discovery chat | partial | Provide a normal post-setup Ask entry and return approved sources to Jobs/Settings. |
 | `discover-companies` | Proposal UI plus guided onboarding chat | partial | Learn a company thesis, mix focus seeds with broad discovery, and run recurring expansion after setup. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
-| `evaluate-job` | Application drawer and long-JD intake | partial | Support short URLs, sourced rows, natural references, structured inline results, and correct next actions. |
-| `tailor-application` | Job packet document actions | partial | Route natural Ask requests to the saved job and return gaps/artifacts in chat. |
-| `apply-job` | Apply on site button and skill runtime | blocked | Connect the supervised executor and build the evaluate-to-packet-to-confirm-to-verify chat chain. |
+| `evaluate-job` | Application drawer, short-URL Ask, and open-saved-job Ask | partial | Add pasted/attached JD routing, natural references beyond the open drawer, and packaged acceptance coverage. |
+| `tailor-application` | Job packet actions plus the open-job Apply Ask chain | partial | Add standalone natural tailoring requests and browser-captured screening questions; keep returning gaps/artifacts in chat. |
+| `apply-job` | Ask/manual handoff, Apply on site, and skill runtime | partial | Connect the supervised executor and automatic form-question capture; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls and classified pasted updates | partial | Resolve natural job references and make external outcomes one-turn durable actions. |
 | `email-comms` | Draft, note, and external-send controls | partial | Resolve natural thread references and connect a verified send executor or explicit supervised handoff. |
 | `schedule-meeting` | Manual interview scheduling form | partial | Add availability, timezone, busy-calendar, thread reply, hold, and next-action flow. |

@@ -44,6 +44,7 @@
   --accent-on: #ffffff;
 
   --success: #1e9e6a;
+  --success-ink: #0f6842;
   --success-bg: #e6f4ed;
   --success-border: #b9e0cd;
 
@@ -178,6 +179,7 @@
   --accent-on: #ffffff;
 
   --success: #34c48c;
+  --success-ink: var(--success);
   --success-bg: #123526;
   --success-border: #1f5a3f;
 

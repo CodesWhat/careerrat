@@ -232,6 +232,24 @@ function actionPreview({ engineAvailable = true } = {}) {
   };
 }
 
+function jobActionPreview({
+  type = "job.evaluate-request",
+  label = "Capture and evaluate this job",
+} = {}) {
+  return {
+    action: {
+      label,
+      intent: {
+        type,
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { jobUrl: "https://boards.greenhouse.io/acme/jobs/123" },
+      },
+    },
+    answer: { label: "Answer about this job" },
+    engineAvailable: true,
+  };
+}
+
 function answerOnlyPreview({ engineAvailable = true } = {}) {
   return {
     action: null,
@@ -446,6 +464,27 @@ describe("AskBar — focused preview", () => {
     expect(textOf(rows[0])).toContain("what's blocking my top role?");
   });
 
+  it("passes the explicitly open job as context for 'this job' requests", async () => {
+    routerState.pathname = "/jobs";
+    routerState.searchParams = new URLSearchParams({ open: "app-acme" });
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({ label: "Evaluate this saved job" })
+    );
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "rate this job" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+
+    expect(api.previewWorkspaceQuery).toHaveBeenCalledWith("rate this job", {
+      pathname: "/jobs",
+      jobId: "app-acme",
+    });
+  });
+
   it("a stale preview response resolving after a newer one does not overwrite it", async () => {
     const first = deferred();
     const second = deferred();
@@ -626,6 +665,215 @@ describe("AskBar — acting", () => {
     expect(textOf(answer)).toBe("Here's your answer.");
     const receipt = byClass(tree, "ask-bar__receipt");
     expect(textOf(receipt)).toBe("AI · Claude Code · 4S");
+  });
+
+  it("renders a structured job evaluation and runs its typed next action", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(jobActionPreview());
+    api.runWorkspaceIntent
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Evaluated Acme — Staff AI Engineer: Keep (92/100 fit).",
+              artifacts: [
+                {
+                  kind: "job_evaluation",
+                  title: "Acme — Staff AI Engineer — Keep",
+                  applicationId: "app-acme",
+                  evaluation: {
+                    gate: "keep",
+                    fitScore: 92,
+                    fitReasons: ["Strong production AI evidence"],
+                    fitRisks: ["Travel frequency is unclear"],
+                    compensation: { summary: "Posted range clears the floor." },
+                  },
+                },
+              ],
+              metadata: {
+                state: "keep",
+                nextActions: [
+                  {
+                    label: "Prepare application",
+                    intent: {
+                      type: "job.generate-documents",
+                      entity: { type: "application", id: "app-acme" },
+                      input: { applyIntent: true, formats: ["pdf"] },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Generated the application packet.",
+              artifacts: [
+                {
+                  kind: "packet_generation",
+                  status: "reviewable",
+                  uploadReady: false,
+                  blockingGapCount: 0,
+                  gaps: [{ kind: "answers", message: "Application questions are pending." }],
+                },
+              ],
+            },
+          ],
+        },
+      });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({
+      target: { value: "rate https://boards.greenhouse.io/acme/jobs/123" },
+    });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const evaluation = byClass(tree, "ask-bar__evaluation");
+    expect(textOf(evaluation)).toContain("KEEP");
+    expect(textOf(evaluation)).toContain("92/100 fit");
+    expect(textOf(evaluation)).toContain("Posted range clears the floor.");
+    expect(textOf(evaluation)).toContain("Strong production AI evidence");
+    expect(textOf(evaluation)).toContain("Travel frequency is unclear");
+
+    buttonByText(tree, "Prepare application").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+    expect(textOf(byClass(tree, "ask-bar__packet-status"))).not.toContain("needs review");
+    expect(api.runWorkspaceIntent).toHaveBeenNthCalledWith(
+      2,
+      "job.generate-documents",
+      { type: "application", id: "app-acme" },
+      { applyIntent: true, formats: ["pdf"] }
+    );
+  });
+
+  it("renders a manual application handoff without claiming submission", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({
+        type: "job.prepare-request",
+        label: "Evaluate and prepare this application",
+      })
+    );
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "The site is ready for you. This application was not marked Applied.",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                title: "Acme — Staff AI Engineer — Application site",
+                applicationId: "app-acme",
+                url: "https://boards.greenhouse.io/acme/jobs/123",
+                submissionVerified: false,
+              },
+            ],
+            metadata: {
+              state: "manual-handoff",
+              submissionVerified: false,
+              nextActions: [
+                {
+                  label: "I applied",
+                  intent: {
+                    type: "application.record-external",
+                    entity: { type: "application", id: "app-acme" },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({
+      target: { value: "apply https://boards.greenhouse.io/acme/jobs/123" },
+    });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("This application was not marked Applied.");
+    const siteLink = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node).trim() === "Open application site"
+    )[0];
+    expect(siteLink.props.href).toBe("https://boards.greenhouse.io/acme/jobs/123");
+    expect(buttonByText(tree, "I applied")).toBeTruthy();
+    expect(textOf(tree)).not.toContain("Application submitted and verified");
+  });
+
+  it("does not render an executable application handoff URL", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({
+        type: "job.prepare-request",
+        label: "Evaluate and prepare this application",
+      })
+    );
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "The site handoff needs a valid posting URL.",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                applicationId: "app-acme",
+                url: "javascript:alert(1)",
+                submissionVerified: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({
+      target: { value: "apply https://boards.greenhouse.io/acme/jobs/123" },
+    });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(
+      visit(tree, (node) => node.type === "a" && textOf(node).trim() === "Open application site")
+    ).toHaveLength(0);
   });
 
   it("renders an inline error when the agent turn comes back as agent_error", async () => {

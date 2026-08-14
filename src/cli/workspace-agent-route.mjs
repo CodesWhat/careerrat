@@ -8,22 +8,23 @@ import { workspaceThreadOpen } from "../core/agent/workspace-thread.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
+const CONFLICT_CODES = new Set([
+  "JOB_BODY_REQUIRES_BROWSER",
+  "JOB_CAPTURE_FAILED",
+  "APPLICATION_NOT_VERIFIED",
+  "COMMUNICATION_DRAFT_REQUIRED",
+  "COMMUNICATION_EXECUTOR_UNAVAILABLE",
+  "COMMUNICATION_NOT_DRAFTABLE",
+  "COMMUNICATION_NOT_VERIFIED",
+  "INTAKE_CONFIRMATION_REQUIRED",
+  "EVALUATION_APPLICATION_REQUIRED",
+]);
 
 function statusForError(error) {
   if (error?.code === "NO_DATABASE") return 409;
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "MISSING_JOB_BODY") return 409;
-  if (
-    error?.code === "APPLICATION_EXECUTOR_UNAVAILABLE" ||
-    error?.code === "APPLICATION_NOT_VERIFIED" ||
-    error?.code === "COMMUNICATION_DRAFT_REQUIRED" ||
-    error?.code === "COMMUNICATION_EXECUTOR_UNAVAILABLE" ||
-    error?.code === "COMMUNICATION_NOT_DRAFTABLE" ||
-    error?.code === "COMMUNICATION_NOT_VERIFIED" ||
-    error?.code === "INTAKE_CONFIRMATION_REQUIRED" ||
-    error?.code === "EVALUATION_APPLICATION_REQUIRED"
-  )
-    return 409;
+  if (CONFLICT_CODES.has(error?.code)) return 409;
   if (
     [
       "BAD_DATE",
@@ -33,6 +34,8 @@ function statusForError(error) {
       "BAD_KIND",
       "BAD_ROLE",
       "BAD_INTENT_ENTITY",
+      "JOB_URL_REQUIRED",
+      "JOB_IDENTITY_REQUIRED",
       "EMPTY_TEXT",
       "INTENT_NOT_IMPLEMENTED",
       "EMPTY_AI_RESPONSE",
@@ -46,6 +49,7 @@ function statusForError(error) {
       "BAD_OUTCOME_STATUS",
       "BAD_INTERVIEW_AT",
       "BAD_INTERVIEW_ARTIFACT",
+      "BAD_QUESTION_CAPTURE",
       "EMPTY_COMMUNICATION_NOTE",
       "INTERVIEW_APPLICATION_REQUIRED",
       "TEXT_TOO_LONG",
@@ -100,7 +104,7 @@ export function mountWorkspaceAgentRoutes({
   addRoute("POST", "/api/workspace/preview", async (req, res) => {
     try {
       const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
-      const data = previewIntentImpl({ repoRoot, env, text: body?.text });
+      const data = previewIntentImpl({ repoRoot, env, text: body?.text, context: body?.context });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {
       sendError(res, error);

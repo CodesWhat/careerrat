@@ -38,7 +38,10 @@ The user should be able to:
 ## Product Gaps
 
 - Product routes still have compatibility/static/generated tracker dependencies that should not be canonical.
-- Quick onboarding does not yet start a true background sourcing run and return the user to deep ingest.
+- Quick onboarding now starts the first sourcing run once minimum search context exists,
+  keeps Paul active while source setup finishes, and refuses to graduate into the app
+  without durable sources plus a running or completed search. The remaining gate is
+  clean-home and restart QA across success, retry, guided repair, and resumable pause.
 - Deep ingest is not yet a full app-native lane for drop-all assets, project links/repos, story extraction, honesty boundaries, and AI interview follow-ups.
 - Public company/board intelligence is not yet separated from candidate-specific proposal, fit, comp, notes, or tracker data.
 - Generic public careers pages need a deterministic extraction/scraper/API cascade before AI fallback.

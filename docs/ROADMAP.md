@@ -55,9 +55,9 @@ nurse, a driver, and an engineer each bring their own config.
   manual-submit default; auto-submit is strictly opt-in, and the flow halts on
   CAPTCHAs and unsupported auth prompts. With explicit `mail_access` consent, it
   can read one recent emailed verification code from any webmail provider and continue.
-  The agent-led workflow and safety gates are shipped; connecting the native Ask and
-  Apply on site surfaces to the supervised executor is part of the active product
-  coherence gate below.
+  The agent-led workflow and safety gates are shipped. Native Ask and Apply on site
+  now provide a truthful manual handoff; connecting them to the supervised executor
+  remains part of the active product coherence gate below.
 - **One-command start** (`careerrat start [agent]`) — scaffolds the workspace,
   installs the skills, brings up the local app, and launches a supported detected
   agent or an explicitly named compatible command with a starter message, so first
@@ -330,7 +330,11 @@ The current build order is:
    of answer-only chat. Rating captures the JD, evaluates it, saves the verdict, renders the result,
    and offers the correct next action. Applying chains evaluation, promotion, packet generation,
    unresolved questions, confirmation, supervised execution/manual handoff, and verified outcome
-   write-back in the same durable thread.
+   write-back in the same durable thread. Short URLs and the explicitly open saved job now complete
+   that chain through a truthful manual handoff, including deferred application-question handling;
+   they never mark Applied without confirmation. Remaining work is broader natural saved-job
+   references, pasted/attached JD parity, the connected authenticated executor and automatic form
+   question capture, plus clean-home and packaged acceptance coverage.
 3. **Company thesis, not a company allowlist** — Paul asks about companies or kinds of companies
    whose values, industry, size, stage, business model, or local presence the user likes. He turns
    answers such as fintech, large corporations, fast-food chains, or small Denver accounting firms

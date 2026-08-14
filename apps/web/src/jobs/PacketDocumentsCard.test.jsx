@@ -152,7 +152,8 @@ describe("PacketDocumentsCard", () => {
         gaps: [
           {
             kind: "answers",
-            message: "answers artifact skipped — no application questions captured yet",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "The application site will provide its questions later.",
           },
         ],
       },
@@ -163,7 +164,8 @@ describe("PacketDocumentsCard", () => {
         gaps: [
           {
             kind: "answers",
-            message: "answers artifact skipped — no application questions captured yet",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "The application site will provide its questions later.",
           },
         ],
       },

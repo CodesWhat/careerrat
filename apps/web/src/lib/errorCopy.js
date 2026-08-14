@@ -82,15 +82,32 @@ const RULES = [
     action: null,
   },
   {
-    match: ({ code }) => code === "APPLICATION_EXECUTOR_UNAVAILABLE",
-    message:
-      "CareerRat can't control the application site in this session, so nothing was submitted. Use “I applied elsewhere” after you finish on the site.",
-    action: null,
-  },
-  {
     match: ({ code }) => code === "APPLICATION_NOT_VERIFIED",
     message:
       "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "JOB_BODY_REQUIRES_BROWSER",
+    message:
+      "CareerRat couldn't read the full posting from that link. Open the job in your connected browser or paste the job description here.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "JOB_IDENTITY_REQUIRED",
+    message:
+      "CareerRat read the page but couldn't identify the company and role. Paste the job description or use the direct posting link.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "JOB_CAPTURE_FAILED",
+    message:
+      "CareerRat couldn't save that posting. Try the direct job link or paste the description.",
+    action: { label: "Try again", retry: true },
+  },
+  {
+    match: ({ code }) => code === "JOB_URL_REQUIRED",
+    message: "Paste the direct job-posting link so CareerRat can read and save it.",
     action: null,
   },
   {

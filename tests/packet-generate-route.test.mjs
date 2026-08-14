@@ -977,7 +977,10 @@ test("POST /api/packet/generate: no capture degrades without apply intent and sk
     assert.equal(generated.body.data.artifacts.answersSource ?? null, null);
     assert.ok(
       generated.body.data.gaps.some(
-        (gap) => gap.kind === "answers" && /skipped.*no application questions/i.test(gap.message)
+        (gap) =>
+          gap.kind === "answers" &&
+          gap.code === "QUESTION_CAPTURE_DEFERRED" &&
+          /skipped.*no application questions/i.test(gap.message)
       )
     );
 
