@@ -1,6 +1,6 @@
 ---
 name: ingest-profile
-description: Interview a new candidate to produce all user-layer config files: profile, targeting, evidence, honesty boundaries, form defaults, writing style, personalized AGENTS.md, and seed search sources. Run on first setup or any major profile change.
+description: "Interview a new candidate to produce all user-layer config files: profile, targeting, evidence, honesty boundaries, form defaults, writing style, personalized AGENTS.md, and seed search sources. Run on first setup or any major profile change."
 ---
 
 # ingest-profile
@@ -507,8 +507,8 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 2. `research-boards` — find additional boards/aggregators for this candidate's domain.
    This is confirm-first; run it unless the user explicitly says the baseline sources are
    enough for now.
-3. `discover-companies` — find employers and wire their Ashby/Greenhouse/Lever/Workable/
-   SmartRecruiters boards into `config/sourced-scan.json`. This is confirm-first; run it
+3. `discover-companies` — find employers and wire boards supported by CareerRat's pinned
+   73-adapter public provider catalog into source config. This is confirm-first; run it
    before the first sweep unless the user explicitly wants a board-only search.
 4. `search-jobs` — run the first sourced sweep only after the source and company discovery
    steps are complete or intentionally skipped.

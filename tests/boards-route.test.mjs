@@ -367,6 +367,33 @@ test("source maintenance adds a query and edits, disables, then removes a broad 
   }
 });
 
+test("source maintenance adds a deterministic Career Ops provider query", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    const response = await postJson(server, "/api/boards/search/add", {
+      query: "staff platform engineer",
+      label: "Remote roles",
+      provider: "remoteok",
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches, [
+      {
+        provider: "remoteok",
+        source_type: "board",
+        label: "Remote roles",
+        query: "staff platform engineer",
+        enabled: true,
+        recency: { mode: "since-last-run", safetyMinutes: 30 },
+      },
+    ]);
+    assert.equal(response.body.searches[0].legitimacy, "supported");
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("source maintenance adds, edits, disables, and removes a supported company board", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -396,6 +423,31 @@ test("source maintenance adds, edits, disables, and removes a supported company 
     response = await postJson(server, "/api/boards/company/remove", { name: "Acme Labs" });
     assert.equal(response.status, 200);
     assert.deepEqual(response.body.companies, []);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source maintenance accepts an explicit adapter for a branded company board", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    const response = await postJson(server, "/api/boards/company/save", {
+      name: "Example",
+      url: "https://jobs.example.com/search",
+      provider: "phenom",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.companies[0].provider, "phenom");
+    assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
+      {
+        name: "Example",
+        careers_url: "https://jobs.example.com/search",
+        provider: "phenom",
+        enabled: true,
+      },
+    ]);
   } finally {
     await closeServer(server);
   }

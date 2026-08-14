@@ -84,9 +84,9 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [busy, setBusy] = useState(null);
-  const [queryDraft, setQueryDraft] = useState({ label: "", query: "" });
+  const [queryDraft, setQueryDraft] = useState({ label: "", query: "", provider: "HiringCafe" });
   const [urlDraft, setUrlDraft] = useState({ label: "", url: "" });
-  const [companyDraft, setCompanyDraft] = useState({ name: "", url: "" });
+  const [companyDraft, setCompanyDraft] = useState({ name: "", url: "", provider: "" });
   const [pendingRemoval, setPendingRemoval] = useState(null);
 
   const reload = useCallback(async () => {
@@ -155,14 +155,14 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
         mutate(
           "company-add",
           () => api.saveCompanyBoard({ ...companyDraft, enabled: true }),
-          () => setCompanyDraft({ name: "", url: "" })
+          () => setCompanyDraft({ name: "", url: "", provider: "" })
         )
       }
       onAddQuery={() =>
         mutate(
           "query-add",
-          () => api.addSearchQuery({ ...queryDraft, provider: "HiringCafe" }),
-          () => setQueryDraft({ label: "", query: "" })
+          () => api.addSearchQuery(queryDraft),
+          () => setQueryDraft({ label: "", query: "", provider: "HiringCafe" })
         )
       }
       onCompanyDraft={setCompanyDraft}
@@ -187,6 +187,7 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
             originalName: row.originalName || row.name,
             name: row.name,
             url: row.url,
+            provider: row.provider,
             enabled: row.enabled,
           })
         )
@@ -252,7 +253,8 @@ export function SourceMaintenanceView({
     <Card title="Search sources">
       <p className="field__hint settings-sources__intro">
         These are the exact broad searches and company ATS boards used by Electron and the
-        <code> careerrat searches</code> / <code>careerrat companies</code> commands.
+        <code> careerrat searches</code> / <code>careerrat companies</code> commands. CareerRat
+        ships 73 public adapters and auto-detects known board URLs.
       </p>
       {error ? (
         <InlineAlert message={error.message} action={error.action} detail={error.detail} />
@@ -348,6 +350,13 @@ export function SourceMaintenanceView({
                 onChange={(query) => onQueryDraft({ ...queryDraft, query })}
               />
             </Field>
+            <Field label="Provider adapter" htmlFor="source-query-provider">
+              <TextField
+                id="source-query-provider"
+                value={queryDraft.provider || ""}
+                onChange={(provider) => onQueryDraft({ ...queryDraft, provider })}
+              />
+            </Field>
             <Button disabled={!queryDraft.query.trim() || Boolean(busy)} onClick={onAddQuery}>
               Add query
             </Button>
@@ -379,7 +388,7 @@ export function SourceMaintenanceView({
         <div className="settings-sources__heading">
           <div>
             <h3 id="company-sources-heading">Company ATS boards</h3>
-            <p>Direct scans are accepted only for supported ATS hosts.</p>
+            <p>Known hosts are automatic. Branded hosts can use a supported adapter override.</p>
           </div>
           <span>{companies.length} tracked</span>
         </div>
@@ -404,6 +413,11 @@ export function SourceMaintenanceView({
                     aria-label={`Company ${index + 1} board URL`}
                     value={row.url}
                     onChange={(url) => onCompanyEdit(index, { url })}
+                  />
+                  <TextField
+                    aria-label={`Company ${index + 1} provider adapter`}
+                    value={row.provider || ""}
+                    onChange={(provider) => onCompanyEdit(index, { provider })}
                   />
                 </div>
                 <div className="settings-sources__actions">
@@ -461,6 +475,13 @@ export function SourceMaintenanceView({
               id="source-company-url"
               value={companyDraft.url}
               onChange={(url) => onCompanyDraft({ ...companyDraft, url })}
+            />
+          </Field>
+          <Field label="Provider adapter (optional)" htmlFor="source-company-provider">
+            <TextField
+              id="source-company-provider"
+              value={companyDraft.provider || ""}
+              onChange={(provider) => onCompanyDraft({ ...companyDraft, provider })}
             />
           </Field>
           <Button

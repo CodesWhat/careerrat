@@ -4,13 +4,69 @@ import test from "node:test";
 import { isBoardProviderSupported, scanBoards } from "../src/core/scoring/sourced-scanner.mjs";
 
 test("isBoardProviderSupported recognizes supported providers case-insensitively", () => {
-  for (const provider of ["remoteok", "RemoteOK", "REMOTIVE", "workingnomads", "WorkingNomads"]) {
+  for (const provider of [
+    "remoteok",
+    "RemoteOK",
+    "REMOTIVE",
+    "workingnomads",
+    "WorkingNomads",
+    "BambooHR",
+    "arbeitnow",
+    "TheMuse",
+  ]) {
     assert.equal(isBoardProviderSupported(provider), true, provider);
   }
 
   for (const provider of ["unknown", null, undefined]) {
     assert.equal(isBoardProviderSupported(provider), false, String(provider));
   }
+});
+
+test("scanBoards dispatches Career Ops adapters through the deterministic scanner", async () => {
+  const result = await scanBoards(
+    {
+      searches: [
+        {
+          provider: "bamboohr",
+          source_type: "ats",
+          label: "Acme careers",
+          name: "Acme",
+          url: "https://acme.bamboohr.com/careers",
+          enabled: true,
+        },
+      ],
+    },
+    {
+      fetchImpl: async () =>
+        new Response(
+          JSON.stringify({
+            result: [
+              {
+                id: "42",
+                jobOpeningName: "Staff Platform Engineer",
+                location: { city: "Denver", state: "CO" },
+              },
+            ],
+          }),
+          { status: 200 }
+        ),
+    }
+  );
+
+  assert.equal(result.errors.length, 0);
+  assert.deepEqual(result.offers, [
+    {
+      title: "Staff Platform Engineer",
+      url: "https://acme.bamboohr.com/careers/42",
+      company: "Acme",
+      location: "Denver, CO",
+      comp: "",
+      bodyText: "",
+      bodyPartial: true,
+      provider: "bamboohr",
+      source: "bamboohr-api",
+    },
+  ]);
 });
 
 test("scanBoards fetches only enabled supported board sources and tags offers", async () => {

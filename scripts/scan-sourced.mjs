@@ -138,7 +138,7 @@ function searchListKey(config) {
 function isFetchableSearchSource(source) {
   if (!source || source.enabled === false) return false;
   if (source.source_type === "rss" || source.rssUrl) return true;
-  return source.source_type === "board" && isBoardProviderSupported(source.provider);
+  return ["ats", "board"].includes(source.source_type) && isBoardProviderSupported(source.provider);
 }
 
 function stampSearchSourceWatermark(config, sourceIndex, savedAt) {
@@ -204,7 +204,10 @@ function searchSourceTasks(searchSources) {
     if (source.source_type === "rss" || source.rssUrl) {
       rss.push({ kind: "rss", source, sourceIndex });
     }
-    if (source.source_type === "board" && isBoardProviderSupported(source.provider)) {
+    if (
+      ["ats", "board"].includes(source.source_type) &&
+      isBoardProviderSupported(source.provider)
+    ) {
       boards.push({ kind: "board", source, sourceIndex });
     }
   });

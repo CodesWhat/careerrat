@@ -38,12 +38,17 @@ import { sourceConfigGet, sourceConfigPut } from "../core/db/verbs/source-config
 import { buildHiringCafeUrl } from "../core/providers/hiringcafe.mjs";
 import { buildLinkedInSearchUrl, salaryBandForMinimumBase } from "../core/providers/linkedin.mjs";
 import {
+  addProviderSource,
   addSearchFromQuery,
   addSearchFromUrl,
   listSearches,
   validateConfig,
 } from "../core/providers/search-sources.mjs";
-import { inferProvider, isBoardProviderSupported } from "../core/scoring/sourced-scanner.mjs";
+import {
+  inferProvider,
+  isBoardProviderSupported,
+  isCompanyProviderSupported,
+} from "../core/scoring/sourced-scanner.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024; // 1MB — same cap the other M8 route modules use.
@@ -80,7 +85,7 @@ function readIndex(body, length) {
 function searchLegitimacy(search) {
   if (search?.auth === true) return "consent-required";
   if (search?.source_type === "rss" || search?.rssUrl) return "supported";
-  if (search?.source_type === "board" && isBoardProviderSupported(search.provider)) {
+  if (["ats", "board"].includes(search?.source_type) && isBoardProviderSupported(search.provider)) {
     return "supported";
   }
   if (["HiringCafe", "Lever"].includes(String(search?.provider || ""))) return "supported";
@@ -270,11 +275,16 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       const query = String(body?.query || "").trim();
       if (!query) badRequest("body.query is required");
       const current = readDbSearchSources(pathCtx);
-      const next = addSearchFromQuery(current, {
+      const provider = String(body?.provider || "HiringCafe").trim() || "HiringCafe";
+      const sourceOptions = {
         query,
         label: String(body?.label || "").trim() || undefined,
-        provider: String(body?.provider || "HiringCafe").trim() || "HiringCafe",
-      });
+        provider,
+      };
+      const next =
+        provider.toLowerCase() === "hiringcafe"
+          ? addSearchFromQuery(current, sourceOptions)
+          : addProviderSource(current, sourceOptions);
       sendJson(res, 200, { ok: true, ...validateAndWriteSearchConfig(pathCtx, next) });
     } catch (err) {
       sendSourceConfigError(res, err);
@@ -336,7 +346,13 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       const name = String(body?.name || "").trim();
       const url = String(body?.url || "").trim();
       if (!name || !url) badRequest("company name and board URL are required");
-      const provider = inferProvider({ careers_url: url });
+      const requestedProvider = String(body?.provider || "")
+        .trim()
+        .toLowerCase();
+      if (requestedProvider && !isCompanyProviderSupported(requestedProvider)) {
+        badRequest(`unsupported ATS provider — cannot scan with "${body.provider}"`);
+      }
+      const provider = requestedProvider || inferProvider({ careers_url: url });
       if (!provider) badRequest(`unsupported ATS host — cannot scan "${url}"`);
       const current = sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
       const companies = Array.isArray(current.tracked_companies)
@@ -356,6 +372,7 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
         ...previous,
         name,
         careers_url: url,
+        ...(requestedProvider ? { provider } : {}),
         enabled: body?.enabled !== false,
       };
       if (index >= 0) companies[index] = entry;

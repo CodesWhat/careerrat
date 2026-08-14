@@ -4,6 +4,7 @@ import { test } from "node:test";
 import { URL } from "node:url";
 import { buildHiringCafeUrl } from "../src/core/providers/hiringcafe.mjs";
 import {
+  addProviderSource,
   addSearchFromQuery,
   addSearchFromUrl,
   emptyConfig,
@@ -82,6 +83,69 @@ test("addSearchFromQuery throws on empty query", () => {
 });
 
 // ---------------------------------------------------------------------------
+// addProviderSource
+// ---------------------------------------------------------------------------
+
+test("addProviderSource creates a deterministic board source from a provider and query", () => {
+  const cfg = addProviderSource(emptyConfig(), {
+    provider: "RemoteOK",
+    query: "staff platform engineer",
+  });
+  assert.deepEqual(cfg.searches, [
+    {
+      provider: "remoteok",
+      source_type: "board",
+      label: "RemoteOK",
+      query: "staff platform engineer",
+      enabled: true,
+      recency: { mode: "since-last-run", safetyMinutes: 30 },
+    },
+  ]);
+  assert.equal(validateConfig(cfg, SCHEMA).valid, true);
+});
+
+test("addProviderSource creates an explicit ATS source for a branded provider URL", () => {
+  const url = "https://jobs.example.com/search";
+  const cfg = addProviderSource(emptyConfig(), {
+    provider: "phenom",
+    label: "Example careers",
+    url,
+  });
+  assert.deepEqual(cfg.searches, [
+    {
+      provider: "phenom",
+      source_type: "ats",
+      label: "Example careers",
+      name: "Example careers",
+      url,
+      enabled: true,
+      recency: { mode: "since-last-run", safetyMinutes: 30 },
+    },
+  ]);
+  assert.equal(validateConfig(cfg, SCHEMA).valid, true);
+});
+
+test("addProviderSource deduplicates provider and target", () => {
+  const cfg = addProviderSource(emptyConfig(), {
+    provider: "remoteok",
+    query: "staff engineer",
+  });
+  assert.equal(addProviderSource(cfg, { provider: "RemoteOK", query: "staff engineer" }), cfg);
+});
+
+test("addProviderSource rejects unsupported, unsafe, and incomplete sources", () => {
+  assert.throws(
+    () => addProviderSource(emptyConfig(), { provider: "not-real", query: "engineer" }),
+    /unsupported/i
+  );
+  assert.throws(
+    () => addProviderSource(emptyConfig(), { provider: "local-parser", query: "engineer" }),
+    /unsupported/i
+  );
+  assert.throws(() => addProviderSource(emptyConfig(), { provider: "remoteok" }), /query or URL/i);
+});
+
+// ---------------------------------------------------------------------------
 // addSearchFromUrl — HiringCafe
 // ---------------------------------------------------------------------------
 
@@ -128,6 +192,22 @@ test("addSearchFromUrl with LinkedIn URL validates against real schema", () => {
   const cfg = addSearchFromUrl(emptyConfig(), linkedinUrl);
   const result = validateConfig(cfg, SCHEMA);
   assert.ok(result.valid, `schema errors: ${JSON.stringify(result.errors)}`);
+});
+
+test("addSearchFromUrl turns a supported Career Ops URL into a deterministic ATS source", () => {
+  const url = "https://acme.bamboohr.com/careers";
+  const cfg = addSearchFromUrl(emptyConfig(), url, { label: "Acme careers" });
+  assert.deepEqual(cfg.searches, [
+    {
+      provider: "bamboohr",
+      source_type: "ats",
+      label: "Acme careers",
+      name: "Acme careers",
+      url,
+      enabled: true,
+    },
+  ]);
+  assert.equal(validateConfig(cfg, SCHEMA).valid, true);
 });
 
 test("addSearchFromUrl throws on unparseable URL", () => {

@@ -588,10 +588,10 @@ export function removeSearchSource(index) {
   });
 }
 
-export function saveCompanyBoard({ originalName, name, url, enabled = true }) {
+export function saveCompanyBoard({ originalName, name, url, provider, enabled = true }) {
   return apiFetch("/api/boards/company/save", {
     method: "POST",
-    body: JSON.stringify({ originalName, name, url, enabled }),
+    body: JSON.stringify({ originalName, name, url, provider, enabled }),
   });
 }
 

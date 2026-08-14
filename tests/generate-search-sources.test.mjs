@@ -408,3 +408,11 @@ test("buildSearchSources: source_catalog has aggregators, ats, remote_boards", (
     "RemoteVibeCodingJobs missing from aggregators"
   );
 });
+
+test("buildSearchSources: source_catalog exposes all public Career Ops providers", () => {
+  const result = buildSearchSources(targeting, profile);
+  assert.equal(result.source_catalog.deterministic_providers.length, 73);
+  assert.ok(result.source_catalog.deterministic_providers.includes("bamboohr"));
+  assert.ok(result.source_catalog.deterministic_providers.includes("workday"));
+  assert.equal(result.source_catalog.deterministic_providers.includes("local-parser"), false);
+});

@@ -65,6 +65,8 @@ describe("SourceMaintenanceView", () => {
     expect(html).toContain("Never scanned");
     expect(html).toContain("Import URL");
     expect(html).toContain("Add company board");
+    expect(html).toContain("Provider adapter (optional)");
+    expect(html).toContain("73 public adapters");
     expect(html).toContain("Disabled");
   });
 

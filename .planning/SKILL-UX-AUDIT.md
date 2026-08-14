@@ -195,12 +195,13 @@ those responsibilities.
 
 Snapshot on 2026-08-14:
 
-- CareerRat directly scans seven company ATS families: Ashby, Greenhouse, Lever,
-  Workable, SmartRecruiters, Recruitee, and Workday.
-- CareerRat also scans three broad public feeds: Remote OK, Remotive, and Working
-  Nomads, plus generic RSS.
-- Career Ops exposes 74 provider modules on its current `main` branch. That list is
-  the parity reference, not code to copy blindly.
+- CareerRat pins Career Ops commit `8be39e0934b83410276d66b541bf3a2edf3411cb`
+  and accounts for all 74 provider modules in `provider-parity.mjs`.
+- The 73 public-network adapters are implemented behind one CareerRat registry and
+  scanner boundary. `local-parser` is intentionally unsupported because it executes
+  user-configured local commands.
+- Recognized URLs infer their adapter automatically. Branded hosts can select an
+  explicit adapter through the CLI, API, or Settings source-maintenance surface.
 
 Free/public deterministic calls run before AI. Each imported provider requires a
 registry manifest, URL/host inference, normalized offer output, pagination and
@@ -208,7 +209,7 @@ recency behavior, liveness/error tests, dedupe stability, full-JD capture, and a
 app-visible source identity. Providers that need authentication or violate the
 local consent model stay behind the appropriate opt-in browser capability.
 
-Implementation waves:
+Implemented waves:
 
 1. shared provider contract, parity manifest, fixtures, and conformance suite;
 2. high-leverage ATS families, including BambooHR, Breezy, Comeet, Gem, Getro,
@@ -219,9 +220,11 @@ Implementation waves:
 5. parser-only/custom sources and authenticated providers behind explicit
    capability gates.
 
-Provider parity is complete only when the manifest accounts for every Career Ops
-provider as implemented, intentionally unsupported with a reason, or superseded by
-a more general tested adapter.
+The code-level parity gate is complete: all 73 implemented adapters load, their
+upstream offline provider contracts run against the vendored snapshot, and shared
+CareerRat tests cover transport, normalization, provenance, dedupe, and full-JD
+hydration. Packaged clean-home and returning-user acceptance remains part of the
+release gate below.
 
 ## Release gate
 

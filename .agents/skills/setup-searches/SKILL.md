@@ -50,10 +50,16 @@ Perform any curation the user requested (or all of (a)–(d) on initial setup):
 **(a) Add keyword searches** — one per title or per explicit user request:
 
 ```
-careerrat searches --add-query "<title or keyword>" [--label "<l>"] [--provider <provider>]
+careerrat searches --add-query "<title or keyword>" [--label "<l>"]
 ```
 
-> **Default provider:** if `--provider` is omitted, the CLI defaults to `HiringCafe`. For non-tech roles or when the user's `candidate.domain` does not map to HiringCafe, always pass `--provider <provider>` explicitly so the entry is not silently pinned to the wrong source.
+This is the HiringCafe query builder. To add a deterministic Career Ops adapter,
+inspect `careerrat searches --providers`, then use one of these instead:
+
+```
+careerrat searches --add-provider "<provider>" --query "<title or keyword>" [--label "<label>"]
+careerrat searches --add-provider "<provider>" --url "<branded board URL>" [--label "<label>"]
+```
 
 **(b) Import a pasted board URL** — when the user pastes a URL from any job board:
 
@@ -64,6 +70,8 @@ careerrat searches --add-url "<full URL>" [--label "<label>"]
 For hiring.cafe URLs: the embedded `searchState` and query-string filters are parsed and written into the `searchState` block verbatim. Do not strip, normalize, or drop query params.
 For `wellfound.com` URLs: routed to provider `Wellfound`, `source_type: browser` (Wellfound is a SPA — agent must use a browser tool for liveness checks and browsing).
 For `jobs.lever.co` or `api.lever.co` URLs: routed to provider `Lever`, `source_type: ats`; the company slug is derived from the URL path automatically.
+For any URL recognized by the pinned Career Ops registry: routed to its deterministic provider with `source_type: ats`.
+For an unrecognized branded host whose adapter is known: use `--add-provider <id> --url <url>` instead of importing it as a browser source.
 For other hosts: the entry becomes `source_type: browser`.
 
 Do not assume HiringCafe is the only importable provider. Any board URL a user pastes can be imported — label it clearly.
@@ -124,7 +132,7 @@ Use `careerrat searches` to review the current state before finalizing.
 
 Verify the auto-selected aggregator and board set is appropriate for the candidate's domain:
 
-- If the candidate is **not** in the domain that matches the aggregator (e.g. a trucking candidate with a tech RSS feed), disable or replace the aggregator entry manually via `careerrat searches --disable <index>` and add domain-appropriate boards via `--add-url` or `--add-query --provider <provider>`.
+- If the candidate is **not** in the domain that matches the aggregator (e.g. a trucking candidate with a tech RSS feed), disable or replace the aggregator entry via `careerrat searches --disable <index>` and add domain-appropriate boards via `--add-url` or `--add-provider`.
 - If the user mentions a board or aggregator they always want included: add it now, and apply the gate write-back below.
 
 **Auto-seeded portals (review these):**
@@ -144,8 +152,8 @@ source config already has more than the auto-generated baseline entries.
    and gets a note that no domain-specific vetted boards exist yet for that domain).
 3. Exclude rows already in the dedup set (any board whose root domain already appears in
    source config).
-4. Exclude rows with Status `planned` that have no provider implementation — these cannot be
-   added via the CLI yet. Note them to the user as "coming soon" if they look relevant.
+4. Verify support with `careerrat searches --providers --json`. Exclude any row that is not
+   implemented; never infer support from prose alone.
 5. Present the filtered list as a pick-list:
 
    ```
@@ -168,7 +176,7 @@ source config already has more than the auto-generated baseline entries.
    careerrat searches --add-url "<url>" --label "<label>"
    ```
 
-   For niche boards with no canonical search URL yet, use `--add-query "<role family keyword>" --provider <provider>` if a provider key exists, or note that the board needs a URL once the provider is implemented and skip it.
+   For niche boards with no canonical search URL yet, use `--add-provider "<provider>" --query "<role family keyword>"` when the provider is implemented. Otherwise, note that the source needs an adapter and skip it.
 
 7. If the candidate's domain has no matching registry boards beyond the general aggregators
    (which are already auto-generated), say so explicitly and do not prompt for picks.
@@ -246,7 +254,9 @@ discovery.
 | Generate baseline from targeting | `careerrat searches --from-targeting` |
 | See current searches | `careerrat searches` |
 | See current searches (JSON) | `careerrat searches --json` — emits `{ exists: bool, searches: [ { index, provider, label, target, enabled, recency? } ] }` |
-| Add a keyword search | `careerrat searches --add-query "<query>" [--label "<label>"] [--provider <p>]` |
+| List deterministic providers | `careerrat searches --providers` |
+| Add a HiringCafe keyword search | `careerrat searches --add-query "<query>" [--label "<label>"]` |
+| Add a deterministic provider query or branded URL | `careerrat searches --add-provider "<id>" [--query "<query>" | --url "<url>"] [--label "<label>"]` |
 | Import a pasted board URL | `careerrat searches --add-url "<url>" [--label "<label>"]` |
 | Enable a search | `careerrat searches --enable <index or label>` |
 | Disable a search | `careerrat searches --disable <index or label>` |

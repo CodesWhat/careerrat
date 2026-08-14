@@ -90,34 +90,24 @@ Use it as both:
 
 ## How to add a source provider
 
-Touch these files in order, replacing `<name>` with the provider key (lowercase, no spaces):
+CareerRat vendors the public-network provider contract from Career Ops commit
+`8be39e0934b83410276d66b541bf3a2edf3411cb`. The canonical inventory is
+`src/core/providers/provider-parity.mjs`; inspect it with
+`careerrat searches --providers` or `careerrat searches --providers --json`.
 
-1. **`src/core/providers/<name>.mjs`** — export a `buildXxxUrl(source)` function that
-   returns a string URL from a source config object. See `lever.mjs` or `wellfound.mjs`
-   for a pure URL-builder template, or `hiringcafe.mjs` for one that also computes
-   recency state.
+To add one of those providers to a candidate workspace:
 
-2. **`src/core/providers/source-url.mjs`** — import the builder and add an `if
-   (provider === "<name>")` branch inside `buildSourceUrl`. Return
-   `{ url, searchState: {}, recency: null }` (or the full recency shape if applicable).
+- Paste a recognized board URL with `careerrat searches --add-url "<url>"`. Known
+  hosts are inferred and become deterministic ATS sources automatically.
+- Add a broad provider with `careerrat searches --add-provider "<id>" --query
+  "<role or keyword>"`.
+- Add a branded/custom-domain board whose adapter is known with `careerrat
+  searches --add-provider "<id>" --url "<url>"`, or a company board with
+  `careerrat companies --add "<name>" --url "<url>" --provider "<id>" --write`.
 
-3. **`scripts/capture-search-sources.mjs`** — two additions:
-   - In `inferProviderFromUrl`: add an `if (raw.includes("<domain>")) return "<name>";`
-     line so bare URLs are auto-detected.
-   - In `extractOffers`: add a branch for the provider. For SPA boards, add a
-     `page.evaluate(extractXxx)` DOM extractor (see `extractHiringCafe` or
-     `extractWellfound`). For boards with a public JSON API, fetch directly instead
-     (see `fetchLeverPostings` for the pattern).
-
-4. **`src/core/liveness/job-link-checker.mjs`** — if the board renders via JavaScript
-   and a plain HTTP fetch will return a short shell (or 403), add the hostname(s) to the
-   array inside `isSpaJobHost`. Optionally extend `spaEscalation` if the provider has a
-   machine-readable API to use as a liveness fallback.
-
-5. **`src/core/scoring/sourced-scanner.mjs`** *(only if the provider has a company-level
-   ATS API)* — add a `fetchXxx(entry, fetchImpl)` function, register it in
-   `fetchProvider`'s dispatch, and add the URL pattern to `inferProvider` so company
-   entries can be detected automatically from a `careers_url`.
+Adding a new adapter to CareerRat itself requires a parity-manifest entry, the
+provider module, upstream/offline conformance fixtures, CareerRat wrapper tests,
+URL inference where possible, full-JD hydration coverage, and documentation.
 
 ## Curated Board Registry
 
@@ -145,13 +135,13 @@ never written here.
 | Lever | general | ATS | high | implemented | `src/core/providers/lever.mjs`; JSON API in `capture-search-sources.mjs`; company-level ATS API |
 | Workable | general | ATS | high | implemented | `fetchWorkable` in `sourced-scanner.mjs`; company-level ATS API |
 | SmartRecruiters | general | ATS | high | implemented | `fetchSmartRecruiters` in `sourced-scanner.mjs`; company-level ATS API |
-| Recruitee | general | ATS | medium | planned | company-level ATS; no provider impl yet |
-| Workday | general | ATS | medium | planned | company-level ATS; no provider impl yet |
-| RemoteOK | remote | niche-board | high | planned | remote-only; RSS feed available |
-| Jobicy | remote | niche-board | high | planned | remote-only; RSS feed available |
-| Working Nomads | remote | niche-board | high | planned | remote-only; curated listings |
-| We Work Remotely | remote | niche-board | high | planned | remote-only; well-established |
-| Remotive | remote | niche-board | high | planned | remote-only; RSS feed available |
+| Recruitee | general | ATS | high | implemented | Career Ops deterministic adapter; company-level public API |
+| Workday | general | ATS | high | implemented | Career Ops deterministic adapter with bounded pagination |
+| RemoteOK | remote | niche-board | high | implemented | public board-wide API |
+| Jobicy | remote | niche-board | high | implemented | public board API |
+| Working Nomads | remote | niche-board | high | implemented | public board-wide API |
+| We Work Remotely | remote | niche-board | high | implemented | public RSS adapter |
+| Remotive | remote | niche-board | high | implemented | public board-wide API |
 
 ### Registry legend
 
@@ -169,40 +159,20 @@ never written here.
 
 ---
 
-## Initial Catalog (legacy reference)
+## Deterministic provider parity
 
-The table above supersedes this list. Kept briefly for cross-reference until all
-entries are confirmed migrated.
+The curated table above is a starter menu, not the complete runtime inventory.
+CareerRat accounts for all 74 providers in the pinned Career Ops snapshot: 73
+public-network adapters are implemented, and `local-parser` is intentionally
+unsupported because it executes user-configured local commands rather than making
+a public network call. The npm package includes the adapter sources, MIT license,
+and parity manifest.
 
-Aggregators and broad sources:
-
-- HiringCafe — ✓ implemented (`src/core/providers/hiringcafe.mjs`, DOM extractor in `capture-search-sources.mjs`)
-- Wellfound — ✓ implemented (`src/core/providers/wellfound.mjs`, DOM extractor in `capture-search-sources.mjs`; SPA host in `isSpaJobHost`)
-- Remote Vibe Coding Jobs — ✓ implemented (URL builder inline in `source-url.mjs`, feeds via `src/core/providers/rss.mjs`)
-- LinkedIn — ✓ implemented (DOM extractor `extractLinkedIn` in `capture-search-sources.mjs`; disabled by default, requires `--include-disabled`)
-- Google Jobs — planned
-
-Boards discovered via `research-boards` are domain-specific to whoever runs it, so they are
-NOT listed here (this file ships publicly). They persist to the user's own gitignored
-`config/search-sources.yml` and `workspace/research/` log instead.
-
-ATS and company APIs:
-
-- Ashby — ✓ implemented (`fetchAshby` in `sourced-scanner.mjs`; SPA host in `isSpaJobHost`)
-- Greenhouse — ✓ implemented (`fetchGreenhouse` in `sourced-scanner.mjs`)
-- Lever — ✓ implemented (`src/core/providers/lever.mjs`; `fetchLeverPostings` JSON API in `capture-search-sources.mjs`; `fetchLever` in `sourced-scanner.mjs`; SPA host in `isSpaJobHost`)
-- Workable — ✓ implemented (`fetchWorkable` in `sourced-scanner.mjs`)
-- SmartRecruiters — ✓ implemented (`fetchSmartRecruiters` in `sourced-scanner.mjs`)
-- Recruitee — planned
-- Workday — planned
-
-Remote boards:
-
-- RemoteOK — planned
-- Jobicy — planned
-- Working Nomads — planned
-- We Work Remotely — planned
-- Remotive — planned
+Every provider runs through the same CareerRat boundary: bounded HTTP transport,
+normalized offers, source provenance, scanner dedupe, and immediate full-JD
+hydration when a list API only returns metadata. AI/browser discovery remains the
+fallback for ambiguous custom pages, authentication gates, and providers outside
+the manifest.
 
 ## State
 

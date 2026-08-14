@@ -50,7 +50,10 @@ If `doctor` says the next discovery step is `setup-searches`, `research-boards`,
 overrides and asks for a partial sweep. If source config is missing or has no enabled
 entries, stop and run `setup-searches` first:
 
-> **Available portals:** Wellfound (`wellfound.com`) is auto-seeded for tech-domain candidates; Lever (`jobs.lever.co`) is seeded one entry per company in `targeting.tracked_companies`. Pasting a `wellfound.com` or `jobs.lever.co` URL via `setup-searches` routes it automatically to the correct provider.
+> **Available portals:** the baseline auto-seeds domain-appropriate sources, and
+> `careerrat searches --providers` lists all 73 public deterministic adapters.
+> `setup-searches` auto-detects recognized pasted board URLs and supports explicit
+> adapter selection for branded hosts.
 
 ```
 careerrat searches

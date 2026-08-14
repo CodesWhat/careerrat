@@ -273,6 +273,27 @@ test("caches API URLs for Recruitee and Workday supported ATS hints", async () =
   }
 });
 
+test("resolves newly supported Career Ops ATS hints without requiring a hand-built API URL", async () => {
+  const repoRoot = setupRepo();
+  const result = await resolveCompanyBoard({
+    repoRoot,
+    seed: { name: "Acme Bamboo", domain_hint: "https://acme.bamboohr.com/careers" },
+    fetchImpl: rejectingFetch(),
+    lookupHost: lookupHostFor({ "acme.bamboohr.com": "203.0.113.31" }),
+    now: NOW,
+  });
+
+  assert.equal(result.status, "supported_ats");
+  assert.equal(result.atsProvider, "bamboohr");
+  assert.equal(result.jobBoardUrl, "https://acme.bamboohr.com/careers");
+  assert.equal(result.apiUrl, "");
+  assert.equal(result.promotable, true);
+
+  const cached = companyBoardResolutionGet({ repoRoot, companyKey: "acme-bamboo" }).resolution;
+  assert.equal(cached.ats_provider, "bamboohr");
+  assert.equal(cached.job_board_url, "https://acme.bamboohr.com/careers");
+});
+
 test("discovers a supported ATS board from public homepage and careers links within the redirect cap", async () => {
   const repoRoot = setupRepo();
   const fetchImpl = fetchFrom({

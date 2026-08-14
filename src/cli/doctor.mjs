@@ -527,7 +527,7 @@ function printCompanyAtsReadiness(readiness) {
       "- Company ATS scans: not configured - ask your agent to run discover-companies, or add boards with `careerrat companies --add`."
     );
     console.log(
-      "  This is the path that wires employer boards such as Ashby, Greenhouse, Lever, Workable, and SmartRecruiters."
+      "  This wires employer boards through CareerRat's 73 public deterministic provider adapters."
     );
     return;
   }

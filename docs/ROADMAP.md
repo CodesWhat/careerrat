@@ -117,11 +117,12 @@ nurse, a driver, and an engineer each bring their own config.
   BATNA framing, and multi-round sequencing across the written (`email-comms`) and
   live (`interview-prep`) channels, anchored to market benchmarks and never
   fabricating an offer, number, or deadline.
-- **Deterministic source foundation** — direct scanners for Ashby, Greenhouse, Lever,
-  Workable, SmartRecruiters, Recruitee, and Workday; broad public feeds for Remote OK,
-  Remotive, and Working Nomads; generic RSS; plus authenticated/manual provider modules
-  where a public feed is not available. Expansion to the full Career Ops provider
-  reference is part of the active product coherence gate below.
+- **Deterministic source foundation** — all 73 public-network adapters from the pinned
+  Career Ops provider snapshot run through CareerRat's shared scanner boundary, including
+  company ATS APIs, broad public APIs/RSS, regional boards, and niche sources. The parity
+  manifest records the one intentional exclusion: `local-parser`, which executes arbitrary
+  user-configured local commands. Generic RSS and opt-in authenticated/manual sources remain
+  available where a public adapter is not appropriate.
 - **Opt-in browser & mail automation** — session-based automation you switch on per
   capability, using your own browser login with no stored credentials: application-status
   sync (`sync-status`), authenticated search, in-platform message ingest
@@ -346,11 +347,13 @@ The current build order is:
    contextual shortcut where useful, deterministic entity resolution, visible work, safe decisions,
    a durable linked result, and the next handoff. Internal extraction helpers stay internal but must
    expose progress and errors through the invoking workflow.
-5. **Free/public source parity before AI** — the current seven ATS scanners, three broad feeds, and
-   RSS grow toward an accounted-for manifest of all 74 provider modules in Career Ops. Each adapter
-   needs provider inference, normalization, pagination/recency, liveness fixtures, dedupe, full-JD
-   capture, and source provenance. AI remains the fallback for discovery gaps and ambiguous/custom
-   pages, not the default repeated scan path.
+5. **Free/public source parity before AI (implemented, acceptance pending)** — the pinned manifest
+   accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
+   deterministic registry, and `local-parser` is intentionally excluded with a safety reason.
+   URL inference, explicit branded-host selection, normalized output, upstream conformance fixtures,
+   scanner dedupe, full-JD hydration, and source provenance are wired. AI remains the fallback for
+   discovery gaps and ambiguous/custom pages, not the default repeated scan path. The fresh
+   acceptance pass below still has to prove the packaged and UI-facing paths.
 6. **Fresh acceptance pass** — rerun clean-home and returning-user QA across every skill-to-screen
    contract, then web, packaged Electron, npm, lint, build, and distribution gates. The prior 74
    findings stay closed; this gate tracks the newly exposed cross-workflow gaps honestly.

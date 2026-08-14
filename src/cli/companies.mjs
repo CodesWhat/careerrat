@@ -5,6 +5,7 @@
 //   --list (default)         Print tracked companies as a numbered list with providers.
 //   --add "<name>" --url "<careers_url>"
 //                            Append a company (dry-run by default, --write to commit).
+//       [--provider "<id>"] Provider override for branded Career Ops ATS hosts.
 //   --remove "<name>"        Remove by name (dry-run by default, --write to commit).
 //   --json                   Machine-readable output for any mode.
 //   --help / -h              Show usage.
@@ -14,7 +15,12 @@ import { fileURLToPath } from "node:url";
 import { dbExists } from "../core/db/connection.mjs";
 import { companyAtsRemove, companyAtsUpsert, sourceConfigGet } from "../core/db/verbs.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
-import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
+import { CAREER_OPS_UPSTREAM } from "../core/providers/provider-parity.mjs";
+import {
+  inferProvider,
+  isCompanyProviderSupported,
+  loadScannerConfig,
+} from "../core/scoring/sourced-scanner.mjs";
 
 const args = process.argv.slice(2);
 const root = optValueFrom(args, "--root") || join(fileURLToPath(new URL("../..", import.meta.url)));
@@ -22,16 +28,7 @@ const pathCtx = { repoRoot: root };
 const CONFIG_REL = "config/sourced-scan.json";
 const CONFIG_PATH = userPath(pathCtx, CONFIG_REL);
 
-const SUPPORTED_HOSTS = [
-  "jobs.ashbyhq.com",
-  "job-boards.greenhouse.io",
-  "boards.greenhouse.io",
-  "jobs.lever.co",
-  "apply.workable.com",
-  "careers.smartrecruiters.com",
-  "jobs.smartrecruiters.com",
-];
-const ATS_FAMILIES = "Ashby, Greenhouse, Lever, Workable, or SmartRecruiters";
+const PUBLIC_PROVIDER_COUNT = CAREER_OPS_UPSTREAM.providerCount - 1;
 
 const json = args.includes("--json");
 const write = args.includes("--write");
@@ -86,7 +83,7 @@ function runList() {
       "Company ATS scans are not wired: Ask your agent to run discover-companies next to find target employers automatically, or add a scannable ATS board manually."
     );
     console.log(
-      `Until this is populated, search-jobs can use broad board searches but will not scan company ATS boards like ${ATS_FAMILIES}.`
+      `Until this is populated, search-jobs can use broad board searches but will not scan company ATS boards through the ${PUBLIC_PROVIDER_COUNT} public Career Ops adapters.`
     );
     console.log(
       `Add one: careerrat companies --add "Acme" --url "https://jobs.ashbyhq.com/acme" --write`
@@ -108,16 +105,28 @@ function runList() {
 function runAdd() {
   const name = optValue("--add");
   const url = optValue("--url");
+  const requestedProvider = optValue("--provider");
 
   if (!name || !url) {
-    console.error('Usage: careerrat companies --add "<name>" --url "<careers_url>" [--write]');
+    console.error(
+      'Usage: careerrat companies --add "<name>" --url "<careers_url>" [--provider "<id>"] [--write]'
+    );
     return 2;
   }
 
-  const provider = inferProvider({ careers_url: url });
+  const provider = requestedProvider
+    ? String(requestedProvider).trim().toLowerCase()
+    : inferProvider({ careers_url: url });
+  if (requestedProvider && !isCompanyProviderSupported(provider)) {
+    console.error(`Unsupported provider — cannot scan with "${requestedProvider}".`);
+    console.error(`CareerRat supports ${PUBLIC_PROVIDER_COUNT} public Career Ops adapters.`);
+    return 2;
+  }
   if (!provider) {
     console.error(`Unsupported ATS host — cannot scan "${url}".`);
-    console.error(`Supported hosts: ${SUPPORTED_HOSTS.join(", ")}`);
+    console.error(
+      `CareerRat supports ${PUBLIC_PROVIDER_COUNT} public Career Ops adapters. For a branded host, pass its known adapter with --provider.`
+    );
     return 2;
   }
 
@@ -145,13 +154,15 @@ function runAdd() {
     return 0;
   }
 
-  const entry = { name, careers_url: url };
+  const entry = {
+    name,
+    careers_url: url,
+    ...(requestedProvider ? { provider } : {}),
+  };
 
   if (!write) {
     if (json) {
-      console.log(
-        JSON.stringify({ status: "dry-run", would_add: { name, careers_url: url, provider } })
-      );
+      console.log(JSON.stringify({ status: "dry-run", would_add: { ...entry, provider } }));
     } else {
       console.log(`Dry run — would add: ${name} — ${url} (${provider})`);
       console.log("Pass --write to commit.");
@@ -316,12 +327,12 @@ function printHelp() {
 Usage:
   careerrat companies                                        List tracked companies (default)
   careerrat companies --add "<name>" --url "<url>"           Dry-run add (print what would be added)
-  careerrat companies --add "<name>" --url "<url>" --write   Append a company and save
+  careerrat companies --add "<name>" --url "<url>" [--provider "<id>"] --write
   careerrat companies --remove "<name>"                      Dry-run remove
   careerrat companies --remove "<name>" --write              Remove a company and save
   careerrat companies --json                                 Machine-readable output for any mode
 
-Supported ATS hosts: ${SUPPORTED_HOSTS.join(", ")}
+Supported provider catalog: ${PUBLIC_PROVIDER_COUNT} public Career Ops adapters.
 
-Only scannable ATS URLs are accepted. Non-scannable boards are rejected at --add time.`);
+Only scannable ATS URLs are accepted. Auto-detected hosts need no provider flag; branded hosts can pass an explicit supported provider.`);
 }
