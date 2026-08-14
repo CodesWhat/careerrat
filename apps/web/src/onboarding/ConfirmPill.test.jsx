@@ -133,12 +133,14 @@ describe("ConfirmPill — single-click kinds", () => {
     expect(textOf(byClass(notAuthorized, "confirm-pill__label")[0])).toBe("Not authorized");
   });
 
-  it("company_add: label is code-owned ('Track company') plus the proposed name", () => {
+  it("company_add: saves an example without implying it limits discovery", () => {
     const tree = render({
       block: { kind: "company_add", payload: { name: "Anthropic" }, status: "pending" },
       onConfirm: vi.fn(),
     });
-    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Track company · Anthropic");
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe(
+      "Use as focus example · Anthropic"
+    );
   });
 
   it("companies_suggest: fixed code-owned label, no payload needed", () => {

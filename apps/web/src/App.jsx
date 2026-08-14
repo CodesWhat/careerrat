@@ -9,7 +9,7 @@ import { getOnboardState } from "./lib/api.js";
 import { LibraryPage } from "./library/LibraryPage.jsx";
 import { NetworkPage } from "./network/NetworkPage.jsx";
 import { OnboardingPage } from "./onboarding/OnboardingPage.jsx";
-import { setupIsComplete } from "./onboarding/onboardingSetup.js";
+import { setupCanGraduate } from "./onboarding/onboardingSetup.js";
 import { ComingSoonPage } from "./pages/ComingSoonPage.jsx";
 import { DashboardPage } from "./pages/DashboardPage.jsx";
 import { SettingsPage } from "./settings/SettingsPage.jsx";
@@ -66,7 +66,7 @@ export function App() {
       .then((state) => {
         if (cancelled) return;
         setGate(
-          setupIsComplete(state) ? RELEASED : { status: "blocked", forPath: location.pathname }
+          setupCanGraduate(state) ? RELEASED : { status: "blocked", forPath: location.pathname }
         );
       })
       .catch(() => {

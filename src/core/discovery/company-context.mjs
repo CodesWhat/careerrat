@@ -69,6 +69,26 @@ function compensationFloorsFromProfile(profile = {}) {
   return output;
 }
 
+function companyPreferencesFromTargeting(targeting = {}) {
+  const input = targeting.company_preferences || {};
+  const output = {};
+  if (input.confirmed === true) output.confirmed = true;
+  for (const key of [
+    "industries",
+    "organization_types",
+    "sizes",
+    "stages",
+    "business_models",
+    "values",
+    "geographies",
+    "examples",
+  ]) {
+    const values = compactStrings(input[key]);
+    if (values.length) output[key] = values;
+  }
+  return output;
+}
+
 function readDbRows({ repoRoot, env }, table) {
   const db = requireDb({ repoRoot, env });
   return db
@@ -156,6 +176,7 @@ export function buildCompanySeedContext({ repoRoot, env = process.env } = {}) {
     locationPosture: locationPostureFromProfile(profile),
     keepSignals: compactStrings(targeting.keep_signals),
     cutSignals: compactStrings(targeting.cut_signals),
+    companyPreferences: companyPreferencesFromTargeting(targeting),
     excludedCompanies,
     trackedCompanies,
     applications,

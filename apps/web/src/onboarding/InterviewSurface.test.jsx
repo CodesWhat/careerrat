@@ -1742,11 +1742,17 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     });
   });
 
-  it("company_add pill confirm unions the new name into tracked_companies (R2, never a replace)", async () => {
+  it("company_add pill confirm unions the new name into focus examples without narrowing discovery", async () => {
     api.findChatBySkill.mockResolvedValue({ chatId: "resumed-1", state: "running" });
     api.saveCandidateFile.mockResolvedValue({ ok: true });
     api.getOnboardState.mockResolvedValue(
-      stateFixture({ data: { targeting: { tracked_companies: ["Stripe"] } } })
+      stateFixture({
+        data: {
+          targeting: {
+            company_preferences: { confirmed: true, examples: ["Stripe"] },
+          },
+        },
+      })
     );
     render({ runtime: RUNTIME });
     await runEffects();
@@ -1764,7 +1770,10 @@ describe("InterviewSurface — confirm blocks (Lane A)", () => {
     await flush();
 
     expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
-      tracked_companies: ["Stripe", "Anthropic"],
+      company_preferences: {
+        confirmed: true,
+        examples: ["Stripe", "Anthropic"],
+      },
     });
   });
 
@@ -2115,7 +2124,33 @@ describe("conversationNeedsAttention", () => {
 });
 
 describe("InterviewSurface — completion screen (3e)", () => {
-  it("does not abandon pending confirmations when the canonical checklist reaches 8 of 8", async () => {
+  it("starts the first search as soon as targeting is search-ready, before the interview is complete", async () => {
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({
+        doneKeys: ["engine", "resume", "roles", "quickFacts"],
+        complete: false,
+        data: { setup: { readiness: { search_ready: true } } },
+      })
+    );
+    api.startFirstSearchRun.mockResolvedValue({
+      ok: true,
+      reused: false,
+      run: { id: "early-first-run", status: "running" },
+      sources: { deterministicSources: { attempted: 3 } },
+    });
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    let tree = render({ runtime: RUNTIME });
+    await runEffects();
+    await flush();
+    tree = render({ runtime: RUNTIME });
+
+    expect(api.startFirstSearchRun).toHaveBeenCalledTimes(1);
+    expect(textOf(byTag(tree, "h1"))).toBe("This is Paul.");
+  });
+
+  it("does not abandon pending confirmations while starting source work in the background", async () => {
     api.getOnboardState.mockResolvedValue(
       stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
     );
@@ -2137,6 +2172,10 @@ describe("InterviewSurface — completion screen (3e)", () => {
         ],
       },
     });
+    api.startFirstSearchRun.mockResolvedValue({
+      run: { id: "pending-confirm-run", status: "running" },
+      sources: { deterministicSources: { attempted: 2 } },
+    });
 
     render({ runtime: RUNTIME });
     await runEffects();
@@ -2148,10 +2187,10 @@ describe("InterviewSurface — completion screen (3e)", () => {
     expect(textOf(tree)).toContain("Any role families to exclude?");
     expect(visit(tree, (node) => node.type === "mock-confirm-pill")).toHaveLength(1);
     expect(byTag(tree, "h1")).toBeUndefined();
-    expect(api.startFirstSearchRun).not.toHaveBeenCalled();
+    expect(api.startFirstSearchRun).toHaveBeenCalledTimes(1);
   });
 
-  it("shows saved setup values and starts guided source discovery only after a click", async () => {
+  it("shows saved setup values and keeps guided source expansion optional after search starts", async () => {
     const completeState = stateFixture({
       doneKeys: ALL_SETUP_KEYS,
       complete: true,
@@ -2173,7 +2212,13 @@ describe("InterviewSurface — completion screen (3e)", () => {
         },
         evidence: { claims: [{ claim: "Shipped an agent pipeline" }] },
         sourcing: {
-          firstSearchRun: { ok: true, purpose: "first-search", status: "not_started", run: null },
+          sourceSetup: { deterministicSources: { attempted: 2 } },
+          firstSearchRun: {
+            ok: true,
+            purpose: "first-search",
+            status: "running",
+            run: { id: "first-run-active", status: "running" },
+          },
         },
       },
     });
@@ -2200,14 +2245,14 @@ describe("InterviewSurface — completion screen (3e)", () => {
 
     expect(textOf(byClass(tree, "onboarding-app__status")[0])).toBe("SETUP · 8 OF 8 · DONE");
     expect(textOf(byTag(tree, "h1"))).toBe("CareerRat is ready.");
-    expect(textOf(tree)).toContain("Next, choose where CareerRat should look.");
+    expect(textOf(tree)).toContain("the first search is underway");
     expect(api.startFirstSearchRun).not.toHaveBeenCalled();
     expect(api.startDiscoveryQuickStart).not.toHaveBeenCalled();
     expect(visit(tree, (n) => n.type === "mock-ask-bar")).toHaveLength(0);
 
     const start = visit(
       tree,
-      (node) => node.type === "button" && textOf(node) === "Set up search sources"
+      (node) => node.type === "button" && textOf(node) === "Add more search sources"
     )[0];
     await start.props.onClick();
     await flush();
@@ -2245,14 +2290,28 @@ describe("InterviewSurface — completion screen (3e)", () => {
     tree = render({ runtime: RUNTIME });
     const disclosure = byClass(tree, "onboarding-done__disclosure")[0];
     expect(textOf(disclosure)).toContain("Roles: Applied AI Engineer");
-    expect(textOf(disclosure)).toContain("Companies: Anthropic");
+    expect(textOf(disclosure)).toContain(
+      "Company focus: Tracked sources: Anthropic · Broad discovery on"
+    );
     expect(textOf(disclosure)).toContain("Quick facts: Jamie Rivera");
     expect(textOf(disclosure)).not.toContain("Roles: done");
   });
 
   it("surfaces a failed discovery handoff and never starts a job sweep", async () => {
     api.getOnboardState.mockResolvedValue(
-      stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+      stateFixture({
+        doneKeys: ALL_SETUP_KEYS,
+        complete: true,
+        data: {
+          sourcing: {
+            sourceSetup: { deterministicSources: { attempted: 0 } },
+            firstSearchRun: {
+              status: "failed",
+              run: { status: "failed", error: { message: "No usable sources yet." } },
+            },
+          },
+        },
+      })
     );
     api.startDiscoveryQuickStart.mockRejectedValue(new Error("discovery unavailable"));
 
@@ -2264,7 +2323,7 @@ describe("InterviewSurface — completion screen (3e)", () => {
     tree = render({ runtime: RUNTIME });
     const start = visit(
       tree,
-      (node) => node.type === "button" && textOf(node) === "Set up search sources"
+      (node) => node.type === "button" && textOf(node) === "Set up sources with Paul"
     )[0];
     await start.props.onClick();
     await flush();
@@ -2276,7 +2335,19 @@ describe("InterviewSurface — completion screen (3e)", () => {
 
   it("resumes completed discovery at an explicit first-search button", async () => {
     api.getOnboardState.mockResolvedValue(
-      stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+      stateFixture({
+        doneKeys: ALL_SETUP_KEYS,
+        complete: true,
+        data: {
+          sourcing: {
+            sourceSetup: { deterministicSources: { attempted: 0 } },
+            firstSearchRun: {
+              status: "failed",
+              run: { status: "failed", error: { message: "No usable sources yet." } },
+            },
+          },
+        },
+      })
     );
     api.startDiscoveryQuickStart.mockResolvedValue({
       readyForFirstSearch: true,
@@ -2298,7 +2369,7 @@ describe("InterviewSurface — completion screen (3e)", () => {
 
     await visit(
       tree,
-      (node) => node.type === "button" && textOf(node) === "Set up search sources"
+      (node) => node.type === "button" && textOf(node) === "Set up sources with Paul"
     )[0].props.onClick();
     await flush();
     tree = render({ runtime: RUNTIME });
@@ -2317,7 +2388,19 @@ describe("InterviewSurface — completion screen (3e)", () => {
 
   it("starts a post-discovery refresh when an older first search already completed", async () => {
     api.getOnboardState.mockResolvedValue(
-      stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+      stateFixture({
+        doneKeys: ALL_SETUP_KEYS,
+        complete: true,
+        data: {
+          sourcing: {
+            sourceSetup: { deterministicSources: { attempted: 2 } },
+            firstSearchRun: {
+              status: "completed",
+              run: { id: "old-first-run", status: "completed" },
+            },
+          },
+        },
+      })
     );
     api.startDiscoveryQuickStart.mockResolvedValue({
       readyForFirstSearch: true,
@@ -2344,7 +2427,7 @@ describe("InterviewSurface — completion screen (3e)", () => {
 
     await visit(
       tree,
-      (node) => node.type === "button" && textOf(node) === "Set up search sources"
+      (node) => node.type === "button" && textOf(node) === "Add more search sources"
     )[0].props.onClick();
     await flush();
     tree = render({ runtime: RUNTIME });
@@ -2360,19 +2443,109 @@ describe("InterviewSurface — completion screen (3e)", () => {
     expect(textOf(tree)).toContain("A new search started with your approved sources");
   });
 
-  // Without this link the completion screen is a dead end: App.jsx's setup
-  // gate sends every route here until setup reads complete, so finishing
-  // setup would strand the user on a screen with no way into the app but
-  // hand-editing the URL. Asserts `to` reached the DOM (the mocked Link
-  // renders <a href={to}>) rather than a raw href that would resolve
-  // outside the BrowserRouter basename.
-  it("offers a way into the app once setup is complete", async () => {
+  it("does not offer the dashboard until a usable first search is running", async () => {
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+    );
+    api.startFirstSearchRun.mockResolvedValue({
+      run: { status: "failed", error: { message: "No usable sources yet." } },
+      sources: { deterministicSources: { attempted: 0 } },
+    });
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+    await runEffects();
+    await flush();
+    const tree = render({ runtime: RUNTIME });
+
+    expect(visit(tree, (n) => n.type === "a" && n.props?.href === "/")).toHaveLength(0);
+    expect(byTag(tree, "inline-alert").props.message).toBe("No usable sources yet.");
+    const pause = visit(tree, (n) => n.type === "button" && textOf(n) === "Pause setup")[0];
+    expect(pause).toBeTruthy();
+    await pause.props.onClick();
+    expect(api.saveOnboardingDraft).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draftSeeds: expect.objectContaining({
+          sourcingPause: expect.objectContaining({
+            paused: true,
+            reason: "No usable sources yet.",
+          }),
+        }),
+      })
+    );
+  });
+
+  it("restores a paused source checkpoint and resumes from that exact step", async () => {
+    api.getOnboardingDraft.mockResolvedValue({
+      draft: {
+        transcript: [],
+        draftSeeds: {
+          sourcingPause: {
+            paused: true,
+            reason: "Company boards need review.",
+            pausedAt: "2026-08-14T20:00:00.000Z",
+          },
+        },
+      },
+    });
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({
+        doneKeys: ALL_SETUP_KEYS,
+        complete: true,
+        data: {
+          sourcing: {
+            sourceSetup: { deterministicSources: { attempted: 0 } },
+            firstSearchRun: {
+              status: "failed",
+              run: { status: "failed", error: { message: "Company boards need review." } },
+            },
+          },
+        },
+      })
+    );
+    api.startFirstSearchRun.mockResolvedValue({
+      run: { id: "resumed-first-run", status: "running" },
+      sources: { deterministicSources: { attempted: 1 } },
+    });
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    let tree = render({ runtime: RUNTIME });
+    await runEffects();
+    await flush();
+    tree = render({ runtime: RUNTIME });
+
+    expect(api.startFirstSearchRun).not.toHaveBeenCalled();
+    expect(textOf(tree)).toContain("Setup paused at search setup. Company boards need review.");
+    const resume = visit(tree, (n) => n.type === "button" && textOf(n) === "Resume setup")[0];
+    await resume.props.onClick();
+
+    expect(api.saveOnboardingDraft).toHaveBeenCalledWith({ draftSeeds: {}, transcript: [] });
+    expect(api.startFirstSearchRun).toHaveBeenCalledTimes(1);
+  });
+
+  // The dashboard only unlocks after the server confirms both sides of the
+  // graduation contract: at least one deterministic source and a running or
+  // completed first-search run.
+  it("offers a way into the app once setup and the first search are ready", async () => {
     vi.useFakeTimers();
     try {
       api.getOnboardState.mockResolvedValue(
-        stateFixture({ doneKeys: ALL_SETUP_KEYS, complete: true })
+        stateFixture({
+          doneKeys: ALL_SETUP_KEYS,
+          complete: true,
+          data: {
+            sourcing: {
+              sourceSetup: { deterministicSources: { attempted: 2 } },
+              firstSearchRun: {
+                status: "running",
+                run: { id: "first-run-ready", status: "running" },
+              },
+            },
+          },
+        })
       );
-      api.startFirstSearchRun.mockResolvedValue({ run: { status: "running" } });
 
       render({ runtime: RUNTIME });
       await runEffects();
@@ -2384,6 +2557,7 @@ describe("InterviewSurface — completion screen (3e)", () => {
       const cta = visit(tree, (n) => n.type === "a" && n.props?.href === "/")[0];
       expect(cta).toBeTruthy();
       expect(textOf(cta)).toBe("Go to your dashboard");
+      expect(api.startFirstSearchRun).not.toHaveBeenCalled();
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();

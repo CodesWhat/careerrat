@@ -34,7 +34,7 @@ export const SETUP_ITEM_LABELS = {
   engine: "Engine",
   resume: "Resume",
   roles: "Roles",
-  companies: "Companies",
+  companies: "Company focus",
   evidence: "Evidence",
   guardrails: "Guardrails",
   quickFacts: "Quick facts",
@@ -123,6 +123,29 @@ export function setupIsComplete(state) {
   );
 }
 
+export function deterministicSourceCount(state) {
+  const attempted =
+    state?.data?.sourcing?.sourceSetup?.deterministicSources?.attempted ??
+    state?.deterministicSources?.attempted ??
+    0;
+  const count = Number(attempted);
+  return Number.isFinite(count) && count > 0 ? count : 0;
+}
+
+export function firstSearchStatus(state) {
+  const firstSearchRun =
+    state?.data?.sourcing?.firstSearchRun ?? state?.sourcing?.firstSearchRun ?? null;
+  return firstSearchRun?.run?.status ?? firstSearchRun?.status ?? "not_started";
+}
+
+export function setupCanGraduate(state) {
+  return (
+    setupIsComplete(state) &&
+    deterministicSourceCount(state) > 0 &&
+    ["running", "completed"].includes(firstSearchStatus(state))
+  );
+}
+
 export function setupDisclosureRows({ state, runtime } = {}) {
   const data = state?.data ?? {};
   const profile = data.profile ?? {};
@@ -131,7 +154,18 @@ export function setupDisclosureRows({ state, runtime } = {}) {
   const claims = data.evidence?.claims ?? [];
   const declined = data["form-defaults"]?.declined_fields ?? {};
   const roleTitles = (targeting.role_buckets ?? []).flatMap((bucket) => bucket.titles ?? []);
-  const companies = targeting.tracked_companies ?? [];
+  const companyPreferences = targeting.company_preferences ?? {};
+  const companySignals = [
+    ...(companyPreferences.industries ?? []),
+    ...(companyPreferences.organization_types ?? []),
+    ...(companyPreferences.sizes ?? []),
+    ...(companyPreferences.stages ?? []),
+    ...(companyPreferences.business_models ?? []),
+    ...(companyPreferences.values ?? []),
+    ...(companyPreferences.geographies ?? []),
+  ];
+  const companyExamples = companyPreferences.examples ?? [];
+  const trackedCompanies = targeting.tracked_companies ?? [];
   const guardrails = targeting.cut_signals ?? [];
   const location = candidate.location || profile.location?.home;
   const modes = locationModePreferencesConfirmed(state)
@@ -187,7 +221,18 @@ export function setupDisclosureRows({ state, runtime } = {}) {
     {
       key: "companies",
       label: SETUP_ITEM_LABELS.companies,
-      value: companies.length ? companies.join(", ") : "Not provided",
+      value:
+        companyPreferences.confirmed === true
+          ? [
+              ...(companySignals.length ? companySignals : ["No narrow focus"]),
+              companyExamples.length ? `Examples: ${companyExamples.join(", ")}` : null,
+              "Broad discovery on",
+            ]
+              .filter(Boolean)
+              .join(" · ")
+          : trackedCompanies.length
+            ? `Tracked sources: ${trackedCompanies.join(", ")} · Broad discovery on`
+            : "Not provided",
     },
     { key: "evidence", label: SETUP_ITEM_LABELS.evidence, value: evidenceValue },
     {
@@ -263,9 +308,17 @@ export function rolesDetailLine({ state } = {}) {
 
 export function companiesDetailLine({ state } = {}) {
   if (!fileWritten(state, "targeting")) return null;
-  const companies = state?.data?.targeting?.tracked_companies ?? [];
-  if (!companies.length) return null;
-  return `${companies.length} tracked`;
+  const preferences = state?.data?.targeting?.company_preferences ?? {};
+  const examples = preferences.examples ?? [];
+  if (preferences.confirmed === true && !examples.length) {
+    return "Broad discovery · no narrow focus";
+  }
+  if (examples.length) {
+    return `${examples.length} focus example${examples.length === 1 ? "" : "s"} · broad discovery on`;
+  }
+  const tracked = state?.data?.targeting?.tracked_companies ?? [];
+  if (!tracked.length) return null;
+  return `${tracked.length} tracked source${tracked.length === 1 ? "" : "s"} · broad discovery on`;
 }
 
 export function evidenceDetailLine({ state } = {}) {

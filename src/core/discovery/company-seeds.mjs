@@ -143,11 +143,46 @@ function normalizeAICompanies(companies = []) {
   return companies.map((company) => normalizeSeed(company, { manual: false })).filter(Boolean);
 }
 
+function uniqueSeeds(seeds = []) {
+  const output = [];
+  const seen = new Set();
+  for (const seed of seeds) {
+    const key = normalizeCompanyKey(seed?.name);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    output.push(seed);
+  }
+  return output;
+}
+
+function preferenceSeeds(context = {}) {
+  return (context.companyPreferences?.examples || []).map((name) => ({
+    name,
+    why: "Focus example from the candidate's company thesis.",
+    confidence: "high",
+    sourceHint: "company-preference",
+  }));
+}
+
+function contextForBroaderDiscovery(context = {}, focusSeeds = []) {
+  const focusNames = focusSeeds.map((seed) => seed.name);
+  return {
+    ...context,
+    priorityCompanySeeds: focusNames,
+    dedupe: {
+      ...(context.dedupe || {}),
+      companies: [...(context.dedupe?.companies || []), ...focusNames],
+      keys: [...(context.dedupe?.keys || []), ...focusNames.map(normalizeCompanyKey)],
+    },
+  };
+}
+
 function seedPrompt({ context, maxCompanies, now }) {
   return [
     "Generate candidate-specific company seeds for CareerRat's discover-companies workflow.",
     "Return only companies worth resolving against supported ATS boards; do not include URLs, provider names, approval state, or write decisions.",
-    "Avoid companies already tracked, sourced, applied to, or excluded.",
+    "Avoid companies already tracked, sourced, applied to, excluded, or already included as priorityCompanySeeds.",
+    "Priority company seeds are focus examples, not an allowlist. Generate additional companies beyond them that match the broader company thesis, role, and location context.",
     JSON.stringify(
       {
         generatedAt:
@@ -247,6 +282,7 @@ export async function generateCompanySeeds({
   now = new Date(),
 } = {}) {
   const maxCompanies = clampRequestedCount(requestedCount);
+  const safeContext = context || buildCompanySeedContext({ repoRoot, env });
   let normalizedManual;
   try {
     normalizedManual = normalizeManualCompanySeeds(manualSeeds);
@@ -261,26 +297,43 @@ export async function generateCompanySeeds({
     });
   }
 
-  if (normalizedManual.length > 0) {
-    const cappedManual = normalizedManual.slice(0, maxCompanies);
+  const normalizedFocus = uniqueSeeds([
+    ...normalizedManual,
+    ...normalizeManualCompanySeeds(preferenceSeeds(safeContext)),
+  ]);
+  const focusCapacity =
+    normalizedFocus.length && maxCompanies > 1 ? maxCompanies - 1 : maxCompanies;
+  const cappedFocus = normalizedFocus.slice(0, focusCapacity);
+  let filledFocus = cappedFocus;
+  let focusAI = { used: false };
+  if (cappedFocus.length > 0) {
     const { seeds: filledManual, ai: fillAI } = await fillManualDomainHints({
       repoRoot,
       env,
-      context,
-      seeds: cappedManual,
+      context: safeContext,
+      seeds: cappedFocus,
       call,
       now,
     });
+    filledFocus = filledManual;
+    focusAI = fillAI;
+  }
+
+  const remaining = maxCompanies - filledFocus.length;
+  if (remaining <= 0) {
     return makeBoundedAIEnvelope({
       ok: true,
       status: 200,
-      data: { companies: filledManual },
-      ai: fillAI,
+      data: {
+        companies: filledFocus,
+        broadDiscovery: { status: "deferred", code: "BATCH_FULL" },
+      },
+      ai: focusAI,
       manual: MANUAL_SEED_FALLBACK,
     });
   }
 
-  const safeContext = context || buildCompanySeedContext({ repoRoot, env });
+  const broaderContext = contextForBroaderDiscovery(safeContext, filledFocus);
   const result = await runBoundedAI({
     labels: COMPANY_SEED_LABELS,
     schema: companySeedSchema,
@@ -296,12 +349,27 @@ export async function generateCompanySeeds({
     messages: [
       {
         role: "user",
-        content: seedPrompt({ context: safeContext, maxCompanies, now }),
+        content: seedPrompt({ context: broaderContext, maxCompanies: remaining, now }),
       },
     ],
   });
 
-  if (!result.body?.ok) return result;
+  if (!result.body?.ok) {
+    if (!filledFocus.length) return result;
+    return makeBoundedAIEnvelope({
+      ok: true,
+      status: 200,
+      data: {
+        companies: filledFocus,
+        broadDiscovery: {
+          status: "unavailable",
+          code: result.body?.code || BOUNDED_AI_CODES.AI_PROVIDER_FAILED,
+        },
+      },
+      ai: result.body?.ai || focusAI,
+      manual: result.body?.manual || MANUAL_SEED_FALLBACK,
+    });
+  }
 
   const validation = validateCompanySeedResponse(result.body.data);
   if (!validation.valid) {
@@ -321,7 +389,13 @@ export async function generateCompanySeeds({
   return makeBoundedAIEnvelope({
     ok: true,
     status: 200,
-    data: { companies: normalizeAICompanies(result.body.data.companies).slice(0, maxCompanies) },
+    data: {
+      companies: uniqueSeeds([
+        ...filledFocus,
+        ...normalizeAICompanies(result.body.data.companies),
+      ]).slice(0, maxCompanies),
+      broadDiscovery: { status: "complete" },
+    },
     ai: result.body.ai,
     manual: result.body.manual,
   });

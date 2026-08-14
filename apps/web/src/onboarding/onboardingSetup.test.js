@@ -18,6 +18,7 @@ import {
   rolesDetailLine,
   SETUP_ITEM_LABELS,
   SETUP_ITEM_ORDER,
+  setupCanGraduate,
   setupCompletedCount,
   setupDisclosureRows,
   setupIsComplete,
@@ -149,6 +150,59 @@ describe("setupCompletedCount / setupIsComplete", () => {
   });
 });
 
+describe("setupCanGraduate", () => {
+  const completedCandidate = {
+    setupProgress: { complete: true },
+    data: { setup: { readiness: { search_ready: true } } },
+  };
+
+  it("keeps a completed candidate in onboarding until usable sources and a first run exist", () => {
+    expect(setupCanGraduate(completedCandidate)).toBe(false);
+    expect(
+      setupCanGraduate({
+        ...completedCandidate,
+        data: {
+          ...completedCandidate.data,
+          sourcing: {
+            sourceSetup: { deterministicSources: { attempted: 2 } },
+            firstSearchRun: { status: "not_started", run: null },
+          },
+        },
+      })
+    ).toBe(false);
+  });
+
+  it.each(["running", "completed"])(
+    "graduates once sources exist and the first search is %s",
+    (status) => {
+      expect(
+        setupCanGraduate({
+          ...completedCandidate,
+          data: {
+            ...completedCandidate.data,
+            sourcing: {
+              sourceSetup: { deterministicSources: { attempted: 2 } },
+              firstSearchRun: { status, run: { status } },
+            },
+          },
+        })
+      ).toBe(true);
+    }
+  );
+
+  it("does not graduate a failed or explicitly paused search setup", () => {
+    for (const status of ["failed", "paused"]) {
+      expect(
+        setupCanGraduate({
+          ...completedCandidate,
+          deterministicSources: { attempted: 1 },
+          sourcing: { firstSearchRun: { run: { status } } },
+        })
+      ).toBe(false);
+    }
+  });
+});
+
 describe("setupTotal", () => {
   it("reads state.setupProgress.total when present", () => {
     expect(setupTotal({ setupProgress: { total: 9 } })).toBe(9);
@@ -197,7 +251,12 @@ describe("setupDisclosureRows", () => {
         },
         targeting: {
           role_buckets: [{ titles: ["Applied AI Engineer", "Forward Deployed Engineer"] }],
-          tracked_companies: ["Anthropic", "OpenAI"],
+          company_preferences: {
+            confirmed: true,
+            industries: ["fintech"],
+            sizes: ["large corporations"],
+            examples: ["Anthropic", "OpenAI"],
+          },
           cut_signals: ["Below $180K", "Five days on-site"],
         },
         evidence: {
@@ -217,7 +276,11 @@ describe("setupDisclosureRows", () => {
         label: "Roles",
         value: "Applied AI Engineer, Forward Deployed Engineer",
       },
-      { key: "companies", label: "Companies", value: "Anthropic, OpenAI" },
+      {
+        key: "companies",
+        label: "Company focus",
+        value: "fintech · large corporations · Examples: Anthropic, OpenAI · Broad discovery on",
+      },
       {
         key: "evidence",
         label: "Evidence",
@@ -236,6 +299,20 @@ describe("setupDisclosureRows", () => {
       },
       { key: "authorization", label: "Work authorization", value: "Authorized" },
     ]);
+  });
+
+  it("shows that broad company discovery remains on when no focus examples were named", () => {
+    const state = {
+      files: [{ name: "targeting", exists: true }],
+      data: { targeting: { company_preferences: { confirmed: true } } },
+    };
+    const rows = setupDisclosureRows({
+      state,
+    });
+    expect(rows.find((row) => row.key === "companies").value).toBe(
+      "No narrow focus · Broad discovery on"
+    );
+    expect(companiesDetailLine({ state })).toBe("Broad discovery · no narrow focus");
   });
 
   it("uses honest fallback copy for values that were declined or not provided", () => {
@@ -368,11 +445,11 @@ describe("rolesDetailLine", () => {
 });
 
 describe("companiesDetailLine", () => {
-  it("returns null with no tracked companies, else '<n> tracked'", () => {
+  it("returns null with no tracked sources, else makes their scope explicit", () => {
     expect(companiesDetailLine({ state: {} })).toBeNull();
     expect(
       companiesDetailLine({ state: { data: { targeting: { tracked_companies: ["Stripe"] } } } })
-    ).toBe("1 tracked");
+    ).toBe("1 tracked source · broad discovery on");
   });
 
   it("Bug 4: returns null when state.files marks targeting.yml as not existing", () => {
@@ -548,7 +625,7 @@ describe("detailLineFor", () => {
   it("dispatches to the matching builder by key", () => {
     expect(
       detailLineFor("companies", { state: { data: { targeting: { tracked_companies: ["A"] } } } })
-    ).toBe("1 tracked");
+    ).toBe("1 tracked source · broad discovery on");
   });
 
   it("returns null for an unknown key rather than throwing", () => {

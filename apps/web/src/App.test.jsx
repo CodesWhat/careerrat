@@ -43,7 +43,13 @@ const hooks = vi.hoisted(() => ({
 const apiMocks = vi.hoisted(() => ({ getOnboardState: vi.fn() }));
 const COMPLETE_ONBOARD_STATE = {
   setupProgress: { complete: true },
-  data: { setup: { readiness: { search_ready: true } } },
+  data: {
+    setup: { readiness: { search_ready: true } },
+    sourcing: {
+      sourceSetup: { deterministicSources: { attempted: 1 } },
+      firstSearchRun: { status: "running", run: { status: "running" } },
+    },
+  },
 };
 
 // Controllable stand-in for the router's current location. Tests mutate
@@ -180,6 +186,22 @@ describe("App — setup gate", () => {
     const module = await loadApp();
     routerState.pathname = "/jobs";
     apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: false } });
+
+    renderApp(module);
+    await flushEffects();
+    const html = renderApp(module);
+
+    expect(html).toContain("navigate:/onboarding:replace=true");
+    expect(html).not.toContain("jobs-page");
+  });
+
+  it("keeps a completed candidate in onboarding when source setup has not started", async () => {
+    const module = await loadApp();
+    routerState.pathname = "/jobs";
+    apiMocks.getOnboardState.mockResolvedValueOnce({
+      setupProgress: { complete: true },
+      data: { setup: { readiness: { search_ready: true } } },
+    });
 
     renderApp(module);
     await flushEffects();

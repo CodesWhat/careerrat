@@ -35,9 +35,27 @@ excluded_companies:        # companies to hard-penalize at triage (Jane's exampl
   - "xAI"
   - "Neuralink"
 
-tracked_companies:         # seeds a Lever board source per company (jobs.lever.co/<slug>); domain-neutral
-  - "Ramp"                 # only ATS-on-Lever companies resolve; others are skipped harmlessly
+tracked_companies:         # company names resolved to supported ATS boards before scanning
+  - "Ramp"                 # unresolved or unsupported boards are skipped harmlessly
   - "Brex"
+
+# A company thesis focuses discovery without limiting it. Named examples are
+# priority seeds; only excluded_companies remove employers from consideration.
+company_preferences:
+  confirmed: true
+  industries:
+    - "fintech"
+  organization_types:
+    - "large product companies"
+  sizes: []
+  stages: []
+  business_models: []
+  values:
+    - "customer trust"
+  geographies:
+    - "New York City"
+  examples:
+    - "Ramp"
 
 degree_policy: "Do not fabricate education. Apply despite degree requirements if the candidate wants that policy."
 

@@ -117,6 +117,14 @@ function seedCandidateContext(repoRoot) {
       ],
       keep_signals: ["agentic developer workflows", "customer-facing prototypes"],
       cut_signals: ["pure ML research"],
+      company_preferences: {
+        confirmed: true,
+        industries: ["fintech"],
+        organization_types: ["large corporations"],
+        values: ["customer trust"],
+        geographies: ["New York City"],
+        examples: ["Focus Example Co"],
+      },
       tracked_companies: ["Candidate Target Co"],
       excluded_companies: ["Excluded Co"],
     },
@@ -172,6 +180,7 @@ function minimalSeedContext(overrides = {}) {
     trackedCompanies: [],
     applications: [],
     sourcedCompanies: [],
+    companyPreferences: { confirmed: true, industries: ["applied AI"] },
     compensationFloors: { currency: "USD", minimum_base: 200000 },
     locationPosture: { remote: true },
     dedupe: { companies: [] },
@@ -238,6 +247,14 @@ test("buildCompanySeedContext includes candidate and dedupe inputs while omittin
     "customer-facing prototypes",
   ]);
   assert.deepEqual(context.cutSignals, ["pure ML research"]);
+  assert.deepEqual(context.companyPreferences, {
+    confirmed: true,
+    industries: ["fintech"],
+    organization_types: ["large corporations"],
+    values: ["customer trust"],
+    geographies: ["New York City"],
+    examples: ["Focus Example Co"],
+  });
   assert.deepEqual(context.excludedCompanies, ["Excluded Co"]);
   assert.deepEqual(context.trackedCompanies, ["Tracked ATS Co", "Candidate Target Co"]);
   assert.deepEqual(context.applications, ["Applied Already Co"]);
@@ -257,7 +274,7 @@ test("buildCompanySeedContext includes candidate and dedupe inputs while omittin
   assertNoCurrentCompLeak(context);
 });
 
-test("manual company seeds are normalized locally and do not invoke AI", async () => {
+test("manual focus seeds are kept first while broader AI discovery fills the same batch", async () => {
   const rawManualSeeds = [
     {
       name: "  Manual Co  ",
@@ -280,22 +297,76 @@ test("manual company seeds are normalized locally and do not invoke AI", async (
     },
   ]);
 
-  let aiInvoked = false;
+  const calls = [];
   const result = await generateCompanySeeds({
+    context: minimalSeedContext(),
     manualSeeds: rawManualSeeds,
     requestedCount: 12,
-    call: async () => {
-      aiInvoked = true;
-      throw new Error("AI must not be invoked for manual seeds");
+    call: async (options) => {
+      calls.push(options);
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify({
+              companies: [
+                validSeed({
+                  name: "Broader Match Co",
+                  domain_hint: "broader.example",
+                  why: "Matches the wider company thesis.",
+                }),
+              ],
+            }),
+          },
+        ],
+        model: "claude-native-test",
+      };
     },
   });
 
-  assert.equal(aiInvoked, false);
+  assert.equal(calls.length, 1);
+  assert.match(calls[0].messages[0].content, /Manual Co/);
+  assert.match(calls[0].messages[0].content, /"maxCompanies": 11/);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.ai.used, true);
+  assert.deepEqual(result.body.data.companies, [
+    ...normalizeManualCompanySeeds(rawManualSeeds),
+    {
+      name: "Broader Match Co",
+      domain_hint: "broader.example",
+      why: "Matches the wider company thesis.",
+      role_family_hint: "Applied AI",
+      confidence: "high",
+      source_hint: "candidate keep signals",
+    },
+  ]);
+  assertNoCurrentCompLeak(result.body);
+});
+
+test("manual focus seeds still resolve when broader AI discovery is unavailable", async () => {
+  const noRoute = new Error("no AI route configured");
+  noRoute.code = BOUNDED_AI_CODES.NO_AI_ROUTE;
+  const result = await generateCompanySeeds({
+    context: minimalSeedContext(),
+    manualSeeds: [{ name: "Manual Co", domain_hint: "manual.example" }],
+    requestedCount: 12,
+    call: async () => {
+      throw noRoute;
+    },
+  });
+
   assert.equal(result.status, 200);
   assert.equal(result.body.ok, true);
   assert.equal(result.body.ai.used, false);
-  assert.deepEqual(result.body.data.companies, normalizeManualCompanySeeds(rawManualSeeds));
-  assertNoCurrentCompLeak(result.body);
+  assert.deepEqual(
+    result.body.data.companies.map((company) => company.name),
+    ["Manual Co"]
+  );
+  assert.deepEqual(result.body.data.broadDiscovery, {
+    status: "unavailable",
+    code: BOUNDED_AI_CODES.NO_AI_ROUTE,
+  });
 });
 
 test("no manual seeds plus no AI route returns the shared 501 manual fallback envelope", async () => {
@@ -373,7 +444,7 @@ test("AI company seed generation uses native-preferred bounded AI with exact lab
   assert.equal(calls[0].outputMode, "native");
   assert.equal(calls[0].outputName, "company_seed_response");
   assert.deepEqual(calls[0].outputSchema, companySeedSchema);
-  assert.match(calls[0].messages[0].content, /"maxCompanies": 12/);
+  assert.match(calls[0].messages[0].content, /"maxCompanies": 11/);
   assert.match(calls[0].messages[0].content, /identity automation and applied AI/);
   assert.match(calls[0].messages[0].content, /Applied AI/);
   assert.match(calls[0].messages[0].content, /agentic developer workflows/);
@@ -382,6 +453,8 @@ test("AI company seed generation uses native-preferred bounded AI with exact lab
   assert.match(calls[0].messages[0].content, /Applied Already Co/);
   assert.match(calls[0].messages[0].content, /200000/);
   assert.match(calls[0].messages[0].content, /100000/);
+  assert.match(calls[0].messages[0].content, /Focus Example Co/);
+  assert.match(calls[0].messages[0].content, /priorityCompanySeeds/);
   assertNoCurrentCompLeak(calls[0]);
 
   assert.equal(result.status, 200);
@@ -392,6 +465,14 @@ test("AI company seed generation uses native-preferred bounded AI with exact lab
   assert.equal(result.body.ai.operation, "company-seeds");
   assert.equal(result.body.ai.mode, "native");
   assert.deepEqual(result.body.data.companies, [
+    {
+      name: "Focus Example Co",
+      domain_hint: "",
+      why: "Focus example from the candidate's company thesis.",
+      role_family_hint: "",
+      confidence: "high",
+      source_hint: "company-preference",
+    },
     {
       name: "Native Seeds Co",
       domain_hint: "native.example",
