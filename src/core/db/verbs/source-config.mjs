@@ -3,7 +3,7 @@
 // These are setup/config verbs, not tracker mutations: no tracker meta bump,
 // no activity event, and no tracker export. Legacy config files are compatibility
 // output only; DB-mode readers should load these rows first.
-import { inferProvider } from "../../scoring/sourced-scanner.mjs";
+import { inferProvider, isCompanyProviderSupported } from "../../scoring/sourced-scanner.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
 
@@ -62,13 +62,25 @@ function normalizeCompanyEntry(entry = {}) {
     err.code = "BAD_REQUEST";
     throw err;
   }
-  const provider = inferProvider({ careers_url: careersUrl });
+  const requestedProvider = String(entry.provider || "")
+    .trim()
+    .toLowerCase();
+  const provider = requestedProvider || inferProvider({ careers_url: careersUrl });
+  if (requestedProvider && !isCompanyProviderSupported(requestedProvider)) {
+    const err = new Error(`unsupported ATS provider — cannot scan with "${entry.provider}"`);
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
   if (!provider) {
     const err = new Error(`unsupported ATS host — cannot scan "${careersUrl}"`);
     err.code = "BAD_REQUEST";
     throw err;
   }
-  return { name, careers_url: careersUrl };
+  return {
+    name,
+    careers_url: careersUrl,
+    ...(requestedProvider ? { provider } : {}),
+  };
 }
 
 function sameCompanyOrUrl(a, b) {

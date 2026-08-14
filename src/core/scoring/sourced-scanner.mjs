@@ -4,6 +4,11 @@ import { setTimeout as delay } from "node:timers/promises";
 import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { scannerLikelyKeepThreshold } from "../profile/modes.mjs";
+import {
+  fetchCareerOpsProvider,
+  inferCareerOpsProvider,
+  isCareerOpsProviderSupported,
+} from "../providers/career-ops-registry.mjs";
 import { fetchRemoteOk } from "../providers/remoteok.mjs";
 import { fetchRemotive } from "../providers/remotive.mjs";
 import { feedItemsToOffers, parseFeed } from "../providers/rss.mjs";
@@ -27,7 +32,12 @@ const BOARD_PROVIDERS = {
 };
 
 export function isBoardProviderSupported(provider) {
-  return Boolean(BOARD_PROVIDERS[String(provider || "").toLowerCase()]);
+  const providerId = String(provider || "").toLowerCase();
+  return Boolean(BOARD_PROVIDERS[providerId]) || isCareerOpsProviderSupported(providerId);
+}
+
+export function isCompanyProviderSupported(provider) {
+  return isCareerOpsProviderSupported(provider);
 }
 
 // --- Cold-family down-weight (outcome-aware scoring) ---------------------------
@@ -706,7 +716,11 @@ function decodeHtmlEntities(value = "") {
 }
 
 export function inferProvider(entry = {}) {
-  if (entry.provider) return entry.provider;
+  if (entry.provider) {
+    const explicit = String(entry.provider).trim();
+    if (explicit.toLowerCase() === "local-parser") return null;
+    return isCareerOpsProviderSupported(explicit) ? explicit.toLowerCase() : explicit;
+  }
   const url = entry.careers_url || "";
   if (/jobs\.ashbyhq\.com\//.test(url)) return "ashby";
   if (/job-boards(?:\.eu)?\.greenhouse\.io\/|boards\.greenhouse\.io\//.test(url))
@@ -716,7 +730,7 @@ export function inferProvider(entry = {}) {
   if (/(careers|jobs)\.smartrecruiters\.com\//.test(url)) return "smartrecruiters";
   if (/\/\/[a-z0-9][a-z0-9-]*\.recruitee\.com/i.test(url)) return "recruitee";
   if (/[\w-]+\.wd[\w-]*\.myworkdayjobs\.com\//.test(url)) return "workday";
-  return null;
+  return inferCareerOpsProvider(entry);
 }
 
 export function filterAndDedupeOffers(
@@ -917,7 +931,7 @@ export async function scanCompanies(config, { fetchImpl = fetch, companyFilter =
 
   for (const company of companies) {
     const provider = inferProvider(company);
-    if (!provider) {
+    if (!provider || !isCompanyProviderSupported(provider)) {
       errors.push({ company: company.name, error: "no supported provider inferred" });
       continue;
     }
@@ -933,15 +947,19 @@ export async function scanCompanies(config, { fetchImpl = fetch, companyFilter =
 }
 
 export async function fetchProvider(provider, entry, fetchImpl = fetch) {
-  if (provider === "ashby") return fetchAshby(entry, fetchImpl);
-  if (provider === "greenhouse") return fetchGreenhouse(entry, fetchImpl);
-  if (provider === "lever") return fetchLever(entry, fetchImpl);
-  if (provider === "workable") return fetchWorkable(entry, fetchImpl);
-  if (provider === "smartrecruiters") return fetchSmartRecruiters(entry, fetchImpl);
-  if (provider === "recruitee") return fetchRecruitee(entry, fetchImpl);
-  if (provider === "workday") return fetchWorkday(entry, fetchImpl);
-  if (provider === "rss") return fetchRss(entry, fetchImpl);
-  throw new Error(`unsupported provider: ${provider}`);
+  const providerId = String(provider || "").toLowerCase();
+  if (providerId === "ashby") return fetchAshby(entry, fetchImpl);
+  if (providerId === "greenhouse") return fetchGreenhouse(entry, fetchImpl);
+  if (providerId === "lever") return fetchLever(entry, fetchImpl);
+  if (providerId === "workable") return fetchWorkable(entry, fetchImpl);
+  if (providerId === "smartrecruiters") return fetchSmartRecruiters(entry, fetchImpl);
+  if (providerId === "recruitee") return fetchRecruitee(entry, fetchImpl);
+  if (providerId === "workday") return fetchWorkday(entry, fetchImpl);
+  if (providerId === "rss") return fetchRss(entry, fetchImpl);
+  if (isCareerOpsProviderSupported(providerId)) {
+    return fetchCareerOpsProvider(providerId, entry, { fetchImpl });
+  }
+  throw new Error(`unsupported provider: ${providerId || provider}`);
 }
 
 // Fetch + parse a single RSS source (a config/search-sources.yml entry with an
@@ -990,7 +1008,9 @@ export async function scanSearchSources(searchSources, { fetchImpl = fetch } = {
 export async function scanBoards(searchSources, { fetchImpl = fetch } = {}) {
   const sources = (searchSources?.sources || searchSources?.searches || [])
     .filter((s) => s && s.enabled !== false)
-    .filter((s) => s.source_type === "board" && isBoardProviderSupported(s.provider));
+    .filter(
+      (s) => ["ats", "board"].includes(s.source_type) && isBoardProviderSupported(s.provider)
+    );
 
   const results = [];
   const errors = [];
@@ -998,8 +1018,11 @@ export async function scanBoards(searchSources, { fetchImpl = fetch } = {}) {
     const providerId = String(source.provider || "").toLowerCase();
     const provider = BOARD_PROVIDERS[providerId];
     try {
-      const offers = await provider(source, fetchImpl);
-      results.push(...offers.map((offer) => ({ ...offer, source: `${providerId}-board` })));
+      const offers = provider
+        ? await provider(source, fetchImpl)
+        : await fetchProvider(providerId, source, fetchImpl);
+      const sourceKind = source.source_type === "ats" ? "api" : "board";
+      results.push(...offers.map((offer) => ({ ...offer, source: `${providerId}-${sourceKind}` })));
     } catch (error) {
       errors.push({ company: source.label || providerId, error: error.message });
     }

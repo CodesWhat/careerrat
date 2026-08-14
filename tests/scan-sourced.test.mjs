@@ -660,6 +660,86 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
   }
 });
 
+test("DB ATS search sources run through Career Ops and hydrate a full JD before capture", async () => {
+  const repoRoot = tempRepo();
+  const boardUrl = "https://acme.bamboohr.com/careers";
+  const jobUrl = "https://acme.bamboohr.com/careers/42";
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        location: {
+          home: "Denver, CO",
+          remote: true,
+          hybrid: true,
+          onsite: true,
+          relocation: [],
+        },
+      },
+    });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "bamboohr",
+            source_type: "ats",
+            label: "Acme careers",
+            name: "Acme",
+            url: boardUrl,
+            enabled: true,
+          },
+        ],
+      },
+    });
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      write: true,
+      intake: false,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      fetchImpl: async (url) => {
+        if (String(url) === `${boardUrl}/list`) {
+          return new Response(
+            JSON.stringify({
+              result: [
+                {
+                  id: "42",
+                  jobOpeningName: "Staff Platform Engineer",
+                  location: { city: "Denver", state: "CO" },
+                },
+              ],
+            }),
+            { status: 200 }
+          );
+        }
+        if (String(url) === jobUrl) {
+          return new Response(
+            `<html><body><h1>Staff Platform Engineer</h1><p>${"Build reliable distributed systems. ".repeat(30)}</p><a href="/apply">Apply now</a></body></html>`,
+            { status: 200, headers: { "content-type": "text/html" } }
+          );
+        }
+        throw new Error(`unexpected fetch: ${url}`);
+      },
+    });
+
+    assert.equal(summary.new, 1);
+    assert.equal(summary.offers[0].source, "bamboohr-api");
+    assert.equal(summary.offers[0].bodyPartial, false);
+    const jdText = readFileSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd), "utf8");
+    assert.match(jdText, /partial: false/);
+    assert.match(jdText, /Build reliable distributed systems/);
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
+    assert.match(stored.searches[0].recency.lastRunAt, /^\d{4}-\d{2}-\d{2}T/);
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("DB RSS scan replaces a feed preview with the canonical ATS job body before capture", async () => {
   const repoRoot = tempRepo();
   const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";

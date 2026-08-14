@@ -451,6 +451,12 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
         { source_type: "auth", url: "https://www.linkedin.com/jobs/search", enabled: true },
         { url: "https://example.test/jobs?query=ai", enabled: true },
         { source_type: "board", provider: "RemoteOK", enabled: true },
+        {
+          source_type: "ats",
+          provider: "bamboohr",
+          url: "https://acme.bamboohr.com/careers",
+          enabled: true,
+        },
         { source_type: "board", provider: "remotive", enabled: false },
         { source_type: "board", provider: "unknown", enabled: true },
         { source_type: "rss", rssUrl: "https://example.test/off.xml", enabled: false },
@@ -460,14 +466,19 @@ test("countDeterministicSources counts RSS, supported boards, and ATS while skip
       tracked_companies: [
         { name: "Acme", careers_url: "https://jobs.lever.co/acme" },
         { name: "Beta", careers_url: "https://job-boards.greenhouse.io/beta" },
+        {
+          name: "Custom command",
+          provider: "manual-provider",
+          careers_url: "https://example.test/jobs",
+        },
       ],
     },
   });
 
   assert.deepEqual(counts, {
-    attempted: 4,
+    attempted: 5,
     rss: 1,
-    boards: 1,
+    boards: 2,
     supportedAtsCompanies: 2,
     skipped: 4,
   });

@@ -9,6 +9,8 @@
     "ignoreUnknown": true,
     "includes": [
       "src/**",
+      "!src/core/providers/career-ops/vendor",
+      "!tests/fixtures/career-ops",
       "tests/**",
       "scripts/**",
       "bin/**",

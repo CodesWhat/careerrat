@@ -82,3 +82,51 @@ test("careerrat companies writes DB source config in DB mode and does not create
   ]);
   assert.equal(existsSync(userPath({ repoRoot }, "config/sourced-scan.json")), false);
 });
+
+test("careerrat companies accepts an explicit supported provider for a branded ATS host", () => {
+  const repoRoot = tempRepo();
+  dataCli(repoRoot, ["candidate", "init"]);
+
+  const add = jsonCli([
+    "src/cli/companies.mjs",
+    "--root",
+    repoRoot,
+    "--json",
+    "--add",
+    "Example",
+    "--url",
+    "https://jobs.example.com/search",
+    "--provider",
+    "phenom",
+    "--write",
+  ]);
+  assert.equal(add.status, "added");
+  assert.equal(add.provider, "phenom");
+  assert.deepEqual(sourceConfigGet({ repoRoot, name: "sourced-scan" }).data.tracked_companies, [
+    {
+      name: "Example",
+      careers_url: "https://jobs.example.com/search",
+      provider: "phenom",
+    },
+  ]);
+});
+
+test("careerrat companies rejects local-parser as a network source", () => {
+  const repoRoot = tempRepo();
+  const result = runCli(
+    [
+      "src/cli/companies.mjs",
+      "--root",
+      repoRoot,
+      "--add",
+      "Unsafe",
+      "--url",
+      "https://jobs.example.com",
+      "--provider",
+      "local-parser",
+      "--write",
+    ],
+    { expectedStatus: 2 }
+  );
+  assert.match(result.stderr, /Unsupported provider/i);
+});

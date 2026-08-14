@@ -33,6 +33,35 @@ test("inferProvider recognizes Recruitee and Workday URLs while preserving expli
   assert.equal(inferProvider({ careers_url: "https://careers.example.test/jobs" }), null);
 });
 
+test("inferProvider and fetchProvider route newly supported Career Ops adapters", async () => {
+  assert.equal(inferProvider({ careers_url: "https://acme.bamboohr.com/careers" }), "bamboohr");
+  assert.equal(inferProvider({ careers_url: "https://acme.pinpointhq.com/postings" }), "pinpoint");
+  assert.equal(inferProvider({ provider: "PHENOM" }), "phenom");
+  assert.equal(inferProvider({ provider: "local-parser" }), null);
+
+  const offers = await fetchProvider(
+    "bamboohr",
+    { name: "Acme", careers_url: "https://acme.bamboohr.com/careers" },
+    async () =>
+      jsonResponse({
+        result: [{ id: "42", jobOpeningName: "Staff Engineer", location: { city: "Denver" } }],
+      })
+  );
+
+  assert.deepEqual(offers, [
+    {
+      title: "Staff Engineer",
+      url: "https://acme.bamboohr.com/careers/42",
+      company: "Acme",
+      location: "Denver",
+      comp: "",
+      bodyText: "",
+      bodyPartial: true,
+      provider: "bamboohr",
+    },
+  ]);
+});
+
 test("fetchProvider maps Recruitee offers and validates returned offer URLs", async () => {
   const calls = [];
   const offers = await fetchProvider(

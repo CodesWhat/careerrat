@@ -12,7 +12,11 @@ import {
 import { normalizeCompanyKey, resolveCompanyBoard } from "../discovery/company-board-resolver.mjs";
 import { fillManualDomainHints } from "../discovery/company-seeds.mjs";
 import { buildSearchSources } from "../profile/generate-search-sources.mjs";
-import { inferProvider, isBoardProviderSupported } from "../scoring/sourced-scanner.mjs";
+import {
+  inferProvider,
+  isBoardProviderSupported,
+  isCompanyProviderSupported,
+} from "../scoring/sourced-scanner.mjs";
 
 // Bounded backfill for automatic company-board resolution ahead of the first
 // search: on a fresh install, targeting.tracked_companies is just a list of
@@ -225,14 +229,18 @@ function isFetchableRss(entry = {}) {
 
 function isFetchableBoard(entry = {}) {
   return (
-    isEnabled(entry) && entry.source_type === "board" && isBoardProviderSupported(entry.provider)
+    isEnabled(entry) &&
+    ["ats", "board"].includes(entry.source_type) &&
+    isBoardProviderSupported(entry.provider)
   );
 }
 
 function supportedAtsCompanies(sourcedScan = {}) {
-  return asArray(sourcedScan.tracked_companies).filter(
-    (entry) => entry && entry.enabled !== false && Boolean(inferProvider(entry))
-  );
+  return asArray(sourcedScan.tracked_companies).filter((entry) => {
+    if (!entry || entry.enabled === false) return false;
+    const provider = inferProvider(entry);
+    return Boolean(provider && isCompanyProviderSupported(provider));
+  });
 }
 
 function sourceSetupError() {

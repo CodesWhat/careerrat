@@ -65,6 +65,57 @@ test("careerrat searches --add-query writes DB source config without search-sour
   assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
 });
 
+test("careerrat searches --add-provider writes a runnable deterministic source", () => {
+  const home = tempHome();
+  assert.equal(runData(["init"], home).status, 0);
+  const result = runSearches(
+    ["--add-provider", "remoteok", "--query", "Staff platform engineer", "--json"],
+    home
+  );
+  assert.equal(result.status, 0, result.stderr);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.mode, "add-provider");
+  assert.deepEqual(body.searches, [
+    {
+      index: 0,
+      provider: "remoteok",
+      label: "remoteok",
+      target: "Staff platform engineer",
+      source_type: "board",
+      enabled: true,
+      lastRunAt: null,
+    },
+  ]);
+});
+
+test("legacy --add-query --provider routes supported providers to a runnable board source", () => {
+  const home = tempHome();
+  assert.equal(runData(["init"], home).status, 0);
+  const result = runSearches(
+    ["--add-query", "Staff engineer", "--provider", "remoteok", "--json"],
+    home
+  );
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(JSON.parse(result.stdout).searches[0].source_type, "board");
+});
+
+test("careerrat searches --providers exposes the complete pinned parity manifest", () => {
+  const home = tempHome();
+  const result = runSearches(["--providers", "--json"], home);
+  assert.equal(result.status, 0, result.stderr);
+  const body = JSON.parse(result.stdout);
+  assert.equal(body.upstream.providerCount, 74);
+  assert.equal(body.providers.filter((provider) => provider.status === "implemented").length, 73);
+  assert.deepEqual(
+    body.providers.find((provider) => provider.id === "local-parser"),
+    {
+      id: "local-parser",
+      status: "unsupported",
+      reason: "Executes user-configured local commands; it is not a public network source adapter.",
+    }
+  );
+});
+
 test("careerrat searches --from-targeting writes generated DB source config without YAML", () => {
   const home = tempHome();
   assert.equal(runData(["init"], home).status, 0);

@@ -1,5 +1,6 @@
 import { validate } from "../profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../profile/yaml.mjs";
+import { inferCareerOpsProvider, isCareerOpsProviderSupported } from "./career-ops-registry.mjs";
 import { parseHiringCafeSearchState, resolveRecencyWindow } from "./hiringcafe.mjs";
 
 // ---------------------------------------------------------------------------
@@ -95,6 +96,56 @@ export function addSearchFromQuery(
 }
 
 // ---------------------------------------------------------------------------
+// addProviderSource
+// ---------------------------------------------------------------------------
+
+export function addProviderSource(
+  config,
+  { provider, label, query, url, enabled = true, safetyMinutes = 30 } = {}
+) {
+  const providerId = String(provider || "")
+    .trim()
+    .toLowerCase();
+  if (!isCareerOpsProviderSupported(providerId)) {
+    throw new Error(`addProviderSource: unsupported provider: ${provider || "(missing)"}`);
+  }
+
+  const normalizedQuery = typeof query === "string" ? query.trim() : "";
+  const normalizedUrl = typeof url === "string" ? url.trim() : "";
+  if (!normalizedQuery && !normalizedUrl) {
+    throw new Error("addProviderSource: a query or URL is required");
+  }
+  if (normalizedUrl) {
+    try {
+      new URL(normalizedUrl);
+    } catch {
+      throw new Error(`addProviderSource: unparseable URL: ${url}`);
+    }
+  }
+
+  const duplicate = (config.searches ?? []).some((source) => {
+    if (String(source.provider || "").toLowerCase() !== providerId) return false;
+    return normalizedUrl
+      ? source.url === normalizedUrl
+      : String(source.query || "").toLowerCase() === normalizedQuery.toLowerCase();
+  });
+  if (duplicate) return config;
+
+  const sourceLabel = label || String(provider).trim();
+  const entry = {
+    provider: providerId,
+    source_type: normalizedUrl ? "ats" : "board",
+    label: sourceLabel,
+    ...(normalizedUrl ? { name: sourceLabel, url: normalizedUrl } : { query: normalizedQuery }),
+    enabled,
+    recency: { mode: "since-last-run", safetyMinutes },
+  };
+  if (normalizedUrl && normalizedQuery) entry.query = normalizedQuery;
+
+  return { ...config, searches: [...(config.searches ?? []), entry] };
+}
+
+// ---------------------------------------------------------------------------
 // addSearchFromUrl
 // ---------------------------------------------------------------------------
 
@@ -166,6 +217,20 @@ export function addSearchFromUrl(config, pastedUrl, { label, enabled = true } = 
       label: label || `${host} (authenticated)`,
       url: pastedUrl,
       enabled: false,
+    };
+    return { ...config, searches: [...(config.searches ?? []), entry] };
+  }
+
+  const deterministicProvider = inferCareerOpsProvider({ careers_url: pastedUrl });
+  if (deterministicProvider) {
+    const sourceLabel = label || parsed.hostname;
+    const entry = {
+      provider: deterministicProvider,
+      source_type: "ats",
+      label: sourceLabel,
+      name: sourceLabel,
+      url: pastedUrl,
+      enabled,
     };
     return { ...config, searches: [...(config.searches ?? []), entry] };
   }

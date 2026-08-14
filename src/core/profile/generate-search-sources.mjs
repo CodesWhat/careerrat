@@ -1,3 +1,4 @@
+import { CAREER_OPS_PUBLIC_PROVIDER_IDS } from "../providers/provider-parity.mjs";
 import { buildWellfoundUrl } from "../providers/wellfound.mjs";
 
 // Generate a search-sources configuration object from targeting + profile.
@@ -445,6 +446,7 @@ export function buildSearchSources(targeting, profile) {
     aggregators: ["HiringCafe", "RemoteVibeCodingJobs", "Wellfound", "LinkedIn", "Google Jobs"],
     ats: ["Ashby", "Greenhouse", "Lever", "Workable", "SmartRecruiters", "Recruitee", "Workday"],
     remote_boards: ["RemoteOK", "Jobicy", "Working Nomads", "We Work Remotely", "Remotive"],
+    deterministic_providers: [...CAREER_OPS_PUBLIC_PROVIDER_IDS],
   };
 
   return {

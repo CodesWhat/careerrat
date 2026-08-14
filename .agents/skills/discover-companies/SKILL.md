@@ -135,8 +135,13 @@ the **Delegation Contract** in AGENTS.md.
 For each candidate company, do two things:
 
 **(a) Resolve a scannable careers board.** Find the company's real careers page and identify its
-ATS. The scanner can sweep **only** these hosts (the `careers_url` must be one of them, with the
-company's slug):
+provider. The pinned provider catalog is authoritative:
+
+```
+careerrat searches --providers --json
+```
+
+Recognized hosts infer their adapter automatically. Common examples include:
 
 | ATS | careers_url shape |
 |---|---|
@@ -145,11 +150,15 @@ company's slug):
 | Lever | `https://jobs.lever.co/<slug>` |
 | Workable | `https://apply.workable.com/<slug>` |
 | SmartRecruiters | `https://careers.smartrecruiters.com/<slug>` or `https://jobs.smartrecruiters.com/<slug>` |
+| Recruitee | `https://<tenant>.recruitee.com` |
+| Workday | `https://<tenant>.<instance>.myworkdayjobs.com/<site>` |
+| BambooHR | `https://<tenant>.bamboohr.com/careers` |
+| Personio | `https://<tenant>.jobs.personio.com` |
 
-Verify the slug resolves to a real board (fetch it, or a known listing path). A company on
-Workday / a custom / an embedded ATS that is **not** one of the five is `ATS: unsupported` —
-keep it as intel in the table marked unsupported, but it **cannot be auto-added** (the
-`companies` helper will reject the URL).
+Verify the board resolves to current listings. A branded/custom domain may still be supported
+when its underlying adapter is known; add it with `--provider <id>`. If neither URL inference nor
+an explicit implemented adapter can resolve it, mark it `ATS: unsupported` and keep it as intel
+without adding it.
 
 **(b) Screen — REQUIRE all three to propose:**
 
@@ -242,12 +251,13 @@ SQLite source tables or `config/sourced-scan.json`**:
 ```
 careerrat companies --add "<Company Name>" --url "<careers_url>"          # dry-run preview
 careerrat companies --add "<Company Name>" --url "<careers_url>" --write  # commit
+careerrat companies --add "<Company Name>" --url "<branded_url>" --provider "<id>" --write
 ```
 
-The helper infers the provider from the host, **rejects any URL not on a supported ATS**, dedups
-by name and URL (idempotent no-op if already tracked), and writes atomically. In DB workspaces it
-writes SQLite source config; in legacy workspaces it writes `config/sourced-scan.json`. An
-`ATS: unsupported` company cannot be added — leave it in the table as intel only.
+The helper infers recognized hosts, validates explicit branded-host adapters against the parity
+manifest, dedups by name and URL, and writes atomically. In DB workspaces it writes SQLite source
+config; in legacy workspaces it writes `config/sourced-scan.json`. An `ATS: unsupported` company
+cannot be added; leave it in the table as intel only.
 
 After adding, confirm the result and validate:
 
@@ -341,10 +351,10 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 - **Focus is not scope.** `company_preferences.examples`, manual seed lists, and currently tracked
   companies never become an allowlist. Every non-excluded employer remains eligible when it
   matches the role, location, compensation-plausibility, and company-thesis signals.
-- **Scannable-ATS gate.** Only propose-to-add a company whose careers board resolves to a
-  supported ATS host (Ashby, Greenhouse, Lever, Workable, SmartRecruiters, Recruitee, or
-  Workday). Unsupported-ATS companies are intel only — the helper refuses them, by design (an
-  unscannable board would silently never sweep).
+- **Scannable-ATS gate.** Only propose-to-add a company whose careers board resolves to one of
+  the 73 implemented public adapters in `careerrat searches --providers`. Recognized hosts infer
+  automatically; branded hosts require a validated explicit provider. Unsupported companies are
+  intel only because an unscannable board would silently never sweep.
 - **Comp screen stays internal.** Use `minimum_base` to filter implausible employers; never write
   the figure into the table, an artifact, or any outbound text (Privacy Invariant).
 - **Use the helper.** Additions go through `careerrat companies --add … --write`. Do not edit
@@ -362,6 +372,7 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 | See currently tracked companies | `careerrat companies` |
 | Preview adding a company (dry run) | `careerrat companies --add "<name>" --url "<careers_url>"` |
 | Add a confirmed company | `careerrat companies --add "<name>" --url "<careers_url>" --write` |
+| Add a branded supported board | `careerrat companies --add "<name>" --url "<url>" --provider "<id>" --write` |
 | Remove a tracked company | `careerrat companies --remove "<name>" --write` |
 | Scan the newly added companies | `npm run scan:sourced -- --company "<name>" --write --intake --summary --verify` |
 | Health check after additions | `careerrat doctor` |

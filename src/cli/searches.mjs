@@ -9,13 +9,16 @@
 //
 // Modes:
 //   --list                  Show current searches (index, provider, label, target, enabled).
+//   --providers             Show the pinned deterministic provider manifest.
 //   --from-targeting        Generate/refresh searches from candidate/targeting.yml +
 //                           candidate/profile.yml, merged into any existing config
 //                           (manual entries preserved — idempotent).
 //   --add-query "<q>"       Append a single keyword search.
-//       [--label "<l>"] [--provider HiringCafe]
+//       [--label "<l>"]
 //   --add-url "<url>"       Append a search from a pasted URL (hiring.cafe filters preserved).
 //       [--label "<l>"]
+//   --add-provider "<id>"   Append a deterministic Career Ops provider source.
+//       [--query "<q>"] [--url "<url>"] [--label "<l>"]
 //   --enable <selector>     Enable a search by index or label.
 //   --disable <selector>    Disable a search by index or label.
 //   --json                  Machine-readable output for the current mode.
@@ -31,6 +34,11 @@ import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { buildSearchSources } from "../core/profile/generate-search-sources.mjs";
 import { formatErrors } from "../core/profile/schema-validator.mjs";
 import {
+  CAREER_OPS_PROVIDER_PARITY,
+  CAREER_OPS_UPSTREAM,
+} from "../core/providers/provider-parity.mjs";
+import {
+  addProviderSource,
   addSearchFromQuery,
   addSearchFromUrl,
   emptyConfig,
@@ -58,8 +66,12 @@ if (args.includes("--help") || args.includes("-h")) {
 }
 
 let exitCode = 0;
-if (args.includes("--from-targeting")) {
+if (args.includes("--providers")) {
+  exitCode = runProviders();
+} else if (args.includes("--from-targeting")) {
   exitCode = runFromTargeting();
+} else if (args.includes("--add-provider")) {
+  exitCode = runAddProvider();
 } else if (args.includes("--add-query")) {
   exitCode = runAddQuery();
 } else if (args.includes("--add-url")) {
@@ -76,6 +88,24 @@ process.exit(exitCode);
 // ---------------------------------------------------------------------------
 // Modes
 // ---------------------------------------------------------------------------
+
+function runProviders() {
+  const result = {
+    upstream: CAREER_OPS_UPSTREAM,
+    providers: CAREER_OPS_PROVIDER_PARITY,
+  };
+  if (json) {
+    console.log(JSON.stringify(result, null, 2));
+    return 0;
+  }
+  const implemented = result.providers.filter((provider) => provider.status === "implemented");
+  console.log(`${implemented.length} public deterministic providers:`);
+  console.log(implemented.map((provider) => provider.id).join(", "));
+  for (const provider of result.providers.filter((entry) => entry.status !== "implemented")) {
+    console.log(`\n${provider.id}: ${provider.status} - ${provider.reason}`);
+  }
+  return 0;
+}
 
 function runList() {
   const config = loadConfig();
@@ -138,19 +168,22 @@ function failFromTargeting(message) {
 function runAddQuery() {
   const query = optValue("--add-query");
   if (!query) {
-    console.error(
-      'Usage: careerrat searches --add-query "<query>" [--label "<label>"] [--provider HiringCafe]'
-    );
+    console.error('Usage: careerrat searches --add-query "<query>" [--label "<label>"]');
     return 1;
   }
   const config = loadConfig() || emptyConfig();
   let next;
   try {
-    next = addSearchFromQuery(config, {
+    const provider = optValue("--provider") || "HiringCafe";
+    const options = {
       query,
       label: optValue("--label") || undefined,
-      provider: optValue("--provider") || "HiringCafe",
-    });
+      provider,
+    };
+    next =
+      provider.toLowerCase() === "hiringcafe"
+        ? addSearchFromQuery(config, options)
+        : addProviderSource(config, options);
   } catch (err) {
     console.error(err.message);
     return 1;
@@ -159,6 +192,33 @@ function runAddQuery() {
     if (!json) console.log(`Already present — no duplicate added for "${query}".`);
   }
   return writeConfig(next, { mode: "add-query", query });
+}
+
+function runAddProvider() {
+  const provider = optValue("--add-provider");
+  if (!provider) {
+    console.error(
+      'Usage: careerrat searches --add-provider "<id>" [--query "<query>"] [--url "<url>"] [--label "<label>"]'
+    );
+    return 1;
+  }
+  const config = loadConfig() || emptyConfig();
+  let next;
+  try {
+    next = addProviderSource(config, {
+      provider,
+      query: optValue("--query") || undefined,
+      url: optValue("--url") || undefined,
+      label: optValue("--label") || undefined,
+    });
+  } catch (err) {
+    console.error(err.message);
+    return 1;
+  }
+  if (next.searches.length === (config.searches?.length ?? 0) && !json) {
+    console.log(`Already present — no duplicate added for provider "${provider}".`);
+  }
+  return writeConfig(next, { mode: "add-provider", provider });
 }
 
 function runAddUrl() {
@@ -321,9 +381,11 @@ function printHelp() {
 
 Usage:
   careerrat searches                                      Show current searches
+  careerrat searches --providers                          Show deterministic provider support
   careerrat searches --from-targeting                     Generate/refresh from candidate targeting (idempotent)
-  careerrat searches --add-query "<q>" [--label "<l>"] [--provider HiringCafe]
+  careerrat searches --add-query "<q>" [--label "<l>"]
   careerrat searches --add-url "<url>" [--label "<l>"]    Import a pasted URL (hiring.cafe filters preserved)
+  careerrat searches --add-provider "<id>" [--query "<q>"] [--url "<url>"] [--label "<l>"]
   careerrat searches --enable <index or label>            Enable a search
   careerrat searches --disable <index or label>           Disable a search
   careerrat searches --json                               Machine-readable output for any mode

@@ -53,28 +53,50 @@ export async function resolveJobUrl(
   }
 
   const provider = inferProvider({ careers_url: rawUrl });
+  let providerResolution = null;
   if (provider) {
     const resolved = await resolveViaProviderBoard({ provider, url: rawUrl, fetchImpl });
-    if (resolved) return resolved;
+    if (resolved?.bodyText?.trim()) return resolved;
+    providerResolution = resolved;
     // Known ATS, but this specific posting isn't on the company's current
-    // board (closed, moved, or the board fetch itself failed) — fall through
-    // to the plain-fetch path below for an honest signal instead of a hard
-    // failure. Most ATS hosts are also SPA hosts, so this usually still ends
-    // in "deferred" — which is correct, not a downgrade.
+    // board, or its list payload has no description. Fall through to the
+    // posting page for full-JD recovery instead of treating an empty body as
+    // resolved. SPA hosts still defer honestly to the session-browser path.
   }
 
   if (isSpaJobHost(parsed.hostname) || platformForHost(parsed.hostname)) {
-    return {
+    return mergeProviderMetadata(providerResolution, {
       bodyFetchStatus: "deferred",
       url: rawUrl,
       provider,
       reason:
         "SPA-rendered or login-gated host — no session browser available to a headless intake route; " +
         "evaluate-job's own STEP 0 browser-escalation path handles this once confirmed",
-    };
+    });
   }
 
-  return resolvePlainFetch({ url: rawUrl, fetchImpl, resolveHost, timeoutMs, maxBytes, provider });
+  const plain = await resolvePlainFetch({
+    url: rawUrl,
+    fetchImpl,
+    resolveHost,
+    timeoutMs,
+    maxBytes,
+    provider,
+  });
+  return mergeProviderMetadata(providerResolution, plain);
+}
+
+function mergeProviderMetadata(providerResolution, result) {
+  if (!providerResolution) return result;
+  return {
+    ...result,
+    url: result.url || providerResolution.url,
+    provider: result.provider || providerResolution.provider,
+    title: result.title || providerResolution.title,
+    company: result.company || providerResolution.company,
+    location: result.location || providerResolution.location,
+    comp: result.comp || providerResolution.comp,
+  };
 }
 
 async function resolveViaProviderBoard({ provider, url, fetchImpl }) {
