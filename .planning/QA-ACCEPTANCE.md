@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-14
 
-Gate result: all 82 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 83 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, restart, and native Electron checks pass. The
 broader native skill-to-screen build gate remains tracked separately in `SKILL-UX-AUDIT.md`.
 
@@ -1510,3 +1510,18 @@ Test homes:
 - Live retest: a brand-new packed install completed with no allow-scripts warning. Running
   `careerrat start --no-agent --no-dashboard` then installed all 27 skills and seeded the isolated
   workspace successfully.
+
+### `F-083` Vercel builds depend on live Google font downloads
+
+- Status: `FIXED`
+- Severity: P0 release blocker, the public website preview fails even though local builds pass.
+- Reproduction: deploy the PR through Vercel after Google retires one of Next.js's generated
+  Archivo asset URLs.
+- Root cause: the website and docs used `next/font/google`, which still fetches font files during
+  each production build. The resulting site is self-hosted, but the build itself is network-coupled.
+- Fix: load the required Archivo and IBM Plex files from pinned local npm font packages through
+  `next/font/local`, so neither site contacts Google during a build.
+- Regression: `tests/website-copy.test.mjs` rejects Google font imports and remote font hosts on
+  both deployed surfaces.
+- Live retest: the complete Vercel-mode docs-plus-website production build passed locally without
+  any remote font request; the updated PR preview is the external acceptance check.

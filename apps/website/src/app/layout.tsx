@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo } from "next/font/google";
 import localFont from "next/font/local";
 import { Analytics } from "@vercel/analytics/next";
 import "./globals.css";
@@ -19,12 +18,19 @@ const geistMono = localFont({
   display: "swap",
 });
 
-// next/font/google self-hosts Archivo at build time (downloaded once, served
-// from our own domain) — nothing hits Google at runtime.
-const archivo = Archivo({
-  subsets: ["latin"],
-  weight: ["700", "800"],
-  style: ["normal"],
+const archivo = localFont({
+  src: [
+    {
+      path: "../../../../node_modules/@fontsource/archivo/files/archivo-latin-700-normal.woff2",
+      weight: "700",
+      style: "normal",
+    },
+    {
+      path: "../../../../node_modules/@fontsource/archivo/files/archivo-latin-800-normal.woff2",
+      weight: "800",
+      style: "normal",
+    },
+  ],
   variable: "--font-display",
   display: "swap",
 });
