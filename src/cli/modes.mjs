@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// rolester modes - safe read/write helper for optional mode switches.
+// careerrat modes - safe read/write helper for optional mode switches.
 //
 // Defaults are safe when candidate/modes.yml is absent:
 //   usage_mode: standard
@@ -9,6 +9,8 @@ import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { dbExists } from "../core/db/connection.mjs";
+import { candidateConfigPatch } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { atomicWriteFile } from "../core/profile/gate-writer.mjs";
 import {
@@ -101,6 +103,43 @@ if (!MODE_ROUTES[type]) {
   fail(`unknown mode type "${type}". Use usage or application.`);
 }
 
+if (dbExists(pathCtx)) {
+  const modes = loadModes({ root: opts.root });
+  const route = MODE_ROUTES[type];
+  if (!route.values.includes(value)) {
+    fail(`"${value}" is not valid for ${route.label}. Allowed: ${route.values.join(", ")}`);
+  }
+  const changed = modes.data?.[route.path] !== value;
+  const result = {
+    ok: true,
+    file: modesDisplay(),
+    source: "db",
+    path: route.path,
+    value,
+    changed,
+    written: false,
+  };
+  if (!changed) {
+    if (opts.json) console.log(JSON.stringify({ ...result, note: "already set" }, null, 2));
+    else console.log(`No change - ${route.path} is already "${value}".`);
+    process.exit(0);
+  }
+  if (!opts.write) {
+    if (opts.json) console.log(JSON.stringify({ ...result, dryRun: true }, null, 2));
+    else {
+      console.log(`Proposed DB write for ${route.path}:`);
+      console.log(`  ~ ${route.path}: ${modes.data?.[route.path] || "(empty)"} -> ${value}`);
+      console.log("Dry run - pass --write to commit.");
+    }
+    process.exit(0);
+  }
+  candidateConfigPatch({ ...pathCtx, name: "modes", patch: { [route.path]: value } });
+  result.written = true;
+  if (opts.json) console.log(JSON.stringify(result, null, 2));
+  else console.log(`Written to SQLite candidate modes: ${route.path}: ${value}`);
+  process.exit(0);
+}
+
 const candidatePath = userPath(pathCtx, MODES_REL_PATH);
 const currentText = existsSync(candidatePath)
   ? readFileSync(candidatePath, "utf8")
@@ -168,18 +207,18 @@ function fail(message) {
 }
 
 function printHelp() {
-  console.log(`rolester modes - safe mode-switcher read/write helper
+  console.log(`careerrat modes - safe mode-switcher read/write helper
 
 Usage:
-  rolester modes status [--json]
-  rolester modes allows <operation> [--json]
-  rolester modes set usage <lean|standard|full> [--write]
-  rolester modes set application <selective|balanced|high-volume> [--write]
+  careerrat modes status [--json]
+  careerrat modes allows <operation> [--json]
+  careerrat modes set usage <lean|standard|full> [--write]
+  careerrat modes set application <selective|balanced|high-volume> [--write]
 
 Options:
   --write     Commit the change (default: dry run)
   --json      Machine-readable output
-  --root DIR  Repo root (default: the rolester install)
+  --root DIR  Repo root (default: the careerrat install)
 
 Absent candidate/modes.yml means usage_mode=standard and application_mode=balanced.
 Writes are schema-validated and atomic. Mode switches never relax honesty, privacy,

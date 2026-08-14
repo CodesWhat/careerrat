@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/tracker.schema.json",
-  "title": "Rolester Tracker",
+  "$id": "https://careerrat.local/schemas/tracker.schema.json",
+  "title": "CareerRat Tracker",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -71,6 +71,33 @@
               "risks": { "type": ["array", "null"], "items": { "type": "string", "maxLength": 80 }, "description": "Up to 3 gaps/caveats/flags, ≤80 chars each." }
             }
           },
+          "evaluation": {
+            "type": ["object", "null"],
+            "additionalProperties": true,
+            "description": "Canonical typed evaluation result. This is the sole current verdict; list, drawer, compensation, packet gating, and CTA projections derive from it.",
+            "properties": {
+              "gate": { "type": "string", "enum": ["keep", "review", "cut"] },
+              "fitScore": { "type": ["number", "null"], "minimum": 0, "maximum": 100 },
+              "fitBucket": { "type": ["string", "null"], "enum": ["high", "med", "stretch", null] },
+              "fitSummary": { "type": ["string", "null"], "maxLength": 160 },
+              "compensation": {
+                "type": ["object", "null"],
+                "additionalProperties": true,
+                "properties": {
+                  "status": { "type": "string", "enum": ["clears-floor", "below-floor", "unknown"] },
+                  "currency": { "type": ["string", "null"] },
+                  "minBase": { "type": ["number", "null"], "minimum": 0 },
+                  "maxBase": { "type": ["number", "null"], "minimum": 0 },
+                  "source": { "type": "string", "enum": ["job-description", "market", "unknown"] },
+                  "summary": { "type": ["string", "null"], "maxLength": 140 }
+                }
+              },
+              "fitReasons": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string", "maxLength": 80 } },
+              "fitRisks": { "type": ["array", "null"], "maxItems": 3, "items": { "type": "string", "maxLength": 80 } },
+              "confidence": { "type": ["string", "null"], "enum": ["low", "medium", "high", null] },
+              "evaluatedAt": { "type": ["string", "null"] }
+            }
+          },
           "link":   { "type": ["string", "null"] },
           "domain": { "type": ["string", "null"] },
           "channel": { "type": ["string", "null"], "enum": ["board", "linkedin", "portal", "referral", "recruiter", null] },
@@ -103,7 +130,9 @@
               "additionalProperties": true,
               "properties": {
                 "date":      { "type": ["string", "null"] },
-                "kind":      { "type": ["string", "null"] },
+                "kind":      { "type": ["string", "null"], "description": "Free-text DISPLAY label for this round (e.g. 'Technical screen', 'Onsite loop'). Use `stage` for the canonical machine-readable stage id — `kind` is never repurposed as the enum." },
+                "stage":     { "type": ["string", "null"], "description": "Canonical stage id for this round — the STAGE_ORDER vocabulary (src/core/tracker/dashboard-data.js).", "enum": ["sourced", "reviewed-hold", "manual-apply", "applied", "screen", "interview", "assessment", "technical", "hiring-manager", "onsite", "final", "offer", "accepted", "rejected", "withdrawn", null] },
+                "outcome":   { "type": ["string", "null"], "description": "Result of this round. 'pending' = the round happened and is awaiting a decision.", "enum": ["pending", "advanced", "rejected", "cancelled", null] },
                 "who":       { "type": ["string", "null"] },
                 "notes":     { "type": ["string", "null"], "maxLength": 200, "description": "2 sentences max: what happened + immediate next step. Comp/process/coaching go in the typed sibling fields, not here." },
                 "compNote":  { "type": ["string", "null"], "maxLength": 140, "description": "One-sentence comp signal heard on this call (else omit)." },

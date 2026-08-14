@@ -1,15 +1,36 @@
 import assert from "node:assert/strict";
-import test from "node:test";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { after, test } from "node:test";
 
 import {
   buildSearchSnapshotPath,
   captureSearchSources,
   hiringCafeSearchUrl,
+  ingestCapturedSnapshot,
   loadSearchSourceConfig,
   searchSourceUrl,
   selectSearchSources,
   stampSourceOffers,
 } from "../scripts/capture-search-sources.mjs";
+import { closeAll, openDb } from "../src/core/db/connection.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
+
+const cleanupRoots = [];
+
+function tempRepo() {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-search-sources-"));
+  cleanupRoots.push(repoRoot);
+  return repoRoot;
+}
+
+after(() => {
+  closeAll();
+  for (const root of cleanupRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test("builds HiringCafe saved-search URLs with the 24h recency convention", () => {
   const url = new URL(hiringCafeSearchUrl("forward deployed engineer"));
@@ -231,4 +252,94 @@ test("HiringCafe Vercel security checkpoint is reported as a capture error", asy
   assert.equal(snapshot.offers.length, 0);
   assert.equal(snapshot.errors.length, 1);
   assert.match(snapshot.errors[0].error, /security checkpoint/i);
+});
+
+test("ingests captured browser snapshot offers into DB sourced rows with JD artifacts", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const result = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-04T12:00:00.000Z"),
+    snapshot: {
+      source: "linkedin-browser",
+      offers: [
+        {
+          company: "Acme",
+          title: "Director of IT",
+          url: "https://www.linkedin.com/jobs/view/123456",
+          location: "Remote",
+          source: "linkedin-browser",
+          sourceId: "li-director",
+          sourceLabel: "Director search",
+          sourceProvider: "linkedin",
+          searchUrl: "https://www.linkedin.com/jobs/search/?keywords=Director",
+          capturedUrl:
+            "https://www.linkedin.com/jobs/search/?keywords=Director&currentJobId=123456",
+          hiringCafeUrl: "https://hiring.cafe/job/source-ref",
+          reqId: "linkedin:123456",
+          rawText: "Own identity, endpoints, SaaS automation, and IT operations.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.persistedRows, 1);
+  assert.match(result.offers[0].artifacts.jd, /^workspace\/jobs\/acme-director-of-it-/);
+  assert.equal(existsSync(userPath({ repoRoot }, result.offers[0].artifacts.jd)), true);
+  assert.match(
+    readFileSync(userPath({ repoRoot }, result.offers[0].artifacts.jd), "utf8"),
+    /Own identity, endpoints, SaaS automation/
+  );
+
+  const rows = openDb({ repoRoot })
+    .prepare("SELECT data FROM sourced")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].company, "Acme");
+  assert.equal(rows[0].role, "Director of IT");
+  assert.equal(rows[0].source, "linkedin-browser");
+  assert.equal(rows[0].sourcedAt, "2026-07-04T12:00:00.000Z");
+  assert.equal(rows[0].updatedAt, "2026-07-04T12:00:00.000Z");
+  assert.equal(rows[0].artifacts.jd, result.offers[0].artifacts.jd);
+  assert.deepEqual(rows[0].sourceMeta, {
+    sourceId: "li-director",
+    sourceLabel: "Director search",
+    sourceProvider: "linkedin",
+    searchUrl: "https://www.linkedin.com/jobs/search/?keywords=Director",
+    capturedUrl: "https://www.linkedin.com/jobs/search/?keywords=Director&currentJobId=123456",
+    hiringCafeUrl: "https://hiring.cafe/job/source-ref",
+  });
+
+  const tracker = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  assert.equal(tracker.sourced.length, 1);
+  assert.equal(tracker.sourced[0].id, rows[0].id);
+});
+
+test("capture ingest skips invalid blank-company offers without writing JD artifacts", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+
+  const result = ingestCapturedSnapshot({
+    repoRoot,
+    now: new Date("2026-07-04T12:00:00.000Z"),
+    snapshot: {
+      source: "generic-browser",
+      offers: [
+        {
+          company: "",
+          title: "Unattributed role",
+          url: "https://example.test/jobs/1",
+          rawText: "This card did not expose an employer.",
+        },
+      ],
+    },
+  });
+
+  assert.equal(result.persistedRows, 0);
+  assert.equal(result.offers.length, 0);
+  assert.equal(existsSync(userPath({ repoRoot }, "workspace/jobs")), false);
 });

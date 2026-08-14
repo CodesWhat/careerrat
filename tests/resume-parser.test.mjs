@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   deriveEvidenceSeed,
   deriveProfileSeed,
   parseResume,
 } from "../src/core/profile/resume-parser.mjs";
+
+const TEST_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
 // ---------------------------------------------------------------------------
 // Fixture
@@ -56,6 +61,16 @@ Graduated with honors. GPA 3.8/4.0.
 - Delivered comprehensive documentation and examples for contributors
 `.trim();
 
+const BARE_LINK_RESUME = `
+linkedin.com/in/alexrivera | github.com/alexrivera
+Alex Rivera
+alex.rivera@example.com
+
+## Experience
+
+- Built reliable developer tooling.
+`.trim();
+
 // ---------------------------------------------------------------------------
 // parseResume — contact extraction
 // ---------------------------------------------------------------------------
@@ -102,6 +117,40 @@ test("portfolio is null when no non-linkedin non-github URL exists", () => {
   assert.equal(parsed.contact.portfolio, null);
 });
 
+test("normalizes and extracts bare linkedin and github contact URLs", () => {
+  const parsed = parseResume(BARE_LINK_RESUME);
+  assert.equal(parsed.contact.linkedin, "https://linkedin.com/in/alexrivera");
+  assert.equal(parsed.contact.github, "https://github.com/alexrivera");
+});
+
+test("normalizes and extracts www-prefixed bare contact URLs", () => {
+  const text = `Taylor Morgan\ntaylor@example.com | www.linkedin.com/in/taylormorgan | www.github.com/taylormorgan\n\n## Experience\n\n- Shipped useful software.`;
+  const parsed = parseResume(text);
+  assert.equal(parsed.contact.linkedin, "https://www.linkedin.com/in/taylormorgan");
+  assert.equal(parsed.contact.github, "https://www.github.com/taylormorgan");
+});
+
+test("preserves full-scheme contact URLs and deduplicates their bare matches", () => {
+  const text = `Jordan Lee\njordan@example.com | https://linkedin.com/in/jordanlee | https://github.com/jordanlee | github.com/jordanlee\n\n## Experience\n\n- Built useful software.`;
+  const parsed = parseResume(text);
+  assert.equal(parsed.contact.linkedin, "https://linkedin.com/in/jordanlee");
+  assert.equal(parsed.contact.github, "https://github.com/jordanlee");
+  assert.equal(parsed.links.filter((url) => url === "https://github.com/jordanlee").length, 1);
+});
+
+test("does not treat unrelated domains, skill tokens, or pathless hosts as links", () => {
+  const text = `Casey Jones\ncasey@example.com | mygithub.com/caseyjones | github.com\n\n## Skills\n\nNode.js, socket.io`;
+  const parsed = parseResume(text);
+  assert.deepEqual(parsed.links, []);
+  assert.equal(parsed.contact.linkedin, null);
+  assert.equal(parsed.contact.github, null);
+});
+
+test("skips a bare-link-only contact line when detecting the full name", () => {
+  const parsed = parseResume(BARE_LINK_RESUME);
+  assert.equal(parsed.contact.full_name, "Alex Rivera");
+});
+
 // ---------------------------------------------------------------------------
 // parseResume — skills tokenization
 // ---------------------------------------------------------------------------
@@ -137,6 +186,39 @@ test("captures experience as raw text blocks split on blank lines", () => {
   assert.ok(experience.length >= 2, `expected ≥2 experience blocks, got ${experience.length}`);
   // First block should contain job content.
   assert.ok(experience.some((b) => b.includes("Acme Corp") || b.includes("distributed job queue")));
+});
+
+test("ISSUE-004: groups Morgan's blank-spaced PDF text into exactly three employment records", () => {
+  const text = readFileSync(
+    join(TEST_ROOT, "tests/fixtures/resume/morgan-hale-pdftotext.txt"),
+    "utf8"
+  );
+  const { experience } = parseResume(text).sections;
+
+  assert.equal(experience.length, 3);
+  assert.match(experience[0], /^Staff Platform Engineer \| Juniper Relay/);
+  assert.match(experience[1], /^Senior Software Engineer \| Northstar Ledger/);
+  assert.match(experience[2], /^Software Engineer \| HarborSignal/);
+});
+
+test("ISSUE-004: evidence excludes employment metadata and never absorbs the next job header", () => {
+  const text = readFileSync(
+    join(TEST_ROOT, "tests/fixtures/resume/morgan-hale-pdftotext.txt"),
+    "utf8"
+  );
+  const claims = deriveEvidenceSeed(parseResume(text)).claims;
+
+  assert.equal(claims.length, 10);
+  assert.equal(
+    claims.some(({ claim }) => /New York, NY|Jersey City, NJ/.test(claim)),
+    false
+  );
+  assert.equal(
+    claims.some(({ claim }) =>
+      /Staff Platform Engineer|Senior Software Engineer|HarborSignal/.test(claim)
+    ),
+    false
+  );
 });
 
 // ---------------------------------------------------------------------------
@@ -182,6 +264,18 @@ test("deriveProfileSeed omits keys whose contact value is null", () => {
   }
 });
 
+test("deriveProfileSeed carries normalized bare contact URLs end to end", () => {
+  const parsed = parseResume(BARE_LINK_RESUME);
+  const seed = deriveProfileSeed(parsed);
+  assert.equal(seed.candidate.linkedin, "https://linkedin.com/in/alexrivera");
+  assert.equal(seed.candidate.github, "https://github.com/alexrivera");
+});
+
+test("plain-text contact parsing preserves a full country or state name after the comma", () => {
+  const parsed = parseResume("Morgan Hale\nmorgan@example.com | Brooklyn, New York\n");
+  assert.equal(parsed.contact.location, "Brooklyn, New York");
+});
+
 // ---------------------------------------------------------------------------
 // deriveEvidenceSeed
 // ---------------------------------------------------------------------------
@@ -223,7 +317,7 @@ test("every claim has the fixed evidence note", () => {
   const parsed = parseResume(RESUME);
   const { claims } = deriveEvidenceSeed(parsed);
   for (const c of claims) {
-    assert.equal(c.evidence, "Source: resume. Verify scope and outcome before use.");
+    assert.equal(c.evidence, "Source: candidate resume (user-provided).");
   }
 });
 

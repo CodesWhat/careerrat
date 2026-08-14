@@ -1,6 +1,5 @@
 #!/usr/bin/env node
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { homedir } from "node:os";
 import { join } from "node:path";
 import { stdin as input, stdout as output } from "node:process";
 import { createInterface } from "node:readline/promises";
@@ -8,13 +7,15 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 
+import { defaultProfileRoot } from "../src/core/automation/session.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { parseYaml } from "../src/core/profile/yaml.mjs";
+import { captureAndPersistOffersIfDb } from "../src/core/scoring/sourced-persistence.mjs";
 import { extractReqId } from "../src/core/scoring/sourced-scanner.mjs";
 
 const pathCtx = { repoRoot: ROOT };
 const DEFAULT_CONFIG = userPath(pathCtx, "config/search-sources.yml");
-const DEFAULT_PROFILE_ROOT = join(homedir(), ".rolester", "board-profiles");
+const DEFAULT_PROFILE_ROOT = defaultProfileRoot();
 
 export function hiringCafeSearchUrl(searchQuery, searchState = {}) {
   const url = new URL("https://hiring.cafe/");
@@ -214,6 +215,24 @@ export async function captureSearchSources({
   };
 }
 
+export function ingestCapturedSnapshot({
+  repoRoot = ROOT,
+  env = process.env,
+  snapshot,
+  now = new Date(),
+} = {}) {
+  const result = captureAndPersistOffersIfDb({
+    repoRoot,
+    env,
+    offers: snapshot?.offers || [],
+    savedAt: now,
+  });
+  if (!result) {
+    throw new Error("capture ingest requires a CareerRat SQLite database");
+  }
+  return result;
+}
+
 export async function runCli(argv = process.argv.slice(2)) {
   if (argv.includes("--help")) {
     console.log(helpText());
@@ -265,6 +284,10 @@ export async function runCli(argv = process.argv.slice(2)) {
   console.log(
     `Captured ${snapshot.offers.length} offers from ${snapshot.capturedSourceCount}/${snapshot.sourceCount} sources`
   );
+  if (options.ingest) {
+    const ingest = ingestCapturedSnapshot({ repoRoot: ROOT, snapshot });
+    console.log(`Ingested ${ingest.persistedRows} captured offers into SQLite sourced rows`);
+  }
   if (snapshot.errors.length > 0) {
     console.log("Errors:");
     for (const error of snapshot.errors) console.log(`- ${error.id}: ${error.error}`);
@@ -295,6 +318,7 @@ function parseArgs(args) {
     perSourceLimit: Number(valueAfter(args, "--per-source-limit") || 250),
     scrollPages: Number(valueAfter(args, "--scroll-pages") || 0),
     waitMs: Number(valueAfter(args, "--wait-ms") || 800),
+    ingest: args.includes("--ingest"),
   };
 }
 
@@ -724,14 +748,16 @@ Options:
   --manual               Pause before every configured source capture.
   --browser NAME         Playwright channel. Use chrome for saved auth. Default: chromium.
   --headless             Run without a visible browser.
-  --profile-root DIR     Persistent profile root. Default: ~/.rolester/board-profiles.
+  --profile-root DIR     Persistent profile root. Default: ~/.careerrat/board-profiles
   --per-source-limit N   Max offers per source. Default: 250.
   --limit N              Max offers in the combined snapshot. Default: unlimited.
   --scroll-pages N       Scroll result pages before extraction. Default: 0.
   --out FILE             Output JSON file. Default: scan-results/<source>-browser-<timestamp>.json.
+  --ingest               After capture, write offers to SQLite sourced rows and JD artifacts.
 
 After capture:
-  npm run delta:sourced -- --source <source>-browser --repo-new-only --write
+  DB workspaces: use --ingest so captured offers become sourced rows immediately.
+  Legacy workspaces: npm run delta:sourced -- --source <source>-browser --repo-new-only --write
 `;
 }
 

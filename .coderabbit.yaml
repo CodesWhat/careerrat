@@ -1,4 +1,4 @@
-# CodeRabbit configuration: rolester
+# CodeRabbit configuration: careerrat
 language: en-US
 early_access: true
 enable_free_tier: true
@@ -70,7 +70,7 @@ reviews:
   path_instructions:
     - path: "src/core/**"
       instructions: |
-        Core workspace engine. Data shapes must stay consistent with DATA_CONTRACT.md — flag changes that drift from it.
+        Core workspace engine. Data shapes must stay consistent with docs/DATA_CONTRACT.md — flag changes that drift from it.
     - path: "src/cli/**"
       instructions: |
         CLI layer. Keep commands thin — flag business logic that belongs in src/core.

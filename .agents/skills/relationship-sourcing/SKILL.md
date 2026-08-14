@@ -15,14 +15,14 @@ stays waiting/monitoring until a lead is found, reviewed, and approved by the
 candidate. This skill only creates lead candidates for review; outreach drafts go
 through `email-comms` or `ingest-messages` and sending remains confirm-first.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — Consent gate
 
 Run:
 
 ```bash
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.relationship_sourcing`. Applicable platforms are `linkedin`
@@ -33,10 +33,10 @@ If no requested platform is allowed, stop before opening a browser and explain t
 opt-in path:
 
 ```bash
-rolester automation consent <platform> --write
-rolester automation enable relationship_sourcing --write
-rolester automation enable relationship_sourcing <platform> --write
-rolester automation status --json
+careerrat automation consent <platform> --write
+careerrat automation enable relationship_sourcing --write
+careerrat automation enable relationship_sourcing <platform> --write
+careerrat automation status --json
 ```
 
 The user must read the platform terms themselves before recording consent. Never
@@ -98,8 +98,30 @@ a person as an approved warm path until the candidate approves the lead.
 
 ## STEP 4 — Write back and render
 
-Append review leads to `workspace/tracker.json#relationshipLeads[]`. Avoid duplicate
-lead records by normalized `company + name + platform`.
+**Mode detection:** run `careerrat data status`. Exit 0 → DB workspace — use the
+`careerrat data <verb>` command below (Data Write Contract, AGENTS.md). Nonzero
+exit → legacy workspace (no DB yet) — use the direct `tracker.json` write path
+below.
+
+Append review leads to `relationshipLeads[]`. Avoid duplicate lead records by
+normalized `company + name + platform`.
+
+**DB workspace:**
+
+```bash
+careerrat data relationship leads upsert --data '<relationship lead JSON array>'
+careerrat data verify
+careerrat tracker --verify
+```
+
+`relationship leads upsert` persists `relationshipLeads[]`, dedupes by
+normalized `company + name + platform`, clears sourcing-related CTAs on linked
+jobs in the same transaction, writes Activity Pulse, and exports
+`workspace/tracker.json` + `workspace/activity.jsonl`. Run `careerrat tracker`
+afterward only when a recovery snapshot is useful.
+
+**Legacy workspace (no DB):** append review leads to
+`workspace/tracker.json#relationshipLeads[]` directly.
 
 **CTA clear-down (same write):** For each target job row, inspect `jobs[id].nextAction`
 and `jobs[id].followUp` for any sourcing-related pending CTA (e.g. "find recruiter
@@ -115,10 +137,10 @@ Partial writes leave ghost CTAs. One write, both mutations.
 Then run:
 
 ```bash
-rolester tracker --verify
+careerrat tracker --verify
 npm run verify:tracker
-rolester activity append --type system --title "Relationship leads found" --summary "Review leads captured for candidate approval." --tag relationship --needs-user --write
-rolester tracker
+careerrat activity append --type system --title "Relationship leads found" --summary "Review leads captured for candidate approval." --tag relationship --needs-user --write
+careerrat tracker
 ```
 
 Add concrete `--company`, `--role`, or `--app-id` refs when the leads map cleanly
@@ -128,6 +150,38 @@ The Network dashboard will show pending leads in **Lead review**. Approved leads
 become Network contacts; rejected leads stay out of the warm-path map.
 
 ## STEP 5 — Approval and outreach
+
+**DB workspace:**
+
+When the candidate approves a lead:
+
+```bash
+careerrat data relationship lead set-status <lead-id> approved --at <ISO timestamp> --follow-up-due <ISO date>
+careerrat data verify
+careerrat tracker --verify
+```
+
+`relationship lead set-status` sets `relationshipLeads[n].status = "approved"`,
+records `approvedAt`, updates the linked job row to
+`nextAction: "Send outreach to <Name> via email-comms"`, sets `nextActionDue`,
+appends the internal conversation note, logs Activity Pulse, and exports
+tracker files in one transaction.
+
+When the candidate rejects a lead:
+
+```bash
+careerrat data relationship lead set-status <lead-id> rejected --at <ISO timestamp> --note "<brief reason>"
+careerrat data verify
+careerrat tracker --verify
+```
+
+The same verb records `rejectedAt`, appends the internal note, and if no other
+`review` or `approved` leads remain for that target job, restates
+`nextAction: "Re-run relationship-sourcing for <Company>"` with
+`nextActionDue: null` in the same transaction. Run `careerrat tracker` afterward
+only when a recovery snapshot is useful.
+
+**Legacy workspace (no DB):**
 
 **When the candidate approves a lead**, perform a single `workspace/tracker.json`
 write that covers all three mutations together:
@@ -148,12 +202,12 @@ Bump `meta.lastUpdatedAt` to the current ISO timestamp in the same write (per th
 Then run:
 
 ```bash
-rolester tracker --verify
+careerrat tracker --verify
 npm run verify:tracker
-rolester activity append --type outreach --actor agent \
+careerrat activity append --type outreach --actor agent \
   --title "Relationship lead approved: <Name>" \
   --summary "Lead approved; outreach to <Name> (<title>, <platform>) queued to email-comms." --write
-rolester tracker
+careerrat tracker
 ```
 
 Only after the write can this contact be treated as a warm path.
@@ -171,12 +225,12 @@ Bump `meta.lastUpdatedAt` to the current ISO timestamp in the same write (per th
 Then run:
 
 ```bash
-rolester tracker --verify
+careerrat tracker --verify
 npm run verify:tracker
-rolester activity append --type system --actor agent \
+careerrat activity append --type system --actor agent \
   --title "Relationship lead declined: <Name>" \
   --summary "Lead rejected; brief reason noted on lead record." --write
-rolester tracker
+careerrat tracker
 ```
 
 If outreach is needed, hand the approved contact and context to `email-comms` for a

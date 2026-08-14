@@ -1,7 +1,7 @@
 /**
  * interview/packet.mjs
  *
- * Interview-packet renderer + story-gap extractor for Rolester.
+ * Interview-packet renderer + story-gap extractor for CareerRat.
  *
  * Rules:
  *  - Assemble packets from REAL provided data only (profile, evidence-bank

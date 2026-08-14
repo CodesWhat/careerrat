@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://careerrat.local/schemas/application-limits.schema.json",
+  "title": "CareerRat Application Limits",
+  "type": "object",
+  "required": ["companies"],
+  "additionalProperties": true,
+  "properties": {
+    "companies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["company", "scope", "status"],
+        "additionalProperties": true,
+        "properties": {
+          "company": { "type": "string" },
+          "scope": { "type": "string" },
+          "cap": {
+            "anyOf": [
+              { "type": "null" },
+              {
+                "type": "object",
+                "required": ["max", "window_days"],
+                "additionalProperties": true,
+                "properties": {
+                  "max": { "type": "number" },
+                  "window_days": { "type": ["number", "null"] }
+                }
+              }
+            ]
+          },
+          "cooldown_days": { "type": ["number", "null"] },
+          "status": { "enum": ["ok", "caution", "blocked"] },
+          "hit_on": { "type": ["string", "null"] },
+          "hit_via": { "type": ["string", "null"] },
+          "reapply_rule": { "type": ["string", "null"] },
+          "reapply_after": { "type": ["string", "null"] },
+          "bypass": { "type": ["string", "null"] },
+          "source": { "type": ["string", "null"] },
+          "note": { "type": ["string", "null"] }
+        }
+      }
+    }
+  }
+}

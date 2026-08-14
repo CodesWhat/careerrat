@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/targeting.schema.json",
-  "title": "Rolester Targeting",
+  "$id": "https://careerrat.local/schemas/targeting.schema.json",
+  "title": "CareerRat Targeting",
   "type": "object",
   "required": ["role_buckets", "keep_signals", "cut_signals"],
   "additionalProperties": false,
@@ -16,7 +16,9 @@
           "name": { "type": "string" },
           "priority": { "type": "string", "enum": ["primary", "secondary", "stretch", "oe"] },
           "titles": { "type": "array", "items": { "type": "string" } },
-          "notes": { "type": "string" }
+          "notes": { "type": "string" },
+          "fit_signals": { "type": "array", "items": { "type": "string" } },
+          "down_signals": { "type": "array", "items": { "type": "string" } }
         }
       }
     },
@@ -45,6 +47,35 @@
           "properties": {
             "mode": { "type": "string", "enum": ["since-last-run", "fixed-days"] },
             "days": { "type": "number" }
+          }
+        },
+        "presentation_cap_per_company": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Maximum qualified roles from one company in the default review queue per sweep. Defaults to 5."
+        },
+        "cadence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["mode"],
+          "properties": {
+            "mode": { "type": "string", "enum": ["daily", "every-3-days", "weekly", "manual"] },
+            "recommended_from": { "type": "string", "enum": ["default", "history"] },
+            "saved_at": { "type": "string" }
+          }
+        },
+        "ai_prompts": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["id", "text", "source"],
+            "additionalProperties": false,
+            "properties": {
+              "id": { "type": "string" },
+              "text": { "type": "string" },
+              "source": { "type": "string", "enum": ["generated", "edited", "user"] },
+              "updatedAt": { "type": "string" }
+            }
           }
         }
       }

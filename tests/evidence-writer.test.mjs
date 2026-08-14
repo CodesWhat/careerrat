@@ -143,7 +143,7 @@ test("computeEvidenceWrite refuses a claim that fails the firewall", () => {
 // ---------------------------------------------------------------------------
 
 test("writeEvidence + loadEvidence round-trips and passes the schema guard", () => {
-  const dir = mkdtempSync(join(tmpdir(), "rolester-ev-"));
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-ev-"));
   try {
     const claims = [
       goodClaim(),
@@ -169,7 +169,7 @@ test("writeEvidence + loadEvidence round-trips and passes the schema guard", () 
 });
 
 test("loadEvidence reports a missing bank without throwing", () => {
-  const dir = mkdtempSync(join(tmpdir(), "rolester-ev-empty-"));
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-ev-empty-"));
   try {
     const loaded = loadEvidence({ root: dir });
     assert.equal(loaded.exists, false);
@@ -180,7 +180,7 @@ test("loadEvidence reports a missing bank without throwing", () => {
 });
 
 test("end-to-end: compute then write a derived-id claim, reload by that id", () => {
-  const dir = mkdtempSync(join(tmpdir(), "rolester-ev-e2e-"));
+  const dir = mkdtempSync(join(tmpdir(), "careerrat-ev-e2e-"));
   try {
     const c = goodClaim();
     delete c.id;

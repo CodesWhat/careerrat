@@ -1,0 +1,23 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://careerrat.local/schemas/ai.schema.json",
+  "title": "CareerRat AI Model Config",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "_comment": {
+      "type": "string",
+      "description": "Documentation only — ignored. Present so config/ai.example.json can be copied to config/ai.json verbatim without tripping validation."
+    },
+    "model": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "Default model id for skill runs and callAI(). May be a native Anthropic model id (e.g. \"claude-sonnet-5\") or an upstream gateway slug (e.g. \"anthropic/claude-sonnet-4.6\" via Vercel AI Gateway). Only used when the corresponding env var (ANTHROPIC_MODEL) is unset — env always wins. null/absent = no override, caller/SDK default applies."
+    },
+    "smallFastModel": {
+      "type": ["string", "null"],
+      "default": null,
+      "description": "Default model id for small/fast (background/haiku-tier) work. Same id shape as `model`. Only used when ANTHROPIC_SMALL_FAST_MODEL is unset — env always wins. null/absent = no override."
+    }
+  }
+}

@@ -1,0 +1,53 @@
+# electron-builder config for the CareerRat desktop shell (M5, macOS-first).
+#
+# `npm run dist` runs `stage.mjs` first (builds staging/careerrat, the
+# extraResources tree below) then electron-builder itself.
+#
+# Signing: leave `mac.identity` unset so electron-builder uses its standard
+# macOS certificate discovery. Local signing credentials belong in the
+# builder's keychain or CI signing environment, not in this tracked file.
+#
+# Notarization: enabled for pilot builds. electron-builder reads Apple
+# notarization credentials from the local keychain or CI environment; this
+# tracked config intentionally carries no account, team, password, or profile
+# values.
+appId: com.codeswhat.careerrat
+productName: CareerRat
+directories:
+  output: dist
+files:
+  - main.mjs
+  - desktop-runtime.mjs
+  - desktop-routing.mjs
+  - desktop-smoke.mjs
+  - window-options.mjs
+  - package.json
+extraResources:
+  - from: staging/careerrat
+    to: careerrat
+    filter:
+      - "**/*"
+      - ".agents/**"
+      - ".claude/**"
+      - "apps/web/dist/**"
+      - "!**/.DS_Store"
+  # electron-builder's copy filter rejects a root-level `node_modules`
+  # directory inside a FileSet, so copy the staged SDK tree as its own source.
+  - from: staging/careerrat/node_modules
+    to: careerrat/node_modules
+    filter:
+      - "**/*"
+      - "!**/.DS_Store"
+mac:
+  icon: build/icon.icns
+  target:
+    - target: dmg
+      arch:
+        - arm64
+  category: public.app-category.productivity
+  hardenedRuntime: true
+  forceCodeSigning: true
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.inherit.plist
+  gatekeeperAssess: false
+  notarize: true

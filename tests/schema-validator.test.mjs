@@ -15,6 +15,7 @@ function loadSchema(name) {
 }
 
 const profileSchema = loadSchema("profile.schema.json");
+const formDefaultsSchema = loadSchema("form-defaults.schema.json");
 const targetingSchema = loadSchema("targeting.schema.json");
 const searchSourcesSchema = loadSchema("search-sources.schema.json");
 
@@ -83,6 +84,31 @@ test("profile: valid complete object → { valid: true, errors: [] }", () => {
   const result = validate(makeProfile(), profileSchema);
   assert.equal(result.valid, true);
   assert.deepEqual(result.errors, []);
+});
+
+test("profile: negative compensation values are rejected", () => {
+  const data = makeProfile();
+  data.compensation.expected_base = -1;
+  const result = validate(data, profileSchema);
+
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) => error.path === "compensation.expected_base" && /at least 0/.test(error.message)
+    ),
+    `expected a non-negative compensation error, got: ${JSON.stringify(result.errors)}`
+  );
+});
+
+test("form defaults: negative expected base is rejected", () => {
+  const result = validate({ auto_submit: false, expected_base: -1 }, formDefaultsSchema);
+
+  assert.equal(result.valid, false);
+  assert.ok(
+    result.errors.some(
+      (error) => error.path === "expected_base" && /at least 0/.test(error.message)
+    )
+  );
 });
 
 // ---------------------------------------------------------------------------

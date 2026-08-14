@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://careerrat.local/schemas/form-questions.schema.json",
+  "title": "CareerRat Normalized Form Questions",
+  "description": "Shared output shape of src/core/apply/form-questions.mjs — a job posting's real application-form questions, fetched deterministically (Greenhouse/Ashby) or pasted by hand.",
+  "type": "object",
+  "required": ["source", "url", "fetchedAt", "questions"],
+  "additionalProperties": true,
+  "properties": {
+    "source": { "type": "string", "enum": ["greenhouse", "ashby", "manual"] },
+    "url": { "type": "string" },
+    "fetchedAt": { "type": "string" },
+    "demographicSectionPresent": {
+      "type": "boolean",
+      "description": "true when a demographic/EEOC survey section was seen and excluded from questions[]. Omitted for source \"manual\" (undetectable from pasted text)."
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "label", "type", "required", "options"],
+        "additionalProperties": false,
+        "properties": {
+          "id": { "type": "string" },
+          "label": { "type": "string" },
+          "type": {
+            "type": "string",
+            "enum": ["text", "textarea", "select", "multiselect", "boolean", "file", "number", "unknown"]
+          },
+          "required": { "type": "boolean" },
+          "options": {
+            "type": ["array", "null"],
+            "items": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

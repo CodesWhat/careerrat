@@ -1,6 +1,6 @@
 // evidence-writer.mjs — the safe add/validate primitive for the evidence truth bank.
 //
-// candidate/evidence.yml is the highest-stakes file in Rolester: every résumé,
+// candidate/evidence.yml is the highest-stakes file in CareerRat: every résumé,
 // cover letter, interview packet, and STAR+R story draws its claims from here, and
 // nothing outbound may assert a fact that isn't in it. Until now evidence was only
 // written by hand-edit (ingest-profile) or résumé parse — there was no guarded
@@ -26,12 +26,13 @@
 // isolated at the bottom.
 
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import { displayPath, userPath } from "../paths/workspace.mjs";
 import { findCurrentBaseToken } from "./comp-guard.mjs";
-import { atomicWriteFile, readTextIfExists } from "./gate-writer.mjs";
+import { loadCandidateDoc } from "./config-store.mjs";
+import { atomicWriteFile } from "./gate-writer.mjs";
 import { validate } from "./schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "./yaml.mjs";
 
@@ -77,9 +78,9 @@ export function parseEvidence(text) {
 }
 
 export function loadEvidence({ root = DEFAULT_ROOT } = {}) {
-  const text = readTextIfExists(evidenceAbsPath(root));
-  if (text === null) return { exists: false, claims: [] };
-  return { exists: true, ...parseEvidence(text) };
+  const data = loadCandidateDoc("evidence", { repoRoot: root });
+  if (!data) return { exists: false, claims: [] };
+  return { exists: true, data, claims: Array.isArray(data.claims) ? data.claims : [] };
 }
 
 // ---------------------------------------------------------------------------

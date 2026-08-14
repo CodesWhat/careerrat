@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Rolester companies CLI — manage config/sourced-scan.json#tracked_companies.
+// CareerRat companies CLI — manage config/sourced-scan.json#tracked_companies.
 //
 // Commands:
 //   --list (default)         Print tracked companies as a numbered list with providers.
@@ -11,10 +11,13 @@
 import { mkdirSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { companyAtsRemove, companyAtsUpsert, sourceConfigGet } from "../core/db/verbs.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
 import { inferProvider, loadScannerConfig } from "../core/scoring/sourced-scanner.mjs";
 
-const root = join(fileURLToPath(new URL("../..", import.meta.url)));
+const args = process.argv.slice(2);
+const root = optValueFrom(args, "--root") || join(fileURLToPath(new URL("../..", import.meta.url)));
 const pathCtx = { repoRoot: root };
 const CONFIG_REL = "config/sourced-scan.json";
 const CONFIG_PATH = userPath(pathCtx, CONFIG_REL);
@@ -30,7 +33,6 @@ const SUPPORTED_HOSTS = [
 ];
 const ATS_FAMILIES = "Ashby, Greenhouse, Lever, Workable, or SmartRecruiters";
 
-const args = process.argv.slice(2);
 const json = args.includes("--json");
 const write = args.includes("--write");
 
@@ -62,6 +64,8 @@ function runList() {
       name: entry.name,
       careers_url: entry.careers_url,
       provider: inferProvider(entry),
+      enabled: entry.enabled !== false,
+      lastRunAt: entry.lastRunAt || null,
     }));
     console.log(
       JSON.stringify(
@@ -85,13 +89,17 @@ function runList() {
       `Until this is populated, search-jobs can use broad board searches but will not scan company ATS boards like ${ATS_FAMILIES}.`
     );
     console.log(
-      `Add one: rolester companies --add "Acme" --url "https://jobs.ashbyhq.com/acme" --write`
+      `Add one: careerrat companies --add "Acme" --url "https://jobs.ashbyhq.com/acme" --write`
     );
     return 0;
   }
   for (const [i, entry] of companies.entries()) {
     const provider = inferProvider(entry) || "unknown";
-    console.log(`${String(i + 1).padStart(2)} ${entry.name} — ${entry.careers_url} (${provider})`);
+    const flag = entry.enabled === false ? "✗" : "✓";
+    const watermark = entry.lastRunAt ? ` last-run ${entry.lastRunAt}` : " never-run";
+    console.log(
+      `${String(i + 1).padStart(2)} ${flag} ${entry.name} — ${entry.careers_url} (${provider})${watermark}`
+    );
   }
   console.log(`\n${companies.length} tracked ${companies.length === 1 ? "company" : "companies"}.`);
   return 0;
@@ -102,7 +110,7 @@ function runAdd() {
   const url = optValue("--url");
 
   if (!name || !url) {
-    console.error('Usage: rolester companies --add "<name>" --url "<careers_url>" [--write]');
+    console.error('Usage: careerrat companies --add "<name>" --url "<careers_url>" [--write]');
     return 2;
   }
 
@@ -152,6 +160,26 @@ function runAdd() {
   }
 
   const next = { ...config, tracked_companies: [...companies, entry] };
+  if (dbExists(pathCtx)) {
+    const result = companyAtsUpsert({ ...pathCtx, entry });
+    if (json) {
+      console.log(
+        JSON.stringify({
+          status: result.status,
+          name: result.entry.name,
+          careers_url: result.entry.careers_url,
+          provider,
+          total: result.total,
+        })
+      );
+    } else {
+      const verb = result.status === "updated" ? "Updated" : "Added";
+      console.log(`${verb} ${result.entry.name} — ${result.entry.careers_url} (${provider})`);
+      console.log(`${result.total} tracked ${result.total === 1 ? "company" : "companies"} total.`);
+    }
+    return 0;
+  }
+
   writeConfig(next);
 
   if (json) {
@@ -176,7 +204,7 @@ function runAdd() {
 function runRemove() {
   const name = optValue("--remove");
   if (!name) {
-    console.error('Usage: rolester companies --remove "<name>" [--write]');
+    console.error('Usage: careerrat companies --remove "<name>" [--write]');
     return 2;
   }
 
@@ -215,6 +243,19 @@ function runRemove() {
   }
 
   const next = { ...config, tracked_companies: companies.filter((entry) => entry !== match) };
+  if (dbExists(pathCtx)) {
+    const result = companyAtsRemove({ ...pathCtx, name });
+    if (json) {
+      console.log(
+        JSON.stringify({ status: result.status, name: result.name || name, total: result.total })
+      );
+    } else {
+      console.log(`Removed ${result.name || name}`);
+      console.log(`${result.total} tracked ${result.total === 1 ? "company" : "companies"} total.`);
+    }
+    return 0;
+  }
+
   writeConfig(next);
 
   if (json) {
@@ -235,6 +276,7 @@ function runRemove() {
 // ---------------------------------------------------------------------------
 
 function loadConfig() {
+  if (dbExists(pathCtx)) return sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data;
   return loadScannerConfig(CONFIG_PATH);
 }
 
@@ -246,7 +288,7 @@ function companyAtsReadiness(companies) {
     providers,
     missingAction:
       companies.length === 0
-        ? "Run discover-companies, or add a scannable ATS board with rolester companies --add."
+        ? "Run discover-companies, or add a scannable ATS board with careerrat companies --add."
         : null,
   };
 }
@@ -263,16 +305,21 @@ function optValue(flag) {
   return i !== -1 && i + 1 < args.length ? args[i + 1] : null;
 }
 
+function optValueFrom(argv, flag) {
+  const i = argv.indexOf(flag);
+  return i !== -1 && i + 1 < argv.length ? argv[i + 1] : null;
+}
+
 function printHelp() {
-  console.log(`rolester companies — manage config/sourced-scan.json#tracked_companies
+  console.log(`careerrat companies — manage config/sourced-scan.json#tracked_companies
 
 Usage:
-  rolester companies                                        List tracked companies (default)
-  rolester companies --add "<name>" --url "<url>"           Dry-run add (print what would be added)
-  rolester companies --add "<name>" --url "<url>" --write   Append a company and save
-  rolester companies --remove "<name>"                      Dry-run remove
-  rolester companies --remove "<name>" --write              Remove a company and save
-  rolester companies --json                                 Machine-readable output for any mode
+  careerrat companies                                        List tracked companies (default)
+  careerrat companies --add "<name>" --url "<url>"           Dry-run add (print what would be added)
+  careerrat companies --add "<name>" --url "<url>" --write   Append a company and save
+  careerrat companies --remove "<name>"                      Dry-run remove
+  careerrat companies --remove "<name>" --write              Remove a company and save
+  careerrat companies --json                                 Machine-readable output for any mode
 
 Supported ATS hosts: ${SUPPORTED_HOSTS.join(", ")}
 

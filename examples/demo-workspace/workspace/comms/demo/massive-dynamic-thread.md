@@ -7,7 +7,7 @@
 ## Message 1 — Inbound from Recruiter
 **Date:** 2026-05-02
 **From:** camille.torres@massive-dynamic.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Staff Engineer, AI Platform — Massive Dynamic (referred by Alex Kim)
 
 Hi Riley,
@@ -26,7 +26,7 @@ Talent Partner, Massive Dynamic
 
 ## Message 2 — Outbound from Riley
 **Date:** 2026-05-03
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** camille.torres@massive-dynamic.example
 **Subject:** Re: Staff Engineer, AI Platform — Massive Dynamic (referred by Alex Kim)
 
@@ -43,7 +43,7 @@ Riley
 ## Message 3 — Inbound from Recruiter (post-screen)
 **Date:** 2026-05-08
 **From:** camille.torres@massive-dynamic.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Re: Staff Engineer, AI Platform — great talking today!
 
 Riley,
@@ -62,7 +62,7 @@ Camille
 ## Message 4 — Inbound from Recruiter (technical advance)
 **Date:** 2026-05-20
 **From:** camille.torres@massive-dynamic.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Next step: Technical Screen with Yuki Tanaka
 
 Hi Riley,
@@ -81,7 +81,7 @@ Camille
 ## Message 5 — Inbound from Recruiter (panel invitation)
 **Date:** 2026-06-10
 **From:** camille.torres@massive-dynamic.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Panel Interview Invitation — 2026-06-20
 
 Riley,
@@ -105,7 +105,7 @@ Camille
 
 ## Message 6 — Outbound from Riley
 **Date:** 2026-06-10
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** camille.torres@massive-dynamic.example
 **Subject:** Re: Panel Interview Invitation — 2026-06-20
 

@@ -1,13 +1,15 @@
-# Rolester Agent Router
+# CareerRat Agent Router
 
 This is the agent operating contract. Humans setting up: see README.md first.
 
 Read this before doing job-search work in this repo.
 
-If `candidate/AGENTS.md` exists, read it too — `ingest-profile` generates it to
-personalize this router with the candidate's target roles, comp floor, location
-posture, and keep/cut signals. If the workspace has no `candidate/` setup yet,
-run `ingest-profile` (or `rolester ingest`) first.
+If `candidate/AGENTS.md` exists, read it too — `ingest-profile` / `write-config`
+generates it to personalize this router with the candidate's target roles, comp
+floor, location posture, and keep/cut signals. In DB workspaces, SQLite candidate
+setup is canonical and `candidate/` files are compatibility exports. If the
+workspace has no candidate setup yet, run `ingest-profile` (or `careerrat ingest`)
+first.
 
 The agent is the runtime; the skills are the how-to. When in doubt about *how* to
 do something, open the owning skill and follow it — don't improvise the procedure.
@@ -22,15 +24,17 @@ When a user pulls the repo fresh and says something like "familiarize yourself a
 let's get started" (or anything that isn't a specific task):
 
 1. **Make sure the skills are installed first.** If the user entered via
-   `rolester start`, skills are already installed — skip to step 2. If the agent
-   was opened directly (without `rolester start`), run `rolester install-skills --check`;
-   if it reports skills aren't discoverable, run `rolester install-skills` — it shims
+   `careerrat start`, skills are already installed — skip to step 2. If the agent
+   was opened directly (without `careerrat start`), run `careerrat install-skills --check`;
+   if it reports skills aren't discoverable, run `careerrat install-skills` — it shims
    `.claude/skills` → `.agents/skills` (a symlink, or a copied tree where symlinks
    aren't available) so `/apply-job`, `/search-jobs`, etc. become invokable.
-   `rolester doctor` also flags this. Codex and other agents that read this AGENTS.md
+   `careerrat doctor` also flags this. Codex and other agents that read this AGENTS.md
    natively need no install — they route through the index below directly.
-2. Read this router and the skill index. Detect setup state: is there a
-   `candidate/` profile? Is `workspace/tracker.json` real or still the demo seed?
+2. Read this router and the skill index. Detect setup state with `careerrat data
+   status` / `careerrat ingest --check`: is there DB-backed candidate setup (or,
+   in legacy mode, a `candidate/` profile)? Is `workspace/tracker.json` real or
+   still the demo seed?
 3. If not set up, run `ingest-profile` — but make onboarding feel like a
    conversation, not a form:
    - **Use what you already know.** Pull from this session's context, the user's
@@ -42,18 +46,18 @@ let's get started" (or anything that isn't a specific task):
    - **Go through everything** the profile needs (identity, targeting buckets,
      comp floor, location posture, keep/cut signals, evidence, honesty boundaries)
      — but lead with confirmations and fill gaps with questions.
-   - **Basic vs Advanced mode.** At STEP 0a `ingest-profile` asks whether the user
-     wants Basic (read-only/manual workflow, no browser automation) or Advanced
-     (opts into the authenticated browser + mail capabilities — still per-capability
-     opt-in and defaults OFF; `rolester automation` governs each switch). This is one
-     question, not a form; Advanced just surfaces the capability install guidance during
-     setup. See the **Browser Automation Contract** for the full permission model.
-   - **Deep vs Shallow + resume-later.** `ingest-profile` also offers deep (full
-     interview now) or shallow (minimum-viable config now, defer the rest). Partial
-     progress saves to `workspace/setup-state.json` after each step — the user can
-     stop and resume by re-running `ingest-profile` (or `rolester ingest`), which
-     picks up where it left off. `rolester doctor` reports whether setup is complete
-     or in progress.
+   - **Keep implementation modes internal.** Setup defaults to the full conversational
+     interview with focused questions. Do not ask candidates to choose an automation,
+     depth, or question-style mode before they know the product. When a concrete task
+     later needs browser, mail, calendar, or messaging access, explain that one
+     capability and ask for that permission only. See the **Browser Automation
+     Contract** for the permission model.
+   - **Save progress continuously.** Partial progress saves to
+     `workspace/setup-state.json` after each step. The user can stop and resume by
+     re-running `ingest-profile` (or `careerrat ingest`), which picks up where it left
+     off. If the user explicitly asks for a shorter setup, defer nonessential sections
+     then, without front-loading a mode chooser. `careerrat doctor` reports whether
+     setup is complete or in progress.
 4. **Voice input is fine.** The onboarding interview and paste-dumps are
    conversational by nature — the user can speak answers using any dictation or
    voice-to-text tool (macOS built-in Dictation, Wispr Flow, or similar) instead
@@ -67,10 +71,10 @@ let's get started" (or anything that isn't a specific task):
    additional boards/aggregators, `discover-companies` wires employer ATS boards,
    and only then should `search-jobs` run the first sweep unless the user
    explicitly skips one of the discovery steps.
-7. **Follow doctor's Agent guidance.** After `rolester doctor`, read the
+7. **Follow doctor's Agent guidance.** After `careerrat doctor`, read the
    `Agent guidance` block and treat it as the canonical next handoff: tell the
    user which skill the agent should run next, then run that skill. For clarity:
-   do not treat `rolester searches` or `rolester companies` as the workflow; those commands are
+   do not treat `careerrat searches` or `careerrat companies` as the workflow; those commands are
    source/config views that explain what is missing, while the agent-led skills
    (`setup-searches`, `research-boards`, `discover-companies`, `search-jobs`) do
    the work and write durable state.
@@ -79,9 +83,9 @@ let's get started" (or anything that isn't a specific task):
 
 ## Ongoing Next-Skill Steering
 
-Always steer toward the next useful skill. Rolester is an agentic workflow, not a
+Always steer toward the next useful skill. CareerRat is an agentic workflow, not a
 set of passive list commands: when the user asks "what now?", reports something
-changed, or seems stalled, inspect `rolester doctor`, the dashboard's Next agent
+changed, or seems stalled, inspect `careerrat doctor`, the dashboard's Next agent
 task, and `workspace/tracker.json`, then recommend and run the owning skill.
 
 - If candidate setup is incomplete, run `ingest-profile`; if source setup is
@@ -103,24 +107,51 @@ task, and `workspace/tracker.json`, then recommend and run the owning skill.
   `reevaluate-strategy`; if company risk becomes relevant, run `company-health`.
 
 After every skill finishes, surface the next handoff in one line. If an optional
-discovery step is intentionally skipped, record it with `rolester next --skip <step> --write`
+discovery step is intentionally skipped, record it with `careerrat next --skip <step> --write`
 where `<step>` is `research-boards` or `discover-companies`, so doctor,
-`rolester next`, and the dashboard stop recommending it.
+`careerrat next`, and the dashboard stop recommending it.
+
+## Runtime Routing for Company Discovery
+
+The app default for company discovery is the local company proposal path:
+create/read proposal batches with `/api/discovery/company-proposals` and decide
+them with `/api/discovery/company-proposal-decisions`. Bounded AI may supply
+company seed judgment only; seed output is advisory until deterministic
+validation, resolver/scanner/gate checks, and confirm-first source config writes
+through `careerrat companies` or the DB/source-config owners approve it.
+
+Local proposal errors do not silently start chat, `/api/chat/*`, the full skill
+runtime, or `POST /api/skill/run`; they surface locally with manual input, retry,
+or no-AI fallback paths. `/api/discovery/quick-start` and
+`/api/discovery/next` are explicit user-selected chat handoffs that start or
+reuse visible `/api/chat/*` sessions. `POST /api/skill/run` remains the retained
+allowlisted full skill runtime for tool-heavy, long-running, or human-watched
+workflows, not the default app path for proposal creation, proposal decisions,
+deterministic validation, dedupe, or confirmed writes.
 
 ## Keeping Current
 
-Run `rolester update` to pull the latest code from npm. Source checkouts should
-run `npm link` once so the local `rolester` binary is on PATH. Rolester is
-published at `rolester@latest`; the update command does a privacy-guarded
+Run `careerrat update` to pull the latest code from npm. Source checkouts should
+run `npm link` once so the local `careerrat` binary is on PATH. CareerRat is
+published at `careerrat@latest`; the update command does a privacy-guarded
 tarball extract so your `candidate/` and `workspace/` data are never touched.
+
+## Local AI Key Storage
+
+The onboarding key step writes BYOK credentials through `src/core/ai/ai-env.mjs`.
+Path resolution follows the active CareerRat home: with `CAREERRAT_HOME` set,
+the file is `<CAREERRAT_HOME>/internal/ai.env`
+(no dot); in legacy repo-root mode it
+is `.internal/ai.env`. The value is chmod `0600`, loaded at server boot, and
+never echoed back by the API.
 
 ## Dashboard Dev Server Contract
 
-The dashboard is part of the live Rolester workspace, not a one-off artifact. In
-any active job-search session, make sure `rolester tracker-dev` is serving the
+The dashboard is part of the live CareerRat workspace, not a one-off artifact. In
+any active job-search session, make sure `careerrat tracker-dev` is serving the
 tracker before telling the user to open the dashboard.
 
-- The normal entry point, `rolester start [agent]`, starts the dashboard as a
+- The normal entry point, `careerrat start [agent]`, starts the local app as a
   separate local process and records `.internal/tracker-dev.pid` plus
   `.internal/tracker-dev.log`. Agents opened directly in the repo must perform
   the same check themselves.
@@ -131,29 +162,28 @@ tracker before telling the user to open the dashboard.
 
   ```bash
   mkdir -p .internal
-  nohup rolester tracker-dev > .internal/tracker-dev.log 2>&1 &
+  nohup careerrat tracker-dev > .internal/tracker-dev.log 2>&1 &
   echo $! > .internal/tracker-dev.pid
   ```
 
-- If port 7777 is in use, verify whether it is already Rolester. If it is not,
-  start with another port, for example `rolester tracker-dev --port 7778`, and
+- If port 7777 is in use, verify whether it is already CareerRat. If it is not,
+  start with another port, for example `careerrat tracker-dev --port 7778`, and
   tell the user the actual URL.
 - After changing `workspace/tracker.json`, `candidate/`, dashboard source, or
   other tracker-visible data, keep the dev server running so the open page hot
-  reloads. Re-render with `rolester tracker` only when a static snapshot is
-  specifically needed.
-- **Live reload is event-driven, not a poll.** `rolester tracker-dev` watches
+  reloads. Run `careerrat tracker` when a recovery snapshot and summary are
+  needed; it no longer publishes a second dashboard.
+- **Live reload is event-driven, not a poll.** `careerrat tracker-dev` watches
   `workspace/tracker.json` (and `activity.jsonl`, `candidate/modes.yml`,
-  `src/core/tracker/*`) with `fs.watch`, re-renders via the canonical CLI, and
+  `src/core/tracker/*`) with `fs.watch`, refreshes its canonical view model, and
   pushes a Server-Sent-Events `reload` to the open page. A write to the source
   of truth reaches the screen within ~120ms — there is no refresh timer.
-- **The static view does not refresh.** A `workspace/tracker.html` opened
-  directly (or served without `rolester tracker-dev`) fetches its data once at page load:
-  the "last updated" pill is accurate at open but then only ages, it never
-  re-reads. For any live session, point the user at `rolester tracker-dev`
-  (`http://localhost:7777`), not the static file.
-- The dashboard is read-only. Agents and skills remain the writers of
-  `workspace/tracker.json` and related workspace files.
+- **There is one dashboard.** The old static tracker page is retired. For every
+  live session, point the user at `careerrat tracker-dev`
+  (`http://localhost:7777`).
+- The app writes supported local actions through the canonical domain layer.
+  Agents and skills own longer or tool-heavy workflows. No surface hand-edits
+  generated `workspace/tracker.json` in a database-backed workspace.
 
 ## Actionability Write-Back Contract
 
@@ -162,6 +192,10 @@ it must be written to the workspace, not left only in chat. The live dashboard
 renders from these files.
 
 ### Tracker Write Contract (hard — binds every writing skill)
+
+DB workspaces (`careerrat data status` exits 0) use the **Data Write Contract**
+below instead — this section governs legacy JSON-only workspaces (no
+`.careerrat/db/careerrat.db` yet).
 
 `workspace/tracker.json` is the **single source of truth** for the dashboard.
 Every skill that mutates it — `apply-job`, `evaluate-job`, `tailor-application`,
@@ -181,9 +215,9 @@ following as one logical write, in order, every time:
    incomplete write. (Sweeps that find nothing change no data and write
    `meta.lastSweepAt` instead — never `lastUpdatedAt`/`version` — so the pill
    doesn't reset on a no-op poll.)
-2. **Verify:** `rolester tracker --verify` (and `npm run verify:tracker`
+2. **Verify:** `careerrat tracker --verify` (and `npm run verify:tracker`
    when domain integrity could be affected).
-3. **Refresh analytics** *(outcome-changing writes only):* `rolester analytics --write`
+3. **Refresh analytics** *(outcome-changing writes only):* `careerrat analytics --write`
    re-computes `tracker.json#analytics` (rejection/advance counts, reevaluation
    thresholds, `due`/`dueReasons`) and persists the result with `stamp:false` — it
    does **not** move the freshness pill. Run this step whenever the write touches
@@ -192,13 +226,12 @@ following as one logical write, in order, every time:
    `search-jobs`/`relationship-sourcing` when they add rows). Skip it for pure
    comms/scheduling writes (`email-comms`, `schedule-meeting`, `calendar-sync`,
    `interview-prep` dossier saves) — those don't alter the analytics block. Must
-   run **before** re-render so the dashboard picks up the fresh block.
-4. **Re-render:** `rolester tracker` so the D module + shell publish and
-   the open dev-server page hot-reloads. This re-render IS the hand-off to the
-   dashboard — there is no separate "dashboard agent"; the SSE live-reload closes
-   the loop automatically. Never end a tracker-mutating skill without it (every
-   write path, including early-exit / CUT branches).
-5. **Log one Activity Pulse event** (`rolester activity append …`) for any
+   run **before** the verification snapshot so the dashboard reads the fresh block.
+4. **Snapshot:** run `careerrat tracker` as the durable recovery checkpoint.
+   The open app reloads from the source-file write itself; there is no separate
+   renderer or dashboard agent. Never end a legacy tracker mutation without this
+   checkpoint, including early-exit and CUT branches.
+5. **Log one Activity Pulse event** (`careerrat activity append …`) for any
    tracker-visible change, so the timeline and the pill agree. Include
    `--skill <skill-id>` and `--operation <resource:verb>` (e.g.
    `--skill track-outcomes --operation application:status-advance`) so the feed
@@ -229,7 +262,8 @@ contract — there is no code interceptor for them, by design.
   `conversations[]` for calls/interviews/debriefs.
 - Sourced roles stay in `sourced[]` until the gate and application flow promote
   them. Saved JD bodies belong in `workspace/jobs/`; source run watermarks belong
-  in `config/search-sources.yml` and/or `tracker.sources[]`.
+  in DB source config in DB workspaces, and in `config/search-sources.yml` and/or
+  `tracker.sources[]` in legacy workspaces.
 - **JD-body capture invariant (hard).** Any time a posting is grabbed — sourced,
   evaluated, or applied to — its **full job-description text is captured locally at
   grab time**, into `workspace/jobs/<…>.md` and mirrored onto the row's
@@ -242,9 +276,9 @@ contract — there is no code interceptor for them, by design.
   a posting closed/unavailable after the logged-in session browser also can't reach
   it. When even that fails, capture what's on screen (or ask the user to paste the
   JD) and save it flagged `partial`, rather than saving nothing.
-- After any tracker-visible write, run `rolester tracker --verify` and
+- After any tracker-visible write, run `careerrat tracker --verify` and
   `npm run verify:tracker` when domain integrity could be affected, then
-  `rolester tracker` so the D dashboard module and shell are published.
+  `careerrat tracker` so the D dashboard module and shell are published.
 - **Sent-clears-draft invariant (hard).** When a communications record transitions
   from `status: drafted` to `status: waiting` (a message is sent), the writer MUST
   also set `comm.draft = null` in the SAME `tracker.json` write — and if the draft
@@ -254,11 +288,63 @@ contract — there is no code interceptor for them, by design.
   that a later event fires.
 - **Completed-action clears its CTA (hard).** Completing any tracked action — sending a reply, submitting a recruiter-requested portal/data-completion form (e.g. an Avature additional-info form), finishing a call, providing a requested document, or the user reporting they already did it out-of-band — requires the SAME `tracker.json` write to: (1) transition the source record's `status` to its resulting state (`waiting` when the ball is now with the other party, or the next pipeline stage); (2) `null` the satisfied `nextActionDue`; (3) rewrite or clear `nextAction` to reflect what's expected next (or clear it if nothing is); (4) append the completed action to `messages[]` or `conversations[]` as history; and (5) set `comm.draft = null` (and `app.followUp.draft = null`) if a draft backed the action. Writing only `statusNote`, `note`, or an activity event does NOT clear a CTA that lives on a different record — e.g., a `communications[]` thread requesting an additional-info form is a distinct record from the `applications[]` row; updating the app row's `statusNote` leaves the comm CTA up. When the user says they already completed an action the agent did not perform, record the completion and clear state immediately — never leave a CTA standing because the agent wasn't the one who did it.
 
+### Data Write Contract (DB workspaces)
+
+Mode detection: run `careerrat data status`. **Exit 0 (a database exists at
+`.careerrat/db/careerrat.db`)** — every tracker-visible mutation goes through
+`careerrat data <verb>`; never hand-edit `tracker.json`/`activity.jsonl` with the
+Edit tool, they are generated files in this mode. **Nonzero exit (no database
+yet)** — the Tracker Write Contract above applies unchanged. A workspace only
+enters DB mode via an explicit `careerrat data import` (legacy migrate) or
+`careerrat data init` (fresh) — never trigger that migration yourself as a side
+effect of another skill.
+
+Each `careerrat data <verb>` call is one atomic transaction that already performs
+steps 1 and 5 of the Tracker Write Contract (plus step 3 for outcome-changing
+verbs), then exports — do not repeat these by hand in DB mode:
+
+- **Stamp + version bump** (`meta.lastUpdatedAt` / `meta.version`) — every verb
+  except `activity append` and `analytics-refresh` (derived-data-only, same
+  no-op-poll carve-out as the legacy contract).
+- **One Activity Pulse event**, logged in the same transaction — every verb
+  except `analytics-refresh`.
+- **Analytics refresh** (`tracker.json#analytics`), same transaction, stamp
+  **not** bumped a second time — only the outcome-changing verbs: `app upsert`,
+  `app set-status`, `sourced upsert-batch`, `sourced promote`. Comms/scheduling/
+  artifact verbs (`app set-fields`, `app schedule-interview`,
+  `app register-artifact`, `comm upsert`, `comm append-message`,
+  `comm mark-sent`) skip it — same carve-out as pure comms/scheduling writes.
+- **Export to legacy files**, immediately after commit: `workspace/tracker.json`
+  + `workspace/activity.jsonl` are regenerated for compatibility and recovery.
+  If `careerrat tracker-dev` is running, its `fs.watch` on `tracker.json` picks
+  this up and live-reloads. Run `careerrat tracker` only when a separate recovery
+  snapshot and summary are useful.
+- **`app set-status`** applies the interview round-completion clearing
+  automatically (nulls `nextInterviewAt`/`interviewNote`, and `interviewAt` too
+  when no next round is booked) — do not hand-write those nulls in DB mode.
+- **`comm mark-sent`** applies the Sent-Clears-Draft invariant automatically
+  (`comm.draft = null`, and `app.followUp.draft = null` when that application
+  exists) in the same write — do not hand-write that clear in DB mode.
+- **Verify:** `careerrat data verify` re-exports then runs the same
+  domain-integrity check as `npm run verify:tracker` (status/score/modes/
+  channels/dupes). It does not run the ajv schema check (`careerrat tracker
+  --verify`); run that too after export if schema-level parity is needed.
+
+Verbs available today (`node src/cli/data.mjs --help` for exact syntax):
+`app upsert|set-status|set-fields|schedule-interview|register-artifact`,
+`sourced upsert-batch|promote`, `comm upsert|append-message|mark-sent`,
+`calendar busy`, `candidate init|get`, `candidate patch`, `candidate evidence`,
+`candidate limits upsert`, `activity append`,
+`intake capture|update|decide|list|one`, `analytics-refresh`, plus top-level
+`status|init|import|export|verify`. Every verb accepts `--json`
+(machine-readable) and `--root <dir>`.
+
 ### Tracker Content Register (hard)
 
 The dashboard renders typed fields, not one free-text blob. Every field holds
-**exactly one topic** within a **hard character budget**. This governs what you
-*write into `tracker.json`*; it is separate from `agent_voice` (which governs chat
+**exactly one topic** within a **hard character budget**. This governs fields written
+to canonical tracker state (`careerrat data ...` in DB workspaces, `workspace/tracker.json`
+in legacy workspaces); it is separate from `agent_voice` (which governs chat
 output). The canonical anti-pattern — never acceptable in any field — is one
 paragraph that mixes scheduling + comp/band + recruiter signals + next rounds +
 role fit. Each of those is a different field below.
@@ -323,8 +409,8 @@ The company chip on every Jobs row resolves its avatar in one fixed order
    If set, it wins. This is the **standard field a skill writes** when it has a real
    logo in hand: the user asked you to fetch the employer's logo, or you captured one
    while applying. Write the path/URL here and the dashboard picks it up — no other
-   wiring. A relative path resolves against the generated `workspace/tracker.html`
-   (the demo seed uses `../assets/logos/<slug>.png`); a full `https://` URL also works.
+   wiring. A relative path resolves from the current app route (the demo seed uses
+   `../assets/logos/<slug>.png`); a full `https://` URL also works.
 2. **logo.dev lookup** — only when `settings.logoToken` is set (a PRIVATE, opt-in
    publishable token; off by default). Keys on a clean employer domain, else the
    company name. This is the zero-upkeep path for real searches that opt in.
@@ -381,7 +467,7 @@ it is mirrored by the classifier in `src/core/tracker/dashboard-data.js`
 
 The user will often just paste or drop content with no instruction. Take whatever
 they give, **classify it, route it to the owning skill, capture it into the
-tracker, and re-render** — without making them name a skill.
+tracker, and confirm the live app refresh** — without making them name a skill.
 
 **Nothing the user pastes is ever dropped.** Every paste — a job, an email, a
 name, a link, a stray fact, a screenshot, an offhand note — gets captured
@@ -404,7 +490,7 @@ chat.
 | A mailbox sync request (Apple Mail / Gmail / Outlook) | `ingest-mail` | `communications[]` |
 | An in-platform message sync request (LinkedIn / Wellfound DMs) | `ingest-messages` | `communications[]` |
 | A company name / "tell me about X" / a company homepage URL | `research-company` | `workspace/research/<slug>.md` |
-| A wishlist of employers to target / "find companies like X to add" | `discover-companies` | `config/sourced-scan.json` `tracked_companies[]` (confirm-first) |
+| A wishlist of employers to target / "find companies like X to add" | `discover-companies` | tracked-company source config through `careerrat companies` (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise) (confirm-first) |
 | "is X a safe bet" / company risk, layoffs, financial health, morale — scoped to the role | `company-health` | `companyHealth` (role-scoped rating) on the tracker row |
 | A standalone fact / preference / constraint (comp, location, an exclusion) | `configure` / `ingest-profile` | `candidate/` config, confirm-first |
 | Anything else with no obvious owner (a note, a stray link, a screenshot) | capture as a dated note | `workspace/intake/<slug>-<date>.md`, linked to the nearest application or company |
@@ -425,14 +511,14 @@ Rules for intake:
   record it touches (application, company, communication, or profile) so it feeds
   fit, drafts, prep, or comp. A capture that doesn't change a downstream decision
   is incomplete.
-- After capturing, re-render the tracker so the new data shows immediately.
+- After capturing, confirm the tracker write reached the live app.
 
 ## Intent Routing
 
 - If the user says "apply", "apply to this", "submit", "fill this application",
   or gives a JD URL with application intent: use `apply-job`. LinkedIn Easy Apply
   postings can use the opt-in authenticated one-click path in `apply-job` (STEP 7b);
-  requires `rolester automation status` to show `one_click_apply` allowed for `linkedin`.
+  requires `careerrat automation status` to show `one_click_apply` allowed for `linkedin`.
 - If the user says "find jobs", "search", "source", "scan", "refresh",
   "HiringCafe", or asks for a queue: use `search-jobs`.
 - If the user says "research this company", "tell me about", "what do you know
@@ -456,7 +542,8 @@ Rules for intake:
   keeps returning only roles at companies already in play (the tracked-company set
   is exhausted): use `discover-companies`. It web-searches employers likely hiring
   the candidate's target roles, resolves each to a scannable ATS board, and
-  proposes adding them to `config/sourced-scan.json` `tracked_companies[]`
+  proposes adding them to tracked-company source config through `careerrat companies`
+  (SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise)
   (confirm-first). It is the company analog of `research-boards` and upstream of
   `search-jobs` — `research-boards` finds boards/aggregators, `discover-companies`
   finds employers and wires their board into the sweep.
@@ -465,6 +552,15 @@ Rules for intake:
 - If the user asks to tailor a resume, cover letter, short answer, or
   non-message outreach artifact: use `tailor-application`, but only after the
   job has passed `evaluate-job`.
+- If the user pastes an application-form or screening question and wants a
+  drafted answer outside a full tailor/apply run ("how should I answer this",
+  "the form is asking X"): use `answer-question`. It reuses
+  `screening_answers` first, grounds new answers in profile/honesty/evidence,
+  never fabricates (the unanswerable case is the literal `NEEDS YOU` marker),
+  and persists durable disclosure-style answers back to
+  `form-defaults.yml#screening_answers` so they're never re-asked. During a
+  full tailor/apply run, `tailor-application` STEP 6 owns the answers
+  artifact instead.
 - If the user asks to write, reply to, follow up on, summarize, thank,
   negotiate, or respond to a recruiter/hiring email or message: use
   `email-comms`.
@@ -483,22 +579,22 @@ Rules for intake:
 - If the user asks to add a tracked event to Apple Calendar, Google Calendar,
   Outlook Calendar, a real calendar, or an approved local automation tool: use
   `calendar-sync`. It requires the `calendar_sync` capability to be allowed for
-  the selected provider in `rolester automation status`, previews the exact
+  the selected provider in `careerrat automation status`, previews the exact
   event, confirms first, writes only the chosen event/provider, and appends
   `calendarWrites[]` history.
 - If the user asks to sync/import/check their email, pull recruiter replies, or
   ingest mail updates from Apple Mail (macOS) or Gmail/Outlook webmail: use
-  `ingest-mail`. Gmail/Outlook requires `rolester automation status` to show
+  `ingest-mail`. Gmail/Outlook requires `careerrat automation status` to show
   `mail_access` allowed for that provider.
 - If the user asks to sync/check their LinkedIn or Wellfound messages/DMs, pull
   in-platform recruiter messages, or ingest portal-inbox updates: use
   `ingest-messages` (opt-in browser automation; reads DMs into `communications[]`,
-  reply drafts go to `email-comms`). Requires `rolester automation status` to show
+  reply drafts go to `email-comms`). Requires `careerrat automation status` to show
   `messaging` allowed for that platform.
 - If the user asks to find a recruiter, hiring manager, employee contact, warm path,
   referral path, or relationship contact for a tracked company or job: use
   `relationship-sourcing` (opt-in browser automation; writes only review leads into
-  `relationshipLeads[]` for Network). Requires `rolester automation status` to show
+  `relationshipLeads[]` for Network). Requires `careerrat automation status` to show
   `relationship_sourcing` allowed for LinkedIn or Wellfound. Do not treat a found
   person as an action path until the candidate approves the lead; outreach drafts
   route to `email-comms` and never send automatically.
@@ -506,7 +602,7 @@ Rules for intake:
   profile read for <roles>", "fix my headline/About", or wants a LinkedIn profile
   pass: use `optimize-linkedin` (opt-in browser automation; reads the profile and
   proposes honest, evidence-backed rewrites — dry-run preview first, then optional
-  per-field write-back). Reading + suggesting requires `rolester automation status`
+  per-field write-back). Reading + suggesting requires `careerrat automation status`
   to show `profile_optimize` allowed for `linkedin`; writing the edits back is a
   separate gate, `profile_apply`. It also runs as a no-browser suggest-only fix-doc.
 - If the user says they got an interview, screen, recruiter call, assessment, or
@@ -538,14 +634,14 @@ Rules for intake:
   applications", "poll the portals", or wants to read application status straight
   from their ATS dashboards: use `sync-status` (opt-in browser automation; it reads
   the portals and hands transitions to `track-outcomes`). Requires
-  `rolester automation status` to show `status_polling` allowed for a platform.
+  `careerrat automation status` to show `status_polling` allowed for a platform.
 - If the user asks why they're getting filtered, to review strategy, to re-rank,
   or "what should I change" — or an outcome threshold trips (see Reevaluation
   Contract): use `reevaluate-strategy`.
 - If the user says "scan this folder", "look at my projects", "see what I've
   built", or points at a code/projects folder or repo to mine accomplishments
   from: use `ingest-profile` (the projects-scan evidence source, STEP 2b) — it
-  reads the real work and originates `evidence.yml` claims via `rolester evidence`.
+  reads the real work and originates `evidence.yml` claims via `careerrat evidence`.
 - If the workspace is new or the candidate profile is incomplete: use
   `ingest-profile`.
 - If the user says "change a setting", "configure", "settings", "update my comp
@@ -553,19 +649,19 @@ Rules for intake:
   defaults", "change usage/application mode", "turn on/off browser automation", or
   "switch the session browser" — anything that adjusts EXISTING config without
   re-running first-run onboarding: use `configure`. It surfaces current state
-  (`rolester doctor`, `rolester modes status`, `rolester automation status`),
-  then routes each change to the canonical CLI (`rolester gate`, `rolester modes`,
-  `rolester automation`) or owning skill (`setup-searches`, or a scoped
+  (`careerrat doctor`, `careerrat modes status`, `careerrat automation status`),
+  then routes each change to the canonical CLI (`careerrat gate`, `careerrat modes`,
+  `careerrat automation`) or owning skill (`setup-searches`, or a scoped
   `ingest-profile` step) confirm-first. It never becomes a new way to mutate
   config.
-- If a `rolester` command crashes, throws a stack trace, exits non-zero
+- If a `careerrat` command crashes, throws a stack trace, exits non-zero
   unexpectedly, or a skill produces clearly-wrong output — or the user says "this
   is broken", "report a bug", "file an issue", or "tell the devs": use
   `report-issue`. It first separates a real defect from a config problem (routing
   setup issues to `configure` / `doctor`), assembles **redacted** diagnostics (no
   candidate PII, comp, employer/recruiter names, or workspace contents; home paths
   normalized), and — only with an explicit yes — opens a GitHub issue on the
-  upstream `CodesWhat/rolester` repo under the user's own `gh` identity. It never
+  upstream `CodesWhat/careerrat` repo under the user's own `gh` identity. It never
   auto-files and falls back to a prefilled issue URL when `gh` isn't available.
 
 ## Gate Contract
@@ -601,24 +697,26 @@ ACTION: apply-now|hold|manual|cut
 A "gate" is any constraint that decides what the user will or won't pursue: a
 cut/keep signal, an excluded company, a comp floor, a per-company application cap,
 an honesty boundary, a degree policy. **Gates live in canonical candidate config
-files that the skills read — never hardcoded into a skill's prose.** The skills are
-field-agnostic procedures; the gate files are what make them conform to *this* user.
+that the skills read — SQLite in DB workspaces, YAML only in legacy/export mode —
+never hardcoded into a skill's prose.** The skills are field-agnostic procedures;
+the candidate config is what makes them conform to *this* user.
 This is the core productization move over a single-user setup: a trucking candidate
 and an AI engineer run the *same* skills against *different* gate files.
 
-Canonical gate files (all under `candidate/`, gitignored/private):
+Canonical candidate config (DB tables in DB mode; compatibility YAML under
+`candidate/`, gitignored/private, in legacy/export mode):
 
 | File | Governs | Read by |
 | --- | --- | --- |
 | `targeting.yml` | `role_buckets`, `keep_signals`, `cut_signals`, `excluded_companies`, `degree_policy`, `fit_bands`, `priorities`/`must_haves` (candidate needs — drive the company-health cross-cut), OE bucket | evaluate-job, search-jobs, setup-searches, discover-companies, tailor-application, track-outcomes, reevaluate-strategy, interview-prep, optimize-linkedin, company-health |
 | `profile.yml` | `domain`, `toolchain`, `location.*`, `compensation.*` (minimum/target/expected base, OE range, relo; **`current_base` is private**) | nearly all skills |
 | `honesty.yml` | `education` policy, `tools.confirmed` / `tools.do_not_claim`, `claims.do_not_fabricate` | tailor-application, apply-job, email-comms, interview-prep, evaluate-job, optimize-linkedin |
-| `application-limits.yml` | per-company caps/cooldowns, reevaluation thresholds | apply-job (step-zero), evaluate-job (ACTION), search-jobs (deprioritize), track-outcomes (thresholds) |
+| `application-limits` / `application-limits.yml` | per-company caps/cooldowns, reevaluation thresholds | apply-job (step-zero), evaluate-job (ACTION), search-jobs (deprioritize), track-outcomes (thresholds) |
 | `form-defaults.yml` | `auto_submit`, applicant facts, `expected_base` | apply-job |
 | `modes.yml` | optional `usage_mode`, `application_mode`, `agent_voice`, and `company_health` (firing policy); absent means `standard` / `balanced` / `standard` / defaults | search-jobs, evaluate-job, research-company, research-comp, research-boards, interview-prep, configure, doctor, email-comms, reevaluate-strategy, company-health |
 | `writing-style.md` (+ `workspace/writing-samples/`) | voice/calibration | tailor-application, email-comms, interview-prep |
 | `research-prefs.yml` | `research_axes`, `staleness_days`, `max_searches_per_company`; works if absent (field-agnostic defaults apply) | research-company |
-| `stories.yml` | STAR+R behavioural story bank; read by interview-prep (`rolester stories match/list/check`), written via `rolester stories add` | interview-prep |
+| `stories.yml` | STAR+R behavioural story bank; read by interview-prep (`careerrat stories match/list/check`), written via `careerrat stories add` | interview-prep |
 
 ### Domain-Neutral Rule (hard)
 
@@ -633,11 +731,13 @@ than restating it.
 
 ### Mode switches
 
-`candidate/modes.yml` is optional, private user posture. If it is absent, Rolester
-uses `usage_mode: standard`, `application_mode: balanced`, and `agent_voice: standard`.
-Use `rolester modes status`, `rolester modes allows <operation>`, and `rolester modes
--- set <usage|application|agent_voice> <value> --write`; do not hand-edit the file
-unless the helper is unavailable.
+Candidate modes config is optional, private user posture. In DB workspaces it lives
+in SQLite; in legacy/export mode it may appear as `candidate/modes.yml`. If it is
+absent, CareerRat uses `usage_mode: standard`, `application_mode: balanced`, and
+`agent_voice: standard`.
+Use `careerrat modes status`, `careerrat modes allows <operation>`, and `careerrat modes
+-- set <usage|application|agent_voice> <value> --write`; do not hand-edit the DB or
+compatibility file unless the helper is unavailable.
 
 - `usage_mode` (`lean | standard | full`) controls compute/scope for discretionary
   work. Core work — evaluation, tailoring, outcome tracking, and recruiter comms —
@@ -671,29 +771,32 @@ Memory**.
 
 When the user states a **new gate mid-flow** ("never Palantir", "below $190K is a
 no", "add ML-research as a cut", "OpenAI capped me at 5/180d"), the skill that hears
-it **writes it to the canonical file** so every other skill inherits it — then
-re-renders / confirms. A stated gate must never live only in chat, and must never be
+it **writes it to canonical candidate config** so every other skill inherits it, then
+confirms the live app refresh. A stated gate must never live only in chat, and must never be
 hardcoded into a skill.
 
-- **Mechanism — use the `gate` helper, don't hand-edit YAML.** `rolester gate --
-  <type> <value>` routes to the right file, patches the text (comments preserved),
-  schema-validates the result, and prints the diff + friction — as a **dry run**.
+- **Mechanism — use the `gate` helper, don't hand-edit YAML.** `careerrat gate --
+  <type> <value>` routes to the right DB-backed config in DB mode (or the legacy
+  compatibility file in legacy mode), schema-validates the result, and prints the
+  diff + friction — as a **dry run**.
   Add `--write` to commit a write-and-report gate; `--write --confirm` to commit a
   confirm-first one. It refuses any change that would invalidate the file and is
-  idempotent (re-adding an existing value is a no-op). `rolester gate --list`
+  idempotent (re-adding an existing value is a no-op). `careerrat gate --list`
   shows the types: `exclude-company`, `cut-signal`, `keep-signal`, `comp-floor`,
-  `comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`. For a gate
-  with no `gate` type yet (e.g. an `application-limits.yml` cap block), edit the
-  file directly, then `rolester doctor`.
+  `comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`.
+  Per-company application caps/cooldowns use the DB-aware data helper:
+  `careerrat data candidate limits upsert --data '<json row>'` in DB mode, or the
+  legacy compatibility file in legacy mode.
 - **Routing** (the helper encodes this; here for reference): exclusion →
   `targeting.yml#excluded_companies`; cut/keep signal →
   `targeting.yml#cut_signals`/`keep_signals`; comp floor/anchor →
-  `profile.yml#compensation`; per-company cap/cooldown → `application-limits.yml`;
+  `profile.yml#compensation`; per-company cap/cooldown →
+  `application-limits` (`candidate/application-limits.yml` only in legacy/export mode);
   honesty boundary → `honesty.yml`.
 - **Friction:** *write-and-report* for unambiguous, low-blast-radius gates (one clear
   cut signal; a cap the user just hit) — `--write`, then echo `Written to <file>:
   <key: value>`. *Confirm-first* for consequential ones (a broad exclusion, dropping
-  the comp floor, a large re-rank) — propose the exact change (a bare `rolester gate`
+  the comp floor, a large re-rank) — propose the exact change (a bare `careerrat gate`
   dry run shows it), get a yes, then `--write --confirm`.
 - Keep it auditable: state what changed and why.
 
@@ -723,9 +826,9 @@ as fallback). Skills that produce outbound text route around `current_base` by f
   truth; Downloads is the convenience copy. Never hand the user an artifact that
   lives only in the chat.
 - **Downloads is organized by company, then by round.** Every export goes under a
-  per-company folder: `~/Downloads/rolester/<Company Name>/`. The current/active
+  per-company folder: `~/Downloads/careerrat/<Company Name>/`. The current/active
   round's materials sit at that company root; when a round is superseded, move its
-  files into `~/Downloads/rolester/<Company Name>/archive/`. Name files
+  files into `~/Downloads/careerrat/<Company Name>/archive/`. Name files
   `<Company> - <Round or Type>.<ext>` so they read at a glance, e.g.
   `Aperture Science - Final Panel Prep.md`, `Aperture Science - Resume.pdf`,
   `archive/Aperture Science - Leadership Round Prep.pdf`. Use the real company name
@@ -738,7 +841,7 @@ as fallback). Skills that produce outbound text route around `current_base` by f
 - Use `candidate/evidence.yml` and `candidate/honesty.yml` as the source of
   truth. Never invent facts.
 - **Originate evidence the safe way.** New claims (e.g. from `ingest-profile`
-  scanning a projects folder/repo) land via `rolester evidence add` (dry-run;
+  scanning a projects folder/repo) land via `careerrat evidence add` (dry-run;
   `--write` to commit) — it refuses a claim missing `id`/`claim`/`evidence`,
   carrying placeholder residue, or holding the private `current_base` field, and
   won't rewrite the bank unless the result passes the schema + a round-trip check.
@@ -772,14 +875,14 @@ Default triggers (tune in `candidate/` config when present):
 
 **How the trip is evaluated (do not hand-count).** The trip is computed by
 `buildReevaluationAnalytics()` and persisted to `tracker.json#analytics.reevaluation`
-(refreshed by `rolester analytics --write` in the Tracker Write Contract). It fires on
+(refreshed by `careerrat analytics --write` in the Tracker Write Contract). It fires on
 the **delta since the last `strategyReview` stamp** (`reevaluation.sinceLastReview`), **not**
 the cumulative total — a completed review re-baselines the count, so already-reviewed
 rejections never re-trip. `track-outcomes` (STEP 6) and `reevaluate-strategy` (STEP 0) read
 `reevaluation.due` / `reevaluation.dueReasons` from the block; they MUST NOT re-derive the
 trip by tallying cumulative `status === "rejected"` rows. The numbers above describe the
 thresholds; the persisted block applies them. If the block looks stale, refresh it
-(`rolester analytics --write`) and read again — never fall back to a manual cumulative count.
+(`careerrat analytics --write`) and read again — never fall back to a manual cumulative count.
 
 Treat fit as a prior and outcomes as evidence. On small-N, **recommend** changes
 (re-rank sourced roles, edit `targeting.yml`, re-anchor comp) — do not silently
@@ -788,7 +891,7 @@ re-score on noise. Log what changed and why.
 **Self-clearing review nudge (hard).** The dashboard "review ready" nudge is derived
 live from the rolling 30-day funnel, so it has no memory of whether a review ran — left
 ungated it re-fires on every render forever. On completion `reevaluate-strategy` MUST
-stamp `tracker.json#strategyReview` (`rolester strategy-review stamp --write`), which
+stamp `tracker.json#strategyReview` (`careerrat strategy-review stamp --write`), which
 records the run time and an all-time outcome snapshot (advances + rejections). The render
 gate (`buildStrategyReviewTrigger`) then keeps the nudge quiet until enough NEW outcomes
 accrue past the threshold (default 5) or a slow drip ages past the cooldown (default 21
@@ -804,14 +907,14 @@ A nudge can show with few or zero rejections; never read the dashboard pill as
 
 ## Learning Memory
 
-Rolester compounds — it gets better at each role-track the more the user runs it.
+CareerRat compounds — it gets better at each role-track the more the user runs it.
 Durable lessons live in per-role-family learning files at
 `candidate/learnings/<family>.md` (families per `classifyRoleFamily` — fde,
 applied-ai, solutions, …; a user targeting several tracks gets one file each).
 
 - **Mechanism — use the `learnings` helper, don't hand-edit the markdown.** Skills
-  call `rolester learnings <cmd>` rather than re-deriving the family slug in prose
-  or hand-appending entries — the markdown analog of `rolester gate`. It classifies a
+  call `careerrat learnings <cmd>` rather than re-deriving the family slug in prose
+  or hand-appending entries — the markdown analog of `careerrat gate`. It classifies a
   role title to its family via `targeting.yml` (so READ and WRITE always resolve the
   same file), refuses an entry that carries placeholder residue or a `current_base`
   leak, and appends atomically (creating the file on first write). Commands:
@@ -820,11 +923,11 @@ applied-ai, solutions, …; a user targeting several tracks gets one file each).
   <f>` (dry-run; add `--write` to commit), `list`. Add `--family` to pass an explicit
   slug instead of a role title, `--date YYYY-MM-DD` to override today.
 - **WRITE:** `interview-prep` distills transcripts/debriefs; `track-outcomes` and
-  `reevaluate-strategy` add rejection and win patterns — each via `rolester learnings
+  `reevaluate-strategy` add rejection and win patterns — each via `careerrat learnings
   -- append`. Capture only what's durable — winning positioning and bullet phrasings,
   objections and gaps heard, keywords that land, comp signals, recurring reject
   reasons — not one-off detail.
-- **READ:** `tailor-application` reads the matching learning file (`rolester learnings
+- **READ:** `tailor-application` reads the matching learning file (`careerrat learnings
   -- read`) before writing a résumé / cover letter, so each artifact for that track
   is sharper than the last; `evaluate-job` and `search-jobs` factor learnings into
   the fit score.
@@ -834,12 +937,12 @@ happen. They sharpen positioning; they do not fabricate it.
 
 ## Research Memory
 
-Rolester can also **go find things out** (M11). Cited findings from web search live
+CareerRat can also **go find things out** (M11). Cited findings from web search live
 under `workspace/research/`: company intel (`<slug>.md`), market comp benchmarks
 (`comp-bench-<role>-<loc>-<yyyy-mm>.md`), and an optional board-discovery log.
 
 - **Mechanism — use the `research` helper, don't hand-write the file.** Skills call
-  `rolester research <cmd>` so the citation + privacy guards always run: `record`
+  `careerrat research <cmd>` so the citation + privacy guards always run: `record`
   refuses an artifact that cites no source, carries placeholder residue, or contains
   the private `current_base` field, and writes atomically. Commands: `read "<company>"`
   / `read --name <stem>` (print or skip-note + exit 0 when absent), `path`, `list`,
@@ -868,7 +971,7 @@ event at the end of that action** — the same "the writer records it" disciplin
 `track-outcomes` the only writer of status transitions.
 
 - **Mechanism — use the `activity` helper, don't hand-write JSONL.** Skills call
-  `rolester activity append --type <type> --title "…"` rather than editing the feed in
+  `careerrat activity append --type <type> --title "…"` rather than editing the feed in
   prose — the dashboard/CLI only RENDER it. The append is a **dry run** by default
   (canonicalizes, schema-validates, lint/leak-checks, prints the line it would write);
   add `--write` to commit. It is **idempotent** on a content-derived id, so re-logging the
@@ -885,13 +988,13 @@ event at the end of that action** — the same "the writer records it" disciplin
   | `search-jobs` | `sourced` | agent | after a source run promotes roles into `sourced[]` — one summary event ("N roles sourced from `<source>`") |
   | `evaluate-job` | `evaluated` | agent | after the gate resolves (title carries the KEEP/CUT/REVIEW verdict) |
   | `tailor-application` | `tailored` | agent | after the résumé / cover-letter artifacts are built |
-  | `apply-job` | `applied` | agent | after STEP 9 writes the application row and re-renders |
+  | `apply-job` | `applied` | agent | after STEP 9 writes the application row and confirms the live refresh |
   | `email-comms` | `drafted` (awaiting send) / `message` (sent) | agent | after the message is persisted to `communications[].messages[]` |
   | `schedule-meeting` | `drafted` (needs-user) | agent | after the scheduling reply is drafted + scheduling state written (a booked meeting's stage change is handed to `track-outcomes` / `interview-prep`, which log it) |
   | `track-outcomes` | `status_change` / `interview` / `offer` / `failure` | world | after the outcome is recorded (it is the only writer of status transitions, including those handed up by `sync-status`) |
   | `ingest-mail` / `ingest-messages` | `message` | world | one event per inbound thread captured into `communications[]` |
-  | `research-company` / `research-comp` / `research-boards` | `research` | agent | after `rolester research record --write` |
-  | `discover-companies` | `research` | agent | after companies are added to `config/sourced-scan.json` — one summary event ("N companies added to track") |
+  | `research-company` / `research-comp` / `research-boards` | `research` | agent | after `careerrat research record --write` |
+  | `discover-companies` | `research` | agent | after companies are added to tracked-company source config through `careerrat companies` — one summary event ("N companies added to track") |
   | `company-health` | `research` | agent | after a role-scoped rating is persisted to `companyHealth` — title "Company health: &lt;Company&gt; — &lt;rating&gt;" |
   | `interview-prep` | `interview` | agent | after a packet / debrief is captured to `conversations[]` |
   | `reevaluate-strategy` | `system` | agent | after a strategy retune is recorded |
@@ -901,7 +1004,7 @@ event at the end of that action** — the same "the writer records it" disciplin
 
   `sync-status` writes no tracker state itself — it hands transitions to `track-outcomes`,
   which logs them, so it does **not** log separately.
-- **Actor semantics.** `agent` = Rolester did it (sourced, evaluated, tailored, applied,
+- **Actor semantics.** `agent` = CareerRat did it (sourced, evaluated, tailored, applied,
   drafted, researched). `world` = something arrived or happened (a reply, a rejection, an
   interview invite, an offer). `--needs-user` is an audit annotation on the history record
   only — it does not render a CTA. Live CTAs are derived from `tracker.json` state by
@@ -928,12 +1031,12 @@ event at the end of that action** — the same "the writer records it" disciplin
   every event is schema-validated against `config/activity-event.schema.json`, refused if
   its prose carries placeholder residue, and refused if it names the private `current_base`
   field. Log only what actually happened — the feed is an audit trail, not a highlight reel.
-- **Backfill + retention.** `rolester activity backfill` derives recent events from
+- **Backfill + retention.** `careerrat activity backfill` derives recent events from
   existing `tracker.json` state (applied dates, inbound replies, status outcomes, and now
   also `drafted` events from comm records with `status=drafted` and non-null `draft`, and
   outbound `message`/`drafted` events from `messages[]` with direction `outbound-sent` /
   `outbound-draft`) so the feed isn't empty for work done before logging existed — idempotent,
-  safe to re-run. `rolester activity prune --max N --write` caps the file for retention.
+  safe to re-run. `careerrat activity prune --max N --write` caps the file for retention.
 
 ## Negotiation Contract
 
@@ -1009,15 +1112,15 @@ never emit `current_base`.
 When a negotiation round reveals a new comp boundary the user confirms, write
 it back via the existing gate helper — **confirm-first, never auto**:
 
-- `rolester gate comp-floor <N>` — dry-run; updates `profile.compensation.minimum_base` (the sourcing gate).
-- `rolester gate comp-floor <N> --write --confirm` — commits after confirmation.
-- `rolester gate comp-target <N>` — dry-run; updates `profile.compensation.target_base`.
-- `rolester gate comp-target <N> --write --confirm` — commits after confirmation.
+- `careerrat gate comp-floor <N>` — dry-run; updates `profile.compensation.minimum_base` (the sourcing gate).
+- `careerrat gate comp-floor <N> --write --confirm` — commits after confirmation.
+- `careerrat gate comp-target <N>` — dry-run; updates `profile.compensation.target_base`.
+- `careerrat gate comp-target <N> --write --confirm` — commits after confirmation.
 
 Distinguish: a **session- or offer-specific** walk-away ("I won't go below $X on
 this one") is `profile.compensation.minimum_base` — write it directly to
 `profile.yml` via confirm-first, not via `comp-floor`. A **permanent sourcing
-floor change** routes to `rolester gate comp-floor`.
+floor change** routes to `careerrat gate comp-floor`.
 
 ### Channel Split Summary
 
@@ -1034,7 +1137,7 @@ Action, Result, Reflection) layered over `evidence.yml` and reused across interv
 loops so prep compounds instead of restarting each round.
 
 - **Mechanism — use the `stories` helper, don't hand-edit the YAML.** Skills call
-  `rolester stories <cmd>` so the trace firewall always runs. Commands: `list`,
+  `careerrat stories <cmd>` so the trace firewall always runs. Commands: `list`,
   `path`, `check` (validate the whole bank — exit 1 on any issue),
   `gaps [--competencies "…"]` (behavioural themes no story covers yet),
   `match <jd.md.json> | --signals "…"` (rank stories for a role), `add --file <f>`
@@ -1044,7 +1147,7 @@ loops so prep compounds instead of restarting each round.
   thin spots — bank it now, never gate on a missing detail. Record each gap (a metric
   to confirm, a concrete before/after, a detail that conflicts with committed code) as
   an `open_questions[]` string on the story. `add --write` auto-mirrors `open_questions`
-  into `tracker.storyEnrichment`, which the read-only dashboard renders as a
+  into `tracker.storyEnrichment`, which the local app renders as a
   self-clearing **"give me more context"** card in the Next Steps queue (one per thin
   story). The story's `open_questions` is the source of truth; `tracker.storyEnrichment`
   is the derived browser-side mirror. Clearing a story's `open_questions` and re-`add
@@ -1095,10 +1198,10 @@ matrix lives in `candidate/automation.yml` (gitignored, schema `config/automatio
 template `templates/automation.example.yml`). Toggle it through the CLI — never
 hand-edit — so writes stay schema-validated, comment-preserving, and atomic:
 
-- `rolester automation status [--json]` — show the matrix + what's actually live.
-- `rolester automation consent <platform> --write` — record ToS consent (after the
+- `careerrat automation status [--json]` — show the matrix + what's actually live.
+- `careerrat automation consent <platform> --write` — record ToS consent (after the
   user reads that platform's terms). `revoke <platform> --write` withdraws it.
-- `rolester automation enable <capability> [platform] --write` — flip the global
+- `careerrat automation enable <capability> [platform] --write` — flip the global
   switch (no platform) or one platform. `disable` is the inverse.
 
 Dry-run is the default (prints the change + the resulting live-verdict, writes
@@ -1109,11 +1212,11 @@ terms. Before recording consent, surface the ToS note and get an explicit yes; r
 it once via the CLI. **Never auto-run and never run on a schedule** — every automated
 session is user-initiated with the agent in the loop.
 
-**No stored credentials.** Rolester stores no passwords. The browser session holds the
+**No stored credentials.** CareerRat stores no passwords. The browser session holds the
 logins: **prefer the Chrome extension** (Claude-in-Chrome / Codex — it already has the
 user's logins + password store), fall back to a **Playwright persistent profile** the
-user signs into once per platform (`~/.rolester/board-profiles/<platform>`, the
-`scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
+user signs into once per platform (`~/.careerrat/board-profiles/<platform>` —
+the `scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
 the session browser," never an MCP namespace or vendor tool name. See
 `src/core/automation/session.mjs` and `docs/BROWSER.md`.
 
@@ -1129,8 +1232,10 @@ in-platform messaging, relationship sourcing, and any other Layer-3 work fan out
 has no such limit and parallelizes freely. The consent predicate (`mayRun()`) always
 runs on the **orchestrator** before any spawn — a subagent never re-checks or bypasses it.
 
-**Local-only + safety.** Screenshots, scraped bodies, and session tokens never leave
-`workspace/`; `comp-guard` still applies to anything outbound; **halt and ask** on a
+**Local storage + safety.** Store screenshots and scraped bodies only under
+`workspace/`; browser tools and their configured providers may process the page
+content they read. Session tokens stay in the selected browser profile and are not
+copied into CareerRat state. `comp-guard` still applies to anything outbound; **halt and ask** on a
 captcha, a 2FA prompt, a mail login wall, or an application-limit blocker.
 **Captures are scratch + hidden by default.** Any screenshot or browser artifact
 (Playwright, the session browser, confirmation shots, render checks) is throwaway:
@@ -1138,8 +1243,10 @@ write it under `workspace/captures/` — which is gitignored — and **never** t
 repo root or `workspace/` root (stray PNGs there are also backstop-ignored). Don't
 commit captures. Only when a screenshot is meant to be shown in the app do you write
 it to a deliberately tracked path and reference it from the tracker/dashboard.
-`track-outcomes` remains the **only** writer of `tracker.json` — status-polling and
-messaging hand it transitions, they don't write the tracker themselves.
+`track-outcomes` remains the owner of canonical tracker status transitions; in DB
+workspaces it writes via `careerrat data`, and in legacy workspaces it writes the
+tracker JSON. Status-polling and messaging hand it transitions, they don't write
+status themselves.
 
 **Application form-fill autonomy.** Custom screening questions are not blockers by
 default. During `apply-job`, answer as the candidate from local context first:
@@ -1154,7 +1261,8 @@ or a materially new disclosure not captured during onboarding.
 
 **Phased rollout.** Each capability becomes usable when its skill ships (M12 Phase 1–4):
 `status_polling` (read-only status) — **shipped as the `sync-status` skill**, which polls
-ATS dashboards and hands transitions to `track-outcomes` (the only writer of `tracker.json`);
+ATS dashboards and hands transitions to `track-outcomes` (the owner of canonical
+tracker status transitions; DB mode writes via `careerrat data`, legacy mode writes tracker JSON);
 `authenticated_search` — **wired into `search-jobs` / `setup-searches`**: a pasted
 LinkedIn/Indeed/Glassdoor search URL becomes a `source_type:"browser"`, `auth:true`,
 `enabled:false` source bound to its `platform`, and `search-jobs` runs it only when both the
@@ -1239,8 +1347,8 @@ runtime *this phase parallelizes cleanly*.
   any spawn. A subagent never re-derives or bypasses a gate.
 - **A subagent gets a self-contained prompt and returns one structured block.** It does
   not read AGENTS.md, does not load the candidate config it wasn't handed, and does not
-  write `tracker.json` or any canonical file. The orchestrator merges results and does
-  the single authoritative write (e.g. `track-outcomes` stays the sole tracker writer).
+  write tracker JSON or any canonical file. The orchestrator merges results and does
+  the single authoritative write (e.g. `track-outcomes` stays the sole status-transition writer).
 - **One session browser at a time.** Browser-driving fan-out (status polling, messaging,
   relationship sourcing) runs **sequentially** per the Browser Automation Contract.
   `WebSearch` / `WebFetch` fan-out parallelizes freely.
@@ -1272,8 +1380,8 @@ Loading every input a skill *might* touch into the orchestrator is the main driv
 token burn. Split each skill's inputs into two tiers and load lazily:
 
 - **Tier 1 — load to decide.** The decision surface the orchestrator needs to route,
-  gate, and dispatch: mode/consent verdicts (`rolester modes status`,
-  `rolester automation status`), the freshness/watermark flag, the exclusion list and
+  gate, and dispatch: mode/consent verdicts (`careerrat modes status`,
+  `careerrat automation status`), the freshness/watermark flag, the exclusion list and
   comp floor, `usage_mode`, the tracker row being acted on. Small, cheap, always loaded.
 - **Tier 2 — load to do.** The heavy bodies only the executing step (or a subagent)
   needs: full `evidence.yml`, `writing-style.md` + samples, the whole `tracker.json`,

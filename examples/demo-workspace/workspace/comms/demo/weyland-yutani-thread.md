@@ -8,7 +8,7 @@
 ## Message 1 — Inbound | 2026-05-20
 
 **From:** priya.vasquez@weylandyutani.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Staff Engineer, Spaceframe — Weyland-Yutani (remote, $215–255K base)
 
 Hi Riley,
@@ -35,7 +35,7 @@ priya.vasquez@weylandyutani.example
 
 ## Message 2 — Outbound (sent) | 2026-05-21
 
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** priya.vasquez@weylandyutani.example
 **Subject:** Re: Staff Engineer, Spaceframe — Weyland-Yutani (remote, $215–255K base)
 
@@ -56,7 +56,7 @@ Riley Chen
 ## Message 3 — Inbound | 2026-05-23
 
 **From:** priya.vasquez@weylandyutani.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Re: Staff Engineer, Spaceframe — JD + screen scheduling
 
 Riley,
@@ -77,7 +77,7 @@ Priya
 
 ## Message 4 — Outbound (sent) | 2026-05-23
 
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** priya.vasquez@weylandyutani.example
 **Subject:** Re: Staff Engineer, Spaceframe — JD + screen scheduling
 
@@ -98,7 +98,7 @@ Riley
 ## Message 5 — Inbound | 2026-06-10
 
 **From:** priya.vasquez@weylandyutani.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Weyland-Yutani Final Loop — invitation + logistics
 
 Riley,
@@ -127,7 +127,7 @@ Priya
 
 ## Message 6 — Outbound (sent) | 2026-06-11
 
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** priya.vasquez@weylandyutani.example
 **Subject:** Re: Weyland-Yutani Final Loop — invitation + logistics
 

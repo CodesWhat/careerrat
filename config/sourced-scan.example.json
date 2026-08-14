@@ -1,5 +1,5 @@
 {
-  "_comment": "Example company-watchlist scanner config. Copy to config/sourced-scan.json (gitignored) and fill in YOUR targets — Rolester ships no role, geography, or company defaults so a zero-config install stays domain-neutral. Used by `npm run scan:sourced`.",
+  "_comment": "Example company-watchlist scanner config. Copy to config/sourced-scan.json (gitignored) and fill in YOUR targets — CareerRat ships no role, geography, or company defaults so a zero-config install stays domain-neutral. Used by `npm run scan:sourced`.",
   "title_filter": {
     "positive": ["<role keyword to keep, e.g. your target title>"],
     "negative": ["<role keyword to drop, e.g. a level/specialty you don't want>"]

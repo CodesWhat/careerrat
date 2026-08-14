@@ -16,6 +16,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { closeAll } from "../src/core/db/connection.mjs";
+import {
+  authorizationDeclared,
+  candidateArtifactPut,
+  candidateConfigGet,
+  candidateConfigPatch,
+  candidateSetupInitialize,
+} from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
   CANDIDATE_FILES,
@@ -25,6 +33,7 @@ import {
   loadCandidate,
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
+import { validate } from "../src/core/profile/schema-validator.mjs";
 
 import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 
@@ -33,13 +42,14 @@ import { stringifyYaml } from "../src/core/profile/yaml.mjs";
 // ---------------------------------------------------------------------------
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const dbRoots = [];
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function buildTempRoot() {
-  const tempRoot = mkdtempSync(join(tmpdir(), "rolester-test-"));
+  const tempRoot = mkdtempSync(join(tmpdir(), "careerrat-test-"));
 
   // Create templates/ and config/ dirs
   mkdirSync(join(tempRoot, "templates"), { recursive: true });
@@ -67,6 +77,28 @@ function buildTempRoot() {
 function candidatePath(root, relPath) {
   return userPath({ repoRoot: root }, relPath);
 }
+
+function buildDbRoot() {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-candidate-db-"));
+  dbRoots.push(repoRoot);
+  candidateSetupInitialize({ repoRoot });
+  return repoRoot;
+}
+
+function formDefaultsSchema() {
+  return JSON.parse(readFileSync(join(REAL_ROOT, "config/form-defaults.schema.json"), "utf8"));
+}
+
+function targetingSchema() {
+  return JSON.parse(readFileSync(join(REAL_ROOT, "config/targeting.schema.json"), "utf8"));
+}
+
+after(() => {
+  closeAll();
+  for (const root of dbRoots.splice(0)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 // ---------------------------------------------------------------------------
 // Test suite
@@ -305,7 +337,7 @@ describe("candidate-setup", () => {
   // -------------------------------------------------------------------------
   it("lintPlaceholders — returns clean=true when no candidate files exist", () => {
     // Build a fresh temp root with no candidate/ dir
-    const emptyRoot = mkdtempSync(join(tmpdir(), "rolester-empty-"));
+    const emptyRoot = mkdtempSync(join(tmpdir(), "careerrat-empty-"));
     try {
       mkdirSync(join(emptyRoot, "templates"), { recursive: true });
       mkdirSync(join(emptyRoot, "config"), { recursive: true });
@@ -321,5 +353,345 @@ describe("candidate-setup", () => {
     } finally {
       rmSync(emptyRoot, { recursive: true, force: true });
     }
+  });
+});
+
+describe("candidate setup DB readiness and document formats", () => {
+  it("keeps search_ready earlier than gate_ready/apply_ready when compensation is absent", () => {
+    const repoRoot = buildDbRoot();
+
+    candidateArtifactPut({
+      repoRoot,
+      id: "source-resume",
+      kind: "source-resume",
+      data: {
+        format: "text",
+        text: "AI builder with identity automation and agent workflow experience.",
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [
+          {
+            name: "AI builder",
+            priority: "primary",
+            titles: ["Applied AI Engineer", "Forward Deployed Engineer"],
+          },
+        ],
+        search_preferences: {
+          cadence: {
+            mode: "weekly",
+            recommended_from: "default",
+            saved_at: "2026-07-05T22:00:00Z",
+          },
+        },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: {
+        candidate: {
+          full_name: "Scott Candidate",
+          email: "scott@example.com",
+        },
+        location: {
+          home: "New York, NY",
+          remote: true,
+          hybrid: true,
+          onsite: false,
+          relocation: [],
+        },
+      },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.equal(config.profile.compensation.minimum_base, null);
+    assert.deepEqual(config.targeting.search_preferences.cadence, {
+      mode: "weekly",
+      recommended_from: "default",
+      saved_at: "2026-07-05T22:00:00Z",
+    });
+    assert.equal(config.setup.readiness.search_ready, true);
+    assert.equal(config.setup.readiness.gate_ready, false);
+    assert.equal(config.setup.readiness.apply_ready, false);
+    assert.deepEqual(config.setup.missing.search_ready, []);
+    assert.match(config.setup.missing.gate_ready.join("\n"), /compensation floor/i);
+    assert.match(config.setup.missing.apply_ready.join("\n"), /compensation floor/i);
+  });
+
+  it("lets a résumé-less candidate search after they choose to build their profile from answers", () => {
+    const repoRoot = buildDbRoot();
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Backend", titles: ["Staff Backend Engineer"] }],
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { location: { home: "Brooklyn, NY", remote: true } },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "form-defaults",
+      patch: { declined_fields: { resume: { declined_at: "2026-08-13T19:00:00Z" } } },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.equal(config.setup.readiness.search_ready, true);
+    assert.ok(!config.setup.missing.search_ready.includes("source resume"));
+  });
+
+  it("defaults targeting.search_preferences cadence without changing search readiness gates", () => {
+    const repoRoot = buildDbRoot();
+    const config = candidateConfigGet({ repoRoot });
+
+    assert.deepEqual(config.targeting.search_preferences, {
+      posting_age: { mode: "since-last-run" },
+      cadence: { mode: "daily", recommended_from: "default" },
+    });
+    assert.equal(config.setup.readiness.search_ready, false);
+    assert.ok(config.setup.missing.search_ready.includes("source resume"));
+    assert.ok(!config.setup.missing.search_ready.includes("compensation floor"));
+  });
+
+  it("validates cadence search preferences and still rejects unknown search preference keys", () => {
+    const schema = targetingSchema();
+    const validCadence = validate(
+      {
+        role_buckets: [],
+        keep_signals: [],
+        cut_signals: [],
+        search_preferences: {
+          posting_age: { mode: "since-last-run" },
+          cadence: {
+            mode: "every-3-days",
+            recommended_from: "history",
+            saved_at: "2026-07-05T22:00:00Z",
+          },
+        },
+      },
+      schema
+    );
+    assert.equal(validCadence.valid, true, JSON.stringify(validCadence.errors));
+
+    const invalidMode = validate(
+      {
+        role_buckets: [],
+        keep_signals: [],
+        cut_signals: [],
+        search_preferences: {
+          cadence: { mode: "hourly", recommended_from: "default" },
+        },
+      },
+      schema
+    );
+    assert.equal(invalidMode.valid, false, "unknown cadence modes must be rejected");
+    assert.match(JSON.stringify(invalidMode.errors), /cadence|hourly|enum/i);
+
+    const unknownKey = validate(
+      {
+        role_buckets: [],
+        keep_signals: [],
+        cut_signals: [],
+        search_preferences: {
+          cadence: { mode: "daily", recommended_from: "default" },
+          scheduler: { enabled: true },
+        },
+      },
+      schema
+    );
+    assert.equal(unknownKey.valid, false, "unknown search_preferences keys must be rejected");
+    assert.match(JSON.stringify(unknownKey.errors), /search_preferences|scheduler|additional/i);
+  });
+
+  it("uses local sourcing API wrappers for durable first-search runs", async () => {
+    const api = await import(`../apps/web/src/lib/api.js?candidate-setup=${Date.now()}`);
+    const originalFetch = globalThis.fetch;
+    const calls = [];
+    globalThis.fetch = async (path, options = {}) => {
+      calls.push({ path: String(path), options });
+      return {
+        ok: true,
+        status: 202,
+        text: async () => JSON.stringify({ ok: true, run: { id: "run-1", status: "running" } }),
+      };
+    };
+
+    try {
+      assert.equal(typeof api.getSourcingRun, "function");
+      assert.equal(typeof api.startFirstSearchRun, "function");
+      assert.equal(typeof api.startSearchRun, "function");
+
+      await api.getSourcingRun({ purpose: "first-search" });
+      await api.startFirstSearchRun({ retry: true });
+      await api.startSearchRun({ purpose: "manual-search" });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+
+    assert.deepEqual(
+      calls.map((call) => call.path),
+      [
+        "/api/sourcing/runs/latest?purpose=first-search",
+        "/api/sourcing/first-run/start",
+        "/api/sourcing/search/start",
+      ]
+    );
+    assert.equal(calls[0].options.method, undefined);
+    assert.equal(calls[1].options.method, "POST");
+    assert.equal(calls[2].options.method, "POST");
+    assert.deepEqual(JSON.parse(calls[1].options.body), { retry: true });
+    assert.deepEqual(JSON.parse(calls[2].options.body), { purpose: "manual-search" });
+    assert.equal(
+      calls.some((call) => /\/api\/(?:discovery|chat|skill\/run)\b/.test(call.path)),
+      false
+    );
+  });
+
+  it("defaults form-defaults.document_formats to PDF packets with no board-required exports", () => {
+    const repoRoot = buildDbRoot();
+    const config = candidateConfigGet({ repoRoot });
+
+    assert.deepEqual(config["form-defaults"].document_formats, {
+      default_packet_format: "pdf",
+      required_export_formats: [],
+    });
+  });
+
+  it("validates DOCX as a board-required export format and rejects unknown formats", () => {
+    const schema = formDefaultsSchema();
+
+    const docxAllowed = validate(
+      {
+        auto_submit: false,
+        document_formats: {
+          default_packet_format: "pdf",
+          required_export_formats: ["docx"],
+        },
+      },
+      schema
+    );
+    assert.equal(docxAllowed.valid, true, JSON.stringify(docxAllowed.errors));
+
+    const unknownRejected = validate(
+      {
+        auto_submit: false,
+        document_formats: {
+          default_packet_format: "pdf",
+          required_export_formats: ["pages"],
+        },
+      },
+      schema
+    );
+    assert.equal(unknownRejected.valid, false, "unknown export formats must be rejected");
+    assert.match(JSON.stringify(unknownRejected.errors), /document_formats|pages|enum/i);
+  });
+
+  it("validates declined_fields — an object with declined_at, or null to clear it", () => {
+    const schema = formDefaultsSchema();
+
+    const declined = validate(
+      {
+        auto_submit: false,
+        declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } },
+      },
+      schema
+    );
+    assert.equal(declined.valid, true, JSON.stringify(declined.errors));
+
+    const cleared = validate(
+      { auto_submit: false, declined_fields: { authorization: null } },
+      schema
+    );
+    assert.equal(cleared.valid, true, JSON.stringify(cleared.errors));
+
+    const missingTimestamp = validate(
+      { auto_submit: false, declined_fields: { authorization: {} } },
+      schema
+    );
+    assert.equal(missingTimestamp.valid, false, "declined_at must be required when present");
+  });
+
+  it("authorizationDeclared — R3 readiness declared-split (declined, false/false via decline, absent)", () => {
+    // Absent: no authorization sub-object, no decline — still missing. This is
+    // also the freshly-initialized DB row's exact shape (DEFAULTS.profile.authorization
+    // is {false, false}), so a plain profile-shape check can never tell "never
+    // touched" apart from "explicitly answered false/false" — see this
+    // function's own header comment for why the false/false case below is
+    // only declared once the UI also records a decline.
+    assert.equal(authorizationDeclared({}, {}), false);
+    assert.equal(authorizationDeclared({ authorization: {} }, {}), false);
+    assert.equal(
+      authorizationDeclared(
+        { authorization: { work_authorized: false, requires_sponsorship: false } },
+        {}
+      ),
+      false,
+      "false/false alone (no recorded decline) must still read as missing — same shape as an untouched default"
+    );
+
+    // True/anything and anything/true count (the pre-existing "authorized" case).
+    assert.equal(
+      authorizationDeclared(
+        { authorization: { work_authorized: true, requires_sponsorship: false } },
+        {}
+      ),
+      true
+    );
+
+    // An explicit false/false answer counts as declared once the interview UI
+    // has also recorded it as a decline (InterviewSurface's own save path).
+    assert.equal(
+      authorizationDeclared(
+        { authorization: { work_authorized: false, requires_sponsorship: false } },
+        { declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } } }
+      ),
+      true
+    );
+
+    // A recorded decline counts as declared even with no authorization sub-object.
+    assert.equal(
+      authorizationDeclared(
+        {},
+        { declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } } }
+      ),
+      true
+    );
+
+    // A cleared decline (null) does not count.
+    assert.equal(authorizationDeclared({}, { declined_fields: { authorization: null } }), false);
+  });
+
+  it("computeCandidateSetup — a recorded decline drops 'work authorization' from gate/apply missing", () => {
+    const repoRoot = buildDbRoot();
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: { role_buckets: [{ name: "Primary", priority: "primary", titles: ["Engineer"] }] },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { location: { home: "Remote", remote: true, hybrid: false, onsite: false } },
+    });
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "form-defaults",
+      patch: { declined_fields: { authorization: { declined_at: "2026-08-09T12:00:00Z" } } },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.ok(
+      !config.setup.missing.gate_ready.includes("work authorization"),
+      `expected "work authorization" to be cleared by a decline; got: ${JSON.stringify(config.setup.missing.gate_ready)}`
+    );
   });
 });

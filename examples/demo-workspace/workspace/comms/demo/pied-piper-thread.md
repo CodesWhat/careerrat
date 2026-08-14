@@ -9,7 +9,7 @@
 ## Message 1 — Inbound · 2026-05-23
 
 **From:** marco.fontaine@piedpiper.example  
-**To:** riley.chen@rolester.dev, dana.holloway@piedpiper.example  
+**To:** riley.chen@careerrat.dev, dana.holloway@piedpiper.example  
 **Subject:** Intro: Riley Chen → Dana Holloway at Pied Piper
 
 Hey Dana,
@@ -28,7 +28,7 @@ Marco
 ## Message 2 — Inbound · 2026-05-24
 
 **From:** dana.holloway@piedpiper.example  
-**To:** riley.chen@rolester.dev  
+**To:** riley.chen@careerrat.dev  
 **Subject:** Re: Intro — Senior Software Engineer, Enterprise AI Team
 
 Hi Riley,
@@ -53,7 +53,7 @@ dana.holloway@piedpiper.example
 
 ## Message 3 — Outbound · 2026-05-24
 
-**From:** riley.chen@rolester.dev  
+**From:** riley.chen@careerrat.dev  
 **To:** dana.holloway@piedpiper.example  
 **Subject:** Re: Intro — Senior Software Engineer, Enterprise AI Team
 
@@ -70,7 +70,7 @@ One thing to flag upfront: my comp target is $215K base. I saw the posted band g
 Attaching a current resume. Looking forward to talking.
 
 Riley Chen  
-riley.chen@rolester.dev · +1-555-0148  
+riley.chen@careerrat.dev · +1-555-0148  
 rileychen.dev · linkedin.com/in/rileychendev
 
 ---
@@ -78,7 +78,7 @@ rileychen.dev · linkedin.com/in/rileychendev
 ## Message 4 — Inbound · 2026-06-09
 
 **From:** dana.holloway@piedpiper.example  
-**To:** riley.chen@rolester.dev  
+**To:** riley.chen@careerrat.dev  
 **Subject:** Great news — Final Round Invite, Pied Piper Senior SWE
 
 Hi Riley,
@@ -100,7 +100,7 @@ Dana
 
 ## Message 5 — Outbound · 2026-06-10
 
-**From:** riley.chen@rolester.dev  
+**From:** riley.chen@careerrat.dev  
 **To:** dana.holloway@piedpiper.example  
 **Subject:** Re: Great news — Final Round Invite, Pied Piper Senior SWE
 
@@ -125,7 +125,7 @@ Riley
 ## Message 6 — Inbound · 2026-06-12
 
 **From:** dana.holloway@piedpiper.example  
-**To:** riley.chen@rolester.dev  
+**To:** riley.chen@careerrat.dev  
 **Subject:** Re: Final Round details — June 14
 
 Hi Riley,

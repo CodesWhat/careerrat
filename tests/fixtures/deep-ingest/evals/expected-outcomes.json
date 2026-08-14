@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 1,
+  "decisionCoverage": [
+    "D-01",
+    "D-02",
+    "D-03",
+    "D-04",
+    "D-05",
+    "D-06",
+    "D-07",
+    "D-08",
+    "D-09",
+    "D-10",
+    "D-11",
+    "D-12",
+    "D-13",
+    "D-14",
+    "D-15"
+  ],
+  "cases": {
+    "happyPath": {
+      "sourceStatus": "proposal_ready",
+      "progressText": "7 of 7 lanes terminal",
+      "aiLabels": {
+        "skill": "deep-ingest",
+        "action": "proposal",
+        "operation": "deep_ingest.evidence.propose"
+      }
+    },
+    "noAiManualFallback": {
+      "builderStatus": "manual_fallback",
+      "todos": ["evidence_claims", "open_gaps"],
+      "gaps": ["story_bank"]
+    },
+    "hostileSource": {
+      "unsafeStatus": "not_available",
+      "localPathStatus": "not_available",
+      "oversizedStatus": "gap",
+      "reviewBypassStatus": 400,
+      "aiLabels": {
+        "skill": "deep-ingest",
+        "action": "proposal",
+        "operation": "deep_ingest.evidence.propose"
+      },
+      "blockedReasons": [
+        ["ungrounded", "unsupported_metric"],
+        ["current_base", "local_path", "protected_trait"]
+      ]
+    }
+  }
+}

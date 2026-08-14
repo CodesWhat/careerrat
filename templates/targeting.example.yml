@@ -50,6 +50,7 @@ fit_bands:                # single source for FIT thresholds; omit to use defaul
                           # so low-fit roles never reach manual triage. Omit to disable.
 
 search_preferences:
+  presentation_cap_per_company: 5
   posting_age:
     mode: "since-last-run" # default: only scan since the prior successful source run
     # mode: "fixed-days"   # use this instead to always scan a fixed posting-age window

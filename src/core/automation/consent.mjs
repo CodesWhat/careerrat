@@ -15,6 +15,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { displayPath, userPath } from "../paths/workspace.mjs";
+import { candidateConfigSource, loadCandidateDoc } from "../profile/config-store.mjs";
 import { atomicWriteFile, findKeyPath, setScalar, validateText } from "../profile/gate-writer.mjs";
 import { validate } from "../profile/schema-validator.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
@@ -126,10 +127,29 @@ export function defaultAutomation() {
   }
   return {
     version: 1,
+    setup_mode: "basic",
     consent,
     capabilities,
     session: { provider: "extension", profile_root: null },
   };
+}
+
+export function automationModePatch(mode) {
+  if (mode === "advanced") return { setup_mode: "advanced" };
+  if (mode !== "basic") throw new Error('automation mode must be "basic" or "advanced"');
+  return defaultAutomation();
+}
+
+function effectiveAutomationMode(cfg) {
+  if (cfg?.setup_mode === "basic" || cfg?.setup_mode === "advanced") return cfg.setup_mode;
+  const hasLegacyOptIn =
+    Object.values(cfg?.consent || {}).some((value) => value === true) ||
+    Object.values(cfg?.capabilities || {}).some(
+      (capability) =>
+        capability?.enabled === true ||
+        Object.values(capability?.platforms || {}).some((value) => value === true)
+    );
+  return hasLegacyOptIn ? "advanced" : "basic";
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +159,21 @@ export function defaultAutomation() {
 export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
   const path = userPath({ repoRoot: root }, AUTOMATION_FILE);
   const display = displayPath({ repoRoot: root }, AUTOMATION_FILE);
+  const source = candidateConfigSource({ repoRoot: root });
+  if (source === "db") {
+    const data = loadCandidateDoc("automation", { repoRoot: root }) || {};
+    const schemaPath = join(root, AUTOMATION_SCHEMA);
+    const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
+    const { valid, errors } = schema ? validate(data, schema) : { valid: true, errors: [] };
+    return {
+      exists: true,
+      valid,
+      errors,
+      data: data && typeof data === "object" ? data : {},
+      path: display,
+      source,
+    };
+  }
   if (!existsSync(path)) {
     return {
       exists: false,
@@ -146,6 +181,7 @@ export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
       errors: [],
       data: defaultAutomation(),
       path: display,
+      source,
     };
   }
   let data;
@@ -158,6 +194,7 @@ export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
       errors: [{ path: "", message: `YAML parse error: ${err.message}` }],
       data: defaultAutomation(),
       path: display,
+      source,
     };
   }
   const schemaPath = join(root, AUTOMATION_SCHEMA);
@@ -169,6 +206,7 @@ export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
     errors,
     data: data && typeof data === "object" ? data : defaultAutomation(),
     path: display,
+    source,
   };
 }
 
@@ -194,6 +232,7 @@ export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {})
   }
 
   const cfg = data || loadAutomation({ root }).data;
+  const advancedMode = effectiveAutomationMode(cfg) === "advanced";
   const cap = cfg.capabilities?.[capability] || {};
   const globalOn = cap.enabled === true;
   const platformOn = !!(cap.platforms && cap.platforms[platform] === true);
@@ -201,18 +240,20 @@ export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {})
 
   if (!globalOn)
     reasons.push(
-      `capability "${capability}" is disabled (enable: \`rolester automation enable ${capability} --write\`)`
+      `capability "${capability}" is disabled (enable: \`careerrat automation enable ${capability} --write\`)`
     );
   if (!platformOn)
     reasons.push(
-      `platform "${platform}" is off for ${capability} (enable: \`rolester automation enable ${capability} ${platform} --write\`)`
+      `platform "${platform}" is off for ${capability} (enable: \`careerrat automation enable ${capability} ${platform} --write\`)`
     );
   if (!consentOn)
     reasons.push(
-      `ToS consent for "${platform}" not recorded (record: \`rolester automation consent ${platform} --write\`)`
+      `ToS consent for "${platform}" not recorded (record: \`careerrat automation consent ${platform} --write\`)`
     );
 
-  const allowed = globalOn && platformOn && consentOn;
+  if (!advancedMode) reasons.push("Basic mode keeps every external capability disabled");
+
+  const allowed = advancedMode && globalOn && platformOn && consentOn;
   return {
     allowed,
     reasons,
@@ -262,6 +303,7 @@ export function automationStatus({ root = DEFAULT_ROOT } = {}) {
     exists: loaded.exists,
     valid: loaded.valid,
     errors: loaded.errors,
+    mode: effectiveAutomationMode(cfg),
     liveCount,
     capabilities,
     consent: Object.fromEntries(

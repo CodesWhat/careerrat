@@ -7,7 +7,24 @@ tier_2_inputs: [per-source scan results, per-role JD bodies]
 
 # search-jobs
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+
+## AI Web Search mode
+
+Activated when the kickoff input is JSON containing `"mode": "ai-web-search"` (a `prompts: [{id, text}]` array and a `candidate` context object arrive alongside it in that same input). When this mode is active, run this section instead of STEP 0 through STEP 8 above — it is a separate, read-only execution path through the same skill, not a variant of the file-writing sweep.
+
+**Tool surface is restricted to Read, Glob, Grep, WebFetch, WebSearch, and Skill.** No Bash, no Write, no Edit, no session browser, and no `careerrat`/npm CLI commands are available in this mode — the embedded runtime enforces this at the tool-allowlist level, so do not attempt any of them. Everything STEP 0-8 above does through a CLI command, a file write, or the session browser is out of scope here; see "Skip" below.
+
+For each entry in `prompts`, run one or more `WebSearch` calls using that prompt's text (or a close paraphrase) as the query. For every promising result — a real job-posting URL, not an aggregator/search-results page — run `WebFetch` on the URL to pull the actual JD text. Prefer postings you can read directly; drop a result rather than guessing at a JD you couldn't fetch.
+
+Score every posting you keep using the **STEP 3 — Coarse triage** rules above, verbatim — the same `fitScore`/`fitBucket`/`fitBasis`/`ruleFlags`/one-line-reason shape, no new rules invented here. Score against the `candidate` context object in the kickoff input (role buckets with their fit/down signals, excluded companies, comp floor, location posture, work authorization) rather than reading `candidate/targeting.yml` directly — the tracker, application-limits, company-history, and learnings inputs STEP 3 also lists are not reachable in this mode (no CLI, no tracker read). Flags that depend on that unreachable data (`company-history-*`, `app-limit-*`, `oe-candidate`) only apply if you can confirm the underlying condition from the posting itself and the given `candidate` context (e.g. `oe-candidate`'s remote+comp-band+priority conditions); otherwise omit the flag rather than guessing.
+
+**Skip:** everything that writes. No `workspace/jobs/*.md`, no `config/search-sources.yml` watermark, no `careerrat activity append`, no tracker write, no `evaluate-job` handoff. The server that invoked this run validates your JSON reply and persists survivors itself — this mode never touches disk or the tracker directly.
+
+Finish with **exactly one** fenced ` ```json ` block matching `config/ai-web-search.schema.json` and nothing else — no prose before or after the fence, since the server is a machine reading exactly that one block. Shape:
+
+- `roles[]` — one entry per posting kept, each with `company`, `title`, `url`, `fit_score`, `fit_bucket`, `fit_basis`, `rule_flags`, `source_evidence` (required), plus whichever of `location`, `comp_text`, `posted_at`, `body_text`, `body_partial` you actually have.
+- `queries_run[]` — `{prompt_id, query, status, error?}` for every `WebSearch` call you actually ran, so the server can report exact search coverage back to the user. Use `status: "completed"` when the query returned normally. Use `status: "failed"` and a short factual `error` when the search call failed; never hide a failed query or report it as completed.
 
 ## STEP 0 — Prerequisites
 
@@ -15,13 +32,13 @@ Read all gate files before touching anything else:
 
 1. `candidate/targeting.yml` — `role_buckets`, `keep_signals`, `cut_signals`, `excluded_companies`, `fit_bands`, `degree_policy`
 2. `candidate/profile.yml` — `compensation.minimum_base`, `location.*`, `candidate.domain` — used for salary floor and location triage. **Do not read or use `compensation.current_base` for any purpose in this skill.**
-3. `candidate/application-limits.yml` — per-company caps and cooldowns. Build a blocked/capped company set now so the scan can flag them at triage time.
+3. Application limits — in DB mode read `careerrat data candidate get --json` (`application-limits.companies[]`); in legacy mode read `candidate/application-limits.yml`. Build a blocked/capped company set now so the scan can flag them at triage time.
 4. `workspace/tracker.json` — existing `applications[]` and `sourced[]`. Build company-history sets now: active applications, recent rejections, prior cuts/closed sourced rows, and exact req/company-role duplicates. Company history is not the same as an application-limit block, but it must affect warnings and priority.
-5. For a classifiable role, read its learnings via `rolester learnings read "<role>"` — the helper resolves the family from targeting.yml and skips silently when no file exists. Improves triage scoring.
-6. `candidate/modes.yml` — optional. Run `rolester modes status`; absent = `usage_mode: standard`, `application_mode: balanced`.
-7. `config/search-sources.yml` — `searches[]`, per-source `lastRunAt` watermarks, `recency.postFilterAfter`.
+5. For a classifiable role, read its learnings via `careerrat learnings read "<role>"` — the helper resolves the family from targeting.yml and skips silently when no file exists. Improves triage scoring.
+6. `candidate/modes.yml` — optional. Run `careerrat modes status`; absent = `usage_mode: standard`, `application_mode: balanced`.
+7. Source config — in DB mode use CareerRat commands/scan output as the canonical view; in legacy mode read `config/search-sources.yml` (`searches[]`, per-source `lastRunAt` watermarks, `recency.postFilterAfter`).
 
-Run `rolester doctor` and confirm it exits clean. Read the `Discovery pipeline`
+Run `careerrat doctor` and confirm it exits clean. Read the `Discovery pipeline`
 section before scanning. The post-onboarding order is:
 
 ```
@@ -30,19 +47,19 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 
 If `doctor` says the next discovery step is `setup-searches`, `research-boards`, or
 `discover-companies`, stop and run that owning skill first unless the user explicitly
-overrides and asks for a partial sweep. If `config/search-sources.yml` is missing or
-has no enabled entries, stop and run `setup-searches` first:
+overrides and asks for a partial sweep. If source config is missing or has no enabled
+entries, stop and run `setup-searches` first:
 
 > **Available portals:** Wellfound (`wellfound.com`) is auto-seeded for tech-domain candidates; Lever (`jobs.lever.co`) is seeded one entry per company in `targeting.tracked_companies`. Pasting a `wellfound.com` or `jobs.lever.co` URL via `setup-searches` routes it automatically to the correct provider.
 
 ```
-rolester searches
+careerrat searches
 ```
 
 If sources are present but haven't been derived from targeting yet, optionally rebuild:
 
 ```
-rolester searches --from-targeting
+careerrat searches --from-targeting
 ```
 
 Privacy gate: `profile.compensation.current_base` is private. It must not appear in any scan output, intake file, tracker note, or JD frontmatter produced by this skill. Use `minimum_base` / `target_base` / `expected_base` as the comp floor only.
@@ -53,7 +70,7 @@ keeps medium fits in review), not which plausible roles are discovered. Before a
 multi-source sweep, run:
 
 ```
-rolester modes allows search:sweep:broad
+careerrat modes allows search:sweep:broad
 ```
 
 If it returns `downshift`, run fewer enabled sources or a narrower recency window and state
@@ -67,7 +84,14 @@ Run the full sourced sweep against all enabled sources since their `lastRunAt` w
 npm run scan:sourced -- --write --intake --summary --verify
 ```
 
-This dedupes against existing tracker sourced entries and `workspace/jobs/`, checks liveness, and writes:
+This dedupes against existing tracker sourced entries and `workspace/jobs/`, checks liveness,
+captures JD artifacts, and writes sourced rows through the canonical write path. In DB mode,
+`--write` uses DB verbs and exports the generated tracker files; agents must not hand-edit
+canonical tracker state or source YAML. In legacy mode, it writes scan snapshots, JD artifacts,
+intake, and source watermarks; any sourced-row tracker mutation still follows the Tracker Write
+Contract.
+
+It also writes:
 - `workspace/scan-results/sourced-<date>.json` — raw scan snapshot
 - `workspace/intake/sourced-<date>.md` — intake markdown
 
@@ -82,20 +106,26 @@ Print the run summary: sources scanned, new entries, filtered, duplicates, expir
 **JS-rendered or login-gated boards:** if a source returns nothing (or returns only partial listings) because the board requires a login or heavy client-side rendering, the normal scan path will not reach its content. In that case reach for the capture scripts instead:
 
 ```
-npm run capture:board           # capture a single board page in the session browser
-npm run capture:search-sources  # capture all configured search-source pages
+npm run capture:board -- --ingest           # capture one board page and ingest offers in DB mode
+npm run capture:search-sources -- --ingest  # capture configured source pages and ingest offers in DB mode
 ```
 
-These drive the bundled browser session (Layer 2 per `docs/BROWSER.md`) and write raw HTML/text that the scan pipeline can then parse. Use them as a manual fallback, not a first step.
+These drive the bundled browser session (Layer 2 per `docs/BROWSER.md`). In DB workspaces,
+`--ingest` writes parsed offers through the SQLite sourced-row path and captures each JD body
+into `workspace/jobs/*.md` with `artifacts.jd` mirrored onto the row. Without `--ingest`, they
+are snapshot-only diagnostics/fallback artifacts. Use them as a manual fallback, not a first step.
 
 ### Authenticated browser sources (M12 Phase 2)
 
-Sources in `config/search-sources.yml` with `source_type: "browser"`, `auth: true`, and a `platform` field (one of `linkedin`, `indeed`, `wellfound`, `glassdoor`) are authenticated browser sources — logged-in saved-search or results pages that require a session. These default to `enabled: false` and are never run automatically.
+Sources with `source_type: "browser"`, `auth: true`, and a `platform` field (one of
+`linkedin`, `indeed`, `wellfound`, `glassdoor`) are authenticated browser sources —
+logged-in saved-search or results pages that require a session. These default to
+`enabled: false` and are never run automatically.
 
 **Two gates, both required.** For each such source, run it only if:
 
-1. The source's own `enabled` is `true` in `config/search-sources.yml`, AND
-2. `rolester automation status --json` shows `authenticated_search` `allowed: true` for that source's `platform`.
+1. The source's own `enabled` is `true` in source config, AND
+2. `careerrat automation status --json` shows `authenticated_search` `allowed: true` for that source's `platform`.
 
 The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/automation/consent.mjs` (capability global switch · per-platform switch · per-platform ToS consent). Never re-derive that predicate here.
 
@@ -103,21 +133,22 @@ The `allowed` field encodes the three-part AND from `mayRun()` in `src/core/auto
 
 To enable a source:
 1. Read that platform's terms of service yourself.
-2. Record ToS consent: `rolester automation consent <platform> --write`
-3. Enable the capability global switch: `rolester automation enable authenticated_search --write`
-4. Enable for the specific platform: `rolester automation enable authenticated_search <platform> --write`
-5. Set `enabled: true` for the source entry in `config/search-sources.yml`.
-6. Verify: `rolester automation status --json`
+2. Record ToS consent: `careerrat automation consent <platform> --write`
+3. Enable the capability global switch: `careerrat automation enable authenticated_search --write`
+4. Enable for the specific platform: `careerrat automation enable authenticated_search <platform> --write`
+5. Set `enabled: true` for the source entry through the owning source-config command in DB mode,
+   or in `config/search-sources.yml` in legacy mode.
+6. Verify: `careerrat automation status --json`
 
 Then stop for that source and continue with the next.
 
 **If both gates pass — scrape via the session browser.**
 
-Navigate to the source's saved-search URL in the session browser (Layer 3 per `docs/BROWSER.md`). Prefer the Chrome extension, which already holds the user's logins; fall back to a Playwright persistent profile the user signs into once per platform (`~/.rolester/board-profiles/<platform>`, the `scripts/capture-board-snapshot.mjs` model). Snapshot or read the current page state before each action — never rely on hardcoded selectors. Drive the live DOM turn-by-turn.
+Navigate to the source's saved-search URL in the session browser (Layer 3 per `docs/BROWSER.md`). Prefer the Chrome extension, which already holds the user's logins; fall back to a Playwright persistent profile the user signs into once per platform (`~/.careerrat/board-profiles/<platform>`, the `scripts/capture-board-snapshot.mjs` model). Snapshot or read the current page state before each action — never rely on hardcoded selectors. Drive the live DOM turn-by-turn.
 
 Scrape the visible postings (title, company, URL, posted date where available). Then feed every scraped posting through the **same** existing pipeline this skill already uses for other sources: intake → dedupe against tracker and `workspace/jobs/` → liveness check → coarse triage (STEP 3) → JD save (STEP 4) → watermark (STEP 5). Do not invent a parallel pipeline.
 
-**LinkedIn URL-filter recipe (keep each saved search to ~1 page).** Encode the candidate's hard gates directly in the saved-search URL so the platform pre-filters server-side and you read one page per keyword instead of paging through noise. Build/maintain the `url:` of each `platform: linkedin` source in `config/search-sources.yml` from these query params:
+**LinkedIn URL-filter recipe (keep each saved search to ~1 page).** Encode the candidate's hard gates directly in the saved-search URL so the platform pre-filters server-side and you read one page per keyword instead of paging through noise. Build/maintain the `url:` of each `platform: linkedin` source in source config from these query params:
 
 - `keywords=%22<phrase>%22` — URL-encode the quoted phrase for an exact-title match (drop the quotes only when you deliberately want a broad net).
 - `f_TPR=r<seconds>` — time-posted window. `r86400` = 24h, `r604800` = 7d, `r2592000` = 30d. Set this to track the run cadence: tight (24h) for a daily sweep so each term returns ~1 page; widen it if the source is run less often, or you'll miss postings between runs.
@@ -152,9 +183,9 @@ npm run delta:sourced -- --source <provider> --repo-new-only --write --baseline-
 For each sourced entry in the intake, emit a triage block before writing it to the tracker. Score using:
 
 - `candidate/targeting.yml` — `role_buckets.priority`, `keep_signals`, `cut_signals`, `excluded_companies`
-- `rolester learnings read "<role>"` — when the sourced role's family is classifiable; skips silently if no file exists
+- `careerrat learnings read "<role>"` — when the sourced role's family is classifiable; skips silently if no file exists
 - `candidate/profile.yml#compensation.minimum_base` — salary floor (use this field, not `current_base`)
-- `candidate/application-limits.yml` — blocked/capped companies
+- application limits — blocked/capped companies
 
 Emit per-entry:
 
@@ -175,11 +206,11 @@ Rule flags to apply where conditions are met:
 - `top-of-band-only` — posting says "up to $X" near the floor
 - `possible-duplicate` — title+company match an existing tracker row
 - `company-history-active` — the same company has an active application (`awaiting`, `screen`, `interview`, `blocked`, or equivalent non-terminal status)
-- `company-history-recent-rejection` — the same company has a rejection or pass in `applications[]` within the last 90 days, unless `application-limits.yml` defines a different cooldown window
+- `company-history-recent-rejection` — the same company has a rejection or pass in `applications[]` within the last 90 days, unless application limits define a different cooldown window
 - `company-history-prior-sourced` — the same company has prior sourced rows, cuts, or closed/404 entries that may affect prioritization
 - `oe-candidate` — ALL THREE conditions must hold: (1) the posting is fully remote (no required onsite days), AND (2) posted comp falls within `profile.compensation.oe_min_base`–`profile.compensation.oe_max_base` (both from foundations-spec §2; if either is null, the OE range is unconfigured — skip the flag), AND (3) the best-matching `role_buckets[]` entry has `priority: oe`. If any condition fails, do not apply the flag. The scanner does not flag OE itself — applying this three-part check at triage time is an agent behavior (the scanner stays a coarse pre-screen, not a comp gate).
-- `app-limit-blocked` — company has an active block in `application-limits.yml`
-- `app-limit-caution` — company is approaching its cap in `application-limits.yml`
+- `app-limit-blocked` — company has an active application-limit block
+- `app-limit-caution` — company is approaching its application-limit cap
 
 A coarse honest estimate beats no fit at all. Closed or expired postings get status `closed` and are not queued.
 
@@ -207,33 +238,39 @@ url: "<posting URL>"
 ---
 ```
 
-**Sourced-role lifecycle:** every new posting written here is simultaneously added to (or confirmed in) `workspace/tracker.json` `sourced[]` with `status: "sourced"`. That is the ungated, pre-evaluation state. The gate that advances or cuts the role runs in `evaluate-job`.
+**Sourced-role lifecycle:** every new posting written here is simultaneously added to (or confirmed
+in) sourced rows with `status: "sourced"`: through DB verbs in DB mode, or
+`workspace/tracker.json` `sourced[]` in legacy mode. That is the ungated, pre-evaluation state.
+The gate that advances or cuts the role runs in `evaluate-job`.
 
 Validate the file against `config/job.schema.json`. One file per posting/req — consolidate location-clone duplicates to a single file.
 
 ## STEP 5 — Write the watermark
 
-After the sweep completes, update `lastRunAt` in `config/search-sources.yml` for each source that ran. Without this, the next invocation is not incremental.
+After the sweep completes, ensure `lastRunAt` is updated for each source that ran. Without this,
+the next invocation is not incremental. In DB mode, the scan/write path owns source watermarks in
+SQLite and exported files are generated artifacts; do not hand-edit YAML. In legacy mode only,
+update `config/search-sources.yml` directly if the scanner did not already write the watermark.
 
-For each source that ran:
+For each legacy source that needs a manual watermark:
 1. Read and print the current (before) `lastRunAt` value: `searches[id=<source>].lastRunAt` (print it so the write can be confirmed).
 2. Edit `config/search-sources.yml` directly — set `lastRunAt` to the ISO timestamp of this run.
 3. Print the new (after) `lastRunAt` value as confirmation: `Written lastRunAt for <source>: <before> → <after>`.
 
-Then run `rolester doctor` to confirm the file still validates.
+Then run `careerrat doctor` to confirm the file still validates.
 
 ## STEP 6 — Gate write-back (if user stated a new gate mid-session)
 
-If during this session the user said something like "skip \<Company\> from now on", "add \<signal\> as a cut", or "cap me at N apps to \<Company\>", write it to the canonical file now:
+If during this session the user said something like "skip \<Company\> from now on", "add \<signal\> as a cut", or "cap me at N apps to \<Company\>", persist it through the owning DB-aware command now. A stated gate must never live only in chat.
 
-| What the user said | Write to |
+| What the user said | Command |
 |---|---|
-| "skip / never / exclude \<Company\>" | `candidate/targeting.yml#excluded_companies` (confirm-first — broad exclusion) |
-| "add \<signal\> as a cut signal" | `candidate/targeting.yml#cut_signals` (write-and-report if unambiguous) |
-| "cap \<Company\> at N apps" | `candidate/application-limits.yml` (write-and-report) |
-| "below $X is a no" | `candidate/profile.yml#compensation.minimum_base` (confirm-first — changes comp floor) |
+| "skip / never / exclude \<Company\>" | `careerrat gate exclude-company "<Company>" --write --confirm` (confirm-first — broad exclusion) |
+| "add \<signal\> as a cut signal" | `careerrat gate cut-signal "<signal>" --write` (write-and-report if unambiguous) |
+| "cap \<Company\> at N apps" | `careerrat data candidate limits upsert --data '<json row>'` in DB mode (per-company caps/cooldowns); legacy mode routes to `configure` — never hand-edit `candidate/application-limits.yml` |
+| "below $X is a no" | `careerrat gate comp-floor <N> --write --confirm` (confirm-first — changes comp floor) |
 
-After writing, echo: `Written to <file>: <key: value>`. A stated gate must never live only in chat.
+After writing, echo the CLI's confirmation. `careerrat gate` writes SQLite in DB mode and legacy YAML only in legacy mode; never hand-edit `candidate/*.yml`.
 
 ## STEP 7 — Optional: hand top sourced roles to evaluate-job
 
@@ -241,7 +278,8 @@ After writing, echo: `Written to <file>: <key: value>`. A stated gate must never
 one subagent per role (cap ≈5). Each runs evaluate-job's read-only gate (fetch JD, body-read,
 emit the GATE/FIT/COMP/ACTION block) and **returns the verdict**; it does NOT write the
 tracker. The orchestrator applies evaluate-job STEP 9 (the sourced-row fitScore/status
-write-back) **serially**, so there is one writer of `tracker.json`. WebFetch-able JDs
+write-back) **serially** through the canonical write path (`careerrat data` in DB mode,
+the legacy tracker writer otherwise), so there is one writer of canonical tracker state. WebFetch-able JDs
 parallelize; JS-portal JDs that need the session browser serialize (one-browser rule).
 Degrade to inline sequential gating with no subagent primitive. See the **Delegation
 Contract** in AGENTS.md.
@@ -249,7 +287,7 @@ Contract** in AGENTS.md.
 For each sourced entry with `fitBucket: high` and no `excluded-company` / `app-limit-blocked` / `likely-cut` flag, offer to run `evaluate-job` for a full body-read gate:
 
 ```
-rolester evaluate workspace/jobs/<company>-<slug>.md
+careerrat evaluate workspace/jobs/<company>-<slug>.md
 ```
 
 Exit 0 = KEEP, exit 2 = REVIEW, exit 1 = CUT.
@@ -272,17 +310,17 @@ Run tracker integrity after any sourced additions:
 npm run verify:tracker
 ```
 
-Report the summary. List any issues found. Re-render the dashboard:
+Report the summary. List any issues found. Snapshot tracker state:
 
 ```
-rolester tracker
+careerrat tracker
 ```
 
 Then log the source run to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md). One summary event per source run, not per role:
 
 ```
-rolester activity append --type sourced --actor agent \
+careerrat activity append --type sourced --actor agent \
   --title "Sourced <N> roles — <source>" --summary "<one-line triage note, e.g. 'M passed coarse triage'>" \
   --tag "<source>" --write
 ```
@@ -307,11 +345,11 @@ coverage before another refresh.
 
 ## Rules — authenticated browser sources
 
-- **Both gates required.** Never scrape an authenticated source unless the source's `enabled` is `true` AND `rolester automation status --json` shows `authenticated_search` `allowed: true` for its platform. If either is false, skip and explain the opt-in steps; do not open a browser.
+- **Both gates required.** Never scrape an authenticated source unless the source's `enabled` is `true` AND `careerrat automation status --json` shows `authenticated_search` `allowed: true` for its platform. If either is false, skip and explain the opt-in steps; do not open a browser.
 - **`allowed` encodes the three-part AND.** The `allowed` field from `mayRun()` in `src/core/automation/consent.mjs` is the single predicate (capability global · platform · ToS consent). Never re-derive it in prose.
 - **Same pipeline, no parallel track.** Postings scraped from authenticated sources flow through the same intake → dedupe → liveness → triage pipeline as every other source. No special path.
 - **User-initiated only. Never on a schedule.**
 - **Halt on any auth challenge** (captcha, 2FA, login wall, unexpected interstitial). Never bypass.
 - **Local-only.** Scraped pages and screenshots stay under `workspace/`. Nothing goes outbound.
 - **Tool-agnostic browser prose.** Prefer the Chrome extension (holds existing logins); fall back to Playwright with a one-time login pause. Never name an MCP namespace or vendor tool.
-- **Domain-neutral.** No hardcoded platforms beyond what `config/search-sources.yml` and `consent.mjs` define. No bracketed placeholder tokens — if a detail is unknown, omit or go generic.
+- **Domain-neutral.** No hardcoded platforms beyond what source config and `consent.mjs` define. No bracketed placeholder tokens — if a detail is unknown, omit or go generic.

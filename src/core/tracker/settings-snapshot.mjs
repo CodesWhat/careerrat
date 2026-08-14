@@ -1,8 +1,12 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { displayPath, userPath } from "../paths/workspace.mjs";
-import { parseYaml } from "../profile/yaml.mjs";
+import {
+  CANDIDATE_DOCS,
+  candidateDocNames,
+  loadCandidateConfig,
+} from "../profile/config-store.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -33,17 +37,19 @@ const PROVIDER_LABELS = {
   playwright: "Playwright profile",
 };
 
-function readYamlIfExists(root, relPath) {
-  const path = userPath({ repoRoot: root }, relPath);
-  if (!existsSync(path)) return null;
-  return parseYaml(readFileSync(path, "utf8"));
-}
-
 function formatBase(value) {
   const num = Number(value);
   if (!Number.isFinite(num) || num <= 0) return "Not set";
   if (num >= 1000) return `$${Math.round(num / 1000)}K`;
   return `$${num}`;
+}
+
+// Raw $K figure alongside the display string above — the Jobs drawer's comp
+// pins need a real number to plot on the gauge, not a formatted "$200K"
+// string to re-parse. null when unset so callers never fabricate a number.
+function baseK(value) {
+  const num = Number(value);
+  return Number.isFinite(num) && num > 0 ? Math.round(num / 1000) : null;
 }
 
 function compactLocation(location = {}, candidate = {}) {
@@ -99,6 +105,9 @@ export function buildSettingsSnapshot({
       minimumBase: formatBase(compensation.minimum_base),
       targetBase: formatBase(compensation.target_base),
       expectedBase: formatBase(compensation.expected_base),
+      minimumBaseK: baseK(compensation.minimum_base),
+      targetBaseK: baseK(compensation.target_base),
+      expectedBaseK: baseK(compensation.expected_base),
       workAuthorization: workAuthorization(authorization),
     },
     targeting: {
@@ -126,14 +135,23 @@ export function buildSettingsSnapshot({
 }
 
 export function loadSettingsSnapshot({ root = DEFAULT_ROOT } = {}) {
-  const files = CONFIG_FILES.filter((relPath) =>
-    existsSync(userPath({ repoRoot: root }, relPath))
-  ).map((relPath) => displayPath({ repoRoot: root }, relPath));
+  const config = loadCandidateConfig({ repoRoot: root });
+  const files = new Set(
+    CONFIG_FILES.filter((relPath) => existsSync(userPath({ repoRoot: root }, relPath))).map(
+      (relPath) => displayPath({ repoRoot: root }, relPath)
+    )
+  );
+  if (config.mode === "db") {
+    for (const name of candidateDocNames()) {
+      if (name === "automation" && Object.keys(config.automation || {}).length === 0) continue;
+      files.add(displayPath({ repoRoot: root }, CANDIDATE_DOCS[name].candidatePath));
+    }
+  }
   return buildSettingsSnapshot({
-    profile: readYamlIfExists(root, "candidate/profile.yml") || {},
-    targeting: readYamlIfExists(root, "candidate/targeting.yml") || {},
-    honesty: readYamlIfExists(root, "candidate/honesty.yml") || {},
-    automation: readYamlIfExists(root, "candidate/automation.yml") || {},
-    files,
+    profile: config.profile || {},
+    targeting: config.targeting || {},
+    honesty: config.honesty || {},
+    automation: config.automation || {},
+    files: [...files],
   });
 }

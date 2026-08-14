@@ -1,9 +1,11 @@
 #!/usr/bin/env node
-// Rolester searches CLI — build and curate config/search-sources.yml.
+// CareerRat searches CLI — build and curate search source config.
 //
 // This is the authoring surface for job-search SOURCES (the `setup-searches`
-// skill drives it). It builds and maintains the source list; it does not scan,
-// dedupe results, or gate jobs — that is `search-jobs` and `evaluate-job`.
+// skill drives it). In DB workspaces it reads/writes SQLite source config; in
+// legacy workspaces it reads/writes config/search-sources.yml. It builds and
+// maintains the source list; it does not scan, dedupe results, or gate jobs —
+// that is `search-jobs` and `evaluate-job`.
 //
 // Modes:
 //   --list                  Show current searches (index, provider, label, target, enabled).
@@ -22,10 +24,12 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { mayRun } from "../core/automation/consent.mjs";
+import { dbExists } from "../core/db/connection.mjs";
+import { sourceConfigGet, sourceConfigPut } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { buildSearchSources } from "../core/profile/generate-search-sources.mjs";
 import { formatErrors } from "../core/profile/schema-validator.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
 import {
   addSearchFromQuery,
   addSearchFromUrl,
@@ -44,8 +48,6 @@ const CONFIG_REL = "config/search-sources.yml";
 const CONFIG_PATH = userPath(pathCtx, CONFIG_REL);
 const CONFIG_DISPLAY = displayPath(pathCtx, CONFIG_REL);
 const SCHEMA_PATH = join(root, "config/search-sources.schema.json");
-const TARGETING_PATH = userPath(pathCtx, "candidate/targeting.yml");
-const PROFILE_PATH = userPath(pathCtx, "candidate/profile.yml");
 
 const args = process.argv.slice(2);
 const json = args.includes("--json");
@@ -82,7 +84,7 @@ function runList() {
       console.log(JSON.stringify({ exists: false, searches: [] }, null, 2));
     } else {
       console.log(`No ${CONFIG_DISPLAY} yet.`);
-      console.log("Generate one from targeting: rolester searches --from-targeting");
+      console.log("Generate one from targeting: careerrat searches --from-targeting");
     }
     return 0;
   }
@@ -98,15 +100,25 @@ function runList() {
 }
 
 function runFromTargeting() {
-  if (!existsSync(TARGETING_PATH) || !existsSync(PROFILE_PATH)) {
+  const targeting = loadCandidateDoc("targeting", pathCtx);
+  const profile = loadCandidateDoc("profile", pathCtx);
+  if (!targeting || !profile) {
     console.error(
-      "Need candidate/targeting.yml and candidate/profile.yml first. Run: rolester ingest"
+      "Need candidate/targeting.yml and candidate/profile.yml first. Run: careerrat ingest"
     );
     return 1;
   }
-  const targeting = parseYaml(readFileSync(TARGETING_PATH, "utf8"));
-  const profile = parseYaml(readFileSync(PROFILE_PATH, "utf8"));
   const baseline = buildSearchSources(targeting, profile);
+  // Board-wide aggregator entries (RemoteOK/Remotive/Working Nomads) are seeded
+  // unconditionally by buildSearchSources — even for an unfinished onboarding
+  // with no role_buckets — so they alone must not satisfy this "targeting has
+  // role titles" guard; only role-derived entries count.
+  const roleDerivedSearches = (baseline.searches ?? []).filter((s) => s.source_type !== "board");
+  if (roleDerivedSearches.length === 0) {
+    return failFromTargeting(
+      "No role titles found in candidate targeting; finish onboarding before generating search sources."
+    );
+  }
 
   const existing = loadConfig();
   const config = existing ? mergeSearchConfigs(existing, baseline) : baseline;
@@ -114,11 +126,20 @@ function runFromTargeting() {
   return writeConfig(config, { mode: "from-targeting", added: config.searches.length });
 }
 
+function failFromTargeting(message) {
+  if (json) {
+    console.log(JSON.stringify({ ok: false, error: message }, null, 2));
+  } else {
+    console.error(message);
+  }
+  return 1;
+}
+
 function runAddQuery() {
   const query = optValue("--add-query");
   if (!query) {
     console.error(
-      'Usage: rolester searches --add-query "<query>" [--label "<label>"] [--provider HiringCafe]'
+      'Usage: careerrat searches --add-query "<query>" [--label "<label>"] [--provider HiringCafe]'
     );
     return 1;
   }
@@ -143,7 +164,7 @@ function runAddQuery() {
 function runAddUrl() {
   const url = optValue("--add-url");
   if (!url) {
-    console.error('Usage: rolester searches --add-url "<full URL>" [--label "<label>"]');
+    console.error('Usage: careerrat searches --add-url "<full URL>" [--label "<label>"]');
     return 1;
   }
   const config = loadConfig() || emptyConfig();
@@ -159,12 +180,12 @@ function runAddUrl() {
 
 function runToggle(selector, enabled) {
   if (selector == null) {
-    console.error(`Usage: rolester searches --${enabled ? "enable" : "disable"} <index or label>`);
+    console.error(`Usage: careerrat searches --${enabled ? "enable" : "disable"} <index or label>`);
     return 1;
   }
   const config = loadConfig();
   if (!config) {
-    console.error(`No ${CONFIG_DISPLAY} yet. Run: rolester searches --from-targeting`);
+    console.error(`No ${CONFIG_DISPLAY} yet. Run: careerrat searches --from-targeting`);
     return 1;
   }
   const sel = /^\d+$/.test(selector) ? Number(selector) : selector;
@@ -206,6 +227,10 @@ function warnIfAuthGateClosed(before, after) {
 // ---------------------------------------------------------------------------
 
 function loadConfig() {
+  if (dbExists(pathCtx)) {
+    const stored = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+    return stored.stored ? stored.data : null;
+  }
   if (!existsSync(CONFIG_PATH)) return null;
   return parseConfig(readFileSync(CONFIG_PATH, "utf8"));
 }
@@ -222,20 +247,22 @@ function writeConfig(config, meta) {
     console.error(formatErrors(result.errors));
     return 1;
   }
-  mkdirSync(dirname(CONFIG_PATH), { recursive: true });
-  writeFileSync(CONFIG_PATH, `${serializeConfig(config)}\n`);
+  const dbMode = dbExists(pathCtx);
+  if (dbMode) {
+    sourceConfigPut({ ...pathCtx, name: "search-sources", data: config });
+  } else {
+    mkdirSync(dirname(CONFIG_PATH), { recursive: true });
+    writeFileSync(CONFIG_PATH, `${serializeConfig(config)}\n`);
+  }
   const rows = listSearches(config);
+  const wrote = dbMode ? "SQLite source config: search-sources" : CONFIG_DISPLAY;
   if (json) {
     console.log(
-      JSON.stringify(
-        { ...meta, wrote: CONFIG_DISPLAY, searches: rows, readiness: runReadiness(rows) },
-        null,
-        2
-      )
+      JSON.stringify({ ...meta, wrote, searches: rows, readiness: runReadiness(rows) }, null, 2)
     );
     return 0;
   }
-  console.log(`Wrote ${CONFIG_DISPLAY} (${rows.length} search${rows.length === 1 ? "" : "es"}).`);
+  console.log(`Wrote ${wrote} (${rows.length} search${rows.length === 1 ? "" : "es"}).`);
   printTable(rows);
   return 0;
 }
@@ -290,16 +317,16 @@ function optValue(flag) {
 }
 
 function printHelp() {
-  console.log(`rolester searches — build and curate config/search-sources.yml
+  console.log(`careerrat searches — build and curate config/search-sources.yml
 
 Usage:
-  rolester searches                                      Show current searches
-  rolester searches --from-targeting                     Generate/refresh from candidate targeting (idempotent)
-  rolester searches --add-query "<q>" [--label "<l>"] [--provider HiringCafe]
-  rolester searches --add-url "<url>" [--label "<l>"]    Import a pasted URL (hiring.cafe filters preserved)
-  rolester searches --enable <index or label>            Enable a search
-  rolester searches --disable <index or label>           Disable a search
-  rolester searches --json                               Machine-readable output for any mode
+  careerrat searches                                      Show current searches
+  careerrat searches --from-targeting                     Generate/refresh from candidate targeting (idempotent)
+  careerrat searches --add-query "<q>" [--label "<l>"] [--provider HiringCafe]
+  careerrat searches --add-url "<url>" [--label "<l>"]    Import a pasted URL (hiring.cafe filters preserved)
+  careerrat searches --enable <index or label>            Enable a search
+  careerrat searches --disable <index or label>           Disable a search
+  careerrat searches --json                               Machine-readable output for any mode
 
 This builds the SOURCE list. Running scans, dedupe, and gating belong to search-jobs / evaluate-job.`);
 }

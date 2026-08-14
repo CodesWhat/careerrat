@@ -1,19 +1,19 @@
 #!/usr/bin/env bash
-# Apply drydock-style branch protection to CodesWhat/rolester `main` (via a ruleset).
+# Apply drydock-style branch protection to CodesWhat/careerrat `main` (via a ruleset).
 #
 # Mirrors drydock's "Main branch protection" ruleset: require a PR with 2 approvals,
 # dismiss stale reviews on push, code-owner review, last-push approval, block force-push,
 # block deletion, no bypass for anyone.
 #
-# Deliberately OMITS two of drydock's rules until rolester has the matching infra:
-#   - required_status_checks (drydock gates on Build/Lint/Test/E2E) — rolester has no
+# Deliberately OMITS two of drydock's rules until careerrat has the matching infra:
+#   - required_status_checks (drydock gates on Build/Lint/Test/E2E) — careerrat has no
 #     PR CI yet and the suite is red; requiring checks that never pass blocks all merges.
-#   - code_scanning (CodeQL) — not enabled on rolester yet.
+#   - code_scanning (CodeQL) — not enabled on careerrat yet.
 # Add both back here once a green PR CI workflow + CodeQL are in place.
 #
 # Run:  bash scripts/protect-main.sh
 set -euo pipefail
-REPO="CodesWhat/rolester"
+REPO="CodesWhat/careerrat"
 
 if gh api "repos/$REPO/rulesets" --jq '.[].name' 2>/dev/null | grep -qx "Main branch protection"; then
   echo "✓ a 'Main branch protection' ruleset already exists on $REPO — nothing to do."

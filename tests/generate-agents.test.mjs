@@ -7,7 +7,7 @@ import { renderLocalAgents } from "../src/core/profile/generate-agents.mjs";
 // Fixtures
 // ---------------------------------------------------------------------------
 
-const template = "# Rolester Local Agent Instructions\n\nRouting here.\n";
+const template = "# CareerRat Local Agent Instructions\n\nRouting here.\n";
 
 const profile = {
   candidate: {

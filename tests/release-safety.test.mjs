@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
@@ -7,19 +8,311 @@ import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 
+const LEGACY_BRAND_TERMS = [["role", "ster"].join(""), ["roll", "ster"].join("")];
+
+test("tracked paths and text use CareerRat branding only", () => {
+  const pattern = LEGACY_BRAND_TERMS.join("|");
+  const trackedPaths = execFileSync("git", ["ls-files"], {
+    cwd: root,
+    encoding: "utf8",
+  })
+    .trim()
+    .split("\n")
+    .filter((file) => file && existsSync(join(root, file)));
+  const pathOffenders = trackedPaths.filter((file) =>
+    LEGACY_BRAND_TERMS.some((term) => file.toLowerCase().includes(term))
+  );
+
+  let textOffenders = "";
+  try {
+    textOffenders = execFileSync("git", ["grep", "-n", "-I", "-i", "-E", pattern], {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (err) {
+    if (err.status !== 1) throw err;
+  }
+
+  assert.deepEqual(
+    pathOffenders,
+    [],
+    `Legacy-branded tracked paths found:\n${pathOffenders.join("\n")}`
+  );
+  assert.equal(textOffenders, "", `Legacy brand text found:\n${textOffenders}`);
+});
+
+test("the tracked repository root contains only entry-point documentation", () => {
+  const allowed = new Set(["AGENTS.md", "CLAUDE.md", "README.md"]);
+  const rootMarkdown = execFileSync("git", ["ls-files", "*.md"], {
+    cwd: root,
+    encoding: "utf8",
+  })
+    .trim()
+    .split("\n")
+    .filter((file) => file && !file.includes("/"));
+
+  assert.deepEqual(
+    rootMarkdown.filter((file) => !allowed.has(file)),
+    [],
+    "Long-form project documentation belongs under docs/"
+  );
+});
+
+test("shared runtime fonts live under the asset tree", async () => {
+  assert.equal(existsSync(join(root, "fonts")), false, "root fonts/ should not exist");
+  for (const file of ["Geist-OFL.txt", "GeistMonoVF.woff2", "GeistVF.woff2"]) {
+    assert.equal(existsSync(join(root, "assets", "fonts", file)), true, `${file} should ship`);
+  }
+
+  const trackerDev = await readText("src/cli/tracker-dev.mjs");
+  const documentExport = await readText("src/core/documents/export.mjs");
+  const webTokens = await readText("apps/web/src/styles/tokens.css");
+  const pkg = JSON.parse(await readText("package.json"));
+  assert.match(trackerDev, /join\(repoRoot, "assets", "fonts"\)/);
+  assert.match(documentExport, /join\(repoRoot, "assets", "fonts", file\)/);
+  assert.match(webTokens, /\.\.\/\.\.\/\.\.\/\.\.\/assets\/fonts\/GeistVF\.woff2/);
+  assert.doesNotMatch(webTokens, /url\("\/fonts\//);
+  assert.ok(!pkg.files.includes("fonts"));
+});
+
+test("product apps and archived prototypes are consolidated out of the repository root", async () => {
+  for (const staleRoot of ["website", "docs-site", "mockups"]) {
+    assert.equal(
+      existsSync(join(root, staleRoot)),
+      false,
+      `${staleRoot}/ should not remain at the repository root`
+    );
+  }
+  for (const expected of [
+    "apps/website/package.json",
+    "apps/docs/package.json",
+    ".planning/archive/mockups/index.html",
+  ]) {
+    assert.equal(existsSync(join(root, expected)), true, `${expected} should exist`);
+  }
+  assert.equal(
+    existsSync(join(root, "apps/docs/package-lock.json")),
+    false,
+    "the monorepo should use one root package lock"
+  );
+  const trackedPaths = new Set(
+    execFileSync("git", ["ls-files"], { cwd: root, encoding: "utf8" }).trim().split("\n")
+  );
+  assert.equal(
+    trackedPaths.has("apps/docs/next-env.d.ts"),
+    false,
+    "Next may generate app-local type wiring, but Git should not track it"
+  );
+  assert.equal(
+    trackedPaths.has("apps/docs/package-lock.json"),
+    false,
+    "the monorepo should not track an app-local package lock"
+  );
+
+  const pkg = JSON.parse(await readText("package.json"));
+  const websitePkg = JSON.parse(await readText("apps/website/package.json"));
+  const docsPkg = JSON.parse(await readText("apps/docs/package.json"));
+  const gitignore = await readText(".gitignore");
+  const vercelignore = await readText(".vercelignore");
+  const turbo = JSON.parse(await readText("turbo.json"));
+
+  assert.deepEqual(pkg.workspaces, ["apps/*"]);
+  assert.equal(websitePkg.name, "@careerrat/website");
+  assert.equal(docsPkg.name, "@careerrat/docs");
+  assert.match(websitePkg.scripts["build:docs-content"], /build-docs-content\.mjs/);
+  assert.match(websitePkg.scripts.build, /\.\.\/\.\.\/scripts\/harden-static-html\.mjs/);
+  assert.match(docsPkg.scripts.build, /\.\.\/\.\.\/scripts\/harden-static-html\.mjs/);
+  assert.match(pkg.scripts["site:build"], /@careerrat\/website/);
+  assert.match(pkg.scripts["docs:build"], /@careerrat\/docs/);
+  assert.ok(turbo.tasks.build.outputs.includes("dist/**"));
+  assert.ok(!turbo.tasks.build.outputs.includes("apps/web/dist/**"));
+  assert.doesNotMatch(gitignore, /^(?:website|docs-site|mockups)\//m);
+  assert.match(vercelignore, /^\/\.planning$/m);
+});
+
+test("onboarding does not ask candidates to choose implementation modes", async () => {
+  const router = await readText("AGENTS.md");
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+  const roadmap = await readText("docs/ROADMAP.md");
+  const setup = await readText("docs/SETUP.md");
+  const installGuide = await readText("apps/docs/content/docs/getting-started/install.mdx");
+  for (const text of [router, skill, roadmap, setup, installGuide]) {
+    assert.doesNotMatch(text, /Basic vs Advanced/i);
+    assert.doesNotMatch(text, /\b(?:Basic|Advanced) mode\b/i);
+    assert.doesNotMatch(text, /Do you want \*\*(?:Basic|Deep|Simple)/i);
+  }
+  assert.doesNotMatch(setup, /## Setup Modes|Deep vs Shallow/i);
+  assert.match(skill, /capability-on-demand/i);
+  assert.match(skill, /defaults to the full conversational setup/i);
+});
+
+test("public docs describe the app as an active client over canonical data", async () => {
+  for (const path of [
+    "README.md",
+    "AGENTS.md",
+    "apps/docs/content/docs/getting-started/dashboard.mdx",
+    "apps/docs/content/docs/getting-started/first-job.mdx",
+  ]) {
+    const text = await readText(path);
+    assert.doesNotMatch(text, /dashboard is (?:\*\*)?read-only|dashboard never .*writes/i, path);
+  }
+});
+
+test("the published package does not run repository hook setup in consumers", async () => {
+  const pkg = JSON.parse(await readText("package.json"));
+  assert.equal(pkg.scripts?.prepare, undefined);
+  assert.match(pkg.scripts?.["hooks:install"] || "", /lefthook install/);
+});
+
+test("onboarding previews every explicit candidate fact without waiting for a field bundle", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /confirm-block each explicit fact immediately/i);
+  assert.match(skill, /do not wait for related identity or contact fields/i);
+  assert.doesNotMatch(skill, /name \+ email \+ phone, once all three are confirmed/i);
+});
+
+test("onboarding never re-asks a fact already present in canonical or pending state", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /never ask for a fact already present in canonical or pending state/i);
+  assert.match(skill, /inspect both saved candidate data and unresolved confirm blocks/i);
+});
+
+test("web onboarding does not collect job-board preferences it cannot save", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /in conversational chat, do not ask for job-board preferences/i);
+  assert.match(skill, /setup-searches owns that question and its durable write/i);
+  assert.doesNotMatch(skill, /hold the answer in conversation/i);
+});
+
+test("onboarding does not reclassify an already-saved compensation value", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /never ask whether a repeated value is current_base or expected_base/i);
+  assert.match(skill, /preserve the stored compensation field/i);
+});
+
+test("onboarding skips arrangement floors for work the candidate ruled out", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /collect floors only for arrangements the candidate would accept/i);
+  assert.match(skill, /do not ask for an onsite or relocation floor/i);
+});
+
+test("web onboarding confirms expected base once while preserving both canonical mirrors", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /emit one form-defaults confirmation block/i);
+  assert.match(skill, /the web surface mirrors that confirmed value into profile compensation/i);
+});
+
+test("onboarding does not solicit optional lifestyle details by default", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(
+    skill,
+    /ask about family or lifestyle constraints only when optional_areas includes lifestyle/i
+  );
+  assert.match(skill, /or the candidate raises one naturally/i);
+});
+
+test("onboarding does not solicit over-employment by default", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /ask about over-employment only when the candidate naturally raises/i);
+  assert.match(skill, /otherwise skip (?:this|the) question/i);
+  assert.doesNotMatch(skill, /explicitly ask about over-employment/i);
+});
+
+test("conversational onboarding stops once the canonical checklist is complete", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /when .*setupProgress\.complete.*true/i);
+  assert.match(skill, /ask no new initial-setup questions/i);
+});
+
+test("onboarding does not solicit optional company-size preferences by default", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(
+    skill,
+    /ask about headcount or funding-stage limits only when optional_areas includes work-preferences/i
+  );
+  assert.match(skill, /otherwise skip this question/i);
+});
+
+test("web onboarding confirms profile links once while preserving form mirrors", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /emit one profile confirmation block for linkedin, github, and portfolio/i);
+  assert.match(skill, /the web surface mirrors those confirmed links into form-defaults/i);
+  assert.match(
+    skill,
+    /profile link fields are strings; use an empty string when the candidate has no link/i
+  );
+});
+
+test("web onboarding writes ATS authorization defaults with schema-safe strings", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /form-defaults work_authorization and requires_sponsorship are strings/i);
+  assert.match(skill, /use yes or no, never booleans/i);
+});
+
+test("web onboarding persists stated writing preferences without requiring sample files", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+  const schema = JSON.parse(await readText("config/honesty.schema.json"));
+
+  assert.match(skill, /when the candidate states writing preferences/i);
+  assert.match(skill, /emit one honesty confirmation block immediately/i);
+  assert.match(skill, /style\.prefer/i);
+  assert.deepEqual(schema.properties.style.properties.prefer, {
+    type: "array",
+    items: { type: "string" },
+  });
+});
+
+test("conversational board research never asks users to recite internal source config", async () => {
+  const skill = await readText(".agents/skills/research-boards/SKILL.md");
+
+  assert.match(skill, /outbound-safe candidate context.*configured_sources/is);
+  assert.match(skill, /never ask the\s+candidate for configured source labels or urls/i);
+});
+
+test("web discovery emits typed proposals that the app can actually persist", async () => {
+  const boards = await readText(".agents/skills/research-boards/SKILL.md");
+  const companies = await readText(".agents/skills/discover-companies/SKILL.md");
+
+  assert.match(boards, /careerrat:discovery/);
+  assert.match(boards, /"kind":"source_proposal"/);
+  assert.match(boards, /"kind":"discovery_complete","step":"research-boards"/);
+  assert.match(companies, /careerrat:discovery/);
+  assert.match(companies, /"kind":"company_proposal"/);
+  assert.match(companies, /"kind":"discovery_complete","step":"discover-companies"/);
+});
+
+test("the app theme bootstrap is rebased exactly once", async () => {
+  const index = await readText("apps/web/index.html");
+  assert.match(index, /<script src="\/theme-init\.js"><\/script>/);
+  assert.doesNotMatch(index, /%BASE_URL%theme-init\.js/);
+});
+
 test("local user data roots are excluded from git, docker, and Vercel surfaces", async () => {
   const gitignore = await readText(".gitignore");
   const dockerignore = await readText(".dockerignore");
   const vercelignore = await readText(".vercelignore");
 
-  assert.match(gitignore, /^\.rolester\/$/m);
+  assert.match(gitignore, /^\.careerrat\/$/m);
   assert.match(gitignore, /^\/candidate\/$/m);
   assert.match(gitignore, /^workspace\/tracker\.\*$/m);
   assert.match(gitignore, /^config\/search-sources\.yml$/m);
   assert.match(gitignore, /^config\/sourced-scan\.json$/m);
 
   for (const pattern of [
-    ".rolester",
+    ".careerrat",
     ".internal",
     "candidate",
     "workspace/jobs",
@@ -31,18 +324,34 @@ test("local user data roots are excluded from git, docker, and Vercel surfaces",
   assert.doesNotMatch(dockerignore, /^\*\.png$/m);
   assert.match(dockerignore, /^tracker-\*\.png$/m);
 
-  for (const pattern of [".rolester", ".internal", "candidate", "workspace", ".agents", "config"]) {
+  for (const pattern of [
+    ".careerrat",
+    ".internal",
+    "candidate",
+    "workspace",
+    ".agents",
+    "config",
+  ]) {
     assert.match(vercelignore, new RegExp(`^/${escapeRegExp(pattern)}$`, "m"));
   }
 
   // .vercelignore uses .gitignore semantics: an unanchored pattern matches at
-  // every depth. A bare `src` also matched website/src and docs-site/src, so
-  // the git build deleted both Next apps and production served a 404.
-  for (const pattern of ["src", "bin", "scripts", "tests", "examples", "templates", "config", "mockups"]) {
+  // every depth. A bare `src` also matched both Next apps' source trees, so
+  // the git build deleted them and production served a 404.
+  for (const pattern of [
+    "src",
+    "bin",
+    "scripts",
+    "tests",
+    "examples",
+    "templates",
+    "config",
+    "mockups",
+  ]) {
     assert.doesNotMatch(
       vercelignore,
       new RegExp(`^${escapeRegExp(pattern)}$`, "m"),
-      `.vercelignore must anchor "${pattern}" as "/${pattern}" — unanchored it also deletes website/${pattern} and docs-site/${pattern} from the Vercel upload`,
+      `.vercelignore must anchor "${pattern}" as "/${pattern}" so it cannot delete nested app files from the Vercel upload`
     );
   }
 });
@@ -71,30 +380,34 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(!files.some((entry) => entry.includes("search-sources.yml")));
 });
 
+// Shared with the built-dist scan below (apps/web/dist) — one banned list,
+// two surfaces: `git grep` over tracked source, and a plain filesystem walk
+// over generated build output that `git grep` (tracked-files-only) can't see.
+const PERSONAL_SENTINELS = [
+  ["Scott", "Benson"].join(" "),
+  "Bloomfield",
+  "$" + "145K",
+  "145" + "000",
+  "sctt" + "bnsn",
+  ["Work", "OS"].join(""),
+  ["work", "os"].join(""),
+  "Pw" + "C",
+  "pwc",
+  "workos" + ".com",
+  "pwc" + ".com",
+  "shopify" + ".com",
+  ["Anna", "Meyer"].join(" "),
+  ["Robert", "Choe"].join(" "),
+  ["Alex", "Aberg"].join(" "),
+  ["Juniper", "Square"].join(" "),
+  "Sabri" + "na",
+  "225" + "000",
+  "220" + "000",
+  "225" + "K",
+];
+
 test("tracked app files do not contain known production personal sentinels", () => {
-  const banned = [
-    ["Scott", "Benson"].join(" "),
-    "Bloomfield",
-    "$" + "145K",
-    "145" + "000",
-    "sctt" + "bnsn",
-    ["Work", "OS"].join(""),
-    ["work", "os"].join(""),
-    "Pw" + "C",
-    "pwc",
-    "workos" + ".com",
-    "pwc" + ".com",
-    "shopify" + ".com",
-    ["Anna", "Meyer"].join(" "),
-    ["Robert", "Choe"].join(" "),
-    ["Alex", "Aberg"].join(" "),
-    ["Juniper", "Square"].join(" "),
-    "Sabri" + "na",
-    "225" + "000",
-    "220" + "000",
-    "225" + "K",
-  ];
-  const pattern = banned.map(escapeEgrep).join("|");
+  const pattern = PERSONAL_SENTINELS.map(escapeEgrep).join("|");
 
   try {
     const output = execFileSync(
@@ -107,6 +420,7 @@ test("tracked app files do not contain known production personal sentinels", () 
         pattern,
         "--",
         ".",
+        ":!.planning/**",
         ":!candidate/**",
         ":!workspace/**",
         ":!tests/release-safety.test.mjs",
@@ -118,6 +432,52 @@ test("tracked app files do not contain known production personal sentinels", () 
     if (err.status === 1) return;
     throw err;
   }
+});
+
+// M7 — apps/web/dist is gitignored (built fresh, shipped via package.json
+// #files), so the `git grep` check above (tracked files only) can never see
+// it. Vite bundles anything imported at build time into plain static text;
+// this is the guard that no candidate/workspace value ever gets inlined into
+// the shipped SPA bundle. Skips cleanly when dist hasn't been built in this
+// run (root `npm test` stays build-free — see package.json's own `test`
+// script scoping) rather than failing on a missing optional artifact.
+test("built apps/web/dist (when present) contains no known production personal sentinels", async () => {
+  const {
+    existsSync,
+    readdirSync,
+    readFileSync: readFileSyncFs,
+    statSync,
+  } = await import("node:fs");
+  const distDir = join(root, "apps/web/dist");
+  if (!existsSync(distDir)) return;
+
+  const TEXT_EXTENSIONS = new Set([".html", ".js", ".css", ".map", ".json", ".svg", ".txt"]);
+  const pattern = new RegExp(PERSONAL_SENTINELS.map(escapeRegExp).join("|"));
+
+  const files = [];
+  const walk = (dir) => {
+    for (const name of readdirSync(dir)) {
+      const full = join(dir, name);
+      if (statSync(full).isDirectory()) walk(full);
+      else files.push(full);
+    }
+  };
+  walk(distDir);
+
+  const offenders = [];
+  for (const file of files) {
+    const ext = file.slice(file.lastIndexOf("."));
+    if (!TEXT_EXTENSIONS.has(ext)) continue;
+    const text = readFileSyncFs(file, "utf8");
+    if (pattern.test(text)) offenders.push(file.slice(root.length));
+  }
+
+  assert.deepEqual(
+    offenders,
+    [],
+    `Personal sentinel(s) found in built apps/web/dist — a candidate/workspace value leaked ` +
+      `into the SPA bundle:\n${offenders.join("\n")}`
+  );
 });
 
 test("shipped docs/SOURCES.md carries no candidate-discovered (vetted) boards", async () => {

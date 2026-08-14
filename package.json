@@ -1,7 +1,8 @@
 {
-  "name": "rolester",
-  "version": "0.5.2",
+  "name": "careerrat",
+  "version": "0.7.0",
   "private": false,
+  "packageManager": "npm@11.16.0",
   "publishConfig": {
     "access": "public"
   },
@@ -10,20 +11,20 @@
   "author": "CodesWhat",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/CodesWhat/rolester.git"
+    "url": "git+https://github.com/CodesWhat/careerrat.git"
   },
-  "homepage": "https://github.com/CodesWhat/rolester#readme",
+  "homepage": "https://github.com/CodesWhat/careerrat#readme",
   "bugs": {
-    "url": "https://github.com/CodesWhat/rolester/issues"
+    "url": "https://github.com/CodesWhat/careerrat/issues"
   },
   "bin": {
-    "rolester": "bin/rolester.mjs"
+    "careerrat": "bin/careerrat.mjs"
   },
   "workspaces": [
-    "website"
+    "apps/*"
   ],
   "engines": {
-    "node": ">=18"
+    "node": ">=24"
   },
   "files": [
     "bin",
@@ -31,6 +32,7 @@
     "config/*.schema.json",
     "config/*.example.*",
     "templates",
+    ".agents/skills/answer-question/SKILL.md",
     ".agents/skills/apply-job/SKILL.md",
     ".agents/skills/calendar-sync/SKILL.md",
     ".agents/skills/company-health/SKILL.md",
@@ -41,6 +43,7 @@
     ".agents/skills/ingest-mail/SKILL.md",
     ".agents/skills/ingest-messages/SKILL.md",
     ".agents/skills/ingest-profile/SKILL.md",
+    ".agents/skills/intake-extract/SKILL.md",
     ".agents/skills/interview-prep/SKILL.md",
     ".agents/skills/optimize-linkedin/SKILL.md",
     ".agents/skills/reevaluate-strategy/SKILL.md",
@@ -49,6 +52,7 @@
     ".agents/skills/research-boards/SKILL.md",
     ".agents/skills/research-comp/SKILL.md",
     ".agents/skills/research-company/SKILL.md",
+    ".agents/skills/resume-extract/SKILL.md",
     ".agents/skills/schedule-meeting/SKILL.md",
     ".agents/skills/search-jobs/SKILL.md",
     ".agents/skills/setup-searches/SKILL.md",
@@ -65,7 +69,7 @@
     "docs/foundations-spec.md",
     "examples",
     "assets",
-    "fonts",
+    "apps/web/dist",
     "scripts/analyze-outcomes.mjs",
     "scripts/calibrate-writing-style.mjs",
     "scripts/capture-board-snapshot.mjs",
@@ -77,16 +81,24 @@
     "scripts/verify-tracker.mjs",
     "AGENTS.md",
     "CLAUDE.md",
-    "DATA_CONTRACT.md",
+    "docs/DATA_CONTRACT.md",
     "README.md"
   ],
   "scripts": {
     "postinstall": "node -e \"const f='scripts/install-skills.mjs'; if (require('fs').existsSync(f)) require('child_process').spawnSync(process.execPath,[f,'--soft'],{stdio:'inherit'})\"",
-    "prepare": "lefthook install || true",
+    "hooks:install": "lefthook install",
+    "prepack": "npm run build --workspace apps/web",
     "dev": "turbo dev",
-    "build": "turbo build",
-    "web:dev": "npm --workspace website run dev",
-    "web:build": "npm --workspace website run build",
+    "build": "turbo build --filter=!@careerrat/docs",
+    "site:dev": "npm --workspace @careerrat/website run dev",
+    "site:build": "npm --workspace @careerrat/website run build",
+    "docs:dev": "npm --workspace @careerrat/docs run dev",
+    "docs:build": "npm --workspace @careerrat/docs run build",
+    "app:dev": "npm run dev --workspace apps/web",
+    "app:build": "npm run build --workspace apps/web",
+    "desktop": "npm --workspace apps/desktop run dev",
+    "desktop:fresh": "CAREERRAT_HOME=.careerrat-fresh npm run desktop",
+    "desktop:dist": "npm --workspace apps/desktop run dist",
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
@@ -99,8 +111,10 @@
     "searches": "node src/cli/searches.mjs",
     "companies": "node src/cli/companies.mjs",
     "evaluate": "node src/cli/evaluate.mjs",
+    "questions": "node src/cli/questions.mjs",
     "tracker": "node src/cli/tracker.mjs",
     "tracker:dev": "node src/cli/tracker-dev.mjs",
+    "serve": "node src/cli/tracker-dev.mjs",
     "build:demo": "node scripts/build-demo.mjs",
     "deploy:demo": "node scripts/deploy-demo.mjs",
     "gate": "node src/cli/gate.mjs",
@@ -116,7 +130,7 @@
     "status:map": "node src/cli/status-map.mjs",
     "export": "node src/cli/export.mjs",
     "lint:placeholders": "node src/cli/lint-placeholders.mjs",
-    "test": "node --test",
+    "test": "node --test 'tests/**/*.test.mjs'",
     "scan:sourced": "node scripts/scan-sourced.mjs",
     "delta:sourced": "node scripts/delta-sourced.mjs",
     "capture:board": "node scripts/capture-board-snapshot.mjs",
@@ -124,7 +138,8 @@
     "check:jobs": "node scripts/check-job-links.mjs",
     "verify:tracker": "node scripts/verify-tracker.mjs",
     "analyze:outcomes": "node scripts/analyze-outcomes.mjs",
-    "calibrate:style": "node scripts/calibrate-writing-style.mjs"
+    "calibrate:style": "node scripts/calibrate-writing-style.mjs",
+    "ai-proxy": "node src/cli/ai-proxy.mjs"
   },
   "keywords": [
     "job-search",
@@ -136,9 +151,28 @@
   ],
   "license": "MIT",
   "devDependencies": {
+    "@anthropic-ai/claude-agent-sdk": "^0.3.199",
     "@biomejs/biome": "^2.5.0",
     "lefthook": "^2.1.9",
     "playwright": "^1.60.0",
     "turbo": "^2.9.18"
+  },
+  "allowScripts": {
+    "electron-winstaller@5.4.0": true,
+    "esbuild@0.25.12": true,
+    "fsevents@2.3.2": true,
+    "fsevents@2.3.3": true,
+    "sharp@0.35.0": true,
+    "lefthook@2.1.10": true
+  },
+  "overrides": {
+    "postcss": "^8.5.10",
+    "sharp": "^0.35.0"
+  },
+  "dependencies": {
+    "htmlparser2": "^12.0.0",
+    "mammoth": "^1.12.0",
+    "sanitize-html": "^2.17.4",
+    "undici": "^7.28.0"
   }
 }

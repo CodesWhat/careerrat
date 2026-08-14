@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-// rolester evidence — the safe read/validate/add helper for the evidence truth bank.
+// careerrat evidence — the safe read/validate/add helper for the evidence truth bank.
 //
 // candidate/evidence.yml is the source of truth every outbound artifact draws from
 // (résumés, cover letters, interview packets, STAR+R stories). This is the guarded
 // write path for ORIGINATING evidence — e.g. ingest-profile scanning a projects
 // folder and proposing claims — so new facts land with the same firewall the rest of
-// Rolester uses: placeholder lint, a private-`current_base` refusal, schema validity,
+// CareerRat uses: placeholder lint, a private-`current_base` refusal, schema validity,
 // and a stringify→parse round-trip check before the file is rewritten.
 //
 // Usage:
@@ -22,6 +22,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { candidateEvidenceMerge } from "../core/db/verbs.mjs";
 import { displayPath } from "../core/paths/workspace.mjs";
 import {
   computeEvidenceWrite,
@@ -214,6 +216,30 @@ function cmdAdd() {
     process.exit(0);
   }
 
+  if (dbExists({ repoRoot: opts.root })) {
+    const written = candidateEvidenceMerge({ repoRoot: opts.root, claims: [plan.claim] });
+    if (opts.json)
+      console.log(
+        JSON.stringify(
+          {
+            ok: true,
+            written: true,
+            id: plan.claim.id,
+            replaced: plan.replaced,
+            count: written.total,
+            relPath: "sqlite:candidate_evidence_claims",
+          },
+          null,
+          2
+        )
+      );
+    else
+      console.log(
+        `Written to sqlite:candidate_evidence_claims: claim "${plan.claim.id}" ${plan.replaced ? "updated" : "added"} (${written.total} total).`
+      );
+    process.exit(0);
+  }
+
   const written = writeEvidence({ claims: plan.nextClaims, root: opts.root, schema: loadSchema() });
   if (!written.ok) {
     if (opts.json) console.log(JSON.stringify({ ok: false, error: written.error }, null, 2));
@@ -251,7 +277,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester evidence — safe read/validate/add for the evidence truth bank
+  console.log(`careerrat evidence — safe read/validate/add for the evidence truth bank
 
 Usage:
   node src/cli/evidence.mjs list [--json]
@@ -274,5 +300,5 @@ Options:
   --file FILE   YAML claim fragment for add (a claim mapping, or { claims: [ one ] }).
   --write       Commit the add (default: dry run).
   --json        Machine-readable output.
-  --root DIR    Repo root (default: the rolester install).`);
+  --root DIR    Repo root (default: the careerrat install).`);
 }

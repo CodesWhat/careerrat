@@ -1,14 +1,14 @@
-# Rolester Local Agent Instructions
+# CareerRat Local Agent Instructions
 
 Read this before touching jobs.
 
 ## Dashboard Dev Server
 
-The dashboard should be live during active Rolester work. Check
-`http://localhost:7777`; if it is down, start `rolester tracker-dev` from the repo
+The dashboard should be live during active CareerRat work. Check
+`http://localhost:7777`; if it is down, start `careerrat tracker-dev` from the repo
 root before telling the user to use the dashboard.
 
-The normal entry point, `rolester start [agent]`, starts the dashboard as a
+The normal entry point, `careerrat start [agent]`, starts the dashboard as a
 separate local process and records `.internal/tracker-dev.pid` plus
 `.internal/tracker-dev.log`. Agents opened directly in the repo must perform the
 same check themselves.
@@ -17,12 +17,12 @@ For agent-run sessions, detach it so it survives the current turn:
 
 ```bash
 mkdir -p .internal
-nohup rolester tracker-dev > .internal/tracker-dev.log 2>&1 &
+nohup careerrat tracker-dev > .internal/tracker-dev.log 2>&1 &
 echo $! > .internal/tracker-dev.pid
 ```
 
-If port 7777 is already occupied by something other than Rolester, use
-`rolester tracker-dev --port 7778` and report the actual URL. Keep the server
+If port 7777 is already occupied by something other than CareerRat, use
+`careerrat tracker-dev --port 7778` and report the actual URL. Keep the server
 running after tracker-visible changes so the page hot reloads. The dashboard is
 read-only; agents and skills write `workspace/tracker.json`.
 
@@ -42,9 +42,9 @@ workspace files:
   bodies in `workspace/comms/` with `artifactPath`.
 - For every application/interview/status change, update `applications[]`,
   artifact paths, follow-up state, and `conversations[]` as applicable.
-- After tracker-visible writes, run `rolester tracker --verify`; run
+- After tracker-visible writes, run `careerrat tracker --verify`; run
   `npm run verify:tracker` when domain integrity could be affected; then run
-  `rolester tracker` so the live UI hot reloads.
+  `careerrat tracker` so the live UI hot reloads.
 
 ## Intent Routing
 
@@ -63,16 +63,16 @@ workspace files:
 - If the user asks to add a tracked event to Apple Calendar, Google Calendar,
   Outlook Calendar, a real calendar, or an approved local automation tool: use
   `calendar-sync`. It requires the `calendar_sync` capability to be allowed for
-  the selected provider in `rolester automation status`, previews the event,
+  the selected provider in `careerrat automation status`, previews the event,
   confirms first, writes only that provider, and appends `calendarWrites[]`.
 - If the user asks to sync/import/check email from Apple Mail, Gmail, or
   Outlook, pull recruiter replies, or ingest mailbox updates: use `ingest-mail`.
   Gmail/Outlook requires the `mail_access` capability to be allowed for that
-  provider in `rolester automation status`.
+  provider in `careerrat automation status`.
 - If the user asks to find a recruiter, hiring manager, employee contact, warm
   path, referral path, or relationship contact for a tracked company or job: use
   `relationship-sourcing`. It requires the `relationship_sourcing` capability to
-  be allowed for LinkedIn or Wellfound in `rolester automation status`, writes
+  be allowed for LinkedIn or Wellfound in `careerrat automation status`, writes
   only review leads into `relationshipLeads[]`, and never sends outreach.
 - If the user says they got an interview, screen, recruiter call, assessment, or
   panel: use `interview-prep`.
@@ -80,12 +80,12 @@ workspace files:
   status change: use `track-outcomes`.
 - If the workspace is new or the candidate profile is incomplete: use
   `ingest-profile`.
-- If a `rolester` command crashes or exits unexpectedly, a skill produces
+- If a `careerrat` command crashes or exits unexpectedly, a skill produces
   clearly-wrong output, or the user says "this is broken" / "report a bug" /
   "file an issue": use `report-issue`. It separates a real defect from a config
   problem, assembles redacted diagnostics (no candidate PII, comp, or workspace
   contents), and — only with an explicit yes — opens a GitHub issue on the
-  upstream `CodesWhat/rolester` repo. It never auto-files.
+  upstream `CodesWhat/careerrat` repo. It never auto-files.
 
 ## Mandatory Gate
 

@@ -12,7 +12,7 @@ before an interview or application evaluation. Also use it automatically when
 `interview-prep` or `evaluate-job` needs company context and no non-stale artifact
 exists yet.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing the research summary presented to the user. Apply the register from AGENTS.md#mode-switches. The `workspace/research/<slug>.md` artifact is always written in full — register governs the **in-chat summary**: `exec-summary` = 3–5 bullet signals + file path; `standard` = short section-per-axis bullets + file path; `technical` = signal analysis + sourcing notes; `verbose` = full artifact mirrored in chat.
 
@@ -46,7 +46,7 @@ If `candidate/research-prefs.yml` exists and specifies `research_axes`, use thos
 Then check usage mode:
 
 ```
-rolester modes allows research:company
+careerrat modes allows research:company
 ```
 
 If it returns `skip`, do not run web search by default; explain that lean usage mode
@@ -61,7 +61,7 @@ continue normally.
 1. Canonicalize the company name as given by the user or inferred from the JD.
 2. Run:
    ```
-   rolester research read "<Company>"
+   careerrat research read "<Company>"
    ```
    - If the command returns a **non-stale** artifact (within `staleness_days`), show the
      user the artifact summary and offer two choices:
@@ -145,7 +145,7 @@ totals for the Required Output block.
 
 Compose the full artifact to a temporary draft file. Use a path outside
 `workspace/research/` — for example `workspace/research/.<slug>.draft` — so it is
-not itself listed by `rolester research list`. Do NOT write a `.md` file directly
+not itself listed by `careerrat research list`. Do NOT write a `.md` file directly
 into `workspace/research/`; the `record --write` command is the only write path.
 
 The artifact must follow this exact structure:
@@ -214,7 +214,7 @@ refused by the placeholder lint.
 
 1. Dry-run to validate and preview:
    ```
-   rolester research record "<Company>" --file <path-to-draft>
+   careerrat research record "<Company>" --file <path-to-draft>
    ```
    Read the output. If `record` refuses (placeholder residue, missing frontmatter field,
    zero sources, `current_base` leak), fix the draft and re-run. Do not proceed to `--write`
@@ -222,13 +222,13 @@ refused by the placeholder lint.
 
 2. Commit:
    ```
-   rolester research record "<Company>" --file <path-to-draft> --write
+   careerrat research record "<Company>" --file <path-to-draft> --write
    ```
 
 3. Log the research to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
 
    ```
-   rolester activity append --type research --actor agent \
+   careerrat activity append --type research --actor agent \
      --title "Researched <Company>" --summary "<axes covered, e.g. 'product, funding, culture'>" \
      --company "<Company>" --write
    ```
@@ -254,13 +254,12 @@ Tell the user:
 If the user states during the research flow that this company is a no ("I don't want
 to apply there", "add them to the exclusion list", "this is a no"):
 
-1. Confirm with the user before writing ("Add `<Company>` to `excluded_companies` in
-   `candidate/targeting.yml`?").
+1. Confirm with the user before writing ("Add `<Company>` to excluded companies?").
 2. On confirmation, run:
    ```
-   rolester gate exclude-company "<Company>"
+   careerrat gate exclude-company "<Company>" --write --confirm
    ```
-3. Echo `Written to candidate/targeting.yml: excluded_companies[] += <Company>`.
+3. Echo the CLI confirmation. `careerrat gate` writes SQLite in DB mode and legacy YAML only in legacy mode.
 4. The research artifact can remain — it costs nothing and may be useful for competitive
    intel — but note to the user that `evaluate-job` will CUT any posting from this company.
 

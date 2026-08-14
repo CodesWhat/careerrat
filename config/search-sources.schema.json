@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/search-sources.schema.json",
-  "title": "Rolester Search Sources",
+  "$id": "https://careerrat.local/schemas/search-sources.schema.json",
+  "title": "CareerRat Search Sources",
   "type": "object",
   "additionalProperties": true,
   "properties": {
@@ -23,7 +23,7 @@
           "provider": { "type": "string" },
           "source_type": {
             "type": "string",
-            "enum": ["url-query", "rss", "ats", "aggregator", "manual-auth", "browser"]
+            "enum": ["url-query", "rss", "ats", "aggregator", "manual-auth", "browser", "board"]
           },
           "auth": {
             "type": "boolean",

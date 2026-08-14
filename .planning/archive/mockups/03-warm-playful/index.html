@@ -1,0 +1,1511 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Flag JS as available so the reveal animation only hides content when it can be revealed.
+       Without this, .reveal content stays invisible if JS/IntersectionObserver ever fails. -->
+  <script>document.documentElement.classList.add('js');</script>
+  <title>CareerRat — Find, vet, and advance the right roles.</title>
+  <link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,900&display=swap" rel="stylesheet" />
+  <style>
+    /* ─── Fonts ─── */
+    @font-face {
+      font-family: 'Geist';
+      src: url('../assets/fonts/GeistVF.woff2') format('woff2');
+      font-weight: 100 900;
+      font-display: swap;
+    }
+    @font-face {
+      font-family: 'Geist Mono';
+      src: url('../assets/fonts/GeistMonoVF.woff2') format('woff2');
+      font-weight: 100 900;
+      font-display: swap;
+    }
+
+    /* ─── Tokens ─── */
+    :root {
+      --cream: #faf6ef;
+      --paper: #f5f0e8;
+      --ink: #2b2724;
+      --ink-soft: #5a4f4a;
+      --coral: #e8553d;
+      --coral-dark: #c93e28;
+      --teal: #2f9e8f;
+      --teal-light: #d6f0ec;
+      --mustard: #e0a93b;
+      --mustard-light: #fdf3d6;
+      --radius-sm: 12px;
+      --radius-md: 20px;
+      --radius-lg: 28px;
+      --radius-pill: 999px;
+      --shadow-soft: 0 4px 20px rgba(43,39,36,0.08);
+      --shadow-card: 0 8px 32px rgba(43,39,36,0.10);
+      --transition: 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    }
+
+    /* ─── Reset ─── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Geist', system-ui, sans-serif;
+      background: var(--cream);
+      color: var(--ink);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+    img { display: block; max-width: 100%; }
+    a { color: inherit; text-decoration: none; }
+
+    /* ─── Paper grain texture (SVG noise overlay) ─── */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='300' height='300' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+      pointer-events: none;
+      z-index: 0;
+    }
+    body > * { position: relative; z-index: 1; }
+
+    /* ─── Focus states ─── */
+    :focus-visible {
+      outline: 3px solid var(--coral);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    /* ─── Layout helpers ─── */
+    .wrap {
+      max-width: 1160px;
+      margin: 0 auto;
+      padding: 0 24px;
+    }
+
+    /* ─── NAV ─── */
+    nav {
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      padding: 16px 0;
+      background: rgba(250,246,239,0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      transition: padding 0.3s ease, background 0.3s ease;
+    }
+    /* On scroll the header detaches into a centered floating pill. */
+    nav.scrolled {
+      padding: 12px 0;
+      background: transparent;
+      backdrop-filter: none;
+      -webkit-backdrop-filter: none;
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      gap: 32px;
+      transition: width 0.3s ease, max-width 0.3s ease, padding 0.3s ease,
+        background 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease,
+        border-radius 0.3s ease;
+      border: 1px solid transparent;
+    }
+    nav.scrolled .nav-inner {
+      width: calc(100% - 32px);
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 9px 12px 9px 22px;
+      background: rgba(250,246,239,0.92);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border-radius: 999px;
+      border-color: rgba(43,39,36,0.07);
+      box-shadow: 0 8px 28px rgba(43,39,36,0.12), 0 2px 6px rgba(43,39,36,0.05);
+    }
+    .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Fraunces', serif;
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+    .nav-logo img {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+    }
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      list-style: none;
+      margin-left: auto;
+    }
+    .nav-links a {
+      font-size: 0.9rem;
+      font-weight: 500;
+      color: var(--ink-soft);
+      padding: 6px 14px;
+      border-radius: var(--radius-pill);
+      transition: background 0.2s, color 0.2s;
+    }
+    .nav-links a:hover {
+      background: var(--paper);
+      color: var(--ink);
+    }
+    .nav-cta {
+      background: var(--ink) !important;
+      color: var(--cream) !important;
+      font-weight: 600 !important;
+      padding: 8px 18px !important;
+      border-radius: var(--radius-pill) !important;
+      transition: background 0.2s, transform 0.15s !important;
+    }
+    .nav-cta:hover {
+      background: var(--coral) !important;
+      transform: translateY(-1px);
+    }
+    .nav-mobile-hide { display: flex; }
+
+    /* ─── HERO ─── */
+    .hero {
+      padding: 80px 0 60px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-blobs {
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .blob {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(60px);
+      opacity: 0.35;
+    }
+    .blob-1 {
+      width: 520px; height: 520px;
+      background: radial-gradient(circle, #e8553d 0%, transparent 70%);
+      top: -180px; right: -100px;
+      animation: blobdrift 10s ease-in-out infinite alternate;
+    }
+    .blob-2 {
+      width: 520px; height: 520px;
+      background: radial-gradient(circle, #2f9e8f 0%, transparent 70%);
+      /* Sit fully inside the hero (positive bottom) so the blob's own soft edge
+         fades out before the section boundary — visible, and never clipped. */
+      bottom: 90px; left: -130px;
+      animation: blobdrift 13s ease-in-out infinite alternate-reverse;
+    }
+    .blob-3 {
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, #e0a93b 0%, transparent 70%);
+      top: 40%; left: 40%;
+      animation: blobdrift 16s ease-in-out infinite alternate;
+    }
+    @keyframes blobdrift {
+      from { transform: translate(0, 0) scale(1); }
+      to   { transform: translate(30px, 20px) scale(1.08); }
+    }
+
+    .hero-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 48px;
+      align-items: center;
+    }
+    .hero-copy { max-width: 560px; }
+    .hero-eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--coral);
+      background: rgba(232,85,61,0.10);
+      padding: 6px 14px;
+      border-radius: var(--radius-pill);
+      margin-bottom: 20px;
+    }
+    .hero-h1 {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(2.6rem, 5.5vw, 4.2rem);
+      font-weight: 900;
+      line-height: 1.06;
+      letter-spacing: -0.02em;
+      color: var(--ink);
+      margin-bottom: 24px;
+    }
+    .hero-h1 .underline-word {
+      position: relative;
+      display: inline-block;
+      white-space: nowrap;
+    }
+    .hero-h1 .underline-word svg {
+      position: absolute;
+      bottom: -6px;
+      left: -4px;
+      width: calc(100% + 8px);
+      height: 14px;
+      overflow: visible;
+    }
+    .hero-h1 .underline-word path {
+      stroke: var(--coral);
+      stroke-width: 3;
+      fill: none;
+      stroke-linecap: round;
+      stroke-dasharray: 300;
+      stroke-dashoffset: 300;
+      transition: stroke-dashoffset 1s cubic-bezier(0.25, 1, 0.5, 1) 0.4s;
+    }
+    .hero-h1 .underline-word.drawn path {
+      stroke-dashoffset: 0;
+    }
+    .hero-sub {
+      font-size: 1.1rem;
+      color: var(--ink-soft);
+      line-height: 1.65;
+      margin-bottom: 36px;
+      max-width: 480px;
+    }
+    .hero-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-bottom: 40px;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--coral);
+      color: #fff;
+      font-family: 'Geist', sans-serif;
+      font-size: 1rem;
+      font-weight: 700;
+      padding: 16px 28px;
+      border-radius: var(--radius-lg);
+      border: none;
+      cursor: pointer;
+      transition: background var(--transition), transform 0.15s;
+      text-decoration: none;
+      box-shadow: 0 4px 16px rgba(232,85,61,0.30);
+    }
+    .btn-primary:hover {
+      background: var(--coral-dark);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(232,85,61,0.38);
+    }
+    .btn-secondary {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: transparent;
+      color: var(--ink);
+      font-family: 'Geist', sans-serif;
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 15px 24px;
+      border-radius: var(--radius-lg);
+      border: 2px solid rgba(43,39,36,0.18);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s, transform 0.15s;
+      text-decoration: none;
+    }
+    .btn-secondary:hover {
+      border-color: var(--ink);
+      background: var(--paper);
+      transform: translateY(-1px);
+    }
+
+    .hero-stickers {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .sticker {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 7px 14px;
+      border-radius: var(--radius-pill);
+      border: 2px solid;
+      animation: stickerfloat 4s ease-in-out infinite;
+    }
+    .sticker:nth-child(2) { animation-delay: 0.7s; }
+    .sticker:nth-child(3) { animation-delay: 1.4s; }
+    .sticker:nth-child(4) { animation-delay: 2.1s; }
+    @keyframes stickerfloat {
+      0%, 100% { transform: translateY(0px); }
+      50%       { transform: translateY(-4px); }
+    }
+    .sticker-coral {
+      background: rgba(232,85,61,0.08);
+      color: var(--coral-dark);
+      border-color: rgba(232,85,61,0.25);
+    }
+    .sticker-teal {
+      background: var(--teal-light);
+      color: var(--teal);
+      border-color: rgba(47,158,143,0.3);
+    }
+    .sticker-mustard {
+      background: var(--mustard-light);
+      color: #9a6c00;
+      border-color: rgba(224,169,59,0.35);
+    }
+    .sticker-ink {
+      background: rgba(43,39,36,0.06);
+      color: var(--ink);
+      border-color: rgba(43,39,36,0.2);
+    }
+
+    .hero-visual {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+    }
+    .rat-container {
+      position: relative;
+      width: 280px;
+      height: 280px;
+    }
+    .rat-bg {
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle, rgba(232,85,61,0.15) 0%, rgba(224,169,59,0.10) 60%, transparent 80%);
+      border-radius: 50%;
+    }
+    .rat-img {
+      position: absolute;
+      width: 220px;
+      height: 220px;
+      object-fit: contain;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+      cursor: default;
+    }
+    .rat-img:hover {
+      transform: translate(-50%, -50%) rotate(-8deg) scale(1.08);
+    }
+    .rat-badge {
+      position: absolute;
+      bottom: 20px;
+      right: 0;
+      background: var(--ink);
+      color: var(--cream);
+      font-family: 'Fraunces', serif;
+      font-size: 0.85rem;
+      font-weight: 600;
+      padding: 10px 16px;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-card);
+      max-width: 180px;
+      line-height: 1.35;
+      animation: badgepop 3s ease-in-out infinite;
+    }
+    .rat-badge::before {
+      content: '💬';
+      display: block;
+      margin-bottom: 2px;
+    }
+    .rat-badge span {
+      display: block;
+    }
+    @keyframes badgepop {
+      0%, 100% { transform: rotate(-2deg) translateY(0); }
+      50%       { transform: rotate(1deg) translateY(-3px); }
+    }
+
+    /* ─── Reveal animation ─── */
+    .reveal {
+      transition: opacity 0.6s ease, transform 0.6s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    /* Only hide reveal content when JS is present to bring it back. No-JS = fully visible. */
+    html.js .reveal {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    /* Must out-specify `html.js .reveal` (0,2,1) or the hidden state wins and content never appears. */
+    html.js .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .reveal-delay-1 { transition-delay: 0.1s; }
+    .reveal-delay-2 { transition-delay: 0.2s; }
+    .reveal-delay-3 { transition-delay: 0.3s; }
+    .reveal-delay-4 { transition-delay: 0.4s; }
+    .reveal-delay-5 { transition-delay: 0.5s; }
+
+    /* Hero is above the fold: animate it in on first paint instead of waiting for the
+       scroll observer (which leaves the hero blank for a beat on load). */
+    @keyframes heroIn {
+      from { opacity: 0; transform: translateY(24px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    html.js .hero .reveal {
+      animation: heroIn 0.6s cubic-bezier(0.34,1.56,0.64,1) both;
+    }
+    html.js .hero .reveal-delay-1 { animation-delay: 0.08s; }
+    html.js .hero .reveal-delay-2 { animation-delay: 0.16s; }
+    html.js .hero .reveal-delay-3 { animation-delay: 0.24s; }
+    html.js .hero .reveal-delay-4 { animation-delay: 0.32s; }
+
+    /* ─── SECTION COMMON ─── */
+    section {
+      padding: 88px 0;
+    }
+    .section-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.78rem;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: var(--ink-soft);
+      margin-bottom: 14px;
+    }
+    .section-label::before {
+      content: '';
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: var(--coral);
+      border-radius: 50%;
+    }
+    .section-h2 {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(2rem, 3.5vw, 3rem);
+      font-weight: 900;
+      line-height: 1.12;
+      letter-spacing: -0.02em;
+      margin-bottom: 20px;
+    }
+    .section-sub {
+      font-size: 1.05rem;
+      color: var(--ink-soft);
+      line-height: 1.7;
+      max-width: 560px;
+    }
+
+    /* ─── MEET YOUR SIDEKICK ─── */
+    .sidekick {
+      background: var(--paper);
+      border-radius: var(--radius-lg);
+      padding: 72px 56px;
+      position: relative;
+      overflow: hidden;
+    }
+    .sidekick::after {
+      content: '';
+      position: absolute;
+      top: -40px; right: -40px;
+      width: 200px; height: 200px;
+      background: radial-gradient(circle, rgba(47,158,143,0.18), transparent 70%);
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .sidekick-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+    .sidekick-rat {
+      position: relative;
+      display: flex;
+      justify-content: center;
+    }
+    .sidekick-rat-img {
+      width: 180px;
+      height: 180px;
+      object-fit: contain;
+      filter: drop-shadow(0 8px 24px rgba(43,39,36,0.18));
+      transition: transform 0.3s cubic-bezier(0.34,1.56,0.64,1);
+    }
+    .sidekick-rat-img:hover {
+      transform: scale(1.06) rotate(-5deg);
+    }
+    .sidekick-copy .section-sub {
+      max-width: none;
+    }
+    .gate-pullquote {
+      margin-top: 32px;
+      padding: 24px 28px;
+      background: var(--cream);
+      border-radius: var(--radius-md);
+      position: relative;
+    }
+    .gate-pullquote-text {
+      font-family: 'Fraunces', serif;
+      font-size: 1.35rem;
+      font-weight: 600;
+      line-height: 1.35;
+      color: var(--ink);
+    }
+    .gate-pullquote-sub {
+      margin-top: 8px;
+      font-size: 0.88rem;
+      color: var(--ink-soft);
+    }
+    .gate-badge {
+      position: absolute;
+      top: -12px;
+      right: 20px;
+      background: var(--coral);
+      color: #fff;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      padding: 4px 12px;
+      border-radius: var(--radius-pill);
+    }
+
+    /* ─── HOW IT WORKS ─── */
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 24px;
+      margin-top: 48px;
+    }
+    .step-card {
+      background: var(--cream);
+      border: 2px solid rgba(43,39,36,0.08);
+      border-radius: var(--radius-lg);
+      padding: 32px 28px;
+      position: relative;
+      transition: transform var(--transition), box-shadow 0.2s;
+    }
+    .step-card:hover {
+      transform: translateY(-4px);
+      box-shadow: var(--shadow-card);
+    }
+    .step-number {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 40px;
+      height: 40px;
+      background: var(--ink);
+      color: var(--cream);
+      font-family: 'Fraunces', serif;
+      font-size: 1.1rem;
+      font-weight: 900;
+      border-radius: 50%;
+      margin-bottom: 20px;
+    }
+    .step-card:nth-child(1) .step-number { background: var(--coral); }
+    .step-card:nth-child(2) .step-number { background: var(--teal); }
+    .step-card:nth-child(3) .step-number { background: var(--mustard); color: var(--ink); }
+    .step-card:nth-child(4) .step-number { background: var(--ink); }
+    .step-doodle {
+      position: absolute;
+      top: 20px;
+      right: 24px;
+      opacity: 0.55;
+    }
+    .step-h3 {
+      font-family: 'Fraunces', serif;
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin-bottom: 10px;
+    }
+    .step-p {
+      font-size: 0.9rem;
+      color: var(--ink-soft);
+      line-height: 1.6;
+    }
+
+    /* ─── HONESTY ─── */
+    .honesty-section {
+      background: var(--ink);
+      border-radius: var(--radius-lg);
+      padding: 72px 56px;
+      color: var(--cream);
+      position: relative;
+      overflow: hidden;
+    }
+    .honesty-section::before {
+      content: '';
+      position: absolute;
+      top: -60px; left: -60px;
+      width: 300px; height: 300px;
+      background: radial-gradient(circle, rgba(232,85,61,0.25), transparent 70%);
+      border-radius: 50%;
+    }
+    .honesty-section .section-label {
+      color: rgba(250,246,239,0.55);
+    }
+    .honesty-section .section-label::before {
+      background: var(--coral);
+    }
+    .honesty-section .section-h2 {
+      color: var(--cream);
+    }
+    .honesty-section .section-sub {
+      color: rgba(250,246,239,0.72);
+      max-width: 640px;
+    }
+    .honesty-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      margin-top: 48px;
+    }
+    .honesty-point {
+      display: flex;
+      gap: 16px;
+    }
+    .honesty-icon {
+      flex-shrink: 0;
+      width: 44px;
+      height: 44px;
+      border-radius: var(--radius-sm);
+      background: rgba(250,246,239,0.08);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.3rem;
+    }
+    .honesty-point-text h4 {
+      font-family: 'Fraunces', serif;
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--cream);
+    }
+    .honesty-point-text p {
+      font-size: 0.88rem;
+      color: rgba(250,246,239,0.65);
+      line-height: 1.6;
+    }
+
+    /* ─── PRIVACY ─── */
+    .privacy-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: center;
+    }
+    .privacy-visual {
+      position: relative;
+    }
+    .privacy-card {
+      background: var(--paper);
+      border-radius: var(--radius-lg);
+      padding: 36px;
+      box-shadow: var(--shadow-card);
+    }
+    .privacy-card-icon {
+      font-size: 3rem;
+      margin-bottom: 16px;
+    }
+    .privacy-card h3 {
+      font-family: 'Fraunces', serif;
+      font-size: 1.3rem;
+      font-weight: 700;
+      margin-bottom: 12px;
+    }
+    .privacy-card p {
+      font-size: 0.9rem;
+      color: var(--ink-soft);
+      line-height: 1.65;
+    }
+    .privacy-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    .privacy-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 0.82rem;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: var(--radius-pill);
+      background: var(--teal-light);
+      color: var(--teal);
+    }
+    .privacy-copy .section-sub {
+      max-width: none;
+    }
+
+    /* ─── AI SECTION ─── */
+    .ai-section {
+      background: var(--paper);
+      border-radius: var(--radius-lg);
+      padding: 72px 56px;
+    }
+    .ai-section-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: start;
+    }
+    .ai-chip-group {
+      margin-top: 28px;
+    }
+    .ai-chip-group-title {
+      font-size: 0.72rem;
+      font-weight: 800;
+      letter-spacing: 0;
+      text-transform: uppercase;
+      color: rgba(43,39,36,0.54);
+      margin-bottom: 10px;
+    }
+    .ai-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+    .ai-chip {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 10px 18px;
+      border-radius: var(--radius-pill);
+      border: 2px solid rgba(43,39,36,0.12);
+      background: var(--cream);
+      color: var(--ink);
+      transition: border-color 0.2s, transform var(--transition);
+    }
+    .ai-chip:hover {
+      border-color: var(--coral);
+      transform: translateY(-2px);
+    }
+    .ai-chip-logo {
+      width: 24px;
+      height: 24px;
+      flex: 0 0 24px;
+      display: block;
+    }
+    .ai-chip-logo-codex {
+      border-radius: 8px;
+      box-shadow: inset 0 0 0 1px rgba(43,39,36,0.1);
+    }
+    .terminal-sticker {
+      background: #1a1614;
+      color: #e0d4c4;
+      font-family: 'Geist Mono', monospace;
+      font-size: 0.9rem;
+      padding: 28px 32px;
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-card);
+      position: relative;
+      margin-top: 24px;
+    }
+    .terminal-dots {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 20px;
+    }
+    .terminal-dot {
+      width: 12px; height: 12px;
+      border-radius: 50%;
+    }
+    .terminal-dot-red    { background: #ff5f56; }
+    .terminal-dot-yellow { background: #ffbd2e; }
+    .terminal-dot-green  { background: #27c93f; }
+    .terminal-prompt {
+      color: #7a9e7e;
+      margin-bottom: 8px;
+    }
+    .terminal-command {
+      color: #f0e4cc;
+      font-weight: 600;
+    }
+    .terminal-comment {
+      color: #7a7068;
+      margin-top: 14px;
+      font-size: 0.8rem;
+    }
+    .terminal-cursor {
+      display: inline-block;
+      width: 9px; height: 16px;
+      background: var(--coral);
+      vertical-align: middle;
+      margin-left: 2px;
+      animation: cursorblink 1.1s step-end infinite;
+    }
+    @keyframes cursorblink {
+      0%, 100% { opacity: 1; }
+      50%       { opacity: 0; }
+    }
+
+    /* ─── CHECKLIST ─── */
+    .checklist-inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 60px;
+      align-items: start;
+    }
+    .checklist-copy .section-sub {
+      max-width: none;
+    }
+    .checklist {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .checklist li {
+      display: flex;
+      align-items: flex-start;
+      gap: 12px;
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .checklist li::before {
+      content: '✓';
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 24px; height: 24px;
+      background: var(--teal-light);
+      color: var(--teal);
+      border-radius: 50%;
+      font-size: 0.72rem;
+      font-weight: 700;
+      margin-top: 0px;
+    }
+    .maker-note {
+      margin-top: 40px;
+      padding: 20px 24px;
+      background: var(--paper);
+      border-radius: var(--radius-md);
+      font-size: 0.9rem;
+      color: var(--ink-soft);
+      line-height: 1.65;
+    }
+    .maker-note strong {
+      color: var(--ink);
+    }
+
+    /* ─── FINAL CTA ─── */
+    .final-cta {
+      text-align: center;
+      padding: 100px 0 80px;
+    }
+    .final-cta-inner {
+      max-width: 700px;
+      margin: 0 auto;
+    }
+    .final-rat {
+      width: 100px;
+      height: 100px;
+      object-fit: contain;
+      margin: 0 auto 28px;
+      animation: ratbob 3s ease-in-out infinite;
+    }
+    @keyframes ratbob {
+      0%, 100% { transform: translateY(0) rotate(0deg); }
+      50%       { transform: translateY(-8px) rotate(3deg); }
+    }
+    .final-h2 {
+      font-family: 'Fraunces', serif;
+      font-size: clamp(2.4rem, 5vw, 3.8rem);
+      font-weight: 900;
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+      margin-bottom: 20px;
+    }
+    .final-sub {
+      font-size: 1.1rem;
+      color: var(--ink-soft);
+      margin-bottom: 40px;
+      line-height: 1.65;
+    }
+    .final-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      justify-content: center;
+    }
+
+    /* ─── FOOTER ─── */
+    footer {
+      border-top: 1px solid rgba(43,39,36,0.10);
+      padding: 40px 0;
+    }
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .footer-logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-family: 'Fraunces', serif;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+    .footer-logo img {
+      width: 28px; height: 28px;
+      border-radius: 6px;
+      opacity: 0.85;
+    }
+    .footer-note {
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+    }
+    .footer-tagline {
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      font-style: italic;
+    }
+
+    /* ─── Responsive ─── */
+    @media (max-width: 768px) {
+      .nav-mobile-hide { display: none; }
+      .hero-inner, .sidekick-grid, .honesty-grid,
+      .privacy-inner, .ai-section-inner, .checklist-inner {
+        grid-template-columns: 1fr;
+      }
+      .hero-visual { order: -1; }
+      .rat-container { width: 200px; height: 200px; }
+      .rat-img { width: 160px; height: 160px; }
+      .sidekick, .honesty-section, .ai-section { padding: 48px 28px; }
+      .honesty-grid { grid-template-columns: 1fr; gap: 24px; }
+      section { padding: 64px 0; }
+      .steps-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 500px) {
+      .steps-grid { grid-template-columns: 1fr; }
+      .wrap { padding: 0 16px; }
+    }
+
+    /* ─── Reduced motion ─── */
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+      }
+      .reveal {
+        opacity: 1;
+        transform: none;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ─── NAV ─────────────────────────────────── -->
+  <nav aria-label="Main navigation">
+    <div class="wrap nav-inner">
+      <a class="nav-logo" href="#" aria-label="CareerRat home">
+        <img src="../assets/logo.png" alt="CareerRat rat mascot logo" width="32" height="32" />
+        CareerRat
+      </a>
+      <ul class="nav-links nav-mobile-hide" role="list">
+        <li><a href="#how-it-works">How it works</a></li>
+        <li><a href="#privacy">Privacy</a></li>
+        <li><a href="#what-you-get">What you get</a></li>
+        <li><a href="#get" class="nav-cta">Get CareerRat →</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- ─── HERO ─────────────────────────────────── -->
+  <section class="hero" aria-labelledby="hero-h1">
+    <div class="hero-blobs" aria-hidden="true">
+      <div class="blob blob-1"></div>
+      <div class="blob blob-2"></div>
+      <div class="blob blob-3"></div>
+    </div>
+    <div class="wrap hero-inner">
+      <div class="hero-copy">
+        <div class="hero-eyebrow reveal" aria-hidden="true">
+          Your job hunt deserves better than a spreadsheet
+        </div>
+        <h1 class="hero-h1 reveal reveal-delay-1" id="hero-h1">
+          A
+          <span class="underline-word" id="underline-sidekick">sidekick
+            <svg viewBox="0 0 120 14" aria-hidden="true" focusable="false">
+              <path d="M4,10 Q30,4 60,8 Q90,12 116,6" />
+            </svg>
+          </span>
+          for<br />your job&nbsp;search.
+        </h1>
+        <p class="hero-sub reveal reveal-delay-2">
+          Define what you actually want, vet real jobs before chasing them,
+          write honest applications from your own evidence, and track every
+          outcome — all on your own machine, with your own AI.
+        </p>
+        <div class="hero-actions reveal reveal-delay-3">
+          <a href="#get" class="btn-primary">
+            Get started — it's yours, and it's free
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M3 8h10M9 4l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" fill="none"/></svg>
+          </a>
+          <a href="#how-it-works" class="btn-secondary">
+            See how it works
+          </a>
+        </div>
+        <div class="hero-stickers reveal reveal-delay-4" aria-label="Key features">
+          <span class="sticker sticker-coral">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><circle cx="6.5" cy="6.5" r="6" stroke="currentColor" stroke-width="1.5"/><path d="M4 6.5l2 2 3-3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            reads the whole job
+          </span>
+          <span class="sticker sticker-teal">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><rect x="2" y="2" width="9" height="9" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M5 6.5h3" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            never lies on your résumé
+          </span>
+          <span class="sticker sticker-mustard">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><path d="M6.5 2v9M2 6.5h9" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>
+            stays on your laptop
+          </span>
+          <span class="sticker sticker-ink">
+            <svg width="13" height="13" viewBox="0 0 13 13" fill="none" aria-hidden="true"><path d="M2 11l3-6 2 3 2-4 2 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            Claude or Codex
+          </span>
+        </div>
+      </div>
+      <div class="hero-visual reveal reveal-delay-2">
+        <div class="rat-container">
+          <div class="rat-bg" aria-hidden="true"></div>
+          <img
+            class="rat-img"
+            src="../assets/logo.png"
+            alt="CareerRat's rat mascot — your friendly job-search sidekick"
+            width="220"
+            height="220"
+          />
+          <div class="rat-badge" aria-hidden="true">
+            <span>Fresh roles.</span>
+            <span>Sharp docs.</span>
+            <span>Fast apply.</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── MEET YOUR SIDEKICK ───────────────────── -->
+  <section aria-labelledby="sidekick-h2">
+    <div class="wrap">
+      <div class="sidekick reveal">
+        <div class="sidekick-grid">
+          <div class="sidekick-rat">
+            <img
+              class="sidekick-rat-img"
+              src="../assets/logo.png"
+              alt="CareerRat rat mascot"
+              width="180"
+              height="180"
+            />
+          </div>
+          <div class="sidekick-copy">
+            <div class="section-label">Meet your sidekick</div>
+            <h2 class="section-h2" id="sidekick-h2">CareerRat is an agent-driven job-search workspace.</h2>
+            <p class="section-sub">
+              It onboards you once — your preferences, your evidence, your comp floor — and then works the whole loop: finding jobs, vetting them, writing honest applications, drafting recruiter messages, prepping you for interviews, and learning from every outcome. The agent does the work. You make the calls.
+            </p>
+            <div class="gate-pullquote">
+              <div class="gate-badge">The Gate</div>
+              <p class="gate-pullquote-text">"It reads the actual job before you chase it."</p>
+              <p class="gate-pullquote-sub">Emits a GATE / FIT / COMP / ACTION verdict against your real constraints — not just a keyword match.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── HOW IT WORKS ─────────────────────────── -->
+  <section id="how-it-works" aria-labelledby="steps-h2">
+    <div class="wrap">
+      <div class="reveal">
+        <div class="section-label">How it works</div>
+        <h2 class="section-h2" id="steps-h2">Four steps. One loop.</h2>
+        <p class="section-sub">Each step builds on the last. Nothing is skipped, nothing is faked.</p>
+      </div>
+      <div class="steps-grid">
+
+        <div class="step-card reveal reveal-delay-1">
+          <div class="step-number">1</div>
+          <svg class="step-doodle" width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <circle cx="20" cy="20" r="18" stroke="#e8553d" stroke-width="1.5" stroke-dasharray="4 3"/>
+            <path d="M13 20l4 4 10-8" stroke="#e8553d" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+          <h3 class="step-h3">Tell it what you actually want</h3>
+          <p class="step-p">Walk through a friendly onboarding. Role families, comp floor, location, what you'll accept, what you won't. This config is yours — no black box.</p>
+        </div>
+
+        <div class="step-card reveal reveal-delay-2">
+          <div class="step-number">2</div>
+          <svg class="step-doodle" width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <rect x="8" y="10" width="24" height="20" rx="4" stroke="#2f9e8f" stroke-width="1.5"/>
+            <path d="M14 18h12M14 23h7" stroke="#2f9e8f" stroke-width="1.5" stroke-linecap="round"/>
+          </svg>
+          <h3 class="step-h3">It finds and vets the real jobs</h3>
+          <p class="step-p">Searches the boards you tell it to. Reads the full posting body. Checks it against your constraints. Tells you to GATE, FIT, pass on COMP, or act. No spray-and-pray.</p>
+        </div>
+
+        <div class="step-card reveal reveal-delay-3">
+          <div class="step-number">3</div>
+          <svg class="step-doodle" width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <path d="M12 28V20a8 8 0 1116 0v8" stroke="#e0a93b" stroke-width="1.5" stroke-linecap="round"/>
+            <path d="M8 28h24" stroke="#e0a93b" stroke-width="1.5" stroke-linecap="round"/>
+            <circle cx="20" cy="16" r="3" stroke="#e0a93b" stroke-width="1.5"/>
+          </svg>
+          <h3 class="step-h3">It writes honest applications</h3>
+          <p class="step-p">Tailors your résumé and cover letter only from your real evidence bank. Refuses to invent facts. Every claim is backed by something you actually did.</p>
+        </div>
+
+        <div class="step-card reveal reveal-delay-4">
+          <div class="step-number">4</div>
+          <svg class="step-doodle" width="40" height="40" viewBox="0 0 40 40" fill="none" aria-hidden="true">
+            <path d="M10 30l6-10 4 5 5-8 5 13" stroke="#2b2724" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+            <circle cx="30" cy="12" r="3" stroke="#2b2724" stroke-width="1.5"/>
+          </svg>
+          <h3 class="step-h3">It preps you to win</h3>
+          <p class="step-p">Drafts recruiter messages and follow-ups. Builds story banks for interviews. Coaches comp negotiation. Tracks every outcome and gets smarter each run.</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── HONESTY ───────────────────────────────── -->
+  <section aria-labelledby="honesty-h2">
+    <div class="wrap">
+      <div class="honesty-section reveal">
+        <div class="section-label">It won't lie for you</div>
+        <h2 class="section-h2" id="honesty-h2">
+          That's the point.
+        </h2>
+        <p class="section-sub">
+          Honest tailoring isn't a limitation — it's a design choice. Applications that overclaim don't hold up in interviews. Artifacts built from your real evidence do.
+        </p>
+        <div class="honesty-grid">
+          <div class="honesty-point">
+            <div class="honesty-icon" aria-hidden="true">🏦</div>
+            <div class="honesty-point-text">
+              <h4>Evidence bank, not a word bank</h4>
+              <p>You build a bank of real things you did — projects, metrics, decisions. Every tailored artifact draws only from that bank.</p>
+            </div>
+          </div>
+          <div class="honesty-point">
+            <div class="honesty-icon" aria-hidden="true">🚫</div>
+            <div class="honesty-point-text">
+              <h4>Refuses to invent facts</h4>
+              <p>If a claim isn't in your evidence, it won't write it. No hallucinated roles. No inflated titles. No fake metrics.</p>
+            </div>
+          </div>
+          <div class="honesty-point">
+            <div class="honesty-icon" aria-hidden="true">🎯</div>
+            <div class="honesty-point-text">
+              <h4>Tailored, not fabricated</h4>
+              <p>It reorders, reframes, and emphasises what genuinely fits the role. That's tailoring. That's honest.</p>
+            </div>
+          </div>
+          <div class="honesty-point">
+            <div class="honesty-icon" aria-hidden="true">📋</div>
+            <div class="honesty-point-text">
+              <h4>Gate before tailor</h4>
+              <p>Tailoring only runs after the gate clears. You never write a cover letter for a job that doesn't fit your constraints.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── PRIVACY ───────────────────────────────── -->
+  <section id="privacy" aria-labelledby="privacy-h2">
+    <div class="wrap">
+      <div class="privacy-inner">
+        <div class="privacy-visual reveal">
+          <div class="privacy-card">
+            <div class="privacy-card-icon" aria-hidden="true">🔒</div>
+            <h3>Your stuff stays yours.</h3>
+            <p>
+              CareerRat runs entirely on your machine. Your résumé, comp numbers, evidence bank, and full pipeline never leave your laptop. No cloud sync, no account, no telemetry — not even by accident.
+            </p>
+            <div class="privacy-chips" role="list">
+              <span class="privacy-chip" role="listitem">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="5.5" r="5.5"/></svg>
+                no cloud
+              </span>
+              <span class="privacy-chip" role="listitem">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="5.5" r="5.5"/></svg>
+                no account
+              </span>
+              <span class="privacy-chip" role="listitem">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="5.5" r="5.5"/></svg>
+                no telemetry
+              </span>
+              <span class="privacy-chip" role="listitem">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="5.5" r="5.5"/></svg>
+                zero runtime deps
+              </span>
+              <span class="privacy-chip" role="listitem">
+                <svg width="11" height="11" viewBox="0 0 11 11" fill="currentColor" aria-hidden="true"><circle cx="5.5" cy="5.5" r="5.5"/></svg>
+                free
+              </span>
+            </div>
+          </div>
+        </div>
+        <div class="privacy-copy reveal reveal-delay-2">
+          <div class="section-label">Privacy as warmth</div>
+          <h2 class="section-h2" id="privacy-h2">Local-first isn't a feature. It's respect.</h2>
+          <p class="section-sub">
+            Job searches are personal. Your comp floor, your reasons for leaving, your backup options — none of that belongs in a cloud database. CareerRat keeps it on your machine, full stop.
+          </p>
+          <p class="section-sub" style="margin-top: 16px;">
+            No signup, no freemium tier that quietly uploads your data, no API key that routes your résumé through someone else's server. What you put in stays in.
+          </p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── AI AGNOSTIC ──────────────────────────── -->
+  <section aria-labelledby="ai-h2">
+    <div class="wrap">
+      <div class="ai-section reveal">
+        <div class="ai-section-inner">
+          <div>
+            <div class="section-label">Agent runtime</div>
+            <h2 class="section-h2" id="ai-h2">Works with your favorite AI.</h2>
+            <p class="section-sub">
+              CareerRat is an agent runtime. It doesn't lock you into a model or a subscription. Bring whatever AI CLI you already use — Claude Code, Codex, or anything else on your PATH.
+            </p>
+            <div class="ai-chip-group">
+              <div class="ai-chip-group-title">CLI launch options</div>
+              <div class="ai-chips" role="list">
+                <span class="ai-chip" role="listitem">
+                  <svg class="ai-chip-logo ai-chip-logo-claude" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <title>Claude Code</title>
+                    <path d="M20.998 10.949H24v3.102h-3v3.028h-1.487V20H18v-2.921h-1.487V20H15v-2.921H9V20H7.488v-2.921H6V20H4.487v-2.921H3V14.05H0V10.95h3V5h17.998v5.949zM6 10.949h1.488V8.102H6v2.847zm10.51 0H18V8.102h-1.49v2.847z" fill="#D97757" />
+                  </svg>
+                  Claude Code
+                </span>
+                <span class="ai-chip" role="listitem">
+                  <svg class="ai-chip-logo ai-chip-logo-codex" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <title>OpenAI Codex</title>
+                    <path d="M19.503 0H4.496A4.496 4.496 0 000 4.496v15.007A4.496 4.496 0 004.496 24h15.007A4.496 4.496 0 0024 19.503V4.496A4.496 4.496 0 0019.503 0z" fill="#fff" />
+                    <path d="M9.064 3.344a4.578 4.578 0 012.285-.312c1 .115 1.891.54 2.673 1.275.01.01.024.017.037.021a.09.09 0 00.043 0 4.55 4.55 0 013.046.275l.047.022.116.057a4.581 4.581 0 012.188 2.399c.209.51.313 1.041.315 1.595a4.24 4.24 0 01-.134 1.223.123.123 0 00.03.115c.594.607.988 1.33 1.183 2.17.289 1.425-.007 2.71-.887 3.854l-.136.166a4.548 4.548 0 01-2.201 1.388.123.123 0 00-.081.076c-.191.551-.383 1.023-.74 1.494-.9 1.187-2.222 1.846-3.711 1.838-1.187-.006-2.239-.44-3.157-1.302a.107.107 0 00-.105-.024c-.388.125-.78.143-1.204.138a4.441 4.441 0 01-1.945-.466 4.544 4.544 0 01-1.61-1.335c-.152-.202-.303-.392-.414-.617a5.81 5.81 0 01-.37-.961 4.582 4.582 0 01-.014-2.298.124.124 0 00.006-.056.085.085 0 00-.027-.048 4.467 4.467 0 01-1.034-1.651 3.896 3.896 0 01-.251-1.192 5.189 5.189 0 01.141-1.6c.337-1.112.982-1.985 1.933-2.618.212-.141.413-.251.601-.33.215-.089.43-.164.646-.227a.098.098 0 00.065-.066 4.51 4.51 0 01.829-1.615 4.535 4.535 0 011.837-1.388zm3.482 10.565a.637.637 0 000 1.272h3.636a.637.637 0 100-1.272h-3.636zM8.462 9.23a.637.637 0 00-1.106.631l1.272 2.224-1.266 2.136a.636.636 0 101.095.649l1.454-2.455a.636.636 0 00.005-.64L8.462 9.23z" fill="url(#ai-logo-codex-gradient)" />
+                    <defs>
+                      <linearGradient id="ai-logo-codex-gradient" x1="12" x2="12" y1="3" y2="21" gradientUnits="userSpaceOnUse">
+                        <stop stop-color="#B1A7FF" />
+                        <stop offset=".5" stop-color="#7A9DFF" />
+                        <stop offset="1" stop-color="#3941FF" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+                  OpenAI Codex
+                </span>
+                <span class="ai-chip" role="listitem">
+                  <svg class="ai-chip-logo ai-chip-logo-path" role="img" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
+                    <title>any CLI on PATH</title>
+                    <rect width="24" height="24" rx="7" fill="#2B2724" />
+                    <path d="M6.5 8.4L9.9 12l-3.4 3.6M12.2 15.5h5.3" fill="none" stroke="#FFF8F0" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.9" />
+                  </svg>
+                  any CLI on PATH
+                </span>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="terminal-sticker" role="region" aria-label="Example start command">
+              <div class="terminal-dots" aria-hidden="true">
+                <div class="terminal-dot terminal-dot-red"></div>
+                <div class="terminal-dot terminal-dot-yellow"></div>
+                <div class="terminal-dot terminal-dot-green"></div>
+              </div>
+              <div class="terminal-prompt">~ careerrat $</div>
+              <div class="terminal-command">node bin/careerrat.mjs start claude<span class="terminal-cursor" aria-hidden="true"></span></div>
+              <div class="terminal-comment"># scaffold → skills → dashboard → agent handoff<br /># one command, then the agent takes it from here</div>
+            </div>
+            <p style="margin-top:16px; font-size:0.85rem; color:var(--ink-soft); line-height:1.5;">
+              CareerRat scaffolds the workspace, installs skills, starts the dashboard, and hands off to a supported agent CLI. Model choice, cost, and local data stay under local control.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── WHAT YOU GET ──────────────────────────── -->
+  <section id="what-you-get" aria-labelledby="checklist-h2">
+    <div class="wrap">
+      <div class="checklist-inner">
+        <div class="checklist-copy reveal">
+          <div class="section-label">What you get</div>
+          <h2 class="section-h2" id="checklist-h2">The whole loop. Nothing sold separately.</h2>
+          <p class="section-sub">
+            Every capability ships together. Config-driven, not code-driven — the same skills serve any field: a nurse, an engineer, a driver each bring their own config.
+          </p>
+          <div class="maker-note" aria-label="Note from the maker">
+            <strong>A note from the maker:</strong> I built this to solve my own job search — the spray-and-pray cycle felt disrespectful of everyone's time, including mine. CareerRat is what I wanted: an agent that vets first, writes honestly, and keeps my data to itself.
+          </div>
+        </div>
+        <div class="reveal reveal-delay-2">
+          <ul class="checklist" role="list">
+            <li>Tells you what it wants from you — guided onboarding</li>
+            <li>Finds and vets real jobs from the boards you choose</li>
+            <li>Reads the full job posting body before tailoring anything</li>
+            <li>Gates every role against your actual constraints</li>
+            <li>Writes honest résumés and cover letters from your evidence</li>
+            <li>Drafts and tracks recruiter messages and follow-ups</li>
+            <li>Researches companies and benchmarks compensation</li>
+            <li>Builds interview story banks and preps you for live calls</li>
+            <li>Coaches verbal comp negotiation</li>
+            <li>Tracks every outcome and learns from each run</li>
+            <li>Live read-only dashboard — you see the work, agent does it</li>
+            <li>Config-driven — same skills for any role, any field</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── FINAL CTA ─────────────────────────────── -->
+  <section class="final-cta" aria-labelledby="final-h2">
+    <div class="wrap">
+      <div class="final-cta-inner reveal">
+        <img
+          class="final-rat"
+          src="../assets/logo.png"
+          alt="CareerRat rat mascot waving you in"
+          width="100"
+          height="100"
+        />
+        <h2 class="final-h2" id="final-h2">Ready when you are.</h2>
+        <p class="final-sub">
+          Free. Local. Honest. One command to get going. Your data never leaves your machine.
+        </p>
+        <div class="final-actions">
+          <a href="#get" class="btn-primary">
+            Get CareerRat
+          </a>
+          <a href="#how-it-works" class="btn-secondary">
+            How it works
+          </a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ─── FOOTER ────────────────────────────────── -->
+  <footer>
+    <div class="wrap footer-inner">
+      <div class="footer-logo">
+        <img src="../assets/logo.png" alt="CareerRat logo" width="28" height="28" />
+        CareerRat
+      </div>
+      <span class="footer-tagline">Find, vet, and advance the right roles.</span>
+      <span class="footer-note">Free. Local-first. No account. No telemetry.</span>
+    </div>
+  </footer>
+
+  <!-- ─── INTERACTIONS ─────────────────────────── -->
+  <script>
+    // ── Staggered reveal on scroll ──────────────────
+    (function () {
+      var revealEls = document.querySelectorAll('.reveal');
+
+      // guard: if reduced-motion or no IntersectionObserver support, show everything instantly
+      if (!('IntersectionObserver' in window) ||
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        revealEls.forEach(function (el) {
+          el.classList.add('visible');
+        });
+        return;
+      }
+
+      var observer = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add('visible');
+            observer.unobserve(entry.target);
+          }
+        });
+      }, { threshold: 0.12, rootMargin: '0px 0px -40px 0px' });
+
+      revealEls.forEach(function (el) { observer.observe(el); });
+    })();
+
+    // ── Squiggle underline draw-in on first visibility ──
+    (function () {
+      if (!('IntersectionObserver' in window) ||
+          window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+        var word = document.getElementById('underline-sidekick');
+        if (word) word.classList.add('drawn');
+        return;
+      }
+      var word = document.getElementById('underline-sidekick');
+      if (!word) return;
+      var obs = new IntersectionObserver(function (entries) {
+        if (entries[0].isIntersecting) {
+          word.classList.add('drawn');
+          obs.disconnect();
+        }
+      }, { threshold: 0.5 });
+      obs.observe(word);
+    })();
+
+    // ── Rat mascot wiggle on hover (hero) ─────────────
+    // (handled via CSS :hover — no JS needed)
+
+    // ── Soft nav link active state ────────────────────
+    (function () {
+      var sections = document.querySelectorAll('section[id]');
+      var navLinks = document.querySelectorAll('.nav-links a[href^="#"]');
+      if (!sections.length || !navLinks.length || !('IntersectionObserver' in window)) return;
+
+      var sectionObs = new IntersectionObserver(function (entries) {
+        entries.forEach(function (entry) {
+          if (!entry.isIntersecting) return;
+          var id = entry.target.id;
+          navLinks.forEach(function (link) {
+            var isActive = link.getAttribute('href') === '#' + id;
+            link.style.fontWeight = isActive ? '700' : '';
+            link.style.color = isActive ? 'var(--ink)' : '';
+          });
+        });
+      }, { threshold: 0.4 });
+
+      sections.forEach(function (s) { sectionObs.observe(s); });
+    })();
+
+    // ── Header condenses into a floating pill on scroll ──
+    (function () {
+      var nav = document.querySelector('nav');
+      if (!nav) return;
+      var THRESHOLD = 40;
+      var ticking = false;
+      function update() {
+        nav.classList.toggle('scrolled', window.scrollY > THRESHOLD);
+        ticking = false;
+      }
+      window.addEventListener('scroll', function () {
+        if (!ticking) { window.requestAnimationFrame(update); ticking = true; }
+      }, { passive: true });
+      update();
+    })();
+  </script>
+
+</body>
+</html>

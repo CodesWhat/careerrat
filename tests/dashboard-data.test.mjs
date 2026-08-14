@@ -2,30 +2,10 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-import {
-  buildDashboardViewModel,
-  hydrateDashboardFromTracker,
-  renderDashboardViewModel,
-} from "../src/core/tracker/dashboard-data.js";
+import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
 import { buildLibrarySnapshot } from "../src/core/tracker/library-snapshot.mjs";
 
 const root = new URL("..", import.meta.url);
-
-function fakeElement() {
-  const attrs = {};
-  return {
-    textContent: "",
-    dataset: {},
-    title: "",
-    setAttribute(name, value) {
-      attrs[name] = String(value);
-      this[name] = String(value);
-    },
-    getAttribute(name) {
-      return attrs[name];
-    },
-  };
-}
 
 test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
   const tracker = JSON.parse(
@@ -35,20 +15,90 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
     now: new Date("2026-06-15T13:30:00.000Z"),
   });
 
-  assert.equal(vm.stats.inPlay, 23);
-  assert.equal(vm.stats.responseRate, 34);
-  assert.equal(vm.stats.interviews, 4);
+  assert.equal(vm.stats.inPlay, 22);
+  assert.equal(vm.stats.responseRate, 32);
+  assert.equal(vm.stats.interviews, 3);
   assert.equal(vm.jobs.totalCount, tracker.applications.length + tracker.sourced.length);
-  assert.equal(vm.jobs.visibleCount, 25);
+  assert.equal(vm.jobs.visibleCount, 31);
   assert.ok(vm.calendar.weeks[0].days.some((day) => day.events.length > 0));
-  assert.ok(vm.latestRoles.some((role) => role.company === "Black Mesa"));
+  assert.ok(vm.latestRoles.some((role) => role.company === "Aperture Science"));
   assert.ok(vm.jobs.sankey.nodes.length > 0);
+});
+
+test("Jobs Sankey uses canonical semantic stages and never numbered rounds", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        {
+          id: "technical-active",
+          company: "Northstar",
+          role: "Platform Engineer",
+          status: "interview",
+          channel: "board",
+          conversations: [{ kind: "technical", date: "2026-08-10" }],
+        },
+        {
+          id: "hm-rejected",
+          company: "Juniper",
+          role: "Backend Engineer",
+          status: "rejected",
+          channel: "recruiter",
+          conversations: [{ kind: "hiring manager", date: "2026-08-11" }],
+        },
+        {
+          id: "awaiting",
+          company: "Aperture",
+          role: "Staff Engineer",
+          status: "applied",
+          channel: "board",
+        },
+      ],
+      sourced: [],
+      sources: [],
+      communications: [],
+    },
+    { now: new Date("2026-08-14T12:00:00.000Z") }
+  );
+
+  const nodes = new Map(vm.jobs.sankey.nodes.map((node) => [node.id, node]));
+  assert.equal(nodes.get("technical")?.label, "Technical");
+  assert.equal(nodes.get("technical")?.filter, "reached-technical");
+  assert.equal(nodes.get("hiring-manager")?.label, "Hiring manager");
+  assert.equal(nodes.get("hiring-manager")?.filter, "reached-hiring-manager");
+  assert.equal(
+    [...nodes.keys()].some((id) => /^round-\d+$/.test(id)),
+    false
+  );
+  assert.equal(
+    vm.jobs.sankey.links.some((link) => link.from === "hiring-manager" && link.to === "rejected"),
+    true
+  );
+});
+
+test("Dashboard adapter excludes reviewed holds from application counts", () => {
+  const vm = buildDashboardViewModel(
+    {
+      meta: {},
+      applications: [
+        { id: "hold-1", company: "Hold One", role: "Engineer", status: "reviewed-hold" },
+        { id: "hold-2", company: "Hold Two", role: "Engineer", status: "reviewed-hold" },
+        { id: "applied-1", company: "Active", role: "Engineer", status: "applied" },
+      ],
+      sourced: [],
+      sources: [],
+      communications: [],
+    },
+    { now: new Date("2026-06-15T13:30:00.000Z") }
+  );
+
+  assert.equal(vm.stats.applied, 1);
+  assert.equal(vm.stats.inPlay, 1);
 });
 
 test("Dashboard sourceshell hydrates through the tracked data module", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
 
-  assert.match(html, /<title>Rolester · Application Tracker<\/title>/);
+  assert.match(html, /<title>CareerRat · Application Tracker<\/title>/);
   assert.match(html, /data-page-panel="dashboard"/);
   assert.match(html, /data-page-panel="jobs"/);
   assert.match(html, /new URL\(["']\.\/dashboard-data\.js["'],\s*import\.meta\.url\)/);
@@ -71,7 +121,7 @@ test("Dashboard source shell exposes the Paper Command Center chrome", async () 
 test("Dashboard shell morphs the top nav from square header to floating pill on scroll", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
 
-  assert.match(html, /<nav class="[^"]*\bis-at-top\b[^"]*"[^>]*data-dashboard-header/);
+  assert.match(html, /<header class="[^"]*\bis-at-top\b[^"]*"[^>]*data-dashboard-header/);
   assert.match(html, /<main class="[^"]*"[^>]*data-dashboard-scroll-root/);
   assert.match(html, /function setupHeaderScrollState\(\)\s*\{/);
   assert.match(html, /document\.querySelector\('\[data-dashboard-scroll-root\]'\)/);
@@ -372,7 +422,7 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   assert.equal(vm.calendar.metrics.dueToday, 2);
   assert.equal(vm.calendar.currentWeekIndex, 0);
   assert.equal(vm.calendar.weeks[0].label, "Jun 15-19");
-  assert.match(vm.calendar.weeks[0].export.filename, /rolester-calendar-jun-15-19\.ics/);
+  assert.match(vm.calendar.weeks[0].export.filename, /careerrat-calendar-jun-15-19\.ics/);
   assert.match(vm.calendar.weeks[0].export.ics, /BEGIN:VCALENDAR/);
   assert.match(vm.calendar.weeks[0].export.ics, /SUMMARY:Aperture interview/);
   assert.match(
@@ -432,115 +482,43 @@ test("Dashboard adapter builds Calendar from tracker dates and actions", () => {
   assert.equal(vm.calendar.sync.history[0].statusLabel, "Written");
 });
 
-test("Dashboard renderer fills the Calendar workbench from view model", () => {
+test("Calendar counts and names a scheduled round inside the rolling 14-day horizon", () => {
   const tracker = {
     applications: [
       {
-        id: "aperture",
-        company: "Aperture",
-        role: "Applied AI Engineer",
+        id: "temporal-staff-platform",
+        company: "Temporal",
+        role: "Staff Software Engineer, Platform",
         status: "interview",
-        followUp: { kind: "interview", dueAt: "2026-06-18T15:00:00.000Z" },
-      },
-      {
-        id: "hooli",
-        company: "Hooli",
-        role: "Applied AI Engineer",
-        status: "interview",
+        interviewAt: "2026-08-20T18:00:00.000Z",
+        interviewNote: "Hiring manager — Thu Aug 20 2:00 PM ET with Avery",
+        conversations: [
+          {
+            id: "temporal-hiring-manager",
+            kind: "hiring manager",
+            stage: "hiring-manager",
+            outcome: "pending",
+            date: "2026-08-20T18:00:00.000Z",
+            who: "Avery",
+          },
+        ],
       },
     ],
     sourced: [],
     sources: [],
-    communications: [
-      {
-        id: "comm-hooli",
-        applicationId: "hooli",
-        company: "Hooli",
-        status: "waiting",
-        nextAction: "Follow up with Hooli",
-        nextActionDue: "2026-06-18",
-      },
-    ],
+    communications: [],
   };
+
   const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-18T12:00:00.000Z"),
+    now: new Date("2026-08-09T16:00:00.000Z"),
   });
-  const values = new Map();
-  const week = { innerHTML: "" };
-  const nextUp = { innerHTML: "" };
-  const loops = { innerHTML: "" };
-  const month = { innerHTML: "" };
-  const today = { innerHTML: "" };
-  const stats = { innerHTML: "" };
-  const prep = { innerHTML: "" };
-  const syncProviders = { innerHTML: "" };
-  const syncHistory = { innerHTML: "" };
-  const monthTitle = fakeElement();
-  const monthCount = fakeElement();
-  const labels = [fakeElement(), fakeElement()];
-  const root = {
-    querySelector(selector) {
-      const stat = selector.match(/^\[data-calendar-stat="([^"]+)"\]$/);
-      if (stat) {
-        if (!values.has(stat[1])) values.set(stat[1], fakeElement());
-        return values.get(stat[1]);
-      }
-      if (selector === "[data-calendar-week-board]") return week;
-      if (selector === "[data-calendar-next-up]") return nextUp;
-      if (selector === "[data-calendar-open-loops]") return loops;
-      if (selector === "[data-calendar-month-grid]") return month;
-      if (selector === "[data-calendar-today-list]") return today;
-      if (selector === "[data-calendar-this-week-stats]") return stats;
-      if (selector === "[data-calendar-protected-prep]") return prep;
-      if (selector === "[data-calendar-sync-providers]") return syncProviders;
-      if (selector === "[data-calendar-sync-history]") return syncHistory;
-      if (selector === "[data-calendar-month-title]") return monthTitle;
-      if (selector === "[data-calendar-month-count]") return monthCount;
-      return null;
-    },
-    querySelectorAll(selector) {
-      if (selector === "[data-calendar-week-label]") return labels;
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(values.get("thisWeek").textContent, "2");
-  assert.equal(values.get("interviews").textContent, "1");
-  assert.equal(values.get("dueToday").textContent, "2");
-  assert.match(week.innerHTML, /Aperture/);
-  assert.match(week.innerHTML, /Hooli/);
-  assert.match(week.innerHTML, /data-kind="interview"/);
-  assert.match(week.innerHTML, /data-calendar-download-event/);
-  assert.match(week.innerHTML, /data-calendar-export-id=/);
-  assert.match(
-    week.innerHTML,
-    /href="https:\/\/calendar\.google\.com\/calendar\/render\?action=TEMPLATE/
+  const event = vm.calendar.upcoming.events.find(
+    (item) => item.detailId === "temporal-staff-platform"
   );
-  assert.match(week.innerHTML, /data-calendar-google-link/);
-  assert.match(
-    week.innerHTML,
-    /href="https:\/\/outlook\.live\.com\/calendar\/0\/deeplink\/compose\?/
-  );
-  assert.match(week.innerHTML, /data-calendar-outlook-link/);
-  assert.match(nextUp.innerHTML, /Aperture|Hooli/);
-  assert.match(nextUp.innerHTML, /data-calendar-download-event/);
-  assert.match(nextUp.innerHTML, /data-calendar-google-link/);
-  assert.match(loops.innerHTML, /Hooli/);
-  assert.match(month.innerHTML, /data-calendar-date="2026-06-18"/);
-  assert.match(month.innerHTML, /calendar-dot/);
-  assert.match(today.innerHTML, /Aperture/);
-  assert.match(stats.innerHTML, />1<\/strong><span>Interviews<\/span>/);
-  assert.match(prep.innerHTML, /Open prep/);
-  assert.match(syncProviders.innerHTML, /Apple Calendar/);
-  assert.match(syncProviders.innerHTML, /Google Calendar/);
-  assert.match(syncProviders.innerHTML, /Outlook Calendar/);
-  assert.match(syncProviders.innerHTML, /automation_tools/);
-  assert.match(syncHistory.innerHTML, /No calendar writes yet/);
-  assert.equal(monthTitle.textContent, "June 2026");
-  assert.match(monthCount.textContent, /tracked/);
-  assert.equal(labels[0].textContent, "Jun 15-19");
+
+  assert.equal(vm.calendar.metrics.interviews, 1);
+  assert.equal(event?.title, "Temporal hiring manager");
+  assert.equal(event?.iso, "2026-08-20");
 });
 
 test("Dashboard shell locks Network to the company relationship map baseline", async () => {
@@ -814,89 +792,12 @@ test("Dashboard adapter builds Network relationship map from live tracker state"
   assert.equal(vm.network.sourcing.reviewLeads[0].company, "Initech");
   assert.equal(vm.network.sourcing.reviewLeads[0].name, "Jamie Rivera");
   assert.equal(vm.network.sourcing.reviewLeads[0].label, "Review lead");
-});
-
-test("Dashboard renderer fills the Network company map", () => {
-  const tracker = {
-    applications: [
-      { id: "aperture", company: "Aperture", role: "Applied AI Engineer", status: "awaiting" },
-    ],
-    sourced: [],
-    sources: [],
-    communications: [
-      {
-        id: "comm-aperture",
-        applicationId: "aperture",
-        company: "Aperture",
-        role: "Applied AI Engineer",
-        channel: "email",
-        status: "waiting",
-        summary: "Recruiter loop is warm.",
-        nextActionDue: "2026-06-22",
-        messages: [
-          {
-            direction: "inbound",
-            from: "Avery Recruiter <anna@aperture.example.test>",
-            to: ["Demo Candidate"],
-            summary: "Aperture is interested.",
-          },
-        ],
-      },
-    ],
-    relationshipLeads: [
-      {
-        id: "lead-aperture-dana",
-        applicationId: "aperture",
-        company: "Aperture",
-        name: "Dana Lee",
-        type: "Decision maker",
-        title: "Engineering Manager",
-        platform: "linkedin",
-        status: "review",
-        basis: "Possible hiring-team contact.",
-      },
-    ],
-  };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-17T13:30:00.000Z"),
-  });
-  const values = new Map();
-  const grid = { innerHTML: "" };
-  const coverage = { innerHTML: "" };
-  const gaps = { innerHTML: "" };
-  const leadReview = { innerHTML: "" };
-  const sourcingTargets = { innerHTML: "" };
-  const root = {
-    querySelector(selector) {
-      const statMatch = selector.match(/^\[data-network-stat="([^"]+)"\]$/);
-      if (statMatch) {
-        if (!values.has(statMatch[1])) values.set(statMatch[1], fakeElement());
-        return values.get(statMatch[1]);
-      }
-      if (selector === "[data-network-company-grid]") return grid;
-      if (selector === "[data-network-coverage]") return coverage;
-      if (selector === "[data-network-gaps]") return gaps;
-      if (selector === "[data-network-lead-review]") return leadReview;
-      if (selector === "[data-network-sourcing-targets]") return sourcingTargets;
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(values.get("warmPaths").textContent, "1");
-  assert.equal(values.get("companies").textContent, "1");
-  assert.match(grid.innerHTML, /Aperture/);
-  assert.match(grid.innerHTML, /Avery Recruiter/);
-  assert.match(grid.innerHTML, /data-reuse-state="safe"/);
-  assert.match(coverage.innerHTML, />1<\/strong><span>Recruiters<\/span>/);
-  assert.match(gaps.innerHTML, /hiring-manager coverage|No urgent relationship gaps/);
-  assert.match(leadReview.innerHTML, /Dana Lee/);
-  assert.match(leadReview.innerHTML, /Review lead/);
-  assert.match(sourcingTargets.innerHTML, /No unconnected active rows|Search contact path/);
+  assert.equal(vm.network.companies[0].applicationId, "aperture");
+  assert.ok(
+    vm.network.companies[0].history.some(
+      (entry) => entry.applicationId === "aperture" && entry.summary
+    )
+  );
 });
 
 test("Dashboard library snapshot summarizes evidence, stories, voice, and claim gaps", () => {
@@ -959,7 +860,7 @@ test("Dashboard adapter exposes data-backed Evidence Library status", () => {
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-17T13:30:00.000Z"),
     library: {
-      metrics: { claims: 2, stories: 1, gaps: 1 },
+      metrics: { claims: 2, stories: 1, voice: 1, honesty: 2, roleSignals: 3, gaps: 1 },
       index: [{ label: "Evidence bank", value: "2" }],
       filters: [{ label: "Agents", count: 2 }],
       cards: [
@@ -972,7 +873,7 @@ test("Dashboard adapter exposes data-backed Evidence Library status", () => {
           note: "Use for applied AI roles.",
         },
       ],
-      readiness: { proof: 1, stories: 1, voice: 1 },
+      readiness: { proof: 1, stories: 1, voice: 1, honesty: 2, roleSignals: 3 },
       gaps: [{ tone: "coral", title: "Do not use yet", body: "Do not invent metrics." }],
       storyLanes: [{ tone: "teal", body: "0-to-1 applied AI systems." }],
     },
@@ -980,69 +881,13 @@ test("Dashboard adapter exposes data-backed Evidence Library status", () => {
 
   assert.equal(vm.library.metrics.claims, 2);
   assert.equal(vm.library.metrics.stories, 1);
+  assert.equal(vm.library.metrics.voice, 1);
+  assert.equal(vm.library.metrics.honesty, 2);
+  assert.equal(vm.library.metrics.roleSignals, 3);
+  assert.equal(vm.library.readiness.honesty, 2);
+  assert.equal(vm.library.readiness.roleSignals, 3);
   assert.equal(vm.library.cards[0].title, "Demo Docs Assistant");
   assert.equal(vm.library.filters[0].label, "Agents");
-});
-
-test("Dashboard renderer fills the Evidence Library", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
-  const vm = buildDashboardViewModel(tracker, {
-    library: {
-      metrics: { claims: 2, stories: 1, gaps: 1 },
-      index: [{ label: "Evidence bank", value: "2" }],
-      filters: [{ label: "Agents", count: 2 }],
-      cards: [
-        {
-          kind: "evidence",
-          label: "Evidence bank",
-          title: "Demo Docs Assistant",
-          summary: "Production AI assistant.",
-          tags: [{ label: "Agents", tone: "teal" }],
-          note: "Use for applied AI roles.",
-        },
-      ],
-      readiness: { proof: 1, stories: 1, voice: 1 },
-      gaps: [{ tone: "coral", title: "Do not use yet", body: "Do not invent metrics." }],
-      storyLanes: [{ tone: "teal", body: "0-to-1 applied AI systems." }],
-    },
-  });
-  const values = new Map();
-  const index = { innerHTML: "" };
-  const filters = { innerHTML: "" };
-  const cards = { innerHTML: "" };
-  const ready = { innerHTML: "" };
-  const gaps = { innerHTML: "", closest: () => null };
-  const lanes = { innerHTML: "" };
-  const root = {
-    querySelector(selector) {
-      const statMatch = selector.match(/^\[data-library-stat="([^"]+)"\]$/);
-      if (statMatch) {
-        if (!values.has(statMatch[1])) values.set(statMatch[1], fakeElement());
-        return values.get(statMatch[1]);
-      }
-      if (selector === "[data-library-index]") return index;
-      if (selector === "[data-library-filters]") return filters;
-      if (selector === "[data-library-cards]") return cards;
-      if (selector === "[data-library-ready]") return ready;
-      if (selector === "[data-library-gaps]") return gaps;
-      if (selector === "[data-library-story-lanes]") return lanes;
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(values.get("claims").textContent, "2");
-  assert.equal(values.get("stories").textContent, "1");
-  assert.match(cards.innerHTML, /Evidence bank/);
-  assert.match(filters.innerHTML, /Agents/);
-  assert.match(cards.innerHTML, /Demo Docs Assistant/);
-  assert.match(cards.innerHTML, /Use for applied AI roles/);
-  assert.match(gaps.innerHTML, /Do not invent metrics/);
-  assert.match(filters.innerHTML, /data-library-tag="Agents"/);
 });
 
 test("Dashboard adapter exposes real Jobs command rail counts and next decision", () => {
@@ -1136,6 +981,30 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
         fitScore: 82,
         base: "$220K",
         nextInterviewAt: "2026-06-20T17:00:00.000Z",
+        conversations: [
+          {
+            date: "2026-06-10T17:00:00.000Z",
+            kind: "recruiter screen",
+            who: "Avery Recruiter",
+          },
+        ],
+      },
+      {
+        id: "past-loop",
+        company: "Past Loop Co",
+        role: "Platform Engineer",
+        status: "interview",
+        channel: "referral",
+        fitScore: 80,
+        base: "$215K",
+        appliedAt: "2026-06-17",
+        conversations: [
+          {
+            date: "2026-06-17T17:00:00.000Z",
+            kind: "recruiter screen",
+            who: "Avery Recruiter",
+          },
+        ],
       },
       {
         id: "wait",
@@ -1221,6 +1090,11 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
   assert.equal(loop.actionState, "interview");
   assert.equal(loop.workstream, "prepare");
   assert.equal(loop.interviewPath, true);
+  assert.equal(loop.action.dueAt, "2026-06-20T17:00:00.000Z");
+
+  const pastLoop = byId.get("past-loop");
+  assert.notEqual(pastLoop.actionState, "interview");
+  assert.notEqual(pastLoop.action.label, "Prep");
 
   const wait = byId.get("wait");
   assert.equal(wait.actionState, "watch");
@@ -1252,89 +1126,264 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
   assert.equal(missing.drawer.nextAction.label, "Comp");
 });
 
-test("Dashboard renderer exposes Jobs actionability hooks and drawer detail contract", () => {
+test("Jobs never attaches a communication with another application id to a same-company role", () => {
   const tracker = {
     applications: [
       {
-        id: "reply",
-        company: "Reply Co",
-        role: "Applied AI Engineer",
-        status: "awaiting",
-        channel: "recruiter",
-        fitScore: 86,
-        base: "$230K",
-        appliedAt: "2026-06-10",
+        id: "black-mesa-research",
+        company: "Black Mesa",
+        role: "Research Engineer",
+        status: "applied",
       },
-    ],
-    sourced: [
       {
-        id: "missing-comp",
-        company: "Missing Co",
-        role: "Agent Engineer",
-        status: "prospect",
-        fitScore: 84,
-        fitBasis: "triage",
+        id: "black-mesa-applied-ai",
+        company: "Black Mesa",
+        role: "Applied AI Engineer",
+        status: "reviewed-hold",
+        conversations: [
+          {
+            who: "Different Recruiter",
+            kind: "recruiter screen",
+            date: "2026-06-18T12:00:00.000Z",
+            notes: "This belongs only to the Applied AI role.",
+          },
+        ],
       },
     ],
+    sourced: [],
     sources: [],
     communications: [
       {
-        id: "comm-reply",
-        applicationId: "reply",
-        company: "Reply Co",
-        role: "Applied AI Engineer",
-        status: "needs-reply",
-        nextAction: "Reply with availability",
-        nextActionDue: "2026-06-17",
-        messages: [],
+        id: "black-mesa-receipt",
+        applicationId: "black-mesa-research",
+        company: "Black Mesa",
+        status: "waiting",
+        subject: "Application received — Research Engineer at Black Mesa",
+        messages: [
+          {
+            direction: "inbound",
+            at: "2026-06-17T12:00:00.000Z",
+            from: "Casey Recruiter",
+            summary: "Black Mesa received the Research Engineer application.",
+          },
+        ],
       },
     ],
   };
+
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-18T13:30:00.000Z"),
   });
-  const table = { innerHTML: "" };
-  const cards = { innerHTML: "" };
-  const root = {
-    querySelector(selector) {
-      if (selector === "#jobs-explorer-tbody") return table;
-      if (selector === "#jobs-card-grid") return cards;
-      return null;
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+
+  assert.equal(byId.get("black-mesa-research").drawer.emails.length, 1);
+  assert.equal(byId.get("black-mesa-applied-ai").drawer.emails.length, 0);
+  assert.equal(
+    byId
+      .get("black-mesa-applied-ai")
+      .drawer.timeline.some((item) => item.title.includes("Research Engineer")),
+    false
+  );
+  assert.ok(
+    vm.network.companies
+      .find((company) => company.company === "Black Mesa")
+      .history.every(
+        (entry) => !entry.applicationId || entry.applicationId === "black-mesa-research"
+      )
+  );
+  assert.equal(
+    vm.network.companies
+      .find((company) => company.company === "Black Mesa")
+      .notes.includes("This belongs only to the Applied AI role."),
+    false
+  );
+});
+
+test("Network never hides approved contacts or companies behind arbitrary display caps", () => {
+  const applications = Array.from({ length: 7 }, (_, index) => ({
+    id: `app-${index}`,
+    company: `Company ${index}`,
+    role: "Engineer",
+    status: "applied",
+    conversations: [
+      { who: `Recruiter ${index}A`, kind: "recruiter screen", date: "2026-06-01" },
+      { who: `Recruiter ${index}B`, kind: "recruiter screen", date: "2026-06-02" },
+      { who: `Manager ${index}`, kind: "hiring manager", date: "2026-06-03" },
+    ],
+  }));
+  const vm = buildDashboardViewModel(
+    {
+      applications,
+      sourced: [],
+      communications: [],
+      relationshipLeads: [
+        {
+          id: "approved-fourth-contact",
+          applicationId: "app-0",
+          company: "Company 0",
+          name: "Approved Referral",
+          type: "Referral",
+          status: "approved",
+        },
+      ],
     },
-    querySelectorAll() {
-      return [];
+    { now: new Date("2026-06-18T13:30:00.000Z") }
+  );
+
+  assert.equal(vm.network.companies.length, 7);
+  assert.ok(
+    vm.network.companies[0].contacts.some((contact) => contact.name === "Approved Referral")
+  );
+});
+
+test("Network deduplicates people by identity and never promotes a rejected lead audit note", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        {
+          id: "app-1",
+          company: "Identity Co",
+          role: "Engineer",
+          status: "applied",
+          conversations: [
+            { who: "Alex Smith", kind: "recruiter screen", date: "2026-06-01" },
+            { who: "Alex Smith", kind: "hiring manager", date: "2026-06-02" },
+            {
+              who: "Rejected Person",
+              kind: "relationship lead rejected",
+              date: "2026-06-03",
+              notes: "Candidate rejected this lead from Network review.",
+            },
+          ],
+        },
+      ],
+      sourced: [],
+      communications: [],
+      relationshipLeads: [
+        {
+          id: "rejected-lead",
+          applicationId: "app-1",
+          company: "Identity Co",
+          name: "Rejected Person",
+          type: "Recruiter",
+          status: "rejected",
+        },
+      ],
     },
+    { now: new Date("2026-06-18T13:30:00.000Z") }
+  );
+
+  const contacts = vm.network.companies[0].contacts;
+  assert.equal(contacts.filter((contact) => contact.name === "Alex Smith").length, 1);
+  assert.equal(
+    contacts.some((contact) => contact.name === "Rejected Person"),
+    false
+  );
+});
+
+// ISSUE-018/ISSUE-035 — jobDetailFromRow's artifact list must never leak the
+// raw workspace path as `note` (the Library/JobDrawer "primary metadata" bug):
+// `note` is always a short human-readable string, and the raw path only ever
+// rides along on a separate `path` field, omitted when there is none.
+test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths, with path split out", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "with-dates",
+        company: "Dated Co",
+        role: "Platform Engineer",
+        status: "awaiting",
+        channel: "board",
+        fitScore: 80,
+        base: "$200K",
+        appliedAt: "2026-06-01",
+        artifacts: {
+          jd: "workspace/jobs/dated-co.md",
+          jdGeneratedAt: "2026-06-01T10:00:00.000Z",
+          resume: "workspace/tailored/dated-co-resume.md",
+          resumeNote: "Tailored for the platform team",
+          coverLetter: "workspace/tailored/dated-co-cover.md",
+          coverLetterGeneratedAt: "2026-06-02T10:00:00.000Z",
+        },
+      },
+      {
+        id: "no-dates",
+        company: "Plain Co",
+        role: "Backend Engineer",
+        status: "awaiting",
+        channel: "board",
+        fitScore: 75,
+        base: "$190K",
+        appliedAt: "2026-06-05",
+        artifacts: {
+          jd: "workspace/jobs/plain-co.md",
+          resume: "workspace/tailored/plain-co-resume.md",
+        },
+      },
+    ],
+    sourced: [],
+    communications: [],
   };
 
-  const previousDetails = globalThis.rolesterJobDetails;
-  renderDashboardViewModel(vm, root);
+  const vm = buildDashboardViewModel(tracker, { now: new Date("2026-06-18T13:30:00.000Z") });
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
 
-  assert.match(table.innerHTML, /data-action-state="needs-action"/);
-  assert.match(table.innerHTML, /data-workstream="respond"/);
-  assert.match(table.innerHTML, /data-needs-action="1"/);
-  assert.match(table.innerHTML, /data-missing-comp="1"/);
-  assert.match(table.innerHTML, /class="jobs-action-cell jobs-action-cell--icon"/);
-  assert.match(table.innerHTML, /class="jobs-action-icon/);
-  assert.match(table.innerHTML, /aria-label="Reply:/);
-  assert.match(
-    table.innerHTML,
-    /<tr data-jobs-row[\s\S]*?<td>\s*<div class="jobs-company-cell">[\s\S]*?<td class="jobs-cell-action">/
+  const dated = byId.get("with-dates");
+  const jd = dated.drawer.artifacts.find((a) => a.kind === "Job description");
+  const resume = dated.drawer.artifacts.find((a) => a.kind === "Resume");
+  const coverLetter = dated.drawer.artifacts.find((a) => a.kind === "Cover letter");
+  assert.equal(jd.path, "workspace/jobs/dated-co.md");
+  assert.notEqual(jd.note, jd.path);
+  assert.match(jd.note, /Captured/);
+  assert.equal(resume.path, "workspace/tailored/dated-co-resume.md");
+  assert.equal(resume.note, "Tailored for the platform team");
+  assert.equal(coverLetter.path, "workspace/tailored/dated-co-cover.md");
+  assert.notEqual(coverLetter.note, coverLetter.path);
+  assert.match(coverLetter.note, /Generated/);
+
+  const plain = byId.get("no-dates");
+  const plainJd = plain.drawer.artifacts.find((a) => a.kind === "Job description");
+  const plainResume = plain.drawer.artifacts.find((a) => a.kind === "Resume");
+  assert.equal(plainJd.path, "workspace/jobs/plain-co.md");
+  assert.equal(plainJd.note, "Captured job description");
+  assert.equal(plainResume.path, "workspace/tailored/plain-co-resume.md");
+  assert.equal(plainResume.note, "Generated document");
+
+  // Regression guard for the exact reported bug: no artifact's clickable
+  // note field is ever the raw workspace path.
+  for (const row of [dated, plain]) {
+    for (const artifact of row.drawer.artifacts) {
+      if (artifact.path) assert.notEqual(artifact.note, artifact.path);
+    }
+  }
+});
+
+test("Dashboard artifact lists never turn prose summaries into document paths", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "legacy-prose-artifacts",
+        company: "Legacy Co",
+        role: "Engineer",
+        status: "applied",
+        artifacts: {
+          jd: "workspace/jobs/legacy-co.md",
+          resume: "Tailored the resume to emphasize platform leadership and reliability.",
+          resumeNote: "Legacy tailoring summary.",
+          coverLetter: "Connected the candidate's evidence to the role in a concise letter.",
+          coverLetterNote: "Legacy cover-letter summary.",
+        },
+      },
+    ],
+    sourced: [],
+    communications: [],
+  });
+
+  const artifacts = vm.jobs.rows[0].drawer.artifacts;
+  assert.deepEqual(
+    artifacts.map((artifact) => artifact.kind),
+    ["Job description"]
   );
-  assert.doesNotMatch(table.innerHTML, /class="jobs-action-copy"/);
-  assert.match(cards.innerHTML, /class="jobs-card-action"/);
-  assert.match(cards.innerHTML, />Reply<\/span>/);
-  assert.match(cards.innerHTML, /data-action-state="missing-comp"/);
-  assert.match(table.innerHTML, /class="jobs-fit[^"]*" style="--jobs-fit-color:/);
-  assert.match(cards.innerHTML, /class="jobs-fit[^"]*" style="--jobs-fit-color:/);
-  assert.match(table.innerHTML, />86<\/span>/);
-  assert.match(table.innerHTML, />~84<\/span>/);
-  assert.doesNotMatch(table.innerHTML, /<span>~?\d+\s+fit<\/span>/);
-  assert.doesNotMatch(cards.innerHTML, /<span>~?\d+\s+fit<\/span>/);
-  assert.doesNotMatch(table.innerHTML, /class="jobs-fit[\s\S]*?<i>/);
-  assert.doesNotMatch(cards.innerHTML, /class="jobs-fit[\s\S]*?<i>/);
-  assert.equal(globalThis.rolesterJobDetails.reply.nextAction.label, "Reply");
-  assert.equal(globalThis.rolesterJobDetails["missing-comp"].nextAction.label, "Comp");
-  globalThis.rolesterJobDetails = previousDetails;
 });
 
 test("Dashboard shell exposes actionable Jobs filters and drawer next-action section", async () => {
@@ -1469,75 +1518,7 @@ test("Dashboard adapter builds Strategy insights from outcomes by source role an
   assert.match(vm.strategy.stale[0].meta, /24d quiet/);
 });
 
-test("Dashboard renderer fills the Strategy insights card", () => {
-  const tracker = {
-    applications: [
-      {
-        id: "warm",
-        company: "Warm Co",
-        role: "Forward Deployed Engineer",
-        status: "screen",
-        channel: "recruiter",
-        fitScore: 92,
-        appliedAt: "2026-06-12",
-      },
-      {
-        id: "stale",
-        company: "Stale Co",
-        role: "AI Solutions Engineer",
-        status: "awaiting",
-        channel: "portal",
-        fitScore: 69,
-        appliedAt: "2026-05-25",
-      },
-    ],
-    sourced: [],
-    sources: [],
-    communications: [],
-  };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-18T12:00:00.000Z"),
-  });
-  const values = new Map();
-  const sources = { innerHTML: "" };
-  const roles = { innerHTML: "" };
-  const fits = { innerHTML: "" };
-  const stale = { innerHTML: "" };
-  const recommendation = { innerHTML: "" };
-  const root = {
-    querySelector(selector) {
-      const metricMatch = selector.match(/^\[data-strategy-metric="([^"]+)"\]$/);
-      if (metricMatch) {
-        if (!values.has(metricMatch[1])) values.set(metricMatch[1], fakeElement());
-        return values.get(metricMatch[1]);
-      }
-      if (selector === "[data-strategy-source-list]") return sources;
-      if (selector === "[data-strategy-role-list]") return roles;
-      if (selector === "[data-strategy-fit-list]") return fits;
-      if (selector === "[data-strategy-stale-list]") return stale;
-      if (selector === "[data-strategy-recommendation]") return recommendation;
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(values.get("topSource").textContent, "Recruiter");
-  assert.equal(values.get("bestLane").textContent, "Forward deployed");
-  assert.equal(values.get("staleCount").textContent, "1");
-  assert.match(sources.innerHTML, /Recruiter/);
-  assert.match(roles.innerHTML, /Forward deployed/);
-  assert.match(fits.innerHTML, /High fit/);
-  assert.match(stale.innerHTML, /Stale Co/);
-  assert.match(recommendation.innerHTML, /Double down|Clean up quiet/);
-  assert.match(recommendation.innerHTML, /data-strategy-recommendation-cta/);
-  assert.doesNotMatch(recommendation.innerHTML, /strategy-summary-row/);
-});
-
-test("Dashboard adapter and renderer expose the next agent task", () => {
+test("Dashboard adapter exposes the next agent task", () => {
   const tracker = { applications: [], sourced: [], sources: [], communications: [] };
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-18T12:00:00.000Z"),
@@ -1554,33 +1535,6 @@ test("Dashboard adapter and renderer expose the next agent task", () => {
   assert.equal(vm.agentGuidance.nextSkill, "search-jobs");
   assert.equal(vm.agentGuidance.title, "Next agent task");
   assert.equal(vm.agentGuidance.ctaLabel, "Run search-jobs");
-
-  const card = fakeElement();
-  const title = fakeElement();
-  const message = fakeElement();
-  const reason = fakeElement();
-  const cta = fakeElement();
-  const root = {
-    querySelector(selector) {
-      if (selector === "[data-agent-guidance]") return card;
-      if (selector === "[data-agent-guidance-title]") return title;
-      if (selector === "[data-agent-guidance-message]") return message;
-      if (selector === "[data-agent-guidance-reason]") return reason;
-      if (selector === "[data-agent-guidance-cta]") return cta;
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(card.dataset.nextSkill, "search-jobs");
-  assert.equal(title.textContent, "Next agent task");
-  assert.match(message.textContent, /run search-jobs next/);
-  assert.match(reason.textContent, /none have run watermarks/);
-  assert.equal(cta.textContent, "Run search-jobs");
 });
 
 test("Dashboard labels portal rows as ATS channel, not source discovery coverage", () => {
@@ -1691,80 +1645,6 @@ test("Dashboard adapter builds Strategy time-in-stage and cadence nudges", () =>
   assert.equal(vm.strategy.recommendation.ctaAction, "actions");
 });
 
-test("Dashboard renderer fills Strategy time-in-stage and cadence rows", () => {
-  const tracker = {
-    applications: [
-      {
-        id: "quiet",
-        company: "Quiet Co",
-        role: "Applied AI Engineer",
-        status: "awaiting",
-        channel: "portal",
-        fitScore: 82,
-        appliedAt: "2026-05-25",
-        statusUpdatedAt: "2026-05-25",
-        conversations: [{ who: "recruiter@quietco.com" }],
-      },
-      {
-        id: "overdue",
-        company: "Overdue Co",
-        role: "Forward Deployed Engineer",
-        status: "awaiting",
-        channel: "recruiter",
-        fitScore: 91,
-        appliedAt: "2026-06-01",
-        statusUpdatedAt: "2026-06-03",
-        followUp: { dueAt: "2026-06-15" },
-      },
-    ],
-    sourced: [],
-    sources: [],
-    communications: [],
-  };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-18T12:00:00.000Z"),
-  });
-  const values = new Map();
-  const sources = { innerHTML: "" };
-  const roles = { innerHTML: "" };
-  const fits = { innerHTML: "" };
-  const stale = { innerHTML: "" };
-  const stages = { innerHTML: "" };
-  const cadence = { innerHTML: "" };
-  const recommendation = { innerHTML: "" };
-  const root = {
-    querySelector(selector) {
-      const metricMatch = selector.match(/^\[data-strategy-metric="([^"]+)"\]$/);
-      if (metricMatch) {
-        if (!values.has(metricMatch[1])) values.set(metricMatch[1], fakeElement());
-        return values.get(metricMatch[1]);
-      }
-      if (selector === "[data-strategy-source-list]") return sources;
-      if (selector === "[data-strategy-role-list]") return roles;
-      if (selector === "[data-strategy-fit-list]") return fits;
-      if (selector === "[data-strategy-stale-list]") return stale;
-      if (selector === "[data-strategy-stage-list]") return stages;
-      if (selector === "[data-strategy-cadence-list]") return cadence;
-      if (selector === "[data-strategy-recommendation]") return recommendation;
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.match(stages.innerHTML, /Quiet Co/);
-  assert.match(stages.innerHTML, /24d in Applied/);
-  assert.match(cadence.innerHTML, /Follow up with Overdue Co/);
-  assert.match(cadence.innerHTML, /3d overdue/);
-  assert.match(cadence.innerHTML, /Set next touch for Quiet Co/);
-  assert.match(recommendation.innerHTML, /Handle the top items in Next Steps/);
-  assert.match(recommendation.innerHTML, /data-strategy-recommendation-cta/);
-  assert.doesNotMatch(recommendation.innerHTML, /Follow up with Overdue Co/);
-});
-
 test("Dashboard adapter builds outcome learning trends and a strategy review trigger", () => {
   const tracker = {
     applications: [
@@ -1866,78 +1746,6 @@ test("Dashboard adapter builds outcome learning trends and a strategy review tri
   );
 });
 
-test("Dashboard renderer fills outcome learning trends and review handoff", () => {
-  const tracker = {
-    applications: [
-      {
-        id: "advanced",
-        company: "Advanced Co",
-        role: "Forward Deployed Engineer",
-        status: "screen",
-        channel: "recruiter",
-        fitScore: 92,
-        appliedAt: "2026-06-15",
-        statusUpdatedAt: "2026-06-18",
-      },
-      {
-        id: "interview",
-        company: "Interview Co",
-        role: "Forward Deployed Engineer",
-        status: "interview",
-        channel: "recruiter",
-        fitScore: 94,
-        appliedAt: "2026-06-08",
-        statusUpdatedAt: "2026-06-17",
-      },
-      {
-        id: "rejected",
-        company: "Rejected Co",
-        role: "Applied AI Engineer",
-        status: "rejected",
-        channel: "board",
-        fitScore: 81,
-        appliedAt: "2026-06-03",
-        statusUpdatedAt: "2026-06-12",
-      },
-    ],
-    sourced: [],
-    sources: [],
-    communications: [],
-  };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-19T12:00:00.000Z"),
-  });
-  const trends = { innerHTML: "" };
-  const history = { innerHTML: "" };
-  const signals = { innerHTML: "" };
-  const review = { innerHTML: "" };
-  const root = {
-    querySelector(selector) {
-      if (selector === "[data-strategy-trend-list]") return trends;
-      if (selector === "[data-strategy-history-list]") return history;
-      if (selector === "[data-strategy-learning-signals]") return signals;
-      if (selector === "[data-strategy-review-trigger]") return review;
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.match(trends.innerHTML, /Applied/);
-  assert.match(trends.innerHTML, /Advanced/);
-  assert.match(trends.innerHTML, /Interviews/);
-  assert.match(trends.innerHTML, /Rejected/);
-  assert.match(history.innerHTML, /Last 30d/);
-  assert.match(history.innerHTML, /31-60d/);
-  assert.match(signals.innerHTML, /Recruiter/);
-  assert.match(review.innerHTML, /Enough signal to review strategy/);
-  assert.match(review.innerHTML, /Run strategy review/);
-  assert.match(review.innerHTML, /href="#strategy-review"/);
-});
-
 test("Dashboard focus card prioritizes the next interview dossier when one is upcoming", () => {
   const tracker = {
     applications: [
@@ -2013,54 +1821,7 @@ test("Dashboard focus card falls back to urgent action when no interview is upco
   assert.equal(vm.focus.kind, "action");
   assert.equal(vm.focus.company, "Aperture Science");
   assert.equal(vm.focus.title, "Reply with availability");
-  assert.equal(vm.focus.cta, "Handle next action");
-});
-
-test("Dashboard renderer fills the adaptive focus card", () => {
-  const tracker = {
-    applications: [
-      {
-        id: "aperture",
-        company: "Aperture",
-        role: "Forward Deployed Engineer",
-        status: "interview",
-        nextInterviewAt: "2026-06-17T14:00:00.000Z",
-        followUp: { kind: "interview-confirmation", dueAt: "2026-06-17T14:00:00.000Z" },
-        artifacts: {
-          interviewDossier: {
-            markdown: "# Aperture dossier",
-            title: "Aperture — Forward Deployed Engineer",
-          },
-        },
-      },
-    ],
-    sourced: [],
-    sources: [],
-    communications: [],
-  };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-17T10:00:00.000Z"),
-  });
-  const focusCard = {
-    innerHTML: "",
-    dataset: {},
-    setAttribute(name, value) {
-      this[name] = String(value);
-    },
-  };
-  const root = {
-    querySelector(selector) {
-      return selector === "#focus-card-body" ? focusCard : null;
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(focusCard.dataset.focusKind, "interview");
-  assert.equal(focusCard.dataset.detailId, "aperture");
-  assert.match(focusCard.innerHTML, /Interview dossier/i);
-  assert.match(focusCard.innerHTML, /Aperture/);
-  assert.match(focusCard.innerHTML, /Open dossier/);
+  assert.equal(vm.focus.cta, "Handle reply");
 });
 
 test("Dashboard adapter exposes usage and application mode status", () => {
@@ -2115,293 +1876,6 @@ test("Dashboard adapter exposes safe read-only settings without current compensa
   assert.doesNotMatch(JSON.stringify(vm.settings), /123K|currentBase|current_base/);
 });
 
-test("Dashboard renderer fills the mode chips", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-15T13:30:00.000Z"),
-    modes: {
-      configured: false,
-      valid: true,
-      usageMode: "standard",
-      applicationMode: "selective",
-    },
-  });
-
-  const usageChip = fakeElement();
-  const usageValue = fakeElement();
-  const appChip = fakeElement();
-  const appValue = fakeElement();
-  const secondaryUsageChip = fakeElement();
-  const secondaryUsageValue = fakeElement();
-  const secondaryAppChip = fakeElement();
-  const secondaryAppValue = fakeElement();
-  const matches = {
-    '[data-mode-chip="usage"]': [usageChip, secondaryUsageChip],
-    '[data-mode-value="usage"]': [usageValue, secondaryUsageValue],
-    '[data-mode-chip="application"]': [appChip, secondaryAppChip],
-    '[data-mode-value="application"]': [appValue, secondaryAppValue],
-  };
-  const root = {
-    querySelector(selector) {
-      return matches[selector]?.[0] || null;
-    },
-    querySelectorAll(selector) {
-      return matches[selector] || [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(usageValue.textContent, "Standard");
-  assert.equal(usageChip.dataset.modeTone, "default");
-  assert.equal(appValue.textContent, "Selective");
-  assert.equal(appChip.dataset.modeTone, "constraint");
-  assert.match(appChip.getAttribute("aria-label"), /^apply mode: Selective\./);
-  assert.match(appChip.title, /medium-fit roles/i);
-  assert.equal(secondaryUsageValue.textContent, "Standard");
-  assert.equal(secondaryUsageChip.dataset.modeTone, "default");
-  assert.equal(secondaryAppValue.textContent, "Selective");
-  assert.equal(secondaryAppChip.dataset.modeTone, "constraint");
-});
-
-test("Dashboard renderer fills the read-only settings drawer", () => {
-  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-15T13:30:00.000Z"),
-    settings: {
-      profile: {
-        candidate: "Demo Candidate",
-        headline: "AI-native builder",
-        location: "Remote / hybrid · Example City, ST",
-        minimumBase: "$200K",
-        targetBase: "$240K",
-      },
-      automation: {
-        sessionProvider: "Browser extension",
-        enabledCapabilities: ["Status polling", "Messaging"],
-      },
-      files: ["candidate/profile.yml", "candidate/honesty.yml"],
-    },
-  });
-
-  const values = new Map();
-  const filesList = { innerHTML: "" };
-  const capabilitiesList = { innerHTML: "" };
-  const root = {
-    querySelector(selector) {
-      if (selector === "[data-settings-files]") return filesList;
-      if (selector === "[data-settings-capabilities]") return capabilitiesList;
-      const valueMatch = selector.match(/^\[data-settings-value="([^"]+)"\]$/);
-      if (valueMatch) {
-        if (!values.has(valueMatch[1])) values.set(valueMatch[1], fakeElement());
-        return values.get(valueMatch[1]);
-      }
-      return null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, root);
-
-  assert.equal(values.get("candidate").textContent, "Demo Candidate");
-  assert.equal(values.get("headline").textContent, "AI-native builder");
-  assert.equal(values.get("location").textContent, "Remote / hybrid · Example City, ST");
-  assert.equal(values.get("minimumBase").textContent, "$200K");
-  assert.equal(values.get("targetBase").textContent, "$240K");
-  assert.equal(values.get("sessionProvider").textContent, "Browser extension");
-  assert.match(filesList.innerHTML, /candidate\/profile\.yml/);
-  assert.match(capabilitiesList.innerHTML, /Status polling/);
-  assert.doesNotMatch(filesList.innerHTML + capabilitiesList.innerHTML, /current_base|123K/);
-});
-
-test("Dashboard hydration loads mode, settings, and library state beside tracker data", async () => {
-  const calls = [];
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    calls.push(String(url));
-    if (String(url).endsWith("/tracker.json")) {
-      return {
-        ok: true,
-        json: async () => ({ applications: [], sourced: [], sources: [], communications: [] }),
-      };
-    }
-    if (String(url).endsWith("/activity.jsonl")) {
-      return { ok: true, text: async () => "" };
-    }
-    if (String(url).endsWith("/modes.json")) {
-      return {
-        ok: true,
-        json: async () => ({
-          configured: true,
-          valid: true,
-          usageMode: "lean",
-          applicationMode: "selective",
-        }),
-      };
-    }
-    if (String(url).endsWith("/settings.json")) {
-      return {
-        ok: true,
-        json: async () => ({
-          profile: {
-            candidate: "Demo Candidate",
-            minimumBase: "$200K",
-            currentBase: "$123K",
-          },
-        }),
-      };
-    }
-    if (String(url).endsWith("/library.json")) {
-      return {
-        ok: true,
-        json: async () => ({
-          metrics: { claims: 2, stories: 1, gaps: 1 },
-          cards: [
-            { kind: "evidence", title: "Demo Docs Assistant", summary: "Production AI assistant." },
-          ],
-        }),
-      };
-    }
-    return { ok: false, status: 404, text: async () => "", json: async () => ({}) };
-  };
-
-  try {
-    const vm = await hydrateDashboardFromTracker({
-      root: { querySelector: () => null },
-      source: "/workspace/tracker.json",
-      now: new Date("2026-06-15T13:30:00.000Z"),
-    });
-
-    assert.ok(calls.includes("/workspace/modes.json"));
-    assert.ok(calls.includes("/workspace/settings.json"));
-    assert.ok(calls.includes("/workspace/library.json"));
-    assert.equal(vm.modes.usage.label, "Lean");
-    assert.equal(vm.modes.application.label, "Selective");
-    assert.equal(vm.settings.profile.candidate, "Demo Candidate");
-    assert.equal(vm.settings.profile.currentBase, undefined);
-    assert.equal(vm.library.metrics.claims, 2);
-    assert.equal(vm.library.cards[0].title, "Demo Docs Assistant");
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("Dashboard hydration falls back to settings embedded in modes state", async () => {
-  const originalFetch = globalThis.fetch;
-  globalThis.fetch = async (url) => {
-    if (String(url).endsWith("/tracker.json")) {
-      return {
-        ok: true,
-        json: async () => ({ applications: [], sourced: [], sources: [], communications: [] }),
-      };
-    }
-    if (String(url).endsWith("/activity.jsonl")) {
-      return { ok: true, text: async () => "" };
-    }
-    if (String(url).endsWith("/modes.json")) {
-      return {
-        ok: true,
-        json: async () => ({
-          configured: true,
-          valid: true,
-          usageMode: "standard",
-          applicationMode: "balanced",
-          settings: {
-            profile: {
-              candidate: "Demo Candidate",
-              minimumBase: "$200K",
-            },
-          },
-        }),
-      };
-    }
-    if (String(url).endsWith("/settings.json")) {
-      return { ok: false, status: 404, json: async () => ({}) };
-    }
-    if (String(url).endsWith("/library.json")) {
-      return { ok: false, status: 404, json: async () => ({}) };
-    }
-    return { ok: false, status: 404, text: async () => "", json: async () => ({}) };
-  };
-
-  try {
-    const vm = await hydrateDashboardFromTracker({
-      root: { querySelector: () => null },
-      source: "/workspace/tracker.json",
-      now: new Date("2026-06-15T13:30:00.000Z"),
-    });
-
-    assert.equal(vm.settings.profile.candidate, "Demo Candidate");
-    assert.equal(vm.settings.profile.minimumBase, "$200K");
-    assert.equal(vm.library.metrics.claims, 0);
-  } finally {
-    globalThis.fetch = originalFetch;
-  }
-});
-
-test("Dashboard Sankey starts source flows close to the left edge", () => {
-  const tracker = {
-    applications: [
-      {
-        id: "direct-awaiting",
-        company: "Direct Awaiting",
-        role: "Applied AI Engineer",
-        status: "awaiting",
-        channel: "board",
-        fitScore: 86,
-      },
-      {
-        id: "direct-screen",
-        company: "Direct Screen",
-        role: "Applied AI Engineer",
-        status: "screen",
-        channel: "board",
-        fitScore: 91,
-      },
-      {
-        id: "recruiter-screen",
-        company: "Recruiter Screen",
-        role: "Forward Deployed Engineer",
-        status: "interview",
-        channel: "recruiter",
-        fitScore: 93,
-      },
-    ],
-    sourced: [],
-    sources: [],
-    communications: [],
-  };
-  const vm = buildDashboardViewModel(tracker, {
-    now: new Date("2026-06-15T13:30:00.000Z"),
-  });
-  const sankeySlot = { innerHTML: "" };
-  const rootStub = {
-    querySelector(selector) {
-      return selector === "#jobs-sankey-slot" ? sankeySlot : null;
-    },
-    querySelectorAll() {
-      return [];
-    },
-  };
-
-  renderDashboardViewModel(vm, rootStub);
-
-  assert.match(sankeySlot.innerHTML, /<rect x="220"[^>]+fill="#8E8B84"/);
-  assert.match(sankeySlot.innerHTML, /d="M 225 /);
-  assert.match(
-    sankeySlot.innerHTML,
-    /<text class="jobs-sankey-node-label jobs-sankey-node-label--source" x="212"[^>]+text-anchor="end">Direct apply/
-  );
-  assert.match(
-    sankeySlot.innerHTML,
-    /<text class="jobs-sankey-node-label jobs-sankey-node-label--source" x="212"[^>]+text-anchor="end">Recruiter sourced/
-  );
-  assert.doesNotMatch(sankeySlot.innerHTML, /x="124"[^>]+Recruiter sourced/);
-  assert.doesNotMatch(sankeySlot.innerHTML, /<rect x="180"[^>]+fill="#8d7f73"/);
-});
-
 test("Dashboard adapter archives cut sourced rows but surfaces manual-apply as active", () => {
   const tracker = {
     applications: [],
@@ -2427,6 +1901,25 @@ test("Dashboard adapter archives cut sourced rows but surfaces manual-apply as a
   assert.equal(byId.get("cut").terminal, true);
   assert.equal(byId.get("blocked").terminal, false);
   assert.equal(byId.get("live").terminal, false);
+});
+
+test("Dashboard adapter keeps an explicit sourced status in the pre-application queue", () => {
+  const tracker = {
+    applications: [],
+    sourced: [{ id: "fresh", company: "Fresh Co", role: "Staff Engineer", status: "sourced" }],
+    sources: [],
+    communications: [],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-15T13:30:00.000Z"),
+  });
+
+  assert.equal(vm.jobs.rows[0].stage, "sourced");
+  assert.equal(vm.jobs.rows[0].stageGroupLabel, "Sourced");
+  assert.equal(vm.jobs.rail.fresh, 1);
+  assert.equal(vm.jobs.rail.manualReview, 1);
+  assert.equal(vm.jobs.funnel[1].id, "sourced");
 });
 
 test("Dashboard sourcebuckets count only true recruiter-sourced jobs", () => {
@@ -2514,7 +2007,7 @@ test("Dashboard sourcebuckets count only true recruiter-sourced jobs", () => {
   assert.equal(sourceNodes.get("src-cold").count, 3);
 });
 
-test("Dashboard nextsteps use action labels and open the related job drawer", () => {
+test("Dashboard nextsteps use action labels and reference the related job's detail id", () => {
   const tracker = {
     applications: [
       {
@@ -2559,20 +2052,4 @@ test("Dashboard nextsteps use action labels and open the related job drawer", ()
   assert.equal(step.actionLabel, "Interview");
   assert.equal(step.actionToneClass, "text-on-tertiary-container");
   assert.equal(step.supportingText, "Aperture · tomorrow");
-
-  const nextStepsEl = { innerHTML: "" };
-  const fakeRoot = {
-    querySelector(selector) {
-      return selector === "#next-steps-list" ? nextStepsEl : null;
-    },
-  };
-
-  renderDashboardViewModel(vm, fakeRoot);
-
-  assert.match(nextStepsEl.innerHTML, /data-next-step-item/);
-  assert.match(nextStepsEl.innerHTML, /data-detail-id="aperture"/);
-  assert.match(nextStepsEl.innerHTML, /font-bold text-primary/);
-  assert.match(nextStepsEl.innerHTML, />Interview<\/span>/);
-  assert.doesNotMatch(nextStepsEl.innerHTML, />Tomorrow<\/span>/);
-  assert.doesNotMatch(nextStepsEl.innerHTML, /ui-badge/);
 });

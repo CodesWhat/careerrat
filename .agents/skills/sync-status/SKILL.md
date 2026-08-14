@@ -7,14 +7,14 @@ tier_2_inputs: [per-platform portal page state]
 
 # sync-status
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — Consent gate (hard stop)
 
 Run:
 
 ```
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect the `capabilities.status_polling` entry. The applicable platforms are
@@ -28,10 +28,10 @@ If **no platform** shows `allowed: true`, explain exactly how to opt in, then
 stop — do not open a browser:
 
 1. Read the platform's terms of service yourself.
-2. Record consent: `rolester automation consent <platform> --write`
-3. Enable the capability: `rolester automation enable status_polling --write`
-4. Enable for the specific platform: `rolester automation enable status_polling <platform> --write`
-5. Verify: `rolester automation status --json`
+2. Record consent: `careerrat automation consent <platform> --write`
+3. Enable the capability: `careerrat automation enable status_polling --write`
+4. Enable for the specific platform: `careerrat automation enable status_polling <platform> --write`
+5. Verify: `careerrat automation status --json`
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
@@ -83,7 +83,7 @@ leaves the local machine.
 For each scraped row, run:
 
 ```
-rolester status-map "<raw status label>" --current "<row's current tracker status>" --json
+careerrat status-map "<raw status label>" --current "<row's current tracker status>" --json
 ```
 
 Read the JSON result. The fields that matter:
@@ -171,11 +171,11 @@ the comm thread open after a portal-confirmed transition.
 ## RULES
 
 - This skill is **read-only at the portal** and **never writes `workspace/tracker.json`**. `track-outcomes` is the only writer of the tracker. Never fabricate a tracker mutation here.
-- Opt-in and OFF by default. Only poll platforms where `rolester automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the three-part AND (global switch, platform switch, ToS consent) from `mayRun()` — never re-derive the predicate in prose.
+- Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the three-part AND (global switch, platform switch, ToS consent) from `mayRun()` — never re-derive the predicate in prose.
 - Never run on a schedule or unattended. Always user-initiated with the agent in the loop.
 - Halt and ask on captcha, 2FA, login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge.
 - Use tool-agnostic browser prose: "the session browser," "snapshot or read the page." Prefer the Chrome extension (holds existing logins); fall back to Playwright with a one-time login pause. Never name an MCP namespace or vendor tool.
-- Status normalization is deterministic via `rolester status-map`. Do not hand-map raw portal labels by eye.
+- Status normalization is deterministic via `careerrat status-map`. Do not hand-map raw portal labels by eye.
 - Local-only. Scraped bodies and screenshots stay under `workspace/`. Nothing goes outbound.
 - Domain-neutral. No hardcoded companies, roles, or candidate-specific values. No bracketed placeholder tokens anywhere — if a detail is unknown, omit it or go generic; never emit `[Company]`, `[Role]`, or any bracket.
 - Auto-apply only `autoApplicable: true` results. Surface `direction: "regress"`, `confidence: "low"`, and `changed: false` rows for human confirmation before handing anything to `track-outcomes`.

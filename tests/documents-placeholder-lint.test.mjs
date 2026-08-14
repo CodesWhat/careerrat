@@ -118,6 +118,19 @@ test("lintArtifact flags XXX", () => {
   assert.equal(findings[0].pattern, "XXX");
 });
 
+test("lintArtifact flags NEEDS YOU unanswered-question marker", () => {
+  const { clean, findings } = lintArtifact(
+    "NEEDS YOU: security-clearance status is not in onboarding data."
+  );
+  assert.equal(clean, false);
+  assert.equal(findings[0].pattern, "needs-you-marker");
+});
+
+test("lintArtifact does not flag lowercase 'needs you' in prose", () => {
+  const { clean } = lintArtifact("This team needs you to own the platform end to end.");
+  assert.equal(clean, true);
+});
+
 test("lintArtifact flags lorem ipsum", () => {
   const { clean, findings } = lintArtifact("Lorem ipsum dolor sit amet.");
   assert.equal(clean, false);

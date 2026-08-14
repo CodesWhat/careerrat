@@ -1,12 +1,14 @@
 #!/usr/bin/env node
 
-// rolester analytics — refresh and inspect the persisted outcome-analytics block.
+// careerrat analytics — refresh and inspect the persisted outcome-analytics block.
 //
 // The analytics block (tracker.json#analytics) is a DERIVED rollup: byStatus, per-family
 // rejection/advancement counts, and a reevaluation-due signal. It is written here and
 // read by the dashboard; no other code recomputes it. Because it is derived data (not a
 // user data change), it NEVER bumps the freshness stamp — the "last updated" pill must
-// only move on real data writes. writeTrackerJson is called with { stamp: false }.
+// only move on real data writes. The write goes through the storage adapter
+// (defaultAdapter().writeTracker) with { stamp: false }, same underlying
+// writeTrackerJson stamping semantics.
 //
 // Usage:
 //   node src/cli/analytics.mjs refresh [--at ISO] [--write] [--json] [--root DIR]
@@ -20,9 +22,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
+import { defaultAdapter } from "../core/storage/storage-adapter.mjs";
 import { buildReevaluationAnalytics } from "../core/tracker/outcome-analysis.mjs";
-import { writeTrackerJson } from "../core/tracker/tracker-writer.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -48,7 +50,7 @@ if (opts.help) {
 }
 
 // Default verb to "refresh" when flags are present but no positional verb was given,
-// so `rolester analytics --write` works without an explicit "refresh" positional.
+// so `careerrat analytics --write` works without an explicit "refresh" positional.
 if (opts.positional.length === 0 && process.argv.length > 2) {
   opts.positional.push("refresh");
 }
@@ -87,10 +89,8 @@ function loadTracker() {
 }
 
 function loadTargeting() {
-  const targetingPath = userPath(pathCtx, "candidate/targeting.yml");
-  if (!existsSync(targetingPath)) return undefined;
   try {
-    return parseYaml(readFileSync(targetingPath, "utf8"));
+    return loadCandidateDoc("targeting", pathCtx) || undefined;
   } catch {
     return undefined;
   }
@@ -131,7 +131,7 @@ function cmdRefresh() {
   }
 
   data.analytics = analytics;
-  writeTrackerJson(trackerPath, data, { stamp: false });
+  defaultAdapter(opts.root).writeTracker(data, { stamp: false });
 
   if (opts.json) {
     console.log(JSON.stringify({ ok: true, written: true, analytics }, null, 2));
@@ -182,7 +182,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester analytics — refresh and inspect the persisted outcome-analytics block
+  console.log(`careerrat analytics — refresh and inspect the persisted outcome-analytics block
 
 Usage:
   node src/cli/analytics.mjs refresh [--at ISO] [--write] [--json] [--root DIR]
@@ -197,7 +197,7 @@ refresh options:
   --at ISO    Override "now" timestamp (ISO 8601; default: current time).
   --write     Persist the computed block to tracker.json (stamp: false - no freshness bump).
   --json      Machine-readable output.
-  --root DIR  Repo root (default: the rolester install).
+  --root DIR  Repo root (default: the careerrat install).
 
 Thresholds come from candidate/targeting.yml#reevaluation:
   rejection_total:      <n>   Reevaluation fires when this many rejections accrue since last review (default 7).

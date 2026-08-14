@@ -1,0 +1,69 @@
+---
+title: What Is CareerRat?
+description: The problem it solves, how it works, and what "agentic job-search workspace" actually means.
+---
+
+## The problem
+
+Keyword-match job sourcing produces noise. Spray-and-pray applying produces
+silence. Most job-search tooling optimizes the wrong thing: volume over signal.
+
+CareerRat is built around a different rule: **do not tailor or apply until the job
+has passed a real body-read gate.** Every skill in the system enforces that
+principle.
+
+## What CareerRat actually is
+
+CareerRat is an **agent runtime** — a local workspace that a coding agent (Claude
+Code, Codex, or similar) runs inside. The agent reads a contract file
+(`AGENTS.md`) that tells it how to route your intent to the installed skills. Each skill is
+a detailed, executable procedure. You talk to the agent; the agent drives the
+skills.
+
+The CLI (`careerrat`) scaffolds the workspace, serves the local app, checks
+health, and exposes validated config helpers. It does not do job-search work.
+The agent does.
+
+## The intended loop
+
+1. **Onboard** — `ingest-profile` interviews you and saves private candidate
+   state: targets, comp floor, keep/cut signals, evidence bank, honesty
+   boundaries, and writing-style calibration. SQLite is authoritative in new
+   workspaces; `candidate/` files are compatibility exports.
+2. **Source** — `setup-searches` + `search-jobs` build searches from your targets,
+   dedupe, liveness-check, and produce a coarse-triage intake queue.
+3. **Gate** — `evaluate-job` reads the full posting and returns a verdict: keep or
+   cut the job, how well it fits, whether the pay clears your floor, and what to
+   do next. Those four print as a `GATE / FIT / COMP / ACTION` block, joined by
+   extra lines when they apply — a comp anchor to negotiate against, a comp
+   estimate when no band was posted, a legitimacy warning on a suspect listing.
+   Nothing gets tailored before a `KEEP`.
+4. **Tailor** — `tailor-application` builds honest résumé, cover letter, and
+   short-answer artifacts from your evidence bank only.
+5. **Communicate** — `email-comms` drafts and tracks recruiter threads, follow-ups,
+   scheduling, and negotiation.
+6. **Track** — `track-outcomes` records results and triggers `reevaluate-strategy`
+   when outcome thresholds trip.
+7. **Prep** — `interview-prep` builds audience-segmented packets, coaches live
+   negotiation, and captures debrief lessons.
+
+The loop compounds: learnings from interview debriefs and rejections feed back
+into evaluation and tailoring so each pass is sharper than the last.
+
+## What "local by default" means
+
+- SQLite state, compatibility exports, and artifacts are stored locally and
+  excluded from version control by CareerRat.
+- Relevant context sent through your selected AI runtime follows that provider's
+  privacy and retention terms.
+- No CareerRat-operated server receives your data.
+- Browser automation is opt-in per capability, uses your own browser session, and
+  stores no credentials.
+
+## What CareerRat is not
+
+- Not a resume builder (it tailors from your evidence; it does not write from scratch).
+- Not a job board (it sources from boards you configure; it is not a board itself).
+- Not a one-click mass-apply tool (the gate and confirm-first submission are
+  intentional guardrails).
+- Not a subscription service (MIT-licensed and free; install and run it locally).

@@ -1,0 +1,88 @@
+---
+title: Interview Prep
+description: Build packets, capture debriefs, coach live comp calls, and grow your story bank.
+---
+
+## When to use interview-prep
+
+Tell the agent when a role advances:
+
+> I got a screen with Thornfield Labs
+> I have a panel coming up
+> I'm in an offer call right now, coach me
+
+The `interview-prep` skill handles:
+
+- **Pre-interview packets** — audience-segmented, grounded in your evidence
+- **Live negotiation coaching** — verbal offer calls, comp pushback, BATNA framing
+- **Post-interview debriefs** — capture what happened and extract durable lessons
+- **Behavioral story bank** — build and sharpen STAR+R stories
+
+## Interview packets
+
+For a scheduled interview, say:
+
+> build an interview prep packet for my screen at [Company]
+
+The skill reads the saved JD body, your evidence bank, any prior research on the
+company, and the role-family learning file. It produces:
+
+- A live cue card (one screen, glanceable during the call)
+- Role-specific positioning for this audience (recruiter / hiring manager / panel)
+- Your strongest evidence mapped to the role's requirements
+- Questions to ask at each stage
+- Comp/logistics scripts using your `target_base` and `minimum_base` (never your
+  private `current_base`)
+
+The packet is saved to `workspace/interview-prep/` and exported to
+`~/Downloads/careerrat/<Company>/`. The dashboard Focus card links directly to it
+via "Open dossier."
+
+## Focus card and interview scheduling
+
+When a role has a scheduled interview, it appears on the dashboard Focus card. The
+agent (via `schedule-meeting`) writes the structured datetime to `interviewAt` in
+the tracker. `interview-prep` reads that field to determine when prep is relevant;
+it does not overwrite an already-booked future datetime.
+
+## Behavioral story bank
+
+CareerRat keeps a private story bank at `candidate/stories.yml`. Stories are
+structured as STAR+R (Situation, Task, Action, Result + Reflection) and each
+traces to an evidence claim.
+
+```bash
+careerrat stories list            # see all stories
+careerrat stories add --file story.yml --write
+careerrat stories match --signals "automation,platform"
+```
+
+`interview-prep` surfaces relevant stories from the bank for each interview packet.
+
+## Post-interview debrief
+
+After an interview, paste your notes and say:
+
+> here are my notes from the screen / debrief this
+
+The skill extracts:
+- What went well (positioning that landed)
+- Objections or gaps that surfaced
+- Comp or process signals heard
+- Coaching items for next rounds
+
+It writes structured fields to the `conversations[]` entry and appends durable
+lessons to the role-family learning file.
+
+## Live negotiation coaching
+
+For a verbal offer call or comp conversation:
+
+> I'm in an offer call right now, coach me through the pushback
+
+`interview-prep` acts as the live negotiation channel. It draws market numbers
+only from cited comp-benchmark artifacts (`workspace/research/comp-bench-*.md`)
+— it never fabricates a number. It covers geographic-discount pushback, competing
+offers/BATNA framing, and multi-round sequencing.
+
+For **written** counter-offers and negotiation emails, use `email-comms` instead.

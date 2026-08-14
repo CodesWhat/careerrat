@@ -12,8 +12,8 @@ import {
 
 test("injectLiveReload inserts the client immediately before </body>", () => {
   const out = injectLiveReload("<html><body><h1>hi</h1></body></html>");
-  assert.ok(out.includes("data-rolester-livereload"));
-  assert.ok(out.indexOf("data-rolester-livereload") < out.indexOf("</body>"));
+  assert.ok(out.includes("data-careerrat-livereload"));
+  assert.ok(out.indexOf("data-careerrat-livereload") < out.indexOf("</body>"));
   assert.ok(out.includes("<h1>hi</h1>"));
 });
 
@@ -27,14 +27,14 @@ test("injectLiveReload targets the LAST </body> when there are several", () => {
 
 test("injectLiveReload is case-insensitive about </BODY>", () => {
   const out = injectLiveReload("<BODY>x</BODY>");
-  assert.ok(out.includes("data-rolester-livereload"));
-  assert.ok(out.indexOf("data-rolester-livereload") < out.indexOf("</BODY>"));
+  assert.ok(out.includes("data-careerrat-livereload"));
+  assert.ok(out.indexOf("data-careerrat-livereload") < out.indexOf("</BODY>"));
 });
 
 test("injectLiveReload appends when there is no body tag", () => {
   const out = injectLiveReload("just text");
   assert.ok(out.startsWith("just text"));
-  assert.ok(out.includes("data-rolester-livereload"));
+  assert.ok(out.includes("data-careerrat-livereload"));
 });
 
 // ── mimeFor ──────────────────────────────────────────────────────────────────
@@ -132,11 +132,11 @@ test("safeAssetPath custom prefix keeps traversal blocked", () => {
 // ── resolvePort ──────────────────────────────────────────────────────────────
 
 test("resolvePort: --port flag wins", () => {
-  assert.equal(resolvePort(["--port", "8080"], { ROLESTER_DEV_PORT: "9000" }), 8080);
+  assert.equal(resolvePort(["--port", "8080"], { CAREERRAT_DEV_PORT: "9000" }), 8080);
 });
 
 test("resolvePort: env used when no flag", () => {
-  assert.equal(resolvePort([], { ROLESTER_DEV_PORT: "9000" }), 9000);
+  assert.equal(resolvePort([], { CAREERRAT_DEV_PORT: "9000" }), 9000);
 });
 
 test("resolvePort: default 7777 when nothing set", () => {
@@ -144,7 +144,7 @@ test("resolvePort: default 7777 when nothing set", () => {
 });
 
 test("resolvePort: invalid flag falls through to env then default", () => {
-  assert.equal(resolvePort(["--port", "abc"], { ROLESTER_DEV_PORT: "9000" }), 9000);
+  assert.equal(resolvePort(["--port", "abc"], { CAREERRAT_DEV_PORT: "9000" }), 9000);
   assert.equal(resolvePort(["--port", "99999"], {}), 7777);
   assert.equal(resolvePort(["--port", "0"], {}), 7777);
 });

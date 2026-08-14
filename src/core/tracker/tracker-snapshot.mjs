@@ -73,7 +73,7 @@ export function listSnapshots(pathCtx) {
 
 export function snapshotTracker(
   pathCtx,
-  { max = Number(process.env.ROLESTER_TRACKER_SNAPSHOTS) || 20, now = new Date() } = {}
+  { max = Number(process.env.CAREERRAT_TRACKER_SNAPSHOTS) || 20, now = new Date() } = {}
 ) {
   try {
     const trackerPath = absPath(pathCtx, "workspace/tracker.json");

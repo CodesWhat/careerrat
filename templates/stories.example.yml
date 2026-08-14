@@ -6,20 +6,20 @@
 #
 # THE FIREWALL: every story must cite one or more `evidence_ids` that resolve to a
 # real claim in candidate/evidence.yml. A story is DRAFTED from evidence and
-# confirmed by you — never invented. `rolester stories check` refuses a story
+# confirmed by you — never invented. `careerrat stories check` refuses a story
 # that cites no evidence, an unknown claim id, a missing STAR+R field, placeholder
 # residue, or a private comp input.
 #
 # Add/replace stories with the guarded CLI (dry-run by default):
-#   rolester stories add --file path/to/story.yml          # preview
-#   rolester stories add --file path/to/story.yml --write   # commit
-# See coverage with `rolester stories gaps` and matches with `... match <jd>`.
+#   careerrat stories add --file path/to/story.yml          # preview
+#   careerrat stories add --file path/to/story.yml --write   # commit
+# See coverage with `careerrat stories gaps` and matches with `... match <jd>`.
 
 stories:
   - id: "prototype-to-production"
     title: "Took a prototype to production"
     # Domain-neutral behavioural themes — match these to the question being asked,
-    # not to a tech stack. `rolester stories gaps` reports which are uncovered.
+    # not to a tech stack. `careerrat stories gaps` reports which are uncovered.
     competencies:
       - "ownership"
       - "measurable-impact"

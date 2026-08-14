@@ -2,7 +2,7 @@
 
 ## Semantic Versioning
 
-Rolester follows [Semantic Versioning](https://semver.org/). The project is
+CareerRat follows [Semantic Versioning](https://semver.org/). The project is
 currently in **0.x** — the minor version increments for new features and the
 patch version for bug fixes. While in 0.x, **any minor bump may contain
 breaking changes**; read the release notes before upgrading.
@@ -17,7 +17,7 @@ Once 1.0.0 ships, the standard semver compatibility guarantees apply:
 Before tagging a release:
 
 1. All tests pass: `npm test`
-2. Doctor reports clean: `rolester doctor`
+2. Doctor reports clean: `careerrat doctor`
 3. Placeholder linter is clean: `npm run lint:placeholders`
 4. **Privacy/public-split check** — grep all tracked files (`git ls-files`) for
    the private origin codename and any personal identity strings — must return
@@ -25,11 +25,34 @@ Before tagging a release:
    internal JSON artifacts, `candidate/`, `workspace/`) remain untracked:
    `git status --ignored` must not show any of them as staged or tracked.
 5. `docs/ROADMAP.md` (public) updated — shipped items reflect reality, planned
-   list current. (The private working roadmap `ROADMAP.md` is gitignored.)
+   list current. The private working roadmap lives under `.internal/roadmap/`.
 6. `README.md` version badge / install snippet reflects new version (if any).
 7. `package.json` version bumped.
-8. Git tag created: `git tag -s v<version> -m "release: v<version>"` then pushed.
+8. Git tag created with the concrete release version, for example
+   `git tag -s v0.4.0 -m "release: v0.4.0"`, then pushed.
 9. GitHub release created from the tag with changelog notes.
+
+### Desktop Pilot Release
+
+For a desktop pilot release, add these checks before tagging:
+
+1. Build the desktop artifact with `npm run desktop:dist`. The command signs and notarizes the app
+   and DMG container, staples the DMG ticket, and fails unless Gatekeeper verification passes.
+2. Confirm the output includes a signed and notarized macOS DMG.
+3. Verify signing and notarization evidence:
+   - `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app`
+   - `xcrun stapler validate apps/desktop/dist/*.dmg`
+   - `spctl --assess --type open --context context:primary-signature apps/desktop/dist/*.dmg`
+4. Run packaged smoke checks for a fresh workspace and an existing workspace.
+   Fresh workspace should open `/app/onboarding`; existing workspace should open
+   `/app`.
+5. Verify the packaged app runs without the source checkout and writes user data
+   under the packaged `CAREERRAT_HOME` data root, not inside signed resources.
+6. Confirm no Apple credentials, candidate data, workspace files, private paths,
+   or local keychain-profile values are tracked or included in release notes.
+7. Record final rollup evidence for the signed/notarized artifact, stapling,
+   Gatekeeper assessment, fresh/existing workspace smoke, and checkout
+   independence.
 
 ## Schema Versioning
 
@@ -37,10 +60,10 @@ All JSON schemas live in `config/*.schema.json` and carry a `$id` URL of the
 form:
 
 ```
-https://rolester.local/schemas/<name>.schema.json
+https://careerrat.local/schemas/{schema-name}.schema.json
 ```
 
-Schemas are versioned implicitly by the Rolester release that ships them. A
+Schemas are versioned implicitly by the CareerRat release that ships them. A
 schema change is treated as:
 
 - **Non-breaking** if it only adds optional fields (patch or minor bump).
@@ -52,12 +75,12 @@ diff and migration instructions.
 
 ## User-Owned Files — Migration Policy
 
-`candidate/` and `workspace/` are **user-owned**. Rolester updates **never**
-overwrite files in those directories. After updating Rolester:
+`candidate/` and `workspace/` are **user-owned**. CareerRat updates **never**
+overwrite files in those directories. After updating CareerRat:
 
-1. Run `rolester doctor` — it will flag any schema mismatches or missing fields.
+1. Run `careerrat doctor` — it will flag any schema mismatches or missing fields.
 2. If new required fields were added, add them manually or re-run
-   `rolester ingest` in update mode (it prompts only for missing fields).
+   `careerrat ingest` in update mode (it prompts only for missing fields).
 3. Workspace artefacts (jobs, tailored resumes, tracker) are forward-compatible;
    old files remain readable by newer versions.
 

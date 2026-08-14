@@ -1,12 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/automation.schema.json",
-  "title": "Rolester Browser-Automation Config",
+  "$id": "https://careerrat.local/schemas/automation.schema.json",
+  "title": "CareerRat Browser-Automation Config",
   "description": "Opt-in authenticated browser automation. Defaults OFF — absence of this file means nothing is automated. A capability runs on a platform only if capabilities.<cap>.enabled AND capabilities.<cap>.platforms.<platform> AND consent.<platform> are all true.",
   "type": "object",
   "additionalProperties": true,
   "properties": {
     "version": { "type": "integer" },
+    "setup_mode": {
+      "description": "Basic is a hard off switch. Advanced only reveals per-capability opt-ins; it enables nothing by itself.",
+      "enum": ["basic", "advanced"],
+      "default": "basic"
+    },
     "consent": {
       "description": "One-time per-platform ToS acknowledgment. true = the user has read that platform's automation terms and accepts the risk. Never set programmatically without the user's explicit yes.",
       "type": "object",

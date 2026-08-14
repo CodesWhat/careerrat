@@ -1,28 +1,30 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { closeAll } from "../src/core/db/connection.mjs";
+import { candidateSetupInitialize, sourceConfigPut } from "../src/core/db/verbs.mjs";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
 function tempHome() {
-  return mkdtempSync(join(tmpdir(), "rolester-readiness-"));
+  return mkdtempSync(join(tmpdir(), "careerrat-readiness-"));
 }
 
 function runCli(script, args, home) {
   return spawnSync(process.execPath, [script, ...args], {
     cwd: ROOT,
-    env: { ...process.env, ROLESTER_HOME: home },
+    env: { ...process.env, CAREERRAT_HOME: home },
     encoding: "utf8",
   });
 }
 
-function runRolester(args, home) {
-  return spawnSync(process.execPath, ["bin/rolester.mjs", ...args], {
+function runCareerRat(args, home) {
+  return spawnSync(process.execPath, ["bin/careerrat.mjs", ...args], {
     cwd: ROOT,
-    env: { ...process.env, ROLESTER_HOME: home },
+    env: { ...process.env, CAREERRAT_HOME: home },
     encoding: "utf8",
   });
 }
@@ -125,7 +127,7 @@ test("doctor gives an agent-led next action for incomplete discovery", () => {
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /Agent guidance:/);
-    assert.match(result.stdout, /Rolester is agent-led/);
+    assert.match(result.stdout, /CareerRat is agent-led/);
     assert.match(result.stdout, /Ask your agent to run research-boards next/);
     assert.match(result.stdout, /then discover-companies before search-jobs/);
   } finally {
@@ -186,7 +188,7 @@ test("doctor --json exposes the next agent skill after onboarding search setup",
   }
 });
 
-test("rolester next prints the next agent skill without the full doctor report", () => {
+test("careerrat next prints the next agent skill without the full doctor report", () => {
   const home = tempHome();
   try {
     seedCandidateFiles(home);
@@ -202,7 +204,7 @@ test("rolester next prints the next agent skill without the full doctor report",
       "utf8"
     );
 
-    const result = runRolester(["next"], home);
+    const result = runCareerRat(["next"], home);
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /Next: ask your agent to run research-boards/);
@@ -214,7 +216,7 @@ test("rolester next prints the next agent skill without the full doctor report",
   }
 });
 
-test("rolester next can record skipped discovery steps and advance the handoff", () => {
+test("careerrat next can record skipped discovery steps and advance the handoff", () => {
   const home = tempHome();
   try {
     seedCandidateFiles(home);
@@ -230,7 +232,7 @@ test("rolester next can record skipped discovery steps and advance the handoff",
       "utf8"
     );
 
-    const skipBoards = runRolester(["next", "--skip", "research-boards", "--write"], home);
+    const skipBoards = runCareerRat(["next", "--skip", "research-boards", "--write"], home);
     assert.equal(skipBoards.status, 0);
     assert.match(skipBoards.stdout, /Skipped research-boards/);
     assert.match(skipBoards.stdout, /Next: ask your agent to run discover-companies/);
@@ -238,16 +240,115 @@ test("rolester next can record skipped discovery steps and advance the handoff",
     const setupState = JSON.parse(readFileSync(join(home, "workspace/setup-state.json"), "utf8"));
     assert.deepEqual(setupState.skippedDiscoverySteps, ["research-boards"]);
 
-    const next = runRolester(["next"], home);
+    const next = runCareerRat(["next"], home);
     assert.equal(next.status, 0);
     assert.match(next.stdout, /Next: ask your agent to run discover-companies/);
     assert.doesNotMatch(next.stdout, /research-boards next/);
 
-    const skipCompanies = runRolester(["next", "--skip", "discover-companies", "--write"], home);
+    const skipCompanies = runCareerRat(["next", "--skip", "discover-companies", "--write"], home);
     assert.equal(skipCompanies.status, 0);
     assert.match(skipCompanies.stdout, /Skipped discover-companies/);
     assert.match(skipCompanies.stdout, /Next: ask your agent to run search-jobs/);
     assert.match(skipCompanies.stdout, /Discovery skip recorded/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("empty DB candidate setup routes doctor and next back to ingest-profile", () => {
+  const home = tempHome();
+  try {
+    const init = runCareerRat(["data", "candidate", "init"], home);
+    assert.equal(init.status, 0);
+
+    const doctor = runCli("src/cli/doctor.mjs", ["--json"], home);
+    const data = JSON.parse(doctor.stdout);
+    assert.equal(doctor.status, 1);
+    assert.equal(data.agentGuidance.nextSkill, "ingest-profile");
+    assert.match(data.agentGuidance.reason, /source resume/i);
+
+    const next = runCareerRat(["next"], home);
+    assert.equal(next.status, 0);
+    assert.match(next.stdout, /Next: ask your agent to run ingest-profile/);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor reads company ATS readiness from DB source config when legacy config is absent", () => {
+  const home = tempHome();
+  try {
+    const init = runCareerRat(["data", "candidate", "init"], home);
+    assert.equal(init.status, 0);
+
+    const add = runCareerRat(
+      ["companies", "--add", "Acme", "--url", "https://jobs.lever.co/acme", "--write", "--json"],
+      home
+    );
+    assert.equal(add.status, 0);
+    assert.equal(JSON.parse(add.stdout).total, 1);
+    assert.equal(existsSync(join(home, "config/sourced-scan.json")), false);
+
+    const doctor = runCli("src/cli/doctor.mjs", ["--json"], home);
+    const data = JSON.parse(doctor.stdout);
+
+    assert.equal(data.discovery.companyAts.configured, true);
+    assert.equal(data.discovery.companyAts.total, 1);
+    assert.deepEqual(data.discovery.companyAts.providers, ["lever"]);
+  } finally {
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("doctor reads broad search readiness from DB source config when legacy config is absent", () => {
+  const home = tempHome();
+  const env = { ...process.env, CAREERRAT_HOME: home };
+  try {
+    candidateSetupInitialize({ repoRoot: ROOT, env });
+    sourceConfigPut({
+      repoRoot: ROOT,
+      env,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "HiringCafe",
+            label: "Director of IT",
+            query: "Director of IT",
+            enabled: true,
+            recency: { lastRunAt: "2026-07-03T12:00:00.000Z" },
+          },
+        ],
+      },
+    });
+
+    assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
+
+    const doctor = runCli("src/cli/doctor.mjs", ["--json"], home);
+    const data = JSON.parse(doctor.stdout);
+
+    assert.equal(data.discovery.broadSources.exists, true);
+    assert.equal(data.discovery.broadSources.valid, true);
+    assert.equal(data.discovery.broadSources.total, 1);
+    assert.equal(data.discovery.broadSources.enabled, 1);
+    assert.equal(data.discovery.broadSources.withLastRun, 1);
+    assert.deepEqual(data.discovery.broadSources.providers, ["HiringCafe"]);
+  } finally {
+    closeAll();
+    rmSync(home, { recursive: true, force: true });
+  }
+});
+
+test("searches --from-targeting refuses to persist an empty DB targeting baseline", () => {
+  const home = tempHome();
+  try {
+    const init = runCareerRat(["data", "candidate", "init"], home);
+    assert.equal(init.status, 0);
+
+    const result = runCli("src/cli/searches.mjs", ["--from-targeting", "--json"], home);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr || result.stdout, /role titles/i);
+    assert.equal(existsSync(join(home, "config/search-sources.yml")), false);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
@@ -293,7 +394,7 @@ test("router tells agents to follow doctor Agent guidance instead of raw list co
 
   assert.match(text, /Agent guidance/);
   assert.match(text, /canonical next handoff/);
-  assert.match(text, /do not treat `rolester searches` or `rolester companies` as the workflow/);
+  assert.match(text, /do not treat `careerrat searches` or `careerrat companies` as the workflow/);
 });
 
 test("router makes proactive next-skill recommendations beyond cold start", () => {
@@ -325,28 +426,28 @@ test("user-facing docs use default list commands instead of npm -- --list noise"
   assert.deepEqual(offenders, []);
 });
 
-test("rolester exposes discovery helper commands directly", () => {
+test("careerrat exposes discovery helper commands directly", () => {
   const home = tempHome();
   try {
-    const companies = runRolester(["companies", "--json"], home);
+    const companies = runCareerRat(["companies", "--json"], home);
     assert.equal(companies.status, 0);
     assert.equal(JSON.parse(companies.stdout).total, 0);
 
-    const searchesHelp = runRolester(["searches", "--help"], home);
+    const searchesHelp = runCareerRat(["searches", "--help"], home);
     assert.equal(searchesHelp.status, 0);
-    assert.match(searchesHelp.stdout, /Usage:\s+rolester searches/);
+    assert.match(searchesHelp.stdout, /Usage:\s+careerrat searches/);
 
-    const companiesHelp = runRolester(["companies", "--help"], home);
+    const companiesHelp = runCareerRat(["companies", "--help"], home);
     assert.equal(companiesHelp.status, 0);
-    assert.match(companiesHelp.stdout, /Usage:\s+rolester companies/);
+    assert.match(companiesHelp.stdout, /Usage:\s+careerrat companies/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }
 });
 
-test("product-facing search and company guidance leads with rolester commands", () => {
+test("product-facing search and company guidance leads with careerrat commands", () => {
   const files = [
-    "bin/rolester.mjs",
+    "bin/careerrat.mjs",
     "src/core/agent-guidance.mjs",
     "src/cli/searches.mjs",
     "src/cli/companies.mjs",
@@ -370,13 +471,13 @@ test("product-facing search and company guidance leads with rolester commands", 
   assert.deepEqual(offenders, []);
 });
 
-test("public setup docs teach the rolester binary instead of source-file invocations", () => {
+test("public setup docs teach the careerrat binary instead of source-file invocations", () => {
   const files = ["README.md", "docs/SETUP.md"];
   const offenders = [];
 
   for (const file of files) {
     const text = readFileSync(join(ROOT, file), "utf8");
-    for (const match of text.matchAll(/node bin\/rolester\.mjs/g)) {
+    for (const match of text.matchAll(/node bin\/careerrat\.mjs/g)) {
       const line = text.slice(0, match.index).split("\n").length;
       offenders.push(`${file}:${line}`);
     }
@@ -385,23 +486,23 @@ test("public setup docs teach the rolester binary instead of source-file invocat
   assert.deepEqual(offenders, []);
 });
 
-test("rolester start prompt anchors the agent to doctor and the discovery order", () => {
-  const text = readFileSync(join(ROOT, "bin/rolester.mjs"), "utf8");
+test("careerrat start prompt anchors the agent to doctor and the discovery order", () => {
+  const text = readFileSync(join(ROOT, "bin/careerrat.mjs"), "utf8");
 
-  assert.match(text, /run rolester doctor/);
-  assert.match(text, /next unfinished Rolester skill/);
+  assert.match(text, /run careerrat doctor/);
+  assert.match(text, /next unfinished CareerRat skill/);
   assert.match(text, /setup-searches -> research-boards -> discover-companies -> search-jobs/);
 });
 
-test("rolester start --no-agent prints the manual agent handoff", () => {
+test("careerrat start --no-agent prints the manual agent handoff", () => {
   const home = tempHome();
   try {
-    const result = runRolester(["start", "--no-agent", "--no-dashboard"], home);
+    const result = runCareerRat(["start", "--no-agent", "--no-dashboard"], home);
 
     assert.equal(result.status, 0);
     assert.match(result.stdout, /Open your agent in this folder and say:/);
-    assert.match(result.stdout, /run rolester doctor/);
-    assert.match(result.stdout, /next unfinished Rolester skill/);
+    assert.match(result.stdout, /run careerrat doctor/);
+    assert.match(result.stdout, /next unfinished CareerRat skill/);
   } finally {
     rmSync(home, { recursive: true, force: true });
   }

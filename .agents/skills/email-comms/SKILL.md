@@ -1,11 +1,11 @@
 ---
 name: email-comms
-description: Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the Rolester tracker.
+description: Draft, reply to, follow up on, summarize, and track job-search email and recruiter-message threads — including thank-yous, scheduling, negotiation, and cold outreach — while persisting full thread context in the CareerRat tracker.
 ---
 
 # email-comms
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing in-chat commentary around drafts. Apply the register from AGENTS.md#mode-switches. The **drafted artifact itself** (email subject + body) is always written in full regardless of register — `writing-style.md` governs its tone. Register governs the **agent commentary**: `exec-summary` = draft only + one action line; `standard` = draft + short bullets on intent/next-step; `technical` = draft + thread-context summary + strategy note; `verbose` = draft + full thread reconstruction + alternatives.
 
@@ -26,8 +26,8 @@ description: Draft, reply to, follow up on, summarize, and track job-search emai
 - complete, finished email or message artifact (subject + body, no placeholders)
 - updated `workspace/tracker.json` — communications[].messages[] append + status fields
 - optional `workspace/comms/<thread-id>.md` for long raw thread bodies
-- `~/Downloads/rolester/email-<company-slug>-<yyyy-mm-dd>.txt` — convenience copy of the draft (`workspace/` stays source of truth)
-- re-rendered tracker dashboard
+- `~/Downloads/careerrat/email-<company-slug>-<yyyy-mm-dd>.txt` — convenience copy of the draft (`workspace/` stays source of truth)
+- tracker snapshot checkpoint
 
 ---
 
@@ -45,22 +45,33 @@ Treat this as an `outbound-follow-up` (or `thank-you` if the notification kind i
 2. Capture the outbound draft message (STEP 6a/b).
 3. Advance the record status and reset `nextActionDue` (STEP 6b / STEP 8 timer reset).
 4. Persist the baked draft onto the record (STEP 8 — `comm.draft` or `app.followUp.draft`) so the notification bell can show it ready to send.
-5. Validate and re-render (`rolester tracker --verify` then `rolester tracker`) — this clears the timer from the Needs Attention panel for that item.
+5. Validate and snapshot — the mode branch from STEP 6(d)/(e) and STEP 8 items 6–7 (DB workspace: `careerrat data verify` + `careerrat tracker --verify`; legacy: `careerrat tracker --verify` then `careerrat tracker`) — this clears the timer from the Needs Attention panel for that item.
 
 ---
 
 ## Out-of-band completion (entry-point branch)
 
+**Mode detection:** run `careerrat data status`. Exit 0 → DB workspace — every
+write step below gives the `careerrat data <verb>` command (Data Write Contract,
+AGENTS.md). Nonzero exit → legacy workspace (no DB yet) — every write step below
+gives the existing direct JSON-edit instructions, unchanged.
+
 When the user says they already sent a message, already replied, or already completed the action manually (e.g. "I already sent this", "I replied earlier today", "I did this on my phone"):
 
 1. **Confirm** which thread and action the user means (one clarifying question if ambiguous).
-2. **Write to `tracker.json` in one operation** — no partial writes:
+2. Record the completion:
    - Append an `outbound-sent` (or `note` if no artifact exists) entry to `communications[].messages[]` with `direction: "outbound-sent"`, current timestamp, and a one-sentence summary of what was sent.
    - Set `status → waiting` (or `closed` if this was a terminal action such as a rejection response or withdrawal).
    - Set `nextActionDue = null` — the CTA is satisfied.
    - Set `nextAction` to the next expected event (e.g. "Await recruiter reply"), or `null` if none.
    - Set `comm.draft = null` (and `app.followUp.draft = null` if a draft was staged) — the draft is no longer pending.
-3. **Run `rolester tracker --verify`**, confirm clean exit, then **re-render** (`rolester tracker`).
+   - **DB workspace:** compose two calls, back-to-back:
+     1. `careerrat data comm append-message <comm-id> --data '{"direction":"outbound-sent","at":"<ISO>","summary":"<what was sent>"}'`
+     2. If `status` is advancing to `waiting` (the common case): `careerrat data comm mark-sent <comm-id> --at <iso>` — sets `status: waiting`, clears `comm.draft` (and `app.followUp.draft` when linked), automatically. Otherwise (e.g. `closed`), or to set `nextAction`/`nextActionDue`: read the current row and persist the patched whole row with `careerrat data comm upsert --data '<patched full comm row JSON>'`.
+   - **Legacy workspace (no DB):** write to `tracker.json` in one operation — no partial writes.
+3. **Validate:**
+   - **DB workspace:** `careerrat data verify` (re-exports + domain integrity), then `careerrat tracker --verify` (schema-level parity).
+   - **Legacy workspace (no DB):** run `careerrat tracker --verify`, confirm clean exit, then **snapshot** (`careerrat tracker`).
 
 The agent not having performed the action is not a reason to leave the CTA up. Record it immediately and clear state.
 
@@ -87,6 +98,12 @@ If the type is ambiguous, ask one clarifying question before proceeding.
 
 ## STEP 1 — Match to tracker thread
 
+**Mode detection** (same check as the entry-point branches above): run `careerrat
+data status`. Exit 0 → DB workspace — every write step below gives the
+`careerrat data <verb>` command (Data Write Contract, AGENTS.md). Nonzero exit →
+legacy workspace (no DB yet) — every write step below gives the existing direct
+JSON-edit instructions, unchanged.
+
 Read `workspace/tracker.json`. Find the `communications[]` record whose:
 - `applicationId` matches a known application, OR
 - `company` + `role` match, OR
@@ -107,7 +124,10 @@ Create a new communications record with at minimum:
 }
 ```
 
-Write the updated `workspace/tracker.json` immediately. Do not proceed with a draft until the record exists.
+- **DB workspace:** `careerrat data comm upsert --data '<the record JSON above>'` (full-row insert).
+- **Legacy workspace (no DB):** write the updated `workspace/tracker.json` immediately.
+
+Do not proceed with a draft until the record exists.
 
 ---
 
@@ -137,7 +157,7 @@ Then check `workspace/writing-samples/` for any files modified AFTER `writing-st
 
 ## STEP 4 — Comp gate (negotiation-comp messages ONLY)
 
-Read `candidate/profile.yml` and extract:
+Read candidate profile config through the shared DB-first accessor and extract:
 
 | Field | Use |
 |---|---|
@@ -151,7 +171,7 @@ Read `candidate/profile.yml` and extract:
 
 For OE-bucket roles: read `profile.compensation.oe_min_base` / `profile.compensation.oe_max_base` (foundations-spec §2; both confirmed in `profile.schema.json`) and apply them instead of the standard floor/anchor. The standard `minimum_base` / `target_base` do NOT apply for OE roles.
 
-If the user states a new comp boundary mid-flow (e.g., "I won't go below $210K on this one") — confirm-first, then write it to `candidate/profile.yml#compensation.minimum_base`. Echo: `Written to candidate/profile.yml: compensation.minimum_base: <value>`.
+If the user states a new comp boundary mid-flow (e.g., "I won't go below $210K on this one") — confirm-first, then run `careerrat gate comp-floor <N> --write --confirm`. Echo the CLI confirmation.
 
 ---
 
@@ -233,7 +253,7 @@ When `cash_over_equity` is `true`, do not offer equity concessions before exhaus
 
 **Persistence:** every round's outbound draft is a `negotiation-comp` message appended to `communications[].messages[]` via STEP 6. The full round history accumulates in the thread so context is never lost between sessions.
 
-**Gate write-back:** if a new comp boundary emerges mid-negotiation (e.g., the candidate says "I won't go below $210K on this one"), apply the STEP 4 write-back rule — confirm-first, then write it directly to `candidate/profile.yml#compensation.minimum_base` (the per-offer walk-away). Echo: `Written to candidate/profile.yml: compensation.minimum_base: <value>`. `profile.compensation.minimum_base` is the single source of truth for the comp floor — there is no separate `targeting.comp_floor` field.
+**Gate write-back:** if a new comp boundary emerges mid-negotiation (e.g., the candidate says "I won't go below $210K on this one"), apply the STEP 4 write-back rule — confirm-first, then run `careerrat gate comp-floor <N> --write --confirm` for the per-offer walk-away. `profile.compensation.minimum_base` is the single source of truth for the comp floor — there is no separate `targeting.comp_floor` field.
 
 ---
 
@@ -277,6 +297,9 @@ Execute the following mutation sequence in order:
 }
 ```
 
+- **DB workspace:** `careerrat data comm append-message <comm-id> --data '<the message JSON above>'`. This appends to `messages[]` and auto-rolls `lastInboundAt`/`lastOutboundAt` forward from `direction` — the first half of (b) below. Include a `summary` or `nextAction` key in the payload if you also want those set on the parent record in this same call (the verb applies them when present).
+- **Legacy workspace (no DB):** append to `communications[].messages[]` directly in `workspace/tracker.json`.
+
 **(b) Update the parent communications record** with:
 - `status`: `needs-reply | drafted | waiting | scheduled | closed | blocked`
 - `nextAction`: what to do next
@@ -290,27 +313,45 @@ Execute the following mutation sequence in order:
   is the sent-clears-draft invariant from AGENTS.md "Actionability Write-Back Contract".
   Leaving a draft set after a send creates a ghost "Ready to send" panel that never resolves.
 
-**(c) Save long raw body** to `workspace/comms/<thread-id>.md` if the body exceeds one paragraph. Reference the path in `artifactPath`. `workspace/comms/` files are local-only and must not appear in any outbound artifact.
+  - **DB workspace:** compose the call(s) matching what actually changed, back-to-back with (a) above (no combined messages+status transaction exists):
+    - **Message was SENT and status is advancing to `waiting`** (the common send-clears-draft case): `careerrat data comm mark-sent <comm-id> [--at <iso>] [--summary "<t>"]` — sets `status: waiting`, clears `comm.draft` (and `app.followUp.draft` when that application exists), and stamps `lastOutboundAt`, all in one transaction, automatically. Do not hand-write that clear.
+    - **Any other status value** (`needs-reply`, `drafted`, `scheduled`, `closed`, `blocked`) or to set `nextAction`/`nextActionDue` explicitly: there is no single-field patch verb for `communications[]`, so read the current row from `workspace/tracker.json#communications[]`, apply the fields above (carrying every other field over unchanged), and persist the whole row: `careerrat data comm upsert --data '<patched full comm row JSON>'`.
+  - **Legacy workspace (no DB):** edit the fields above directly on the communications record in `workspace/tracker.json`, in the same write as (a).
 
-**(d) Validate:** `rolester tracker --verify`
+**(c) Save long raw body** to `workspace/comms/<thread-id>.md` if the body exceeds one paragraph. Reference the path in `artifactPath`. `workspace/comms/` files are local-only and must not appear in any outbound artifact. (This is a local file write outside `tracker.json` — unaffected by DB vs legacy mode.)
 
-Confirm it exits clean before proceeding. If it fails, fix the JSON and re-run.
+**(d) Validate:**
+- **DB workspace:** the calls in (a)/(b) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run `careerrat data verify` (re-exports + domain integrity) and `careerrat tracker --verify` (schema-level parity).
+- **Legacy workspace (no DB):** run `careerrat tracker --verify`.
 
-**(e) Re-render:** `rolester tracker`
+Confirm it exits clean before proceeding. If it fails, fix the JSON (legacy) or the DB row via another verb call (DB — never hand-edit `tracker.json`, it is a regenerated file) and re-run.
+
+**(e) Snapshot:**
+- **DB workspace:** already exported by the calls above; if `careerrat tracker-dev` is running its `fs.watch` already picked it up. Run `careerrat tracker` only for a recovery checkpoint.
+- **Legacy workspace (no DB):** run `careerrat tracker`.
 
 Then log it to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). If the message is a draft awaiting the user to send, log it as needing the user; if it was already sent, log it sent:
 
-```
-# draft awaiting send:
-rolester activity append --type drafted --actor agent --needs-user \
-  --title "Drafted reply — <Company>" --summary "<one line: what the message does>" \
-  --company "<Company>" --app-id <application id> --cta-label "Review & send" --write
+- **DB workspace:** the (a)/(b) calls above already auto-logged their own generic events (`message` type) in their own transactions. For the richer, outcome-specific type below, log an additional event (this verb only logs, it never bumps the stamp):
+  ```
+  # draft awaiting send:
+  careerrat data activity append --data '{"type":"drafted","actor":"agent","needsUser":true,"title":"Drafted reply — <Company>","summary":"<one line: what the message does>","refs":{"applicationId":"<application id>","company":"<Company>"},"cta":{"label":"Review & send"}}'
 
-# already sent:
-rolester activity append --type message --actor agent \
-  --title "Sent — <Company>" --summary "<one line: what the message does>" \
-  --company "<Company>" --app-id <application id> --write
-```
+  # already sent:
+  careerrat data activity append --data '{"type":"message","actor":"agent","title":"Sent — <Company>","summary":"<one line: what the message does>","refs":{"applicationId":"<application id>","company":"<Company>"}}'
+  ```
+- **Legacy workspace (no DB):**
+  ```
+  # draft awaiting send:
+  careerrat activity append --type drafted --actor agent --needs-user \
+    --title "Drafted reply — <Company>" --summary "<one line: what the message does>" \
+    --company "<Company>" --app-id <application id> --cta-label "Review & send" --write
+
+  # already sent:
+  careerrat activity append --type message --actor agent \
+    --title "Sent — <Company>" --summary "<one line: what the message does>" \
+    --company "<Company>" --app-id <application id> --write
+  ```
 
 ---
 
@@ -318,14 +359,14 @@ rolester activity append --type message --actor agent \
 
 Branch on message type after capture:
 
-| Condition | Action |
-|---|---|
-| Scheduling confirmed / interview booked | In the SAME `tracker.json` write: update `applications[].status` to the appropriate stage (phone-screen, onsite, etc.) AND update the communications record — `status → scheduled`, `nextActionDue = null`, `nextAction = 'Attend <stage> — <date>'` (or clear it if no further prep action is needed), `comm.draft = null` if a draft was staged. Both records must land in one write so neither leaves a ghost CTA. Hand off to `interview-prep` for prep materials. |
-| Offer received | Before surfacing the comp comparison, write to `tracker.json` in one operation: comm `status → waiting`, `nextActionDue = null`, `nextAction = 'Evaluate offer and respond'` (set a real deadline if the employer gave one, else null), `comm.draft = null` if a draft was staged. Append a `note`-direction message to `messages[]` summarising the offer receipt. Then read `candidate/profile.yml#compensation.minimum_base` and `target_base`, surface whether the stated comp clears the floor, and recommend accept/negotiate/decline. Do not accept on the user's behalf. |
-| Rejection or withdrawal | In the SAME `tracker.json` write as the STEP 6 capture: set `status = closed`, `nextActionDue = null`, `nextAction = null`, `comm.draft = null` (if any draft was staged). Do not rely on STEP 6's generic status field alone — state it explicitly here. Then hand off to `track-outcomes` for durable outcome recording and reevaluation-threshold check. |
-| Ghosting / no response after follow-up | In the SAME `tracker.json` write: set `status = closed` (or `blocked` if appropriate), `nextActionDue = null`, `nextAction = null`, `comm.draft = null` if a draft was staged. The due-date CTA must clear together with the status in one write. Hand off to `track-outcomes`. |
-| User states new exclusion mid-thread (e.g., "never email this company again") | Confirm-first, then append to `candidate/targeting.yml#excluded_companies` (field confirmed in `targeting.schema.json`). Echo: `Written to candidate/targeting.yml: excluded_companies += <company>`. Run `rolester doctor` to verify schema after write. |
-| User states new comp floor mid-thread | See STEP 4 comp write-back rule. |
+| Condition | Action | DB-mode command |
+|---|---|---|
+| Scheduling confirmed / interview booked | In the SAME `tracker.json` write: update `applications[].status` to the appropriate stage (phone-screen, onsite, etc.) AND update the communications record — `status → scheduled`, `nextActionDue = null`, `nextAction = 'Attend <stage> — <date>'` (or clear it if no further prep action is needed), `comm.draft = null` if a draft was staged. Both records must land in one write so neither leaves a ghost CTA. Hand off to `interview-prep` for prep materials. | `careerrat data app set-status <id> "<stage>"` for the application row, then patch the comm record (read current row, apply the fields, persist): `careerrat data comm upsert --data '<patched full comm row JSON>'`. Run both back-to-back, never deferring the second. |
+| Offer received | Before surfacing the comp comparison, write to `tracker.json` in one operation: comm `status → waiting`, `nextActionDue = null`, `nextAction = 'Evaluate offer and respond'` (set a real deadline if the employer gave one, else null), `comm.draft = null` if a draft was staged. Append a `note`-direction message to `messages[]` summarising the offer receipt. Then read the candidate config through the shared DB-first accessor (`profile.compensation.minimum_base` and `target_base`), surface whether the stated comp clears the floor, and recommend accept/negotiate/decline. Do not accept on the user's behalf. | Patch the comm record locally (status/nextActionDue/nextAction/draft), persist: `careerrat data comm upsert --data '<patched full comm row JSON>'`; then append the note: `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","body":"<offer receipt summary>"}'`. Comp comparison itself is a candidate-config read: SQLite in DB mode, YAML only in legacy mode. |
+| Rejection or withdrawal | In the SAME `tracker.json` write as the STEP 6 capture: set `status = closed`, `nextActionDue = null`, `nextAction = null`, `comm.draft = null` (if any draft was staged). Do not rely on STEP 6's generic status field alone — state it explicitly here. Then hand off to `track-outcomes` for durable outcome recording and reevaluation-threshold check. | Same composition as STEP 6(b)'s DB branch — read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` with `status: "closed"`, `nextActionDue: null`, `nextAction: null`, `draft: null`. `track-outcomes` owns the durable app-row transition (its own DB verbs) — this call only closes the comm thread. |
+| Ghosting / no response after follow-up | In the SAME `tracker.json` write: set `status = closed` (or `blocked` if appropriate), `nextActionDue = null`, `nextAction = null`, `comm.draft = null` if a draft was staged. The due-date CTA must clear together with the status in one write. Hand off to `track-outcomes`. | Same read-patch-persist pattern: `careerrat data comm upsert --data '<patched full comm row JSON>'` with the fields above. |
+| User states new exclusion mid-thread (e.g., "never email this company again") | Confirm-first, then run `careerrat gate exclude-company "<Company>" --write --confirm`. Echo the CLI result. Run `careerrat doctor` to verify after write. | `careerrat gate` is DB-aware: it writes SQLite in DB mode and legacy YAML only in legacy mode. Never hand-edit `candidate/targeting.yml`. |
+| User states new comp floor mid-thread | See STEP 4 comp write-back rule; use `careerrat gate comp-floor <N> --write --confirm`. | `careerrat gate` is DB-aware: it writes SQLite in DB mode and legacy YAML only in legacy mode. Never hand-edit `candidate/profile.yml`. |
 
 ---
 
@@ -338,7 +379,7 @@ After every `outbound-sent` or `outbound-draft` capture, set `nextActionDue`:
 
 **Stale threshold:** A `waiting` thread with no update for **7 days** is stale and surfaces as a follow-up. Applied-with-no-response threads surface after **10 days**. These defaults come from `cadence.mjs` — if the candidate's `follow_up:` config block in `candidate/targeting.yml` provides custom thresholds for a kind, those take precedence over the code defaults.
 
-When the user asks to work follow-ups (or `rolester tracker --followups` surfaces them):
+When the user asks to work follow-ups (or `careerrat tracker --followups` surfaces them):
 
 1. Read the stale thread via STEP 2.
 2. Apply STEP 3 style gate.
@@ -348,9 +389,15 @@ When the user asks to work follow-ups (or `rolester tracker --followups` surface
    - For comm-based kinds (`needs-reply`, `comm-due`, `waiting-stale`): set `comm.draft = { subject, body }` on the communications record.
    - For application-based kinds (`app-nudge`, `post-interview-nudge`, `thank-you`): set `app.followUp = { kind, dueAt, draft: { subject, body }, generatedAt }` on the application record.
    The dashboard notification bell reads these fields directly; a baked draft appears as "ready to send." A baked draft is only valid for the DRAFT/awaiting-send state; once the message is sent, it must be nulled per the sent-clears-draft invariant (STEP 6b) so the "Ready to send" panel clears.
-   **Also write a convenience copy** to the company's Downloads folder — `~/Downloads/rolester/<Company>/<Company> - <what> Email.txt` (e.g. `Aperture Science - Follow-up Email.txt`), per the Artifact Contract (organized by company, then by round). Use the real company name for the folder and file (never a bracket placeholder; if the company is somehow unknown, use `unknown`). File content: subject line on the first line, a blank line, then the body. `workspace/` stays the source of truth; Downloads is for the user's convenience. Body must NEVER contain `current_base` or any private comp field (per the Privacy Invariant).
-6. Validate: `rolester tracker --verify` (also: `npm run verify:tracker`). Confirm clean exit before proceeding.
-7. Re-render: `rolester tracker` (so the timer clears from the dashboard).
+   - **DB workspace:** comm-based kinds — there is no single-field patch verb for `communications[]`, so read the current row, set `draft`, and persist: `careerrat data comm upsert --data '<patched full comm row JSON>'`. Application-based kinds — `app.followUp` merges one level under `app set-fields`: `careerrat data app set-fields <id> --data '{"followUp":{"kind":"<kind>","dueAt":"<iso>","draft":{"subject":"<s>","body":"<b>"},"generatedAt":"<iso>"}}'`. Neither is outcome-changing.
+   - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly.
+   **Also write a convenience copy** to the company's Downloads folder — `~/Downloads/careerrat/<Company>/<Company> - <what> Email.txt` (e.g. `Aperture Science - Follow-up Email.txt`), per the Artifact Contract (organized by company, then by round). Use the real company name for the folder and file (never a bracket placeholder; if the company is somehow unknown, use `unknown`). File content: subject line on the first line, a blank line, then the body. `workspace/` stays the source of truth; Downloads is for the user's convenience. Body must NEVER contain `current_base` or any private comp field (per the Privacy Invariant). (This Downloads copy is a local file write outside `tracker.json` — unaffected by DB vs legacy mode.)
+6. Validate:
+   - **DB workspace:** the calls above already persisted and auto-exported. Run `careerrat data verify` and `careerrat tracker --verify`.
+   - **Legacy workspace (no DB):** `careerrat tracker --verify` (also: `npm run verify:tracker`). Confirm clean exit before proceeding.
+7. Snapshot:
+   - **DB workspace:** already exported; run `careerrat tracker` only for a recovery checkpoint.
+   - **Legacy workspace (no DB):** `careerrat tracker` (so the timer clears from the dashboard).
 
 ---
 
@@ -366,8 +413,8 @@ For each item returned by `computeFollowUps`:
    - `post-interview-nudge`: 4–6 lines referencing the interview stage, reiterating interest, and asking about next steps.
    - `thank-you`: warm, specific thank-you referencing one detail from `applications[].conversations[]`; keep to 3–5 lines.
    - `needs-reply` / `comm-due` / `waiting-stale`: advance the existing thread per STEP 5's follow-up guidance.
-3. **Persist** the draft to the record (see STEP 8 — "Persist a baked draft" above).
-4. **Validate and re-render** after all drafts are written (`rolester tracker --verify` then `rolester tracker`).
+3. **Persist** the draft to the record (see STEP 8 — "Persist a baked draft" above, including its DB-mode branch).
+4. **Validate and snapshot** after all drafts are written — same mode branch as STEP 8 items 6–7: DB workspace runs `careerrat data verify` + `careerrat tracker --verify`; legacy workspace runs `careerrat tracker --verify` then `careerrat tracker`.
 
 ---
 

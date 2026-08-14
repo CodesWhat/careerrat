@@ -1,6 +1,6 @@
 // export.mjs — render tailored artifacts (resume, cover letter, packet) to PDF or DOCX.
-// Zero NEW runtime dependencies: PDF via Playwright Chromium (already a devDep);
-// DOCX via pandoc → soffice → hand-rolled OOXML, detected in that priority order.
+// PDF via Playwright Chromium; DOCX via pandoc → soffice → hand-rolled OOXML,
+// detected in that priority order. Preview fragments are sanitized server-side.
 
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -8,8 +8,93 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { deflateRawSync } from "node:zlib";
+import sanitizeHtml from "sanitize-html";
 
 const repoRoot = join(fileURLToPath(new URL("../../..", import.meta.url)));
+const ARTIFACT_HTML_TAGS = [
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "p",
+  "strong",
+  "em",
+  "code",
+  "a",
+  "span",
+  "ul",
+  "ol",
+  "li",
+  "hr",
+  "pre",
+  "table",
+  "thead",
+  "tbody",
+  "tr",
+  "th",
+  "td",
+  "blockquote",
+  "br",
+];
+
+function safeArtifactHref(value) {
+  const href = String(value || "").trim();
+  const hasAsciiControl = [...href].some((char) => {
+    const code = char.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f;
+  });
+  if (!href || href.startsWith("//") || hasAsciiControl) return null;
+
+  const colon = href.indexOf(":");
+  if (colon === 0) return null;
+  if (colon > 0) {
+    const scheme = href.slice(0, colon);
+    // Reject encoded/entity/whitespace-obfuscated schemes before URL parsing;
+    // browsers normalize several of these into executable protocols.
+    if (/[%&\s]/.test(scheme) || !/^[a-z][a-z\d+.-]*$/i.test(scheme)) return null;
+    if (!["http", "https", "mailto"].includes(scheme.toLowerCase())) return null;
+    try {
+      const parsed = new URL(href);
+      if (!parsed.protocol) return null;
+    } catch {
+      return null;
+    }
+    return href;
+  }
+
+  if (href.includes("://")) return null;
+  try {
+    new URL(href, "https://careerrat.invalid/");
+    return href;
+  } catch {
+    return null;
+  }
+}
+
+function artifactAnchorTransform(_tagName, attributes) {
+  const href = safeArtifactHref(attributes?.href);
+  if (!href) return { tagName: "span", attribs: {} };
+  if (/^https?:/i.test(href)) {
+    return {
+      tagName: "a",
+      attribs: { href, target: "_blank", rel: "noopener noreferrer" },
+    };
+  }
+  return { tagName: "a", attribs: { href } };
+}
+
+export function sanitizeArtifactHtml(html) {
+  return sanitizeHtml(String(html || ""), {
+    allowedTags: ARTIFACT_HTML_TAGS,
+    allowedAttributes: { a: ["href", "target", "rel"] },
+    allowedSchemes: ["http", "https", "mailto"],
+    allowProtocolRelative: false,
+    disallowedTagsMode: "discard",
+    transformTags: { a: artifactAnchorTransform },
+  });
+}
 
 // ---------------------------------------------------------------------------
 // normalizeAtsText — scrub typographic glyphs before PDF/submission export
@@ -117,8 +202,13 @@ export function markdownToHtml(markdown) {
     });
     // Links [text](url) — text already html-escaped, url we escape separately
     s = s.replace(/\[([^\]]*)\]\(([^)]*)\)/g, (_, text, href) => {
-      const safeHref = href.replace(/"/g, "&quot;");
-      return `<a href="${safeHref}">${text}</a>`;
+      const safeHref = safeArtifactHref(href);
+      if (!safeHref) return text;
+      const escapedHref = safeHref.replace(/"/g, "&quot;");
+      if (/^https?:/i.test(safeHref)) {
+        return `<a href="${escapedHref}" target="_blank" rel="noopener noreferrer">${text}</a>`;
+      }
+      return `<a href="${escapedHref}">${text}</a>`;
     });
     // Bold **text** or __text__
     s = s.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
@@ -288,7 +378,7 @@ export function markdownToHtml(markdown) {
   closeOpenPara();
   closeAllLists();
 
-  return out.join("\n");
+  return sanitizeArtifactHtml(out.join("\n"));
 }
 
 // ---------------------------------------------------------------------------
@@ -305,7 +395,7 @@ function fontFaceCss() {
 
   const rules = [];
   for (const { file, family, weight } of variants) {
-    const fontPath = join(repoRoot, "fonts", file);
+    const fontPath = join(repoRoot, "assets", "fonts", file);
     let src;
     try {
       const b64 = readFileSync(fontPath).toString("base64");
@@ -555,16 +645,52 @@ ${body}
  * Render markdown (or pre-built HTML) to a Letter-size PDF via Playwright Chromium.
  * Always closes the browser, even on error.
  *
- * @param {{ markdown?: string, html?: string, outPath: string, title?: string, ats?: boolean }} opts
+ * @param {{ markdown?: string, html?: string, outPath: string, title?: string, ats?: boolean, env?: NodeJS.ProcessEnv|Record<string,string>, fetchImpl?: typeof fetch }} opts
  *   ats: use the ATS-safe standard font stack (no embedded Geist) for submission copies.
  * @returns {Promise<string>} outPath
- * @throws if Chromium is not installed (tells user to run `npx playwright install chromium`)
+ * @throws when neither Electron's authenticated renderer nor Playwright Chromium is available
  */
-export async function renderPdf({ markdown, html, outPath, title = "Document", ats = false }) {
+export async function renderPdf({
+  markdown,
+  html,
+  outPath,
+  title = "Document",
+  ats = false,
+  env = process.env,
+  fetchImpl = globalThis.fetch,
+}) {
   // Normalize typographic glyphs on the markdown path so ATS text extraction
   // isn't corrupted by smart quotes / dashes / invisible chars from LLM output.
   // When the caller supplies pre-built HTML, normalization is their responsibility.
   const source = html || documentHtml(normalizeAtsText(markdown || ""), { title, ats });
+
+  const desktopRenderer = desktopPdfRendererConfig(env);
+  if (desktopRenderer) {
+    const response = await fetchImpl(desktopRenderer.url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-careerrat-render-token": desktopRenderer.token,
+      },
+      body: JSON.stringify({ html: source }),
+    });
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).trim();
+      const err = new Error(
+        `Desktop PDF renderer failed (${response.status})${detail ? `: ${detail}` : ""}`
+      );
+      err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+      throw err;
+    }
+    const pdf = Buffer.from(await response.arrayBuffer());
+    if (pdf.length < 8 || !pdf.subarray(0, 5).equals(Buffer.from("%PDF-"))) {
+      const err = new Error("Desktop PDF renderer returned an invalid PDF response");
+      err.code = "DESKTOP_PDF_RENDERER_INVALID";
+      throw err;
+    }
+    writeFileSync(outPath, pdf);
+    return outPath;
+  }
 
   let chromium;
   try {
@@ -596,6 +722,36 @@ export async function renderPdf({ markdown, html, outPath, title = "Document", a
   }
 
   return outPath;
+}
+
+function desktopPdfRendererConfig(env) {
+  const rawUrl = String(env.CAREERRAT_DESKTOP_PDF_RENDER_URL || "").trim();
+  const token = String(env.CAREERRAT_DESKTOP_PDF_RENDER_TOKEN || "").trim();
+  if (!rawUrl && !token) return null;
+  if (!rawUrl || !token) {
+    const err = new Error("Desktop PDF renderer configuration is incomplete");
+    err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+    throw err;
+  }
+
+  let url;
+  try {
+    url = new URL(rawUrl);
+  } catch {
+    const err = new Error("Desktop PDF renderer URL is invalid");
+    err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+    throw err;
+  }
+  if (
+    url.protocol !== "http:" ||
+    !["127.0.0.1", "localhost", "[::1]"].includes(url.hostname) ||
+    url.pathname !== "/render"
+  ) {
+    const err = new Error("Desktop PDF renderer must use the loopback /render endpoint");
+    err.code = "DESKTOP_PDF_RENDERER_UNAVAILABLE";
+    throw err;
+  }
+  return { url: url.href, token };
 }
 
 // ---------------------------------------------------------------------------
@@ -755,8 +911,8 @@ function makeReferenceDoc(dst) {
 }
 
 async function renderDocxViaPandoc({ markdown, outPath, title }) {
-  const tmp = join(tmpdir(), `rolester-export-${Date.now()}.md`);
-  const refDoc = join(tmpdir(), `rolester-ref-${Date.now()}.docx`);
+  const tmp = join(tmpdir(), `careerrat-export-${Date.now()}.md`);
+  const refDoc = join(tmpdir(), `careerrat-ref-${Date.now()}.docx`);
   writeFileSync(tmp, markdown, "utf8");
   makeReferenceDoc(refDoc);
 
@@ -802,7 +958,7 @@ async function renderDocxViaPandoc({ markdown, outPath, title }) {
 // --- soffice path ---
 
 async function renderDocxViaSoffice({ markdown, outPath, title }) {
-  const tmp = join(tmpdir(), `rolester-export-${Date.now()}.html`);
+  const tmp = join(tmpdir(), `careerrat-export-${Date.now()}.html`);
   const tmpDocx = tmp.replace(".html", ".docx");
 
   writeFileSync(tmp, documentHtml(markdown, { title }), "utf8");

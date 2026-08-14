@@ -1,4 +1,4 @@
-// Resume parser for Rolester — ingests plain-text or markdown resumes into
+// Resume parser for CareerRat — ingests plain-text or markdown resumes into
 // structured data that seeds a candidate's profile and evidence bank.
 // CRITICAL: never invent facts. Only extract what is literally present in the text.
 
@@ -35,10 +35,20 @@ const ACCOMPLISHMENT_VERBS = new Set([
   "scaled",
   "drove",
   "delivered",
+  "mentored",
 ]);
 
 // Matches http(s) URLs.
 const URL_RE = /https?:\/\/[^\s,<>"')]+/g;
+
+// Matches scheme-less contact links for KNOWN hosts only (linkedin.com,
+// github.com), optionally www.-prefixed, e.g. "linkedin.com/in/name" or
+// "www.github.com/name". Requires a following "/path" so a bare mention of
+// the host with nothing after it doesn't match. Deliberately not a general
+// bare-domain matcher — that would false-positive on skill tokens like
+// "node.js" or "socket.io". The leading \b also keeps "mygithub.com" from
+// matching, since there's no word boundary between "my" and "github".
+const BARE_CONTACT_URL_RE = /\b(?:www\.)?(?:linkedin|github)\.com\/[^\s,<>"')]+/gi;
 
 // Matches a first RFC-ish email.
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
@@ -118,8 +128,15 @@ function extractPhone(text) {
 
 function extractUrls(text) {
   const matches = text.match(URL_RE) || [];
-  // Dedupe while preserving first-seen order.
-  return [...new Set(matches)];
+  // Scheme-less contact links (linkedin.com/..., github.com/...) get an
+  // https:// prefix so they normalize into the same shape as full URLs
+  // before hostnameMatches/extractLinkedin/extractGithub see them.
+  const bare = text.match(BARE_CONTACT_URL_RE) || [];
+  const normalizedBare = bare.map((u) => `https://${u}`);
+  // Dedupe while preserving first-seen order. A bare match that's actually
+  // part of an already-captured https:// URL normalizes to an identical
+  // string, so it collapses here instead of producing a duplicate.
+  return [...new Set([...matches, ...normalizedBare])];
 }
 
 function hostnameMatches(url, domain) {
@@ -156,11 +173,16 @@ function extractFullName(lines) {
     // heading like "# Alex Rivera" is usually the candidate's name, so keep it.
     if (isHeading(line) && classifyHeading(line) !== "other") continue;
     if (trimmed.includes("@")) continue;
-    if (URL_RE.test(trimmed)) {
+    // A contact line with only bare links ("linkedin.com/in/x") must skip
+    // here the same way a full-URL line does, or it falls through to the
+    // name check below and gets misclassified.
+    if (URL_RE.test(trimmed) || BARE_CONTACT_URL_RE.test(trimmed)) {
       URL_RE.lastIndex = 0;
+      BARE_CONTACT_URL_RE.lastIndex = 0;
       continue;
     }
     URL_RE.lastIndex = 0;
+    BARE_CONTACT_URL_RE.lastIndex = 0;
     // Count digit clusters — a phone/contact line will have many.
     const digitMatches = trimmed.match(/\d+/g) || [];
     const totalDigits = digitMatches.reduce((s, m) => s + m.length, 0);
@@ -179,7 +201,9 @@ function extractLocation(lines) {
   for (const line of top) {
     const trimmed = line.trim();
     // Look for patterns like "City, ST" or "City, Country" optionally surrounded by other text.
-    const m = trimmed.match(/\b([A-Z][a-zA-Z\s]+),\s*([A-Z]{2}|[A-Z][a-zA-Z]+)\b/);
+    const m = trimmed.match(
+      /\b([A-Z][a-zA-Z\s]+),\s*([A-Z]{2}|[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\b/
+    );
     if (m) {
       // Reject if it looks like an org name embedded in a URL.
       if (trimmed.includes("://")) continue;
@@ -211,6 +235,70 @@ function splitBlocks(lines) {
     const b = current.join("\n").trim();
     if (b) blocks.push(b);
   }
+  return blocks.filter(Boolean);
+}
+
+const EMPLOYMENT_DATE_RANGE_RE =
+  /\b(?:19|20)\d{2}\s*[-–—]\s*(?:(?:19|20)\d{2}|present|current|now)\b/i;
+
+function stripMarkdownHeading(line) {
+  return String(line || "")
+    .trim()
+    .replace(/^#{1,6}\s+/, "")
+    .trim();
+}
+
+function looksLikeRoleHeader(line, nextLine = "") {
+  const raw = String(line || "").trim();
+  const text = stripMarkdownHeading(raw);
+  if (!text || isBulletLine(raw) || text.length > 180) return false;
+
+  // H3+ headings inside Experience are role headings, not top-level sections.
+  if (/^#{3,6}\s+\S/.test(raw)) return true;
+
+  const pipeParts = text.split("|").map((part) => part.trim());
+  if (pipeParts.length >= 2) {
+    const first = pipeParts[0];
+    const rest = pipeParts.slice(1).join(" | ");
+    // `New York, NY / Hybrid | 2022 - Present` is logistics, while
+    // `Staff Platform Engineer | Juniper Relay` is an employment header.
+    if (!(EMPLOYMENT_DATE_RANGE_RE.test(rest) && /,|\//.test(first))) return true;
+  }
+
+  if (/\s(?:—|–)\s/.test(text) || /\s+at\s+/i.test(text)) return true;
+
+  // Plain title/company headings are often followed by a separate date or
+  // location/date line. This also catches layouts that omit visual separators.
+  return Boolean(nextLine && EMPLOYMENT_DATE_RANGE_RE.test(String(nextLine)));
+}
+
+// Blank lines in text extracted from PDFs frequently separate every bullet.
+// Experience records are employment blocks, so once role headers are present,
+// group by those headers instead of treating visual paragraph spacing as jobs.
+function splitExperienceBlocks(lines) {
+  const nextNonEmpty = lines.map((_line, index) => {
+    for (let i = index + 1; i < lines.length; i++) {
+      if (String(lines[i]).trim()) return lines[i];
+    }
+    return "";
+  });
+  const hasRoleHeaders = lines.some((line, index) =>
+    looksLikeRoleHeader(line, nextNonEmpty[index])
+  );
+  if (!hasRoleHeaders) return splitBlocks(lines);
+
+  const blocks = [];
+  let current = [];
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
+    if (!String(line).trim()) continue;
+    if (looksLikeRoleHeader(line, nextNonEmpty[index]) && current.length) {
+      blocks.push(current.join("\n").trim());
+      current = [];
+    }
+    current.push(line);
+  }
+  if (current.length) blocks.push(current.join("\n").trim());
   return blocks.filter(Boolean);
 }
 
@@ -280,7 +368,7 @@ export function parseResume(text) {
 
   // Build sections output.
   const sections = {
-    experience: splitBlocks(buckets.experience),
+    experience: splitExperienceBlocks(buckets.experience),
     education: splitBlocks(buckets.education),
     skills: tokenizeSkills(buckets.skills),
     projects: splitBlocks(buckets.projects),
@@ -332,10 +420,52 @@ function stripBullet(line) {
   return line.replace(/^[\s\-*•]+/, "").trim();
 }
 
+function isBulletLine(line) {
+  return /^\s*[-*•]/.test(line);
+}
+
+// Resume text is usually hard-wrapped; a bullet's continuation lines are the
+// non-bullet lines that follow it. Join them back so each claim is a whole
+// accomplishment, not a mid-sentence fragment. Non-bullet lines that don't
+// follow a bullet (headers, date ranges) stand alone.
+function joinWrappedLines(lines) {
+  const logical = [];
+  let previousWasBullet = false;
+  for (const raw of lines) {
+    const line = raw.trim();
+    if (!line) {
+      previousWasBullet = false;
+      continue;
+    }
+    if (isBulletLine(raw) || !previousWasBullet || !logical.length) {
+      logical.push(line);
+      previousWasBullet = isBulletLine(raw);
+    } else {
+      logical[logical.length - 1] += ` ${line}`;
+    }
+  }
+  return logical;
+}
+
+// A bare employment date range ("2021 - Present", "2018 – 2021") has digits
+// but is not an accomplishment.
+function isDateRange(line) {
+  return /^\d{4}\s*[-–—]\s*(\d{4}|present|current|now)$/i.test(line);
+}
+
+function isEmploymentMetadata(line) {
+  const text = stripMarkdownHeading(line);
+  if (!text) return false;
+  if (looksLikeRoleHeader(line)) return true;
+  if (isDateRange(text)) return true;
+  return EMPLOYMENT_DATE_RANGE_RE.test(text) && (/\||,|\//.test(text) || /^\d{4}/.test(text));
+}
+
 // Determine if a line qualifies as an accomplishment.
 function isAccomplishment(line) {
   const stripped = stripBullet(line);
   if (!stripped) return false;
+  if (isEmploymentMetadata(stripped)) return false;
 
   // Check for a strong past-tense accomplishment verb early in the line.
   // We look at the first few words (up to 4) to find the verb.
@@ -359,7 +489,7 @@ export function deriveEvidenceSeed(parsed) {
   let counter = 1;
 
   for (const block of sources) {
-    const lines = block.split("\n");
+    const lines = joinWrappedLines(block.split("\n"));
     for (const line of lines) {
       if (!isAccomplishment(line)) continue;
       const claim = stripBullet(line);
@@ -368,11 +498,129 @@ export function deriveEvidenceSeed(parsed) {
       claims.push({
         id,
         claim,
-        evidence: "Source: resume. Verify scope and outcome before use.",
+        evidence: "Source: candidate resume (user-provided).",
       });
       counter++;
     }
   }
 
   return { claims };
+}
+
+// ---------------------------------------------------------------------------
+// deriveTargetingSeed
+// ---------------------------------------------------------------------------
+
+const MAX_TARGETING_TITLES = 6;
+
+// Separators that can join a job title to the rest of a header line (company,
+// location, employment type, ...). Order here does not decide precedence —
+// splitTitleFromHeader() picks whichever candidate occurs earliest in the
+// line — this list just enumerates what counts as a separator at all.
+const TITLE_SEPARATORS = [
+  / — /, // em dash
+  / – /, // en dash
+  / - /, // spaced hyphen only (never a hyphenated word like "full-stack")
+  / \| /,
+  / @ /,
+  / at /i, // word-bounded via the surrounding spaces
+  /, /,
+];
+
+// Strip leading markdown heading markers (#, ##, ###), bold markers (**),
+// bullet chars, and whitespace, repeatedly, so combinations like
+// "- **Title**" reduce down to "Title**" (only leading markers are in
+// scope — trailing bold asterisks, if any, are left for the plausibility
+// check downstream).
+function stripLeadingMarkers(line) {
+  let s = line;
+  let changed = true;
+  while (changed) {
+    changed = false;
+    const noSpace = s.replace(/^\s+/, "");
+    if (noSpace !== s) {
+      s = noSpace;
+      changed = true;
+      continue;
+    }
+    const noHeading = s.replace(/^#{1,3}\s*/, "");
+    if (noHeading !== s) {
+      s = noHeading;
+      changed = true;
+      continue;
+    }
+    const noBold = s.replace(/^\*\*/, "");
+    if (noBold !== s) {
+      s = noBold;
+      changed = true;
+      continue;
+    }
+    const noBullet = s.replace(/^[-*•]\s*/, "");
+    if (noBullet !== s) {
+      s = noBullet;
+      changed = true;
+    }
+  }
+  return s;
+}
+
+// Split a cleaned header line on whichever known separator occurs earliest
+// in the string, returning the left segment (the candidate title). Returns
+// the whole line unchanged if no separator is present.
+function splitTitleFromHeader(line) {
+  let bestIndex = -1;
+  for (const re of TITLE_SEPARATORS) {
+    const m = line.match(re);
+    if (m && (bestIndex === -1 || m.index < bestIndex)) {
+      bestIndex = m.index;
+    }
+  }
+  return bestIndex === -1 ? line : line.slice(0, bestIndex);
+}
+
+// Matches a bare 19xx/20xx year, the tell for a date-range fragment leaking
+// into the candidate title (e.g. a header line with no separator at all).
+const DATE_RANGE_RE = /\b(19|20)\d{2}\b/;
+
+function isPlausibleTitle(candidate) {
+  if (!candidate) return false;
+  if (candidate.length > 60) return false;
+  if (/\d/.test(candidate)) return false;
+  if (candidate.includes("@")) return false;
+  if (/http/i.test(candidate)) return false;
+  if (DATE_RANGE_RE.test(candidate)) return false;
+  return true;
+}
+
+// Derive a targeting-role seed from parsed experience blocks: each block's
+// header line yields at most one plausible job title, generic separator/
+// plausibility heuristics only (no hardcoded title/keyword lists — this repo
+// stays domain-neutral). Returns null when no title survives so callers can
+// skip sending an empty seed.
+export function deriveTargetingSeed(parsed) {
+  const blocks = parsed?.sections?.experience || [];
+  const titles = [];
+  const seen = new Set();
+
+  for (const block of blocks) {
+    const lines = block.split("\n");
+    const firstLine = lines.find((l) => l.trim() !== "");
+    if (!firstLine) continue;
+
+    const cleaned = stripLeadingMarkers(firstLine.trim());
+    const candidate = splitTitleFromHeader(cleaned).trim();
+    if (!isPlausibleTitle(candidate)) continue;
+
+    const key = candidate.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    titles.push(candidate);
+    if (titles.length >= MAX_TARGETING_TITLES) break;
+  }
+
+  if (!titles.length) return null;
+
+  return {
+    role_buckets: [{ name: "Primary", priority: "primary", titles }],
+  };
 }

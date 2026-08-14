@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-
+import { effectiveTargetingForRole } from "../src/core/deep-ingest/role-signal-overlay.mjs";
 import {
   anyMatched,
   evaluateCompensation,
@@ -402,6 +402,131 @@ describe("evaluateGate — clean high-fit primary-bucket job", () => {
     assert.equal(result.action, "apply-now");
     assert.equal(result.comp.verdict, "clear");
     assert.ok(["high", "med"].includes(result.fit.tier));
+  });
+});
+
+describe("confirmed role-signal targeting overlay", () => {
+  const roleTargeting = {
+    role_families: [{ name: "Applied AI", patterns: ["applied ai engineer"] }],
+    keep_signals: ["Agent Workflows"],
+    cut_signals: ["Model Training"],
+  };
+
+  it("applies only an exact-normalized family and keeps base spelling authoritative in dedupe", () => {
+    const result = effectiveTargetingForRole({
+      roleTitle: "Senior Applied AI Engineer",
+      targeting: roleTargeting,
+      roleSignals: [
+        {
+          id: "keep-duplicate",
+          roleFamily: "applied-ai",
+          signalType: "keep",
+          text: "agent workflows",
+        },
+        {
+          id: "keep-new",
+          roleFamily: "Applied_AI",
+          signalType: "keep",
+          text: "Customer prototypes",
+        },
+        {
+          id: "near-family",
+          roleFamily: "applied-ai-platform",
+          signalType: "cut",
+          text: "Must not fuzzy match",
+        },
+      ],
+    });
+
+    assert.deepEqual(result.targeting.keep_signals, ["Agent Workflows", "Customer prototypes"]);
+    assert.deepEqual(result.targeting.cut_signals, ["Model Training"]);
+    assert.equal(result.applied.family, "Applied AI");
+    assert.deepEqual(
+      result.applied.keep.map((row) => row.id),
+      ["keep-duplicate", "keep-new"]
+    );
+    assert.deepEqual(result.applied.cut, []);
+  });
+
+  it("returns targeting unchanged for an other or otherwise unresolvable family", () => {
+    const result = effectiveTargetingForRole({
+      roleTitle: "Unrelated Marketing Manager",
+      targeting: roleTargeting,
+      roleSignals: [
+        {
+          id: "must-not-apply",
+          roleFamily: "Applied AI",
+          signalType: "cut",
+          text: "campaign work",
+        },
+      ],
+    });
+
+    assert.strictEqual(result.targeting, roleTargeting);
+    assert.deepEqual(result.applied, { family: null, keep: [], cut: [] });
+  });
+
+  it("hard-cuts a matching derived cut exactly like a base cut and reports the applied row id", () => {
+    const job = {
+      frontmatter: { company: "ExampleCo", role: "Applied AI Engineer" },
+      body: "This role owns model training and production experimentation.",
+    };
+    const targeting = {
+      role_families: [{ name: "Applied AI", patterns: ["applied ai engineer"] }],
+      keep_signals: [],
+      cut_signals: [],
+      excluded_companies: [],
+    };
+    const profile = {
+      ...PROFILE,
+      compensation: { currency: "USD", minimum_base: 98000, target_base: 231000 },
+    };
+    const baseCut = evaluateGate({
+      job,
+      targeting: { ...targeting, cut_signals: ["model training"] },
+      profile,
+    });
+    const derivedCut = evaluateGate({
+      job,
+      targeting,
+      profile,
+      roleSignals: [
+        {
+          id: "cut-model-training",
+          roleFamily: "applied-ai",
+          signalType: "cut",
+          text: "model training",
+        },
+      ],
+    });
+
+    assert.deepEqual(
+      { gate: derivedCut.gate, action: derivedCut.action, reasons: derivedCut.reasons },
+      { gate: baseCut.gate, action: baseCut.action, reasons: baseCut.reasons }
+    );
+    assert.equal(derivedCut.gate, "CUT");
+    assert.deepEqual(derivedCut.appliedRoleSignalIds, ["cut-model-training"]);
+  });
+
+  it("keeps the pre-promotion evaluateGate result shape when roleSignals is not passed", () => {
+    const result = evaluateGate({
+      job: {
+        frontmatter: {
+          company: "ExampleCo",
+          role: "Solutions Engineer",
+          comp: "USD 98000-231000",
+        },
+        body: "Customer deployment work with agentic AI and LLM APIs.",
+      },
+      targeting: TARGETING,
+      profile: { ...PROFILE, compensation: { minimum_base: 98000, target_base: 231000 } },
+    });
+
+    assert.equal(
+      Object.hasOwn(result, "appliedRoleSignalIds"),
+      false,
+      "a no-signal call must remain byte-compatible with the pre-promotion return shape"
+    );
   });
 });
 

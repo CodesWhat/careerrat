@@ -1,0 +1,23 @@
+{
+  "name": "@careerrat/desktop",
+  "version": "0.7.0",
+  "private": true,
+  "type": "module",
+  "description": "Thin Electron shell over the CareerRat local server (M5 paid-POC deliverable).",
+  "author": "CodesWhat",
+  "main": "main.mjs",
+  "scripts": {
+    "dev": "node scripts/brand-dev-app.mjs && electron .",
+    "smoke": "node scripts/brand-dev-app.mjs && electron . --smoke",
+    "stage": "node scripts/stage.mjs",
+    "dist:local": "npm --prefix ../.. run app:build && npm run stage && electron-builder --mac dmg",
+    "release:dmg": "node scripts/release-dmg.mjs",
+    "verify:release": "node scripts/verify-release.mjs",
+    "dist": "npm run dist:local && npm run release:dmg && npm run verify:release"
+  },
+  "devDependencies": {
+    "electron": "43.0.0",
+    "electron-builder": "^26.15.3",
+    "sharp": "^0.35.0"
+  }
+}

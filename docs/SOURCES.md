@@ -1,6 +1,6 @@
 # Search Sources
 
-Rolester should pull from as many practical sources as it can without turning
+CareerRat should pull from as many practical sources as it can without turning
 scanner matches into apply decisions. Sources feed intake; `evaluate-job` still
 owns the body-read gate.
 
@@ -16,9 +16,47 @@ owns the body-read gate.
 - Manual/auth sources: support saved browser sessions, but mark them as
   interactive and do not require them for baseline setup.
 
+## Public Company Intelligence
+
+Public company intelligence helps CareerRat learn public company and careers-board
+metadata without mixing it with candidate-specific search state. It is stored in
+dedicated `public_*` SQLite tables and can be prepared for sync-home only after
+scrub validation passes.
+
+Public records may include:
+
+- company key, name, and domain
+- careers URL and public board URL
+- ATS/provider hint
+- confidence, freshness, provenance, and conflicts
+- scanner status and review reason
+
+Public records must not include:
+
+- resumes, profile data, applications, sourced rows, tracker ids, or private notes
+- compensation floors, fit scores, gate output, or candidate targeting
+- local paths, raw prompts, model text, page bodies, or individual job postings
+- private source config such as search queries or tracked company rows
+
+The scanner cascade runs in this order:
+
+1. Supported ATS APIs and known provider links.
+2. Deterministic public-page extraction for visible careers/job-board links.
+3. Metadata-only no-result handling for empty, blocked, robots-disallowed,
+   login-gated, and useless pages.
+4. Bounded AI fallback only for ambiguous reachable public text.
+5. Review queue for ambiguous or conflicting metadata.
+
+The review queue is intentionally quiet. Clean misses are recorded locally and do
+not ask the user anything. `Use supported ATS` is the only review action that can
+cross into source config, and only after deterministic validation proves a
+supported provider. `Keep public metadata`, `Refresh scan`, `Suppress review`,
+and `Escalate to agent` change public-intel review state only; escalation is
+explicit metadata and does not silently start chat.
+
 ## HiringCafe
 
-HiringCafe keeps filters inside the `searchState` query parameter. Rolester
+HiringCafe keeps filters inside the `searchState` query parameter. CareerRat
 should build that URL directly from a search string and optional `searchState`
 filters instead of clicking through the UI to configure searches.
 
@@ -83,7 +121,7 @@ Touch these files in order, replacing `<name>` with the provider key (lowercase,
 
 ## Curated Board Registry
 
-A domain-tagged menu of the board/aggregator providers Rolester ships support for
+A domain-tagged menu of the board/aggregator providers CareerRat ships support for
 (`implemented`) or has on the roadmap (`planned`). Skills read this table to offer a filtered
 starter menu — it is NOT a universal set of defaults. The `general` tag means suitable for all
 domains; domain-specific tags (e.g. `tech/software`, `tech/AI`, `remote`) indicate narrower scope.
@@ -120,7 +158,7 @@ never written here.
 - **Domain tag(s):** `general` = all domains; `tech/software` = software engineering domain only; `tech/AI` = AI/ML/agent roles; `remote` = remote-posture candidates across domains. Combine tags with commas for entries that span multiple.
 - **Type:** `aggregator` = collects from many sources; `ATS` = company-level ATS API adapter; `niche-board` = curated domain-specific board; `RSS` = feed-only.
 - **Confidence:** `high` = real dated listings, stable URL, identifiable companies; `medium` = unvetted but reputable; `borderline` = real but with noted quality caveats.
-- **Status:** `implemented` = provider code ships with Rolester; `planned` = on roadmap, not yet implemented.
+- **Status:** `implemented` = provider code ships with CareerRat; `planned` = on roadmap, not yet implemented.
 
 > **This shipped registry lists only field-neutral provider infrastructure.** Boards you
 > discover via `research-boards` are candidate-specific (they match your domain and role

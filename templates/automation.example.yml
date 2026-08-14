@@ -10,7 +10,7 @@
 #   3. consent.<name>                               (you've read that platform's ToS)
 # Miss any one and the agent will not act — it tells you which switch is off.
 #
-# NO STORED CREDENTIALS. Rolester never stores your passwords. The browser session
+# NO STORED CREDENTIALS. CareerRat never stores your passwords. The browser session
 # holds your logins: either the Chrome extension (preferred — it already has your
 # logins + password store) or a Playwright persistent profile you sign into once per
 # platform. See docs/BROWSER.md and AGENTS.md → Browser Automation Contract.
@@ -21,17 +21,18 @@
 # yes here, and NEVER runs on a schedule or without you in the loop.
 #
 # Don't hand-edit blindly — use the CLI (it validates + preserves these comments):
-#   rolester automation status                     show the full matrix
-#   rolester automation consent <platform> --write       record ToS consent
-#   rolester automation enable <capability> [platform] --write
-#   rolester automation disable <capability> [platform] --write
-#   rolester automation revoke <platform> --write        withdraw consent
+#   careerrat automation status                     show the full matrix
+#   careerrat automation consent <platform> --write       record ToS consent
+#   careerrat automation enable <capability> [platform] --write
+#   careerrat automation disable <capability> [platform] --write
+#   careerrat automation revoke <platform> --write        withdraw consent
 
 version: 1
+setup_mode: basic
 
 # ── ToS consent — one-time, per platform ──────────────────────────────────────
 # Set a platform true ONLY after you've read its automation terms. Withdraw with
-# `rolester automation revoke <platform> --write`.
+# `careerrat automation revoke <platform> --write`.
 consent:
   linkedin: false
   indeed: false
@@ -142,7 +143,7 @@ capabilities:
       outlook_calendar: false
       automation_tools: false
 
-  # Phase 8 — read-only free/busy ingestion. Lets Rolester see your existing
+  # Phase 8 — read-only free/busy ingestion. Lets CareerRat see your existing
   # commitments so it schedules interviews around them and renders "busy" blocks
   # on the Calendar. Busy times are stored OPAQUE — start/end only, no titles or
   # attendees. work_calendar = a work calendar open in your session browser
@@ -157,7 +158,7 @@ capabilities:
 
 # ── Session browser (tool-agnostic) ───────────────────────────────────────────
 # provider: extension (preferred — holds your logins) | playwright (persistent
-# profile you log into once per platform). profile_root null = ~/.rolester/board-profiles.
+# profile you log into once per platform). profile_root null = ~/.careerrat/board-profiles
 session:
   provider: extension
   profile_root: null

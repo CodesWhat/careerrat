@@ -4,6 +4,7 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
+  automationModePatch,
   automationStatus,
   CAPABILITIES,
   defaultAutomation,
@@ -65,6 +66,7 @@ test("automation consent: calendar_sync supports calendar providers and automati
 
 test("automation consent: mail_access defaults fully off", () => {
   const cfg = defaultAutomation();
+  assert.equal(cfg.setup_mode, "basic");
   assert.equal(cfg.consent.gmail, false);
   assert.equal(cfg.consent.outlook, false);
   assert.equal(cfg.consent.webmail, false);
@@ -91,6 +93,7 @@ test("automation consent: relationship_sourcing defaults fully off and uses the 
   cfg.capabilities.relationship_sourcing.enabled = true;
   cfg.capabilities.relationship_sourcing.platforms.linkedin = true;
   cfg.consent.linkedin = true;
+  cfg.setup_mode = "advanced";
 
   verdict = mayRun({ capability: "relationship_sourcing", platform: "linkedin", data: cfg });
   assert.equal(verdict.allowed, true);
@@ -114,6 +117,7 @@ test("automation consent: calendar_sync defaults fully off and uses the same pre
   cfg.capabilities.calendar_sync.enabled = true;
   cfg.capabilities.calendar_sync.platforms.google_calendar = true;
   cfg.consent.google_calendar = true;
+  cfg.setup_mode = "advanced";
 
   verdict = mayRun({ capability: "calendar_sync", platform: "google_calendar", data: cfg });
   assert.equal(verdict.allowed, true);
@@ -130,10 +134,44 @@ test("automation consent: mail_access uses the same three-switch predicate", () 
   cfg.capabilities.mail_access.enabled = true;
   cfg.capabilities.mail_access.platforms.gmail = true;
   cfg.consent.gmail = true;
+  cfg.setup_mode = "advanced";
 
   verdict = mayRun({ capability: "mail_access", platform: "gmail", data: cfg });
   assert.equal(verdict.allowed, true);
   assert.deepEqual(verdict.reasons, []);
+});
+
+test("Basic mode is a hard off switch and its patch revokes every capability, platform, and consent", () => {
+  const configured = defaultAutomation();
+  configured.setup_mode = "advanced";
+  configured.capabilities.messaging.enabled = true;
+  configured.capabilities.messaging.platforms.linkedin = true;
+  configured.consent.linkedin = true;
+  assert.equal(
+    mayRun({ capability: "messaging", platform: "linkedin", data: configured }).allowed,
+    true
+  );
+
+  const patch = automationModePatch("basic");
+  assert.equal(patch.setup_mode, "basic");
+  assert.equal(patch.capabilities.messaging.enabled, false);
+  assert.equal(patch.capabilities.messaging.platforms.linkedin, false);
+  assert.equal(patch.consent.linkedin, false);
+  assert.equal(
+    mayRun({ capability: "messaging", platform: "linkedin", data: patch }).allowed,
+    false
+  );
+  assert.deepEqual(automationModePatch("advanced"), { setup_mode: "advanced" });
+});
+
+test("Basic mode blocks a malformed stale live matrix even before it is cleared", () => {
+  const cfg = defaultAutomation();
+  cfg.capabilities.one_click_apply.enabled = true;
+  cfg.capabilities.one_click_apply.platforms.linkedin = true;
+  cfg.consent.linkedin = true;
+  const verdict = mayRun({ capability: "one_click_apply", platform: "linkedin", data: cfg });
+  assert.equal(verdict.allowed, false);
+  assert.match(verdict.reasons.join(" "), /Basic mode/);
 });
 
 test("automation consent: status output includes mail_access platforms", () => {

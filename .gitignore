@@ -2,14 +2,26 @@ node_modules/
 .env
 .env.local
 
-# Turborepo / website build artifacts
+# Local throwaway demo workspace seeded by scripts/demo-serve.sh
+# (CAREERRAT_HOME=./.demo-home) — never real data, never checked in.
+.demo-home/
+
+# Turborepo build artifacts. Each app owns its local Next/Vite output rules.
 .turbo/
-website/.next/
-website/out/
+
+# apps/web build artifacts (M7 SPA shell) — built fresh, shipped via
+# package.json#files["apps/web/dist"], same "gitignored generated release
+# artifact" pattern as the Next app outputs above.
+apps/web/dist/
+
+# apps/desktop build artifacts. staging/ (scripts/stage.mjs's extraResources
+# tree) needs an explicit ignore; apps/desktop/dist/ and apps/desktop/
+# node_modules/ are already covered by the bare `dist/` and `node_modules/`
+# patterns above (no path prefix = match at any depth).
+apps/desktop/staging/
 
 # build:demo static bundle (rebuilt per deploy so dates stay evergreen)
 dist/
-website/next-env.d.ts
 *.tsbuildinfo
 .vercel/
 
@@ -31,18 +43,27 @@ venv/
 
 # Agent worktrees / local agent state (the .claude/skills symlink stays tracked)
 .claude/worktrees/
+# Staged release tarballs and verification output
+.claude/skills-release-out/
 
 # Browser-automation / Playwright / verification screenshots are SCRATCH by
 # default. They belong under workspace/captures/ (ignored below) and must never
 # be committed to the repo root or workspace root. Backstop-ignore stray PNGs in
 # those two spots so apply/automation captures never clutter the tree — real
-# image assets live in assets/, website/public/, and mockups/. The tracked
+# image assets live in assets/, apps/website/public/, and app-specific trees. The tracked
 # mascot is the one root-PNG exception. Surface a capture in the app only by
 # writing it to a deliberately tracked path.
 /*.png
-!/rolester-rat.png
+!/careerrat-rat.png
 workspace/*.png
 tracker-*.png
+
+# Local QA evidence bundles (screenshots/logs, 100MB+) — the prose findings get
+# tracked via the roadmap, the raw evidence stays local.
+/qa/
+
+# Design handoff archives dropped at repo root — extracted where needed, never committed.
+/*.zip
 
 # Private working roadmap + internal planning docs (names the private origin,
 # competitor analysis, and personal context). The PUBLIC roadmap is docs/ROADMAP.md.
@@ -56,7 +77,18 @@ docs/COMPARISON.md
 .internal/
 
 # Consolidated local user data root (candidate/workspace/generated config/internal).
-.rolester/
+.careerrat/
+
+# Alternate CAREERRAT_HOME used by `npm run desktop:fresh` to boot the desktop
+# app against a clean data root (fresh onboarding / fresh-db smoke tests)
+# without touching the real .careerrat/ data root.
+#
+# Match ANY *-fresh data root, not just the current product name. A stale
+# pre-rename data root was once left unignored and a later `git add -A`
+# committed a real candidate profile. A name-specific pattern is one rename
+# away from repeating that failure.
+.careerrat-fresh/
+*-fresh/
 
 # Local candidate data
 /candidate/
@@ -76,6 +108,11 @@ config/search-sources.yml
 config/search-sources.json
 config/sourced-scan.json
 
+# User-local model-swap config (schema + example stay committed, see
+# config/ai.schema.json / config/ai.example.json). Holds an operator's chosen
+# model id(s) — no-code-change model swap must never ship a default choice.
+config/ai.json
+
 # Generated/private workspace data
 workspace/jobs/*
 workspace/tailored/*
@@ -93,6 +130,8 @@ workspace/tracker.*
 workspace/.snapshots/
 workspace/activity.jsonl
 workspace/activity.jsonl.bak
+workspace/usage-events.jsonl
+workspace/usage-events.jsonl.bak
 workspace/dashboard-data.js
 workspace/modes.json
 workspace/settings.json
@@ -111,3 +150,5 @@ workspace/setup-state.json
 !workspace/captures/.gitkeep
 !workspace/logos/.gitkeep
 !workspace/legacy/.gitkeep
+.vercel
+.env*

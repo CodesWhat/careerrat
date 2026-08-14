@@ -1,4 +1,4 @@
-// Dependency-free YAML reader/writer for Rolester's candidate-config subset.
+// Dependency-free YAML reader/writer for CareerRat's candidate-config subset.
 // Supports: block mappings, block sequences (scalars and mapping-items),
 // nested structures, quoted/unquoted scalars, booleans, numbers, null,
 // empty/flow empties ([] {}), and full-line / inline comments.

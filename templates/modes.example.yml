@@ -1,4 +1,4 @@
-# Optional mode switches. If this file is absent, Rolester behaves as:
+# Optional mode switches. If this file is absent, CareerRat behaves as:
 # usage_mode: standard
 # application_mode: balanced
 # agent_voice: standard
@@ -8,7 +8,7 @@
 #   standard - normal behavior
 #   full     - deepest discretionary work when asked
 #
-# application_mode controls what Rolester does AFTER discovery:
+# application_mode controls what CareerRat does AFTER discovery:
 #   selective   - broad discovery, stricter promotion/apply posture
 #   balanced    - normal gate behavior
 #   high-volume - broad discovery, more medium fits queued for review/application

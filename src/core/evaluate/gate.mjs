@@ -1,6 +1,7 @@
-// evaluate/gate.mjs — M4 evaluate-job gate logic for Rolester.
+// evaluate/gate.mjs — M4 evaluate-job gate logic for CareerRat.
 // Zero runtime dependencies. Node v24 ESM.
 
+import { effectiveTargetingForRole } from "../deep-ingest/role-signal-overlay.mjs";
 import { shouldReviewMediumBodyReadFits } from "../profile/modes.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
 import { extractCompBand } from "../scoring/sourced-scanner.mjs";
@@ -470,8 +471,15 @@ export function scoreFit({ body, title, targeting, _profile, bucket }) {
  * legitimacy.verdict === "suspect" → REVIEW/manual (never an auto-cut).
  * Otherwise → KEEP, action "apply-now".
  *
- * @param {{ job, targeting, profile, honesty, modes?, now?, scanHistory? }} args
- * @returns {{ gate, fit, comp, location, legitimacy, action, reasons }}
+ * `roleSignals` (optional, confirmed deep-ingest role-signal rows) is resolved
+ * against this posting's title via `effectiveTargetingForRole()` BEFORE any
+ * targeting-derived check runs (bucket match, fit score, comp, hard-cuts) —
+ * a matching `cut` row folds into `cut_signals` and gets the same hard-cut
+ * semantics as a base cut signal. With no rows (or none matching), the
+ * effective targeting is identical to `targeting` and behavior is unchanged.
+ *
+ * @param {{ job, targeting, profile, honesty, modes?, now?, scanHistory?, roleSignals? }} args
+ * @returns {{ gate, fit, comp, location, legitimacy, action, reasons, appliedRoleSignalIds }}
  */
 export function evaluateGate({
   job,
@@ -482,6 +490,7 @@ export function evaluateGate({
   now,
   scanHistory,
   tracker,
+  roleSignals,
 }) {
   const frontmatter = job?.frontmatter ? job.frontmatter : {};
   const body = String(job?.body ? job.body : "");
@@ -490,14 +499,36 @@ export function evaluateGate({
 
   const reasons = [];
 
+  // --- role-signal overlay: ephemeral merge of confirmed keep/cut rows into
+  // targeting, resolved for THIS posting's title, before any targeting-derived
+  // check reads keep_signals/cut_signals/etc. Never written back; targeting
+  // stays the authoritative base (see role-signal-overlay.mjs contract).
+  const overlay = effectiveTargetingForRole({ roleTitle: title, targeting, roleSignals });
+  const effectiveTargeting = overlay.targeting;
+  // Only callers that opt into role signals get the attribution field —
+  // legacy callers must receive a byte-identical result object.
+  const roleSignalExtras =
+    roleSignals === undefined
+      ? {}
+      : {
+          appliedRoleSignalIds: [...overlay.applied.keep, ...overlay.applied.cut].map((s) => s.id),
+        };
+
   // --- locate bucket ---
-  const bucket = matchedTitleBucket(title, targeting);
+  const bucket = matchedTitleBucket(title, effectiveTargeting);
 
   // --- fit score ---
-  const fit = scoreFit({ body, title, targeting, profile, bucket });
+  const fit = scoreFit({ body, title, targeting: effectiveTargeting, profile, bucket });
 
   // --- comp ---
-  const comp = evaluateCompensation({ body, frontmatter, profile, bucket, tracker, targeting });
+  const comp = evaluateCompensation({
+    body,
+    frontmatter,
+    profile,
+    bucket,
+    tracker,
+    targeting: effectiveTargeting,
+  });
 
   // --- location ---
   const location = evaluateLocation({ body, frontmatter, profile });
@@ -511,8 +542,10 @@ export function evaluateGate({
   // -----------------------------------------------------------------------
   // Hard-cut checks
   // -----------------------------------------------------------------------
-  const cutSignals = targeting?.cut_signals ? targeting.cut_signals : [];
-  const excludedCompanies = targeting?.excluded_companies ? targeting.excluded_companies : [];
+  const cutSignals = effectiveTargeting?.cut_signals ? effectiveTargeting.cut_signals : [];
+  const excludedCompanies = effectiveTargeting?.excluded_companies
+    ? effectiveTargeting.excluded_companies
+    : [];
 
   let hardCut = false;
 
@@ -571,7 +604,7 @@ export function evaluateGate({
   // (e) fit floor — a body-read fit score below the configured floor is an
   // auto-drop, not a question for the candidate. Domain-neutral: the threshold
   // lives in targeting.fit_bands.fit_floor; with none configured, nothing drops.
-  const fitFloorRaw = targeting?.fit_bands?.fit_floor;
+  const fitFloorRaw = effectiveTargeting?.fit_bands?.fit_floor;
   const fitFloor =
     fitFloorRaw != null && Number.isFinite(Number(fitFloorRaw)) ? Number(fitFloorRaw) : null;
   if (fitFloor != null && fit.score < fitFloor) {
@@ -592,6 +625,7 @@ export function evaluateGate({
       legitimacy,
       action: "cut",
       reasons,
+      ...roleSignalExtras,
     };
   }
 
@@ -628,7 +662,7 @@ export function evaluateGate({
   }
 
   // Degree check (soft — caveat only, not a hard cut per spec)
-  const degreePolicy = targeting?.degree_policy ? targeting.degree_policy : "";
+  const degreePolicy = effectiveTargeting?.degree_policy ? effectiveTargeting.degree_policy : "";
   const graduateDegreeToken = ["mas", "ter"].join("");
   const degreeRequirementPattern = new RegExp(
     `\\b(bachelor|${graduateDegreeToken}|phd|degree required)\\b`,
@@ -652,6 +686,7 @@ export function evaluateGate({
           ? "hold"
           : "manual",
       reasons: reviewReasons,
+      ...roleSignalExtras,
     };
   }
 
@@ -665,6 +700,7 @@ export function evaluateGate({
     legitimacy,
     action: "apply-now",
     reasons,
+    ...roleSignalExtras,
   };
 }
 

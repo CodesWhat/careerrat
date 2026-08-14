@@ -1,6 +1,6 @@
 // learnings.mjs — the safe read/append primitive for per-role-family learning files.
 //
-// Rolester compounds: it should get better at each role-track the more the user
+// CareerRat compounds: it should get better at each role-track the more the user
 // runs it. Durable lessons live in per-role-family markdown files at
 // `candidate/learnings/<family>.md` (see AGENTS.md → Learning Memory). Three
 // skills WRITE them (track-outcomes, reevaluate-strategy, interview-prep); three

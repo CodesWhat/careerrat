@@ -1,20 +1,21 @@
 #!/usr/bin/env node
-// Rolester evaluate CLI — run the body-read gate on a saved job posting.
+// CareerRat evaluate CLI — run the body-read gate on a saved job posting.
 //
 // Usage:
-//   rolester evaluate <path-to-job.md>     Emit GATE/FIT/COMP/ACTION
-//   rolester evaluate <path> --json        Full machine-readable verdict
-//   rolester evaluate --help
+//   careerrat evaluate <path-to-job.md>     Emit GATE/FIT/COMP/ACTION
+//   careerrat evaluate <path> --json        Full machine-readable verdict
+//   careerrat evaluate --help
 //
 // Reads candidate/targeting.yml, candidate/profile.yml, candidate/honesty.yml.
 import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { dbExists } from "../core/db/connection.mjs";
+import { deepIngestConfirmedForGeneration } from "../core/db/verbs/index.mjs";
 import { evaluateGate, parseSavedJob, renderGateBlock } from "../core/evaluate/gate.mjs";
-import { userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
 
 const root = join(fileURLToPath(new URL("../..", import.meta.url)));
 const args = process.argv.slice(2);
@@ -27,7 +28,7 @@ if (args.includes("--help") || args.includes("-h") || args.length === 0) {
 
 const jobArg = args.find((a) => !a.startsWith("-"));
 if (!jobArg) {
-  console.error("Provide a saved job markdown path. See: rolester evaluate --help");
+  console.error("Provide a saved job markdown path. See: careerrat evaluate --help");
   process.exit(1);
 }
 
@@ -37,9 +38,9 @@ if (!existsSync(jobPath)) {
   process.exit(1);
 }
 
-const targeting = loadYaml("candidate/targeting.yml");
-const profile = loadYaml("candidate/profile.yml");
-const honesty = loadYaml("candidate/honesty.yml") || {};
+const targeting = loadCandidateDoc("targeting", { repoRoot: root });
+const profile = loadCandidateDoc("profile", { repoRoot: root });
+const honesty = loadCandidateDoc("honesty", { repoRoot: root }) || {};
 const modes = loadModes({ root });
 if (!targeting || !profile) {
   console.error("Need candidate/targeting.yml and candidate/profile.yml. Run: npm run ingest");
@@ -51,6 +52,17 @@ if (!modes.valid) {
   process.exit(1);
 }
 
+// DB-backed workspaces fold confirmed role-signal rows into the gate; YAML-only
+// workspaces are unchanged (evaluateGate treats no rows as a no-op).
+let roleSignals;
+if (dbExists({ repoRoot: root })) {
+  try {
+    roleSignals = deepIngestConfirmedForGeneration({ repoRoot: root }).roleSignals;
+  } catch {
+    roleSignals = undefined;
+  }
+}
+
 const job = parseSavedJob(readFileSync(jobPath, "utf8"));
 const result = evaluateGate({
   job,
@@ -59,6 +71,7 @@ const result = evaluateGate({
   honesty,
   modes: modes.data,
   now: new Date(),
+  roleSignals,
 });
 
 if (json) {
@@ -77,19 +90,13 @@ process.exit(result.gate === "KEEP" ? 0 : result.gate === "REVIEW" ? 2 : 1);
 
 // ---------------------------------------------------------------------------
 
-function loadYaml(rel) {
-  const path = userPath({ repoRoot: root }, rel);
-  if (!existsSync(path)) return null;
-  return parseYaml(readFileSync(path, "utf8"));
-}
-
 function printHelp() {
-  console.log(`rolester evaluate — run the body-read gate on a saved job
+  console.log(`careerrat evaluate — run the body-read gate on a saved job
 
 Usage:
-  rolester evaluate <path-to-job.md>     Emit GATE / FIT / COMP / ACTION
-  rolester evaluate <path> --json        Full machine-readable verdict
-  rolester evaluate --help
+  careerrat evaluate <path-to-job.md>     Emit GATE / FIT / COMP / ACTION
+  careerrat evaluate <path> --json        Full machine-readable verdict
+  careerrat evaluate --help
 
 Exit codes: 0 KEEP, 2 REVIEW, 1 CUT (or error).
 Inputs: candidate/targeting.yml, candidate/profile.yml, candidate/honesty.yml.`);

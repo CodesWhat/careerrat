@@ -5,6 +5,7 @@ import test from "node:test";
 import { buildSearchSources } from "../src/core/profile/generate-search-sources.mjs";
 import { validate } from "../src/core/profile/schema-validator.mjs";
 import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { buildLocationFilter } from "../src/core/scoring/sourced-scanner.mjs";
 
 // ---------------------------------------------------------------------------
 // Load the real schema
@@ -90,13 +91,54 @@ test("buildSearchSources: location_filter.allow includes Remote, home, and reloc
   assert.ok(allow.includes("San Francisco, CA"), "missing relocation city 2");
 });
 
-test("buildSearchSources: location_filter.always_allow and block are empty arrays", () => {
+test("buildSearchSources: US home derives a country-aware filter that blocks foreign roles", () => {
   const result = buildSearchSources(targeting, profile);
-  assert.deepEqual(result.location_filter.always_allow, []);
-  assert.deepEqual(result.location_filter.block, []);
+  const filter = buildLocationFilter(result.location_filter);
+
+  assert.ok(result.location_filter.always_allow.includes("Austin, TX"));
+  assert.ok(result.location_filter.allow.includes("United States"));
+  assert.ok(result.location_filter.block.includes("India"));
+  assert.equal(result.location_filter.needs_location, false);
+  assert.equal(filter("Austin, TX"), true);
+  assert.equal(filter("United States"), true);
+  assert.equal(filter("Indianapolis, Indiana, US"), true);
+  assert.equal(filter("Bangalore, India"), false);
+  assert.equal(filter("San Francisco, Chinatown, CA"), true);
 });
 
-test("buildSearchSources: every searches item has provider, label, enabled===true, and a query", () => {
+test("buildLocationFilter preserves punctuation-led state and multi-word allow terms", () => {
+  const filter = buildLocationFilter({
+    always_allow: [],
+    allow: [", NY", "United States", "North America"],
+    block: [],
+  });
+
+  assert.equal(filter("Albany, NY"), true);
+  assert.equal(filter("Remote — United States"), true);
+  assert.equal(filter("Remote — North America"), true);
+});
+
+test("buildSearchSources: remote posture allows remote roles", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    location: { home: "", remote: true, relocation: [] },
+  });
+
+  assert.equal(result.location_filter.needs_location, false);
+  assert.equal(buildLocationFilter(result.location_filter)("Remote"), true);
+});
+
+test("buildSearchSources: no home, relocation, or remote posture needs a location", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    location: { home: "", remote: false, relocation: [] },
+  });
+
+  assert.equal(result.location_filter.needs_location, true);
+  assert.equal(buildLocationFilter(result.location_filter)("Remote"), false);
+});
+
+test("buildSearchSources: every searches item has provider, label, and a query/url/rssUrl; non-board items are enabled by default", () => {
   const result = buildSearchSources(targeting, profile);
   for (const item of result.searches) {
     assert.ok(
@@ -107,18 +149,87 @@ test("buildSearchSources: every searches item has provider, label, enabled===tru
       typeof item.label === "string" && item.label.length > 0,
       `missing label: ${JSON.stringify(item)}`
     );
-    assert.equal(item.enabled, true, `enabled must be true: ${JSON.stringify(item)}`);
+    // Board-wide aggregator entries (RemoteOK/Remotive/Working Nomads) are seeded
+    // present-but-disabled for non-tech domains/titles so any domain can flip them
+    // on later; every other generated entry stays enabled regardless.
+    if (item.source_type !== "board") {
+      assert.equal(item.enabled, true, `enabled must be true: ${JSON.stringify(item)}`);
+    }
     // Every item must satisfy anyOf: query, url, or rssUrl.
     const hasSource = "query" in item || "url" in item || "rssUrl" in item;
     assert.ok(hasSource, `item missing query/url/rssUrl: ${JSON.stringify(item)}`);
   }
 });
 
-test("buildSearchSources: no RemoteVibeCodingJobs when domain is absent", () => {
-  // The shared profile fixture has no candidate.domain — must not produce tech-only boards.
+test("buildSearchSources: no RemoteVibeCodingJobs when domain and titles are both non-tech", () => {
+  // Domain absent AND no title in any bucket looks tech-shaped — the
+  // inferTechFromTargeting() fallback must stay false, same as the old
+  // domain-only gate did for every non-tech candidate.
+  const nonTechTargeting = {
+    role_buckets: [
+      { name: "Primary", priority: "primary", titles: ["Registered Nurse", "Nurse Practitioner"] },
+    ],
+  };
+  const result = buildSearchSources(nonTechTargeting, profile);
+  const rvEntries = result.searches.filter((s) => s.provider === "RemoteVibeCodingJobs");
+  assert.equal(
+    rvEntries.length,
+    0,
+    "RemoteVibeCodingJobs must not appear when domain is absent and titles aren't tech-shaped"
+  );
+});
+
+test("buildSearchSources: RemoteVibeCodingJobs appears when domain is absent but a majority of titles look tech", () => {
+  // The shared `targeting` fixture's titles ("Forward Deployed Engineer",
+  // "Applied AI Engineer", "Solutions Engineer") all contain "Engineer" —
+  // domain absent should now fall back to that title-inference signal
+  // instead of defaulting to general-only aggregators.
   const result = buildSearchSources(targeting, profile);
   const rvEntries = result.searches.filter((s) => s.provider === "RemoteVibeCodingJobs");
-  assert.equal(rvEntries.length, 0, "RemoteVibeCodingJobs must not appear when domain is absent");
+  assert.equal(
+    rvEntries.length,
+    1,
+    "RemoteVibeCodingJobs must appear when a majority of configured titles look tech"
+  );
+  assert.equal(rvEntries[0].rssUrl, "https://remotevibecodingjobs.com/feed.xml");
+  assert.equal(
+    result.searches
+      .filter((source) => source.source_type === "board")
+      .every((source) => source.enabled === true),
+    true,
+    "all seeded boards must be enabled when every configured title looks tech-shaped"
+  );
+});
+
+test("buildSearchSources: empty-domain title inference requires a strict tech-title majority", () => {
+  const cases = [
+    {
+      label: "majority non-tech",
+      titles: ["Software Engineer", "Registered Nurse", "Clinical Manager"],
+    },
+    { label: "exact 50/50", titles: ["Software Engineer", "Registered Nurse"] },
+    { label: "zero titles", titles: [] },
+  ];
+
+  for (const { label, titles } of cases) {
+    const result = buildSearchSources(
+      { role_buckets: [{ name: "Primary", priority: "primary", titles }] },
+      profile
+    );
+
+    assert.equal(
+      result.searches.some((source) => source.provider === "RemoteVibeCodingJobs"),
+      false,
+      `${label} must not enable the tech RSS source`
+    );
+    assert.equal(
+      result.searches
+        .filter((source) => source.source_type === "board")
+        .every((source) => source.enabled === false),
+      true,
+      `${label} must keep every seeded board disabled`
+    );
+  }
 });
 
 test("buildSearchSources: exactly one RemoteVibeCodingJobs entry with rssUrl when domain is tech", () => {
@@ -136,6 +247,90 @@ test("buildSearchSources: exactly one RemoteVibeCodingJobs entry with rssUrl whe
   assert.ok(
     typeof rvEntries[0].rssUrl === "string" && rvEntries[0].rssUrl.length > 0,
     "rssUrl must be a non-empty string"
+  );
+});
+
+test("buildSearchSources: seeds exactly three enabled lowercase board providers for tech", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    candidate: { ...profile.candidate, domain: "software engineering" },
+  });
+  const boards = result.searches.filter((source) => source.source_type === "board");
+
+  assert.deepEqual(
+    boards.map(({ provider, source_type, enabled, enabled_reason }) => ({
+      provider,
+      source_type,
+      enabled,
+      enabled_reason,
+    })),
+    [
+      {
+        provider: "remoteok",
+        source_type: "board",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+      {
+        provider: "remotive",
+        source_type: "board",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+      {
+        provider: "workingnomads",
+        source_type: "board",
+        enabled: true,
+        enabled_reason: "domain-gate",
+      },
+    ]
+  );
+});
+
+test("buildSearchSources: seeds the same three boards disabled for healthcare", () => {
+  const result = buildSearchSources(targeting, {
+    ...profile,
+    candidate: { ...profile.candidate, domain: "nursing and healthcare" },
+  });
+  const boards = result.searches.filter((source) => source.source_type === "board");
+
+  assert.deepEqual(
+    boards.map(({ provider, source_type, enabled }) => ({ provider, source_type, enabled })),
+    [
+      { provider: "remoteok", source_type: "board", enabled: false },
+      { provider: "remotive", source_type: "board", enabled: false },
+      { provider: "workingnomads", source_type: "board", enabled: false },
+    ]
+  );
+  assert.equal(
+    result.searches.some((source) => source.provider === "RemoteVibeCodingJobs"),
+    false,
+    "an explicit non-tech domain must override all-tech title inference"
+  );
+});
+
+test("buildSearchSources: explicit tech domain enables tech sources despite non-tech titles", () => {
+  const result = buildSearchSources(
+    {
+      role_buckets: [
+        { name: "Primary", priority: "primary", titles: ["Registered Nurse", "Clinical Manager"] },
+      ],
+    },
+    {
+      ...profile,
+      candidate: { ...profile.candidate, domain: "software engineering" },
+    }
+  );
+
+  assert.equal(
+    result.searches.some((source) => source.provider === "RemoteVibeCodingJobs"),
+    true
+  );
+  assert.equal(
+    result.searches
+      .filter((source) => source.source_type === "board")
+      .every((source) => source.enabled === true),
+    true
   );
 });
 

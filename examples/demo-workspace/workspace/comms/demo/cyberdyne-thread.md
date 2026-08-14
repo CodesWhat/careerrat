@@ -1,13 +1,13 @@
 # Cyberdyne Systems — Email Thread Export
 **Application:** Staff ML Engineer (demo-app-5)
 **Thread exported:** 2026-06-06
-**Parties:** Riley Chen (riley.chen@rolester.dev) ↔ Priya Desai, Recruiting Manager (priya.desai@cyberdyne.example)
+**Parties:** Riley Chen (riley.chen@careerrat.dev) ↔ Priya Desai, Recruiting Manager (priya.desai@cyberdyne.example)
 
 ---
 
 ## Message 1 — 2026-05-15
 **From:** careers@cyberdyne.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Application Received — Staff ML Engineer at Cyberdyne Systems
 
 > Thank you for applying to the Staff ML Engineer role on our Neural-Net Division ML Platform team.
@@ -20,7 +20,7 @@
 
 ## Message 2 — 2026-05-17
 **From:** priya.desai@cyberdyne.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Staff ML Engineer at Cyberdyne — quick intro call?
 
 > Hi Riley,
@@ -43,7 +43,7 @@
 ---
 
 ## Message 3 — 2026-05-18
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** priya.desai@cyberdyne.example
 **Subject:** Re: Staff ML Engineer at Cyberdyne — quick intro call?
 
@@ -63,7 +63,7 @@
 
 ## Message 4 — 2026-05-22
 **From:** priya.desai@cyberdyne.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Re: Staff ML Engineer — next step: technical screen with Marcus Webb
 
 > Riley,
@@ -87,7 +87,7 @@
 
 ## Message 5 — 2026-06-04
 **From:** priya.desai@cyberdyne.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Cyberdyne onsite — schedule + logistics for June 5
 
 > Riley,
@@ -109,7 +109,7 @@
 ---
 
 ## Message 6 — 2026-06-06
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** priya.desai@cyberdyne.example
 **Subject:** Thank you — Staff ML Engineer onsite
 
@@ -126,4 +126,4 @@
 > Thanks again to you and the whole panel.
 >
 > Riley Chen
-> riley.chen@rolester.dev | +1-555-0148
+> riley.chen@careerrat.dev | +1-555-0148

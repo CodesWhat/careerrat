@@ -8,7 +8,7 @@
 ## Message 1 — Inbound | 2026-05-08
 
 **From:** no-reply@blackmesa-careers.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Application Received — Research Engineer
 
 ---
@@ -27,7 +27,7 @@ Black Mesa Talent Team
 ## Message 2 — Inbound | 2026-05-09
 
 **From:** chloe.park@blackmesa.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Research Engineer — Intro Call?
 
 ---
@@ -54,7 +54,7 @@ Black Mesa
 
 ## Message 3 — Outbound (sent) | 2026-05-09
 
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** chloe.park@blackmesa.example
 **Subject:** Re: Research Engineer — Intro Call?
 
@@ -75,7 +75,7 @@ Riley Chen
 ## Message 4 — Inbound | 2026-05-16
 
 **From:** chloe.park@blackmesa.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Next Steps — Technical Screen + Loop Schedule
 
 ---
@@ -102,7 +102,7 @@ Chloe
 ## Message 5 — Inbound | 2026-06-07
 
 **From:** chloe.park@blackmesa.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Onsite Confirmed — June 10 + a Note from Dr. Vance
 
 ---
@@ -129,7 +129,7 @@ Chloe
 
 ## Message 6 — Outbound (draft) | 2026-06-13
 
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** chloe.park@blackmesa.example
 **Subject:** Re: Following Up After Onsite
 

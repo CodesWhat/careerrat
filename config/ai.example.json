@@ -1,0 +1,5 @@
+{
+  "_comment": "Example no-code model-swap config. Copy to config/ai.json (gitignored) to pick a default model without touching any source file. An explicit ANTHROPIC_MODEL / ANTHROPIC_SMALL_FAST_MODEL env var always wins over this file; leaving a field null/absent falls back to the caller's or SDK's own default. Values may be native Anthropic model ids (e.g. \"claude-sonnet-5\") or upstream gateway slugs (e.g. \"anthropic/claude-sonnet-4.6\" via Vercel AI Gateway).",
+  "model": null,
+  "smallFastModel": null
+}

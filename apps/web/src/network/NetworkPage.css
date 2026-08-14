@@ -1,0 +1,631 @@
+/* apps/web/src/network/NetworkPage.css — styles for the reduced,
+   person-first Network candidate page (NETWORK_UX_RESEARCH.md target shape).
+   Self-contained: grows out of the same tokens the rest of the app uses
+   (--paper-surface/--paper-band/--card-radius/--row-radius/--coral/--ink/
+   --ink-soft/--label-tracking), does not touch styles/app.css. No colored
+   left-edge accent strips on any card or row — state goes in text, icon, and
+   the state pill, never a border-left or inset box-shadow. */
+
+.network {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 22px;
+}
+
+.network__hero {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.network__eyebrow {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  font-family: var(--label-font);
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
+.network__eyebrow strong {
+  color: var(--ink);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.network__title {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
+  font-size: clamp(48px, 5.4vw, 68px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 0.92;
+  text-wrap: balance;
+}
+
+.network__controls {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, auto) auto auto;
+  align-items: center;
+  gap: 10px;
+}
+
+.network__search input,
+.network__filter select {
+  width: 100%;
+  min-height: 42px;
+  padding: 0 13px;
+  border: 1px solid rgba(var(--rgb-line), 0.16);
+  border-radius: var(--row-radius);
+  background: var(--paper-surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.network__search input:focus-visible,
+.network__filter select:focus-visible {
+  outline: 2px solid var(--m-secondary);
+  outline-offset: 2px;
+}
+
+.network__result-count {
+  color: var(--ink-soft);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 11px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.network__empty {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(var(--rgb-line), 0.1);
+  border-radius: var(--card-radius);
+  background: var(--paper-band);
+}
+
+.network__empty p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.4;
+}
+
+.network__people-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.network__person-card {
+  display: flex;
+  min-width: 0;
+  min-height: 172px;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid rgba(var(--rgb-line), 0.08);
+  border-radius: var(--card-radius);
+  background: var(--paper-surface);
+  box-shadow: var(--card-shadow);
+  color: var(--ink);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition:
+    background 0.16s ease,
+    transform 0.16s ease;
+}
+
+.network__person-card:hover {
+  background: var(--paper-band);
+  transform: translateY(-1px);
+}
+
+.network__person-card:focus-visible {
+  outline: 2px solid var(--m-secondary);
+  outline-offset: 2px;
+}
+
+.network__person-card--closed {
+  opacity: 0.72;
+}
+
+.network__person-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.network__person-avatar {
+  display: inline-grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--coral);
+  color: var(--m-on-secondary);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 13px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.network__person-avatar--large {
+  width: 52px;
+  height: 52px;
+  font-size: 16px;
+}
+
+.network__company-mark .avatar {
+  border: 1px solid rgba(var(--rgb-line), 0.1);
+  background: var(--paper-surface);
+  box-shadow: none;
+}
+
+.network__person-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.network__person-name {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 17px;
+  font-weight: 900;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.network__person-role {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.network__person-foot {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.network__person-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.network__person-meta span {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 5px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.network__person-meta svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.network__pill {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 0 10px;
+  border-radius: var(--pill-radius);
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  font-family: var(--label-font);
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.network__pill svg {
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
+}
+
+.network__pill--safe {
+  background: var(--teal-light);
+  color: var(--teal);
+}
+
+.network__pill--caution {
+  background: var(--mustard-light);
+  color: var(--mustard);
+}
+
+.network__pill--closed {
+  background: var(--paper-band);
+  color: var(--ink-soft);
+}
+
+.network__pill--review {
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  border: 1px dashed rgba(var(--rgb-line), 0.28);
+}
+
+/* Sourcing — collapsed <details>, matching CalendarPage's Recent
+   section pattern; never rendered at all when empty (see SourcingSection). */
+.network__sourcing {
+  border: 1px solid rgba(var(--rgb-line), 0.1);
+  border-radius: var(--card-radius);
+  background: var(--paper-surface);
+  box-shadow: var(--card-shadow);
+}
+
+.network__sourcing summary {
+  padding: 14px 18px;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 900;
+  font-family: var(--label-font);
+  letter-spacing: var(--label-tracking);
+  list-style: none;
+  text-transform: uppercase;
+}
+
+.network__sourcing summary::-webkit-details-marker {
+  display: none;
+}
+
+.network__sourcing summary strong {
+  color: var(--ink);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.network__sourcing-body {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 18px 18px;
+}
+
+.network__source-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 0.9fr) minmax(90px, auto) minmax(160px, 1fr);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+}
+
+.network__source-actions {
+  display: flex;
+  grid-column: 2 / -1;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.network__source-actions .btn {
+  min-height: 34px;
+  padding: 0 12px;
+  font-size: 11px;
+}
+
+.network__source-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.network__source-main strong,
+.network__source-main small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.network__source-main small {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.network__source-platform {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 850;
+  font-family: var(--label-font);
+  letter-spacing: var(--label-tracking);
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.network__source-row p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+/* Drawer — inherits .job-drawer-overlay/.job-drawer chrome from app.css;
+   only the width and section-local layout live here. */
+.network__drawer {
+  width: min(520px, 100%);
+}
+
+.network__drawer-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding-right: 32px;
+}
+
+.network__drawer-header h2 {
+  margin: 0;
+  color: var(--ink);
+  font-family: "Archivo", "Geist Sans", system-ui, sans-serif;
+  font-size: clamp(24px, 3vw, 32px);
+  font-weight: 800;
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+}
+
+.network__drawer-header p {
+  margin: 4px 0 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.network__drawer-section {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid rgba(var(--rgb-line), 0.1);
+  border-radius: var(--card-radius);
+  background: var(--paper-surface);
+  box-shadow: var(--card-shadow);
+}
+
+.network__drawer-section h3 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 900;
+  line-height: 1.2;
+}
+
+.network__drawer-section p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.38;
+}
+
+.network__job-link {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  min-height: 44px;
+  padding: 0 14px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+  text-decoration: none;
+}
+
+.network__job-link:hover {
+  background: var(--paper-surface);
+}
+
+.network__job-link:focus-visible {
+  outline: 2px solid var(--m-secondary);
+  outline-offset: 2px;
+}
+
+.network__job-link svg {
+  width: 14px;
+  height: 14px;
+}
+
+.network__history {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.network__history li {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(var(--rgb-line), 0.1);
+}
+
+.network__history li:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.network__history-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.network__history-meta time,
+.network__history small {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 750;
+}
+
+@media (max-width: 760px) {
+  .network__controls {
+    grid-template-columns: minmax(0, 1fr) minmax(132px, auto);
+  }
+
+  .network__result-count {
+    order: 3;
+  }
+
+  .network__controls > .btn {
+    order: 4;
+  }
+}
+
+@media (max-width: 520px) {
+  .network__controls {
+    grid-template-columns: 1fr;
+  }
+
+  .network__controls > .btn,
+  .network__result-count {
+    width: 100%;
+  }
+}
+
+.network__contact-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  margin: 0;
+}
+
+.network__contact-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr);
+  align-items: baseline;
+  gap: 10px;
+}
+
+.network__contact-row dt {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+  font-family: var(--label-font);
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
+.network__contact-row dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.network__contact-link {
+  color: var(--sky);
+  text-decoration: none;
+}
+
+.network__contact-link:hover,
+.network__contact-link:focus-visible {
+  text-decoration: underline;
+}
+
+.network__chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.network__chip-row span {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0 10px;
+  border-radius: var(--pill-radius);
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.network__drawer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+@media (max-width: 1120px) {
+  .network__people-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 760px) {
+  .network {
+    gap: 18px;
+  }
+
+  .network__title {
+    font-size: 42px;
+  }
+
+  .network__people-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .network__source-row {
+    grid-template-columns: 1fr;
+  }
+}

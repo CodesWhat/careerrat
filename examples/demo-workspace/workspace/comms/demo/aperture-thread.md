@@ -8,7 +8,7 @@
 **Date:** 2026-05-14
 **Direction:** Inbound
 **From:** dana.white@aperturescience.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Forward Deployed Engineer — Aperture Science
 
 Hi Riley,
@@ -28,7 +28,7 @@ Recruiting Lead, Aperture Science
 ## Message 2
 **Date:** 2026-05-15
 **Direction:** Outbound (sent)
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** dana.white@aperturescience.example
 **Subject:** Re: Forward Deployed Engineer — Aperture Science
 
@@ -48,7 +48,7 @@ Riley
 **Date:** 2026-05-16
 **Direction:** Inbound
 **From:** dana.white@aperturescience.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Re: Forward Deployed Engineer — Aperture Science
 
 Riley,
@@ -66,7 +66,7 @@ Dana
 **Date:** 2026-06-05
 **Direction:** Inbound
 **From:** nadia.k@aperturescience.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Thank you — Aperture Science FDE loop
 
 Hi Riley,
@@ -86,7 +86,7 @@ Senior FDE, Aperture Science
 **Date:** 2026-06-14
 **Direction:** Inbound
 **From:** dana.white@aperturescience.example
-**To:** riley.chen@rolester.dev
+**To:** riley.chen@careerrat.dev
 **Subject:** Aperture Science — offer letter
 
 Riley,
@@ -113,7 +113,7 @@ Dana
 ## Message 6
 **Date:** 2026-06-15
 **Direction:** Outbound (sent)
-**From:** riley.chen@rolester.dev
+**From:** riley.chen@careerrat.dev
 **To:** dana.white@aperturescience.example
 **Subject:** Re: Aperture Science — offer letter
 

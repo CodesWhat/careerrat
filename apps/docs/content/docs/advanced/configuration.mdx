@@ -1,0 +1,88 @@
+---
+title: Configuration
+description: candidate/*.yml files, mode switches, and how to change settings without re-running onboarding.
+---
+
+## Initial setup
+
+Configuration is produced by `ingest-profile` during onboarding. You do not
+hand-edit the config files directly during setup — the agent interviews you and
+writes the files via validated CLI helpers.
+
+## Changing settings later
+
+To change any setting after onboarding without re-running the full interview:
+
+> change a setting / update my comp floor / add an excluded company
+> turn on browser automation / change my writing style
+
+The agent routes to `configure`, which:
+
+1. Shows your current state (`careerrat doctor`, `careerrat modes status`,
+   `careerrat automation status`).
+2. Routes each change to the canonical validated CLI helper (`careerrat gate`,
+   `careerrat modes`, `careerrat automation`) or the owning skill.
+3. Confirms before writing consequential changes.
+
+`configure` never becomes a separate mutation path — it routes through the same
+validated tools that the skills use.
+
+## Gate files and the gate helper
+
+When you state a new constraint mid-flow ("never that company", "below $190K is a
+no"), the agent writes it to the canonical config file so all other skills inherit
+it immediately. It uses `careerrat gate`:
+
+```bash
+careerrat gate exclude-company "Acme Corp"           # dry-run
+careerrat gate exclude-company "Acme Corp" --write   # commit
+careerrat gate comp-floor 180000 --write
+careerrat gate cut-signal "requires >25% travel" --write
+```
+
+Gate types: `exclude-company`, `cut-signal`, `keep-signal`, `comp-floor`,
+`comp-target`, `comp-expected`, `do-not-claim`, `do-not-fabricate`.
+
+## Mode switches
+
+`candidate/modes.yml` (optional) controls operational posture. If absent,
+defaults are `standard` usage, `balanced` application mode, and `standard` voice.
+
+```bash
+careerrat modes status                              # current values
+careerrat modes set usage lean --write             # change usage mode
+careerrat modes set application high-volume --write
+```
+
+| Mode | Options | Effect |
+|------|---------|--------|
+| `usage_mode` | `lean`, `standard`, `full` | How much discretionary work CareerRat runs (research, deep packets, board discovery) |
+| `application_mode` | `selective`, `balanced`, `high-volume` | Pursuit posture after discovery (thresholds, medium-fit review) |
+No mode relaxes the honesty, privacy, comp, or application-limit gates.
+
+## Browser automation switches
+
+```bash
+careerrat automation status                         # the live matrix
+careerrat automation consent linkedin --write       # record ToS consent
+careerrat automation enable status_polling all --write
+careerrat automation session extension --write      # preferred provider
+```
+
+See [Browser Automation](/advanced/browser-automation) for the full capability
+list and consent model.
+
+## Config files reference
+
+| File | Managed by | Purpose |
+|------|------------|---------|
+| `profile.yml` | `ingest-profile`, `configure` | Identity, comp, location, domain |
+| `targeting.yml` | `ingest-profile`, `careerrat gate` | Role targets, keep/cut signals, exclusions |
+| `evidence.yml` | `ingest-profile`, `careerrat evidence` | Accomplishment claims |
+| `honesty.yml` | `ingest-profile`, `careerrat gate` | Honesty boundaries |
+| `form-defaults.yml` | `ingest-profile`, `configure` | Portal form answers |
+| `application-limits.yml` | `configure`, `careerrat gate` | Per-company caps and cooldowns |
+| `modes.yml` | `careerrat modes` | Usage and application posture |
+| `automation.yml` | `careerrat automation` | Browser capabilities |
+| `search-sources.yml` | `setup-searches`, `research-boards` | Job board and ATS sources |
+| `sourced-scan.json` | `discover-companies` | Tracked companies for the sweep |

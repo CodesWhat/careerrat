@@ -21,7 +21,7 @@ Reading/suggesting and writing carry different ToS exposure and intent, so they 
 independently gated through the same `mayRun()` three-part AND — turning on suggestions
 never implies write-back. Both halt on captcha / 2FA / login-wall.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 **Dry-run preview is the default and always the first move.** The skill always produces
 the full read-only before→after set first — everything it would flag and change, nothing
@@ -38,7 +38,7 @@ touch the profile until consent is confirmed.
 Run:
 
 ```
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect `capabilities.profile_optimize` and `capabilities.profile_apply` for platform
@@ -60,16 +60,16 @@ Resolve the run mode from the two verdicts:
 
   1. Read LinkedIn's terms yourself to confirm automated profile reads (and, for
      write-back, automated edits) are acceptable to you.
-  2. Record consent: `rolester automation consent linkedin --write`
-  3. Enable read+suggest: `rolester automation enable profile_optimize --write` then
-     `rolester automation enable profile_optimize linkedin --write`
-  4. Only if you also want write-back: `rolester automation enable profile_apply --write`
-     then `rolester automation enable profile_apply linkedin --write`
-  5. Verify: `rolester automation status --json`
+  2. Record consent: `careerrat automation consent linkedin --write`
+  3. Enable read+suggest: `careerrat automation enable profile_optimize --write` then
+     `careerrat automation enable profile_optimize linkedin --write`
+  4. Only if you also want write-back: `careerrat automation enable profile_apply --write`
+     then `careerrat automation enable profile_apply linkedin --write`
+  5. Verify: `careerrat automation status --json`
 
 State clearly: both capabilities are OFF by default; enabling either is a deliberate
 choice, and write-back is a separate switch from suggestions. The user reads the ToS
-themselves — Rolester records the decision but does not make it.
+themselves — CareerRat records the decision but does not make it.
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
 
@@ -83,7 +83,7 @@ The profile is rewritten **from the candidate's own data**, never invented. Read
 - `candidate/targeting.yml` — `role_buckets` / target titles, `keep_signals`,
   `cut_signals`. This is what the profile should *read for* — the target side.
 - `candidate/evidence.yml` — the claim bank. **Every proposed line must trace to a claim
-  here** (run `rolester evidence list` if useful). No claim → no line. This is the same
+  here** (run `careerrat evidence list` if useful). No claim → no line. This is the same
   honesty firewall `tailor-application` enforces.
 - `candidate/honesty.yml` — `education` policy, `tools.confirmed` / `tools.do_not_claim`,
   `claims.do_not_fabricate`. Overclaim caps apply to profile copy exactly as they do to a
@@ -99,7 +99,7 @@ diff against otherwise.
 Navigate to the candidate's own LinkedIn profile in the session browser. The session
 browser is Layer 3 per `docs/BROWSER.md`: prefer the Chrome extension (it already holds
 the user's login), fall back to a Playwright persistent profile the user signed into once
-(`~/.rolester/board-profiles/linkedin`).
+(`~/.careerrat/board-profiles/linkedin`).
 
 Snapshot or read the current page before reading anything. Drive the live DOM
 turn-by-turn; never rely on hardcoded selectors — the same model as `apply-job` and
@@ -186,7 +186,7 @@ wall-of-bullets. Match `writing-style.md`.
 
 Write the full set to a document the candidate can act on, in the loose `_linkedin/`
 bucket (per the Artifact Contract — a profile doc isn't a per-company round), e.g.
-`~/Downloads/rolester/_linkedin/linkedin-optimize-<yyyy-mm-dd>.md`, formatted current → proposed per
+`~/Downloads/careerrat/_linkedin/linkedin-optimize-<yyyy-mm-dd>.md`, formatted current → proposed per
 surface, with a one-line rationale and the backing evidence claim id for each change.
 Present the same diff inline to the user.
 
@@ -238,14 +238,14 @@ no connection requests, no reactions.
 
 For every field written in STEP 5, reload and re-read it live to confirm the new text is
 present and correct (quote it back to the user). The before→after document from STEP 4
-stays in `~/Downloads/rolester/` as the record of the pass — write it regardless of whether
+stays in `~/Downloads/careerrat/` as the record of the pass — write it regardless of whether
 anything was applied.
 
 Then log one event to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md), actor `agent`:
 
 ```
-rolester activity append --type system --actor agent \
+careerrat activity append --type system --actor agent \
   --title "LinkedIn profile pass" \
   --summary "<N surfaces reviewed, M fields applied (or 'suggest-only')>" \
   --url "<profile url>" --write
@@ -259,7 +259,7 @@ changes. The point is an honest profile that reads for the target roles, not a l
 ## RULES
 
 - **Opt-in, OFF by default, two separate gates.** Run a browser pass only where
-  `rolester automation status --json` shows the capability `allowed: true` for
+  `careerrat automation status --json` shows the capability `allowed: true` for
   `linkedin`. `profile_optimize` gates reading + suggesting; `profile_apply` separately
   gates write-back. The `allowed` field encodes the three-part AND (global switch ·
   platform switch · ToS consent) from `mayRun()` in `src/core/automation/consent.mjs` —
@@ -293,7 +293,7 @@ changes. The point is an honest profile that reads for the target roles, not a l
 
 - **Privacy invariant (hard).** `compensation.current_base` must never appear in any
   suggested or written profile copy, or in any artifact under `workspace/` /
-  `~/Downloads/rolester/`. Outbound-safe comp fields are `expected_base`, `target_base`,
+  `~/Downloads/careerrat/`. Outbound-safe comp fields are `expected_base`, `target_base`,
   and `minimum_base` only.
 
 - **Don't "fix" intentional styling.** A candidate's deliberate brand styling is a choice,
@@ -308,7 +308,7 @@ changes. The point is an honest profile that reads for the target roles, not a l
   tool.
 
 - **Local-only.** Scraped profile text, screenshots, and the before→after document stay
-  under `workspace/` or `~/Downloads/rolester/`. Nothing goes outbound. No credentials are
+  under `workspace/` or `~/Downloads/careerrat/`. Nothing goes outbound. No credentials are
   stored — the session browser holds the login.
 
 - **Read-only on everything but the candidate's own profile fields.** No messages, no

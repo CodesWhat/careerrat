@@ -1,12 +1,12 @@
 # Setup
 
-Rolester is a local, skill-driven job-search workspace. An agent (Claude Code,
+CareerRat is a local, skill-driven job-search workspace. An agent (Claude Code,
 Codex, or any AGENTS.md-aware tool) drives the workflow; the CLI scaffolds,
-renders, and serves the dashboard.
+renders, and serves the local app.
 
 ## Prerequisites
 
-- Node.js >= 18
+- Node.js >= 24
 - A coding-agent CLI on your PATH — Claude Code or Codex:
   - Claude Code:  `npm install -g @anthropic-ai/claude-code`  (<https://claude.com/claude-code>)
   - Codex:        `npm install -g @openai/codex`               (<https://github.com/openai/codex>)
@@ -14,22 +14,23 @@ renders, and serves the dashboard.
 ## Get It Running
 
 ```bash
-npm install -g rolester
-rolester start claude    # or: rolester start codex
+npm install -g careerrat
+careerrat start claude    # or: careerrat start codex
 ```
 
 Developing from a source checkout is the same command shape; link the local
 binary once:
 
 ```bash
-git clone https://github.com/CodesWhat/rolester
-cd rolester
+git clone https://github.com/CodesWhat/careerrat
+cd careerrat
 npm install
+npm run hooks:install
 npm link
-rolester start claude    # or: rolester start codex
+careerrat start claude    # or: careerrat start codex
 ```
 
-That scaffolds your workspace, installs the skills, opens the dashboard at
+That scaffolds your workspace, installs the skills, opens the local app at
 http://localhost:7777, and hands off to your agent. Then paste a job posting and say
 "evaluate this" — or try the bundled sample under `examples/sample-jobs/`.
 
@@ -38,20 +39,20 @@ http://localhost:7777, and hands off to your agent. Then paste a job posting and
 1. Scaffolds `candidate/` and `workspace/` directories (idempotent).
 2. Installs skills so Claude Code sees `/apply-job`, `/evaluate-job`, etc.
 3. Seeds `workspace/tracker.json` from the demo template (if not yet present).
-4. Boots the live dashboard at http://localhost:7777 with hot reload.
+4. Boots the live local app at http://localhost:7777 with hot reload.
 5. Launches your agent with the starter message that asks it to read
-   `AGENTS.md`, run `rolester doctor`, and follow the next unfinished skill.
+   `AGENTS.md`, run `careerrat doctor`, and follow the next unfinished skill.
 
-The first bare word picks the agent (`rolester start claude`, `rolester start
-codex`, or any CLI on your PATH). Omit it to use the first one found.
+The first bare word picks the agent (`careerrat start claude` or `careerrat start
+codex`). Omit it to use the first supported launcher found.
 
-Flags: `--no-agent` (scaffold + dashboard only), `--no-dashboard`,
+Flags: `--no-agent` (scaffold + local app only), `--no-dashboard`,
 `--agent <name>` (alias for the positional), `--port <n>`.
 
 ## Update Later
 
 ```bash
-rolester update     # fetches the latest published code; your data is untouched
+careerrat update     # fetches the latest published code; your data is untouched
 ```
 
 The update command pulls the latest release from npm and overwrites only the
@@ -62,20 +63,20 @@ code. Your `workspace/` and `candidate/` data are not touched.
 Prefer to open the agent yourself?
 
 ```bash
-npm install        # also runs install-skills via postinstall
-rolester doctor     # confirm the scaffold and environment
+careerrat install-skills
+careerrat doctor     # confirm the scaffold and environment
 ```
 
 Then open your agent in the repo root and send:
 
-> Read AGENTS.md, run rolester doctor, then guide me through the next unfinished Rolester skill.
+> Read AGENTS.md, run careerrat doctor, then guide me through the next unfinished CareerRat skill.
 
 The agent reads `AGENTS.md`, verifies the skills shim, and runs `ingest-profile`
 conversationally if the candidate profile is not yet set up.
 
 ## Candidate Setup
 
-`ingest-profile` (or `rolester ingest`) interviews you and produces these files
+`ingest-profile` (or `careerrat ingest`) interviews you and produces these files
 under `candidate/` (gitignored):
 
 - `profile.yml` — identity, location, comp floor and targets, domain/toolchain
@@ -88,43 +89,18 @@ under `candidate/` (gitignored):
 Until `ingest-profile` has run, the agent will prompt to complete onboarding
 before routing any other intent.
 
-`modes.yml` can also be managed later with `rolester modes`: `usage_mode` changes
-how much discretionary work Rolester runs, while `application_mode` changes how
+`modes.yml` can also be managed later with `careerrat modes`: `usage_mode` changes
+how much discretionary work CareerRat runs, while `application_mode` changes how
 aggressively it pursues already-discovered roles. If the file is absent, the safe
 defaults are `standard` usage and `balanced` application mode.
 
-## Setup Modes
+Setup starts as one plain-language conversation. It uses the résumé and facts
+already available, asks only for missing information, and saves progress after
+each settled answer. You can stop at any point and resume later. External browser,
+mail, calendar, messaging, and application permissions stay off until a concrete
+task needs one; CareerRat explains and asks for that specific capability then.
 
-When `ingest-profile` runs for the first time it asks two quick questions before
-the main interview begins.
-
-### Basic vs Advanced
-
-- **Basic** — read-only, manual workflow. The agent researches, drafts, and
-  guides; you copy/paste and click. No browser automation, no extension required.
-- **Advanced** — opt into the authenticated browser + mail capabilities (status
-  sync, authenticated search, in-platform message ingest, one-click apply,
-  profile optimization, and `mail_access` for provider-agnostic verification-code
-  reads via `webmail` plus Gmail/Outlook webmail ingest). Each
-  capability is still individually off by default; nothing runs until you read a
-  platform's terms, record consent, and enable it via `rolester automation`. The
-  Chrome extension is the preferred path (no separate credential store needed);
-  `rolester automation status` shows what's live. Choosing Advanced during
-  setup just surfaces the install guidance and opt-in prompts at the right moment
-  — you can enable or disable anything later.
-
-### Deep vs Shallow (and resume-later)
-
-- **Deep** — full onboarding interview in one session: identity, targets, comp,
-  location, evidence, honesty boundaries, writing-style calibration, and (in
-  Advanced mode) capability opt-ins.
-- **Shallow** — collect the minimum-viable config now, defer the rest. The skill
-  saves progress after each step to `workspace/setup-state.json` (written by the
-  agent; gitignored). Re-running `ingest-profile` (or `rolester ingest`) reads
-  that file and resumes from where you left off, so you can stop and come back
-  without losing ground.
-
-`rolester doctor` reports whether setup is complete or still in progress.
+`careerrat doctor` reports whether setup is complete or still in progress.
 
 ## Agent Files
 
@@ -136,33 +112,32 @@ filling, or submitting.
 
 ## Dashboard
 
-`rolester start` brings the dashboard up. To run it separately:
+`careerrat start` brings the dashboard up. To run it separately:
 
 ```bash
-rolester tracker        # one-shot snapshot → workspace/tracker.html
-rolester tracker-dev    # live-reloading dev server on :7777
+careerrat tracker        # snapshot tracker.json for recovery
+careerrat tracker-dev    # live-reloading dev server on :7777
 ```
 
-`rolester start [agent]` runs that dashboard as a separate local process and
+`careerrat start [agent]` runs that dashboard as a separate local process and
 writes `.internal/tracker-dev.pid` plus `.internal/tracker-dev.log`, so the page
 stays available while the launched agent works.
 
-`rolester tracker` publishes the dashboard shell plus
-`workspace/dashboard-data.js`. The live server serves those files alongside
-`workspace/tracker.json`, watches tracker data and dashboard source, and refreshes
-the open page over Server-Sent Events.
+`careerrat tracker` creates a deduplicated recovery snapshot and prints a summary.
+The live server reads the canonical database view directly, watches exported tracker
+state, and refreshes the open page over Server-Sent Events.
 
 ## Workspace Directories
 
 By default `workspace/` and `candidate/` are created inside the cloned repo.
-Set `ROLESTER_HOME` to put them somewhere else:
+Set `CAREERRAT_HOME` to put them somewhere else:
 
 ```bash
-export ROLESTER_HOME=~/rolester-data
-rolester start claude
+export CAREERRAT_HOME=~/careerrat-data
+careerrat start claude
 ```
 
-Everything under `ROLESTER_HOME` is gitignored and never touches the repo tree.
+Everything under `CAREERRAT_HOME` is gitignored and never touches the repo tree.
 Useful if you want to share one data directory across multiple checkouts or keep
 your personal files off a work machine's repo path.
 
@@ -180,7 +155,7 @@ Generated and private artifacts live under `workspace/` (gitignored):
 ## Health Check
 
 ```bash
-rolester doctor
+careerrat doctor
 ```
 
 Reports environment health, skills discoverability, workspace scaffold state,

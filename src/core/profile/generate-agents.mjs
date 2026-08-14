@@ -9,8 +9,8 @@
  *
  * @param {object} opts
  * @param {string} opts.template   - Full text of templates/AGENTS.md
- * @param {object} opts.profile    - Rolester candidate profile
- * @param {object} opts.targeting  - Rolester targeting config
+ * @param {object} opts.profile    - CareerRat candidate profile
+ * @param {object} opts.targeting  - CareerRat targeting config
  * @returns {string}
  */
 export function renderLocalAgents({ template, profile, targeting }) {

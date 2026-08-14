@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 
-// rolester stories — the safe read/validate/add helper for the STAR+R story bank.
+// careerrat stories — the safe read/validate/add helper for the STAR+R story bank.
 //
 // The story bank (candidate/stories.yml) is the behavioural-narrative layer over
 // evidence.yml: candidate-owned STAR+R stories that interview-prep assembles into
 // packets and reuses across interview loops (see AGENTS.md → Story Bank). Skills
 // call this instead of hand-editing the YAML, for the same reason they call
-// `rolester gate` / `rolester learnings`: one validator, one write path, one firewall.
+// `careerrat gate` / `careerrat learnings`: one validator, one write path, one firewall.
 //
 // Every story must trace to candidate/evidence.yml — `add` and `check` refuse a
 // story that cites no evidence, cites a claim id that doesn't exist, is missing a
@@ -28,6 +28,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { dbExists } from "../core/db/connection.mjs";
+import { kvGet, kvUpsert } from "../core/db/verbs.mjs";
 import {
   COMMON_COMPETENCIES,
   computeStoryEnrichment,
@@ -41,6 +43,7 @@ import {
   writeStories,
 } from "../core/interview/story-bank.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import { formatErrors, validate } from "../core/profile/schema-validator.mjs";
 import { parseYaml } from "../core/profile/yaml.mjs";
 import { writeTrackerJson } from "../core/tracker/tracker-writer.mjs";
@@ -78,9 +81,9 @@ const [verb, ...rest] = opts.positional;
 // Load evidence.yml claims (the trace target). Absent → empty, with a note.
 function loadEvidence() {
   const path = userPath(pathCtx, "candidate/evidence.yml");
-  if (!existsSync(path)) return { claims: [], path, exists: false };
   try {
-    const data = parseYaml(readFileSync(path, "utf8")) || {};
+    const data = loadCandidateDoc("evidence", pathCtx);
+    if (!data) return { claims: [], path, exists: false };
     return { claims: Array.isArray(data.claims) ? data.claims : [], path, exists: true };
   } catch (err) {
     return { claims: [], path, exists: true, error: err.message };
@@ -235,7 +238,7 @@ function cmdGaps() {
   for (const g of gaps) console.log(`  - ${g}`);
   console.log("");
   console.log(
-    "Draft a story for each from candidate/evidence.yml via interview-prep, then `rolester stories add`."
+    "Draft a story for each from candidate/evidence.yml via interview-prep, then `careerrat stories add`."
   );
 }
 
@@ -283,7 +286,7 @@ function cmdMatch(rest) {
   }
   if (matched.length === 0) {
     console.log(
-      "No stories matched these signals. `rolester stories gaps` shows what's uncovered."
+      "No stories matched these signals. `careerrat stories gaps` shows what's uncovered."
     );
     return;
   }
@@ -392,6 +395,35 @@ function cmdAdd() {
 function runEnrichmentSync({ write }) {
   const { stories } = loadStories({ root: opts.root });
   const entries = computeStoryEnrichment(stories);
+
+  if (dbExists(pathCtx)) {
+    let current;
+    try {
+      current = kvGet({ ...pathCtx, key: "storyEnrichment" });
+    } catch (err) {
+      return { ok: false, error: `read sqlite:kv.storyEnrichment: ${err.message}` };
+    }
+    const prevJson = JSON.stringify(Array.isArray(current) ? current : []);
+    const nextJson = JSON.stringify(entries);
+    const changed = prevJson !== nextJson;
+    if (changed && write) {
+      try {
+        kvUpsert({ ...pathCtx, key: "storyEnrichment", value: entries });
+      } catch (err) {
+        return { ok: false, error: `write sqlite:kv.storyEnrichment: ${err.message}` };
+      }
+    }
+    return {
+      ok: true,
+      applicable: true,
+      trackerExists: true,
+      changed,
+      written: changed && write,
+      count: entries.length,
+      entries,
+    };
+  }
+
   const trackerPath = userPath(pathCtx, "workspace/tracker.json");
   if (!existsSync(trackerPath))
     return { ok: true, applicable: false, trackerExists: false, count: entries.length };
@@ -472,7 +504,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester stories — safe read/validate/add for the STAR+R story bank
+  console.log(`careerrat stories — safe read/validate/add for the STAR+R story bank
 
 Usage:
   node src/cli/stories.mjs list [--json]
@@ -506,5 +538,5 @@ Options:
   --limit N          Max stories from match (default 6).
   --write            Commit the add (default: dry run).
   --json             Machine-readable output.
-  --root DIR         Repo root (default: the rolester install).`);
+  --root DIR         Repo root (default: the careerrat install).`);
 }

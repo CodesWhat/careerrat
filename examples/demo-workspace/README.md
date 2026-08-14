@@ -1,6 +1,6 @@
 # Demo Workspace
 
-This directory is a tracked, fictional Rolester workspace fixture for demos,
+This directory is a tracked, fictional CareerRat workspace fixture for demos,
 website builds, screenshots, and docs.
 
 It intentionally contains no real candidate data. The tracker data is copied from

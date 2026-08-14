@@ -1,5 +1,5 @@
-# Git hooks for Rolester. Installed via `npx lefthook install` (runs through the
-# `prepare` npm script after `npm install`).
+# Git hooks for CareerRat. Install them in a source checkout with
+# `npm run hooks:install`.
 #
 # Adoption is incremental: Biome enforces only on the files a commit actually
 # touches (so the pre-existing lint backlog doesn't block work), while the fast
@@ -11,7 +11,7 @@ pre-commit:
   parallel: true
   jobs:
     - name: biome
-      glob: "*.{js,mjs,cjs,ts,json}"
+      glob: "*.{js,mjs,cjs,jsx,ts,tsx,json}"
       run: npx biome check --write --no-errors-on-unmatched {staged_files}
       stage_fixed: true
     - name: structure-guards

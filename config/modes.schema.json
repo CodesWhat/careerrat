@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/modes.schema.json",
-  "title": "Rolester Modes",
+  "$id": "https://careerrat.local/schemas/modes.schema.json",
+  "title": "CareerRat Modes",
   "type": "object",
   "additionalProperties": false,
   "properties": {

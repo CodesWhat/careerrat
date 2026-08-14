@@ -1,0 +1,62 @@
+---
+title: Keeping Current
+description: How to pull the latest code without touching your data.
+---
+
+CareerRat is published to npm as `careerrat@latest`. The update command pulls the
+latest code and overwrites only the code files. Your `workspace/` and `candidate/`
+data are never touched.
+
+## Update command
+
+```bash
+careerrat update
+```
+
+The update does a privacy-guarded tarball extract: it downloads the latest
+published package, unpacks only the code files, and replaces them in your
+checkout. It never touches your `candidate/` directory or `workspace/` data.
+
+## What gets updated
+
+- `bin/` — the CLI
+- `src/` — scripts and core logic
+- `.agents/skills/*/SKILL.md` — all 21 skill definitions
+- `config/*.schema.json` — schemas (your data files are validated against these)
+- `templates/` — scaffolding templates (your existing files are not overwritten)
+
+## What is never touched
+
+- `candidate/` — your profile, targeting config, evidence bank, honesty
+  boundaries, form defaults, modes, automation consent
+- `workspace/` — tracker data, tailored artifacts, comms, research, activity log
+- Any file that is gitignored in the repo
+
+## Checking your version
+
+```bash
+careerrat --version
+# or
+careerrat doctor
+```
+
+`doctor` reports your current version alongside environment and scaffold state.
+
+## After an update
+
+If the update added schema changes, run `careerrat tracker --verify` to confirm your
+tracker data is still valid:
+
+```bash
+careerrat tracker --verify
+```
+
+Skill definitions are picked up automatically the next time you open your agent —
+no reinstall needed. If your agent does not see new skills after an update, run:
+
+```bash
+careerrat install-skills
+```
+
+That re-shims `.claude/skills` → `.agents/skills` for Claude Code (or creates a
+copied tree where symlinks are not available).

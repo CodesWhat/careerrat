@@ -1,4 +1,4 @@
-// Dependency-free JSON Schema (draft-2020-12 subset) validator for Rolester.
+// Dependency-free JSON Schema (draft-2020-12 subset) validator for CareerRat.
 // Supports the exact keyword subset used by config/*.schema.json.
 
 // ---------------------------------------------------------------------------
@@ -54,6 +54,16 @@ function validateNode(data, schema, path, errors) {
         path,
         message: `value ${JSON.stringify(data)} is not one of the allowed values`,
       });
+    }
+  }
+
+  // --- numeric range ---
+  if (typeof data === "number" && Number.isFinite(data)) {
+    if (typeof schema.minimum === "number" && data < schema.minimum) {
+      errors.push({ path, message: `must be at least ${schema.minimum}` });
+    }
+    if (typeof schema.maximum === "number" && data > schema.maximum) {
+      errors.push({ path, message: `must be at most ${schema.maximum}` });
     }
   }
 

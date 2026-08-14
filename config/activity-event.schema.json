@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/activity-event.schema.json",
-  "title": "Rolester Activity Event",
+  "$id": "https://careerrat.local/schemas/activity-event.schema.json",
+  "title": "CareerRat Activity Event",
   "type": "object",
   "additionalProperties": false,
   "required": ["id", "at", "type", "title"],
@@ -35,7 +35,7 @@
     },
     "actor": {
       "type": "string",
-      "description": "agent = a Rolester skill did it (gets the ✦ Rolester marker); world = something happened to the candidate (inbound mail, status change).",
+      "description": "agent = a CareerRat skill did it (gets the ✦ CareerRat marker); world = something happened to the candidate (inbound mail, status change).",
       "enum": ["agent", "world"]
     },
     "title": {

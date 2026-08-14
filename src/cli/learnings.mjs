@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 
-// rolester learnings — the safe read/append helper for per-role-family learning files.
+// careerrat learnings — the safe read/append helper for per-role-family learning files.
 //
-// Rolester compounds: each role-track gets sharper the more it is run. Durable
+// CareerRat compounds: each role-track gets sharper the more it is run. Durable
 // lessons live in `candidate/learnings/<family>.md` (see AGENTS.md → Learning
 // Memory). Skills call this instead of re-deriving the family slug in prose and
-// hand-appending markdown — the same reason they call `rolester gate` instead of
+// hand-appending markdown — the same reason they call `careerrat gate` instead of
 // hand-editing YAML.
 //
 // Usage:
@@ -27,7 +27,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { userPath } from "../core/paths/workspace.mjs";
+import { loadCandidateDoc } from "../core/profile/config-store.mjs";
 import {
   appendLearning,
   computeAppend,
@@ -38,7 +38,6 @@ import {
   resolveFamilySlug,
   slugifyFamily,
 } from "../core/profile/learnings.mjs";
-import { parseYaml } from "../core/profile/yaml.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
@@ -71,10 +70,8 @@ const [verb, ...rest] = opts.positional;
 
 // Load the candidate's targeting taxonomy once (drives slug classification).
 function loadTargeting() {
-  const path = userPath({ repoRoot: opts.root }, "candidate/targeting.yml");
-  if (!existsSync(path)) return undefined;
   try {
-    return parseYaml(readFileSync(path, "utf8"));
+    return loadCandidateDoc("targeting", { repoRoot: opts.root }) || undefined;
   } catch {
     return undefined;
   }
@@ -249,7 +246,7 @@ function fail(msg) {
 }
 
 function printHelp() {
-  console.log(`rolester learnings — safe read/append for per-role-family learning files
+  console.log(`careerrat learnings — safe read/append for per-role-family learning files
 
 Usage:
   node src/cli/learnings.mjs list [--json]
@@ -271,7 +268,7 @@ Options:
   --date YMD     ISO date for the entry (default: today).
   --write        Commit the append (default: dry run).
   --json         Machine-readable output.
-  --root DIR     Repo root (default: the rolester install).
+  --root DIR     Repo root (default: the careerrat install).
 
 Role titles are classified to a family via candidate/targeting.yml (role_families →
 role_buckets → neutral slug). Appended entries are checked for placeholder residue

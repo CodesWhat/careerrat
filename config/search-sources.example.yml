@@ -1,6 +1,6 @@
-# Rolester search-source configuration — EXAMPLE / TEMPLATE.
+# CareerRat search-source configuration — EXAMPLE / TEMPLATE.
 #
-# Rolester ships NO role, geography, or company defaults. Copy this file to
+# CareerRat ships NO role, geography, or company defaults. Copy this file to
 # config/search-sources.yml (gitignored) and replace every placeholder below with
 # YOUR OWN targets. The values here are illustrative placeholders, not recommendations.
 
@@ -70,6 +70,40 @@ searches:
     label: "Lever – acme"
     url: "https://jobs.lever.co/acme"
     enabled: true
+
+  # Board-wide aggregator feeds — unauthenticated, whole-board JSON feeds (not
+  # scoped to one company or one saved search). scanBoards() (sourced-scanner.mjs)
+  # fetches every enabled source_type:"board" entry whose `provider` has a fetcher
+  # in BOARD_PROVIDERS, then applies title_filter/location_filter above the same
+  # as any other lane. Auto-seeded for EVERY domain (buildSearchSources) so a
+  # fresh install always has at least one working deterministic source — enabled
+  # by default only when candidate.domain is a tech domain, or (when domain is
+  # absent/empty) a majority of the candidate's own targeting titles look
+  # tech-shaped — present-but-disabled otherwise so any domain can flip one on.
+  # Only these three providers are wired today; "Jobicy" and "We Work Remotely"
+  # below in source_catalog.remote_boards are reference labels only — no
+  # fetcher exists for them yet. `enabled_reason: "domain-gate"` marks these as
+  # machine-set by that gate (not a manual edit) so a later regeneration can
+  # re-sync `enabled` instead of a stale value shadowing it forever — remove
+  # the property if you hand-toggle one of these to opt it out of re-sync.
+  - provider: "remoteok"
+    source_type: "board"
+    label: "RemoteOK"
+    url: "https://remoteok.com/api"
+    enabled: true
+    enabled_reason: "domain-gate"
+  - provider: "remotive"
+    source_type: "board"
+    label: "Remotive"
+    url: "https://remotive.com/api/remote-jobs"
+    enabled: true
+    enabled_reason: "domain-gate"
+  - provider: "workingnomads"
+    source_type: "board"
+    label: "Working Nomads"
+    url: "https://www.workingnomads.com/api/exposed_jobs/"
+    enabled: true
+    enabled_reason: "domain-gate"
 
 tracked_companies: []
 

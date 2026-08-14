@@ -7,7 +7,7 @@ tier_2_inputs: [per-thread message bodies]
 
 # ingest-messages
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — CONSENT GATE (hard stop)
 
@@ -19,7 +19,7 @@ until consent is confirmed.
 Run:
 
 ```
-rolester automation status --json
+careerrat automation status --json
 ```
 
 Inspect the `capabilities.messaging` entry. The applicable platforms are `linkedin`
@@ -34,13 +34,13 @@ stop — do not open a browser:
 
 1. Read the platform's terms of service yourself to confirm automated messaging reads
    are permitted.
-2. Record consent: `rolester automation consent <platform> --write`
-3. Enable the capability global switch: `rolester automation enable messaging --write`
-4. Enable for the specific platform: `rolester automation enable messaging <platform> --write`
-5. Verify: `rolester automation status --json`
+2. Record consent: `careerrat automation consent <platform> --write`
+3. Enable the capability global switch: `careerrat automation enable messaging --write`
+4. Enable for the specific platform: `careerrat automation enable messaging <platform> --write`
+5. Verify: `careerrat automation status --json`
 
 State clearly: this capability is OFF by default; enabling it is a deliberate choice.
-The user must read the platform ToS themselves before recording consent — Rolester
+The user must read the platform ToS themselves before recording consent — CareerRat
 records the decision but does not make it.
 
 This skill is always user-initiated. Never run it unprompted or on a schedule.
@@ -69,7 +69,7 @@ For each allowed platform, navigate to that platform's messages or DM inbox URL 
 the session browser. The session browser is Layer 3 per `docs/BROWSER.md`: prefer
 the Chrome extension (it already holds the user's logins), fall back to a Playwright
 persistent profile the user has signed into once
-(`~/.rolester/board-profiles/<platform>`).
+(`~/.careerrat/board-profiles/<platform>`).
 
 Before reading anything, snapshot or read the current page state. Drive the live DOM
 turn-by-turn. Never rely on hardcoded selectors — the same model as `apply-job`.
@@ -101,8 +101,8 @@ recruiting-relevance and match threads to tracker applications in STEP 4.
 ## STEP 4 — MATCH TO TRACKER
 
 Read `workspace/tracker.json` (already loaded in STEP 1). Also read
-`candidate/targeting.yml` for `excluded_companies` and any company/domain signals
-relevant at match time.
+candidate targeting config through the shared DB-first accessor for
+`excluded_companies` and any company/domain signals relevant at match time.
 
 For each thread from STEP 3, attempt matching in priority order:
 
@@ -178,7 +178,49 @@ the platform.
 
 ## STEP 6 — CAPTURE TO TRACKER
 
-For each confirmed-matched thread, update `workspace/tracker.json` directly.
+**Mode detection:** run `careerrat data status`. Exit 0 → DB workspace — use the
+`careerrat data <verb>` commands below (Data Write Contract, AGENTS.md). Nonzero
+exit → legacy workspace (no DB yet) — use the direct `workspace/tracker.json`
+instructions further down in this step.
+
+**DB workspace:** for each confirmed-matched thread:
+
+1. Save any long raw body to `workspace/comms/<thread-id>.md` as before. This
+   artifact file write is local-only and is unaffected by DB vs legacy mode.
+2. Find or create the parent communication row by patching the full
+   communication object and persisting it:
+
+   ```bash
+   careerrat data comm upsert --data '<full communication row JSON>'
+   ```
+
+3. Append each newly captured message in chronological order:
+
+   ```bash
+   careerrat data comm append-message <comm-id> --data '<message JSON>'
+   ```
+
+4. If the thread changes parent communication state (`status`, `lastInboundAt`,
+   `nextAction`, `nextActionDue`, `draft`), patch the full communication row
+   from the current exported tracker state and persist it again:
+
+   ```bash
+   careerrat data comm upsert --data '<patched full communication row JSON>'
+   ```
+
+5. For outcome-signal threads, follow STEP 7: defer intermediate `needs-reply`
+   writes, hand the outcome to `track-outcomes`, then persist only the resolved
+   communication state after `track-outcomes` returns. Do not hand-edit
+   `tracker.json` or `activity.jsonl` in DB mode.
+
+The communication verbs bump/export/log Activity Pulse events automatically.
+Add a richer inbound-thread event only if needed with
+`careerrat data activity append --data '<activity JSON>'`. The message shape,
+status-transition rules, privacy invariant, and gate write-back rules below
+apply in both modes.
+
+**Legacy workspace (no DB):** for each confirmed-matched thread, update
+`workspace/tracker.json` directly.
 
 Find or create the `communications[]` record with fields:
 `id`, `applicationId`, `company`, `role`, `status`, `summary`.
@@ -240,22 +282,22 @@ Privacy invariant: `summary` and `artifactPath` content must never echo
 If the user states a new gate mid-flow (e.g., "never follow up with this company",
 "add them to excluded"), apply the write-back rule using this discriminator:
 
-- **Write directly and report** (`Written to <file>: <key: value>`) when the change
-  affects only the single application in scope (e.g., set `nextAction: none` on one
-  record, add one company to `excluded_companies`).
+- **Write directly and report** when the change affects only the single
+  application in scope (e.g., set `nextAction: none` on one record) or is a
+  low-blast-radius supported gate (`careerrat gate cut-signal` / `keep-signal`).
 - **Confirm first** when the change affects more than one application or has broad
   downstream effects (e.g., a comp floor change, adding a wildcard domain exclusion).
 
-Route each gate type to its canonical file:
-- Company exclusion → `candidate/targeting.yml#excluded_companies[]`
-- Comp floor change → `candidate/profile.yml#compensation.minimum_base`
+Route each gate type through its owning command:
+- Company exclusion → `careerrat gate exclude-company "<Company>" --write --confirm`
+- Comp floor change → `careerrat gate comp-floor <N> --write --confirm`
 - Per-application follow-up pause → `workspace/tracker.json` (that record's
   `nextAction`/`nextActionDue`)
 
 Then log each inbound thread to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). One event per inbound thread captured, actor `world`:
 
 ```
-rolester activity append --type message --actor world \
+careerrat activity append --type message --actor world \
   --title "<Company> messaged" --summary "<one-line summary>" \
   --company "<Company>" --app-id <application id> --write
 ```
@@ -283,66 +325,70 @@ draft the response.
 
 ## STEP 8 — WRITE WATERMARK
 
-For each platform successfully polled, upsert the following object into
-`tracker.json`'s `sources[]` array:
+For each platform successfully polled, write the source watermark.
+
+**DB workspace:**
+
+```bash
+careerrat data source watermark --at <ISO-8601 timestamp of now> --data '<source JSON or JSON array>'
+```
 
 LinkedIn:
+
 ```json
-{
-  "id": "linkedin-messages",
-  "kind": "linkedin-messages",
-  "name": "LinkedIn Messages",
-  "lastRunAt": "<ISO-8601 timestamp of now>"
-}
+{ "id": "linkedin-messages", "kind": "linkedin-messages", "name": "LinkedIn Messages", "lastRunAt": "<ISO-8601 timestamp of now>" }
 ```
 
 Wellfound:
+
 ```json
-{
-  "id": "wellfound-messages",
-  "kind": "wellfound-messages",
-  "name": "Wellfound Messages",
-  "lastRunAt": "<ISO-8601 timestamp of now>"
-}
+{ "id": "wellfound-messages", "kind": "wellfound-messages", "name": "Wellfound Messages", "lastRunAt": "<ISO-8601 timestamp of now>" }
 ```
 
-If an entry with the matching `id` already exists, update only `lastRunAt`.
-If no such entry exists, insert the full object.
+When both platforms were polled, pass a JSON array containing both objects.
+`source watermark` updates `sources[]` and `meta.lastSweepAt`, exports tracker
+files, and intentionally does not bump `meta.version`, `meta.lastUpdatedAt`, or
+Activity Pulse.
 
+**Legacy workspace (no DB):** upsert the same object(s) into
+`tracker.json#sources[]`. If an entry with the matching `id` already exists,
+update only `lastRunAt`. If no such entry exists, insert the full object.
 Write the changes directly to `workspace/tracker.json`.
 
-## STEP 9 — VERIFY + RE-RENDER
+## STEP 9 — VERIFY + SNAPSHOT
 
-Run in sequence:
-
-```bash
-rolester tracker --verify
-```
-
-Must exit 0. If it fails, do not proceed — show the validation errors and ask the
-user how to resolve them.
+**DB workspace:**
 
 ```bash
-rolester tracker --followups
+careerrat data verify
+careerrat tracker --verify
+careerrat tracker --followups
+careerrat tracker --summary
 ```
 
-Confirm new threads appear in the follow-ups surface.
+Both verify commands must exit 0. If either fails, do not proceed — show the
+validation errors and ask the user how to resolve them. Confirm new threads
+appear in the follow-ups surface and message counts incremented for the
+matched applications. Run `careerrat tracker` afterward only when a recovery
+snapshot is useful.
+
+**Legacy workspace (no DB):**
 
 ```bash
-rolester tracker --summary
+careerrat tracker --verify
+careerrat tracker --followups
+careerrat tracker --summary
+careerrat tracker
 ```
 
-Confirm message counts incremented for the matched applications.
-
-```bash
-rolester tracker
-```
-
-Re-renders `workspace/tracker.html`.
+`careerrat tracker --verify` must exit 0. If it fails, do not proceed — show the
+validation errors and ask the user how to resolve them. Confirm new threads
+appear in the follow-ups surface and message counts incremented. The final
+command creates a deduplicated recovery checkpoint under `workspace/.snapshots/`.
 
 Print a final ingest summary. The counts in this summary are agent-composed from
 the running tallies kept during STEPS 4–7 — they are NOT parsed from CLI output
-(the CLI commands above confirm schema validity and rendering only, and do not
+(the CLI commands above confirm schema validity and snapshotting only, and do not
 emit these counts):
 
 ```
@@ -360,7 +406,7 @@ Ingest complete:
 
 ## RULES
 
-- **Opt-in, OFF by default.** Only poll platforms where `rolester automation status --json`
+- **Opt-in, OFF by default.** Only poll platforms where `careerrat automation status --json`
   shows `messaging` `allowed: true` for that platform. The `allowed` field encodes the
   three-part AND (global switch · platform switch · ToS consent) from `mayRun()` in
   `src/core/automation/consent.mjs` — never re-derive the predicate in prose.
@@ -384,7 +430,7 @@ Ingest complete:
 
 - **Tool-agnostic browser prose.** Say "the session browser," "snapshot or read the
   page." Prefer the Chrome extension (it holds existing logins); fall back to Playwright
-  with a one-time login pause (`~/.rolester/board-profiles/<platform>`). Never name an
+  with a one-time login pause (`~/.careerrat/board-profiles/<platform>`). Never name an
   MCP namespace or vendor tool.
 
 - **Local-only.** Message bodies, thread artifacts, and screenshots stay under

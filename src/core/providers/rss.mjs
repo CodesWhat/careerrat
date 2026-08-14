@@ -304,6 +304,20 @@ function parseLocationFromTitle(rawTitle) {
   return m ? m[1].trim() : null;
 }
 
+function parseLocationFromDescription(description) {
+  if (!description) return null;
+  const match = String(description).match(/^\s*Location:\s*([^\n\r]+)$/im);
+  return match ? match[1].trim() : null;
+}
+
+function feedDescriptionsArePreviews(source = {}) {
+  const identity = [source.provider, source.label, source.id, source.rssUrl, source.url]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return identity.includes("remotevibecodingjobs") || identity.includes("remote vibe coding jobs");
+}
+
 // ---------------------------------------------------------------------------
 // Stable slug/id generator
 // ---------------------------------------------------------------------------
@@ -355,11 +369,13 @@ function stableId(item) {
  */
 export function feedItemsToOffers(items, { source } = {}) {
   const sourceLabel = source?.label || source?.id || "rss";
+  const bodyPartial = feedDescriptionsArePreviews(source);
   return (Array.isArray(items) ? items : []).map((item) => {
     const url = item.link || item.guid || null;
     const rawTitle = item.title || "";
     const { company, role: _role } = parseCompanyFromTitle(rawTitle);
-    const location = parseLocationFromTitle(rawTitle);
+    const location =
+      parseLocationFromDescription(item.description) || parseLocationFromTitle(rawTitle);
 
     return {
       title: rawTitle,
@@ -367,6 +383,7 @@ export function feedItemsToOffers(items, { source } = {}) {
       company,
       location,
       description: item.description || null,
+      bodyPartial,
       postedAt: item.isoDate || null,
       source: sourceLabel,
       id: stableId(item),

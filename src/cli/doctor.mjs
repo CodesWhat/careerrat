@@ -1,10 +1,10 @@
 #!/usr/bin/env node
-// Node version guard — same minimum as bin/rolester.mjs.
+// Node version guard — same minimum as bin/careerrat.mjs.
 {
   const major = parseInt(process.versions.node.split(".")[0], 10);
   if (major < 18) {
     process.stderr.write(
-      `rolester requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
+      `careerrat requires Node.js >= 18 (you have ${process.versions.node}) — please upgrade.\n`
     );
     process.exit(1);
   }
@@ -16,13 +16,16 @@ import { fileURLToPath } from "node:url";
 import {
   buildAgentGuidance,
   formatAgentGuidanceLines,
+  readDiscoveryCompletions,
   readDiscoverySkips,
   readSetupState,
 } from "../core/agent-guidance.mjs";
 import { automationStatus, loadAutomation } from "../core/automation/consent.mjs";
 import { detectSession } from "../core/automation/session.mjs";
+import { sourceConfigGet } from "../core/db/verbs.mjs";
 import { loadStories } from "../core/interview/story-bank.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
+import { candidateConfigSource, loadCandidateConfig } from "../core/profile/config-store.mjs";
 import { loadEvidence } from "../core/profile/evidence-writer.mjs";
 import { listLearnings } from "../core/profile/learnings.mjs";
 import { loadModes } from "../core/profile/modes.mjs";
@@ -61,7 +64,7 @@ const userPrereqs = [
 const systemPrereqs = [
   "AGENTS.md",
   "CLAUDE.md",
-  "DATA_CONTRACT.md",
+  "docs/DATA_CONTRACT.md",
   "docs/ROADMAP.md",
   ".agents/skills/ingest-profile/SKILL.md",
   ".agents/skills/evaluate-job/SKILL.md",
@@ -106,7 +109,7 @@ function ensureUserDir(path) {
 
 // Skills are discoverable by Claude Code only when each source skill in
 // .agents/skills/ also resolves under .claude/skills/ (a symlink or copied
-// tree). `rolester install-skills` creates/repairs that shim.
+// tree). `careerrat install-skills` creates/repairs that shim.
 function skillNames() {
   const dir = join(root, ".agents", "skills");
   if (!existsSync(dir)) return [];
@@ -120,7 +123,10 @@ const skillsNotDiscoverable = sourceSkills.filter(
   (name) => !checkPath(join(".claude", "skills", name, "SKILL.md"))
 );
 
-const missingUser = userPrereqs.filter((item) => !checkUserPath(item.path));
+const candidateSource = candidateConfigSource(pathCtx);
+const candidateSetupReadiness = loadCandidateSetupReadiness();
+const missingUser =
+  candidateSource === "db" ? [] : userPrereqs.filter((item) => !checkUserPath(item.path));
 const missingSystem = systemPrereqs.filter((path) => !checkPath(path));
 for (const dir of workspaceDirs) ensureUserDir(dir);
 
@@ -129,12 +135,12 @@ for (const dir of workspaceDirs) ensureUserDir(dir);
 const learnings = listLearnings({ root });
 
 // STAR+R story bank (candidate/stories.yml). Informational only — an empty/absent
-// bank is normal before any interview prep, so it never fails. `rolester stories --
+// bank is normal before any interview prep, so it never fails. `careerrat stories --
 // check` is the dedicated validator.
 const storyBank = loadStories({ root });
 
 // Evidence truth bank (candidate/evidence.yml) claim count. Informational — presence
-// is already a hard prereq above; `rolester evidence check` is the validator.
+// is already a hard prereq above; `careerrat evidence check` is the validator.
 const evidenceBank = loadEvidence({ root });
 
 // Browser automation (candidate/automation.yml). Informational + opt-in — an
@@ -154,6 +160,7 @@ const sessionBrowser = detectSession({ data: automationData });
 // the explicit discovery-skip helper; read-only here.
 const setupState = readSetupState({ root });
 const discoverySkips = readDiscoverySkips({ root });
+const discoveryCompleted = readDiscoveryCompletions({ root });
 const setup = setupState
   ? {
       present: true,
@@ -163,6 +170,7 @@ const setup = setupState
       stepsRecorded: Array.isArray(setupState.completed) ? setupState.completed.length : 0,
       deferredCount: Array.isArray(setupState.deferred) ? setupState.deferred.length : 0,
       skippedDiscoverySteps: discoverySkips,
+      completedDiscoverySteps: discoveryCompleted,
     }
   : {
       present: false,
@@ -172,18 +180,22 @@ const setup = setupState
       stepsRecorded: 0,
       deferredCount: 0,
       skippedDiscoverySteps: discoverySkips,
+      completedDiscoverySteps: discoveryCompleted,
     };
 
 const searchReadiness = loadSearchReadiness();
 const companyAtsReadiness = loadCompanyAtsReadiness();
 const agentGuidance = buildAgentGuidance({
   missingUser,
+  candidateConfigSource: candidateSource,
   missingSystem,
   skillsNotDiscoverable,
   modes,
+  candidateSetupReadiness,
   searchReadiness,
   companyAtsReadiness,
   discoverySkips,
+  discoveryCompleted,
 });
 
 const result = {
@@ -191,7 +203,8 @@ const result = {
     missingUser.length === 0 &&
     missingSystem.length === 0 &&
     skillsNotDiscoverable.length === 0 &&
-    modes.valid,
+    modes.valid &&
+    (candidateSetupReadiness ? candidateSetupReadiness.readiness?.search_ready === true : true),
   missingUser,
   missingSystem,
   skillsNotDiscoverable,
@@ -220,10 +233,12 @@ const result = {
     detail: sessionBrowser.presence.detail,
   },
   setup,
+  candidateSetup: candidateSetupReadiness,
   discovery: {
     broadSources: searchReadiness,
     companyAts: companyAtsReadiness,
     skippedSteps: discoverySkips,
+    completedSteps: discoveryCompleted,
   },
   agentGuidance,
   dataRoot: userPaths.dataRoot,
@@ -234,7 +249,7 @@ if (json) {
   process.exit(result.ok ? 0 : 1);
 }
 
-console.log("rolester doctor");
+console.log("careerrat doctor");
 console.log("================");
 console.log("");
 console.log(`User data root: ${userPaths.dataRoot}`);
@@ -249,7 +264,7 @@ if (missingSystem.length > 0) {
 if (skillsNotDiscoverable.length > 0) {
   console.log("Skills not discoverable by Claude Code:");
   for (const name of skillsNotDiscoverable) console.log(`- ${name}`);
-  console.log("  fix: run `rolester install-skills` (shims .claude/skills -> .agents/skills).");
+  console.log("  fix: run `careerrat install-skills` (shims .claude/skills -> .agents/skills).");
   console.log("");
 }
 
@@ -271,37 +286,37 @@ if (learnings.length > 0) {
 
 if (evidenceBank.exists) {
   console.log(
-    `Evidence bank: ${evidenceBank.claims.length} claim${evidenceBank.claims.length === 1 ? "" : "s"} - validate with \`rolester evidence check\`.`
+    `Evidence bank: ${evidenceBank.claims.length} claim${evidenceBank.claims.length === 1 ? "" : "s"} - validate with \`careerrat evidence check\`.`
   );
   console.log("");
 }
 
 if (storyBank.exists) {
   console.log(
-    `Story bank: ${storyBank.stories.length} STAR+R stor${storyBank.stories.length === 1 ? "y" : "ies"} - validate with \`rolester stories check\`.`
+    `Story bank: ${storyBank.stories.length} STAR+R stor${storyBank.stories.length === 1 ? "y" : "ies"} - validate with \`careerrat stories check\`.`
   );
   console.log("");
 }
 
 if (!modes.valid) {
-  console.log("Modes: candidate/modes.yml is INVALID - run `rolester modes status`.");
+  console.log("Modes: candidate/modes.yml is INVALID - run `careerrat modes status`.");
   console.log("");
 } else {
   const source = modes.exists ? "configured" : "defaults";
   console.log(
-    `Modes: usage ${modes.data.usage_mode}, application ${modes.data.application_mode} (${source}) - change with \`rolester modes set <usage|application> <value> --write\`.`
+    `Modes: usage ${modes.data.usage_mode}, application ${modes.data.application_mode} (${source}) - change with \`careerrat modes set <usage|application> <value> --write\`.`
   );
   console.log("");
 }
 
 if (!automation.exists) {
   console.log(
-    "Browser automation: not configured - all capabilities OFF (opt-in; `rolester automation status`)."
+    "Browser automation: not configured - all capabilities OFF (opt-in; `careerrat automation status`)."
   );
   console.log("");
 } else if (!automation.valid) {
   console.log(
-    "Browser automation: candidate/automation.yml is INVALID against its schema - run `rolester automation status`."
+    "Browser automation: candidate/automation.yml is INVALID against its schema - run `careerrat automation status`."
   );
   console.log("");
 } else {
@@ -319,7 +334,7 @@ if (!automation.exists) {
     `Session browser: ${sessionBrowser.provider}${pref}${setNote} — ${sessionBrowser.presence.detail}.`
   );
   console.log(
-    "  change with `rolester automation session <extension|playwright> --write` (see docs/BROWSER.md)."
+    "  change with `careerrat automation session <extension|playwright> --write` (see docs/BROWSER.md)."
   );
   console.log("");
 }
@@ -334,9 +349,19 @@ if (setup.present) {
   } else {
     const deferred = setup.deferredCount ? `, ${setup.deferredCount} deferred` : "";
     console.log(
-      `Setup: in progress${modeDepth ? ` ${modeDepth}` : ""} — ${setup.stepsRecorded} step(s) recorded${deferred}; resume with \`ingest-profile\` (\`rolester ingest\`).`
+      `Setup: in progress${modeDepth ? ` ${modeDepth}` : ""} — ${setup.stepsRecorded} step(s) recorded${deferred}; resume with \`ingest-profile\` (\`careerrat ingest\`).`
     );
   }
+  console.log("");
+}
+
+if (candidateSetupReadiness) {
+  const ready = candidateSetupReadiness.readiness || {};
+  console.log(
+    `Candidate setup readiness: search ${ready.search_ready ? "ready" : "needs setup"}, gate ${ready.gate_ready ? "ready" : "needs setup"}, apply ${ready.apply_ready ? "ready" : "needs setup"}.`
+  );
+  const missing = candidateSetupReadiness.missing?.search_ready || [];
+  if (missing.length) console.log(`  Search-ready missing: ${missing.join(", ")}.`);
   console.log("");
 }
 
@@ -356,19 +381,48 @@ console.log("");
 if (result.ok) {
   console.log("All required files are present and skills are discoverable.");
 } else if (!modes.valid) {
-  console.log("Rolester scaffold is present, but candidate/modes.yml is invalid.");
-  console.log("Run `rolester modes status` for details.");
+  console.log("CareerRat scaffold is present, but candidate/modes.yml is invalid.");
+  console.log("Run `careerrat modes status` for details.");
+} else if (candidateSetupReadiness?.readiness?.search_ready === false) {
+  console.log("CareerRat scaffold is present, but candidate setup is not search-ready yet.");
+  console.log("Run the ingest-profile skill or continue onboarding.");
 } else if (missingUser.length === 0 && missingSystem.length === 0) {
   console.log("Scaffold and setup look good, but skills aren't discoverable yet.");
-  console.log("Run `rolester install-skills` so Claude Code can invoke /apply-job etc.");
+  console.log("Run `careerrat install-skills` so Claude Code can invoke /apply-job etc.");
 } else {
-  console.log("Rolester scaffold is present, but local candidate setup is incomplete.");
+  console.log("CareerRat scaffold is present, but local candidate setup is incomplete.");
   console.log("Run the ingest-profile skill or copy templates into candidate/.");
 }
 
 process.exit(result.ok ? 0 : 1);
 
+function loadCandidateSetupReadiness() {
+  if (candidateSource !== "db") return null;
+  try {
+    return loadCandidateConfig(pathCtx).setup || null;
+  } catch {
+    return null;
+  }
+}
+
 function loadSearchReadiness() {
+  if (candidateSource === "db") {
+    try {
+      const stored = sourceConfigGet({ ...pathCtx, name: "search-sources" });
+      return summarizeSearchReadiness(stored.data, { exists: stored.stored });
+    } catch (err) {
+      return {
+        exists: false,
+        valid: false,
+        total: 0,
+        enabled: 0,
+        withLastRun: 0,
+        providers: [],
+        error: err.message,
+      };
+    }
+  }
+
   const configPath = userPath(pathCtx, "config/search-sources.yml");
   if (!existsSync(configPath)) {
     return {
@@ -382,16 +436,7 @@ function loadSearchReadiness() {
   }
   try {
     const config = parseConfig(readFileSync(configPath, "utf8"));
-    const searches = Array.isArray(config?.searches) ? config.searches : [];
-    const enabled = searches.filter((search) => search.enabled !== false);
-    return {
-      exists: true,
-      valid: true,
-      total: searches.length,
-      enabled: enabled.length,
-      withLastRun: searches.filter((search) => search.recency?.lastRunAt).length,
-      providers: [...new Set(enabled.map((search) => search.provider).filter(Boolean))].sort(),
-    };
+    return summarizeSearchReadiness(config, { exists: true });
   } catch (err) {
     return {
       exists: true,
@@ -405,9 +450,25 @@ function loadSearchReadiness() {
   }
 }
 
+function summarizeSearchReadiness(config, { exists }) {
+  const searches = Array.isArray(config?.searches) ? config.searches : [];
+  const enabled = searches.filter((search) => search.enabled !== false);
+  return {
+    exists,
+    valid: true,
+    total: searches.length,
+    enabled: enabled.length,
+    withLastRun: searches.filter((search) => search.recency?.lastRunAt).length,
+    providers: [...new Set(enabled.map((search) => search.provider).filter(Boolean))].sort(),
+  };
+}
+
 function loadCompanyAtsReadiness() {
   try {
-    const config = loadScannerConfig(userPath(pathCtx, "config/sourced-scan.json"));
+    const config =
+      candidateSource === "db"
+        ? sourceConfigGet({ ...pathCtx, name: "sourced-scan" }).data
+        : loadScannerConfig(userPath(pathCtx, "config/sourced-scan.json"));
     const companies = Array.isArray(config?.tracked_companies) ? config.tracked_companies : [];
     return {
       configured: companies.length > 0,
@@ -430,7 +491,7 @@ function loadCompanyAtsReadiness() {
 
 function printSearchReadiness(readiness) {
   if (!readiness.exists) {
-    console.log("- Broad sources: no config yet - run `rolester searches --from-targeting`.");
+    console.log("- Broad sources: no config yet - run `careerrat searches --from-targeting`.");
     return;
   }
   if (!readiness.valid) {
@@ -463,7 +524,7 @@ function printCompanyAtsReadiness(readiness) {
   }
   if (!readiness.configured) {
     console.log(
-      "- Company ATS scans: not configured - ask your agent to run discover-companies, or add boards with `rolester companies --add`."
+      "- Company ATS scans: not configured - ask your agent to run discover-companies, or add boards with `careerrat companies --add`."
     );
     console.log(
       "  This is the path that wires employer boards such as Ashby, Greenhouse, Lever, Workable, and SmartRecruiters."

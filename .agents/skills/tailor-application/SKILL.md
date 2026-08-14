@@ -1,11 +1,11 @@
 ---
 name: tailor-application
-description: Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the Rolester gate. Reject unresolved placeholders. Use email-comms for email replies, follow-ups, thank-yous, scheduling, negotiation, and recruiter-message threads.
+description: Generate finished, honest role-specific resumes, cover letters, short answers, and non-message outreach artifacts from a saved JD, source resume facts, candidate evidence bank, writing style, and form defaults after the job passes the CareerRat gate. Reject unresolved placeholders. Use email-comms for email replies, follow-ups, thank-yous, scheduling, negotiation, and recruiter-message threads.
 ---
 
 # tailor-application
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — Prerequisites: gate check
 
@@ -53,7 +53,7 @@ analysis defaults only when both are absent. Record the resolved family (e.g. `f
 
 Run:
 ```
-rolester learnings read "<role>"
+careerrat learnings read "<role>"
 ```
 The helper classifies the role-family from `targeting.yml` and prints the learning file to stdout. If no file exists for this family it prints a skip note to stderr and exits 0 — a missing file is normal, never an error.
 
@@ -154,7 +154,34 @@ wait for permission to draft. A stronger user-supplied angle always wins over th
 inferred one; an angle with no backing evidence is an Evidence Gap to surface, not
 a narrative to fabricate.
 
-Produce short-answer responses when the form or JD requires them.
+### Form questions — fetch the real list, answer every one
+
+Short answers start from the **actual application-form questions**, not guesses inferred
+from the JD:
+
+1. **Fetch the form.** Run `careerrat questions workspace/jobs/<saved-job>.md` —
+   deterministic, zero AI cost; supports Greenhouse and Ashby postings and writes the
+   normalized list to `workspace/jobs/<saved-job>.md.questions.json`. For any other ATS,
+   ask the user to paste the form's questions and capture them in the same shape with
+   `careerrat questions workspace/jobs/<saved-job>.md --paste`. If neither is possible,
+   fall back to questions stated in the JD and say so in the packet summary.
+2. **Answer every fetched question** in one answers artifact,
+   `workspace/tailored/<Company> — <Role> — answers.md`: one section per question
+   (verbatim label, required ones marked), the drafted first-person answer beneath.
+   Use apply-job's screening-answer posture: `form-defaults.yml#screening_answers`
+   first, then profile / honesty / evidence and the tailored artifacts. Entries with
+   `type: "file"` are attachment slots (resume, cover letter) — list them at the top
+   as attachments; never write prose for them.
+3. **Never fabricate.** A question whose truthful answer would require guessing a
+   number/date/clearance/tool depth, revealing current compensation, or contradicting
+   `honesty.yml` gets the literal marker `NEEDS YOU: <one-line reason>` as its body.
+   The placeholder lint (STEP 7) blocks on `NEEDS YOU`, so the packet cannot be
+   upload-ready until the user supplies the answer.
+4. **Persist durable answers.** When the user resolves a `NEEDS YOU` or confirms an
+   answer to a recurring disclosure-style question, write it to
+   `candidate/form-defaults.yml#screening_answers` (normalized question fragment →
+   exact answer) so it is never asked again — and note it in
+   `candidate/interview-notes.md` when it is a legal/disclosure answer.
 
 All cover-letter and short-answer text follows the same constraints as the resume:
 no unresolved placeholders, no forbidden wording, no unevidenced claims, no
@@ -179,13 +206,15 @@ Then log the tailored artifacts to the Activity Pulse feed (the dashboard's live
 **Activity Pulse** in AGENTS.md). One event per tailoring run:
 
 ```
-rolester activity append --type tailored --actor agent \
+careerrat activity append --type tailored --actor agent \
   --title "Tailored application — <Company>" --summary "<what was built, e.g. 'résumé + cover letter'>" \
   --company "<Company>" --role "<Role>" --app-id <application id> --write
 ```
 
 Treat these as invalid placeholders: `[Company]`, `[Role]`, `{candidate}`,
-`<insert metric>`, `TODO`, `TBD`, `lorem ipsum`, and any similar template residue.
+`<insert metric>`, `TODO`, `TBD`, `lorem ipsum`, `NEEDS YOU`, and any similar
+template residue. (`NEEDS YOU` is the STEP 6 unanswered-question marker — resolving
+it with the user, not deleting it, is the fix.)
 
 **Stamp the tracker row — both paths (apply-job and standalone).** After lint exits 0,
 write the produced artifact paths back to the application row in a single
@@ -194,13 +223,14 @@ write the produced artifact paths back to the application row in a single
 ```
 applications[<id>].artifacts.resume      = "workspace/tailored/<Company> — <Role>.md"
 applications[<id>].artifacts.coverLetter = "<cover letter path or inline text, if produced>"
+applications[<id>].artifacts.answers     = "workspace/tailored/<Company> — <Role> — answers.md" (when form answers were produced)
 applications[<id>].artifacts.resumeNote  = "<one-line tailoring approach>"
 ```
 
-Then run the AGENTS.md verify+re-render gate:
+Then run the AGENTS.md verify+snapshot gate:
 
 ```
-rolester tracker --verify && rolester tracker
+careerrat tracker --verify && careerrat tracker
 ```
 
 Both must exit 0 before continuing. Do not skip this on the standalone-artifacts
@@ -220,7 +250,7 @@ bracketed. Brackets in output are a build failure, not a TODO.
 Read `candidate/profile.yml#candidate.toolchain` (set at onboarding via
 `ingest-profile`). Branch on its value:
 
-> **Primary PDF path is STEP 11b** (`rolester export … --pdf`), which renders
+> **Primary PDF path is STEP 11b** (`careerrat export … --pdf`), which renders
 > through the repo's bundled Playwright Chromium — reliable and zero-setup. The
 > toolchain branches below are the **environment fallback** and the DOCX path:
 > use them when the bundled export can't run, or to produce a `.docx`. Note that
@@ -240,7 +270,7 @@ correct font, all black, 0 non-ASCII characters, hyphen bullets. If any check
 fails, fix the source and rebuild.
 
 **b. `libreoffice`:**
-For PDF, prefer STEP 11b (`rolester export … --pdf`) — `soffice` opens a raw
+For PDF, prefer STEP 11b (`careerrat export … --pdf`) — `soffice` opens a raw
 `.md` as plain text and will not render Markdown structure reliably. Use
 LibreOffice only as a last-resort fallback when the bundled export can't run:
 ```
@@ -279,10 +309,11 @@ If the user stated any new honesty boundary during this session (e.g. "never cla
 Terraform", "remove that certification claim", "add Kubernetes to do-not-claim"):
 
 - **Write-and-report** for unambiguous, low-blast-radius additions (one new tool to
-  do_not_claim, one claim to forbid): edit `candidate/honesty.yml` directly, then
-  echo `Written to candidate/honesty.yml: tools.do_not_claim += <tool>`.
+  do_not_claim, one claim to forbid): run `careerrat gate do-not-claim "<tool>" --write`
+  or `careerrat gate do-not-fabricate "<claim>" --write`, then echo the CLI confirmation.
 - **Confirm-first** for consequential changes (removing a confirmed tool, broad
-  claim rewrites): propose the exact YAML change, get a yes, then write.
+  claim rewrites): propose the exact candidate-config change, get a yes, then write
+  through the owning DB-aware command.
 
 The gate must not live only in chat. After writing, re-check the resume for
 compliance with the new boundary and fix if needed.
@@ -310,9 +341,9 @@ After artifacts pass placeholder lint (STEP 7) and ATS-safe validation, render
 print-quality output on request or when the user needs a file for upload/print:
 
 ```
-rolester export workspace/tailored/<Company> — <Role>.md --pdf --ats   # the copy you upload to an ATS
-rolester export workspace/tailored/<Company> — <Role>.md --pdf          # brand/print copy (Geist)
-rolester export workspace/tailored/<Company> — <Role>.md --pdf --docx
+careerrat export workspace/tailored/<Company> — <Role>.md --pdf --ats   # the copy you upload to an ATS
+careerrat export workspace/tailored/<Company> — <Role>.md --pdf          # brand/print copy (Geist)
+careerrat export workspace/tailored/<Company> — <Role>.md --pdf --docx
 ```
 
 **Default the upload/submission PDF to `--ats`.** It renders in a standard,
@@ -333,13 +364,13 @@ renders (resume and cover letter), copy it there unconditionally, under the
 per-company folder (Artifact Contract: organized by company, then by round):
 
 ```
-~/Downloads/rolester/<Company>/<Company> - Resume.pdf
-~/Downloads/rolester/<Company>/<Company> - Cover Letter.pdf   # if produced
+~/Downloads/careerrat/<Company>/<Company> - Resume.pdf
+~/Downloads/careerrat/<Company>/<Company> - Cover Letter.pdf   # if produced
 ```
 
 Use the real company name for the folder and filename (no brackets — truly
 unknown company → `unknown`). If a prior round's file with the same name is at
-that company root, move it to `~/Downloads/rolester/<Company>/archive/` first so
+that company root, move it to `~/Downloads/careerrat/<Company>/archive/` first so
 the root only shows what's live. `workspace/tailored/` remains the source of
 truth; Downloads is a convenience copy for quick access. Plain-text artifacts
 (short answers, outreach notes) export as `.txt` to the same company folder.
@@ -358,7 +389,7 @@ workspace/tailored/<Company> — <Role>.pdf    (if built)
 - If the user only wanted the artifacts: confirm files are ready and list their paths.
 - Do not auto-submit from within this skill. Submission is owned by `apply-job`.
 - **Learnings write-back is owned by `track-outcomes`, not this skill.** Read it
-  via `rolester learnings read "<role>"` (STEP 2); appends are `track-outcomes`'
+  via `careerrat learnings read "<role>"` (STEP 2); appends are `track-outcomes`'
   job. After an outcome is known (rejection, advance, offer), run `track-outcomes`
   — it owns appending to `candidate/learnings/<role-family>.md`. Do not write to
   that file here.
@@ -382,10 +413,10 @@ Writing the app row alone does NOT clear a live comm CTA. Both records must land
 the same write. A ghost comm CTA is a broken contract (see AGENTS.md
 "Completed-action clears its CTA (hard)").
 
-After any write at this step, run the verify+re-render gate again:
+After any write at this step, run the verify+snapshot gate again:
 
 ```
-rolester tracker --verify && rolester tracker
+careerrat tracker --verify && careerrat tracker
 ```
 
 Both must exit 0 before reporting completion to the user.

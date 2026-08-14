@@ -1,25 +1,25 @@
 <p align="center">
-  <img src="assets/logo.png" alt="Rolester" width="200">
+  <img src="assets/logo.png" alt="CareerRat" width="200">
 </p>
 
-# Rolester
+# CareerRat
 
 **Find, vet, and advance the right roles.**
 
-Rolester is a job-search workspace that runs on your own machine. You tell it
+CareerRat is a job-search workspace that runs on your own machine. You tell it
 what you're actually looking for. It reads real job postings and tells you which
 ones are worth your time, writes applications from things you've genuinely done,
 drafts your recruiter replies, preps you for interviews, and keeps track of where
 everything stands.
 
-No account, no server, no telemetry. Rolester never phones home, and your files
+No account, no server, no telemetry. CareerRat never phones home, and your files
 stay on your machine. The one thing that goes out is whatever your AI CLI sends
 to its own provider to do the work — same as any other task you'd give it. See
-[privacy](https://rolester.codeswhat.com/docs/advanced/privacy) for the details.
+[privacy](https://careerrat.com/docs/advanced/privacy) for the details.
 
 ## Why it's different
 
-Most job tools match keywords, then spray. Rolester won't write a single line of
+Most job tools match keywords, then spray. CareerRat won't write a single line of
 a cover letter until it has read the whole posting and checked it against what
 you said you want — your comp floor, your location, your dealbreakers. Jobs that
 don't clear that bar, it tells you to skip.
@@ -32,7 +32,7 @@ written.
 
 You'll need:
 
-- **Node.js 18 or newer** — check with `node -v`
+- **Node.js 24 or newer** — check with `node -v`
 - **An AI coding CLI**, either one:
   - Claude Code — `npm install -g @anthropic-ai/claude-code` ([claude.com/claude-code](https://claude.com/claude-code))
   - Codex — `npm install -g @openai/codex` ([github.com/openai/codex](https://github.com/openai/codex))
@@ -40,11 +40,11 @@ You'll need:
 Then:
 
 ```bash
-npm install -g rolester
-rolester start claude    # or: rolester start codex
+npm install -g careerrat
+careerrat start claude    # or: careerrat start codex
 ```
 
-That sets up your workspace, opens the dashboard at `http://localhost:7777`, and
+That sets up your workspace, opens the local app at `http://localhost:7777`, and
 hands you off to the agent. From there you just talk to it.
 
 ## Your first hour
@@ -62,11 +62,11 @@ hands you off to the agent. From there you just talk to it.
 4. **Paste a recruiter email** and say *"draft a reply."* It writes the reply and
    remembers the thread.
 5. **Open `http://localhost:7777`** and watch the job appear, move through your
-   funnel, and pick up history. The dashboard is read-only on purpose — the agent
-   does the work, the dashboard shows it.
+   funnel, and pick up history. Quick local actions work in the app; longer work
+   opens a visible conversation with the owning skill.
 
 **One first-run thing that looks broken but isn't:** before you've onboarded,
-`rolester doctor` will report that your setup is incomplete and list
+`careerrat doctor` will report that your setup is incomplete and list
 `candidate/*.yml` files to create. That's expected. Onboarding fills them in.
 
 ## What it does
@@ -101,36 +101,36 @@ their own way and get the same loop.
 ## Everyday commands
 
 ```bash
-rolester next       # the one thing worth doing next
-rolester doctor     # check your setup is healthy
-rolester update     # pull the latest code; your data is untouched
+careerrat next       # the one thing worth doing next
+careerrat doctor     # check your setup is healthy
+careerrat update     # pull the latest code; your data is untouched
 ```
 
-The dashboard comes up with `rolester start`. To run it on its own:
+The local app comes up with `careerrat start`. To run it on its own:
 
 ```bash
-rolester tracker        # write a static snapshot to workspace/tracker.html
-rolester tracker-dev    # serve http://localhost:7777 with live reload
+careerrat tracker        # snapshot tracker.json for recovery
+careerrat tracker-dev    # serve http://localhost:7777 with live reload
 ```
 
-**Useful flags on `start`:** `--no-agent` (workspace + dashboard only),
-`--no-dashboard`, `--agent <name>` (any CLI on your PATH, e.g. `cursor`),
+**Useful flags on `start`:** `--no-agent` (workspace + local app only),
+`--no-dashboard`, `--agent <name>` (override with a compatible agent command),
 `--port <n>` (default 7777).
 
 ## How it works
 
-Rolester is an *agent runtime*. The CLI sets up the workspace and serves the
-dashboard, but the job-search work happens inside your agent, reading a set of
+CareerRat is an *agent runtime*. The CLI sets up the workspace and serves the
+local app, but the job-search work happens inside your agent, reading a set of
 skills that tell it how each step is done. That's why you talk to it in plain
-language instead of memorizing subcommands, and why it works with whichever AI
-CLI you already have.
+language instead of memorizing subcommands. The first run detects supported AI
+CLIs and explains the available choices.
 
 The rule underneath all of it: **no tailoring, no applying, until the job has
 passed a real read of the posting.** Titles and keywords are triage, not truth.
 
 ## More
 
-- [Docs](https://rolester.codeswhat.com/docs) — setup, guides, and reference
+- [Docs](https://careerrat.com/docs) — setup, guides, and reference
 - [Architecture](docs/ARCHITECTURE.md) and [AGENTS.md](AGENTS.md) — how the skills
   and the agent contract fit together
 - [Roadmap](docs/ROADMAP.md) · [Sources strategy](docs/SOURCES.md)
@@ -138,11 +138,12 @@ passed a real read of the posting.** Titles and keywords are triage, not truth.
 ## Running from source
 
 ```bash
-git clone https://github.com/CodesWhat/rolester
-cd rolester
+git clone https://github.com/CodesWhat/careerrat
+cd careerrat
 npm install
+npm run hooks:install
 npm link
-rolester start claude
+careerrat start claude
 ```
 
 MIT licensed.

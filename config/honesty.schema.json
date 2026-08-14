@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://rolester.local/schemas/honesty.schema.json",
-  "title": "Rolester Honesty Boundaries",
+  "$id": "https://careerrat.local/schemas/honesty.schema.json",
+  "title": "CareerRat Honesty Boundaries",
   "type": "object",
   "required": ["claims"],
   "additionalProperties": true,
@@ -46,6 +46,10 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "prefer": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "avoid": {
           "type": "array",
           "items": { "type": "string" }

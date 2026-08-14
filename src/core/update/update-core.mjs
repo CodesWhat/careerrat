@@ -1,4 +1,4 @@
-// Shared update plumbing for `rolester update` (self-update) and
+// Shared update plumbing for `careerrat update` (self-update) and
 // scripts/update-live.mjs (operator updates an external live tree).
 //
 // Both refresh CODE ONLY from the published npm package — the package.json `files`
@@ -58,16 +58,16 @@ export function isNewer(current, candidate) {
 // Resolve the published version for a dist-tag (or echo an explicit version). Returns
 // null on any failure (offline, unknown tag) — callers treat null as "couldn't check".
 export function latestVersion(tag = "latest") {
-  const res = spawnSync("npm", ["view", `rolester@${tag}`, "version"], { encoding: "utf8" });
+  const res = spawnSync("npm", ["view", `careerrat@${tag}`, "version"], { encoding: "utf8" });
   if (res.status !== 0) return null;
   const v = (res.stdout || "").trim();
   return v || null;
 }
 
-// Download + unpack the published tarball for a spec (e.g. "rolester@latest").
+// Download + unpack the published tarball for a spec (e.g. "careerrat@latest").
 // Returns { tgz, entries, publishedVersion, cleanup }. Caller MUST call cleanup().
 export function fetchTarball(spec) {
-  const tmp = mkdtempSync(join(tmpdir(), "rolester-update-"));
+  const tmp = mkdtempSync(join(tmpdir(), "careerrat-update-"));
   const cleanup = () => {
     try {
       rmSync(tmp, { recursive: true, force: true });
@@ -149,7 +149,7 @@ export function readUpdateNotice(pathCtx, currentVersion) {
   const cache = readUpdateCache(pathCtx);
   if (!cache?.latest || !currentVersion) return null;
   if (!isNewer(currentVersion, cache.latest)) return null;
-  return `⬆ rolester ${currentVersion} → ${cache.latest} available — run \`rolester update\``;
+  return `⬆ careerrat ${currentVersion} → ${cache.latest} available — run \`careerrat update\``;
 }
 
 // Refresh the cache in a detached child if it's missing or stale. Returns immediately;
@@ -161,7 +161,15 @@ export function refreshUpdateCacheInBackground(pathCtx, root) {
   const script = join(root, "scripts/update-check.mjs");
   if (!existsSync(script)) return;
   try {
-    const c = spawn(process.execPath, [script], { detached: true, stdio: "ignore" });
+    // ELECTRON_RUN_AS_NODE, scoped to this one child: under the desktop
+    // shell process.execPath is the Electron binary — without it this
+    // detached spawn left a headless GUI app instance in the dock on every
+    // stale-cache boot. A plain node parent ignores the variable.
+    const c = spawn(process.execPath, [script], {
+      detached: true,
+      stdio: "ignore",
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    });
     c.unref();
   } catch {
     /* best-effort; a failed refresh just means no notice next run */

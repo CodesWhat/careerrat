@@ -2,10 +2,15 @@ import { existsSync, readdirSync } from "node:fs";
 import { isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const DEFAULT_PRIVATE_DIR = ".rolester";
+export const DEFAULT_PRIVATE_DIR = ".careerrat";
 
 const DEFAULT_REPO_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
-const GENERATED_CONFIG_FILES = ["search-sources.yml", "search-sources.json", "sourced-scan.json"];
+const GENERATED_CONFIG_FILES = [
+  "search-sources.yml",
+  "search-sources.json",
+  "sourced-scan.json",
+  "ai.json",
+];
 const WORKSPACE_RUNTIME_FILES = [
   "tracker.json",
   "tracker.html",
@@ -36,7 +41,7 @@ function cleanRel(relPath) {
 }
 
 function envHome({ repoRoot, env = process.env } = {}) {
-  const raw = String(env?.ROLESTER_HOME || "").trim();
+  const raw = String(env.CAREERRAT_HOME || "").trim();
   if (!raw) return null;
   return isAbsolute(raw) ? normalize(raw) : resolve(repoRoot, raw);
 }
@@ -46,7 +51,7 @@ export function privateDataRoot({ repoRoot = DEFAULT_REPO_ROOT, env = process.en
 }
 
 function hasExplicitHome(env = process.env) {
-  return !!String(env?.ROLESTER_HOME || "").trim();
+  return !!String(env.CAREERRAT_HOME || "").trim();
 }
 
 function legacyGeneratedConfigExists(repoRoot) {

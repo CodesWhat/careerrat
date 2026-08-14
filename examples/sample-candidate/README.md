@@ -1,6 +1,6 @@
 # Sample Candidate Workspace — Riley Chen (Fictional)
 
-This is a complete, fictional worked example of a Rolester candidate workspace.
+This is a complete, fictional worked example of a CareerRat candidate workspace.
 Riley Chen is not a real person. Every field is filled in with realistic but
 made-up data so you can see exactly what a finished workspace looks like before
 you create your own.
@@ -17,12 +17,12 @@ cp -r examples/sample-candidate/ candidate/
 **Option B — start fresh with the init wizard:**
 
 ```
-rolester init
+careerrat init
 # Follow the prompts to fill out your profile interactively.
 ```
 
-After setting up `candidate/`, run `rolester doctor` to verify everything is
-valid, then `rolester searches --from-targeting` to build your search sources.
+After setting up `candidate/`, run `careerrat doctor` to verify everything is
+valid, then `careerrat searches --from-targeting` to build your search sources.
 
 ## Files in this directory
 

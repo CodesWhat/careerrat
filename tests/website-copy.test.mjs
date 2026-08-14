@@ -3,17 +3,10 @@ import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import test from "node:test";
 
-const HERO_BADGE_COPY = "Fresh roles. Sharp docs. Fast apply.";
-const BADGE_LINE_MARKUP =
-  /<span>Fresh roles\.<\/span>[\s\S]*<span>Sharp docs\.<\/span>[\s\S]*<span>Fast apply\.<\/span>/;
-const AI_CHIPS = [
-  ["Claude Code", "claude"],
-  ["OpenAI Codex", "codex"],
-  ["any CLI on PATH", "path"],
-];
-const UNSUPPORTED_AGENT_ADAPTERS = ["Gemini CLI", "DeepSeek", "Qwen", "Kimi", "Hermes Agent"];
-const STALE_PUBLIC_CLI_PATTERN =
-  /node bin\/rolester\.mjs|npm run (?:doctor|next|ingest|searches|companies|modes|automation|research|gate|learnings|stories|activity|analytics|evidence|strategy-review|status:map|export|install-skills|evaluate|tracker|tracker:dev)(?:\s|`|$)|rolester [a-z:-]+ -- --|tracker:dev/;
+const LEGACY_BRAND = ["role", "ster"].join("");
+const STALE_PUBLIC_CLI_PATTERN = new RegExp(
+  `node bin\\/careerrat\\.mjs|npm run (?:doctor|next|ingest|searches|companies|modes|automation|research|gate|learnings|stories|activity|analytics|evidence|strategy-review|status:map|export|install-skills|evaluate|tracker|tracker:dev)(?:\\s|\u0060|$)|(?:${LEGACY_BRAND}|careerrat) [a-z:-]+ -- --|tracker:dev`
+);
 
 async function listFiles(dir, suffix) {
   const out = [];
@@ -25,125 +18,116 @@ async function listFiles(dir, suffix) {
   return out;
 }
 
-test("website hero rat badge uses the fresh-role application copy", async () => {
-  const page = await readFile("website/src/app/page.tsx", "utf8");
+test("website hero leads with the CareerRat pitch", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const styles = await readFile("apps/website/src/app/globals.css", "utf8");
 
-  assert.match(
-    page,
-    /className="rat-badge"[\s\S]*Fresh roles\.[\s\S]*Sharp docs\.[\s\S]*Fast apply\./
+  assert.match(page, /Your job hunt, run by a rat\./);
+  assert.match(page, /npm i -g careerrat/);
+  assert.doesNotMatch(page, new RegExp(LEGACY_BRAND, "i"));
+  assert.doesNotMatch(
+    styles,
+    /\.hero-visual\s*\{[^}]*order:\s*-1/s,
+    "mobile visitors should see the product value proposition before the preview"
   );
-  assert.match(page, BADGE_LINE_MARKUP);
-  assert.doesNotMatch(page, /I read the whole posting before you chase it\./);
-});
-
-test("warm-playful mockup hero rat badge matches the website copy", async () => {
-  const mockup = await readFile("mockups/03-warm-playful/index.html", "utf8");
-
-  assert.match(
-    mockup,
-    /class="rat-badge"[\s\S]*Fresh roles\.[\s\S]*Sharp docs\.[\s\S]*Fast apply\./
-  );
-  assert.match(mockup, BADGE_LINE_MARKUP);
-  assert.doesNotMatch(mockup, /I read the whole posting before you chase it\./);
-});
-
-test("hero badge copy stays compact enough for the floating card", () => {
-  assert.ok(HERO_BADGE_COPY.length <= 42);
-});
-
-test("hero badge beats render as separate lines", async () => {
-  const websiteCss = await readFile("website/src/app/globals.css", "utf8");
-  const mockup = await readFile("mockups/03-warm-playful/index.html", "utf8");
-
-  assert.match(websiteCss, /\.rat-badge span\s*{\s*display: block;/);
-  assert.match(mockup, /\.rat-badge span\s*{\s*display: block;/);
 });
 
 test("root layout suppresses the intentional early html class hydration delta", async () => {
-  const layout = await readFile("website/src/app/layout.tsx", "utf8");
+  const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
 
-  assert.match(layout, /documentElement;[\s\S]*?\.classList\.add\('js'\)/);
+  assert.match(layout, /documentElement;?[\s\S]*?\.classList\.add\('js'\)/);
   assert.match(layout, /<html[\s\S]*suppressHydrationWarning/);
+  assert.match(layout, /process\.env\.VERCEL === "1"/);
+  assert.match(layout, /enableVercelAnalytics \? <Analytics \/> : null/);
 });
 
-test("AI compatibility chips show launchable CLIs and leave adapter-specific agents to the roadmap", async () => {
-  const page = await readFile("website/src/app/page.tsx", "utf8");
-  const styles = await readFile("website/src/app/globals.css", "utf8");
-  const mockup = await readFile("mockups/03-warm-playful/index.html", "utf8");
-  const roadmap = await readFile("docs/ROADMAP.md", "utf8");
-  const pageSquashed = page.replace(/\s+/g, " ");
-  const mockupSquashed = mockup.replace(/\s+/g, " ");
-  const pageAiSection = page.match(/\{\/\* ─── AI AGNOSTIC[\s\S]*?<\/section>/)?.[0] ?? "";
-  const mockupAiSection = mockup.match(/<!-- ─── AI AGNOSTIC[\s\S]*?<\/section>/)?.[0] ?? "";
+test("website metadata is CareerRat-branded", async () => {
+  const layout = await readFile("apps/website/src/app/layout.tsx", "utf8");
 
-  const supportedCopy = /Works with your favorite AI/;
-  assert.match(pageSquashed, supportedCopy);
-  assert.match(mockupSquashed, supportedCopy);
-  assert.match(pageSquashed, /It doesn't lock you into a model or a subscription/);
-  assert.match(mockupSquashed, /It doesn't lock you into a model or a subscription/);
-  assert.match(pageSquashed, /Claude Code, Codex, or anything else on your PATH/);
-  assert.match(mockupSquashed, /Claude Code, Codex, or anything else on your PATH/);
-  assert.match(pageSquashed, /CLI launch options/);
-  assert.match(mockupSquashed, /CLI launch options/);
-  assert.doesNotMatch(pageAiSection, /can actually run|not a claim/i);
-  assert.doesNotMatch(mockupAiSection, /can actually run|not a claim/i);
-
-  for (const [label, key] of AI_CHIPS) {
-    assert.match(page, new RegExp(label.replaceAll(" ", "\\s+")));
-    assert.match(mockup, new RegExp(label.replaceAll(" ", "\\s+")));
-    assert.match(page, new RegExp(`className="ai-chip-logo ai-chip-logo-${key}"[\\s\\S]*<path`));
-    assert.match(mockup, new RegExp(`class="ai-chip-logo ai-chip-logo-${key}"[\\s\\S]*<path`));
+  assert.match(layout, /CareerRat: Rate\. Apply\. Track\./);
+  assert.doesNotMatch(layout, new RegExp(LEGACY_BRAND, "i"));
+  // Product copy carries no em dashes, and page/OG/Twitter titles and
+  // descriptions are product copy: they are the first thing anyone sees in a
+  // shared link preview. Scoped to the metadata strings so an em dash in a
+  // code comment (which no user reads) does not fail the suite.
+  const metadataCopy = [
+    ...layout.matchAll(/^\s*(?:title|description):\s*"([^"]*)"/gm),
+    ...layout.matchAll(/^\s*"(CareerRat is [^"]*)"/gm),
+  ].map((match) => match[1]);
+  // Three titles (page, OG, Twitter) plus the shared siteDescription.
+  assert.equal(metadataCopy.length, 4);
+  for (const copy of metadataCopy) {
+    assert.doesNotMatch(copy, /—/);
   }
-
-  for (const label of UNSUPPORTED_AGENT_ADAPTERS) {
-    assert.doesNotMatch(pageAiSection, new RegExp(label.replaceAll(" ", "\\s+")));
-    assert.doesNotMatch(mockupAiSection, new RegExp(label.replaceAll(" ", "\\s+")));
-    assert.match(roadmap, new RegExp(label.replaceAll(" ", "\\s+")));
-  }
-
-  assert.match(styles, /\.ai-chip-logo\s*{/);
-  assert.doesNotMatch(pageAiSection, /Adapter roadmap/);
-  assert.doesNotMatch(mockupAiSection, /Adapter roadmap/);
-  assert.doesNotMatch(styles, /\.ai-chip-roadmap/);
-  assert.doesNotMatch(page, /Gemini CLI, DeepSeek, Qwen, Kimi, or/);
-  assert.doesNotMatch(mockup, /Gemini CLI, DeepSeek, Qwen, Kimi, or/);
-  assert.doesNotMatch(page, /bring any AI/);
-  assert.doesNotMatch(mockup, /bring any AI/);
-  assert.doesNotMatch(page, /chosen AI CLI/);
-  assert.doesNotMatch(mockup, /chosen AI CLI/);
-  assert.doesNotMatch(page, /your AI takes it from here/);
-  assert.doesNotMatch(mockup, /your AI takes it from here/);
-  assert.doesNotMatch(page, /ai-chip-icon/);
-  assert.doesNotMatch(mockup, /ai-chip-icon/);
-  assert.doesNotMatch(page, /ai-chip-dot/);
-  assert.doesNotMatch(mockup, /ai-chip-dot/);
 });
 
-test("website install copy uses the public rolester CLI convention", async () => {
-  const page = await readFile("website/src/app/page.tsx", "utf8");
-  const publicAgents = await readFile("website/public/AGENTS.md", "utf8");
+test("website install copy uses the public careerrat CLI convention", async () => {
+  const page = await readFile("apps/website/src/app/page.tsx", "utf8");
+  const publicAgents = await readFile("apps/website/public/AGENTS.md", "utf8");
+  const installDocs = await readFile("apps/docs/content/docs/getting-started/install.mdx", "utf8");
+  const packageJson = JSON.parse(await readFile("package.json", "utf8"));
   const combined = `${page}\n${publicAgents}`;
 
-  assert.match(page, /npm install -g rolester/);
-  assert.match(page, /rolester start claude/);
-  assert.match(page, /rolester update/);
-  assert.match(publicAgents, /rolester start claude/);
-  assert.match(publicAgents, /rolester ingest/);
-  assert.match(publicAgents, /rolester update/);
+  assert.match(page, /npm install -g careerrat/);
+  assert.match(page, /careerrat start claude/);
+  assert.match(page, /careerrat update/);
+  assert.match(publicAgents, /careerrat start claude/);
+  assert.match(publicAgents, /careerrat ingest/);
+  assert.match(publicAgents, /careerrat update/);
+  assert.equal(packageJson.engines.node, ">=24");
+  assert.match(page, /Node\.js 24 or newer/);
+  assert.match(installDocs, /Node\.js >= 24/);
+  assert.doesNotMatch(
+    page,
+    /Node\.js 18|zero runtime deps|any CLI (?:already )?on your PATH|anything else on your PATH|whatever AI CLI|nothing leaves it|nothing phoned home|all of it stays on your machine|No wizard/i
+  );
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
 });
 
-test("docs website source uses the public rolester CLI convention", async () => {
-  const files = await listFiles("docs-site/content", ".mdx");
+test("docs website source uses the public careerrat CLI convention", async () => {
+  const files = await listFiles("apps/docs/content", ".mdx");
   const docs = await Promise.all(files.map(async (file) => readFile(file, "utf8")));
   const combined = docs.join("\n");
 
-  assert.match(combined, /npm install -g rolester/);
-  assert.match(combined, /rolester start claude/);
-  assert.match(combined, /rolester tracker-dev/);
-  assert.match(combined, /rolester automation status/);
-  assert.match(combined, /rolester update/);
+  assert.match(combined, /npm install -g careerrat/);
+  assert.match(combined, /careerrat start claude/);
+  assert.match(combined, /careerrat tracker-dev/);
+  assert.match(combined, /careerrat automation status/);
+  assert.match(combined, /careerrat update/);
+  assert.match(combined, /site:dev/);
+  assert.match(combined, /site:build/);
+  assert.match(combined, /docs:dev/);
+  assert.match(combined, /docs:build/);
+  assert.doesNotMatch(combined, /\bweb:(?:dev|build)\b/);
+
+  // Internal contracts use the current product name too.
+  assert.match(combined, /~\/Downloads\/careerrat\//);
 
   assert.doesNotMatch(combined, STALE_PUBLIC_CLI_PATTERN);
+});
+
+test("public docs describe local storage and AI-provider boundaries accurately", async () => {
+  const paths = [
+    "apps/docs/content/docs/index.mdx",
+    "apps/docs/content/docs/getting-started/what-is-careerrat.mdx",
+    "apps/docs/content/docs/advanced/privacy.mdx",
+  ];
+  const combined = (await Promise.all(paths.map((path) => readFile(path, "utf8")))).join("\n");
+
+  assert.doesNotMatch(combined, /your data never leaves your machine/i);
+  assert.doesNotMatch(combined, /evidence, comp floor, and\s+excluded companies never leave/i);
+  assert.match(combined, /provider(?:'s)? privacy and retention terms/i);
+  assert.match(combined, /SQLite/i);
+});
+
+test("docs website is CareerRat-branded (product name and repo links)", async () => {
+  const layout = await readFile("apps/docs/src/app/layout.tsx", "utf8");
+  const indexPage = await readFile("apps/docs/content/docs/index.mdx", "utf8");
+
+  assert.match(layout, /CareerRat Docs/);
+  assert.match(layout, /github\.com\/CodesWhat\/careerrat/);
+  assert.match(indexPage, /CareerRat is a local, skill-driven job-search workspace/);
+
+  assert.doesNotMatch(layout, new RegExp(`\\b${LEGACY_BRAND}\\b`, "i"));
 });

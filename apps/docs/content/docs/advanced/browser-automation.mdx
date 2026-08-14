@@ -1,0 +1,91 @@
+---
+title: Browser Automation
+description: Three layers for reaching the web — static fetch, headless scripts, and the agent-driven session browser.
+---
+
+CareerRat reaches the web three ways. They are not interchangeable — each is
+right for a different layer.
+
+## Layer 1 — Static fetch (WebFetch)
+
+Plain-HTML job postings and board listing pages. Cheapest path; always tried first
+when you only need the posting text. If the body comes back empty or is an SPA
+shell, escalate to Layer 3.
+
+Covers: Greenhouse (`boards.greenhouse.io`), plain ATS URLs, RSS feed items.
+
+## Layer 2 — Headless capture (bundled Playwright)
+
+The `playwright` npm dependency, driven headless and in-process from Node scripts.
+No setup needed — Chromium ships with the package.
+
+Used for:
+- `npm run capture:search-sources` / `npm run capture:board` — bulk-scrape a
+  board's listing DOM
+- Document and packet PDF export (`careerrat export`)
+
+This is for **batch, non-interactive** rendering where the agent does not need to
+reason turn-by-turn.
+
+## Layer 3 — Interactive session browser
+
+Anything the agent drives step-by-step: rendering JS pages, filling application
+forms, reading in-platform DMs, polling ATS status. The agent reads the live DOM
+before each action, never uses hardcoded selectors, and stays confirm-first.
+
+**Provider preference:**
+1. Chrome extension (recommended) — already holds your logins, no credential store
+2. Playwright persistent profile (fallback) — one-time login per platform, profile
+   at `~/.careerrat/board-profiles/<platform>`
+
+## Opt-in authenticated capabilities
+
+Reading public posting bodies requires no permission. Logged-in Layer-3 uses are
+opt-in and default OFF. With no `candidate/automation.yml`, none of them run.
+
+| Capability | Skill | What it does |
+|------------|-------|-------------|
+| `status_polling` | `sync-status` | Read application status from ATS dashboards |
+| `authenticated_search` | `search-jobs` / `setup-searches` | Authenticated board search results |
+| `messaging` | `ingest-messages` | Read LinkedIn / Wellfound DMs |
+| `one_click_apply` | `apply-job` | LinkedIn Easy Apply one-click path |
+| `profile_optimize` | `optimize-linkedin` | Read LinkedIn profile for analysis |
+| `profile_apply` | `optimize-linkedin` | Write approved edits back to the profile |
+| `mail_access` | `ingest-mail`, `apply-job` | Webmail verification codes + Gmail/Outlook ingest |
+| `relationship_sourcing` | `relationship-sourcing` | Find recruiters and warm contacts |
+| `calendar_read` | `schedule-meeting` | Read free/busy for double-booking avoidance |
+| `calendar_sync` | `calendar-sync` | Write events to a calendar provider |
+
+## Enabling a capability
+
+All three conditions must be true for a capability to run on a platform:
+
+1. The capability's global switch is on.
+2. That platform's per-capability switch is on.
+3. That platform's one-time ToS consent is recorded.
+
+```bash
+careerrat automation status                               # current matrix
+careerrat automation consent linkedin --write             # record consent
+careerrat automation enable profile_optimize linkedin --write
+careerrat automation session extension --write            # set provider
+```
+
+## Safety rules (always enforced)
+
+- **Never on a schedule.** Automation runs only when you initiate it.
+- **Halt on CAPTCHA, 2FA, or unexpected interstitial.** The agent stops and tells
+  you what it hit.
+- **Confirm before submitting.** Any outward-facing action (sending a message,
+  submitting a form) requires explicit confirmation, even in high-volume mode.
+- **Capture artifacts are scratch.** Screenshots go to `workspace/captures/`
+  (gitignored), never the repo root.
+- **No credential storage.** The session browser holds your logins. CareerRat does
+  not export or cache them.
+
+## SPA escalation
+
+When a job link returns an SPA shell (Wellfound, Lever, Ashby), the agent:
+- For Lever: fetches the JSON API (`api.lever.co/v0/postings/{company}?mode=json`)
+- For others: escalates to Layer 3, evaluates `document.body.innerText` in the
+  session browser

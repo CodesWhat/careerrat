@@ -30,3 +30,20 @@ jobs:
           node-version: 24
       - name: Structure guards (client JS parses, CSS valid, YAML valid)
         run: node --test tests/client-script.test.mjs tests/styles.test.mjs tests/yaml.test.mjs
+
+  # M7 — builds the apps/web SPA shell. Non-gating (not in the "Main branch
+  # protection" ruleset's required_status_checks) until the workspace is
+  # stable, the same "real, running, but not yet required" pattern
+  # codeql.yml's own header comment documents for code-scanning results.
+  web-build:
+    name: web-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Install dependencies
+        run: npm ci
+      - name: Build the web app shell (apps/web)
+        run: npm run build --workspace apps/web

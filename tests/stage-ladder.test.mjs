@@ -1,10 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import {
-  buildStats,
-  classifyStage,
-  renderTrackerDashboard,
-} from "../src/core/tracker/dashboard.mjs";
+import { buildStats, classifyStage } from "../src/core/tracker/dashboard.mjs";
 
 // ── classifyStage: canonical keyword mapping ──────────────────────────────────
 
@@ -117,25 +113,17 @@ test("buildStats counts a verbose advanced label as advanced (generalised classi
   assert.equal(stats.rejected, 1);
 });
 
-// ── Rendered dashboard: stage groups, pills, sourced entries ──────────────────
-
-test("renderTrackerDashboard groups the Active Pipeline by stage and preserves raw labels", () => {
-  const html = renderTrackerDashboard({
+test("buildStats does not count reviewed holds as applied or active", () => {
+  const stats = buildStats({
     applications: [
-      { id: "a1", company: "Aperture", role: "FDE", status: "offer", fitScore: 92 },
-      { id: "a2", company: "Tyrell", role: "AAE", status: "2nd phone interview", fitScore: 84 },
-      { id: "a3", company: "Cyberdyne", role: "PE", status: "rejected", fitScore: 41 },
+      { id: "hold-1", status: "reviewed-hold" },
+      { id: "hold-2", status: "reviewed-hold" },
+      { id: "applied-1", status: "applied" },
     ],
-    sourced: [{ id: "p1", company: "Black Mesa", role: "AAE", fitScore: 80, fitBasis: "triage" }],
-    communications: [],
-    sources: [],
+    sourced: [],
   });
 
-  assert.match(html, /class="stagefilter"/, "renders the stage filter");
-  assert.match(html, /data-stage="offer"/, "offer group present");
-  assert.match(html, /data-stage="sourced"/, "sourced entry folds in as a sourced group");
-  assert.match(html, /2nd phone interview/, "raw status label preserved verbatim on the pill");
-  assert.ok(!/class="bandfilter"/.test(html), "old band filter markup is gone");
-  // The rejected app is excluded from the active pipeline groups but shown in Rejected.
-  assert.match(html, /Rejected/, "rejected section present");
+  assert.equal(stats.applied, 1);
+  assert.equal(stats.awaiting, 1);
+  assert.equal(stats.inPlay, 1);
 });
