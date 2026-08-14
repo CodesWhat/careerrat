@@ -77,10 +77,10 @@ export function sendWorkspaceMessage(text) {
 // POST /api/workspace/preview — previewWorkspaceIntent. Classify-only: never
 // executes anything and never writes to the thread. Returns
 // { action: { label, intent } | null, answer: { label }, engineAvailable }.
-export function previewWorkspaceQuery(text) {
+export function previewWorkspaceQuery(text, context) {
   return apiFetch("/api/workspace/preview", {
     method: "POST",
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text, ...(context ? { context } : {}) }),
   });
 }
 

@@ -99,6 +99,45 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "job body requires browser",
+    err: new ApiError(409, {
+      code: "JOB_BODY_REQUIRES_BROWSER",
+      error: "The full job description could not be read from this URL.",
+    }),
+    message:
+      "CareerRat couldn't read the full posting from that link. Open the job in your connected browser or paste the job description here.",
+    action: null,
+  },
+  {
+    name: "job identity required",
+    err: new ApiError(400, {
+      code: "JOB_IDENTITY_REQUIRED",
+      error: "The company and role could not be determined.",
+    }),
+    message:
+      "CareerRat read the page but couldn't identify the company and role. Paste the job description or use the direct posting link.",
+    action: null,
+  },
+  {
+    name: "job capture failed",
+    err: new ApiError(409, {
+      code: "JOB_CAPTURE_FAILED",
+      error: "The posting could not be captured.",
+    }),
+    message:
+      "CareerRat couldn't save that posting. Try the direct job link or paste the description.",
+    action: { label: "Try again", retry: true },
+  },
+  {
+    name: "job URL required",
+    err: new ApiError(400, {
+      code: "JOB_URL_REQUIRED",
+      error: "A job URL is required.",
+    }),
+    message: "Paste the direct job-posting link so CareerRat can read and save it.",
+    action: null,
+  },
+  {
     name: "PDF/DOCX not supported prefix",
     err: new ApiError(400, { error: "PDF/DOCX not supported yet, use text or markdown" }),
     message:

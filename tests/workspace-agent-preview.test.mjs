@@ -56,6 +56,113 @@ test("previewWorkspaceIntent: sweep-style phrasings map to the search.run action
   }
 });
 
+test("previewWorkspaceIntent: rate or evaluate plus a job URL maps to job.evaluate-request", () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/12345";
+  for (const text of [`rate this job ${jobUrl}`, `Can you evaluate ${jobUrl}?`]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(result.action, {
+      label: "Capture and evaluate this job",
+      intent: {
+        type: "job.evaluate-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { jobUrl },
+      },
+    });
+  }
+});
+
+test("previewWorkspaceIntent: a bare likely job URL maps to job.evaluate-request", () => {
+  const repoRoot = tempRepo();
+  const urls = [
+    "https://jobs.lever.co/acme/abc-123",
+    "https://www.linkedin.com/jobs/view/1234567890",
+    "https://example.com/careers/jobs/staff-engineer",
+  ];
+  for (const jobUrl of urls) {
+    const result = previewWorkspaceIntent({ text: jobUrl, repoRoot, env: {} });
+    assert.equal(result.action?.intent.type, "job.evaluate-request");
+    assert.equal(result.action?.intent.input.jobUrl, jobUrl);
+  }
+});
+
+test("previewWorkspaceIntent: apply plus a job URL maps to job.prepare-request", () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://jobs.ashbyhq.com/acme/abc-123";
+  const result = previewWorkspaceIntent({
+    text: `Can you apply to this job? ${jobUrl}`,
+    repoRoot,
+    env: {},
+  });
+
+  assert.deepEqual(result.action, {
+    label: "Evaluate and prepare this application",
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: this job resolves to the explicitly open saved job", () => {
+  const repoRoot = tempRepo();
+  const context = { pathname: "/jobs", jobId: "app-acme" };
+
+  const rate = previewWorkspaceIntent({
+    text: "Can you rate this job?",
+    context,
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(rate.action, {
+    label: "Evaluate this saved job",
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-acme" },
+    },
+  });
+
+  const apply = previewWorkspaceIntent({
+    text: "Apply to this job",
+    context,
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(apply.action, {
+    label: "Evaluate and prepare this saved job",
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-acme" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: never guesses what 'this job' means without an open job", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "Can you rate this job?",
+    context: { pathname: "/jobs", jobId: null },
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action, null);
+});
+
+test("previewWorkspaceIntent: a non-job URL stays answer-only", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "https://example.com/about-us",
+    repoRoot,
+    env: {},
+  });
+
+  assert.equal(result.action, null);
+  assert.match(result.answer.label, /^Answer: /);
+});
+
 test("previewWorkspaceIntent: non-action phrasing returns answer-only", () => {
   const repoRoot = tempRepo();
   const phrasings = ["what's blocking my top role?", "draft a nudge to a contact"];
@@ -195,11 +302,13 @@ test("POST /api/workspace/preview delegates text through to the injected classif
 
   const response = await callDirect(routes, "POST", "/api/workspace/preview", {
     text: "what's blocking my top role?",
+    context: { pathname: "/jobs", jobId: "app-acme" },
   });
 
   assert.equal(response.status, 200);
   assert.equal(seen.length, 1);
   assert.equal(seen[0].text, "what's blocking my top role?");
+  assert.deepEqual(seen[0].context, { pathname: "/jobs", jobId: "app-acme" });
   assert.deepEqual(response.body.data, {
     action: null,
     answer: { label: "stubbed" },

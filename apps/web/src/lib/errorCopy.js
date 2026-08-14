@@ -94,6 +94,29 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "JOB_BODY_REQUIRES_BROWSER",
+    message:
+      "CareerRat couldn't read the full posting from that link. Open the job in your connected browser or paste the job description here.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "JOB_IDENTITY_REQUIRED",
+    message:
+      "CareerRat read the page but couldn't identify the company and role. Paste the job description or use the direct posting link.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "JOB_CAPTURE_FAILED",
+    message:
+      "CareerRat couldn't save that posting. Try the direct job link or paste the description.",
+    action: { label: "Try again", retry: true },
+  },
+  {
+    match: ({ code }) => code === "JOB_URL_REQUIRED",
+    message: "Paste the direct job-posting link so CareerRat can read and save it.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",

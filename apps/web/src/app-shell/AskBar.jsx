@@ -206,6 +206,7 @@ export function AskBar() {
   const needsYou = useNeedsYouCount();
 
   const placeholder = placeholderForRoute(location.pathname, searchParams);
+  const openJobId = location.pathname === "/jobs" ? searchParams.get("open") : null;
   const panelOpen = focused && text.trim().length > 0;
 
   useGlobalShortcut("k", () => {
@@ -239,7 +240,10 @@ export function AskBar() {
     const requestId = ++previewRequestId.current;
     const timer = setTimeout(async () => {
       try {
-        const res = await previewWorkspaceQuery(trimmed);
+        const context = openJobId ? { pathname: location.pathname, jobId: openJobId } : null;
+        const res = context
+          ? await previewWorkspaceQuery(trimmed, context)
+          : await previewWorkspaceQuery(trimmed);
         if (previewRequestId.current !== requestId) return;
         const data = res?.data || res;
         setPreview(data || null);
@@ -252,7 +256,7 @@ export function AskBar() {
       }
     }, PREVIEW_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [text, captureMode]);
+  }, [text, captureMode, location.pathname, openJobId]);
 
   // Live client-side elapsed ticker while a turn is running — reconciled
   // with the server's own elapsedMs the moment the turn completes.
@@ -354,6 +358,8 @@ export function AskBar() {
               resultText: isError ? null : last?.text || null,
               error: isError ? last?.text || "The action could not be completed." : null,
               retryable: isError,
+              artifacts: isError && !last?.artifacts ? [] : last?.artifacts || [],
+              metadata: last?.metadata || {},
               engine: last?.metadata?.engine || null,
               elapsedMs:
                 typeof last?.metadata?.elapsedMs === "number"
@@ -639,6 +645,7 @@ export function AskBar() {
             onReclassify={handleReclassifyIntake}
             onDismiss={handleDismissIntake}
             onRetry={retryTurn}
+            onRunAction={commitAction}
           />
         ) : null}
         {needsYouOpen ? (
@@ -934,6 +941,7 @@ function AskBarTurn({
   onReclassify,
   onDismiss,
   onRetry,
+  onRunAction,
 }) {
   if (turn.kind === "capture") {
     if (turn.status === "running") {
@@ -1003,10 +1011,106 @@ function AskBarTurn({
     );
   }
 
+  const evaluationArtifact = turn.artifacts?.find((artifact) => artifact.kind === "job_evaluation");
+  const packetArtifact = turn.artifacts?.find((artifact) => artifact.kind === "packet_generation");
+  const handoffArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "application_handoff"
+  );
+  const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
+
   return (
     <div className="ask-bar__turn">
       {turn.resultText ? <p className="ask-bar__summary">{turn.resultText}</p> : null}
+      {evaluationArtifact ? <JobEvaluationCard artifact={evaluationArtifact} /> : null}
+      {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
+      {handoffArtifact?.url ? (
+        <a
+          className="ask-bar__handoff-link"
+          href={handoffArtifact.url}
+          target="_blank"
+          rel="noreferrer"
+        >
+          Open application site
+        </a>
+      ) : null}
+      {nextActions.length ? (
+        <div className="ask-bar__next-actions">
+          {nextActions.map((action) =>
+            action.href ? (
+              <a className="btn btn--secondary" href={action.href} key={action.href}>
+                {action.label || "Open"}
+              </a>
+            ) : action.intent ? (
+              <Button
+                variant="secondary"
+                key={`${action.intent.type}:${action.intent.entity?.type}:${action.intent.entity?.id}`}
+                onClick={() => onRunAction(action)}
+              >
+                {action.label || "Continue"}
+              </Button>
+            ) : null
+          )}
+        </div>
+      ) : null}
       <EngineReceipt engine={turn.engine} elapsedMs={turn.elapsedMs} />
+    </div>
+  );
+}
+
+function JobEvaluationCard({ artifact }) {
+  const evaluation = artifact.evaluation || {};
+  const gate = String(evaluation.gate || "review").toUpperCase();
+  const fitReasons = Array.isArray(evaluation.fitReasons)
+    ? evaluation.fitReasons
+    : Array.isArray(evaluation.roleFit?.why)
+      ? evaluation.roleFit.why
+      : [];
+  const fitRisks = Array.isArray(evaluation.fitRisks)
+    ? evaluation.fitRisks
+    : Array.isArray(evaluation.roleFit?.risks)
+      ? evaluation.roleFit.risks
+      : [];
+  const compensation =
+    typeof evaluation.compensation === "string"
+      ? evaluation.compensation
+      : evaluation.compensation?.summary || null;
+
+  return (
+    <section className="ask-bar__evaluation" aria-label="Job evaluation">
+      <div className="ask-bar__evaluation-head">
+        <span className={`ask-bar__gate ask-bar__gate--${gate.toLowerCase()}`}>{gate}</span>
+        {evaluation.fitScore == null ? null : <strong>{evaluation.fitScore}/100 fit</strong>}
+      </div>
+      {compensation ? <p>{compensation}</p> : null}
+      {fitReasons.map((reason) => (
+        <p className="ask-bar__evaluation-signal" key={`why-${reason}`}>
+          <span aria-hidden="true">✓</span> {reason}
+        </p>
+      ))}
+      {fitRisks.map((risk) => (
+        <p
+          className="ask-bar__evaluation-signal ask-bar__evaluation-signal--risk"
+          key={`risk-${risk}`}
+        >
+          <span aria-hidden="true">!</span> {risk}
+        </p>
+      ))}
+    </section>
+  );
+}
+
+function PacketStatus({ artifact }) {
+  const gaps = Array.isArray(artifact.gaps) ? artifact.gaps : [];
+  return (
+    <div className="ask-bar__packet-status">
+      <strong>
+        Application packet: {artifact.uploadReady ? "ready" : artifact.status || "reviewable"}
+      </strong>
+      {gaps.length ? (
+        <span>
+          {gaps.length} item{gaps.length === 1 ? " needs" : "s need"} review.
+        </span>
+      ) : null}
     </div>
   );
 }

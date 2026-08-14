@@ -283,6 +283,60 @@ describe("JobDrawer", () => {
     expect(button(tree, "Apply on site")).toBeFalsy();
   });
 
+  it("describes a manual Apply on site handoff without claiming submission", async () => {
+    api.applyOnSite.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            kind: "action_result",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                url: "https://boards.greenhouse.io/northstar/jobs/123",
+              },
+            ],
+            metadata: { state: "manual-handoff", submissionVerified: false },
+          },
+        ],
+      },
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    let tree = renderDrawer(applicationRow);
+
+    await button(tree, "Apply on site").props.onClick();
+    tree = renderDrawer(applicationRow);
+
+    expect(textOf(tree)).toContain("Application site is ready. Nothing was marked Applied yet.");
+    expect(textOf(tree)).not.toContain("Application submitted and verified.");
+    const handoff = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node) === "Open application site"
+    )[0];
+    expect(handoff.props.href).toBe("https://boards.greenhouse.io/northstar/jobs/123");
+  });
+
+  it("only claims Apply on site submission when the result is verified", async () => {
+    api.applyOnSite.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            kind: "action_result",
+            metadata: { state: "applied", submissionVerified: true },
+          },
+        ],
+      },
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    let tree = renderDrawer(applicationRow);
+
+    await button(tree, "Apply on site").props.onClick();
+    tree = renderDrawer(applicationRow);
+
+    expect(textOf(tree)).toContain("Application submitted and verified.");
+  });
+
   it("uses the server-persisted typed evaluation without a second client write", async () => {
     api.runPacketGate.mockResolvedValueOnce({
       data: {

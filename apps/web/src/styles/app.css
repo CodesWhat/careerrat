@@ -6231,6 +6231,86 @@ button.chip {
   line-height: 1.5;
 }
 
+.ask-bar__evaluation {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--row-radius);
+  background: var(--surface);
+}
+
+.ask-bar__evaluation p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ask-bar__evaluation-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+
+.ask-bar__gate {
+  padding: 2px 7px;
+  border-radius: var(--pill-radius);
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: var(--label-tracking);
+}
+
+.ask-bar__gate--keep {
+  background: var(--success-bg);
+  color: var(--success);
+}
+
+.ask-bar__gate--review {
+  background: var(--mustard-light);
+  color: var(--mustard);
+}
+
+.ask-bar__gate--cut {
+  background: var(--danger-bg);
+  color: var(--danger);
+}
+
+.ask-bar__evaluation-signal {
+  display: flex;
+  gap: 6px;
+}
+
+.ask-bar__evaluation p.ask-bar__evaluation-signal--risk {
+  color: var(--warning);
+}
+
+.ask-bar__packet-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.ask-bar__handoff-link {
+  width: fit-content;
+  color: var(--accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ask-bar__next-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 .ask-bar__error {
   margin: 0;
   padding: 7px 9px;

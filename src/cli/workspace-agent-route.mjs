@@ -14,6 +14,8 @@ function statusForError(error) {
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "MISSING_JOB_BODY") return 409;
   if (
+    error?.code === "JOB_BODY_REQUIRES_BROWSER" ||
+    error?.code === "JOB_CAPTURE_FAILED" ||
     error?.code === "APPLICATION_EXECUTOR_UNAVAILABLE" ||
     error?.code === "APPLICATION_NOT_VERIFIED" ||
     error?.code === "COMMUNICATION_DRAFT_REQUIRED" ||
@@ -33,6 +35,8 @@ function statusForError(error) {
       "BAD_KIND",
       "BAD_ROLE",
       "BAD_INTENT_ENTITY",
+      "JOB_URL_REQUIRED",
+      "JOB_IDENTITY_REQUIRED",
       "EMPTY_TEXT",
       "INTENT_NOT_IMPLEMENTED",
       "EMPTY_AI_RESPONSE",
@@ -46,6 +50,7 @@ function statusForError(error) {
       "BAD_OUTCOME_STATUS",
       "BAD_INTERVIEW_AT",
       "BAD_INTERVIEW_ARTIFACT",
+      "BAD_QUESTION_CAPTURE",
       "EMPTY_COMMUNICATION_NOTE",
       "INTERVIEW_APPLICATION_REQUIRED",
       "TEXT_TOO_LONG",
@@ -100,7 +105,7 @@ export function mountWorkspaceAgentRoutes({
   addRoute("POST", "/api/workspace/preview", async (req, res) => {
     try {
       const body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
-      const data = previewIntentImpl({ repoRoot, env, text: body?.text });
+      const data = previewIntentImpl({ repoRoot, env, text: body?.text, context: body?.context });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {
       sendError(res, error);

@@ -132,6 +132,20 @@ function toDatetimeLocal(iso) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function applyOnSiteNotice(response) {
+  const messages = (response?.data || response)?.messages || [];
+  const last = messages[messages.length - 1];
+  return last?.metadata?.submissionVerified === true
+    ? "Application submitted and verified."
+    : "Application site is ready. Nothing was marked Applied yet.";
+}
+
+function applicationHandoffUrl(response) {
+  const messages = (response?.data || response)?.messages || [];
+  const last = messages[messages.length - 1];
+  return last?.artifacts?.find((artifact) => artifact.kind === "application_handoff")?.url || null;
+}
+
 export function JobDrawer({ row, onClose, initialSection }) {
   const { refetch } = useDashboardSnapshot();
   const [app, setApp] = useState(null);
@@ -140,6 +154,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
   const [busyKey, setBusyKey] = useState(null);
   const [actionError, setActionError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [handoffUrl, setHandoffUrl] = useState(null);
   const [sourcedResolved, setSourcedResolved] = useState(false);
   const [viewer, setViewer] = useState(null); // {title, artifact} | null
   const [jdHint, setJdHint] = useState(null);
@@ -168,6 +183,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setLoadError(null);
     setActionError(null);
     setNotice(null);
+    setHandoffUrl(null);
     setSourcedResolved(false);
     setJdHint(null);
     setJdMeta(null);
@@ -287,11 +303,13 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setBusyKey(key);
     setActionError(null);
     try {
-      await fn();
+      const result = await fn();
       if (!isApplication && (key === "skip" || key === "promote")) setSourcedResolved(true);
       emitDashboardChanged();
       await Promise.all([refetch(), loadRaw()]);
-      if (successNote) setNotice(successNote);
+      if (successNote) {
+        setNotice(typeof successNote === "function" ? successNote(result) : successNote);
+      }
     } catch (err) {
       setActionError(withRetryAction(resolveErrorCopy(err), () => runWrite(key, fn, successNote)));
     } finally {
@@ -373,6 +391,11 @@ export function JobDrawer({ row, onClose, initialSection }) {
             />
           ) : null}
           {notice ? <p className="field__hint">{notice}</p> : null}
+          {handoffUrl ? (
+            <a className="job-drawer__link" href={handoffUrl} target="_blank" rel="noreferrer">
+              Open application site
+            </a>
+          ) : null}
 
           {/* Evaluate (Phase B) — explicit-click packet gate, only meaningful once a
             role has been promoted into applications[] (packet gate is
@@ -643,8 +666,12 @@ export function JobDrawer({ row, onClose, initialSection }) {
                         onClick={() =>
                           runWrite(
                             "apply-on-site",
-                            () => applyOnSite({ id: row.id }),
-                            "Application submitted and verified."
+                            async () => {
+                              const result = await applyOnSite({ id: row.id });
+                              setHandoffUrl(applicationHandoffUrl(result));
+                              return result;
+                            },
+                            applyOnSiteNotice
                           )
                         }
                       >

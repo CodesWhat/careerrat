@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -26,6 +26,7 @@ import { appUpsert } from "../src/core/db/verbs/app.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
+import { userPath } from "../src/core/paths/workspace.mjs";
 
 const cleanupRoots = [];
 
@@ -337,6 +338,372 @@ test("job evaluation executes behind workspace-main and preserves the typed verd
   assert.match(JSON.stringify(modelCalls[0].messages), /Posted base clears the candidate floor/);
 });
 
+test("job.evaluate-request resolves a URL, captures the full JD, promotes it, and saves the verdict", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/12345";
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      provider: "greenhouse",
+      title: "Senior AI Engineer",
+      company: "Acme",
+      location: "Remote US",
+      comp: "$210,000 - $260,000",
+      bodyText: "Own production agent systems and evaluation infrastructure.",
+    }),
+    evaluateJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data: {
+            applicationId: input.body.applicationId,
+            gate: "keep",
+            fitScore: 91,
+            fitBucket: "high",
+            fitReasons: ["Production agent systems"],
+            fitRisks: [],
+            compensation: { summary: "Posted band clears the floor." },
+            manual: { required: false },
+          },
+        },
+      };
+    },
+    now: () => new Date("2026-08-14T20:00:00.000Z"),
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.jobUrl, jobUrl);
+  assert.match(calls[0].body.jobBody, /production agent systems/i);
+  const applicationId = result.messages.at(-1).metadata.applicationId;
+  const application = readApplication(repoRoot, applicationId);
+  assert.equal(application.company, "Acme");
+  assert.equal(application.role, "Senior AI Engineer");
+  assert.equal(application.link, jobUrl);
+  assert.ok(application.artifacts.jd.startsWith("workspace/jobs/"));
+  assert.match(
+    readFileSync(userPath({ repoRoot, env: {} }, application.artifacts.jd), "utf8"),
+    /Own production agent systems and evaluation infrastructure\./
+  );
+  assert.equal(
+    openDb({ repoRoot, env: {} }).prepare("SELECT COUNT(*) AS count FROM sourced").get().count,
+    0
+  );
+  assert.equal(result.messages.at(-1).artifacts[0].kind, "job_evaluation");
+  assert.equal(result.messages.at(-1).metadata.state, "keep");
+  assert.equal(
+    result.messages.at(-1).metadata.nextActions[0].intent.type,
+    "job.generate-documents"
+  );
+});
+
+test("job.evaluate-request reuses a matching application while refreshing its JD capture", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://jobs.lever.co/temporal/abc-123";
+  seedApplication(repoRoot, { link: jobUrl, artifacts: { resume: "workspace/old-resume.pdf" } });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      provider: "lever",
+      title: "Applied AI Engineer",
+      company: "Temporal Labs",
+      bodyText: "Build reliable agent workflows.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "review",
+          fitScore: 74,
+          manual: { required: true },
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.messages.at(-1).metadata.applicationId, "app-temporal");
+  const application = readApplication(repoRoot, "app-temporal");
+  assert.equal(application.artifacts.resume, "workspace/old-resume.pdf");
+  assert.ok(application.artifacts.jd.startsWith("workspace/jobs/"));
+  assert.equal(
+    openDb({ repoRoot, env: {} }).prepare("SELECT COUNT(*) AS count FROM applications").get().count,
+    1
+  );
+});
+
+test("job.evaluate-request resolves an explicitly open saved sourced role and promotes it", async () => {
+  const repoRoot = tempRepo();
+  seedSourced(repoRoot, {
+    id: "sourced-open",
+    company: "Northstar",
+    role: "Staff AI Engineer",
+    link: "https://jobs.example.test/northstar/staff-ai",
+    artifacts: { jd: "workspace/jobs/northstar-staff-ai.md" },
+  });
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "sourced-open" },
+    },
+    evaluateJobImpl: async (input) => {
+      calls.push(input);
+      return {
+        status: 200,
+        body: {
+          ok: true,
+          data: {
+            applicationId: input.body.applicationId,
+            gate: "keep",
+            fitScore: 89,
+            manual: { required: false },
+          },
+        },
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.jobUrl, "https://jobs.example.test/northstar/staff-ai");
+  assert.equal(readSourced(repoRoot, "sourced-open"), null);
+  const applicationId = result.messages.at(-1).metadata.applicationId;
+  assert.equal(readApplication(repoRoot, applicationId).company, "Northstar");
+  assert.equal(result.messages.at(-1).metadata.state, "keep");
+});
+
+test("job.prepare-request stops on CUT and does not generate documents", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://jobs.ashbyhq.com/acme/cut-role";
+  let generated = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Travel Sales Engineer",
+      company: "Acme",
+      bodyText: "Travel 80 percent and work on-site five days per week.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "cut",
+          fitScore: 31,
+          fitRisks: ["Travel conflicts with a hard boundary"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async () => {
+      generated += 1;
+      return {};
+    },
+  });
+
+  assert.equal(generated, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "cut");
+  assert.equal(result.messages.at(-1).artifacts.length, 1);
+});
+
+test("job.prepare-request stops on REVIEW and hands the unresolved decision to the job drawer", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://jobs.ashbyhq.com/acme/review-role";
+  let generated = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Field AI Engineer",
+      company: "Acme",
+      bodyText: "Work with customers on production AI systems. Compensation is not posted.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "review",
+          fitScore: 76,
+          fitRisks: ["Compensation needs confirmation"],
+          manual: { required: true },
+        },
+      },
+    }),
+    generateDocumentsImpl: async () => {
+      generated += 1;
+      return {};
+    },
+  });
+
+  assert.equal(generated, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "review");
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].label, "Review this job");
+  assert.match(result.messages.at(-1).metadata.nextActions[0].href, /^\/jobs\?open=/);
+});
+
+test("job.prepare-request generates a KEEP packet and returns the review/apply handoff", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/keep-role";
+  const generationCalls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async (input) => {
+      generationCalls.push(input);
+      return {
+        status: "ready",
+        uploadReady: true,
+        gaps: [],
+        artifacts: { resumePdf: "workspace/tailored/acme-resume.pdf" },
+      };
+    },
+  });
+
+  assert.equal(generationCalls.length, 1);
+  assert.equal(generationCalls[0].body.applyIntent, true);
+  assert.deepEqual(
+    result.messages.at(-1).artifacts.map((artifact) => artifact.kind),
+    ["job_evaluation", "packet_generation"]
+  );
+  assert.equal(result.messages.at(-1).metadata.state, "ready");
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.apply");
+});
+
+test("job.prepare-request keeps moving when application questions are not captured yet", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/keep-role";
+  const generationCalls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async (input) => {
+      generationCalls.push(input);
+      if (input.body.applyIntent) {
+        const error = new Error("Capture the application questions first.");
+        error.code = "BAD_QUESTION_CAPTURE";
+        throw error;
+      }
+      return {
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            message: "answers artifact skipped — no application questions captured yet",
+          },
+        ],
+        artifacts: { resumePdf: "workspace/tailored/acme-resume.pdf" },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    generationCalls.map((call) => call.body.applyIntent),
+    [true, false]
+  );
+  assert.equal(result.messages.at(-1).metadata.state, "reviewable");
+  assert.equal(result.messages.at(-1).metadata.gapCount, 1);
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.apply");
+  assert.match(result.messages.at(-1).text, /application questions/i);
+});
+
 test("document generation executes behind workspace-main and preserves artifact and gap context", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
@@ -393,7 +760,8 @@ test("document generation executes behind workspace-main and preserves artifact 
   });
   assert.equal(result.messages[1].metadata.state, "reviewable");
   assert.equal(result.messages[1].metadata.gapCount, 1);
-  assert.match(result.messages[1].text, /1 item needs review/i);
+  assert.match(result.messages[1].text, /application questions/i);
+  assert.equal(result.messages[1].metadata.nextActions[0].intent.type, "job.apply");
 
   const modelCalls = [];
   await runWorkspaceAgentTurn({
@@ -409,6 +777,53 @@ test("document generation executes behind workspace-main and preserves artifact 
   assert.match(modelHistory, /Capture application questions before applying/);
   assert.ok(modelHistory.includes("workspace/tailored/temporal-resume.md"));
   assert.doesNotMatch(modelHistory, /full generated resume body intentionally not replayed/);
+});
+
+test("apply-intent document generation degrades to base documents before question capture", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep" },
+    artifacts: { jd: "workspace/jobs/temporal.md" },
+  });
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.generate-documents",
+      entity: { type: "application", id: "app-temporal" },
+      input: { applyIntent: true, formats: ["pdf"] },
+    },
+    generateDocumentsImpl: async (input) => {
+      calls.push(input);
+      if (input.body.applyIntent) {
+        const error = new Error("Capture the application questions first.");
+        error.code = "BAD_QUESTION_CAPTURE";
+        throw error;
+      }
+      return {
+        applicationId: "app-temporal",
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            message: "answers artifact skipped — no application questions captured yet",
+          },
+        ],
+        artifacts: { resumePdf: "workspace/tailored/temporal-resume.pdf" },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    calls.map((call) => call.body.applyIntent),
+    [true, false]
+  );
+  assert.equal(result.messages.at(-1).metadata.gapCount, 1);
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.apply");
+  assert.match(result.messages.at(-1).text, /application questions/i);
 });
 
 test("document export executes behind workspace-main and preserves packaged file context", async () => {
@@ -1113,35 +1528,36 @@ test("communication notes and user-reported sends stay in workspace-main", async
   assert.equal(result.messages.at(-1).metadata.recordingMode, "external_report");
 });
 
-test("Apply on site cannot mark an application applied without a verified executor", async () => {
+test("Apply on site returns a manual handoff without changing status when no executor is connected", async () => {
   const repoRoot = tempRepo();
-  seedApplication(repoRoot);
+  const seeded = seedApplication(repoRoot);
 
-  await assert.rejects(
-    executeWorkspaceIntent({
-      repoRoot,
-      env: {},
-      intent: {
-        type: "job.apply",
-        entity: { type: "application", id: "app-temporal" },
-      },
-    }),
-    (error) =>
-      error.code === "APPLICATION_EXECUTOR_UNAVAILABLE" &&
-      error.workspaceThreadId === WORKSPACE_THREAD_ID
-  );
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+  });
 
   assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
-  const thread = workspaceThreadRead({ repoRoot, env: {} });
   assert.deepEqual(
-    thread.messages.map(({ role, kind }) => ({ role, kind })),
+    result.messages.map(({ role, kind }) => ({ role, kind })),
     [
       { role: "user", kind: "intent" },
-      { role: "assistant", kind: "action_error" },
+      { role: "assistant", kind: "action_result" },
     ]
   );
-  assert.equal(thread.messages[1].error.code, "APPLICATION_EXECUTOR_UNAVAILABLE");
-  assert.match(thread.messages[1].text, /not marked Applied/i);
+  assert.equal(result.messages[1].artifacts[0].kind, "application_handoff");
+  assert.equal(result.messages[1].artifacts[0].url, seeded.link);
+  assert.equal(result.messages[1].metadata.state, "manual-handoff");
+  assert.equal(result.messages[1].metadata.submissionVerified, false);
+  assert.equal(
+    result.messages[1].metadata.nextActions[0].intent.type,
+    "application.record-external"
+  );
+  assert.match(result.messages[1].text, /not marked Applied/i);
 });
 
 test("Apply on site writes Applied only after its executor returns verified confirmation", async () => {
@@ -1421,6 +1837,33 @@ test("workspace agent routes expose the one thread and route button intents thro
   assert.equal(seen.length, 1);
   assert.equal(acted.body.data.thread.id, WORKSPACE_THREAD_ID);
   assert.equal(acted.body.data.messages.length, 2);
+});
+
+test("workspace job-request errors return actionable client statuses instead of server errors", async () => {
+  const repoRoot = tempRepo();
+  const cases = [
+    ["JOB_URL_REQUIRED", 400],
+    ["JOB_IDENTITY_REQUIRED", 400],
+    ["JOB_CAPTURE_FAILED", 409],
+    ["JOB_BODY_REQUIRES_BROWSER", 409],
+  ];
+
+  for (const [code, expectedStatus] of cases) {
+    const routes = mountDirect(repoRoot, async () => {
+      const error = new Error(`job request failed: ${code}`);
+      error.code = code;
+      throw error;
+    });
+    const response = await callDirect(routes, "POST", "/api/workspace/intent", {
+      intent: {
+        type: "job.evaluate-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { jobUrl: "https://jobs.example.test/acme/role" },
+      },
+    });
+    assert.equal(response.status, expectedStatus, code);
+    assert.equal(response.body.code, code);
+  }
 });
 
 test("workspace message route waits for the same agent turn and returns its durable reply", async () => {
