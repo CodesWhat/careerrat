@@ -95,16 +95,18 @@ test("Jobs page manual search uses the deterministic sourcing endpoint", () => {
   // a85a9e96 rebuilt JobsPage.jsx (structured priority card + SPA de-version)
   // and extracted the manual-search action into apps/web/src/jobs/jobsSearch.js
   // (hasDbSourceSetup/runJobsPageSearch) — startSearchRun/purpose now live
-  // there instead of inline on the page, and the setup-needed copy changed
-  // from "Finish Search setup before running a job search." to "Finish
-  // Search Setup" / an actionable source-setup instruction.
+  // there instead of inline on the page. Source state now stays neutral while
+  // loading and a confirmed zero-source state returns to Paul instead of
+  // exposing a Jobs-page repair instruction.
   const jobsPage = stripJavaScriptComments(source("apps/web/src/jobs/JobsPage.jsx"));
   assert.match(jobsPage, /\bgetSearchSources\b/);
   assert.match(jobsPage, /\brunJobsPageSearch\b/);
   assert.match(jobsPage, /\bhasDbSourceSetup\b/);
   assert.match(jobsPage, /Search jobs/);
   assert.match(jobsPage, /Searching…/);
-  assert.match(
+  assert.match(jobsPage, /Loading Search Sources/);
+  assert.match(jobsPage, /<Navigate to="\/onboarding" replace \/>/);
+  assert.doesNotMatch(
     jobsPage,
     /Add tracked companies or a job board in Settings or\s+Onboarding, then reload this page\./
   );

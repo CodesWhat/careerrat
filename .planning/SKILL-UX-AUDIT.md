@@ -61,11 +61,12 @@ Required behavior:
    search progress, results, or the resumable pause action, not contradictory
    readiness copy.
 
-Current root cause: candidate `search_ready` only checks resume handling, role
-titles, and search location. The completion screen then makes source setup and the
-first search optional button clicks, while the app route gate considers onboarding
-complete without either. Jobs independently checks source config and exposes the
-dead-end error shown in the screenshot.
+Current implementation now starts baseline sourcing at candidate `search_ready`,
+requires usable source config plus a running/completed first search for graduation,
+and keeps failed or paused setup inside Paul. The remaining release gate is a
+clean-home and restart QA pass proving that every required setting is covered, the
+background run is visible while the interview continues, pending reads never flash
+a false zero-source error, and every failure resumes from a durable checkpoint.
 
 ### "Rate this job"
 

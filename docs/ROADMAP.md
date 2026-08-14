@@ -311,7 +311,20 @@ The current build order is:
    and the first search is running or completed. If that cannot happen, Paul offers a durable pause
    with the exact reason and a resume-from-here action, but keeps the app gated. A user must never
    reach Jobs and see "No search sources set up yet" or be told to repair onboarding in Settings and
-   reload.
+   reload. The release check for this contract must prove all of the following on a clean home and
+   again after restart:
+
+   - source generation and the first search begin at minimum search readiness, before the rest of
+     Paul's interview is complete;
+   - every setting required by the candidate's enabled workflows is confirmed or explicitly
+     deferred inside Paul's thread;
+   - failed or unavailable setup work offers retry, guided repair, and a durable **Pause setup**
+     checkpoint that resumes at the same item;
+   - unreadable setup state fails closed to Paul, and a pending source read never flashes a false
+     zero-source error; and
+   - the main app opens only after usable source config is durable and the first search is running
+     or completed, with progress or results already visible.
+
 2. **Ask orchestration** — make short job URLs, "rate this job," "apply to this job," natural job
    references, recruiter updates, and settings requests resolve to visible typed workflows instead
    of answer-only chat. Rating captures the JD, evaluates it, saves the verdict, renders the result,

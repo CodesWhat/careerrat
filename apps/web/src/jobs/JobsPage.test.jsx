@@ -517,6 +517,40 @@ afterEach(() => {
 });
 
 describe("JobsPage", () => {
+  it("shows source loading instead of claiming setup is missing before the source read settles", () => {
+    const { searchSources: _searchSources, ...dataWithoutSourceSnapshot } = JOBS_DATA;
+    const html = renderJobsPage({
+      route: "/jobs?tab=search",
+      snapshot: {
+        data: {
+          ...dataWithoutSourceSnapshot,
+          sourcing: { ...dataWithoutSourceSnapshot.sourcing, manualSearchRun: null },
+        },
+      },
+    });
+
+    expect(html).toContain("Checking your saved search sources");
+    expect(html).not.toContain("No search sources set up yet");
+    expect(html).not.toContain("Finish Search Setup");
+    expect(html).not.toContain("Search is available after source setup");
+  });
+
+  it("renders no Jobs dead end when a confirmed zero-source state routes back to Paul", () => {
+    const html = renderJobsPage({
+      route: "/jobs?tab=search",
+      snapshot: {
+        data: {
+          ...JOBS_DATA,
+          searchSources: { deterministicSources: { attempted: 0 } },
+        },
+      },
+    });
+
+    expect(html).toBe("");
+    expect(html).not.toContain("Add tracked companies or a job board in Settings");
+    expect(html).not.toContain("reload this page");
+  });
+
   it("labels free-board fit scores as approximate rules-based triage", () => {
     const html = renderJobsPage({ route: "/jobs?tab=search" });
 
