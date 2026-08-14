@@ -17,6 +17,7 @@ import {
   APP_SAFE_RUNTIME_TOOLS,
   DEFAULT_RUNTIME_TOOL_PROFILE,
 } from "../src/core/ai/runtime-tools.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 // A minimal addRoute-based harness mirroring tracker-dev.mjs's own routing
 // table (method+path -> handler), without pulling in the whole dev server.
@@ -34,7 +35,7 @@ function bootRouteServer(runSkillStream, { repoRoot = "/fake/repo", env = {} } =
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));

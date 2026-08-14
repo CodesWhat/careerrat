@@ -1,8 +1,10 @@
 // public-page-extractor.mjs — deterministic public careers-page metadata.
 
 import { createHash } from "node:crypto";
+import { Parser } from "htmlparser2";
 import { fetchPublicHttpText } from "../net/public-http-fetch.mjs";
 import { inferProvider } from "../scoring/sourced-scanner.mjs";
+import { htmlToPlainText } from "../text/html-text.mjs";
 
 const TEXT_CAP = 200_000;
 const JOB_LINK_RE = /\b(careers?|jobs?|openings?|roles?|join-us|positions?)\b/i;
@@ -40,51 +42,54 @@ function hashText(text) {
     .digest("hex")}`;
 }
 
-function decodeAttribute(value = "") {
-  return String(value || "")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .trim();
-}
-
 function visibleText(html = "") {
-  return String(html || "")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
+  return htmlToPlainText(html, { blockSeparator: " " })
+    .replace(/\u00a0/g, " ")
     .replace(/\s+/g, " ")
     .trim();
 }
 
 function extractRobots(html = "") {
-  const match = String(html).match(
-    /<meta[^>]+name\s*=\s*(?:"robots"|'robots'|robots)[^>]*content\s*=\s*(?:"([^"]+)"|'([^']+)'|([^>\s]+))/i
+  let robots = "";
+  const parser = new Parser(
+    {
+      onopentag(name, attributes) {
+        if (name === "meta" && String(attributes.name || "").toLowerCase() === "robots") {
+          robots = String(attributes.content || "").toLowerCase();
+        }
+      },
+    },
+    { decodeEntities: true }
   );
-  return String(match?.[1] || match?.[2] || match?.[3] || "").toLowerCase();
+  parser.end(String(html || ""));
+  return robots;
 }
 
 function extractLinks(html = "", baseUrl) {
   const links = [];
   const seen = new Set();
-  const hrefPattern = /href\s*=\s*(?:"([^"]+)"|'([^']+)'|([^>\s]+))/gi;
-  for (const match of String(html).matchAll(hrefPattern)) {
-    const href = decodeAttribute(match[1] || match[2] || match[3] || "");
-    if (!href || href.startsWith("#") || /^mailto:|^tel:/i.test(href)) continue;
-    let url;
-    try {
-      url = new URL(href, baseUrl);
-    } catch {
-      continue;
-    }
-    if (url.protocol !== "http:" && url.protocol !== "https:") continue;
-    const key = url.toString();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    links.push(url);
-  }
+  const parser = new Parser(
+    {
+      onopentag(name, attributes) {
+        if (name !== "a") return;
+        const href = String(attributes.href || "").trim();
+        if (!href || href.startsWith("#") || /^mailto:|^tel:/i.test(href)) return;
+        let url;
+        try {
+          url = new URL(href, baseUrl);
+        } catch {
+          return;
+        }
+        if (url.protocol !== "http:" && url.protocol !== "https:") return;
+        const key = url.toString();
+        if (seen.has(key)) return;
+        seen.add(key);
+        links.push(url);
+      },
+    },
+    { decodeEntities: true }
+  );
+  parser.end(String(html || ""));
   return links;
 }
 

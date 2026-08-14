@@ -17,6 +17,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
 } from "../src/core/db/verbs/candidate.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
 
@@ -273,7 +274,7 @@ function bootServer(repoRoot, opts = {}) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));
@@ -384,10 +385,7 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
     const app = readApp(repoRoot, "app-packet");
     const jdPath = app?.artifacts?.jd;
     assert.match(String(jdPath || ""), /^workspace\/jobs\/.+\.md$/);
-    assert.ok(
-      existsSync(join(repoRoot, jdPath.replace(/^workspace\//, "workspace/"))),
-      "captured JD artifact should exist locally"
-    );
+    assert.ok(existsSync(join(repoRoot, jdPath)), "captured JD artifact should exist locally");
     assert.match(String(app?.artifacts?.jdGeneratedAt || ""), /^\d{4}-\d{2}-\d{2}T/);
     assert.deepEqual(app.evaluation, body.data);
     assert.equal(app.packetGate, undefined, "typed evaluation is the sole current verdict");
@@ -673,7 +671,7 @@ test("POST /api/packet/generate: stamps packet source/export artifacts through D
         `${key} should be workspace-stamped`
       );
       assert.ok(
-        existsSync(join(repoRoot, artifacts[key].replace(/^workspace\//, "workspace/"))),
+        existsSync(join(repoRoot, artifacts[key])),
         `${key} should point at a local artifact file`
       );
     }

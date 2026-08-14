@@ -17,6 +17,7 @@ import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { ONBOARD_PAGE_HTML } from "../src/core/onboarding/onboard-page.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
+import { extractInlineScript } from "./html-test-helpers.mjs";
 
 // A fresh repoRoot with its workspace dir pre-created — same convention
 // tests/answer-page.test.mjs's tempRepoWithSkills() uses (no skills needed
@@ -82,11 +83,11 @@ test("the finish-links panel starts hidden (only revealed after write-config suc
 // ---------------------------------------------------------------------------
 
 test("onboard-page.mjs inline <script> parses as valid JavaScript (no syntax error)", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(ONBOARD_PAGE_HTML);
-  assert.ok(match, "expected an inline <script> block in the page");
+  const script = extractInlineScript(ONBOARD_PAGE_HTML);
+  assert.ok(script, "expected an inline <script> block in the page");
   assert.doesNotThrow(() => {
     // eslint-disable-next-line no-new-func
-    new Function(match[1]);
+    new Function(script);
   }, "onboard-page.mjs's inline script has a JS syntax error — it would break the live page");
 });
 
@@ -96,9 +97,9 @@ test("onboard-page.mjs's inline <script> never uses a template literal or backti
   // outer literal or silently get interpolated at module-load time instead of
   // shipping as literal client-side JS. The whole file is written to avoid
   // backticks entirely; this test guards that invariant going forward.
-  const match = /<script>([\s\S]*?)<\/script>/.exec(ONBOARD_PAGE_HTML);
-  assert.ok(match);
-  assert.ok(!match[1].includes("`"), "inline script must not contain a backtick");
+  const script = extractInlineScript(ONBOARD_PAGE_HTML);
+  assert.ok(script);
+  assert.ok(!script.includes("`"), "inline script must not contain a backtick");
 });
 
 // ---------------------------------------------------------------------------

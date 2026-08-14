@@ -21,7 +21,7 @@
 // env is always an explicit parameter) so both front ends, and their tests,
 // can drive this module directly without a live server.
 
-import { createHash, timingSafeEqual } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 
 export const ANTHROPIC_VERSION = "2023-06-01";
 
@@ -92,8 +92,8 @@ export function extractProvidedToken(headers) {
 // Fixed-length digest compare: avoids both a length-branch timing leak and
 // timingSafeEqual's own throw-on-mismatched-length-buffers behavior.
 function digest(s) {
-  return createHash("sha256")
-    .update(String(s ?? ""), "utf8")
+  return createHmac("sha256", String(s ?? ""))
+    .update("careerrat-proxy-token-v1", "utf8")
     .digest();
 }
 export function tokensMatch(provided, expected) {
@@ -139,11 +139,15 @@ export async function authenticate(headers, tokenEntries) {
 // Upstream header injection/stripping + Vercel AI Gateway attribution
 // ---------------------------------------------------------------------------
 
-// First 12 hex chars of sha256(token) — stable per token, never the token
-// itself. Long enough to attribute usage per-caller at the gateway without
-// being reversible or colliding across a realistic number of proxy tokens.
+// First 12 hex chars of a domain-separated HMAC keyed by the token — stable
+// per token, never the token itself. Long enough to attribute usage per-caller
+// at the gateway without being reversible or colliding across a realistic
+// number of proxy tokens.
 export function reportingUserId(token) {
-  return createHash("sha256").update(String(token), "utf8").digest("hex").slice(0, 12);
+  return createHmac("sha256", String(token))
+    .update("careerrat-reporting-user-v1", "utf8")
+    .digest("hex")
+    .slice(0, 12);
 }
 
 // "skill:x,action:y" from the x-careerrat-* labels, or null when neither is

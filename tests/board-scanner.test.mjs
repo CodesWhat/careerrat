@@ -63,9 +63,10 @@ test("scanBoards accepts searches and isolates per-source fetch errors", async (
     },
     {
       fetchImpl: async (url) => {
-        if (url.includes("remotive.com")) throw new Error("feed unavailable");
-        if (url.includes("remoteok.com")) throw new Error("remote feed unavailable");
-        if (url.includes("workingnomads.com")) {
+        const hostname = new URL(url).hostname;
+        if (hostname === "remotive.com") throw new Error("feed unavailable");
+        if (hostname === "remoteok.com") throw new Error("remote feed unavailable");
+        if (hostname === "workingnomads.com" || hostname === "www.workingnomads.com") {
           return [
             {
               title: "Solutions Engineer",

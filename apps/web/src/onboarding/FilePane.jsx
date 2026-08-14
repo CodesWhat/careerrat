@@ -172,7 +172,9 @@ function CandidateSnapshot({ state, hasPending = false, hideEmpty = false }) {
     ["LinkedIn", candidate.linkedin],
     ["GitHub", candidate.github],
     ["Portfolio", candidate.portfolio],
-  ].filter(([, href]) => href);
+  ]
+    .map(([label, href]) => [label, safeProfileHref(href)])
+    .filter(([, href]) => href);
   const hasDetails = !!(candidate.full_name || candidate.headline || facts.length || links.length);
 
   if (!hasDetails) {
@@ -212,6 +214,15 @@ function CandidateSnapshot({ state, hasPending = false, hideEmpty = false }) {
       ) : null}
     </section>
   );
+}
+
+function safeProfileHref(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 const EDITABLE_KEYS = new Set([

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { htmlToPlainText } from "../text/html-text.mjs";
 
 export const DEEP_INGEST_JSON_BODY_MAX_BYTES = 1024 * 1024;
 export const DEEP_INGEST_UPLOAD_MAX_BYTES = 10 * 1024 * 1024;
@@ -158,16 +159,8 @@ export function chunkText({ sourceId, text, maxChars }) {
 }
 
 export function plainTextFromHtml(html = "") {
-  return String(html)
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
+  return htmlToPlainText(html, { blockSeparator: " " })
+    .replace(/\u00a0/g, " ")
     .replace(/\s+\n/g, "\n")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")

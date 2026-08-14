@@ -19,6 +19,7 @@ import {
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { candidateConfigPatch, candidateEvidenceMerge } from "../src/core/db/verbs/candidate.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
 
@@ -90,7 +91,7 @@ function bootServer(repoRoot, opts = {}) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));
@@ -505,11 +506,7 @@ test("POST /api/packet/questions persists capture before local answer drafting",
     assert.equal(artifacts.packetQuestionCount, 2);
     assert.equal(artifacts.packetQuestionExcludedCount, 1);
     assert.equal(app?.packetManifest?.questions?.answerableCount, 2);
-    assert.ok(
-      existsSync(
-        join(repoRoot, artifacts.packetQuestionsSource.replace(/^workspace\//, "workspace/"))
-      )
-    );
+    assert.ok(existsSync(join(repoRoot, artifacts.packetQuestionsSource)));
   } finally {
     await closeServer(server);
   }

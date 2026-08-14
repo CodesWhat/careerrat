@@ -170,6 +170,7 @@
     "sharp": "^0.35.0"
   },
   "dependencies": {
+    "htmlparser2": "^12.0.0",
     "mammoth": "^1.12.0",
     "sanitize-html": "^2.17.4",
     "undici": "^7.28.0"

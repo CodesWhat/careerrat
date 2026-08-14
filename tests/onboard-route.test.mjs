@@ -50,6 +50,7 @@ import {
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
 import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -127,7 +128,7 @@ function bootServer(repoRoot, env = {}, extra = {}) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve({ server, env }));
@@ -1274,9 +1275,7 @@ describe("DOCX resume extraction", () => {
     const markdown = await extractDocxResumeMarkdown(bytes);
 
     assert.equal(rawText, "Public profile");
-    assert.equal(rawText.includes(url), false);
-    assert.match(markdown, /Public profile/);
-    assert.equal(markdown.includes(url), true);
+    assert.equal(markdown, `[Public profile](${url})`);
   });
 });
 

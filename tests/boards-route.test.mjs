@@ -15,6 +15,7 @@ import { mountBoardsRoutes } from "../src/cli/boards-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -44,7 +45,7 @@ function bootServer(repoRoot) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));

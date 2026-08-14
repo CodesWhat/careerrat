@@ -1,4 +1,5 @@
 import mammoth from "mammoth";
+import { htmlToMarkdownText } from "../text/html-text.mjs";
 
 const EMAIL_RE = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/;
 const PHONE_RE = /(?:\+?1[\s\-.]?)?(?:\(\d{3}\)|\d{3})[\s\-.]?\d{3}[\s\-.]?\d{4}/;
@@ -48,17 +49,7 @@ export async function extractDocxResumeMarkdown(buffer) {
 }
 
 function htmlAnchorsToMarkdownLinks(html) {
-  return String(html || "")
-    .replace(/<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_match, href, inner) => {
-      const text = inner.replace(/<[^>]+>/g, "").trim();
-      return href ? `${text} (${href})` : text;
-    })
-    .replace(/<[^>]+>/g, "\n")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
+  return htmlToMarkdownText(html);
 }
 
 export function normalizeDocxResumeText(text) {

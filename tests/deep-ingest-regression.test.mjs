@@ -26,6 +26,7 @@ import { proposeEvidenceFromSource } from "../src/core/deep-ingest/proposals/evi
 import { scanDeepIngestSource } from "../src/core/deep-ingest/source-scanner.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { loadLibrarySnapshot } from "../src/core/tracker/library-snapshot.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const fixtureUrl = new URL("./fixtures/deep-ingest/evals/source-cases.json", import.meta.url);
 const expectedUrl = new URL("./fixtures/deep-ingest/evals/expected-outcomes.json", import.meta.url);
@@ -118,7 +119,7 @@ function bootServer({ repoRoot, proposalBuilders = null, fetchImpl = fetch, scan
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => server.listen(0, "127.0.0.1", () => resolve(server)));
 }

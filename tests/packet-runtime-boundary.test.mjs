@@ -8,11 +8,12 @@ import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { ANSWER_PAGE_HTML } from "../src/core/ai/answer-page.mjs";
 import { PACKET_PAGE_HTML } from "../src/core/onboarding/packet-page.mjs";
+import { extractInlineScript } from "./html-test-helpers.mjs";
 
 function inlineScript(html) {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(html);
-  assert.ok(match, "expected an inline script");
-  return match[1];
+  const script = extractInlineScript(html);
+  assert.ok(script, "expected an inline script");
+  return script;
 }
 
 test("ordinary packet page generation calls the local packet API, not the retained skill runtime", () => {

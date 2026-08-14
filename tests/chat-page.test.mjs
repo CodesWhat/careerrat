@@ -16,6 +16,7 @@ import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { CHAT_PAGE_HTML } from "../src/core/onboarding/chat-page.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
+import { extractInlineScript } from "./html-test-helpers.mjs";
 
 // A fresh repoRoot with its workspace dir pre-created plus fake SKILL.md
 // directories for each name in `skillNames` — same convention
@@ -128,11 +129,11 @@ test("GET /chat serves the same byte-static page regardless of repo state", asyn
 // ---------------------------------------------------------------------------
 
 test("chat-page.mjs inline <script> parses as valid JavaScript (no syntax error)", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(CHAT_PAGE_HTML);
-  assert.ok(match, "expected an inline <script> block in the page");
+  const script = extractInlineScript(CHAT_PAGE_HTML);
+  assert.ok(script, "expected an inline <script> block in the page");
   assert.doesNotThrow(() => {
     // eslint-disable-next-line no-new-func
-    new Function(match[1]);
+    new Function(script);
   }, "chat-page.mjs's inline script has a JS syntax error — it would break the live page");
 });
 
@@ -140,9 +141,9 @@ test("chat-page.mjs's inline <script> contains no backtick or template-literal c
   // Header comment's stated invariant: this file's own content is a template
   // literal, so a literal backtick in the script would terminate it early.
   // Guard the invariant directly instead of only trusting the syntax check.
-  const match = /<script>([\s\S]*?)<\/script>/.exec(CHAT_PAGE_HTML);
-  assert.ok(match, "expected an inline <script> block in the page");
-  assert.ok(!match[1].includes("`"), "chat-page.mjs's inline script must not contain a backtick");
+  const script = extractInlineScript(CHAT_PAGE_HTML);
+  assert.ok(script, "expected an inline <script> block in the page");
+  assert.ok(!script.includes("`"), "chat-page.mjs's inline script must not contain a backtick");
 });
 
 // ---------------------------------------------------------------------------

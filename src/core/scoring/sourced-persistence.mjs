@@ -11,7 +11,8 @@ function slug(value, fallback = "unknown") {
   const normalized = String(value || "")
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
+    .replace(/^-+/, "")
+    .replace(/-+$/, "")
     .slice(0, 80);
   return normalized || fallback;
 }

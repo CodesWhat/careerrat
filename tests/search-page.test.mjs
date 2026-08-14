@@ -17,6 +17,7 @@ import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { SEARCH_PAGE_HTML } from "../src/core/onboarding/search-page.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
+import { extractInlineScript } from "./html-test-helpers.mjs";
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-search-page-"));
@@ -65,11 +66,11 @@ test("the results-list container starts with an empty-state message, not an offe
 // ---------------------------------------------------------------------------
 
 test("search-page.mjs inline <script> parses as valid JavaScript (no syntax error)", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(SEARCH_PAGE_HTML);
-  assert.ok(match, "expected an inline <script> block in the page");
+  const script = extractInlineScript(SEARCH_PAGE_HTML);
+  assert.ok(script, "expected an inline <script> block in the page");
   assert.doesNotThrow(() => {
     // eslint-disable-next-line no-new-func
-    new Function(match[1]);
+    new Function(script);
   }, "search-page.mjs's inline script has a JS syntax error — it would break the live page");
 });
 
@@ -79,9 +80,9 @@ test("search-page.mjs's inline <script> never uses a template literal or backtic
   // outer literal or silently get interpolated at module-load time instead of
   // shipping as literal client-side JS. Mirrors onboard-page.test.mjs's own
   // guard on this exact invariant.
-  const match = /<script>([\s\S]*?)<\/script>/.exec(SEARCH_PAGE_HTML);
-  assert.ok(match);
-  assert.ok(!match[1].includes("`"), "inline script must not contain a backtick");
+  const script = extractInlineScript(SEARCH_PAGE_HTML);
+  assert.ok(script);
+  assert.ok(!script.includes("`"), "inline script must not contain a backtick");
 });
 
 test("the offer-evaluate link is built against /evaluate?url=", () => {

@@ -96,7 +96,7 @@ test("known ATS (Greenhouse) board fetch fails -> falls through to a plain fetch
   const url = "https://job-boards.greenhouse.io/acme/jobs/999999";
   let plainFetchCalled = false;
   const fetchImpl = async (requestedUrl) => {
-    if (String(requestedUrl).includes("boards-api.greenhouse.io")) {
+    if (new URL(String(requestedUrl)).hostname === "boards-api.greenhouse.io") {
       throw new Error("board API unreachable");
     }
     plainFetchCalled = true;
@@ -114,7 +114,7 @@ test("known ATS that's ALSO an SPA host (Ashby) with a failing board fetch -> de
   const url = "https://jobs.ashbyhq.com/acme/12345678-1234-1234-1234-123456789abc";
   let plainFetchAttempted = false;
   const fetchImpl = async (requestedUrl) => {
-    if (String(requestedUrl).includes("api.ashbyhq.com")) {
+    if (new URL(String(requestedUrl)).hostname === "api.ashbyhq.com") {
       throw new Error("board API unreachable");
     }
     plainFetchAttempted = true;

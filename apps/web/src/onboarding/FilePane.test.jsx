@@ -208,8 +208,24 @@ describe("FilePane — rows", () => {
     expect(textOf(snapshot)).toContain("555-0100");
     expect(textOf(snapshot)).toContain("Baltimore, MD");
     expect(
-      visit(snapshot, (n) => n.type === "a" && n.props.href.includes("linkedin.com"))
+      visit(snapshot, (n) => n.type === "a" && n.props.href === "https://linkedin.com/in/jamie")
     ).toHaveLength(1);
+  });
+
+  it("does not turn unsafe profile URL schemes into links", () => {
+    const tree = render({
+      state: stateWith(["resume"], {
+        profile: {
+          candidate: {
+            full_name: "Jamie Rivera",
+            linkedin: "javascript:alert(document.domain)",
+            github: "data:text/html,<script>alert(1)</script>",
+          },
+        },
+      }),
+    });
+
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
   });
 
   it("shows an honest empty-file prompt before profile facts exist", () => {

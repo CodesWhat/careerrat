@@ -14,7 +14,6 @@
 // good client hygiene and what makes "did /meter update yet" deterministic.
 
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
@@ -501,9 +500,7 @@ test("proxy: usage attributes distinct token hashes and labels without persistin
     );
     assert.deepEqual(
       events.map((event) => event.user),
-      [tokens.alpha, tokens.beta, tokens.default].map((token) =>
-        createHash("sha256").update(token, "utf8").digest("hex").slice(0, 12)
-      )
+      [tokens.alpha, tokens.beta, tokens.default].map(reportingUserId)
     );
     assert.equal(new Set(events.map((event) => event.user)).size, 3);
 
@@ -798,10 +795,7 @@ test("proxy: healthy meter DB receives metadata-only snake_case event and JSONL 
     );
     const post = meterDb.requests.find((request) => request.method === "POST");
     const row = JSON.parse(post.bodyText);
-    assert.equal(
-      row.user_id,
-      createHash("sha256").update("fake-db-token").digest("hex").slice(0, 12)
-    );
+    assert.equal(row.user_id, reportingUserId("fake-db-token"));
     assert.equal(row.user_label, "fakeTester");
     assert.equal(Object.hasOwn(row, "user"), false);
     assert.equal(Object.hasOwn(row, "userLabel"), false);
@@ -854,7 +848,7 @@ test("proxy: meter DB failure preserves 200 response and writes exactly one JSON
 test("proxy: DB hydration restores prior user spend and rejects the first over-cap request", async () => {
   const upstream = await startMockUpstream();
   const token = "fake-hydrated-token";
-  const userId = createHash("sha256").update(token).digest("hex").slice(0, 12);
+  const userId = reportingUserId(token);
   const meterDb = await startMockMeterDb({ aggregateRows: [{ user_id: userId, sum: "1.50" }] });
   const root = tempRoot();
   const proxy = await startProxy({
@@ -950,7 +944,7 @@ test("proxy: CAREERRAT_UPSTREAM_REPORTING=1 injects ai-reporting-user/-tags, nev
 
     assert.equal(upstream.requests.length, 1);
     const [upReq] = upstream.requests;
-    const expectedUserId = createHash("sha256").update("devtok", "utf8").digest("hex").slice(0, 12);
+    const expectedUserId = reportingUserId("devtok");
     assert.equal(upReq.headers["ai-reporting-user"], expectedUserId);
     assert.equal(
       upReq.headers["ai-reporting-tags"],

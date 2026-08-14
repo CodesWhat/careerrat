@@ -13,6 +13,7 @@ import { mountDataRoutes } from "../src/cli/data-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
 
@@ -47,7 +48,7 @@ function bootServer(repoRoot) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));

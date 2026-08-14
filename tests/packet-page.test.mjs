@@ -16,6 +16,7 @@ import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { PACKET_PAGE_HTML } from "../src/core/onboarding/packet-page.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
+import { extractInlineScript } from "./html-test-helpers.mjs";
 
 function tempRepo() {
   const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-packet-page-"));
@@ -76,11 +77,11 @@ test("binary packet artifacts render as open links instead of markdown panes", (
 // ---------------------------------------------------------------------------
 
 test("packet-page.mjs inline <script> parses as valid JavaScript (no syntax error)", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(PACKET_PAGE_HTML);
-  assert.ok(match, "expected an inline <script> block in the page");
+  const script = extractInlineScript(PACKET_PAGE_HTML);
+  assert.ok(script, "expected an inline <script> block in the page");
   assert.doesNotThrow(() => {
     // eslint-disable-next-line no-new-func
-    new Function(match[1]);
+    new Function(script);
   }, "packet-page.mjs's inline script has a JS syntax error — it would break the live page");
 });
 
@@ -90,15 +91,14 @@ test("packet-page.mjs's inline <script> never uses a template literal or backtic
   // outer literal or silently get interpolated at module-load time instead of
   // shipping as literal client-side JS. Mirrors search-page.test.mjs's own
   // guard on this exact invariant.
-  const match = /<script>([\s\S]*?)<\/script>/.exec(PACKET_PAGE_HTML);
-  assert.ok(match);
-  assert.ok(!match[1].includes("`"), "inline script must not contain a backtick");
+  const script = extractInlineScript(PACKET_PAGE_HTML);
+  assert.ok(script);
+  assert.ok(!script.includes("`"), "inline script must not contain a backtick");
 });
 
 test("the Generate packet run POSTs the local packet generate API by default", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(PACKET_PAGE_HTML);
-  assert.ok(match);
-  const script = match[1];
+  const script = extractInlineScript(PACKET_PAGE_HTML);
+  assert.ok(script);
   assert.match(script, /fetch\("\/api\/packet\/generate"/);
   assert.match(script, /fetch\("\/api\/packet\/questions"/);
   assert.match(script, /questionCaptureState/);
@@ -111,9 +111,8 @@ test("the Generate packet run POSTs the local packet generate API by default", (
 });
 
 test("packet page captures application questions before local generation", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(PACKET_PAGE_HTML);
-  assert.ok(match);
-  const script = match[1];
+  const script = extractInlineScript(PACKET_PAGE_HTML);
+  assert.ok(script);
   assert.match(script, /function captureQuestions\(\)/);
   assert.match(script, /manualText: manualText/);
   assert.match(script, /url: url/);

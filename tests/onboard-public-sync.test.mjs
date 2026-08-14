@@ -14,6 +14,7 @@ import {
   COPY_ONLY_CANDIDATE_FILES,
   OPTIONAL_CANDIDATE_FILES,
 } from "../src/core/profile/candidate-setup.mjs";
+import { extractInlineScript } from "./html-test-helpers.mjs";
 
 const cleanupRoots = [];
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
@@ -168,12 +169,12 @@ test("onboarding page includes default-on public sync UI hooks and no-private-da
 });
 
 test("onboarding page script wires public sync preference without template literals", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(ONBOARD_PAGE_HTML);
-  assert.ok(match, "expected inline script");
+  const script = extractInlineScript(ONBOARD_PAGE_HTML);
+  assert.ok(script, "expected inline script");
   assert.doesNotThrow(() => {
     // eslint-disable-next-line no-new-func
-    new Function(match[1]);
+    new Function(script);
   });
-  assert.equal(match[1].includes("`"), false);
-  assert.match(match[1], /public-sync-preference/);
+  assert.equal(script.includes("`"), false);
+  assert.match(script, /public-sync-preference/);
 });

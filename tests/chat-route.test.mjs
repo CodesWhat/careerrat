@@ -14,6 +14,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { mountChatRoute } from "../src/cli/chat-route.mjs";
 import { createChatRuntime } from "../src/core/ai/chat-runtime.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -131,7 +132,7 @@ function bootServer(chatRuntime, repoRoot) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   const sockets = new Set();
   server.on("connection", (socket) => {

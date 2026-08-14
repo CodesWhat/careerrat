@@ -59,6 +59,7 @@ import {
   resolveTrackerBindHost,
   sendLocalSecurityError,
 } from "../core/tracker/request-security.mjs";
+import { dispatchHttpRoute } from "../core/tracker/route-dispatch.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountAutomationRoutes } from "./automation-route.mjs";
 import { mountBoardsRoutes } from "./boards-route.mjs";
@@ -401,8 +402,7 @@ export function createDevServer({
     }
 
     const route = routes.get(`${req.method} ${url}`);
-    if (route) {
-      route(req, res);
+    if (dispatchHttpRoute(route, req, res)) {
       return;
     }
 

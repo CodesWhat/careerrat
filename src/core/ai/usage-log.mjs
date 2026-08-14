@@ -147,7 +147,8 @@ function slugLabel(v) {
     .trim()
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-+/, "")
+    .replace(/-+$/, "");
 }
 
 function normalizeFeatureId(v) {
@@ -156,7 +157,8 @@ function normalizeFeatureId(v) {
     .toLowerCase()
     .replace(/\s+/g, "-")
     .replace(/[^a-z0-9._:-]+/g, "-")
-    .replace(/^-+|-+$/g, "");
+    .replace(/^-+/, "")
+    .replace(/-+$/, "");
   return text || null;
 }
 

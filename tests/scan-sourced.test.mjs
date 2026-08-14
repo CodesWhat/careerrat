@@ -45,7 +45,7 @@ import {
   sourcedUpsertBatch,
 } from "../src/core/db/verbs.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
-import { stringifyYaml } from "../src/core/profile/yaml.mjs";
+import { parseYaml, stringifyYaml } from "../src/core/profile/yaml.mjs";
 
 const REPO_ROOT = fileURLToPath(new URL("..", import.meta.url));
 
@@ -726,7 +726,9 @@ test("DB RSS scan replaces a feed preview with the canonical ATS job body before
     const jdText = readFileSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd), "utf8");
     assert.match(jdText, /partial: false/);
     assert.match(jdText, /Complete canonical job description/);
-    assert.match(jdText, new RegExp(`source: "?${atsUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+    const frontmatterEnd = jdText.indexOf("\n---", 4);
+    const frontmatter = parseYaml(jdText.slice(4, frontmatterEnd));
+    assert.equal(frontmatter.source, atsUrl);
   } finally {
     closeAll();
     rmSync(repoRoot, { recursive: true, force: true });

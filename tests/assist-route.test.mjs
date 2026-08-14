@@ -17,6 +17,7 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { suggestAssist } from "../apps/web/src/lib/api.js";
 import { buildAssistPrompt, mountAssistRoutes, runBareOneshot } from "../src/cli/assist-route.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const REAL_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const cleanupRoots = [];
@@ -72,7 +73,7 @@ function bootServer(repoRoot, { env = PROXY_ENV, call } = {}) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));

@@ -18,6 +18,7 @@ import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { ANSWER_PAGE_HTML } from "../src/core/ai/answer-page.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
+import { extractInlineScript } from "./html-test-helpers.mjs";
 
 // A fresh repoRoot with its workspace dir pre-created plus fake SKILL.md
 // directories for each name in `skillNames` — same convention
@@ -99,18 +100,17 @@ test("GET /api/runtime/config omits answer-question when its SKILL.md isn't disc
 // ---------------------------------------------------------------------------
 
 test("answer-page.mjs inline <script> parses as valid JavaScript (no syntax error)", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(ANSWER_PAGE_HTML);
-  assert.ok(match, "expected an inline <script> block in the page");
+  const script = extractInlineScript(ANSWER_PAGE_HTML);
+  assert.ok(script, "expected an inline <script> block in the page");
   assert.doesNotThrow(() => {
     // eslint-disable-next-line no-new-func
-    new Function(match[1]);
+    new Function(script);
   }, "answer-page.mjs's inline script has a JS syntax error — it would break the live page");
 });
 
 test("answer page drafts through the local packet answers API by default", () => {
-  const match = /<script>([\s\S]*?)<\/script>/.exec(ANSWER_PAGE_HTML);
-  assert.ok(match);
-  const script = match[1];
+  const script = extractInlineScript(ANSWER_PAGE_HTML);
+  assert.ok(script);
   assert.match(script, /fetch\("\/api\/packet\/answers"/);
   assert.match(script, /renderAnswer/);
   assert.match(script, /excludedQuestionIds/);

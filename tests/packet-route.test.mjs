@@ -17,6 +17,7 @@ import { after, test } from "node:test";
 import { mountPacketRoutes } from "../src/cli/packet-route.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
 
@@ -66,7 +67,7 @@ function bootServer(repoRoot, opts = {}) {
       res.writeHead(404).end();
       return;
     }
-    route(req, res);
+    dispatchHttpRoute(route, req, res);
   });
   return new Promise((resolve) => {
     server.listen(0, "127.0.0.1", () => resolve(server));

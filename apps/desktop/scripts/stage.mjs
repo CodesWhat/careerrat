@@ -45,6 +45,7 @@ import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, write
 import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { compileSingleStarGlob } from "../../../src/core/fs/single-star-glob.mjs";
 
 const desktopDir = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const repoRoot = join(desktopDir, "../..");
@@ -89,7 +90,7 @@ function expandGlobEntry(entry) {
   if (starAt === -1) return null;
   const dir = entry.slice(0, entry.lastIndexOf("/", starAt));
   const pattern = entry.slice(entry.lastIndexOf("/", starAt) + 1);
-  const regex = new RegExp(`^${pattern.replace(/[.]/g, "\\.").replace(/\*/g, ".*")}$`);
+  const regex = compileSingleStarGlob(pattern);
   const absDir = join(repoRoot, dir);
   if (!existsSync(absDir)) return [];
   return readdirSync(absDir)
