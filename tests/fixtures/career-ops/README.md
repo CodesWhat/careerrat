@@ -8,7 +8,9 @@ roots adapted so Node's test runner executes them against
 `src/core/providers/career-ops/vendor`. The VDAB-only ambient
 `config/profile.yml` fallback assertions are omitted because CareerRat injects
 DB-backed candidate keywords through its registry instead; that replacement has
-first-party coverage. `local-parser` is excluded because it executes
+first-party coverage. One Remotli mock salary is changed to `219500` because the
+upstream value is an intentional CareerRat private-data release sentinel; the
+assertion remains equivalent. `local-parser` is excluded because it executes
 user-configured local commands and is not a network source.
 
 CareerRat owns the small assertion helper in this directory. Shared CareerRat

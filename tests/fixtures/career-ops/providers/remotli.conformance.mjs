@@ -57,7 +57,7 @@ try {
       applyUrl: "https://job-boards.greenhouse.io/acme/jobs/4012345",
       publishedAt: "2026-08-01T10:00:00.000Z",
       salaryMin: 180000,
-      salaryMax: 220000,
+      salaryMax: 219500,
       salaryCurrency: "chf",
     })
   );
@@ -119,7 +119,7 @@ try {
     full &&
     full.salary &&
     full.salary.min === 180000 &&
-    full.salary.max === 220000 &&
+    full.salary.max === 219500 &&
     full.salary.currency === "CHF"
   ) {
     pass(
