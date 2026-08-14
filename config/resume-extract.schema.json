@@ -55,7 +55,7 @@
     },
     "targeting_suggestions": {
       "type": "object",
-      "required": ["role_buckets", "keep_signals", "tracked_companies"],
+      "required": ["role_buckets", "keep_signals"],
       "additionalProperties": false,
       "properties": {
         "role_buckets": {
@@ -94,11 +94,6 @@
         "keep_signals": {
           "type": "array",
           "maxItems": 12,
-          "items": { "type": "string" }
-        },
-        "tracked_companies": {
-          "type": "array",
-          "maxItems": 24,
           "items": { "type": "string" }
         }
       }

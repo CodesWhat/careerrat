@@ -210,6 +210,19 @@ describe("InterviewDossierCard", () => {
     expect(visit(tree, (node) => node.type === "inline-alert")).toHaveLength(0);
   });
 
+  it("treats the console-clean missing response as the expected build state", async () => {
+    api.getInterviewDossier.mockResolvedValue({
+      data: { applicationId: "app-3", dossier: null, state: "missing" },
+    });
+
+    renderCard({ applicationId: "app-3" });
+    await runEffects();
+    const tree = renderCard({ applicationId: "app-3" });
+
+    expect(button(tree, "Build prep dossier")).toBeTruthy();
+    expect(visit(tree, (node) => node.type === "inline-alert")).toHaveLength(0);
+  });
+
   it("routes a genuine load failure (other than DOSSIER_NOT_FOUND) through resolveErrorCopy — the fallback message renders, the raw server string only ever lives in `detail` — and wires a working retry", async () => {
     // 409/NO_DATABASE deliberately isn't one of resolveErrorCopy's mapped
     // statuses/strings, so this exercises the true generic bucket, where the

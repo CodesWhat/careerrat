@@ -433,11 +433,15 @@ const CONFIRM_BLOCK_GUIDANCE =
   "field is a string; targeting.role_buckets is an array where every item contains non-empty name, " +
   "priority, and titles fields. Keep " +
   "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words. " +
+  "A candidate's notice period belongs at profile.authorization.notice_period, never " +
+  "form-defaults.notice_period. Do not collect an earliest start date during initial setup. " +
   "Emit a confirm block as soon as a fact is settled, not at the end of a topic: if the user gives " +
   "their name and email, send a candidate_patch for those two fields right away rather than waiting " +
   "to also collect phone, city, and links, so an interrupted conversation never loses everything " +
   "already answered. Group one coherent set of facts per block: name plus email plus phone together " +
-  "is right, a separate pill for each is wrong. Never re-propose a fact the user already saved or " +
+  "is right, a separate pill for each is wrong. Never say a new fact is noted or saved unless it " +
+  "is already in canonical state or the same response contains the confirmation block that can " +
+  "save it. Never re-propose a fact the user already saved or " +
   "declined. `current_base` (what the candidate currently earns) is private: whenever a patch sets " +
   "it, include `current_comp_shareable: false` in the same patch, and it must never appear in any " +
   "outbound artifact. Do not invent kinds outside this closed list; anything not in it is silently " +

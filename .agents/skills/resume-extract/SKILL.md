@@ -44,11 +44,12 @@ case:
    a name, contact detail, employer, dates, or accomplishment that isn't legible in
    the source. A factual field you can't find is `null` (or an empty array for
    `claims`/section counts), never a guess or a placeholder.
-3. You may infer **targeting suggestions** from the resume's visible background,
+3. You may infer **role targeting suggestions** from the resume's visible background,
    seniority, domain, tools, and company context. These are suggestions for the user
    to accept/reject later, not facts about the candidate. Use real posted job-title
-   language and recognizable company names; if there is not enough signal, return
-   empty arrays rather than generic filler.
+   language; if there is not enough signal, return empty arrays rather than generic
+   filler. Never infer target companies or a company thesis from a résumé. Paul learns
+   those preferences directly from the user during onboarding.
 4. Multi-page PDFs are read up to 20 pages at once. If the document is truncated
    (e.g. a combined cover-letter-plus-resume dump), extract what's visible and don't
    fabricate the rest.
@@ -101,8 +102,7 @@ today's callers:
         "down_signals": ["pure frontend UI"]
       }
     ],
-    "keep_signals": ["platform ownership", "team leadership"],
-    "tracked_companies": ["Acme Corp", "Globex", "Initech"]
+    "keep_signals": ["platform ownership", "team leadership"]
   }
 }
 ```
@@ -143,9 +143,6 @@ today's callers:
   guardrails such as travel, salary, location, or autonomy here.
 - `targeting_suggestions.keep_signals[]` — concrete role/posting signals that would make
   a job relevant to this candidate. These are compatibility search/gate hints, not resume claims.
-- `targeting_suggestions.tracked_companies[]` — 8-20 plausible target companies based on
-  the candidate's domain, seniority, location posture if visible, and product/company
-  patterns. Do not include past employers unless they are also plausible future targets.
 
 ## On a corrective retry
 

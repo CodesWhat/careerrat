@@ -1389,7 +1389,6 @@ describe("POST /api/onboard/resume-docx", () => {
           },
         ],
         keep_signals: ["platform systems"],
-        tracked_companies: [],
       },
     });
     const calls = [];
@@ -1578,7 +1577,6 @@ describe("POST /api/onboard/resume-ai", () => {
         },
       ],
       keep_signals: ["team leadership", "platform architecture"],
-      tracked_companies: ["Stripe", "Ramp", "Linear"],
     },
   });
   const VALID_FENCED_REPLY = `Here you go:\n\`\`\`json\n${VALID_REPLY}\n\`\`\`\n`;
@@ -1635,7 +1633,7 @@ describe("POST /api/onboard/resume-ai", () => {
         "team leadership",
         "platform architecture",
       ]);
-      assert.deepEqual(body.data.targetingSeed.tracked_companies, ["Stripe", "Ramp", "Linear"]);
+      assert.equal(body.data.targetingSeed.tracked_companies, undefined);
       assert.deepEqual(body.ai, {
         used: true,
         label: "resume-extract:resume-ai:onboard.resume-ai",
@@ -1731,7 +1729,7 @@ describe("POST /api/onboard/resume-ai", () => {
       candidate: { domain: "" },
       claims: [],
       sections: { experience: 0, education: 0, skills: 0, projects: 0, other: 0 },
-      targeting_suggestions: { role_buckets: [], keep_signals: [], tracked_companies: [] },
+      targeting_suggestions: { role_buckets: [], keep_signals: [] },
     });
     const runSkillStream = fakeRunSkillStream([emptyReply]);
     const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
@@ -1988,7 +1986,6 @@ describe("POST /api/onboard/resume-ai-stream", () => {
     targeting_suggestions: {
       role_buckets: [{ name: "Platform", priority: "primary", titles: ["Platform Engineer"] }],
       keep_signals: ["platform delivery"],
-      tracked_companies: ["Example Corp"],
     },
   });
 
@@ -2122,7 +2119,7 @@ describe("POST /api/onboard/resume-ai-stream", () => {
       candidate: { domain: "" },
       claims: [],
       sections: { experience: 0, education: 0, skills: 0, projects: 0, other: 0 },
-      targeting_suggestions: { role_buckets: [], keep_signals: [], tracked_companies: [] },
+      targeting_suggestions: { role_buckets: [], keep_signals: [] },
     });
     const runSkillStream = fakeRunSkillStream([emptyReply]);
     const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });

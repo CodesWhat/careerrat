@@ -684,7 +684,7 @@ test("POST /api/chat/close: 204 on success, 404 for an unknown chatId", async ()
 // GET /api/chat/by-skill and GET /api/chat/list
 // ---------------------------------------------------------------------------
 
-test("GET /api/chat/by-skill: 200 with {chatId, state} for a live session, 404 otherwise", async () => {
+test("GET /api/chat/by-skill: returns a console-clean 200 miss or the live session", async () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   const chatRuntime = createChatRuntime({
     repoRoot,
@@ -694,8 +694,12 @@ test("GET /api/chat/by-skill: 200 with {chatId, state} for a live session, 404 o
   const server = await bootServer(chatRuntime, repoRoot);
   try {
     const missing = await fetch(`${baseUrl(server)}/api/chat/by-skill?skill=ingest-profile`);
-    assert.equal(missing.status, 404);
-    await missing.json();
+    assert.equal(missing.status, 200);
+    assert.deepEqual(await missing.json(), {
+      chatId: null,
+      skill: "ingest-profile",
+      state: "missing",
+    });
 
     const startRes = await fetch(`${baseUrl(server)}/api/chat/start`, {
       method: "POST",

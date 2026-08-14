@@ -1,4 +1,5 @@
 import { authorizationDeclared } from "../db/verbs.mjs";
+import { hasConfiguredCompensationFloor } from "../profile/compensation.mjs";
 
 const SETUP_PROGRESS_ITEMS = [
   "engine",
@@ -28,7 +29,6 @@ export function computeSetupProgress({
   const targeting = data.targeting || {};
   const profile = data.profile || {};
   const profileLocation = profile.location || {};
-  const minimumBase = Number(profile.compensation?.minimum_base);
   const locationReady =
     !!String(profileLocation.home || "").trim() ||
     !!profileLocation.hybrid ||
@@ -44,7 +44,7 @@ export function computeSetupProgress({
       (targeting.tracked_companies ?? []).length > 0,
     evidence: (data.evidence?.claims ?? []).length > 0,
     guardrails: (targeting.cut_signals ?? []).length > 0,
-    quickFacts: locationReady && Number.isFinite(minimumBase) && minimumBase > 0,
+    quickFacts: locationReady && hasConfiguredCompensationFloor(profile.compensation),
     authorization: authorizationValuePresent(data),
   };
 

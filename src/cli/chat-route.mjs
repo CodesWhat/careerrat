@@ -12,7 +12,7 @@
 //   POST /api/chat/message   { chatId, text } -> 202 {accepted:true} (fire-and-forget)
 //   POST /api/chat/interrupt { chatId }       -> 202
 //   POST /api/chat/close     { chatId }       -> 204
-//   GET  /api/chat/by-skill  ?skill=<name>    -> 200 {chatId, skill, state, ...} / 404
+//   GET  /api/chat/by-skill  ?skill=<name>    -> 200 live session or explicit missing state
 //   GET  /api/chat/list                       -> 200 [{chatId, skill, state, ...}]
 //
 // Unlike POST /api/skill/run (skill-run-route.mjs), a chat session outlives
@@ -174,7 +174,7 @@ export function mountChatRoute({ addRoute, repoRoot, chatRuntime, env = process.
     const skill = String(queryParam(req, "skill") || "").trim();
     const session = skill ? chatRuntime.findBySkill(skill) : null;
     if (!session) {
-      sendJson(res, 404, { error: "no live session for that skill" });
+      sendJson(res, 200, { chatId: null, skill, state: "missing" });
       return;
     }
     sendJson(res, 200, session);

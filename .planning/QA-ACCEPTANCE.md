@@ -1,12 +1,12 @@
 # CareerRat full-product acceptance ledger
 
 Started: 2026-08-13
-Completed: 2026-08-14
+Reopened: 2026-08-14
+Current tranche completed: 2026-08-14
 
-Gate result: product acceptance complete, with all 74 findings fixed and live-retested.
-CareerRat's web app, CLI, clean npm package, packaged Electron runtime, and macOS DMG pass their
-release gates. The final DMG is signed, accepted by Apple notarization, stapled, and approved by
-Gatekeeper.
+Gate result: all 82 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+rate/apply, deterministic-provider, npm install, restart, and native Electron checks pass. The
+broader native skill-to-screen build gate remains tracked separately in `SKILL-UX-AUDIT.md`.
 
 This is the live execution ledger for the release gate in `docs/ROADMAP.md`. Status values are
 `NOT RUN`, `PASS`, `FAIL`, `FIXED`, or `DEFERRED`. Every failure needs reproduction evidence,
@@ -1387,3 +1387,126 @@ Test homes:
 - Regression: `tests/app-shell-style.test.mjs` pins the safe inset and complete title-bar contract.
 - Live retest: PASS in a 1280x860 CareerRat Electron window. All three native controls render left
   of the wordmark with clear separation, and the header action remains interactive.
+
+### `F-075` Completed onboarding can land on Jobs with no search sources
+
+- Status: `FIXED`
+- Severity: P0 release blocker, a first-time candidate can finish Paul's interview and immediately
+  see "No search sources set up yet" instead of a working search.
+- Reproduction: complete onboarding in a clean npm home without manually adding a tracked company
+  or board, then open Jobs.
+- Root cause: historical graduation treated interview completion and usable source/search state as
+  separate concerns.
+- Fix: start deterministic source generation and the first search as soon as minimum
+  search readiness exists. Keep setup gated unless sources are durable and that search is running
+  or complete; otherwise expose retry, guided repair, and durable pause/resume.
+- Regression: the onboarding graduation and background-sourcing route/surface suites.
+- Live retest: a clean packed npm install started four deterministic sources at 4 of 8 while Paul
+  continued interviewing, scanned 269 postings, saved two qualified roles, and opened Jobs without
+  the no-sources banner. After a full server restart, setup still opened as ready and Jobs still
+  showed the same two-role review queue with zero HTTP or console errors.
+
+### `F-076` Résumé extraction invents company targeting
+
+- Status: `FIXED`
+- Severity: P1, uploading a résumé can silently turn former employers into target companies and
+  skip Paul's actual company-thesis question.
+- Reproduction: upload a résumé containing employer names in a fresh setup and inspect Company
+  focus before answering any company-preference question.
+- Root cause: the extraction schema allowed target-company suggestions from employment history.
+- Fix: résumé extraction now seeds role and keep signals only. Named employers and company thesis
+  remain empty until the candidate states them.
+- Regression: résumé extraction, onboarding route, and InterviewSurface suites.
+- Live retest: the clean packed install remained at 4 of 8 after upload, showed no tracked companies
+  or company preferences, and Paul asked the open company-thesis question.
+
+### `F-077` Setup failures cannot be paused and resumed safely
+
+- Status: `FIXED`
+- Severity: P0 release blocker, a runtime or source failure can strand a non-technical user with no
+  durable way to stop and continue.
+- Reproduction: fail the onboarding chat start after entering a message, then close and reopen setup.
+- Root cause: the interview surface showed retry copy but persisted neither the pause reason nor the
+  failed turn.
+- Fix: persist the failed user turn and an `interviewPause` checkpoint, disable streaming while
+  paused, and expose Pause setup plus Resume setup with exact progress and transcript restoration.
+- Regression: InterviewSurface, onboarding state, and chat route suites.
+- Live retest: an aborted start was paused, the app was closed and reopened, and Resume restored the
+  exact transcript and populated notes pane with no HTTP or console errors.
+
+### `F-078` Paul can claim notice period is saved under an invalid field
+
+- Status: `FIXED`
+- Severity: P0 release blocker, Paul can tell the candidate setup is complete while emitting
+  `form-defaults.notice_period`, which the schema rejects and never saves.
+- Reproduction: answer Paul's notice-period question on the completion boundary of a clean setup.
+- Root cause: the skill asked for an unsupported earliest-start value and did not pin notice period
+  to `profile.authorization.notice_period`; completion copy could also outrun the write confirmation.
+- Fix: use the supported profile path, stop collecting earliest start during initial
+  setup, and prohibit saved/noted claims without canonical state or a same-response confirmation.
+- Regression: chat-runtime and release-safety suites.
+- Live retest: in the complete clean packed-install interview, Paul's final response exposed a
+  reviewable Notice period confirmation, saved `profile.authorization.notice_period` as `2 weeks`,
+  asked no earliest-start follow-up, and then reached CareerRat is ready.
+
+### `F-079` Arrangement-specific compensation floors do not satisfy setup readiness
+
+- Status: `FIXED`
+- Severity: P0 release blocker, Paul can correctly save remote and hybrid floors but Quick facts and
+  `gate_ready` remain incomplete because they check only the obsolete flat fallback.
+- Reproduction: save positive `comp_floors.remote` and `comp_floors.hybrid` without `minimum_base`.
+- Root cause: onboarding progress and SQLite readiness drifted from the evaluation gate, which
+  already understands arrangement-specific floors.
+- Fix: share compensation-floor readiness semantics across setup and candidate state, and
+  render the actual per-arrangement floors in Paul's notes.
+- Regression: setup progress, candidate DB verbs, and onboarding view-model suites.
+- Live retest: after the clean interview, the packed app's live API removed the flat fallback while
+  retaining remote and hybrid floors. Quick facts remained complete at 8 of 8 across restart, and
+  the disclosure rendered `Remote $175K floor · Hybrid $190K floor` with zero HTTP or console errors.
+
+### `F-080` Ask result links leave the mounted app router
+
+- Status: `FIXED`
+- Severity: P1, a successful job rating's Review action navigates from `/app/jobs` to the unmounted
+  `/jobs` URL and loses the drawer.
+- Reproduction: open a saved job, ask "Can you rate this job?", then click Review this job or Review
+  why this was cut in the typed result.
+- Root cause: workspace actions correctly carried router-relative `/jobs?...` paths, but Ask rendered
+  them as raw anchors without applying the product's `/app` mount point.
+- Fix: normalize trusted internal action paths through the mounted app prefix and suppress non-local
+  href values from that action slot.
+- Regression: `AskBar.test.jsx` pins the resulting `/app/jobs?...` URL.
+- Live retest: the packed app rated the open job, followed Review this job without leaving CareerRat,
+  kept the drawer open, and accepted the contextual "Apply to this job" follow-up.
+
+### `F-081` Empty interview dossiers log expected 404s as browser errors
+
+- Status: `FIXED`
+- Severity: P1, opening an ordinary application drawer before interview prep exists logs a 404 and
+  red console error even though the UI treats the missing dossier as normal.
+- Reproduction: open any newly evaluated application and inspect the interview-prep request and
+  browser console.
+- Root cause: the optional read API encoded "not built yet" as an HTTP error and relied on the card
+  to catch it.
+- Fix: return a console-clean 200 with `state: "missing"` and `dossier: null`; retain client handling
+  for legacy 404 responses.
+- Regression: interview dossier route and card suites cover both the new missing state and legacy
+  compatibility.
+- Live retest: the packed rate/apply flow opened and refreshed the drawer repeatedly with no 4xx
+  responses or console errors.
+
+### `F-082` npm blocks CareerRat's redundant consumer postinstall
+
+- Status: `FIXED`
+- Severity: P1, npm 11 warns that CareerRat has an unapproved install script and skips the skill
+  shim during an otherwise successful first install.
+- Reproduction: install the packed package into a clean npm consumer with current npm defaults.
+- Root cause: skill installation ran both as a package lifecycle hook and inside `careerrat start`;
+  the lifecycle copy now requires consumer approval and was unnecessary.
+- Fix: remove the consumer postinstall entirely and keep the explicit, idempotent skill installation
+  in `careerrat start` and `careerrat install-skills`.
+- Regression: release-safety coverage requires no prepare/postinstall lifecycle and verifies the
+  start launcher still invokes the installer.
+- Live retest: a brand-new packed install completed with no allow-scripts warning. Running
+  `careerrat start --no-agent --no-dashboard` then installed all 27 skills and seeded the isolated
+  workspace successfully.

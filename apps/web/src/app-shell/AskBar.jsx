@@ -79,6 +79,13 @@ function describeAskBarError(err) {
   return resolveErrorCopy(err).message;
 }
 
+function appActionHref(value) {
+  const href = String(value || "").trim();
+  if (!href.startsWith("/") || href.startsWith("//")) return null;
+  if (href === "/app" || href.startsWith("/app/")) return href;
+  return `/app${href}`;
+}
+
 // Ported from the deleted CaptureBar.jsx (git show 95f27540~1) — the 409
 // NO_DATABASE hint every /api/data/* route already surfaces for a legacy
 // (pre-migration) workspace; intake is DB-native by construction
@@ -1032,12 +1039,16 @@ function AskBarTurn({
       ) : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
-          {nextActions.map((action) =>
-            action.href ? (
-              <a className="btn btn--secondary" href={action.href} key={action.href}>
-                {action.label || "Open"}
-              </a>
-            ) : action.intent ? (
+          {nextActions.map((action) => {
+            const href = appActionHref(action.href);
+            if (href) {
+              return (
+                <a className="btn btn--secondary" href={href} key={href}>
+                  {action.label || "Open"}
+                </a>
+              );
+            }
+            return action.intent ? (
               <Button
                 variant="secondary"
                 key={`${action.intent.type}:${action.intent.entity?.type}:${action.intent.entity?.id}`}
@@ -1045,8 +1056,8 @@ function AskBarTurn({
               >
                 {action.label || "Continue"}
               </Button>
-            ) : null
-          )}
+            ) : null;
+          })}
         </div>
       ) : null}
       <EngineReceipt engine={turn.engine} elapsedMs={turn.elapsedMs} />

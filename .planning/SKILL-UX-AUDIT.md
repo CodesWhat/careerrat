@@ -61,12 +61,12 @@ Required behavior:
    search progress, results, or the resumable pause action, not contradictory
    readiness copy.
 
-Current implementation now starts baseline sourcing at candidate `search_ready`,
-requires usable source config plus a running/completed first search for graduation,
-and keeps failed or paused setup inside Paul. The remaining release gate is a
-clean-home and restart QA pass proving that every required setting is covered, the
-background run is visible while the interview continues, pending reads never flash
-a false zero-source error, and every failure resumes from a durable checkpoint.
+Current implementation starts baseline sourcing at candidate `search_ready`, requires
+usable source config plus a running/completed first search for graduation, and keeps
+failed or paused setup inside Paul. Clean packed-install QA proved sourcing at 4 of 8,
+269 postings scanned while the interview continued, two qualified roles waiting on
+Jobs at graduation, no false zero-source state, exact pause/resume restoration, and
+the same ready state after a full server restart.
 
 ### "Rate this job"
 
@@ -86,8 +86,9 @@ The app must:
 Current implementation recognizes short job URLs and an explicitly open saved job,
 captures or reuses the full JD, promotes sourced roles, runs the gate, saves the
 verdict, and renders a structured result plus the correct typed next action in Ask.
-The remaining parity work is pasted/attached JD routing, natural references to saved
-jobs that are not already open, and clean-home plus packaged-app acceptance coverage.
+Packed-app acceptance now covers an open saved job through a typed REVIEW/CUT result
+and a working in-app review handoff. The remaining parity work is pasted/attached JD
+routing and natural references to saved jobs that are not already open.
 
 ### "Apply to this job"
 
@@ -107,9 +108,10 @@ Current implementation resolves a short job URL or explicitly open saved job int
 the evaluate-to-packet chain, stops on `CUT`/`REVIEW`, generates base documents on
 `KEEP`, keeps moving when application questions are not discoverable until the form
 opens, and returns a concrete manual handoff without marking the job Applied. A
-verified executor result is still the only path that writes Applied. Remaining work
-is the connected authenticated executor, automatic form-question capture, broader
-natural references, and packaged-app acceptance coverage.
+verified executor result is still the only path that writes Applied. Packed-app QA
+proves the REVIEW/CUT stop without a false Applied action. Remaining work is the
+connected authenticated executor, automatic form-question capture, and broader
+natural references.
 
 ## Original skill inventory
 
@@ -185,11 +187,11 @@ Required behavior:
 - Label the UI clearly as Focus examples, Discovered companies, and Exclusions.
   Never imply that the focus list is the complete search universe.
 
-Current root cause: `targeting.tracked_companies` is simultaneously used as setup
-completion, a focus list, and deterministic source config. In
-`generateCompanySeeds()`, any non-empty manual seed list returns early, so broader
-seed generation never runs. The data model and orchestration both need to split
-those responsibilities.
+Current implementation persists a confirmed structured company thesis separately
+from resolved ATS sources. Named examples are priority seeds, broader generated and
+deterministic seeds still run, exclusions remain the only hard boundary, and résumé
+employers no longer masquerade as target companies. Recurring post-setup discovery
+cadence remains part of the broader native orchestration gate.
 
 ## Deterministic source parity
 
@@ -220,11 +222,11 @@ Implemented waves:
 5. parser-only/custom sources and authenticated providers behind explicit
    capability gates.
 
-The code-level parity gate is complete: all 73 implemented adapters load, their
+The provider parity gate is complete: all 73 implemented adapters load, their
 upstream offline provider contracts run against the vendored snapshot, and shared
 CareerRat tests cover transport, normalization, provenance, dedupe, and full-JD
-hydration. Packaged clean-home and returning-user acceptance remains part of the
-release gate below.
+hydration. The packed CLI exposes the pinned 74-provider manifest and Settings
+successfully persisted an enabled RemoteOK source with no HTTP or console errors.
 
 ## Release gate
 

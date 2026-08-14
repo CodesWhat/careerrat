@@ -589,7 +589,6 @@ export function normalizeTargetingSeed(raw = {}) {
   return {
     role_buckets: roleBuckets,
     keep_signals: compactStrings(raw.keep_signals, 12),
-    tracked_companies: compactStrings(raw.tracked_companies, 24),
   };
 }
 

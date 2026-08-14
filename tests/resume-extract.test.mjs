@@ -67,10 +67,20 @@ test("resume-extract schema accepts an empty candidate domain but rejects null",
     candidate: { domain: "" },
     claims: [],
     sections: { experience: 0, education: 0, skills: 0, projects: 0, other: 0 },
-    targeting_suggestions: { role_buckets: [], keep_signals: [], tracked_companies: [] },
+    targeting_suggestions: { role_buckets: [], keep_signals: [] },
   };
 
   assert.equal(validate(payload, schema).valid, true);
+  assert.equal(
+    validate(
+      {
+        ...payload,
+        targeting_suggestions: { ...payload.targeting_suggestions, tracked_companies: ["Acme"] },
+      },
+      schema
+    ).valid,
+    false
+  );
   const invalid = validate({ ...payload, candidate: { domain: null } }, schema);
   assert.equal(invalid.valid, false);
   assert.ok(invalid.errors.some((error) => error.path === "candidate.domain"));

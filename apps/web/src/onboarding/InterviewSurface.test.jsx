@@ -630,7 +630,7 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     expect(byTag(tree, "inline-alert")).toBeUndefined();
   });
 
-  it("a résumé drop seeds an empty targeting.yml with role_buckets, keep_signals, and tracked_companies", async () => {
+  it("a résumé drop seeds role signals but never imports speculative company targets", async () => {
     api.startChat.mockResolvedValue({ chatId: "chat-target-1", state: "running" });
     api.extractResumeAi.mockResolvedValue({
       profileSeed: { candidate: {} },
@@ -650,13 +650,12 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     await flush();
 
     expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
-      tracked_companies: ["Anthropic"],
       role_buckets: [{ name: "Primary", priority: "primary", titles: ["Engineer"] }],
       keep_signals: ["Remote"],
     });
   });
 
-  it("a résumé drop never overwrites existing role_buckets/keep_signals, but still unions tracked_companies (never a replace)", async () => {
+  it("a résumé drop never overwrites existing role signals or imports speculative companies", async () => {
     api.startChat.mockResolvedValue({ chatId: "chat-target-2", state: "running" });
     api.extractResumeAi.mockResolvedValue({
       profileSeed: { candidate: {} },
@@ -686,9 +685,7 @@ describe("InterviewSurface — centered until first user-initiated event", () =>
     await captured.onboardingBar.onDropResume({ name: "resume.pdf" });
     await flush();
 
-    expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
-      tracked_companies: ["Stripe", "Anthropic"],
-    });
+    expect(api.saveCandidateFile).not.toHaveBeenCalledWith("targeting", expect.anything());
   });
 
   it("a résumé drop with no targetingSeed data never calls saveCandidateFile for targeting", async () => {
@@ -1016,7 +1013,7 @@ describe("InterviewSurface — 409-reconnect", () => {
     );
     expect(alert.props.action.retry).toBe(true);
     expect(typeof alert.props.action.onRetry).toBe("function");
-    expect(captured.onboardingBar.mode).toBe("centered");
+    expect(captured.onboardingBar.mode).toBe("docked");
 
     await alert.props.action.onRetry();
     await flush();
@@ -1027,6 +1024,98 @@ describe("InterviewSurface — 409-reconnect", () => {
     expect(api.startChat).toHaveBeenLastCalledWith("ingest-profile", {
       input: "I'm hunting applied AI roles",
     });
+  });
+
+  it("offers to pause a failed interview and saves the exact transcript checkpoint", async () => {
+    api.startChat.mockReset().mockRejectedValue(
+      Object.assign(new api.ApiError("boom"), {
+        status: 503,
+        body: { error: "The selected runtime is temporarily unavailable." },
+      })
+    );
+    render({ runtime: RUNTIME });
+    await runEffects();
+    render({ runtime: RUNTIME });
+
+    await captured.onboardingBar.onSend("I'm looking for controller roles in Denver.");
+    await flush();
+
+    let tree = render({ runtime: RUNTIME });
+    expect(textOf(tree)).toContain("Pause setup");
+    const pause = visit(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Pause setup"
+    )[0];
+    expect(pause).toBeTruthy();
+    await pause.props.onClick();
+    await flush();
+
+    expect(api.saveOnboardingDraft).toHaveBeenCalledWith({
+      draftSeeds: expect.objectContaining({
+        interviewPause: expect.objectContaining({
+          paused: true,
+          reason: "Something went wrong on the server. Try again in a moment.",
+        }),
+      }),
+      transcript: [{ role: "user", text: "I'm looking for controller roles in Denver." }],
+    });
+
+    tree = render({ runtime: RUNTIME });
+    expect(textOf(tree)).toContain("Setup is paused.");
+    expect(textOf(tree)).toContain("0 of 8 setup items are saved");
+    expect(textOf(tree)).toContain("Something went wrong on the server. Try again in a moment.");
+    expect(
+      visit(tree, (node) => node.type === "button" && textOf(node) === "Resume setup")
+    ).toHaveLength(1);
+    expect(captured.onboardingBar).toBeNull();
+  });
+
+  it("restores and resumes a paused interview without losing its transcript", async () => {
+    api.getOnboardingDraft.mockResolvedValue({
+      draft: {
+        transcript: [
+          { role: "user", text: "I need local CPA roles in Denver." },
+          { role: "assistant", text: "Got it. What is your compensation floor?", blocks: [] },
+        ],
+        draftSeeds: {
+          interviewPause: {
+            paused: true,
+            reason: "Paul lost the connection.",
+            pausedAt: "2026-08-14T20:00:00.000Z",
+          },
+        },
+      },
+    });
+    api.getOnboardState.mockResolvedValue(
+      stateFixture({ doneKeys: ["engine", "resume", "roles"] })
+    );
+
+    render({ runtime: RUNTIME });
+    await runEffects();
+    let tree = render({ runtime: RUNTIME });
+
+    expect(textOf(tree)).toContain("Setup is paused.");
+    expect(textOf(tree)).toContain("3 of 8 setup items are saved");
+    expect(sse.calls.at(-1).opts.enabled).toBe(false);
+    const resume = visit(
+      tree,
+      (node) => node.type === "button" && textOf(node) === "Resume setup"
+    )[0];
+    await resume.props.onClick();
+    await flush();
+
+    expect(api.saveOnboardingDraft).toHaveBeenCalledWith({
+      draftSeeds: {},
+      transcript: [
+        { role: "user", text: "I need local CPA roles in Denver." },
+        { role: "assistant", text: "Got it. What is your compensation floor?", blocks: [] },
+      ],
+    });
+
+    tree = render({ runtime: RUNTIME });
+    expect(textOf(tree)).not.toContain("Setup is paused.");
+    expect(captured.onboardingBar.mode).toBe("docked");
+    expect(captured.filePane).toBeTruthy();
   });
 });
 

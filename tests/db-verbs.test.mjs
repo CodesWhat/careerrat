@@ -1088,12 +1088,13 @@ test("candidate setup recomputes quick-start readiness from SQLite setup facts",
     repoRoot,
     name: "profile",
     patch: {
-      compensation: { minimum_base: 190000 },
+      compensation: { comp_floors: { remote: 190000, hybrid: 210000 } },
       authorization: { work_authorized: true, requires_sponsorship: false },
     },
   });
 
   config = candidateConfigGet({ repoRoot });
+  assert.equal(config.profile.compensation.minimum_base, null);
   assert.equal(config.setup.readiness.gate_ready, true);
   assert.equal(config.setup.readiness.apply_ready, false);
   assert.match(config.setup.missing.apply_ready.join("\n"), /evidence claims/i);

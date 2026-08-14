@@ -309,6 +309,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   const [automationStatus, setAutomationStatus] = useState(null);
   const [companyProposals, setCompanyProposals] = useState({ batchId: null, items: [] });
   const [onboardingDraftSeeds, setOnboardingDraftSeeds] = useState({});
+  const [interviewPause, setInterviewPause] = useState(null);
   const [sourcingPause, setSourcingPause] = useState(null);
   const [sourcingKickoff, setSourcingKickoff] = useState({ status: "idle", error: null });
   // Engine re-entry (user QA: "a way to go back to the engine screen" once
@@ -444,6 +445,9 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
         const draftSeeds = result?.draft?.draftSeeds;
         if (draftSeeds && typeof draftSeeds === "object" && !Array.isArray(draftSeeds)) {
           setOnboardingDraftSeeds(draftSeeds);
+          if (draftSeeds.interviewPause?.paused === true) {
+            setInterviewPause(draftSeeds.interviewPause);
+          }
           if (draftSeeds.sourcingPause?.paused === true) {
             setSourcingPause(draftSeeds.sourcingPause);
           }
@@ -485,6 +489,29 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     },
     [messages, onboardingDraftSeeds]
   );
+
+  const pauseInterviewSetup = useCallback(
+    async (reason) => {
+      const pause = {
+        paused: true,
+        reason: String(reason || "Paul couldn't continue setup right now."),
+        pausedAt: new Date().toISOString(),
+      };
+      const draftSeeds = { ...onboardingDraftSeeds, interviewPause: pause };
+      await saveOnboardingDraft({ draftSeeds, transcript: messages });
+      setOnboardingDraftSeeds(draftSeeds);
+      setInterviewPause(pause);
+    },
+    [messages, onboardingDraftSeeds]
+  );
+
+  const resumeInterviewSetup = useCallback(async () => {
+    const { interviewPause: _ignored, ...draftSeeds } = onboardingDraftSeeds;
+    await saveOnboardingDraft({ draftSeeds, transcript: messages });
+    setOnboardingDraftSeeds(draftSeeds);
+    setInterviewPause(null);
+    setError(null);
+  }, [messages, onboardingDraftSeeds]);
 
   const resumeSourceSetup = useCallback(async () => {
     const { sourcingPause: _ignored, ...draftSeeds } = onboardingDraftSeeds;
@@ -621,7 +648,7 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   useEventSource(chatId ? `/api/chat/events?id=${encodeURIComponent(chatId)}` : null, {
     types: ["assistant", "chat_state", "error"],
     onEvent: handleEvent,
-    enabled: !!chatId,
+    enabled: !!chatId && !interviewPause,
   });
 
   // The centered->docked trigger (spec, decided): the first user-initiated
@@ -669,9 +696,9 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
 
   async function handleSend(text) {
     const existingId = chatId;
+    updateMessages((m) => [...m, { role: "user", text }]);
     const id = await ensureChatStarted(text);
     if (!id) return;
-    updateMessages((m) => [...m, { role: "user", text }]);
     if (existingId) {
       await sendMessageWithErrorHandling(id, text);
     }
@@ -721,25 +748,16 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       if (claims.length) {
         await saveEvidenceSeed(claims);
       }
-      // A parsed résumé also carries targeting.yml progress (role_buckets,
-      // keep_signals, tracked_companies) — otherwise free setup progress
+      // A parsed résumé also carries targeting.yml role progress (role_buckets
+      // and keep_signals) — otherwise free setup progress
       // gets thrown away on every upload. candidateConfigPatch's deepMerge
-      // replaces any array in a patch wholesale rather than merging it
-      // (companyUnion.js), so tracked_companies goes through the same union
-      // helper company_add uses (never a replace); role_buckets and
-      // keep_signals have no such merge helper, so those two only write when
-      // the candidate hasn't already entered anything there, rather than
-      // risk clobbering a hand-entered answer with the résumé's version.
+      // replaces any array in a patch wholesale, so both fields only write
+      // when the candidate hasn't already entered anything there. Company
+      // focus is never inferred from a résumé; Paul learns that thesis from
+      // the user and company discovery resolves approved ATS boards later.
       const targetingSeed = seed?.targetingSeed ?? {};
       const existingTargeting = state?.data?.targeting ?? {};
       const targetingPatch = {};
-      if (targetingSeed.tracked_companies?.length) {
-        const nextCompanies = unionCompanyNames(
-          existingTargeting.tracked_companies,
-          targetingSeed.tracked_companies
-        );
-        if (nextCompanies.length) targetingPatch.tracked_companies = nextCompanies;
-      }
       if (targetingSeed.role_buckets?.length && !existingTargeting.role_buckets?.length) {
         targetingPatch.role_buckets = targetingSeed.role_buckets;
       }
@@ -1051,6 +1069,36 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     setupIsComplete(state) &&
     !conversationNeedsAttention({ messages, chatState });
 
+  if (interviewPause) {
+    return (
+      <div className="onboarding-app">
+        <header className="onboarding-app__header">
+          <div className="onboarding-app__brand">
+            CareerRat<span className="onboarding-app__brand-dot">.</span>
+          </div>
+          <span className="onboarding-app__status">
+            SETUP · {setupCompletedCount(state)} OF {setupTotal(state)} · PAUSED
+          </span>
+        </header>
+        <main className="onboarding-done">
+          <div>
+            <h1>Setup is paused.</h1>
+            <p>
+              {setupCompletedCount(state)} of {setupTotal(state)} setup items are saved. You can
+              close CareerRat and resume this conversation from the same point.
+            </p>
+          </div>
+          <div className="onboarding-done__search-started" role="status">
+            {interviewPause.reason}
+          </div>
+          <button type="button" className="btn btn--primary" onClick={resumeInterviewSetup}>
+            Resume setup
+          </button>
+        </main>
+      </div>
+    );
+  }
+
   if (complete) {
     return (
       <CompletionScreen
@@ -1126,7 +1174,13 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
             </p>
           </div>
           {error ? (
-            <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+            <>
+              <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+              <InterviewPauseAction
+                onPause={() => pauseInterviewSetup(error.message)}
+                disabled={starting || uploading}
+              />
+            </>
           ) : null}
           <OnboardingBar
             mode="centered"
@@ -1187,7 +1241,13 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
               />
             </div>
             {error ? (
-              <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+              <>
+                <InlineAlert message={error.message} action={error.action} detail={error.detail} />
+                <InterviewPauseAction
+                  onPause={() => pauseInterviewSetup(error.message)}
+                  disabled={starting || uploading}
+                />
+              </>
             ) : null}
           </div>
           <FilePane
@@ -1211,6 +1271,17 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
           busy={starting || uploading || chatState === "running"}
         />
       ) : null}
+    </div>
+  );
+}
+
+function InterviewPauseAction({ onPause, disabled }) {
+  return (
+    <div className="onboarding-pause-action">
+      <span>Still stuck? Pause here. Paul will save this exact point for next time.</span>
+      <button type="button" className="btn" onClick={onPause} disabled={disabled}>
+        Pause setup
+      </button>
     </div>
   );
 }

@@ -15,6 +15,7 @@ import {
 import { lintArtifact } from "../../documents/placeholder-lint.mjs";
 import { CANDIDATE_DEFAULTS } from "../../profile/candidate-defaults.mjs";
 import { findCurrentBaseToken } from "../../profile/comp-guard.mjs";
+import { hasConfiguredCompensationFloor } from "../../profile/compensation.mjs";
 import { validate } from "../../profile/schema-validator.mjs";
 import { openDb, requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -264,11 +265,6 @@ export function hasSearchLocation(profile) {
   );
 }
 
-function hasCompFloor(profile) {
-  const value = profile.compensation?.minimum_base;
-  return typeof value === "number" && Number.isFinite(value) && value > 0;
-}
-
 // authorizationDeclared — Lane A / R3: splits "declared" (a real answer exists
 // for readiness purposes) from "authorized" (work_authorized or
 // requires_sponsorship === true, hasAuthorization's old, still-narrower bar).
@@ -347,7 +343,7 @@ function computeCandidateSetup(db) {
   const resumeHandled = hasSourceResume || !!formDefaults.declined_fields?.resume;
   const titlesReady = hasAnyTitle(targeting);
   const locationReady = hasSearchLocation(profile);
-  const compReady = hasCompFloor(profile);
+  const compReady = hasConfiguredCompensationFloor(profile.compensation);
   const authDeclared = authorizationDeclared(profile, formDefaults);
   const evidenceCount = (evidence.claims || []).length;
 
