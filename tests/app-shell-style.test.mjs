@@ -69,6 +69,18 @@ describe("app shell styles", () => {
     );
   });
 
+  it("keeps chat-first onboarding clear of the macOS window controls", () => {
+    const header = cssRule(".onboarding-app__header");
+    const css = cssText();
+
+    assert.match(header, /padding:\s*0 32px 0 max\(92px,\s*32px\)/);
+    assert.match(header, /-webkit-app-region:\s*drag/);
+    assert.match(
+      css,
+      /\.onboarding-app__header\s+:is\(a,\s*button,\s*input,\s*select,\s*textarea,\s*\[role="button"\]\)\s*\{[^}]*-webkit-app-region:\s*no-drag/
+    );
+  });
+
   it("W3: docks the ask bar bottom-center instead of the old bottom-right capture launcher", () => {
     const askBar = cssRule(".ask-bar");
     const shell = cssRule(".ask-bar__shell");
