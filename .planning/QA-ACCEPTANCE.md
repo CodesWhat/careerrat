@@ -3,7 +3,7 @@
 Started: 2026-08-13
 Completed: 2026-08-14
 
-Gate result: product acceptance complete, with all 73 findings fixed and live-retested.
+Gate result: product acceptance complete, with all 74 findings fixed and live-retested.
 CareerRat's web app, CLI, clean npm package, packaged Electron runtime, and macOS DMG pass their
 release gates. The final DMG is signed, accepted by Apple notarization, stapled, and approved by
 Gatekeeper.
@@ -1372,3 +1372,18 @@ Test homes:
   dispatch behavior, token mismatch, and long slug inputs.
 - Live retest: exact-head CodeQL completed with zero alerts; the root suite passed 2,363 tests with
   five skips and zero failures, and the web suite passed all 647 tests.
+
+### `F-074` macOS window controls covered the onboarding logo
+
+- Status: `FIXED`
+- Severity: P1, the first-run desktop header rendered the native close, minimize, and fullscreen
+  controls on top of the CareerRat wordmark.
+- Reproduction: launch the macOS Electron app into chat-first onboarding. Its header started at a
+  32px left inset while the custom title bar placed the traffic-light controls in the same space.
+- Root cause: the chat-first onboarding surface introduced a third product header without the
+  92px macOS-safe inset and drag/no-drag rules already used by the other desktop headers.
+- Fix: give the chat-first onboarding header the established macOS-safe left inset, make its empty
+  space draggable, and keep links and buttons interactive with an explicit no-drag rule.
+- Regression: `tests/app-shell-style.test.mjs` pins the safe inset and complete title-bar contract.
+- Live retest: PASS in a 1280x860 CareerRat Electron window. All three native controls render left
+  of the wordmark with clear separation, and the header action remains interactive.

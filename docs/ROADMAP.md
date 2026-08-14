@@ -291,12 +291,12 @@ gate:
 ### Full-product acceptance sweep (completed August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. The sweep recorded 72 findings, and all 72 are
+section remains the release-level source of truth. The sweep recorded 74 findings, and all 74 are
 fixed and live-retested. The web app, CLI, clean npm package, packaged Electron runtime, and macOS
 DMG are accepted as functional and release-ready.
 
-Final verification from the accepted code: 2,355 repository tests passed with 5 intentional
-skips; 646 web tests passed; lint passed with no errors; web, website, docs, and desktop smoke
+Final verification from the accepted code: 2,365 repository tests passed with 5 intentional
+skips; 647 web tests passed; lint passed with no errors; web, website, docs, and desktop smoke
 builds passed; the final 450-file npm tarball installed into a clean home and passed data, tracker,
 CLI, onboarding, responsive-layout, and console checks. The final one-command desktop build signs
 and notarizes both the app bundle and DMG container, staples the ticket, and passes Gatekeeper.
