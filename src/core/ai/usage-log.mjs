@@ -28,6 +28,7 @@ import { dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
+import { trimEdgeCharacter } from "../text/slug.mjs";
 
 // Repo-root default (this file lives at src/core/ai/, same depth as
 // src/core/tracker/ — activity-log.mjs's own DEFAULT_ROOT derivation).
@@ -143,22 +144,20 @@ function trimOrNull(v) {
 }
 
 function slugLabel(v) {
-  return String(v || "")
+  const slug = String(v || "")
     .trim()
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+/, "")
-    .replace(/-+$/, "");
+    .replace(/[^a-z0-9]+/g, "-");
+  return trimEdgeCharacter(slug, "-");
 }
 
 function normalizeFeatureId(v) {
-  const text = String(v || "")
+  const slug = String(v || "")
     .trim()
     .toLowerCase()
     .replace(/\s+/g, "-")
-    .replace(/[^a-z0-9._:-]+/g, "-")
-    .replace(/^-+/, "")
-    .replace(/-+$/, "");
+    .replace(/[^a-z0-9._:-]+/g, "-");
+  const text = trimEdgeCharacter(slug, "-");
   return text || null;
 }
 

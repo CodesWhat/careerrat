@@ -6,14 +6,13 @@ import { sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { atomicWriteFile } from "../profile/gate-writer.mjs";
 import { stringifyYaml } from "../profile/yaml.mjs";
+import { trimEdgeCharacter } from "../text/slug.mjs";
 
 function slug(value, fallback = "unknown") {
-  const normalized = String(value || "")
+  const collapsed = String(value || "")
     .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+/, "")
-    .replace(/-+$/, "")
-    .slice(0, 80);
+    .replace(/[^a-z0-9]+/g, "-");
+  const normalized = trimEdgeCharacter(collapsed, "-").slice(0, 80);
   return normalized || fallback;
 }
 

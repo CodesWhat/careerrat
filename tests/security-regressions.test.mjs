@@ -6,6 +6,7 @@ import { plainTextFromHtml } from "../src/core/deep-ingest/source-normalize.mjs"
 import { extractPublicCareersPage } from "../src/core/discovery/public-page-extractor.mjs";
 import { compileSingleStarGlob } from "../src/core/fs/single-star-glob.mjs";
 import { extractDocxResumeMarkdown } from "../src/core/onboarding/resume-docx.mjs";
+import { trimEdgeCharacter } from "../src/core/text/slug.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const publicResolver = async () => [{ address: "93.184.216.34", family: 4 }];
@@ -85,4 +86,10 @@ test("slug normalization avoids the ambiguous repeated-edge alternation", () => 
     const source = readFileSync(new URL(`../${path}`, import.meta.url), "utf8");
     assert.doesNotMatch(source, /replace\(\/\^-\+\|-\+\$\/g/);
   }
+});
+
+test("edge-character trimming is linear and preserves interior separators", () => {
+  assert.equal(trimEdgeCharacter("---career---rat---", "-"), "career---rat");
+  assert.equal(trimEdgeCharacter("-----", "-"), "");
+  assert.equal(trimEdgeCharacter("career-rat", "-"), "career-rat");
 });
