@@ -3,7 +3,7 @@
 Started: 2026-08-13
 Completed: 2026-08-14
 
-Gate result: product acceptance complete, with all 72 findings fixed and live-retested.
+Gate result: product acceptance complete, with all 73 findings fixed and live-retested.
 CareerRat's web app, CLI, clean npm package, packaged Electron runtime, and macOS DMG pass their
 release gates. The final DMG is signed, accepted by Apple notarization, stapled, and approved by
 Gatekeeper.
@@ -1316,10 +1316,12 @@ Test homes:
   `dist:local -> release:dmg -> verify:release` ordering.
 - Live retest: `APPLE_KEYCHAIN_PROFILE=careerrat-notary npm run desktop:dist` completed end to end
   for `CareerRat-0.7.0-arm64.dmg`. Apple accepted app submission
-  `7b16a49d-a19a-4de6-af5a-465b4cc92b35` and DMG submission
-  `cdabfb3b-401a-44bc-a3cc-60a93e71eb4a`; app signature, stapler validation, Gatekeeper, and a
-  fresh-data packaged smoke all pass. Final DMG SHA-256:
-  `36ec91719cb1770234657a8961fa32c3eb4a597cedbe3a176b1174ecf28fd8bb`.
+  `a7c35703-beb2-4ead-a1d4-04f957f3c244` and DMG submission
+  `1c18d46d-f3f0-4de3-8776-512fc8f5ed75`; app signature, stapler validation, Gatekeeper, and
+  fresh, existing-data, and demo packaged smokes all pass from the mounted read-only DMG. The
+  packaged data layer reached schema version 10, wrote SQLite and a mode-0600 BYOK file only under
+  the isolated `CAREERRAT_HOME`, and left signed resources unchanged. Final DMG: 221,908,253 bytes,
+  SHA-256 `8a78f1a353e246046dd73713bf0a860969f6e8c9bab56069723b0abe177e976d`.
 
 ### `F-071` Static website and docs builds emit avoidable browser console errors
 
@@ -1350,3 +1352,23 @@ Test homes:
 - Regression: `tests/website-copy.test.mjs` rejects a mobile negative order on the hero preview.
 - Live retest: the 390px production export has no horizontal overflow, the headline leads visually,
   and the page reports zero console errors.
+
+### `F-073` Release security scan found unsafe input-handling patterns
+
+- Status: `FIXED`
+- Severity: P0 release blocker, CodeQL reported production paths with unsafe HTML stripping,
+  profile-link protocols, route dispatch, glob conversion, token handling, and nonlinear slug
+  regular expressions.
+- Reproduction: run the pull request's JavaScript/TypeScript CodeQL analysis on the release head;
+  the gate originally reported 57 alerts, including 14 in runtime code and 43 in test harnesses.
+- Root cause: several mature input paths still used regex-based HTML parsing or dynamically selected
+  methods, and repeated test helpers reproduced the same patterns across route coverage.
+- Fix: use parser-backed HTML text extraction, allow only HTTP(S) profile links, dispatch fixed route
+  methods explicitly, compile single-star globs without regex construction, compare API tokens by
+  HMAC-derived identifiers, trim slug edges with linear scans, and route test HTML/assertion helpers
+  through the same safe primitives.
+- Regression: `tests/security-regressions.test.mjs`, `apps/web/src/onboarding/FilePane.test.jsx`, and
+  the existing route/parser suites cover malicious protocols, entity handling, glob literals,
+  dispatch behavior, token mismatch, and long slug inputs.
+- Live retest: exact-head CodeQL completed with zero alerts; the root suite passed 2,363 tests with
+  five skips and zero failures, and the web suite passed all 647 tests.
