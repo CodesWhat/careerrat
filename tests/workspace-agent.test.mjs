@@ -1560,6 +1560,23 @@ test("Apply on site returns a manual handoff without changing status when no exe
   assert.match(result.messages[1].text, /not marked Applied/i);
 });
 
+test("Apply on site never returns an executable manual-handoff URL", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { link: "javascript:alert(1)" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+  });
+
+  assert.equal(result.messages.at(-1).artifacts[0].url, null);
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+});
+
 test("Apply on site writes Applied only after its executor returns verified confirmation", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);

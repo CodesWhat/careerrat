@@ -316,6 +316,30 @@ describe("JobDrawer", () => {
     expect(handoff.props.href).toBe("https://boards.greenhouse.io/northstar/jobs/123");
   });
 
+  it("does not render an executable manual-handoff URL", async () => {
+    api.applyOnSite.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            kind: "action_result",
+            artifacts: [{ kind: "application_handoff", url: "javascript:alert(1)" }],
+            metadata: { state: "manual-handoff", submissionVerified: false },
+          },
+        ],
+      },
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    let tree = renderDrawer(applicationRow);
+
+    await button(tree, "Apply on site").props.onClick();
+    tree = renderDrawer(applicationRow);
+
+    expect(
+      visit(tree, (node) => node.type === "a" && textOf(node) === "Open application site")
+    ).toHaveLength(0);
+  });
+
   it("only claims Apply on site submission when the result is verified", async () => {
     api.applyOnSite.mockResolvedValue({
       data: {

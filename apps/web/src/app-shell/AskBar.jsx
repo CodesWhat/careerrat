@@ -16,6 +16,7 @@ import {
 import { errorState, resolveErrorCopy } from "../lib/errorCopy.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 import { kindLabel } from "../lib/intake-labels.js";
+import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
@@ -1016,6 +1017,7 @@ function AskBarTurn({
   const handoffArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "application_handoff"
   );
+  const handoffUrl = safeExternalHttpUrl(handoffArtifact?.url);
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1023,13 +1025,8 @@ function AskBarTurn({
       {turn.resultText ? <p className="ask-bar__summary">{turn.resultText}</p> : null}
       {evaluationArtifact ? <JobEvaluationCard artifact={evaluationArtifact} /> : null}
       {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
-      {handoffArtifact?.url ? (
-        <a
-          className="ask-bar__handoff-link"
-          href={handoffArtifact.url}
-          target="_blank"
-          rel="noreferrer"
-        >
+      {handoffUrl ? (
+        <a className="ask-bar__handoff-link" href={handoffUrl} target="_blank" rel="noreferrer">
           Open application site
         </a>
       ) : null}

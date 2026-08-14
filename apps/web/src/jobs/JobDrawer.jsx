@@ -36,6 +36,7 @@ import {
 } from "../lib/api.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
+import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { ArtifactViewerModal } from "./ArtifactViewerModal.jsx";
 import { InterviewDossierCard } from "./InterviewDossierCard.jsx";
 import { PacketDocumentsCard } from "./PacketDocumentsCard.jsx";
@@ -143,7 +144,9 @@ function applyOnSiteNotice(response) {
 function applicationHandoffUrl(response) {
   const messages = (response?.data || response)?.messages || [];
   const last = messages[messages.length - 1];
-  return last?.artifacts?.find((artifact) => artifact.kind === "application_handoff")?.url || null;
+  return safeExternalHttpUrl(
+    last?.artifacts?.find((artifact) => artifact.kind === "application_handoff")?.url
+  );
 }
 
 export function JobDrawer({ row, onClose, initialSection }) {

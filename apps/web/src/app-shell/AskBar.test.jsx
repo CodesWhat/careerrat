@@ -828,6 +828,53 @@ describe("AskBar — acting", () => {
     expect(textOf(tree)).not.toContain("Application submitted and verified");
   });
 
+  it("does not render an executable application handoff URL", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({
+        type: "job.prepare-request",
+        label: "Evaluate and prepare this application",
+      })
+    );
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "The site handoff needs a valid posting URL.",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                applicationId: "app-acme",
+                url: "javascript:alert(1)",
+                submissionVerified: false,
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({
+      target: { value: "apply https://boards.greenhouse.io/acme/jobs/123" },
+    });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(
+      visit(tree, (node) => node.type === "a" && textOf(node).trim() === "Open application site")
+    ).toHaveLength(0);
+  });
+
   it("renders an inline error when the agent turn comes back as agent_error", async () => {
     api.sendWorkspaceMessage.mockResolvedValue({
       data: {

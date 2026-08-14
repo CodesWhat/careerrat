@@ -212,6 +212,15 @@ function requestDate(now) {
   return Number.isFinite(date.getTime()) ? date : new Date();
 }
 
+function safeExternalHttpUrl(value) {
+  try {
+    const url = new URL(String(value || ""));
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
 async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fetchImpl, now }) {
   const resolved = await resolveJobUrlImpl(jobUrl, { fetchImpl });
   const bodyText = String(resolved?.bodyText || "").trim();
@@ -1528,7 +1537,9 @@ export async function executeWorkspaceIntent({
     }
 
     if (typeof applyJobImpl !== "function") {
-      const postingUrl = application.link || application.url || application.sourceUrl || null;
+      const postingUrl = safeExternalHttpUrl(
+        application.link || application.url || application.sourceUrl
+      );
       return appendActionResult({
         repoRoot,
         env,
