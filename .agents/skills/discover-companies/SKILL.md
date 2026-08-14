@@ -1,7 +1,7 @@
 ---
 name: discover-companies
-description: Web-search companies LIKELY to be hiring the candidate's target roles → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to CareerRat tracked-company source config, confirm-first. Upstream of search-jobs; turns a closed company set into a growing one.
-tier_1_inputs: [profile.candidate.domain, targeting role_buckets, targeting keep_signals, targeting excluded_companies, profile.compensation.minimum_base, STEP 0 dedup set, modes verdict]
+description: Continuously discover companies LIKELY to be hiring the candidate's target roles from their company thesis and role context → resolve each to a scannable ATS careers board → legitimacy-screen and dedup → propose adding to CareerRat tracked-company source config, confirm-first. Named focus companies are priority examples, never an allowlist. Upstream of search-jobs; turns a closed company set into a growing one.
+tier_1_inputs: [profile.candidate.domain, targeting role_buckets, targeting company_preferences, targeting keep_signals, targeting excluded_companies, profile.compensation.minimum_base, STEP 0 dedup set, modes verdict]
 tier_2_inputs: [per-company WebSearch/WebFetch bodies, careers-page resolution]
 ---
 
@@ -23,6 +23,11 @@ companies`: SQLite in DB workspaces, legacy `config/sourced-scan.json` otherwise
 discovery of its own. This skill is what grows that list, so future sweeps reach beyond the set
 the candidate has already exhausted.
 
+The configured scan list is not the discovery universe. `company_preferences.examples` are
+priority seeds and the rest of `company_preferences` supplies reusable focus signals. Always
+look for additional matching employers beyond those examples. Only explicit company/category
+exclusions constrain the universe.
+
 Post-onboarding discovery order:
 
 ```
@@ -35,7 +40,7 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 
 | File | Fields used |
 |---|---|
-| `candidate/targeting.yml` | `role_buckets[].name`, `role_buckets[].titles`, `role_buckets[].priority`, `keep_signals`, `cut_signals`, `excluded_companies` |
+| `candidate/targeting.yml` | `role_buckets[].name`, `role_buckets[].titles`, `role_buckets[].priority`, `company_preferences`, `keep_signals`, `cut_signals`, `excluded_companies` |
 | `candidate/profile.yml` | `candidate.domain`, `location.remote`/`home`/`relocation`, `compensation.minimum_base` (comp-plausibility filter — never surface the figure outbound) |
 | Source config | `careerrat companies` / `tracked_companies[].name`, `tracked_companies[].careers_url` — the company dedup + write target. In DB mode, `careerrat companies` reads/writes SQLite; in legacy mode it reads/writes `config/sourced-scan.json`. |
 | `workspace/tracker.json` | `applications[].company`, `sourced[].company` — companies already in play; never re-propose |
@@ -67,6 +72,7 @@ Read the input files above. Extract:
 - **Domain** — `profile.candidate.domain`.
 - **Role families** — the `name` of every `role_buckets[]` entry (families drive query breadth, not the title list).
 - **Relevance signals** — `targeting.keep_signals` (what makes a company a fit) and `cut_signals` (what disqualifies one).
+- **Company thesis** — `targeting.company_preferences` captures industry, employer type, size/stage, business model, values, geography, and focus examples. Examples are searched first but never suppress broader discovery.
 - **Comp-plausibility floor** — `profile.compensation.minimum_base`. Used only to screen out companies that plausibly can't clear the floor (tiny/seed shops, sub-market employers). **This figure is an internal screen — never put it in any outbound text or artifact.**
 - **Location posture** — `profile.location.remote` + `home` + `relocation` (US-hiring / remote relevance).
 
@@ -87,9 +93,10 @@ Domain: <domain> | Role families: <comma-list> | Comp floor screen: <yes> | Alre
 ## STEP 1 — Web-search for candidate companies
 
 Run WebSearch using domain-neutral query templates. Substitute `candidate.domain`,
-`role_buckets[].name`, and `keep_signals` phrasing into each template — never use hardcoded
-industry, company, or technology names. The candidate's "what's a cool/desirable company"
-notion is **derived from their config** (domain + keep_signals + comp floor), not assumed.
+`role_buckets[].name`, `company_preferences`, and `keep_signals` phrasing into each template —
+never use hardcoded industry, company, or technology names. The candidate's company thesis is
+read from config, not assumed. Focus examples are searched first and also used to find similar
+employers; always include queries that can surface companies the candidate did not name.
 
 **Query templates** (run a selection across role families; skip redundant permutations):
 
@@ -106,6 +113,9 @@ companies, not listings.
 
 Build a raw candidate list: company name + a one-phrase reason it plausibly fits (tie it to a
 `keep_signal` or role family) + any role title you saw them hiring.
+
+If focus/manual seeds are present, resolve them first **and** run the broader queries in the same
+discovery pass. Never return early just because the candidate named one or more companies.
 
 **Drop immediately** (before screening): any company in the STEP 0 dedup set, and any company
 matching `excluded_companies`.
@@ -328,10 +338,13 @@ NEXT: <"run search-jobs sweep" | "awaiting confirmation">
 - **Borderline/medium always confirm-first**, even with auto-add on.
 - **Dedup hard.** Never propose a company in the STEP 0 dedup set (tracked + applied + sourced)
   or in `excluded_companies`.
+- **Focus is not scope.** `company_preferences.examples`, manual seed lists, and currently tracked
+  companies never become an allowlist. Every non-excluded employer remains eligible when it
+  matches the role, location, compensation-plausibility, and company-thesis signals.
 - **Scannable-ATS gate.** Only propose-to-add a company whose careers board resolves to a
-  supported ATS host (greenhouse / ashby / lever / workable / smartrecruiters). Unsupported-ATS
-  companies are intel only — the helper refuses them, by design (an un-scannable board would
-  silently never sweep).
+  supported ATS host (Ashby, Greenhouse, Lever, Workable, SmartRecruiters, Recruitee, or
+  Workday). Unsupported-ATS companies are intel only — the helper refuses them, by design (an
+  unscannable board would silently never sweep).
 - **Comp screen stays internal.** Use `minimum_base` to filter implausible employers; never write
   the figure into the table, an artifact, or any outbound text (Privacy Invariant).
 - **Use the helper.** Additions go through `careerrat companies --add … --write`. Do not edit

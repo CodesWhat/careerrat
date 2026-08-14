@@ -7768,6 +7768,22 @@ a.onboarding-engine__not-found-chip:focus-visible {
   gap: 4px;
 }
 
+.onboarding-done__search-started {
+  padding: 12px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
+.onboarding-done__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
 /* ── M10 — nav footer (theme toggle + activity bell side by side) ──────── */
 
 .app-shell__nav-footer {

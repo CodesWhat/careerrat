@@ -61,7 +61,7 @@ function summaryHasRoom(label) {
 
 const CONFIRM_LABELS = {
   authorization: "Work authorization",
-  company_add: "Track company",
+  company_add: "Use as focus example",
   companies_suggest: "Suggest companies",
   evidence_claim: "Save evidence",
 };

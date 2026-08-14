@@ -39,7 +39,9 @@ export function computeSetupProgress({
     engine: !!keyConfigured,
     resume: resumeValuePresent(data, sourceResumePresent),
     roles: (targeting.role_buckets ?? []).some((bucket) => (bucket?.titles ?? []).length > 0),
-    companies: (targeting.tracked_companies ?? []).length > 0,
+    companies:
+      targeting.company_preferences?.confirmed === true ||
+      (targeting.tracked_companies ?? []).length > 0,
     evidence: (data.evidence?.claims ?? []).length > 0,
     guardrails: (targeting.cut_signals ?? []).length > 0,
     quickFacts: locationReady && Number.isFinite(minimumBase) && minimumBase > 0,

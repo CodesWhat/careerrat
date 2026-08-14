@@ -126,28 +126,43 @@ test("Jobs page manual search uses the deterministic sourcing endpoint", () => {
   assertNoForbiddenRuntime(getSearchSources, "getSearchSources API helper");
 });
 
-test("W4 completion screen kicks off the local first search deterministically", () => {
-  // W4 (chat-first onboarding) deleted apps/web/src/onboarding/steps/
-  // FinishStep.jsx along with its cadence-preference form
-  // (cadencePatch/saveCadencePreference/saveCadenceAndStartFirstSearch/
-  // retryFirstSearch/isSourceSetupReady) — design 3e has no cadence UI, just
-  // explicit source discovery and first-search actions. That logic now lives
-  // in InterviewSurface.jsx's CompletionScreen (design 3e): it starts the
-  // canonical first run once, and if that run is already complete it starts a
-  // post-discovery search instead of reusing stale results. The assertion this
-  // test still owns — search kickoff never routes through
-  // chat/skill-run/browser-capture — carries over unchanged.
+test("chat-first onboarding starts the local first search as soon as targeting is ready", () => {
+  // Source preparation is background work now. It begins when the canonical
+  // candidate readiness flips search_ready, even if Paul still has other
+  // interview questions left. CompletionScreen only owns retries and the
+  // optional post-discovery refresh. Neither path may route through the full
+  // chat/skill/browser runtime.
   const interviewSurface = stripJavaScriptComments(
     source("apps/web/src/onboarding/InterviewSurface.jsx")
   );
+  const runFirstSearch = sliceBetween(
+    interviewSurface,
+    "const runFirstSearch = useCallback(",
+    "const reloadAutomationStatus = useCallback",
+    "first-search callback"
+  );
+  assert.match(runFirstSearch, /\bstartFirstSearchRun\(\)/);
+  assert.match(runFirstSearch, /\bstartSearchRun\(\)/);
+  assert.match(runFirstSearch, /firstResult\?\.reused === true/);
+  assertNoForbiddenRuntime(runFirstSearch, "onboarding first-search callback");
+
+  const automaticKickoff = sliceBetween(
+    interviewSurface,
+    "if (!state || !transcriptLoaded || sourcingPause) return;",
+    "\n\n  const pauseSourceSetup",
+    "automatic first-search kickoff"
+  );
+  assert.match(automaticKickoff, /readiness\?\.search_ready !== true/);
+  assert.match(automaticKickoff, /\bfirstSearchStatus\(state\)/);
+  assert.match(automaticKickoff, /\brunFirstSearch\(\)/);
+  assertNoForbiddenRuntime(automaticKickoff, "automatic first-search kickoff");
+
   const completionScreen = functionBlock(interviewSurface, "function CompletionScreen");
   const firstSearchHandler = functionBlock(
     completionScreen,
     "async function handleStartFirstSearch"
   );
-  assert.match(firstSearchHandler, /\bstartFirstSearchRun\(\)/);
-  assert.match(firstSearchHandler, /\bstartSearchRun\(\)/);
-  assert.match(firstSearchHandler, /firstResult\?\.reused === true/);
+  assert.match(firstSearchHandler, /\bonStartFirstSearch\(\{ refreshCompleted: true \}\)/);
   assert.doesNotMatch(firstSearchHandler, /\bgetSourcingRun\b/);
   assertNoForbiddenRuntime(firstSearchHandler, "onboarding completion screen first-search kickoff");
 });

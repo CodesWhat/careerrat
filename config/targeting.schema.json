@@ -26,6 +26,21 @@
     "cut_signals": { "type": "array", "items": { "type": "string" } },
     "excluded_companies": { "type": "array", "items": { "type": "string" } },
     "tracked_companies": { "type": "array", "items": { "type": "string" } },
+    "company_preferences": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "confirmed": { "type": "boolean" },
+        "industries": { "type": "array", "items": { "type": "string" } },
+        "organization_types": { "type": "array", "items": { "type": "string" } },
+        "sizes": { "type": "array", "items": { "type": "string" } },
+        "stages": { "type": "array", "items": { "type": "string" } },
+        "business_models": { "type": "array", "items": { "type": "string" } },
+        "values": { "type": "array", "items": { "type": "string" } },
+        "geographies": { "type": "array", "items": { "type": "string" } },
+        "examples": { "type": "array", "items": { "type": "string" } }
+      }
+    },
     "degree_policy": { "type": "string" },
     "fit_bands": {
       "type": "object",

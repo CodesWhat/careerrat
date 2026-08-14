@@ -177,7 +177,7 @@ describe("FilePane — rows", () => {
       "Engine",
       "Resume",
       "Roles",
-      "Companies",
+      "Company focus",
       "Evidence",
       "Guardrails",
       "Quick facts",
@@ -289,7 +289,7 @@ describe("FilePane — rows", () => {
 
   it("flips a row from pending (dashed) to done, with a check icon, as state changes", () => {
     let tree = render({ state: EMPTY_STATE });
-    let companies = rowByLabel(tree, "Companies");
+    let companies = rowByLabel(tree, "Company focus");
     expect(hasClass(companies, "file-pane__row--pending")).toBe(true);
     expect(hasClass(companies, "file-pane__row--done")).toBe(false);
     expect(visit(companies, (n) => n.type === "check-icon")).toHaveLength(0);
@@ -297,7 +297,7 @@ describe("FilePane — rows", () => {
     tree = render({
       state: stateWith(["companies"], { targeting: { tracked_companies: ["Stripe"] } }),
     });
-    companies = rowByLabel(tree, "Companies");
+    companies = rowByLabel(tree, "Company focus");
     expect(hasClass(companies, "file-pane__row--done")).toBe(true);
     expect(hasClass(companies, "file-pane__row--pending")).toBe(false);
     expect(visit(companies, (n) => n.type === "check-icon")).toHaveLength(1);
@@ -306,7 +306,7 @@ describe("FilePane — rows", () => {
   it("marks only the first not-done row UP NEXT", () => {
     const tree = render({ state: stateWith(["engine", "resume"]) });
     const roles = rowByLabel(tree, "Roles");
-    const companies = rowByLabel(tree, "Companies");
+    const companies = rowByLabel(tree, "Company focus");
     expect(byClass(roles, "file-pane__row-next")).toHaveLength(1);
     expect(byClass(companies, "file-pane__row-next")).toHaveLength(0);
   });
@@ -316,7 +316,7 @@ describe("FilePane — rows", () => {
       state: stateWith(["engine", "companies"], { targeting: { tracked_companies: ["A"] } }),
     });
     const engine = rowByLabel(tree, "Engine");
-    const companies = rowByLabel(tree, "Companies");
+    const companies = rowByLabel(tree, "Company focus");
     expect(byClass(engine, "file-pane__row-edit-hint")).toHaveLength(0);
     expect(byClass(companies, "file-pane__row-edit-hint")).toHaveLength(1);
   });
@@ -330,7 +330,7 @@ describe("FilePane — rows", () => {
 
   it("clicking an editable row opens its inline editor with the EDITING tag (full border, dual drive)", () => {
     let tree = render({ state: EMPTY_STATE });
-    const companies = rowByLabel(tree, "Companies");
+    const companies = rowByLabel(tree, "Company focus");
     expect(companies.props.disabled).toBe(false);
     companies.props.onClick();
 
@@ -338,7 +338,7 @@ describe("FilePane — rows", () => {
     const editingRow = byClass(tree, "file-pane__row--editing")[0];
     expect(editingRow).toBeTruthy();
     expect(textOf(byClass(editingRow, "file-pane__editing-tag")[0])).toBe("EDITING");
-    expect(textOf(byClass(editingRow, "file-pane__row-title")[0])).toBe("Companies");
+    expect(textOf(byClass(editingRow, "file-pane__row-title")[0])).toBe("Company focus");
   });
 });
 
@@ -369,7 +369,7 @@ describe("FilePane — detail-line gating on state.files[].exists", () => {
       ],
     };
     const tree = render({ state });
-    for (const label of ["Roles", "Companies", "Guardrails", "Evidence", "Quick facts"]) {
+    for (const label of ["Roles", "Company focus", "Guardrails", "Evidence", "Quick facts"]) {
       const row = rowByLabel(tree, label);
       expect(byClass(row, "file-pane__row-detail")).toHaveLength(0);
     }
@@ -393,12 +393,12 @@ describe("FilePane — detail-line gating on state.files[].exists", () => {
 // ---------------------------------------------------------------------------
 
 describe("FilePane — inline editors commit through onFieldSaved", () => {
-  it("Companies editor: submit saves targeting.tracked_companies and reports the summary pill", async () => {
+  it("Company focus editor: submit saves examples as a confirmed thesis, not tracked sources", async () => {
     api.saveCandidateFile.mockResolvedValue({ ok: true });
     const onReload = vi.fn().mockResolvedValue();
     const onFieldSaved = vi.fn();
     let tree = render({ state: EMPTY_STATE, onReload, onFieldSaved });
-    rowByLabel(tree, "Companies").props.onClick();
+    rowByLabel(tree, "Company focus").props.onClick();
     tree = render({ state: EMPTY_STATE, onReload, onFieldSaved });
 
     const chipInput = byTag(tree, "mock-chip-input");
@@ -410,10 +410,13 @@ describe("FilePane — inline editors commit through onFieldSaved", () => {
     await flush();
 
     expect(api.saveCandidateFile).toHaveBeenCalledWith("targeting", {
-      tracked_companies: ["Stripe", "Anthropic"],
+      company_preferences: { confirmed: true, examples: ["Stripe", "Anthropic"] },
     });
     expect(onReload).toHaveBeenCalledTimes(1);
-    expect(onFieldSaved).toHaveBeenCalledWith({ key: "companies", summary: "2 tracked companies" });
+    expect(onFieldSaved).toHaveBeenCalledWith({
+      key: "companies",
+      summary: "2 focus examples · broad discovery on",
+    });
 
     // editingKey resets after commit.
     tree = render({ state: EMPTY_STATE, onReload, onFieldSaved });
@@ -816,7 +819,7 @@ describe("FilePane — company proposal chips (R2)", () => {
 
   it("renders a pending proposal as an accept/reject chip", () => {
     let tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL] });
-    rowByLabel(tree, "Companies").props.onClick();
+    rowByLabel(tree, "Company focus").props.onClick();
     tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL] });
 
     const row = byClass(tree, "file-pane__proposal-row")[0];
@@ -830,7 +833,7 @@ describe("FilePane — company proposal chips (R2)", () => {
       companyProposals: [PROPOSAL],
       onDecideCompanyProposal,
     });
-    rowByLabel(tree, "Companies").props.onClick();
+    rowByLabel(tree, "Company focus").props.onClick();
     tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
 
     const acceptButton = byClass(tree, "file-pane__proposal-accept")[0];
@@ -847,7 +850,7 @@ describe("FilePane — company proposal chips (R2)", () => {
       companyProposals: [PROPOSAL],
       onDecideCompanyProposal,
     });
-    rowByLabel(tree, "Companies").props.onClick();
+    rowByLabel(tree, "Company focus").props.onClick();
     tree = render({ state: EMPTY_STATE, companyProposals: [PROPOSAL], onDecideCompanyProposal });
 
     const rejectButton = byClass(tree, "file-pane__proposal-reject")[0];
@@ -859,7 +862,7 @@ describe("FilePane — company proposal chips (R2)", () => {
 
   it("renders no proposal list when there are no pending proposals", () => {
     let tree = render({ state: EMPTY_STATE });
-    rowByLabel(tree, "Companies").props.onClick();
+    rowByLabel(tree, "Company focus").props.onClick();
     tree = render({ state: EMPTY_STATE });
     expect(byClass(tree, "file-pane__proposal-list")).toHaveLength(0);
   });

@@ -82,7 +82,19 @@ describe("computeSetupProgress", () => {
     assert.equal(withTitle.items.find((i) => i.key === "roles").done, true);
   });
 
-  it("companies flips on a non-empty tracked_companies array", () => {
+  it("companies flips on a confirmed company thesis even when the user names no examples", () => {
+    const broad = computeSetupProgress({
+      data: { targeting: { company_preferences: { confirmed: true } } },
+    });
+    assert.equal(broad.items.find((i) => i.key === "companies").done, true);
+
+    const unconfirmed = computeSetupProgress({
+      data: { targeting: { company_preferences: { industries: ["fintech"] } } },
+    });
+    assert.equal(unconfirmed.items.find((i) => i.key === "companies").done, false);
+  });
+
+  it("keeps non-empty tracked_companies as a legacy completion signal", () => {
     const progress = computeSetupProgress({
       data: { targeting: { tracked_companies: ["Stripe"] } },
     });

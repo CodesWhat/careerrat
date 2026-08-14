@@ -51,10 +51,13 @@ nurse, a driver, and an engineer each bring their own config.
 - **Interview prep** (`interview-prep`) — audience-segmented packets (recruiter /
   hiring manager / panel) grounded in your evidence, with do-not-overclaim
   guardrails. Comp/logistics scripts use only your target/minimum figures.
-- **Apply assistant** (`apply-job`) — portal form-fill recipes with a
+- **Apply workflow engine** (`apply-job`) — portal form-fill recipes with a
   manual-submit default; auto-submit is strictly opt-in, and the flow halts on
   CAPTCHAs and unsupported auth prompts. With explicit `mail_access` consent, it
   can read one recent emailed verification code from any webmail provider and continue.
+  The agent-led workflow and safety gates are shipped; connecting the native Ask and
+  Apply on site surfaces to the supervised executor is part of the active product
+  coherence gate below.
 - **One-command start** (`careerrat start [agent]`) — scaffolds the workspace,
   installs the skills, brings up the local app, and launches a supported detected
   agent or an explicitly named compatible command with a starter message, so first
@@ -114,8 +117,11 @@ nurse, a driver, and an engineer each bring their own config.
   BATNA framing, and multi-round sequencing across the written (`email-comms`) and
   live (`interview-prep`) channels, anchored to market benchmarks and never
   fabricating an offer, number, or deadline.
-- **Portal coverage** — Wellfound and Lever adapters behind provider modules: pasted
-  links route to canonical search URLs, with seeded board defaults.
+- **Deterministic source foundation** — direct scanners for Ashby, Greenhouse, Lever,
+  Workable, SmartRecruiters, Recruitee, and Workday; broad public feeds for Remote OK,
+  Remotive, and Working Nomads; generic RSS; plus authenticated/manual provider modules
+  where a public feed is not available. Expansion to the full Career Ops provider
+  reference is part of the active product coherence gate below.
 - **Opt-in browser & mail automation** — session-based automation you switch on per
   capability, using your own browser login with no stored credentials: application-status
   sync (`sync-status`), authenticated search, in-platform message ingest
@@ -288,6 +294,50 @@ The web app is the daily development surface. The conversation-first product and
 Electron runtime have completed the acceptance sweep below, including the macOS distribution
 gate:
 
+### Skill-to-screen product coherence gate (active August 14, 2026)
+
+The completed acceptance sweep proved the released surfaces and distribution artifacts. A
+broader behavior audit is now active: [`.planning/SKILL-UX-AUDIT.md`](../.planning/SKILL-UX-AUDIT.md)
+maps every original CareerRat skill to its natural-language entry, visible progress, confirmation
+boundary, durable result, and next action. Backend or external-agent availability alone does not
+count as native app support.
+
+The current build order is:
+
+1. **One onboarding graduation contract** — as soon as Paul has a resume/no-resume decision,
+   target roles, and a usable location posture, generate baseline deterministic sources and start
+   sourcing in the background while the interview continues. Paul covers the settings needed for
+   the candidate's intended workflows. The app cannot graduate setup until source config is durable
+   and the first search is running or completed. If that cannot happen, Paul offers a durable pause
+   with the exact reason and a resume-from-here action, but keeps the app gated. A user must never
+   reach Jobs and see "No search sources set up yet" or be told to repair onboarding in Settings and
+   reload.
+2. **Ask orchestration** — make short job URLs, "rate this job," "apply to this job," natural job
+   references, recruiter updates, and settings requests resolve to visible typed workflows instead
+   of answer-only chat. Rating captures the JD, evaluates it, saves the verdict, renders the result,
+   and offers the correct next action. Applying chains evaluation, promotion, packet generation,
+   unresolved questions, confirmation, supervised execution/manual handoff, and verified outcome
+   write-back in the same durable thread.
+3. **Company thesis, not a company allowlist** — Paul asks about companies or kinds of companies
+   whose values, industry, size, stage, business model, or local presence the user likes. He turns
+   answers such as fintech, large corporations, fast-food chains, or small Denver accounting firms
+   into reusable discovery signals. Named employers are priority examples; all non-excluded
+   companies remain fair game. Manual focus seeds and broader discovery must run together, leaving
+   the answer blank must still discover companies, and discovery refreshes after setup instead of
+   becoming a one-time step.
+4. **Original-skill native parity** — every user-facing original skill gets an Ask entry and
+   contextual shortcut where useful, deterministic entity resolution, visible work, safe decisions,
+   a durable linked result, and the next handoff. Internal extraction helpers stay internal but must
+   expose progress and errors through the invoking workflow.
+5. **Free/public source parity before AI** — the current seven ATS scanners, three broad feeds, and
+   RSS grow toward an accounted-for manifest of all 74 provider modules in Career Ops. Each adapter
+   needs provider inference, normalization, pagination/recency, liveness fixtures, dedupe, full-JD
+   capture, and source provenance. AI remains the fallback for discovery gaps and ambiguous/custom
+   pages, not the default repeated scan path.
+6. **Fresh acceptance pass** — rerun clean-home and returning-user QA across every skill-to-screen
+   contract, then web, packaged Electron, npm, lint, build, and distribution gates. The prior 74
+   findings stay closed; this gate tracks the newly exposed cross-workflow gaps honestly.
+
 ### Full-product acceptance sweep (completed August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
@@ -371,7 +421,7 @@ same release contract:
   run an adaptive interview that asks only unresolved/high-value questions, then present a
   grouped human-readable review before writing canonical profile, evidence, targeting, and
   honesty state. Autosave raw intake locally and support resume-later.
-- **First-class Ask/Work surface** — make conversation a primary app surface rather than a
+- **First-class Ask/Work surface** — make conversation the primary app surface rather than a
   floating helper. Attachments, streaming progress, cancel/retry, actionable errors, structured
   proposals, confirmation gates, and links to resulting state all use durable local sessions.
   Onboarding is the first phase of one persistent workspace conversation, not a disposable
@@ -380,8 +430,8 @@ same release contract:
   safety-isolated skill workers internally, with every result returning to the one user-facing
   conversation. Backend foundation now persists one canonical workspace thread, replays its
   durable history through the selected runtime, and routes interview-prep intents/results back
-  into that history; streaming, attachments, onboarding graduation, and the visual Ask surface
-  remain active work.
+  into that history. The remaining work is natural-language entity/action resolution, inline
+  workflow progress and results, executor wiring, and complete skill-to-screen parity.
 - **Bring-your-own authenticated CLI** — use a supported installed agent as the normal AI
   runtime. Be precise about which adapters are fully supported; direct provider keys are an
   Advanced fallback and managed AI is a parked future convenience.
@@ -429,8 +479,6 @@ extra surface area.
   artifacts by default.
 - **Brand-logo modernization** — refine the wordmark/mark so it feels welcoming
   and human while staying restrained, favicon-legible, and theme-agnostic.
-- **More sources** — additional job-board and ATS adapters behind provider modules,
-  beyond the current Wellfound + Lever coverage.
 - **Browser automation inside the app** — the consent-gated session-browser capabilities
   (authenticated search, message ingest, status sync, assisted apply) exist today for
   agent-driven runs; surfacing them as first-class buttons inside the app UI waits until

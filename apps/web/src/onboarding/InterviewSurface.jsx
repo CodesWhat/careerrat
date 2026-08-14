@@ -24,7 +24,7 @@ import {
   startFirstSearchRun,
   startSearchRun,
 } from "../lib/api.js";
-import { GENERIC_ERROR_MESSAGE, resolveErrorCopy } from "../lib/errorCopy.js";
+import { GENERIC_ERROR_MESSAGE, resolveErrorCopy, UserFacingError } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
 import { buildAutomationModePatch } from "../settings/AutomationControls.jsx";
 import { ChatPanel } from "./ChatPanel.jsx";
@@ -35,8 +35,10 @@ import { FilePane } from "./FilePane.jsx";
 import { renderInlineMarkdown } from "./inlineMarkdown.jsx";
 import { OnboardingBar } from "./OnboardingBar.jsx";
 import {
+  firstSearchStatus,
   SETUP_ITEM_LABELS,
   SETUP_ITEM_ORDER,
+  setupCanGraduate,
   setupCompletedCount,
   setupDisclosureRows,
   setupIsComplete,
@@ -306,6 +308,9 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
   const [error, setError] = useState(null);
   const [automationStatus, setAutomationStatus] = useState(null);
   const [companyProposals, setCompanyProposals] = useState({ batchId: null, items: [] });
+  const [onboardingDraftSeeds, setOnboardingDraftSeeds] = useState({});
+  const [sourcingPause, setSourcingPause] = useState(null);
+  const [sourcingKickoff, setSourcingKickoff] = useState({ status: "idle", error: null });
   // Engine re-entry (user QA: "a way to go back to the engine screen" once
   // detection auto-selects a CLI and skips EngineScreen entirely). The chip
   // click never navigates directly — it opens this confirm dialog first,
@@ -347,6 +352,39 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     setState(next);
     return next;
   }, []);
+
+  const runFirstSearch = useCallback(
+    async ({ refreshCompleted = false } = {}) => {
+      setSourcingKickoff({ status: "starting", error: null });
+      try {
+        const firstResult = await startFirstSearchRun();
+        const shouldRefresh =
+          refreshCompleted &&
+          firstResult?.reused === true &&
+          firstResult?.run?.status === "completed";
+        const result = shouldRefresh ? await startSearchRun() : firstResult;
+        const status = result?.run?.status;
+        if (result?.parked || status === "failed" || status === "not_started" || !status) {
+          throw new UserFacingError(
+            result?.run?.error?.message || "CareerRat could not start a search with these sources."
+          );
+        }
+        setSourcingKickoff({ status, error: null });
+        try {
+          await reloadState();
+        } catch {
+          // The run is already durable. A temporary state-refresh failure must
+          // not turn a successfully-started search into an onboarding error.
+        }
+        return { ...result, postDiscoveryRefresh: shouldRefresh };
+      } catch (err) {
+        const resolved = errorState(err, "First search couldn't start.");
+        setSourcingKickoff({ status: "failed", error: resolved });
+        throw err;
+      }
+    },
+    [reloadState]
+  );
 
   // automationStatus backs consent_capability's code-owned capability/platform
   // labels (automationStatus().capabilities[].label/summary — the same
@@ -403,6 +441,13 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     void (async () => {
       try {
         const result = await getOnboardingDraft();
+        const draftSeeds = result?.draft?.draftSeeds;
+        if (draftSeeds && typeof draftSeeds === "object" && !Array.isArray(draftSeeds)) {
+          setOnboardingDraftSeeds(draftSeeds);
+          if (draftSeeds.sourcingPause?.paused === true) {
+            setSourcingPause(draftSeeds.sourcingPause);
+          }
+        }
         const transcript = result?.draft?.transcript;
         if (Array.isArray(transcript) && transcript.length) {
           setMessages((current) => (current.length ? current : transcript));
@@ -414,6 +459,40 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       }
     })();
   }, []);
+
+  useEffect(() => {
+    if (!state || !transcriptLoaded || sourcingPause) return;
+    if (state?.data?.setup?.readiness?.search_ready !== true) return;
+    const status = firstSearchStatus(state);
+    if (["running", "completed", "failed"].includes(status)) return;
+    if (sourcingKickoff.status !== "idle") return;
+    void runFirstSearch().catch(() => {
+      // CompletionScreen owns retry, guided discovery, and pause controls.
+    });
+  }, [runFirstSearch, sourcingKickoff.status, sourcingPause, state, transcriptLoaded]);
+
+  const pauseSourceSetup = useCallback(
+    async (reason) => {
+      const pause = {
+        paused: true,
+        reason: String(reason || "Search setup needs another pass."),
+        pausedAt: new Date().toISOString(),
+      };
+      const draftSeeds = { ...onboardingDraftSeeds, sourcingPause: pause };
+      await saveOnboardingDraft({ draftSeeds, transcript: messages });
+      setOnboardingDraftSeeds(draftSeeds);
+      setSourcingPause(pause);
+    },
+    [messages, onboardingDraftSeeds]
+  );
+
+  const resumeSourceSetup = useCallback(async () => {
+    const { sourcingPause: _ignored, ...draftSeeds } = onboardingDraftSeeds;
+    await saveOnboardingDraft({ draftSeeds, transcript: messages });
+    setOnboardingDraftSeeds(draftSeeds);
+    setSourcingPause(null);
+    return runFirstSearch();
+  }, [messages, onboardingDraftSeeds, runFirstSearch]);
 
   useEffect(() => {
     if (!transcriptLoaded) return;
@@ -769,12 +848,14 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
       return "Suggestions ready: check the file pane";
     }
     if (block.kind === "company_add") {
-      // R2 — union with the existing list, never a replace.
-      const existing = state?.data?.targeting?.tracked_companies ?? [];
+      const preferences = state?.data?.targeting?.company_preferences ?? {};
+      const existing = preferences.examples ?? [];
       const next = unionCompanyNames(existing, [block.payload.name]);
-      await saveCandidateFile("targeting", { tracked_companies: next });
+      await saveCandidateFile("targeting", {
+        company_preferences: { ...preferences, confirmed: true, examples: next },
+      });
       await reloadState();
-      return `Added ${block.payload.name}`;
+      return `Added ${block.payload.name} as a focus example; broad discovery stays on`;
     }
     if (block.kind === "candidate_patch") {
       // The generic write-anything-to-a-candidate-doc kind (confirmBlocks.js
@@ -971,7 +1052,17 @@ export function InterviewSurface({ runtime, onRequestEngineScreen }) {
     !conversationNeedsAttention({ messages, chatState });
 
   if (complete) {
-    return <CompletionScreen state={state} runtime={runtime} />;
+    return (
+      <CompletionScreen
+        state={state}
+        runtime={runtime}
+        sourcingKickoff={sourcingKickoff}
+        sourcingPause={sourcingPause}
+        onStartFirstSearch={runFirstSearch}
+        onPauseSourceSetup={pauseSourceSetup}
+        onResumeSourceSetup={resumeSourceSetup}
+      />
+    );
   }
 
   return (
@@ -1190,10 +1281,19 @@ function TranscriptTurn({ message, index, automationStatus, onConfirmBlock, onDe
 }
 
 // CompletionScreen — design 3e. Not a separate route: it's what
-// InterviewSurface renders once setup and canonical search readiness are
-// both complete and the interview has no unresolved work. Source discovery
-// starts only from the explicit button below and remains visible here.
-function CompletionScreen({ state, runtime }) {
+// InterviewSurface renders once the profile checklist is complete and the
+// interview has no unresolved work. Baseline sourcing may already be running
+// in the background; this screen keeps progress, recovery, and optional source
+// expansion visible until the shared app-graduation contract is satisfied.
+function CompletionScreen({
+  state,
+  runtime,
+  sourcingKickoff,
+  sourcingPause,
+  onStartFirstSearch,
+  onPauseSourceSetup,
+  onResumeSourceSetup,
+}) {
   const [expanded, setExpanded] = useState(false);
   const [discoveryChat, setDiscoveryChat] = useState(null);
   const [startingDiscovery, setStartingDiscovery] = useState(false);
@@ -1201,6 +1301,17 @@ function CompletionScreen({ state, runtime }) {
   const [firstSearchReady, setFirstSearchReady] = useState(false);
   const [searchNotice, setSearchNotice] = useState(null);
   const disclosureRows = setupDisclosureRows({ state, runtime });
+  const graduated = setupCanGraduate(state);
+  const durableRun =
+    state?.data?.sourcing?.firstSearchRun?.run ?? state?.sourcing?.firstSearchRun?.run ?? null;
+  const sourceError =
+    sourcingKickoff?.error?.message ||
+    (sourcingKickoff?.status === "idle" ? durableRun?.error?.message : null) ||
+    null;
+  const sourceStatus =
+    sourcingKickoff?.status && sourcingKickoff.status !== "idle"
+      ? sourcingKickoff.status
+      : firstSearchStatus(state);
 
   async function handleStartDiscovery() {
     setStartingDiscovery(true);
@@ -1230,16 +1341,8 @@ function CompletionScreen({ state, runtime }) {
     setStartingDiscovery(true);
     setDiscoveryError(null);
     try {
-      const firstResult = await startFirstSearchRun();
-      const needsPostDiscoveryRefresh =
-        firstResult?.reused === true && firstResult?.run?.status === "completed";
-      const result = needsPostDiscoveryRefresh ? await startSearchRun() : firstResult;
-      const status = result?.run?.status;
-      if (result?.parked || status === "failed" || status === "not_started") {
-        throw new Error(
-          result?.run?.error?.message || "CareerRat could not start a search with these sources."
-        );
-      }
+      const result = await onStartFirstSearch({ refreshCompleted: true });
+      const needsPostDiscoveryRefresh = result?.postDiscoveryRefresh === true;
       setDiscoveryChat(null);
       setFirstSearchReady(false);
       setSearchNotice(
@@ -1254,6 +1357,35 @@ function CompletionScreen({ state, runtime }) {
     } catch (err) {
       setDiscoveryError(
         withRetryAction(errorState(err, "First search couldn't start."), handleStartFirstSearch)
+      );
+    } finally {
+      setStartingDiscovery(false);
+    }
+  }
+
+  async function handlePauseSourceSetup() {
+    setStartingDiscovery(true);
+    setDiscoveryError(null);
+    try {
+      await onPauseSourceSetup(sourceError);
+    } catch (err) {
+      setDiscoveryError(errorState(err, "Setup couldn't pause."));
+    } finally {
+      setStartingDiscovery(false);
+    }
+  }
+
+  async function handleResumeSourceSetup() {
+    setStartingDiscovery(true);
+    setDiscoveryError(null);
+    try {
+      await onResumeSourceSetup();
+      setSearchNotice(
+        "First search started. New roles will appear on your dashboard as sources finish."
+      );
+    } catch (err) {
+      setDiscoveryError(
+        withRetryAction(errorState(err, "First search couldn't resume."), handleResumeSourceSetup)
       );
     } finally {
       setStartingDiscovery(false);
@@ -1283,15 +1415,16 @@ function CompletionScreen({ state, runtime }) {
           CareerRat<span className="onboarding-app__brand-dot">.</span>
         </div>
         <span className="onboarding-app__status">
-          SETUP · {setupTotal(state)} OF {setupTotal(state)} · DONE
+          SETUP · {setupTotal(state)} OF {setupTotal(state)} · {graduated ? "DONE" : "FINISHING"}
         </span>
       </header>
       <main className="onboarding-done">
         <div>
-          <h1>CareerRat is ready.</h1>
+          <h1>{graduated ? "CareerRat is ready." : "Paul is finishing setup."}</h1>
           <p>
-            Profile setup is saved. Next, choose where CareerRat should look. No job search starts
-            until you review the source and company discovery steps.
+            {graduated
+              ? "Your setup is saved and the first search is underway. New roles will appear as each source finishes."
+              : "Your answers are saved. Paul is building usable search sources and starting the first search before you enter the app."}
           </p>
         </div>
         <div className="onboarding-done__row">
@@ -1299,7 +1432,7 @@ function CompletionScreen({ state, runtime }) {
             ✓
           </span>
           <span className="onboarding-done__label">
-            Setup complete{" "}
+            {graduated ? "Setup complete" : "Profile complete"}{" "}
             <span className="onboarding-done__label-muted">
               · {setupTotal(state)} of {setupTotal(state)}
             </span>
@@ -1328,10 +1461,30 @@ function CompletionScreen({ state, runtime }) {
             detail={discoveryError.detail}
           />
         ) : null}
-        {searchNotice ? (
+        {sourcingPause ? (
+          <div className="onboarding-done__search-started" role="status">
+            Setup paused at search setup. {sourcingPause.reason}
+          </div>
+        ) : sourceError ? (
+          <InlineAlert message={sourceError} />
+        ) : sourceStatus === "starting" ? (
+          <div className="onboarding-done__search-started" role="status">
+            Building sources and starting your first search…
+          </div>
+        ) : searchNotice ? (
           <div className="onboarding-done__search-started" role="status">
             {searchNotice}
           </div>
+        ) : null}
+        {sourcingPause ? (
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={handleResumeSourceSetup}
+            disabled={startingDiscovery}
+          >
+            {startingDiscovery ? "Resuming…" : "Resume setup"}
+          </button>
         ) : firstSearchReady ? (
           <button
             type="button"
@@ -1353,7 +1506,43 @@ function CompletionScreen({ state, runtime }) {
             }
             onComplete={handleDiscoveryComplete}
           />
-        ) : (
+        ) : graduated ? (
+          <button
+            type="button"
+            className="btn"
+            onClick={handleStartDiscovery}
+            disabled={startingDiscovery}
+          >
+            {startingDiscovery ? "Starting source setup…" : "Add more search sources"}
+          </button>
+        ) : sourceError ? (
+          <div className="onboarding-done__actions">
+            <button
+              type="button"
+              className="btn btn--primary"
+              onClick={handleStartFirstSearch}
+              disabled={startingDiscovery}
+            >
+              {startingDiscovery ? "Retrying…" : "Retry first search"}
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={handleStartDiscovery}
+              disabled={startingDiscovery}
+            >
+              Set up sources with Paul
+            </button>
+            <button
+              type="button"
+              className="btn"
+              onClick={handlePauseSourceSetup}
+              disabled={startingDiscovery}
+            >
+              Pause setup
+            </button>
+          </div>
+        ) : sourceStatus === "starting" ? null : (
           <button
             type="button"
             className="btn btn--primary"
@@ -1363,9 +1552,11 @@ function CompletionScreen({ state, runtime }) {
             {startingDiscovery ? "Starting source setup…" : "Set up search sources"}
           </button>
         )}
-        <Link className="btn btn--primary" to="/">
-          Go to your dashboard
-        </Link>
+        {graduated ? (
+          <Link className="btn btn--primary" to="/">
+            Go to your dashboard
+          </Link>
+        ) : null}
       </main>
     </div>
   );

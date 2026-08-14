@@ -486,7 +486,9 @@ function CompaniesRowEditor({
   companyProposals = [],
   onDecideCompanyProposal,
 }) {
-  const [companies, setCompanies] = useState(() => state?.data?.targeting?.tracked_companies ?? []);
+  const [companies, setCompanies] = useState(
+    () => state?.data?.targeting?.company_preferences?.examples ?? []
+  );
   const [saving, setSaving] = useState(false);
   const [decidingId, setDecidingId] = useState(null);
 
@@ -497,8 +499,8 @@ function CompaniesRowEditor({
       await onCommit({
         key: "companies",
         entry: "targeting",
-        patch: { tracked_companies: companies },
-        summary: `${companies.length} tracked compan${companies.length === 1 ? "y" : "ies"}`,
+        patch: { company_preferences: { confirmed: true, examples: companies } },
+        summary: `${companies.length} focus example${companies.length === 1 ? "" : "s"} · broad discovery on`,
       });
     } finally {
       setSaving(false);
@@ -522,7 +524,9 @@ function CompaniesRowEditor({
 
   return (
     <form onSubmit={handleSubmit} className="file-pane__editor">
-      <span className="field__hint">Companies to watch closely — sweeps prioritize these.</span>
+      <span className="field__hint">
+        Focus examples guide discovery. CareerRat still searches beyond them.
+      </span>
       <ChipInput values={companies} onChange={setCompanies} placeholder="e.g. Stripe" />
       {companyProposals.length ? (
         <>
