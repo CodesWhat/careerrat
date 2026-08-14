@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-14
 
-Gate result: all 83 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 84 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, restart, and native Electron checks pass. The
 broader native skill-to-screen build gate remains tracked separately in `SKILL-UX-AUDIT.md`.
 
@@ -1525,3 +1525,20 @@ Test homes:
   both deployed surfaces.
 - Live retest: the complete Vercel-mode docs-plus-website production build passed locally without
   any remote font request; the updated PR preview is the external acceptance check.
+
+### `F-084` Ask trusts arbitrary server-provided internal result links
+
+- Status: `FIXED`
+- Severity: P0 release blocker, CodeQL identified a high-severity path from durable workspace text
+  into an anchor URL on the Ask result surface.
+- Reproduction: return a crafted `metadata.nextActions[].href` from the workspace thread and render
+  the completed Ask turn.
+- Root cause: the client rejected obvious absolute and protocol-relative URLs, but still accepted
+  every root-relative path and query value as an anchor destination.
+- Fix: parse result URLs against a fixed non-routable origin, allow only the supported Jobs drawer
+  route with exactly one `open` application ID, validate that ID, and rebuild the mounted URL from
+  a literal route plus an encoded value. Everything else renders no link.
+- Regression: `AskBar.test.jsx` covers the valid mounted route, an injected query value, and a
+  `javascript:` scheme.
+- Live retest: focused Ask coverage and the complete web suite pass; exact-head CodeQL is the
+  external acceptance check.

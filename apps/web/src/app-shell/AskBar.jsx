@@ -80,10 +80,21 @@ function describeAskBarError(err) {
 }
 
 function appActionHref(value) {
-  const href = String(value || "").trim();
-  if (!href.startsWith("/") || href.startsWith("//")) return null;
-  if (href === "/app" || href.startsWith("/app/")) return href;
-  return `/app${href}`;
+  try {
+    const appOrigin = "https://careerrat.invalid";
+    const url = new URL(String(value || "").trim(), appOrigin);
+    if (url.origin !== appOrigin) return null;
+    if (url.pathname !== "/jobs" && url.pathname !== "/app/jobs") return null;
+    if (url.searchParams.getAll("open").length !== 1 || [...url.searchParams.keys()].length !== 1) {
+      return null;
+    }
+
+    const applicationId = url.searchParams.get("open");
+    if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(applicationId || "")) return null;
+    return `/app/jobs?open=${encodeURIComponent(applicationId)}`;
+  } catch {
+    return null;
+  }
 }
 
 // Ported from the deleted CaptureBar.jsx (git show 95f27540~1) — the 409

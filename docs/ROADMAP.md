@@ -366,7 +366,7 @@ The current build order is:
 ### Product-surface acceptance sweep (updated August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. The sweep now records 83 findings, and all 83 are
+section remains the release-level source of truth. The sweep now records 84 findings, and all 84 are
 fixed and live-retested. The broader skill-to-screen audit above remains active until every
 user-facing original skill has a coherent native path.
 

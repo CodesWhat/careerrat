@@ -779,7 +779,11 @@ describe("AskBar — acting", () => {
               },
             ],
             metadata: {
-              nextActions: [{ label: "Review this job", href: "/jobs?open=app-acme" }],
+              nextActions: [
+                { label: "Review this job", href: "/jobs?open=app-acme" },
+                { label: "Unsafe route", href: "/jobs?open=%22%3E%3Cimg%20src=x%3E" },
+                { label: "Unsafe scheme", href: "javascript:alert(1)" },
+              ],
             },
           },
         ],
@@ -804,6 +808,7 @@ describe("AskBar — acting", () => {
       (node) => node.type === "a" && textOf(node).trim() === "Review this job"
     )[0];
     expect(link.props.href).toBe("/app/jobs?open=app-acme");
+    expect(visit(tree, (node) => node.type === "a")).toHaveLength(1);
   });
 
   it("renders a manual application handoff without claiming submission", async () => {
