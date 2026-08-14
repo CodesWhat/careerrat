@@ -363,6 +363,8 @@ test("local user data roots are excluded from git, docker, and Vercel surfaces",
       `.vercelignore must anchor "${pattern}" as "/${pattern}" so it cannot delete nested app files from the Vercel upload`
     );
   }
+  assert.match(vercelignore, /^!\/scripts\/harden-static-html\.mjs$/m);
+  assert.match(vercelignore, /^!\/scripts\/build-docs-content\.mjs$/m);
 });
 
 test("npm package allowlist names app files, not broad private-data roots", async () => {
