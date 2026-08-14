@@ -1,11 +1,11 @@
-# Rolester App Product Plan
+# CareerRat App Product Plan
 
 **Created:** 2026-07-05
 **Purpose:** Carry the v2 product direction into GSD planning after the v1 skill-to-API foundation.
 
 ## Product Shape
 
-Rolester should be an Electron/React app backed by the local SQLite database. The app is the product surface. Agents and skills remain useful for explicit tool-heavy workflows and developer/user handoffs, but app buttons should call local APIs, DB verbs, deterministic scanners, and bounded AI calls.
+CareerRat should be an Electron/React app backed by the local SQLite database. The app is the product surface. Agents and skills remain useful for explicit tool-heavy workflows and developer/user handoffs, but app buttons should call local APIs, DB verbs, deterministic scanners, and bounded AI calls.
 
 The user should be able to:
 

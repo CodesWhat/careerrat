@@ -55,12 +55,12 @@
 | Hybrid abstraction | Use native output when available, with existing validation and retry/fallback behavior behind a wrapper. | yes |
 
 **User's choice:** "switch to it now no?"
-**Notes:** Adopt native structured outputs now, but not as the sole trust boundary. Rolester still validates deterministically after the model response and keeps the existing compatibility fallback for provider gaps.
+**Notes:** Adopt native structured outputs now, but not as the sole trust boundary. CareerRat still validates deterministically after the model response and keeps the existing compatibility fallback for provider gaps.
 
 ## the agent's Discretion
 
 - The agent chose strict metadata-only telemetry labels for area 3.
-- The agent may choose exact module and field names during Phase 2 planning, provided the wrapper contract remains stable and provider-specific details stay hidden behind Rolester-owned APIs.
+- The agent may choose exact module and field names during Phase 2 planning, provided the wrapper contract remains stable and provider-specific details stay hidden behind CareerRat-owned APIs.
 
 ## Deferred Ideas
 

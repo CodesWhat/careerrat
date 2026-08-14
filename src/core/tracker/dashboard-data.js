@@ -244,6 +244,7 @@ function esc(value) {
 
 function classifyStage(status) {
   const raw = String(status || "").toLowerCase();
+  if (["sourced", "prospect", "saved", "gated"].includes(raw)) return "sourced";
   for (const [id, patterns] of STAGE_RULES) {
     if (patterns.some((pattern) => raw.includes(pattern))) return id;
   }
@@ -406,7 +407,12 @@ function isAdvanced(app) {
 }
 
 function isActive(app) {
-  return !TERMINAL_STAGES.has(classifyStage(app.status));
+  const stage = classifyStage(app.status);
+  return !TERMINAL_STAGES.has(stage) && (STAGE_ORDER[stage] ?? 0) >= STAGE_ORDER.applied;
+}
+
+function isApplied(app) {
+  return (STAGE_ORDER[classifyStage(app.status)] ?? 0) >= STAGE_ORDER.applied;
 }
 
 function daysBetween(dueDate, now) {
@@ -500,17 +506,18 @@ function buildStats(trackerData) {
   const rejected = applications.filter((app) => classifyStage(app.status) === "rejected").length;
   const withdrawn = applications.filter((app) => classifyStage(app.status) === "withdrawn").length;
   const active = applications.filter(isActive).length;
+  const applied = applications.filter(isApplied).length;
   // Candidate withdrawals remove the app from the market-response sample — a withdrawal
   // is not a market signal. Exclude withdrawn from both numerator and denominator so
   // responseRate measures only the market's reply rate on apps that stayed in play.
-  const rateBase = applications.length - withdrawn;
+  const rateBase = applied - withdrawn;
 
   return {
     inPlay: active,
     responseRate: rateBase > 0 ? Math.round(((advanced + rejected) / rateBase) * 100) : 0,
     interviews: advanced,
     sourced: sourced.length,
-    applied: applications.length,
+    applied,
     rejected,
     withdrawn,
   };
@@ -644,6 +651,9 @@ function buildLibraryStatus(library = {}) {
     metrics: {
       claims: Number(metrics.claims || 0),
       stories: Number(metrics.stories || 0),
+      voice: Number(metrics.voice || 0),
+      honesty: Number(metrics.honesty || 0),
+      roleSignals: Number(metrics.roleSignals || 0),
       gaps: Number(metrics.gaps || 0),
     },
     index: objectList(library?.index),
@@ -653,6 +663,8 @@ function buildLibraryStatus(library = {}) {
       proof: Number(readiness.proof || 0),
       stories: Number(readiness.stories || 0),
       voice: Number(readiness.voice || 0),
+      honesty: Number(readiness.honesty || 0),
+      roleSignals: Number(readiness.roleSignals || 0),
     },
     gaps: objectList(library?.gaps),
     storyLanes: objectList(library?.storyLanes),
@@ -693,6 +705,8 @@ function networkRecord(records, company) {
       contactMap: new Map(),
       leads: [],
       notes: [],
+      noteEntries: [],
+      history: [],
       latestAt: "",
     });
   }
@@ -760,6 +774,7 @@ function cleanContactName(value, company) {
 function contactTypeFromText(value, fallback = "Recruiter") {
   const text = String(value || "").toLowerCase();
   if (/\b(portal|workday|ashby|greenhouse)\b/.test(text)) return "Portal";
+  if (/\b(referr\w*|warm intro|warm contact)\b/.test(text)) return "Referral";
   if (/\b(recruit\w*|talent|sourc\w*|people)\b/.test(text)) return "Recruiter";
   if (/\b(hiring manager|engineering manager|manager|director|vp|head|decision)\b/.test(text)) {
     return "Decision maker";
@@ -789,7 +804,11 @@ function addNetworkContact(
   if (!name) return;
   const contactType = type || contactTypeFromText(`${rawName} ${context} ${note}`);
   if (contactType === "Portal") return;
-  const key = `${normalizeName(contactType)}:${normalizeName(name)}`;
+  // A person is one relationship even when different inputs infer different
+  // coarse roles for them (for example a recruiter whose title contains
+  // "Director"). Keying by role + name created duplicate cards for the same
+  // human and let later audit entries look like new contacts.
+  const key = normalizeName(name);
   const existing = record.contactMap.get(key);
   const summary = firstSentence(note || context, "Relationship context captured in tracker.");
   const titleValue = compactUiText(title, 80);
@@ -816,22 +835,48 @@ function latestNetworkDate(record, ...values) {
   if (latest) record.latestAt = latest;
 }
 
-function addNetworkConversation(record, conversation) {
+function addNetworkNote(record, text, applicationId = "") {
+  if (!text) return;
+  record.notes.push(text);
+  record.noteEntries.push({ text, applicationId });
+}
+
+function addNetworkConversation(record, conversation, app = {}) {
   const who = conversation?.who || "";
   const type = contactTypeFromText(`${conversation?.kind || ""} ${who}`, "Recruiter");
-  addNetworkContact(record, who, {
-    company: record.company,
-    type,
-    context: conversation?.kind,
-    note: conversation?.notes,
-  });
-  if (conversation?.notes) record.notes.push(conversation.notes);
+  // Lead decision conversations are an audit trail, not evidence that the
+  // candidate has a relationship with that person. Approved leads are added
+  // from relationshipLeads below; rejected leads must never become contacts.
+  if (!/\brelationship lead (?:approved|rejected)\b/i.test(conversation?.kind || "")) {
+    addNetworkContact(record, who, {
+      company: record.company,
+      type,
+      context: conversation?.kind,
+      note: conversation?.notes,
+    });
+  }
+  addNetworkNote(record, conversation?.notes, app.id || "");
+  if (conversation?.notes || conversation?.kind) {
+    record.history.push({
+      id: `conversation-${app.id || calendarSlug(record.company)}-${record.history.length + 1}`,
+      applicationId: app.id || "",
+      at: conversation?.at || conversation?.date || "",
+      direction: "conversation",
+      label: [
+        conversation?.kind || "Conversation",
+        conversation?.who ? `with ${conversation.who}` : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      summary: compactUiText(conversation?.notes || conversation?.kind, 240),
+    });
+  }
   latestNetworkDate(record, conversation?.at, conversation?.date);
 }
 
 function addNetworkCommunication(record, comm) {
   record.comms.push(comm);
-  if (comm.summary) record.notes.push(comm.summary);
+  addNetworkNote(record, comm.summary, comm.applicationId || "");
   latestNetworkDate(
     record,
     comm.updatedAt,
@@ -854,7 +899,23 @@ function addNetworkCommunication(record, comm) {
   }
 
   for (const message of comm.messages || []) {
-    if (message.summary) record.notes.push(message.summary);
+    addNetworkNote(record, message.summary, comm.applicationId || "");
+    if (message.summary || message.subject) {
+      const outbound = String(message.direction || "").startsWith("outbound");
+      const counterpart = outbound
+        ? arrayOrEmpty(message.to).join(", ")
+        : String(message.from || "").trim();
+      record.history.push({
+        id: `message-${comm.id || calendarSlug(record.company)}-${record.history.length + 1}`,
+        applicationId: comm.applicationId || "",
+        communicationId: comm.id || "",
+        at: message.at || message.date || "",
+        direction: outbound ? "outbound" : message.direction || "inbound",
+        label: `${outbound ? "Sent to" : "Received from"} ${counterpart || record.company}`,
+        subject: compactUiText(message.subject || comm.subject, 100),
+        summary: compactUiText(message.summary || message.body || message.subject, 240),
+      });
+    }
     if (message.direction === "inbound") {
       addNetworkContact(record, message.from, {
         company: record.company,
@@ -877,6 +938,18 @@ function addNetworkCommunication(record, comm) {
         });
       }
     }
+  }
+
+  if (!(comm.messages || []).length && comm.summary) {
+    record.history.push({
+      id: `communication-${comm.id || calendarSlug(record.company)}-${record.history.length + 1}`,
+      applicationId: comm.applicationId || "",
+      communicationId: comm.id || "",
+      at: comm.updatedAt || comm.lastInboundAt || comm.lastOutboundAt || "",
+      direction: "communication",
+      label: comm.subject || `${titleCase(comm.channel || "Communication")} thread`,
+      summary: compactUiText(comm.summary, 240),
+    });
   }
 }
 
@@ -1039,12 +1112,13 @@ function networkStateLabel(state) {
 
 function buildNetworkCompany(record, now) {
   const app = primaryNetworkApp(record.apps) || {};
-  const contacts = [...record.contactMap.values()].slice(0, 3);
+  const contacts = [...record.contactMap.values()];
   const state = networkReuseState(app, record.comms);
   const reuse = networkReuseCopy(state, app, record.comms, now);
   const warmth = networkWarmth({ app, contacts, state, notes: record.notes });
   return {
     company: record.company,
+    applicationId: app.id || "",
     domain: app.domain || app.companyDomain || "",
     initials: initials(record.company),
     role: app.role || record.comms.find((comm) => comm.role)?.role || "Relationship record",
@@ -1059,7 +1133,17 @@ function buildNetworkCompany(record, now) {
     progressTone: networkTone(state),
     stateLabel: networkStateLabel(state),
     latestAt: record.latestAt,
-    notes: record.notes,
+    notes: record.noteEntries
+      .filter((entry) => !entry.applicationId || !app.id || entry.applicationId === app.id)
+      .map((entry) => entry.text),
+    history: [...record.history]
+      .filter(
+        (entry) =>
+          (entry.summary || entry.label) &&
+          (!entry.applicationId || !app.id || entry.applicationId === app.id)
+      )
+      .sort((a, b) => (parseTime(b.at) || 0) - (parseTime(a.at) || 0))
+      .slice(0, 24),
   };
 }
 
@@ -1087,7 +1171,7 @@ function buildNetwork(trackerData, { now = new Date() } = {}) {
     record.apps.push(app);
     latestNetworkDate(record, app.updatedAt, app.statusUpdatedAt, app.appliedAt);
     for (const conversation of app.conversations || []) {
-      addNetworkConversation(record, conversation);
+      addNetworkConversation(record, conversation, app);
     }
   }
 
@@ -1121,8 +1205,7 @@ function buildNetwork(trackerData, { now = new Date() } = {}) {
       const stateDelta = (stateOrder[a.reuseState] ?? 9) - (stateOrder[b.reuseState] ?? 9);
       if (stateDelta) return stateDelta;
       return b.warmth - a.warmth;
-    })
-    .slice(0, 6);
+    });
 
   const recruiterNames = new Set();
   const hmNames = new Set();
@@ -3625,23 +3708,19 @@ function explicitApplicationAction(app = {}, row = {}, now = new Date()) {
   };
 }
 
-function interviewDateForApp(app = {}) {
+function interviewDateForApp(app = {}, now = new Date()) {
+  const nowTime = now instanceof Date ? now.getTime() : new Date(now).getTime();
   return earliestIso(
-    app.nextInterviewAt,
-    app.interviewAt,
-    app.interviewDate,
-    (app.conversations || [])
-      .filter((conversation) =>
-        /\b(interview|screen|loop|panel|onsite|on-site|final)\b/i.test(
-          `${conversation.kind || ""} ${conversation.title || ""} ${conversation.notes || ""}`
-        )
-      )
-      .map((conversation) => conversation.date || conversation.at)
+    [app.nextInterviewAt, app.interviewAt, app.interviewDate].filter((value) => {
+      const time = parseTime(value);
+      return time != null && time > nowTime;
+    })
   );
 }
 
 function interviewAction(row, app = {}, now = new Date()) {
-  const interviewAt = interviewDateForApp(app);
+  const interviewAt = interviewDateForApp(app, now);
+  if (!interviewAt) return null;
   return {
     state: "interview",
     label: "Prep",
@@ -3927,7 +4006,8 @@ function buildJobAction(row, sourceRecord = {}, communications = [], now = new D
     row.source === "application" &&
     (STAGE_ORDER[row.stage] ?? 0) >= STAGE_ORDER.screen
   ) {
-    return interviewAction(row, sourceRecord, now);
+    const action = interviewAction(row, sourceRecord, now);
+    if (action) return action;
   }
 
   // Comp resolution is part of the pre-application promote/hold call. An already
@@ -4104,11 +4184,21 @@ function formatArtifactDate(iso) {
 // {path} object shape — normalize either to the raw path string, or "" when
 // there's nothing there.
 function artifactPathString(value) {
-  if (typeof value === "string") return value.trim();
-  if (value && typeof value === "object" && typeof value.path === "string") {
-    return value.path.trim();
+  const raw =
+    typeof value === "string"
+      ? value.trim()
+      : value && typeof value === "object" && typeof value.path === "string"
+        ? value.path.trim()
+        : "";
+  if (
+    !raw ||
+    !/^workspace\//i.test(raw) ||
+    /(?:^|\/)\.\.(?:\/|$)/.test(raw) ||
+    /[\r\n]/.test(raw)
+  ) {
+    return "";
   }
-  return "";
+  return raw;
 }
 
 // One artifact-list row: `note` is always a short human-readable string —
@@ -4329,6 +4419,7 @@ function jobDetailFromRow(
 
 function applicationJobRow(app, index, communications = [], now = new Date(), profileComp = {}) {
   const statusStage = classifyStage(app.status);
+  const deepestHistoryStage = deepestRoundStage(app)?.stage || null;
   const {
     stage,
     order: furthestOrder,
@@ -4387,7 +4478,15 @@ function applicationJobRow(app, index, communications = [], now = new Date(), pr
     // (screen / interview / hiring-manager / …) so the funnel can count it as a role the
     // candidate actually interviewed for and lost, not a pre-response form-rejection.
     // null when the app was rejected before any round.
-    terminalExitStage: terminal ? deepestRoundStage(app)?.stage || null : null,
+    terminalExitStage: terminal ? deepestHistoryStage : null,
+    // The exact canonical stage represented by this row in the Sankey. Terminal
+    // outcomes keep the deepest stage reached; an accepted role anchors to its
+    // deepest recorded stage before flowing into Accepted.
+    sankeyStage: terminal
+      ? deepestHistoryStage
+      : stage === "accepted"
+        ? deepestHistoryStage || "accepted"
+        : stage,
     // Real interview rounds completed (see roundCount) — the Jobs funnel's honest
     // ordinal axis. Works for terminal rows, so a role lost after its 1st round
     // counts at round 1 (not whatever deep type its last conversation classified as).
@@ -4495,12 +4594,9 @@ function communicationsForApplication(app, communications = []) {
   return communications.filter((comm) => {
     const commCompany = String(comm.company || "").toLowerCase();
     const commRole = String(comm.role || "").toLowerCase();
-    if (
-      comm.applicationId &&
-      comm.applicationId === app.id &&
-      (!commCompany || commCompany === appCompany)
-    )
-      return true;
+    if (comm.applicationId) {
+      return comm.applicationId === app.id && (!commCompany || commCompany === appCompany);
+    }
     return commCompany === appCompany && (!commRole || commRole === appRole);
   });
 }
@@ -4557,29 +4653,40 @@ function buildJobsFunnel(rows) {
   ];
 }
 
-// The Jobs funnel chain is numbered rounds ("1st round", "2nd round", …) rather
-// than semantic stage types. Round depth is the honest funnel axis (see
-// roundCount): a job sits at the column matching how many rounds it actually
-// completed, so nothing passes through a stage it skipped. The greens deepen with
-// depth to echo the old chain's light→dark gradient.
-const ROUND_ORDINALS = ["", "1st", "2nd", "3rd", "4th", "5th", "6th", "7th", "8th", "9th", "10th"];
-const ROUND_GREENS = ["#7FCBA6", "#5BC4A0", "#34B488", "#1D9E75", "#179069", "#14795A", "#12664D"];
-function roundLabel(n) {
-  return `${ROUND_ORDINALS[n] || `${n}th`} round`;
-}
-function roundColor(n) {
-  return ROUND_GREENS[Math.min(n - 1, ROUND_GREENS.length - 1)] || "#1D9E75";
-}
-function sankeyRoundMeta(n, col, count) {
+// The Sankey uses the same semantic stage vocabulary as cards, drawers, and the
+// canonical tracker contract. Each application appears at its deepest known stage;
+// links jump directly there so the funnel never invents a skipped round.
+const SANKEY_STAGE_IDS = [
+  "screen",
+  "interview",
+  "assessment",
+  "technical",
+  "hiring-manager",
+  "onsite",
+  "final",
+  "offer",
+];
+const SANKEY_STAGE_INDEX = new Map(SANKEY_STAGE_IDS.map((id, index) => [id, index]));
+const SANKEY_STAGE_META = new Map(JOB_FUNNEL_STAGES.map((stage) => [stage.id, stage]));
+
+function sankeyStageMeta(stage, count) {
+  const index = SANKEY_STAGE_INDEX.get(stage);
+  const meta = SANKEY_STAGE_META.get(stage);
+  if (index == null || !meta) return null;
   return {
-    id: `round-${n}`,
-    label: roundLabel(n),
-    color: roundColor(n),
+    id: stage,
+    label: meta.label,
+    color: meta.color,
     count,
-    col,
-    order: n,
-    filter: `round-${n}`,
+    col: 2 + index,
+    order: index,
+    filter: `reached-${stage}`,
   };
+}
+
+function semanticStageForRow(row) {
+  const stage = String(row?.sankeyStage || "");
+  return SANKEY_STAGE_INDEX.has(stage) ? stage : null;
 }
 
 // Stale/ghosted are an add-on DECAY state for a quiet PRE-interview (0-round) app:
@@ -4599,23 +4706,16 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
   const nodeMap = new Map();
   const linkMap = new Map();
   const sourceRows = new Map(Object.keys(SANKEY_SOURCE_META).map((key) => [key, []]));
-  const furthestOrders = [];
   // Decay band: only pre-interview (0-round) apps that went quiet drain forward as a
   // progression — Awaiting → Going stale, then the fully-ghosted subset continues
   // Going stale → Ghosted. A ghosted app was stale first, so it passes THROUGH the
   // stale node rather than branching straight off Awaiting.
   const decayStaleRows = []; // quiet 14–30d, still merely stale — terminates at the stale node
   const decayGhostedRows = []; // quiet 30d+, fully ghosted — continues stale → ghosted
-  // Rejections that happened AFTER >= 1 real round, keyed `round-${n}`, so a role lost
-  // after its 1st round drops round-1 → Rejected. These drop forward into the single
-  // bottom-right Rejected sink, alongside the bulk of pre-response form-rejections.
-  const advancedRejectGroups = new Map();
-  // Withdrawals that happened AFTER >= 1 real round — same structure as advancedRejectGroups
-  // but route to the Withdrawn sink (muted, not red).
-  const advancedWithdrawGroups = new Map();
-  // Accepted offers — the happy terminus, keyed by the round depth the accepted role
-  // reached so it flows round-N → Accepted 🎉 (a green celebratory sink, not a sink for losses).
-  const acceptedGroups = new Map();
+  // Mutually exclusive deepest-stage groups. A terminal or accepted row stays in
+  // the stage it actually reached, then flows to its outcome sink.
+  const stageGroups = new Map();
+  const acceptedWithoutStage = [];
   let awaiting = 0;
   let stale = 0;
   let ghosted = 0;
@@ -4653,62 +4753,52 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
   const examplesOf = (items) =>
     items.slice(0, 3).map((row) => `${row.company} · ${row.stageLabel}`);
 
-  // furthestOrders holds ROUND NUMBERS (1, 2, 3 …), not stage orders — the funnel
-  // chain is numbered rounds (see roundCount / sankeyRoundMeta). reachedFor(n) counts
-  // apps that did >= n rounds, which is genuinely cumulative, so the chain never
-  // implies a round the candidate skipped.
+  function addStageRow(stage, row, outcome = "active") {
+    if (!stageGroups.has(stage)) {
+      stageGroups.set(stage, { rows: [], rejected: [], withdrawn: [], accepted: [] });
+    }
+    const group = stageGroups.get(stage);
+    group.rows.push(row);
+    if (outcome !== "active") group[outcome].push(row);
+  }
+
   for (const row of visibleRows) {
     const bucket = row.sourceBucket || sourceBucketId(row.channel);
     sourceRows.get(bucket)?.push(row);
-    const rounds = row.roundsReached || 0;
+    const semanticStage = semanticStageForRow(row);
     if (row.terminal) {
       const isWithdrawn = row.stage === "withdrawn";
       if (isWithdrawn) {
-        // Candidate-initiated exit — tracked separately from market rejections.
         withdrawnTerminal += 1;
-        if (rounds >= 1) {
-          furthestOrders.push(rounds);
-          const key = `round-${rounds}`;
-          if (!advancedWithdrawGroups.has(key)) {
-            advancedWithdrawGroups.set(key, { round: rounds, rows: [] });
-          }
-          advancedWithdrawGroups.get(key).rows.push(row);
+        if (semanticStage) {
+          addStageRow(semanticStage, row, "withdrawn");
         } else {
           withdrawnTerminalPreScreen += 1;
         }
       } else {
         terminal += 1;
-        // A rejection that landed after >= 1 real round is counted at that round AND drops
-        // into Rejected from there (round-N → rejected). A pre-response rejection did 0
-        // rounds and flows into Rejected straight from Heard back.
-        if (rounds >= 1) {
-          furthestOrders.push(rounds);
-          const key = `round-${rounds}`;
-          if (!advancedRejectGroups.has(key)) {
-            advancedRejectGroups.set(key, { round: rounds, rows: [] });
-          }
-          advancedRejectGroups.get(key).rows.push(row);
+        if (semanticStage) {
+          addStageRow(semanticStage, row, "rejected");
         } else {
           terminalPreScreen += 1;
         }
       }
       continue;
     }
-    if (rounds >= 1) {
-      furthestOrders.push(rounds);
-      if (row.stage === "accepted") {
-        if (!acceptedGroups.has(rounds)) acceptedGroups.set(rounds, []);
-        acceptedGroups.get(rounds).push(row);
-      }
+    if (row.stage === "accepted") {
+      if (semanticStage) addStageRow(semanticStage, row, "accepted");
+      else acceptedWithoutStage.push(row);
+    } else if (semanticStage) {
+      addStageRow(semanticStage, row);
     } else {
       awaiting += 1;
     }
-    // Decay overlay: a quiet PRE-interview app (0 rounds, still Awaiting) drains forward
+    // Decay overlay: a quiet pre-screen app, still Awaiting, drains forward
     // through Going stale, and on to Ghosted if it has fully ghosted. An app that already
     // reached a round and went quiet stays counted at its round node (its card carries the
     // stale flag) — routing it back into the col-1.5 decay sink would draw an ugly backward
     // band, so we don't.
-    if ((row.ghosted || row.stale) && rounds < 1) {
+    if ((row.ghosted || row.stale) && !semanticStage) {
       if (row.ghosted) {
         ghosted += 1;
         decayGhostedRows.push(row);
@@ -4725,40 +4815,60 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
     node.count = bucketRows.length;
   }
 
-  const advanced = furthestOrders.length;
-  // Advanced now includes rejected-after-advancing apps (pushed above), so Heard back
-  // = everyone who advanced + the pre-screen rejections + pre-screen withdrawals. Same
-  // total as the old `advanced + terminal`, just without double-counting.
-  const heardBack = advanced + terminalPreScreen + withdrawnTerminalPreScreen;
+  const stageReachedCount = [...stageGroups.values()].reduce(
+    (sum, group) => sum + group.rows.length,
+    0
+  );
+  const heardBack =
+    stageReachedCount +
+    terminalPreScreen +
+    withdrawnTerminalPreScreen +
+    acceptedWithoutStage.length;
   if (awaiting > 0) ensureNode({ ...SANKEY_RESPONSE_META.awaiting, count: awaiting });
   if (heardBack > 0) ensureNode({ ...SANKEY_RESPONSE_META.heard, count: heardBack });
 
-  const reachedFor = (round) => furthestOrders.filter((value) => value >= round).length;
-  // Numbered-round chain: one node per round depth actually reached, 1 … maxRound.
-  // reachedFor(n) is monotonic, so the chain only ever thins out left-to-right.
-  const maxRound = furthestOrders.reduce((max, value) => Math.max(max, value), 0);
-  for (let n = 1; n <= maxRound; n += 1) {
-    ensureNode(sankeyRoundMeta(n, 2 + (n - 1), reachedFor(n)));
+  for (const stage of SANKEY_STAGE_IDS) {
+    const group = stageGroups.get(stage);
+    if (!group?.rows.length) continue;
+    ensureNode(sankeyStageMeta(stage, group.rows.length));
   }
-  // Accepted 🎉 — the celebratory terminus. An accepted offer flows out of the last round
-  // it reached into a single green sink, set just past the deepest accepted round so the
-  // win reads instantly and apart from the live chain. Green (not the red loss sink).
-  const acceptedCount = [...acceptedGroups.values()].reduce((sum, rows) => sum + rows.length, 0);
+  const stageCol = (stage) => sankeyStageMeta(stage, 0)?.col || 1;
+  const deepestRenderedCol = Math.max(
+    1,
+    ...[...stageGroups.keys()].map((stage) => stageCol(stage))
+  );
+
+  const acceptedCount =
+    acceptedWithoutStage.length +
+    [...stageGroups.values()].reduce((sum, group) => sum + group.accepted.length, 0);
   if (acceptedCount > 0) {
-    let acceptedRound = 0;
-    for (const round of acceptedGroups.keys()) acceptedRound = Math.max(acceptedRound, round);
     ensureNode({
       id: "accepted",
       label: "Accepted 🎉",
       color: "#2F9E55",
       count: acceptedCount,
-      col: 2 + (acceptedRound - 1) + 0.7,
+      col: deepestRenderedCol + 0.7,
       order: 98,
       filter: "accepted",
     });
-    for (const [round, rows] of acceptedGroups) {
-      addLink(`round-${round}`, "accepted", rows.length, "#2F9E55", "accepted", examplesOf(rows));
+    for (const [stage, group] of stageGroups) {
+      addLink(
+        stage,
+        "accepted",
+        group.accepted.length,
+        "#2F9E55",
+        "accepted",
+        examplesOf(group.accepted)
+      );
     }
+    addLink(
+      "heardback",
+      "accepted",
+      acceptedWithoutStage.length,
+      "#2F9E55",
+      "accepted",
+      examplesOf(acceptedWithoutStage)
+    );
   }
   // Rejected is a single terminal sink, bottom-pinned (see the layout pass). It sits
   // HALF a column past the furthest point any rejected app actually reached — NOT way
@@ -4769,8 +4879,8 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
   // pre-response rejections from Heard back, per-round cuts from the round they died at.
   if (terminal > 0) {
     let furthestRejectCol = terminalPreScreen > 0 ? 1 : 0;
-    for (const group of advancedRejectGroups.values()) {
-      furthestRejectCol = Math.max(furthestRejectCol, 2 + (group.round - 1));
+    for (const [stage, group] of stageGroups) {
+      if (group.rejected.length) furthestRejectCol = Math.max(furthestRejectCol, stageCol(stage));
     }
     ensureNode({
       id: "rejected",
@@ -4787,8 +4897,9 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
   // round, but rendered with a neutral color.
   if (withdrawnTerminal > 0) {
     let furthestWithdrawCol = withdrawnTerminalPreScreen > 0 ? 1 : 0;
-    for (const group of advancedWithdrawGroups.values()) {
-      furthestWithdrawCol = Math.max(furthestWithdrawCol, 2 + (group.round - 1));
+    for (const [stage, group] of stageGroups) {
+      if (group.withdrawn.length)
+        furthestWithdrawCol = Math.max(furthestWithdrawCol, stageCol(stage));
     }
     ensureNode({
       id: "withdrawn",
@@ -4835,8 +4946,12 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
   for (const [bucket, bucketRows] of sourceRows) {
     if (!bucketRows.length) continue;
     const source = SANKEY_SOURCE_META[bucket];
-    const awaitingRows = bucketRows.filter((row) => !row.terminal && (row.roundsReached || 0) < 1);
-    const heardRows = bucketRows.filter((row) => row.terminal || (row.roundsReached || 0) >= 1);
+    const awaitingRows = bucketRows.filter(
+      (row) => !row.terminal && row.stage !== "accepted" && !semanticStageForRow(row)
+    );
+    const heardRows = bucketRows.filter(
+      (row) => row.terminal || row.stage === "accepted" || Boolean(semanticStageForRow(row))
+    );
     addLink(
       source.id,
       "awaiting",
@@ -4855,37 +4970,29 @@ function buildJobsSankey(rows, { showGhosted = false, hideStale = false } = {}) 
     );
   }
 
-  if (maxRound >= 1) {
-    addLink("heardback", "round-1", reachedFor(1), roundColor(1), "round-1");
+  for (const [stage, group] of stageGroups) {
+    const meta = sankeyStageMeta(stage, group.rows.length);
+    addLink("heardback", stage, group.rows.length, meta.color, meta.filter, examplesOf(group.rows));
   }
   addLink("heardback", "rejected", terminalPreScreen, "#CB5340", "terminal");
   addLink("heardback", "withdrawn", withdrawnTerminalPreScreen, "#6f7479", "terminal");
 
-  for (let n = 1; n < maxRound; n += 1) {
-    addLink(`round-${n}`, `round-${n + 1}`, reachedFor(n + 1), roundColor(n + 1), `round-${n + 1}`);
-  }
-
-  // Per-round rejection threads — each round drops the roles lost there down into the
-  // single Rejected sink (round-1 → rejected, round-2 → rejected …).
-  for (const group of advancedRejectGroups.values()) {
+  for (const [stage, group] of stageGroups) {
     addLink(
-      `round-${group.round}`,
+      stage,
       "rejected",
-      group.rows.length,
+      group.rejected.length,
       "#CB5340",
       "terminal",
-      examplesOf(group.rows)
+      examplesOf(group.rejected)
     );
-  }
-  // Per-round withdrawal threads — mirrors rejection threads but routes to Withdrawn.
-  for (const group of advancedWithdrawGroups.values()) {
     addLink(
-      `round-${group.round}`,
+      stage,
       "withdrawn",
-      group.rows.length,
+      group.withdrawn.length,
       "#6f7479",
       "terminal",
-      examplesOf(group.rows)
+      examplesOf(group.withdrawn)
     );
   }
 

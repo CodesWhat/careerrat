@@ -16,23 +16,23 @@ Phase 02 goal is achieved. The repository contains a shared bounded-AI runtime c
 # Requirements Traceability
 
 - `AIR-01` — satisfied.
-  - Shared helper enforces `skill`, `action`, and `operation` labels before invocation in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/bounded-ai.mjs:43) and propagates them through success/failure metadata in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/bounded-ai.mjs:145).
-  - Native requests pass labels through `callAI()` in [src/core/ai/call-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/call-ai.mjs:129).
-  - Route/runtime consumers use the helper with explicit labels in [src/cli/assist-route.mjs](/Users/sbenson/code/rolester/src/cli/assist-route.mjs:56), [src/core/intake/classify.mjs](/Users/sbenson/code/rolester/src/core/intake/classify.mjs:25), and [src/cli/onboard-route.mjs](/Users/sbenson/code/rolester/src/cli/onboard-route.mjs:705).
+  - Shared helper enforces `skill`, `action`, and `operation` labels before invocation in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/bounded-ai.mjs:43) and propagates them through success/failure metadata in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/bounded-ai.mjs:145).
+  - Native requests pass labels through `callAI()` in [src/core/ai/call-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/call-ai.mjs:129).
+  - Route/runtime consumers use the helper with explicit labels in [src/cli/assist-route.mjs](/Users/sbenson/code/careerrat/src/cli/assist-route.mjs:56), [src/core/intake/classify.mjs](/Users/sbenson/code/careerrat/src/core/intake/classify.mjs:25), and [src/cli/onboard-route.mjs](/Users/sbenson/code/careerrat/src/cli/onboard-route.mjs:705).
 
 - `AIR-02` — satisfied.
-  - Fallback mode delegates parse/validate/retry to `runStructuredOneshot()` in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/bounded-ai.mjs:293).
-  - Native-preferred mode still locally parses and validates provider text before returning `data` in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/bounded-ai.mjs:200).
+  - Fallback mode delegates parse/validate/retry to `runStructuredOneshot()` in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/bounded-ai.mjs:293).
+  - Native-preferred mode still locally parses and validates provider text before returning `data` in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/bounded-ai.mjs:200).
   - Assist, intake, and resume-AI all route through this validation path before downstream use.
 
 - `AIR-03` — satisfied.
-  - Shared no-AI handling returns `501` / `NO_AI_ROUTE` with `ai.used:false` and manual metadata in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/bounded-ai.mjs:344).
-  - Assist sends the shared envelope directly in [src/cli/assist-route.mjs](/Users/sbenson/code/rolester/src/cli/assist-route.mjs:216).
-  - Intake degrades helper `AI_SCHEMA_INVALID` and `NO_AI_ROUTE` into manual `needsUser` results in [src/core/intake/classify.mjs](/Users/sbenson/code/rolester/src/core/intake/classify.mjs:210).
-  - Resume-AI maps true missing configuration to shared no-AI responses while preserving manual continuation in [src/cli/onboard-route.mjs](/Users/sbenson/code/rolester/src/cli/onboard-route.mjs:714).
+  - Shared no-AI handling returns `501` / `NO_AI_ROUTE` with `ai.used:false` and manual metadata in [src/core/ai/bounded-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/bounded-ai.mjs:344).
+  - Assist sends the shared envelope directly in [src/cli/assist-route.mjs](/Users/sbenson/code/careerrat/src/cli/assist-route.mjs:216).
+  - Intake degrades helper `AI_SCHEMA_INVALID` and `NO_AI_ROUTE` into manual `needsUser` results in [src/core/intake/classify.mjs](/Users/sbenson/code/careerrat/src/core/intake/classify.mjs:210).
+  - Resume-AI maps true missing configuration to shared no-AI responses while preserving manual continuation in [src/cli/onboard-route.mjs](/Users/sbenson/code/careerrat/src/cli/onboard-route.mjs:714).
 
 - `AIR-04` — satisfied.
-  - `callAI()` preserves BYOK usage rows and proxy labels in [src/core/ai/call-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/call-ai.mjs:167) and [src/core/ai/call-ai.mjs](/Users/sbenson/code/rolester/src/core/ai/call-ai.mjs:278).
+  - `callAI()` preserves BYOK usage rows and proxy labels in [src/core/ai/call-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/call-ai.mjs:167) and [src/core/ai/call-ai.mjs](/Users/sbenson/code/careerrat/src/core/ai/call-ai.mjs:278).
   - Managed-proxy metering is covered by tests and remains metadata-only.
   - Final regression tests lock allowed usage keys and forbid prompt/raw-content leakage.
 
@@ -52,7 +52,7 @@ Phase 02 goal is achieved. The repository contains a shared bounded-AI runtime c
 
 - Plan `02-04`: present and met.
   - `POST /api/assist/suggest` now calls `runBoundedAI()`, uses strict assist labels, and returns the shared envelope.
-  - `suggestAssist()` unwraps `body.data` for the existing UI contract in [apps/web/src/lib/api.js](/Users/sbenson/code/rolester/apps/web/src/lib/api.js:149).
+  - `suggestAssist()` unwraps `body.data` for the existing UI contract in [apps/web/src/lib/api.js](/Users/sbenson/code/careerrat/apps/web/src/lib/api.js:149).
 
 - Plan `02-05`: present and met.
   - Intake classification keeps the deterministic shortcut first, then uses `runBoundedAI()` only on misses.
@@ -61,7 +61,7 @@ Phase 02 goal is achieved. The repository contains a shared bounded-AI runtime c
 - Plan `02-06`: present and met.
   - Resume-AI uses `runBoundedAI()` in fallback mode while preserving the `tools:["Read"]` skill-runtime adapter.
   - Schema failures no longer expose raw model output.
-  - `extractResumeAi()` unwraps `body.data` for the onboarding UI in [apps/web/src/lib/api.js](/Users/sbenson/code/rolester/apps/web/src/lib/api.js:98).
+  - `extractResumeAi()` unwraps `body.data` for the onboarding UI in [apps/web/src/lib/api.js](/Users/sbenson/code/careerrat/apps/web/src/lib/api.js:98).
 
 - Plan `02-07`: present and met.
   - Final regressions exist for missing labels, BYOK/proxy metadata-only usage rows, assist failure-envelope privacy, and resume-AI failure-envelope privacy.

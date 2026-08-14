@@ -3,8 +3,8 @@
 # doesn't waste bandwidth on build output, node_modules, or candidate data.
 #
 # NOTE: this file uses .gitignore semantics — a pattern with no leading slash
-# matches at EVERY depth. A bare `src` here also matched `website/src` and
-# `docs-site/src`, so the git-integration build deleted both Next apps' source
+# matches at EVERY depth. A bare `src` here also matched the Next apps' source
+# directories, so the git-integration build deleted both apps' source
 # and shipped a 404-only site. Every product-internal path below is anchored
 # with a leading slash for that reason. Don't un-anchor them.
 
@@ -19,8 +19,8 @@ out
 **/out
 **/*.tsbuildinfo
 
-# CLI / product internals, root only — the Vercel build needs website/ and
-# docs-site/ (the latter is built by website's `prebuild` into public/docs).
+# CLI / product internals, root only. The Vercel build needs apps/website and
+# apps/docs (the latter is built into the website's public/docs directory).
 /candidate
 /workspace
 /.internal
@@ -28,6 +28,7 @@ out
 /.playwright-mcp
 /.agents
 /.claude
+/.planning
 /bin
 # src/ is excluded except the one module harden-static-html.mjs imports.
 # gitignore semantics: a re-include only works if no parent DIR is excluded,
@@ -41,11 +42,9 @@ out
 /config
 /templates
 # scripts/ is excluded by contents (not the dir itself) so the one build-time
-# dependency can be re-included — website/ and docs-site/ both run
-# ../scripts/harden-static-html.mjs in their postbuild.
+# dependency can be re-included. Both Next apps run the shared hardener.
 /scripts/*
 !/scripts/harden-static-html.mjs
-/mockups
 /examples
 /tests
 /docs/COMPARISON.md

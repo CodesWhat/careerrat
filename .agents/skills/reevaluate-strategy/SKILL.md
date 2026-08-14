@@ -9,7 +9,7 @@ tier_2_inputs: [full tracker.json, rejection-reason notes, interview transcripts
 
 Use this skill when the user asks why they're getting filtered, to review their strategy, to re-rank sourced roles, or "what should I change" — or when `track-outcomes` trips a threshold (see the Reevaluation Contract in `AGENTS.md`). This is the self-tuning half of the loop: it turns accumulated outcomes into concrete, recommended adjustments.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 > **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing strategy recommendations. Apply the register from AGENTS.md#mode-switches. `exec-summary` = top 2–3 recommended changes as bullets + threshold that tripped; `standard` = findings summary + recommendations as scannable bullets; `technical` = funnel analysis + per-signal breakdown + recommended changes; `verbose` = full analysis including win/rejection patterns, confidence levels, and proposed gate write-backs.
 
@@ -264,15 +264,15 @@ counts stay above threshold regardless of whether a review just ran.
 
 ---
 
-## STEP 8 — VALIDATE AND RE-RENDER
+## STEP 8 — VALIDATE AND SNAPSHOT
 
-**Orphaned-CTA check (before render):** After stamping the strategy-review marker and before re-rendering, run a targeted check over every row whose `priority` or `status` was changed in STEP 7(c). For each such row, confirm in `workspace/tracker.json` that no `comm.nextActionDue` or `followUp.due` remains set on a row that is now in a dormant/inactive state. If `--verify` output flags orphaned due-dates on re-ranked rows, null them now and re-run verify before proceeding.
+**Orphaned-CTA check (before render):** After stamping the strategy-review marker and before snapshotting, run a targeted check over every row whose `priority` or `status` was changed in STEP 7(c). For each such row, confirm in `workspace/tracker.json` that no `comm.nextActionDue` or `followUp.due` remains set on a row that is now in a dormant/inactive state. If `--verify` output flags orphaned due-dates on re-ranked rows, null them now and re-run verify before proceeding.
 
 Run in sequence:
 
 1. `careerrat tracker --verify` — schema check passes with zero errors.
 2. `npm run verify:tracker` — tracker integrity check (foundations-spec §6, distinct from schema check above).
-3. `careerrat tracker` — re-render `workspace/tracker.html` so any re-ranking changes appear in the dashboard.
+3. `careerrat tracker` — create a deduplicated recovery checkpoint under `workspace/.snapshots/`; the source write itself refreshes the live app.
 4. `node src/cli/lint-placeholders.mjs candidate/learnings/` — belt-and-suspenders final sweep for placeholder strings in learning files. (`careerrat learnings append` already lints each entry on write; this is a backstop for the whole directory.)
 5. If `candidate/writing-style.md` was changed: `node src/cli/lint-placeholders.mjs candidate/writing-style.md`.
 

@@ -568,7 +568,8 @@ export function GuardrailsStep({ state, draftSeeds, goNext, goBack, onProgressSe
                 >
                   {GUARDRAIL_PRESETS.map((preset) => {
                     const selected = isGuardrailSelected(avoidSignals, preset.value);
-                    const sourceLabel = GUARDRAIL_SOURCE_LABELS[preset.source] || "CareerRat signal";
+                    const sourceLabel =
+                      GUARDRAIL_SOURCE_LABELS[preset.source] || "CareerRat signal";
                     return (
                       <button
                         key={preset.value}

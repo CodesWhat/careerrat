@@ -142,6 +142,17 @@ function sourceEntries(packetSources = {}) {
   );
 }
 
+function readStoredManifest(workspaceDir, storedPath) {
+  const full = resolveWorkspacePath(workspaceDir, storedPath);
+  if (!full || !existsSync(full)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(full, "utf8"));
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function appRegisterPacketArtifacts({
   repoRoot,
   env,
@@ -198,6 +209,31 @@ export async function exportPacketArtifacts({
     uploadRequirements,
   });
   const { workspaceDir } = resolveUserPaths({ repoRoot, env });
+  const storedManifest = readStoredManifest(workspaceDir, sources.packetManifest);
+  const priorManifest =
+    app.packetManifest && Object.keys(app.packetManifest).length
+      ? app.packetManifest
+      : storedManifest || {};
+  const priorManifestForDb = { ...priorManifest };
+  if (Array.isArray(priorManifestForDb.questions)) {
+    if (priorManifestForDb.questionCaptureSource) {
+      priorManifestForDb.questions = {
+        source: priorManifestForDb.questionCaptureSource,
+        capturedAt: priorManifestForDb.generatedAt || new Date().toISOString(),
+        answerableCount: priorManifestForDb.questions.length,
+        excludedCount: Array.isArray(priorManifestForDb.excludedQuestions)
+          ? priorManifestForDb.excludedQuestions.length
+          : 0,
+        answerableIds: priorManifestForDb.questions.map((question) => String(question?.id || "")),
+        excludedIds: Array.isArray(priorManifestForDb.excludedQuestions)
+          ? priorManifestForDb.excludedQuestions.map((question) => String(question?.id || ""))
+          : [],
+        demographicSectionPresent: false,
+      };
+    } else {
+      delete priorManifestForDb.questions;
+    }
+  }
   const artifacts = {};
   const userFacing = { resume: [], coverLetter: [], answers: [] };
   const downloadsErrors = [];
@@ -245,6 +281,9 @@ export async function exportPacketArtifacts({
 
   if (sources.packetManifest) artifacts.packetManifest = sources.packetManifest;
 
+  const priorGaps = Array.isArray(priorManifestForDb.gaps) ? priorManifestForDb.gaps : [];
+  const uploadReady = priorManifestForDb.uploadReady === true;
+
   const registered = await appRegisterPacketArtifacts({
     repoRoot,
     env,
@@ -252,12 +291,17 @@ export async function exportPacketArtifacts({
     artifacts,
     now,
     manifest: {
+      ...priorManifestForDb,
       applicationId: id,
-      generatedAt,
-      uploadReady: true,
-      status: "exported",
-      gapCount: 0,
-      artifacts,
+      generatedAt: priorManifestForDb.generatedAt || generatedAt,
+      exportedAt: generatedAt,
+      uploadReady,
+      status: priorManifestForDb.status || (uploadReady ? "upload-ready" : "reviewable"),
+      gapCount: Number.isInteger(priorManifestForDb.gapCount)
+        ? priorManifestForDb.gapCount
+        : priorGaps.length,
+      gaps: priorGaps,
+      artifacts: { ...(priorManifestForDb.artifacts || {}), ...artifacts },
     },
   });
 

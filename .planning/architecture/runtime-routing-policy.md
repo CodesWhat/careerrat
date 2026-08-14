@@ -1,6 +1,6 @@
 # Runtime Routing Policy
 
-This policy defines how Rolester UI controls, CLI commands, and agent workflows
+This policy defines how CareerRat UI controls, CLI commands, and agent workflows
 choose between deterministic local APIs, DB verbs, bounded AI assists,
 conversational handoffs, and the retained full skill runtime.
 
@@ -107,8 +107,8 @@ The retained routing boundary is:
 
 ### CLI
 
-- Prefer DB verbs and existing CLI helpers for durable writes: `rolester data`,
-  `rolester searches`, `rolester companies`, and source-config verbs own
+- Prefer DB verbs and existing CLI helpers for durable writes: `careerrat data`,
+  `careerrat searches`, `careerrat companies`, and source-config verbs own
   validation and DB-vs-compat behavior.
 - Prefer direct deterministic commands for scans and verification. The sourced
   sweep uses `scripts/scan-sourced.mjs`; it must not call AI.
@@ -217,7 +217,7 @@ The retained routing boundary is:
 
 2. Add a confirmed supported ATS company:
    - Caller: CLI, UI, or agent after confirmation.
-   - Correct owner: `rolester companies` or `companyAtsUpsert()` through
+   - Correct owner: `careerrat companies` or `companyAtsUpsert()` through
      source-config DB ownership.
    - Reason: source-config owners validate supported provider identity and
      preserve DB-vs-compat behavior.

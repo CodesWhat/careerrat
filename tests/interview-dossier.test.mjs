@@ -220,6 +220,8 @@ test("interview-prep route builds and reads the persisted dossier", async () => 
   const read = await callDirect(routes, "GET", "/api/interview-prep?id=app-temporal");
   assert.equal(read.status, 200);
   assert.deepEqual(read.body.data.dossier, built.body.data.dossier);
+  assert.match(read.body.data.dossier.html, /<h1>Interview Packet<\/h1>/);
+  assert.doesNotMatch(read.body.data.dossier.html, /# Interview Packet/);
 });
 
 test("interview-prep route returns typed 404 and 409 failures", async () => {

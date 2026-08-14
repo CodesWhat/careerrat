@@ -1,0 +1,69 @@
+---
+title: The Dashboard
+description: What the local dashboard shows and how to run it.
+---
+
+The CareerRat dashboard is the local CareerRat app. It reads the same canonical
+SQLite workspace used by the CLI and skills, and its supported actions write
+through the same validated domain operations.
+
+## Running the dashboard
+
+`careerrat start` boots the live dashboard for you as part of first run. To run
+it on its own:
+
+```bash
+careerrat tracker-dev    # local app server on http://localhost:7777
+careerrat tracker        # verify and checkpoint the current tracker state
+```
+
+`careerrat tracker-dev` serves the app and refreshes it when canonical state
+changes. Use this command, or `careerrat start`, for every live session.
+
+## What the dashboard shows
+
+**Dashboard tab**
+
+- Stat cards — total applications, active pipeline, interviews scheduled, offers
+- Funnel (Sankey) — applied → screen → technical → onsite → offer flow
+- Focus card — the role most needing your attention: an upcoming interview with a
+  dossier link, or a follow-up that is due
+- Activity Pulse — a reverse-chronological timeline of what the agent did and
+  what happened (roles sourced, jobs evaluated, artifacts tailored, replies,
+  interviews, offers)
+- Strategy insights — source performance, role-lane performance, cadence nudges,
+  and a strategy-review trigger when outcome thresholds trip
+
+**Jobs tab**
+
+- Active Pipeline rail (Sourced → Applied → Screen → Interview → Final → Offer →
+  Accepted) in compact Table or Cards view
+- All-Jobs table with status, fit, company, role, and follow-up state
+- Slide-in job detail drawer with comp intel, fit reasons/risks, interview notes,
+  artifact links, and the role's own activity timeline
+
+**Calendar tab**
+
+- Week board with interview and follow-up blocks
+- Per-event `.ics` downloads and Google Calendar / Outlook web links
+
+**Network tab**
+
+- Company relationship map with any warm contacts sourced by
+  `relationship-sourcing`
+
+**Library tab**
+
+- Full browsable evidence and story bank (53+ cards for a typical candidate)
+
+## Themes
+
+The dashboard ships Tokyo Night and Gruvbox theme families (light + dark) plus
+the original palette. Switch via the settings drawer on the dashboard.
+
+## What happens when you act
+
+The app can handle local state changes such as promoting a role, updating a
+status, or editing settings. Longer or tool-heavy work opens a visible Ask
+conversation and hands the task to the owning skill. Application submission and
+external-account changes remain confirmation-gated.

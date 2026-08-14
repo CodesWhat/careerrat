@@ -122,14 +122,13 @@ export function rowMatchesStage(row, stage = "all", options = {}) {
   if (selectedStage === "terminal") return isApplication(row) && Boolean(row?.terminal);
   if (selectedStage === "stale") return isApplication(row) && Boolean(row?.stale);
   if (selectedStage === "ghosted") return isApplication(row) && Boolean(row?.ghosted);
+  if (selectedStage.startsWith("reached-")) {
+    return isApplication(row) && row?.sankeyStage === selectedStage.slice("reached-".length);
+  }
   if (NAMED_STAGE_FILTERS.has(selectedStage)) {
     return (
       isApplication(row) && !row?.terminal && stageOrder(row?.stage) >= stageOrder(selectedStage)
     );
-  }
-  if (/^round-\d+$/.test(selectedStage)) {
-    const targetRound = Number(selectedStage.slice("round-".length));
-    return isApplication(row) && toFiniteNumber(row?.roundsReached) >= targetRound;
   }
   if (!showTerminal && row?.terminal) return false;
   return row?.stage === selectedStage;

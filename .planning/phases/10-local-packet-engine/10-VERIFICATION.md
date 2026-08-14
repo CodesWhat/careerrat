@@ -14,7 +14,7 @@ behavior_unverified: 0
 
 ## User Flow Coverage
 
-User story: As a Rolester user, I want to generate ATS-ready apply packets through local APIs, so that I can prepare grounded application materials without launching whole skill workflows for ordinary packet work.
+User story: As a CareerRat user, I want to generate ATS-ready apply packets through local APIs, so that I can prepare grounded application materials without launching whole skill workflows for ordinary packet work.
 
 | Step | Expected | Evidence | Status |
 |------|----------|----------|--------|

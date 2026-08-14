@@ -468,7 +468,10 @@ function normalizeRunSummary(summary = {}, deterministicSources) {
     new: Number(summary.new || 0),
     qualified: Number(summary.qualified || 0),
     presented: Number(summary.presented ?? summary.new ?? 0),
-    filtered: Math.max(0, Number(summary.scanned || 0) - Number(summary.presented ?? summary.new ?? 0)),
+    filtered: Math.max(
+      0,
+      Number(summary.scanned || 0) - Number(summary.presented ?? summary.new ?? 0)
+    ),
     reconciled: Number(summary.reconciled || 0),
     reasonCounts: clone(summary.reasonCounts || {}),
     errorCount: errors.length,

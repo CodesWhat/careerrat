@@ -46,6 +46,7 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("../components/icons.jsx", () => ({ CheckIcon: "check-icon" }));
 vi.mock("../components/form.jsx", () => ({
   ChipInput: "mock-chip-input",
+  NumberField: "mock-numberfield",
   TextArea: "mock-textarea",
   TextField: "mock-textfield",
 }));
@@ -168,8 +169,8 @@ beforeEach(() => {
 describe("FilePane — rows", () => {
   it("renders exactly 8 rows in the fixed order with the pane heading", () => {
     const tree = render({ state: EMPTY_STATE });
-    expect(textOf(byClass(tree, "file-pane__title")[0])).toBe("PAUL'S FILE");
-    expect(textOf(byClass(tree, "file-pane__subtitle")[0])).toBe("LIVE · ~/CANDIDATE");
+    expect(textOf(byClass(tree, "file-pane__title")[0])).toBe("PAUL'S NOTES");
+    expect(textOf(byClass(tree, "file-pane__subtitle")[0])).toBe("UPDATES AS YOU TALK");
     const rows = byClass(tree, "file-pane__row");
     expect(rows).toHaveLength(8);
     expect(rows.map((r) => textOf(byClass(r, "file-pane__row-title")[0]))).toEqual([
@@ -182,6 +183,92 @@ describe("FilePane — rows", () => {
       "Quick facts",
       "Work authorization",
     ]);
+  });
+
+  it("fills the live file header with identity and contact details as Paul saves them", () => {
+    const tree = render({
+      state: stateWith(["resume"], {
+        profile: {
+          candidate: {
+            full_name: "Jamie Rivera",
+            headline: "Applied AI Engineer",
+            email: "jamie@example.com",
+            phone: "555-0100",
+            location: "Baltimore, MD",
+            linkedin: "https://linkedin.com/in/jamie",
+          },
+        },
+      }),
+    });
+
+    const snapshot = byClass(tree, "file-pane__candidate")[0];
+    expect(textOf(snapshot)).toContain("Jamie Rivera");
+    expect(textOf(snapshot)).toContain("Applied AI Engineer");
+    expect(textOf(snapshot)).toContain("jamie@example.com");
+    expect(textOf(snapshot)).toContain("555-0100");
+    expect(textOf(snapshot)).toContain("Baltimore, MD");
+    expect(
+      visit(snapshot, (n) => n.type === "a" && n.props.href.includes("linkedin.com"))
+    ).toHaveLength(1);
+  });
+
+  it("shows an honest empty-file prompt before profile facts exist", () => {
+    const tree = render({ state: EMPTY_STATE });
+    const snapshot = byClass(tree, "file-pane__candidate--empty")[0];
+    expect(textOf(snapshot)).toContain("Your details will fill in here as you talk to Paul.");
+    expect(textOf(snapshot)).not.toContain("Remote");
+  });
+
+  it("shows the active résumé reader instead of a blank profile while extraction runs", () => {
+    const tree = render({ state: EMPTY_STATE, processingResumeName: "morgan-hale-resume.pdf" });
+    const status = byClass(tree, "file-pane__resume-reading")[0];
+    expect(status.props.role).toBe("status");
+    expect(status.props["aria-live"]).toBe("polite");
+    expect(textOf(status)).toContain("READING RÉSUMÉ");
+    expect(textOf(status)).toContain("morgan-hale-resume.pdf");
+    expect(textOf(status)).toContain("Your profile will fill in as Paul reads it.");
+    expect(byClass(tree, "file-pane__candidate--empty")).toHaveLength(0);
+  });
+
+  it("previews facts Paul extracted while making clear they still need confirmation", () => {
+    const tree = render({
+      state: EMPTY_STATE,
+      pendingBlocks: [
+        {
+          kind: "candidate_patch",
+          status: "pending",
+          payload: {
+            doc: "profile",
+            patch: {
+              candidate: { full_name: "Riley Chen", location: "Austin, TX" },
+              compensation: { minimum_base: 190000 },
+            },
+          },
+        },
+        {
+          kind: "candidate_patch",
+          status: "pending",
+          payload: {
+            doc: "targeting",
+            patch: { role_buckets: [{ name: "Applied AI", titles: ["Staff Applied AI"] }] },
+          },
+        },
+        {
+          kind: "authorization",
+          status: "pending",
+          patch: { work_authorized: true, requires_sponsorship: false },
+        },
+      ],
+    });
+
+    const preview = byClass(tree, "file-pane__pending")[0];
+    expect(textOf(preview)).toContain("WAITING FOR YOUR CONFIRMATION");
+    expect(textOf(preview)).toContain("Full nameRiley Chen");
+    expect(textOf(preview)).toContain("LocationAustin, TX");
+    expect(textOf(preview)).toContain("Minimum base$190,000");
+    expect(textOf(preview)).toContain("Role bucketsApplied AI");
+    expect(textOf(preview)).toContain("Work authorizationAuthorized · No sponsorship needed");
+    expect(rowByLabel(tree, "Roles").props.className).toContain("file-pane__row--pending");
   });
 
   it("flips a row from pending (dashed) to done, with a check icon, as state changes", () => {
@@ -336,7 +423,7 @@ describe("FilePane — inline editors commit through onFieldSaved", () => {
     expect(onFieldSaved).toHaveBeenCalledWith({ key: "guardrails", summary: "1 dealbreaker" });
   });
 
-  it("Quick facts editor: submit saves profile.location merged with the toggled modes", async () => {
+  it("Quick facts editor: submit saves location and the minimum base together", async () => {
     api.saveCandidateFile.mockResolvedValue({ ok: true });
     const onFieldSaved = vi.fn();
     const state = stateWith([], { profile: { location: { home: "Austin, TX" } } });
@@ -349,12 +436,24 @@ describe("FilePane — inline editors commit through onFieldSaved", () => {
     const remoteToggle = visit(tree, (n) => n.type === "input" && n.props.type === "checkbox")[0];
     remoteToggle.props.onChange({ target: { checked: true } });
     tree = render({ state, onReload: vi.fn(), onFieldSaved });
+    const minimumBaseField = byTag(tree, "mock-numberfield");
+    expect(minimumBaseField.props.min).toBe(1000);
+    expect(minimumBaseField.props.step).toBe(1000);
+    minimumBaseField.props.onChange(180000);
+    tree = render({ state, onReload: vi.fn(), onFieldSaved });
 
     await byClass(tree, "file-pane__editor")[0].props.onSubmit({ preventDefault: vi.fn() });
     await flush();
 
     expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      location: { home: "Austin, TX", remote: true, hybrid: false, onsite: false },
+      location: {
+        home: "Austin, TX",
+        remote: true,
+        hybrid: false,
+        onsite: false,
+        mode_preferences_confirmed: true,
+      },
+      compensation: { minimum_base: 180000 },
     });
     expect(onFieldSaved).toHaveBeenCalledWith({ key: "quickFacts", summary: "quick facts" });
   });
@@ -374,13 +473,54 @@ describe("FilePane — inline editors commit through onFieldSaved", () => {
     const textField = byTag(tree, "mock-textfield");
     textField.props.onChange("Austin, TX");
     tree = render({ state, onReload: vi.fn(), onFieldSaved });
+    byTag(tree, "mock-numberfield").props.onChange(175000);
+    tree = render({ state, onReload: vi.fn(), onFieldSaved });
 
     await byClass(tree, "file-pane__editor")[0].props.onSubmit({ preventDefault: vi.fn() });
     await flush();
 
     expect(api.saveCandidateFile).toHaveBeenCalledWith("profile", {
-      location: { home: "Austin, TX", hybrid: false, onsite: false },
+      location: {
+        home: "Austin, TX",
+        remote: false,
+        hybrid: false,
+        onsite: false,
+        mode_preferences_confirmed: true,
+      },
+      compensation: { minimum_base: 175000 },
     });
+  });
+
+  it("Quick facts editor: does not preselect ambient Remote after only identity was saved", () => {
+    const state = stateWith([], {
+      profile: {
+        candidate: { full_name: "Morgan Hale" },
+        location: { home: "", remote: true, hybrid: false, onsite: false },
+      },
+    });
+    let tree = render({ state, onReload: vi.fn(), onFieldSaved: vi.fn() });
+    rowByLabel(tree, "Quick facts").props.onClick();
+    tree = render({ state, onReload: vi.fn(), onFieldSaved: vi.fn() });
+
+    const remoteToggle = visit(
+      tree,
+      (node) => node.type === "input" && node.props.type === "checkbox"
+    )[0];
+    expect(remoteToggle.props.checked).toBe(false);
+  });
+
+  it("Quick facts editor: explains the missing minimum instead of saving an incomplete setup", async () => {
+    const state = stateWith([], { profile: { location: { home: "Austin, TX" } } });
+    let tree = render({ state, onReload: vi.fn(), onFieldSaved: vi.fn() });
+    rowByLabel(tree, "Quick facts").props.onClick();
+    tree = render({ state, onReload: vi.fn(), onFieldSaved: vi.fn() });
+
+    await byClass(tree, "file-pane__editor")[0].props.onSubmit({ preventDefault: vi.fn() });
+    await flush();
+    tree = render({ state, onReload: vi.fn(), onFieldSaved: vi.fn() });
+
+    expect(api.saveCandidateFile).not.toHaveBeenCalled();
+    expect(textOf(tree)).toContain("Add the lowest base salary you would accept.");
   });
 
   it("Resume editor: pasting text calls parseResumeText and still commits through onFieldSaved", async () => {
@@ -399,6 +539,22 @@ describe("FilePane — inline editors commit through onFieldSaved", () => {
 
     expect(api.parseResumeText).toHaveBeenCalledWith("Pasted résumé body text.", { save: true });
     expect(onFieldSaved).toHaveBeenCalledWith({ key: "resume", summary: "pasted résumé text" });
+  });
+
+  it("Resume editor explains that an uploaded résumé was parsed instead of showing a blank editor as its contents", () => {
+    const state = stateWith(["resume"], {
+      evidence: { claims: [{ id: "seed-001", claim: "Shipped a thing" }] },
+    });
+    let tree = render({ state });
+    rowByLabel(tree, "Resume").props.onClick();
+    tree = render({ state });
+
+    expect(textOf(byClass(tree, "file-pane__resume-status")[0])).toContain(
+      "Uploaded résumé parsed into your profile and 1 evidence claim."
+    );
+    expect(byTag(tree, "mock-textarea").props.placeholder).toBe(
+      "Paste replacement résumé text here…"
+    );
   });
 
   it("Evidence editor: removing a claim calls removeEvidenceClaim and commits through onFieldSaved", async () => {

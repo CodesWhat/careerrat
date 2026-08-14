@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Map Phase 09 planned work to existing Rolester code patterns. This keeps implementation aligned with current DB, route, scanner, UI, and bounded-AI conventions.
+Map Phase 09 planned work to existing CareerRat code patterns. This keeps implementation aligned with current DB, route, scanner, UI, and bounded-AI conventions.
 
 ## Pattern Map
 

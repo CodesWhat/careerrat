@@ -120,7 +120,7 @@ These already exist — skills must stop calling them "future work":
 | Purpose | Command |
 | --- | --- |
 | Validate tracker schema | `careerrat tracker --verify` |
-| Re-render dashboard | `careerrat tracker` |
+| Snapshot tracker state | `careerrat tracker` |
 | Tracker summary | `careerrat tracker --summary` |
 | Follow-ups due | `careerrat tracker --followups` |
 | Full sourced sweep | `npm run scan:sourced -- --write --intake --summary --verify` |

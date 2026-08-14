@@ -46,6 +46,8 @@ vi.mock("../lib/api.js", () => ({
   setSourcedStatus: vi.fn(async () => ({})),
   exportPacketDocuments: vi.fn(async () => ({ data: {} })),
   generatePacketDocuments: vi.fn(async () => ({ data: {} })),
+  buildInterviewDossier: vi.fn(async () => ({ data: { dossier: null } })),
+  getInterviewDossier: vi.fn(async () => ({ data: { dossier: null } })),
   startSearchRun: vi.fn(async () => ({ run: { status: "running" } })),
   runAiWebSearchStream: vi.fn(async () => {}),
 }));
@@ -515,6 +517,13 @@ afterEach(() => {
 });
 
 describe("JobsPage", () => {
+  it("labels free-board fit scores as approximate rules-based triage", () => {
+    const html = renderJobsPage({ route: "/jobs?tab=search" });
+
+    expect(html).toContain("RULES · APPROXIMATE TRIAGE");
+    expect(html).not.toContain("NO ENGINE · NOTHING RANKED");
+  });
+
   it("does not restore the persisted query on every draft keystroke before debounce", () => {
     const source = readFileSync(new URL("./JobsPage.jsx", import.meta.url), "utf8");
 
@@ -533,6 +542,8 @@ describe("JobsPage", () => {
     expect(html).toContain("Finder");
     expect(html).toContain("Jobs funnel");
     expect(html).toContain("Jobs Sankey funnel");
+    expect(html).toContain("Technical");
+    expect(html).not.toMatch(/\b(?:Round [1-9]\d*|[1-9]\d*(?:st|nd|rd|th) round)\b/i);
     expect(html).toContain('role="button"');
     for (const label of ["Company / Role", "Stage", "Next Action", "Due", "Last Touch", "Fit"]) {
       expect(html).toContain(label);
@@ -562,6 +573,15 @@ describe("JobsPage", () => {
     expect(html).toContain("Mkt P50");
     expect(html).toContain("Your ask");
     expect(html).toContain("$238K");
+  });
+
+  it("opens interview dossiers in a full-page preview without mounting the job drawer", () => {
+    const html = renderJobsPage({ route: "/jobs?dossier=app-stale" });
+
+    expect(html).toContain('class="packet-viewer-overlay"');
+    expect(html).toContain('aria-label="Interview prep dossier"');
+    expect(html).toContain("Loading interview dossier");
+    expect(html).not.toContain('class="job-drawer-overlay"');
   });
 
   it("renders the wired AI web-search lane instead of the coming-soon stub", () => {

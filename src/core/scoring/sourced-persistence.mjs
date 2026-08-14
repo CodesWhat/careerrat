@@ -93,7 +93,7 @@ function renderCapturedJob({ offer, savedAt }) {
     fitBucket: offer.fit || null,
     fitBasis: "triage",
     gate: offer.gate || null,
-    partial: body.length === 0,
+    partial: offer.bodyPartial === true || body.length === 0,
   };
   const triageLines = [
     offer.ratingReason ? `- Reason: ${offer.ratingReason}` : "",

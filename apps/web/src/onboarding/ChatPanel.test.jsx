@@ -53,7 +53,9 @@ const api = vi.hoisted(() => ({
       this.body = body;
     }
   },
+  addBoard: vi.fn(),
   closeChat: vi.fn(),
+  saveCompanyBoard: vi.fn(),
   sendChatMessage: vi.fn(),
   startChat: vi.fn(),
 }));
@@ -224,5 +226,104 @@ describe("ChatPanel — send failure", () => {
     expect(api.sendChatMessage).toHaveBeenCalledTimes(2);
     expect(api.sendChatMessage).toHaveBeenNthCalledWith(1, "chat-99", "What roles fit me?");
     expect(api.sendChatMessage).toHaveBeenNthCalledWith(2, "chat-99", "What roles fit me?");
+  });
+});
+
+describe("ChatPanel — typed discovery proposals", () => {
+  it("adds a reviewed source through the source API and advances only after every decision", async () => {
+    api.addBoard.mockResolvedValue({ ok: true });
+    api.closeChat.mockResolvedValue({ ok: true });
+    const onComplete = vi.fn().mockResolvedValue(undefined);
+    const props = {
+      skill: "research-boards",
+      initialChatId: "boards-chat",
+      completionLabel: "Continue to company discovery",
+      onComplete,
+    };
+
+    render(props);
+    const onEvent = sse.calls.at(-1).opts.onEvent;
+    onEvent(
+      "assistant",
+      JSON.stringify({
+        message: {
+          content: [
+            {
+              type: "text",
+              text: [
+                "I found one new board.",
+                "```careerrat:discovery",
+                JSON.stringify({
+                  kind: "source_proposal",
+                  label: "AI Jobs Board",
+                  url: "https://example.com/jobs",
+                  why: "Current dated applied-AI listings",
+                  confidence: "high",
+                }),
+                "```",
+                "```careerrat:discovery",
+                JSON.stringify({ kind: "discovery_complete", step: "research-boards" }),
+                "```",
+              ].join("\n"),
+            },
+          ],
+        },
+      })
+    );
+    onEvent("chat_state", JSON.stringify({ state: "idle" }));
+
+    let tree = render(props);
+    expect(button(tree, "Continue to company discovery")).toBeUndefined();
+    await button(tree, "Add source").props.onClick();
+    await flush();
+    tree = render(props);
+
+    expect(api.addBoard).toHaveBeenCalledWith({
+      label: "AI Jobs Board",
+      url: "https://example.com/jobs",
+    });
+    expect(textOf(tree)).toContain("Added");
+
+    await button(tree, "Continue to company discovery").props.onClick();
+    await flush();
+    expect(onComplete).toHaveBeenCalledWith({ skill: "research-boards" });
+    expect(api.closeChat).toHaveBeenCalledWith("boards-chat");
+  });
+
+  it("tracks a reviewed company through the supported board API", async () => {
+    api.saveCompanyBoard.mockResolvedValue({ ok: true });
+    const props = { skill: "discover-companies", initialChatId: "companies-chat" };
+    render(props);
+    sse.calls.at(-1).opts.onEvent(
+      "assistant",
+      JSON.stringify({
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `\`\`\`careerrat:discovery\n${JSON.stringify({
+                kind: "company_proposal",
+                name: "Example Co",
+                url: "https://jobs.ashbyhq.com/example",
+                why: "Hiring the target role",
+                confidence: "high",
+              })}\n\`\`\``,
+            },
+          ],
+        },
+      })
+    );
+
+    let tree = render(props);
+    await button(tree, "Track company").props.onClick();
+    await flush();
+    tree = render(props);
+
+    expect(api.saveCompanyBoard).toHaveBeenCalledWith({
+      name: "Example Co",
+      url: "https://jobs.ashbyhq.com/example",
+      enabled: true,
+    });
+    expect(textOf(tree)).toContain("Tracked");
   });
 });

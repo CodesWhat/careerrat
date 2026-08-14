@@ -4,8 +4,8 @@ import { join } from "node:path";
 import test from "node:test";
 
 import {
-  automationStatus,
   automationModePatch,
+  automationStatus,
   CAPABILITIES,
   defaultAutomation,
   mayRun,
@@ -157,7 +157,10 @@ test("Basic mode is a hard off switch and its patch revokes every capability, pl
   assert.equal(patch.capabilities.messaging.enabled, false);
   assert.equal(patch.capabilities.messaging.platforms.linkedin, false);
   assert.equal(patch.consent.linkedin, false);
-  assert.equal(mayRun({ capability: "messaging", platform: "linkedin", data: patch }).allowed, false);
+  assert.equal(
+    mayRun({ capability: "messaging", platform: "linkedin", data: patch }).allowed,
+    false
+  );
   assert.deepEqual(automationModePatch("advanced"), { setup_mode: "advanced" });
 });
 

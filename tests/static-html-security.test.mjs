@@ -16,6 +16,11 @@ test("static HTML hardening hashes inline scripts without script unsafe-inline/e
   assert.match(hardened, /script-src 'self' 'sha256-[A-Za-z0-9+/=]+'/);
   const csp = hardened.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/)?.[1] || "";
   assert.doesNotMatch(csp.match(/script-src[^;]*/)?.[0] || "", /unsafe-inline|unsafe-eval/);
+  assert.doesNotMatch(
+    csp,
+    /frame-ancestors/,
+    "frame-ancestors is ignored in a meta policy and belongs in the HTTP header"
+  );
   assert.ok(hardened.indexOf("Content-Security-Policy") < hardened.indexOf("<script>"));
 });
 
@@ -37,7 +42,7 @@ test("Vite theme bootstrap is external and Vercel/static-demo configs enforce he
   assert.match(appIndex, /theme-init\.js/);
 
   const vercel = JSON.parse(
-    readFileSync(new URL("../website/vercel.json", import.meta.url), "utf8")
+    readFileSync(new URL("../apps/website/vercel.json", import.meta.url), "utf8")
   );
   const headers = Object.fromEntries(
     (vercel.headers?.[0]?.headers || []).map((item) => [item.key, item.value])

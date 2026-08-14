@@ -15,6 +15,7 @@ import {
 } from "../lib/api.js";
 import { GENERIC_ERROR_MESSAGE, resolveErrorCopy } from "../lib/errorCopy.js";
 import { FunnelSankey } from "./FunnelSankey.jsx";
+import { InterviewDossierCard } from "./InterviewDossierCard.jsx";
 import { JobDrawer } from "./JobDrawer.jsx";
 import {
   DEFAULT_EXPLORER_STATE,
@@ -133,8 +134,10 @@ export function JobsPage() {
   const tab = normalizeTab(searchParams.get("tab"));
   const searchFilter = normalizeSearchFilter(searchParams.get("queue"));
   const openId = searchParams.get("open");
+  const dossierId = searchParams.get("dossier");
   const openSection = searchParams.get("section") || null;
   const openRow = openId ? model.rows.find((row) => row.id === openId) : null;
+  const dossierRow = dossierId ? model.rows.find((row) => row.id === dossierId) : null;
   const sourceSetupReady = hasDbSourceSetup(model.sourceSetup);
   const manualSearchRunning = manualSearchPending || model.manualSearchRun?.status === "running";
   const visibleManualSearchError =
@@ -160,8 +163,8 @@ export function JobsPage() {
     (row) => row.source !== "sourced" && !row.terminal
   ).length;
   const finderNewCount = filterSearchRows(model.sourcedRoles, "review").length;
-  // Sweep-line receipt (design handoff 3b): the free-board lane never ranks
-  // anything, so its engine chip is fixed copy. The AI lane's chip names the
+  // Sweep-line receipt (design handoff 3b): the free-board lane uses the
+  // deterministic coarse-triage score shown with a ~ prefix. The AI lane's chip names the
   // real configured route (never a hardcoded CLI name — runtime/config only
   // exposes route type, not a specific tool) and a client-measured elapsed
   // time, shown once a run completes.
@@ -324,6 +327,7 @@ export function JobsPage() {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev);
       next.set("open", id);
+      next.delete("dossier");
       if (section) next.set("section", section);
       else next.delete("section");
       return next;
@@ -335,6 +339,14 @@ export function JobsPage() {
       const next = new URLSearchParams(prev);
       next.delete("open");
       next.delete("section");
+      return next;
+    });
+  }
+
+  function closeDossier() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.delete("dossier");
       return next;
     });
   }
@@ -536,8 +548,11 @@ export function JobsPage() {
         />
       ) : null}
 
-      {openRow ? (
+      {openRow && !dossierRow ? (
         <JobDrawer row={openRow} onClose={closeDrawer} initialSection={openSection} />
+      ) : null}
+      {dossierRow ? (
+        <InterviewDossierCard applicationId={dossierRow.id} fullPage onClose={closeDossier} />
       ) : null}
     </div>
   );
@@ -1013,7 +1028,7 @@ function SearchView({
           meta={`${filteredRoles.length} roles`}
         />
         <LaneReceipt
-          engine="NO ENGINE · NOTHING RANKED"
+          engine="RULES · APPROXIMATE TRIAGE"
           label={
             manualSearchRunning
               ? "Finding roles…"
@@ -1107,7 +1122,7 @@ export function describeManualRunSummary(run) {
 }
 
 // One receipt strip per lane (design handoff 3b) — the free-board lane's
-// engine chip is always "NO ENGINE · NOTHING RANKED"; the AI lane's chip
+// engine chip names its deterministic approximate triage; the AI lane's chip
 // only appears once a run has actually completed (see aiSearchReceipt in
 // JobsPage above), so nothing here ever fabricates an engine name or time.
 function LaneReceipt({ engine, label }) {

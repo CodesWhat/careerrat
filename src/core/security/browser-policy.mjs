@@ -14,7 +14,11 @@ function scriptHash(source) {
   return `'sha256-${createHash("sha256").update(String(source)).digest("base64")}'`;
 }
 
-export function buildContentSecurityPolicy({ inlineScripts = [], allowTailwindCdn = false } = {}) {
+export function buildContentSecurityPolicy({
+  inlineScripts = [],
+  allowTailwindCdn = false,
+  includeFrameAncestors = true,
+} = {}) {
   const hashes = [...new Set(inlineScripts.map(scriptHash))];
   const scriptSources = [
     "'self'",
@@ -37,7 +41,7 @@ export function buildContentSecurityPolicy({ inlineScripts = [], allowTailwindCd
     "manifest-src 'self'",
     "base-uri 'self'",
     "form-action 'self'",
-    "frame-ancestors 'none'",
+    ...(includeFrameAncestors ? ["frame-ancestors 'none'"] : []),
   ].join("; ");
 }
 
@@ -59,6 +63,7 @@ export function hardenStaticHtml(html, { allowTailwindCdn = false } = {}) {
   const csp = buildContentSecurityPolicy({
     inlineScripts: inlineScriptsFromHtml(source),
     allowTailwindCdn,
+    includeFrameAncestors: false,
   });
   const meta = `<meta http-equiv="Content-Security-Policy" content="${csp}">`;
   if (/<head(?:\s[^>]*)?>/i.test(source)) {

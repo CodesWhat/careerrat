@@ -60,6 +60,21 @@ function mediaBlockContaining(query, selector) {
 }
 
 describe("onboarding shell styles", () => {
+  it("keeps the interview and live file pane inside one viewport-height workspace", () => {
+    const app = cssRule(".onboarding-app");
+    const interview = cssRule(".onboarding-interview");
+    const chat = cssRule(".onboarding-interview__chat");
+    const filePane = cssRule(".file-pane");
+
+    assert.match(app, /height:\s*100(?:d)?vh/);
+    assert.match(app, /overflow:\s*hidden/);
+    assert.match(interview, /overflow:\s*hidden/);
+    assert.match(chat, /overflow-y:\s*auto/);
+    assert.match(chat, /overscroll-behavior:\s*contain/);
+    assert.match(filePane, /overflow-y:\s*auto/);
+    assert.match(filePane, /overscroll-behavior:\s*contain/);
+  });
+
   it("integrates the header without a separator line", () => {
     assert.doesNotMatch(cssRule(".onboarding-shell__header"), /border-bottom\s*:/);
   });

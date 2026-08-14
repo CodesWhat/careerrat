@@ -66,7 +66,7 @@ created: 2026-07-05
 
 | Behavior | Requirement | Why Manual | Test Instructions |
 |----------|-------------|------------|-------------------|
-| First-run onboarding flow feels like a setup task, not a nagging reminder | RUN-02 | Automated tests can verify state and copy, but not product feel | Run `rolester tracker-dev`, complete quick onboarding to `search_ready`, confirm the first-search row/card uses `Not started`, `Running`, `Completed`, or `Failed` and returns the user to deeper onboarding. |
+| First-run onboarding flow feels like a setup task, not a nagging reminder | RUN-02 | Automated tests can verify state and copy, but not product feel | Run `careerrat tracker-dev`, complete quick onboarding to `search_ready`, confirm the first-search row/card uses `Not started`, `Running`, `Completed`, or `Failed` and returns the user to deeper onboarding. |
 | Search cadence recommendation is transparent when no data exists | ONB-01 | Requires reading UX copy in context | In a fresh DB workspace, inspect the cadence prompt and confirm any recommendation is framed as a default unless backed by local/source history. |
 
 ---

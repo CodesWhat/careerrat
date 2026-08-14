@@ -5,9 +5,9 @@ description: Interview a new candidate to produce all user-layer config files: p
 
 # ingest-profile
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
-> **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing any summary or explanation output. Apply the register semantics from AGENTS.md#mode-switches. This skill's interview is conversational by design, but **step confirmations, progress summaries, and section wrap-ups** must respect the register — e.g. `exec-summary` means a one-line "Got it — moving to targets" not a paragraph recap. Capture the voice preference in STEP 0a before the main interview so the rest of the session uses it.
+> **Agent voice.** Read candidate modes through the shared DB-first accessor (`modes.agent_voice`, default `standard`) before producing any summary or explanation output. Apply the register semantics from AGENTS.md#mode-switches. This skill's interview is conversational by design, but **step confirmations, progress summaries, and section wrap-ups** must respect the register — e.g. `exec-summary` means a one-line "Got it — moving to targets" not a paragraph recap. Do not ask for a voice mode during initial setup; keep the stored value or use `standard`.
 
 > **Write mechanism depends on context.** This skill runs in two places, and only one has a shell:
 > - **One-shot CLI context** — an agent shell exists. Every `careerrat ...` command named throughout this file runs directly, as written.
@@ -21,6 +21,14 @@ description: Interview a new candidate to produce all user-layer config files: p
 >   ```
 >
 > Per-step instructions below just say "confirm-block it" — that means emit the appropriate block above with that step's `doc`/`patch` (or `claim`/`evidence`) filled in. Where a step names only a `careerrat` command, use the confirm-block equivalent in chat context: same target field(s), same value(s).
+>
+> **Progressive notes are immediate.** In conversational chat, confirm-block each explicit fact immediately in the same response that acknowledges it. Do not wait for related identity or contact fields, the rest of a step, or the next turn. If the candidate says only their name, emit a profile patch for `full_name` now, then ask for the next genuinely missing fact. This is what fills Paul's Notes as the conversation unfolds; the block remains a proposal until the candidate clicks Confirm.
+>
+> **Every question is state-aware.** Before composing each response, inspect both saved candidate data and unresolved confirm blocks in the conversation. Never ask for a fact already present in canonical or pending state. A generic save receipt is not the source of truth; the current candidate snapshot and the actual pending block payloads are. Ask again only when the candidate explicitly corrects a value or the saved value is genuinely incomplete for the field being collected.
+>
+> **Conversational completion is a hard boundary.** When canonical state shows `setupProgress.complete: true`, initial setup is complete. Acknowledge the candidate's latest message, ask no new initial-setup questions, and end with a concise statement rather than a question. Optional evidence, form defaults, toolchain choices, and other enrichment belong after onboarding and only when a later task needs them or the candidate asks for them.
+>
+> **Preserve compensation meaning.** If the candidate repeats a compensation value that matches a saved field and the transcript already establishes its meaning, preserve the stored compensation field. Never ask whether a repeated value is current_base or expected_base; current_base is private and must not be inferred or solicited. Ask about a different compensation concept only when it is required and genuinely missing.
 >
 > **List fields replace, they don't append.** A patch containing an array overwrites the whole stored array, so a block carrying one item of a list wipes every item saved before it. Whenever a patch targets a list field (`keep_signals`, `cut_signals`, `tools.*`, `claims.do_not_fabricate`, `benefits_priorities`, and any other array), send the **complete list** — every value gathered so far for that field, not just the newest one. Object fields deep-merge normally, so this only applies to lists.
 
@@ -41,7 +49,7 @@ description: Interview a new candidate to produce all user-layer config files: p
 Before asking anything:
 
 1. **Resume detection.** Read `workspace/setup-state.json` if it exists (the agent writes it; there is no CLI for this file).
-   - If present and `complete: false`: tell the user where they left off — show `mode`, `depth`, completed steps, and deferred steps. Resume from the next incomplete step rather than restarting. Re-confirm completed sections ("I already have you as X — still right?") rather than re-asking them in full.
+   - If present and `complete: false`: tell the user where they left off by naming completed and deferred sections. Resume from the next incomplete step rather than restarting. Re-confirm completed sections ("I already have you as X — still right?") rather than re-asking them in full.
    - If present and `complete: true`: setup is already done. Confirm which section the user wants to revisit and jump there directly.
    - If absent: this is a fresh setup — proceed normally.
 2. Run `careerrat ingest --check --json` to see which fields fail validation or still hold placeholder values.
@@ -52,64 +60,25 @@ Before asking anything:
 
 ---
 
-## STEP 0a — SETUP MODE + DEPTH + VOICE + OPTIONAL AREAS
+## STEP 0a — START CLEANLY AND SAVE PROGRESS
 
-Ask these questions before the interview begins. Record answers into `workspace/setup-state.json` (the agent writes this file directly; no CLI mutation exists for it).
+Do not begin with mode, depth, question-style, optional-area, or voice menus. A new
+candidate cannot make useful implementation choices before using the product. Setup
+defaults to the full conversational setup with focused questions, standard agent voice,
+and every external capability off.
 
-**Basic vs Advanced:**
+Start from whatever the résumé and current session already established. Ask the first
+missing candidate question, then save each settled answer immediately. If the user asks
+for a shorter setup, set `depth: "shallow"` and defer nonessential sections at that
+moment. Otherwise keep `depth: "deep"`. Optional benefits, lifestyle, and work-preference
+details are captured only when the user naturally raises them or explicitly asks to add
+them. A later explicit request to change agent voice still goes through
+`careerrat modes set agent_voice <value> --write`.
 
-> "Do you want **Basic** or **Advanced** setup?
-> - **Basic** — read-only / manual job search. Nothing logs into a site on your behalf. You can switch on automation later anytime via `careerrat automation status`.
-> - **Advanced** — you'll be offered authenticated browser automation (status polling, search, messaging, one-click apply, profile optimization, and session webmail access for verification codes / webmail mail ingest) and mail capture during setup. Each capability is still individually opt-in and defaults OFF until you explicitly consent."
-
-Record the answer as `mode: "basic"` or `mode: "advanced"`. No separate write here — this file has no CLI and isn't a confirm-block doc (it's agent-owned progress state, not candidate data); it's written together with the rest of STEP 0a's answers in the consolidated `workspace/setup-state.json` initialization below.
-
-**Deep vs Shallow:**
-
-> "Do you want **Deep** (everything now) or **Shallow** (minimum-viable core now, rest deferred)?
-> - **Deep** — go through every step in this skill now.
-> - **Shallow** — capture just `identity`, `targets`, `comp`, and `form-defaults` now (enough to start gating and applying), then defer the remaining steps. You can resume at any time."
-
-Record the answer as `depth: "deep"` or `depth: "shallow"`. Same as above: no separate write, it lands in the consolidated `workspace/setup-state.json` initialization below.
-
-In **shallow** mode, mark these step keys as deferred immediately: `domain`, `projects-scan`, `work-history`, `keep-cut`, `location`, `authorization`, `education`, `exclusions`, `toolchain`, `writing-samples`, `capabilities`. The minimum-viable core steps (`identity`, `targets`, `comp`, `form-defaults`) stay in-scope now.
-
-**Exception — no résumé.** Deferring `work-history` assumes a parsed résumé already seeded the evidence bank. If the candidate has no résumé (STEP 2a), that assumption is false and shallow mode would leave them with zero evidence, so `work-history` stays in-scope for them at any depth.
-
-**Question style — simple vs advanced:**
-
-> "For each section, do you want **Simple** questions (focused, fast, covers what matters most) or **Advanced** questions (deeper follow-ups, more edge cases, more nuance captured)?
-> - **Simple** — one or two direct questions per topic. Good for most people.
-> - **Advanced** — additional probing questions, e.g. per-arrangement comp floors, nuanced work preferences, edge cases on relocation. Adds ~15 min."
-
-Record the answer as `question_style: "simple"` or `question_style: "advanced"`. Same as above: no separate write, it lands in the consolidated `workspace/setup-state.json` initialization below. Throughout the interview, **skip sub-questions and edge-case follow-ups** when `question_style: "simple"`. The core facts (identity, targets, comp floor, location, authorization) are captured regardless of style.
-
-**Optional areas:**
-
-> "There are a few optional areas I can cover during setup. Want me to go through any of these?
->   - **Benefits & perks** — what benefits matter most to you (health plans, 401k match, equity, PTO, parental leave, etc.)
->   - **Lifestyle & logistics** — commute tolerance, travel preferences, time-zone constraints, home-office setup needs
->   - **Work preferences** — management style, team size, IC vs. leadership track, async vs. sync culture
->   You can skip all of them and add them later via `configure`."
-
-Record which areas the user opts into as `optional_areas: ["benefits", "lifestyle", "work-preferences"]` (an array of the keys they chose; empty array if none). Same as above: no separate write, it lands in the consolidated `workspace/setup-state.json` initialization below. These gate optional sub-questions later in the interview.
-
-**Agent voice:**
-
-> "Last one: how do you want me to talk to you during this job search?
-> - **exec-summary** — short and sharp. Lead with the verdict. 1–3 lines.
-> - **standard** — scannable bullets and short lines, takeaway first. Good for most people. (DEFAULT)
-> - **technical** — more depth and jargon when the role calls for it. Still structured.
-> - **verbose** — full detail: complete rationale, all signals, everything.
-> This only controls how I talk to you, not how your applications or emails read."
-
-Record the answer as `agent_voice: "exec-summary"` | `"standard"` | `"technical"` | `"verbose"`. If the user skips or is unsure, default to `"standard"`. Write it through the DB-aware modes CLI:
-
-```
-careerrat modes set agent_voice <value> --write
-```
-
-In DB mode this writes SQLite; in legacy mode it writes `candidate/modes.yml`. Confirm: "Agent voice set to `<value>`."
+Browser, mail, calendar, messaging, and application automation are capability-on-demand.
+Do not enumerate them during initial setup and do not ask for a blanket automation mode.
+When a concrete later task needs one, explain that one capability, show the platform-
+specific consent confirmation, and leave every other capability off.
 
 **Initialize `workspace/setup-state.json`:**
 
@@ -117,10 +86,9 @@ Write (or update) the file now with:
 
 ```json
 {
-  "mode": "basic|advanced",
-  "depth": "deep|shallow",
-  "question_style": "simple|advanced",
-  "optional_areas": ["benefits", "lifestyle", "work-preferences"],
+  "depth": "deep",
+  "question_style": "simple",
+  "optional_areas": [],
   "agent_voice": "standard",
   "updatedAt": "<ISO-8601>",
   "completed": [],
@@ -146,12 +114,12 @@ Tell the user:
 
 ## STEP 2 — IDENTITY + RESUME SOURCE
 
-1. Confirm or capture: `full_name`, `email`, `phone`, `location.city`/`state`/`country`, `linkedin`, `github` (if applicable), `portfolio` (if applicable). Replace every placeholder string from the template (`Jane Candidate`, `jane@example.com`, `+1-555-0100`, etc.).
+1. Confirm or capture: `full_name`, `email`, `phone`, home location, `linkedin`, `github` (if applicable), `portfolio` (if applicable). Replace every placeholder string from the template (`Jane Candidate`, `jane@example.com`, `+1-555-0100`, etc.). The schema has no `location.city`/`state`/`country` object: write the display location as one string at `candidate.location`, and write the search home as one string at top-level `location.home`.
 2. Ask where the source résumé lives (file path, paste, or URL) if not already provided.
 3. **Corrupt/bad-paste gate:** If `careerrat ingest --resume <path>` produced empty contact or empty sections, say so and ask for a screenshot, plain-text paste, or different export before continuing. Never proceed on an unreadable parse.
 4. **Save as you go, not at the end of the step.** Write each coherent group the moment it's settled — through `careerrat data candidate patch profile --data ...` in DB mode (legacy YAML is fallback only when no DB exists), or confirm-block it (`doc: "profile"`) in chat mode:
-   - name + email + phone, once all three are confirmed
-   - city/state/country, once confirmed
+   - each explicitly stated name, email, or phone value immediately; never wait for all three
+   - home location, once confirmed, with `candidate.location` and `location.home` both as strings
    - linkedin/github/portfolio, once confirmed (skip whichever don't apply)
 
    Don't hold any group back waiting on the others — an interruption mid-step should cost at most the group still in progress.
@@ -278,13 +246,13 @@ own; a project's existence is evidence of building it, not of its business impac
 
 ---
 
-## STEP 4 — TARGET ROLES + ADJACENT ROLES + OE BUCKET
+## STEP 4 — TARGET ROLES + ADJACENT ROLES + OPTIONAL OE BUCKET
 
-1. Capture primary target title(s) and adjacent or stretch titles → write as `role_buckets[]` through `careerrat data candidate patch targeting --data ...` in DB mode. Each bucket needs titles and a priority (`primary` | `secondary` | `stretch` | `oe`).
-2. Explicitly ask about over-employment (concurrent secondary role): "Are you open to OE — a concurrent secondary position?" If yes:
+1. Capture primary target title(s) and adjacent or stretch titles → write as `role_buckets[]` through `careerrat data candidate patch targeting --data ...` in DB mode. Every bucket must include a non-empty `name`, a priority (`primary` | `secondary` | `stretch` | `oe`), and a non-empty `titles` array.
+2. Ask about over-employment only when the candidate naturally raises concurrent work or explicitly asks to configure it. Otherwise skip this question. If they opt in:
    - Add a `role_bucket` entry with `priority: oe`.
    - Capture OE comp range (STEP 6e).
-3. Ask which job boards or aggregators the candidate typically uses. **No schema field holds this yet** (the same known gap `setup-searches` documents — do not write it to `targeting.yml` or `profile.yml`). Hold the answer in conversation and carry it directly into STEP 15's `careerrat ingest --write-config` run, which seeds `config/search-sources.yml` from it so board selection reflects the candidate's domain, not a hardcoded tech list. To make the preference durable beyond this run, add it explicitly at the STEP 16 handoff via `careerrat searches --add-url "<url>" --label "<label>"` or `careerrat searches --add-query "<title>" --provider <provider>` (owned by `setup-searches`) — there is no chat-context confirm-block for this one, since there's no doc/patch target to write to.
+3. **Job-board preferences belong to source setup.** In conversational chat, do not ask for job-board preferences during this interview because this surface has no durable write for them. setup-searches owns that question and its durable write immediately after profile setup. In a one-shot CLI context with a shell, the answer may be collected here only when the same run carries it directly into STEP 15's `careerrat ingest --write-config` and verifies the resulting `config/search-sources.yml`; otherwise defer it to `setup-searches` too.
 4. Ask how fresh sourced postings should be: "When we search, do you want **since last run** (default), **24 hours**, **7 days**, **14 days**, or **30 days**?" Write the answer to candidate targeting config at `search_preferences.posting_age`:
    - Since last run → `mode: "since-last-run"` and omit `days`.
    - Fixed window → `mode: "fixed-days"` and `days: <1|7|14|30 or user-specified positive number>`.
@@ -318,9 +286,9 @@ Treat this section as private by default. Capture and write each field separatel
    ```
    **NEVER surface current_base in any outbound artifact** (résumé, cover letter, form field, message, packet, tracker note, or any other candidate-facing or employer-facing output). This is a private gate input only; all outbound comp comes from the fields below.
 2. **(b) minimum_base** — Absolute walk-away floor; comp below this is a hard cut regardless of arrangement. Write with `careerrat gate comp-floor <N> --write --confirm`.
-3. **(b2) Arrangement floors (the comp gate)** — Comp tolerance usually changes with the work arrangement, so capture a base floor for each. Ask explicitly: *"What base salary would each of these need to clear — fully remote, hybrid in your home metro, onsite in your home metro, and relocating to a new city?"* Write the four numbers as `comp_floors.remote`, `comp_floors.hybrid`, `comp_floors.onsite`, and `comp_floors.relocation` (the default relocation floor), plus the home-metro match terms (city/state/region words that mean "no relocation") as `comp_floors.home_metro`, in one call: `careerrat data candidate patch profile --data '{"compensation":{"comp_floors":{"remote":<N>,"hybrid":<N>,"onsite":<N>,"relocation":<N>,"home_metro":["<city>","<state>"]}}}'` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode. These are a **hard gate**: `evaluate-job` cuts any posting whose band tops out below the floor for its arrangement, and a relocation miss is a hard cut (not a soft hold). If the user gives one number for everything, set all four equal to it. Confirm: "These become the comp gate — postings under the floor for their arrangement get cut automatically."
+3. **(b2) Arrangement floors (the comp gate)** — Comp tolerance usually changes with the work arrangement, so collect floors only for arrangements the candidate would accept. If saved targeting or cut signals already exclude full-time onsite work or relocation, do not ask for an onsite or relocation floor and do not invent one; preserve that arrangement as unavailable. Ask only about the remaining viable arrangements, such as: *"What base salary would fully remote and hybrid in your home metro need to clear?"* Write the supplied numbers under their matching `comp_floors` keys (`remote`, `hybrid`, `onsite`, `relocation`) plus the home-metro match terms as `comp_floors.home_metro`, omitting disallowed arrangements, in one `careerrat data candidate patch profile --data ...` call in DB mode or one confirm block (`doc: "profile"`) in chat mode. These are a **hard gate**: `evaluate-job` cuts any posting whose band tops out below the floor for its allowed arrangement, while the saved cut signal rejects unavailable arrangements. If the user gives one number for every arrangement they accept, set each allowed arrangement equal to it. Confirm: "These become the comp gate — postings under the floor for their arrangement get cut automatically."
 4. **(c) target_base** — Default negotiation anchor (what to aim for in a salary conversation). Write with `careerrat gate comp-target <N> --write --confirm`.
-4. **(d) expected_base** — The number to enter in a salary **form field** on an application. May differ from the negotiation anchor (e.g. anchor = $160K, form field = $165K). Write with `careerrat gate comp-expected <N> --write` and also patch `form-defaults.expected_base` in DB mode so apply-job has a direct lookup. Confirm: "This is what goes on application forms — never your current salary."
+4. **(d) expected_base** — The number to enter in a salary **form field** on an application. May differ from the negotiation anchor (e.g. anchor = $160K, form field = $165K). In a one-shot CLI context, write it with `careerrat gate comp-expected <N> --write` and also patch `form-defaults.expected_base` so apply-job has a direct lookup. In conversational chat, emit one form-defaults confirmation block for `expected_base`, not separate profile and form-defaults proposals; the web surface mirrors that confirmed value into profile compensation from the same click. Confirm: "This is what goes on application forms — never your current salary."
 5. **(e) OE range** — If an OE bucket was chosen in STEP 4: capture `oe_min_base` and `oe_max_base`. Write with `careerrat data candidate patch profile --data '{"compensation":{"oe_min_base":<N>,"oe_max_base":<N>}}'` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode. The overall `minimum_base` does NOT apply to OE roles; each OE bucket has its own floor.
 6. **(f) Additional comp context** — Ask about: `cash_over_equity` preference, equity tolerance, bonus tolerance, currency.
    - **Lifestyle-burden multiplier** (separate concept): "If a role requires more travel or on-site time than your norm, does your comp floor rise?" If yes, capture the premium amount or percentage under `relo_package_needs` with a key like `burden_premium` (e.g. `"$20K uplift for >2 days/week on-site"`). This feeds the lifestyle sliding-scale in `evaluate-job` and `apply-job`.
@@ -359,7 +327,7 @@ Save each group the moment it's settled — through `careerrat data candidate pa
 2. Remote / hybrid / on-site tolerance. If hybrid is acceptable: max commute days per week. Save this group once settled.
 3. Travel tolerance (none / occasional / frequent / any). Save it once settled.
 4. Relocation cities (if any). For each relo city, ask if there is a per-city comp floor that differs from the default relocation floor (STEP 6 b2). When one differs, write it **structurally** in candidate profile compensation as `comp_floors.relocation_by_metro[]` — `{ label, floor, match: [<location words for that metro>] }` — so the gate enforces it (free-text notes are NOT read by the gate). High-cost metros (e.g. Bay Area) commonly carry a higher floor than the default. Save this the same way, per relo city, as each is settled.
-5. Any family or lifestyle constraints that affect geography or travel. Save this once settled.
+5. Ask about family or lifestyle constraints only when optional_areas includes lifestyle or the candidate raises one naturally. Otherwise skip this question. Save a constraint once settled.
 6. Confirm every group above is written before moving to STEP 8 — nothing here should still be sitting in chat only.
 
 ---
@@ -385,7 +353,7 @@ Save each group the moment it's settled — through `careerrat data candidate pa
 ## STEP 10 — EXCLUDED COMPANIES + CATEGORIES + APPLICATION LIMITS
 
 1. Ask for named companies to never apply to and company categories to exclude (e.g. defense contractors, tobacco, crypto). Write each named exclusion through `careerrat gate exclude-company "<Company>" --write --confirm`. Include an optional per-company `comp_override_threshold` only when the owning DB verb supports it; do not hand-edit YAML in DB mode.
-2. Ask about headcount or funding-stage limits (if any) → add to cut signals through `careerrat gate cut-signal "<signal>" --write`.
+2. Ask about headcount or funding-stage limits only when optional_areas includes work-preferences or the candidate raises one naturally. Otherwise skip this question. Add any settled limit to cut signals through `careerrat gate cut-signal "<signal>" --write`.
 3. If the user mentions a per-company application cap or cooldown they already know ("I applied to Acme 3 months ago, 6-month cooldown"): after confirmation, write `careerrat data candidate limits upsert --data '<json row>'` in DB mode; legacy mode writes `candidate/application-limits.yml`.
 
 ---
@@ -395,9 +363,9 @@ Save each group the moment it's settled — through `careerrat data candidate pa
 Save each item below through `careerrat data candidate patch form-defaults --data ...` in DB mode, or confirm-block it (`doc: "form-defaults"`) in chat mode, as soon as it's settled — don't hold it to the end of the step.
 
 1. Default "how did you hear about us" source label. Save it immediately.
-2. Work authorization and sponsorship answers for ATS form fields. Save this group once settled.
+2. Work authorization and sponsorship answers for ATS form fields. In form-defaults work_authorization and requires_sponsorship are strings: use Yes or No, never booleans. Save this group once settled.
 3. Current employer and current title (as typically entered in ATS forms). Save this group once settled.
-4. LinkedIn, GitHub, portfolio URLs (confirm these match candidate profile config). Save this group once settled.
+4. LinkedIn, GitHub, portfolio URLs (confirm these match candidate profile config). Profile link fields are strings; use an empty string when the candidate has no link, never `null`. In conversational chat, emit one profile confirmation block for LinkedIn, GitHub, and portfolio, not a second form-defaults proposal; the web surface mirrors those confirmed links into form-defaults from the same click. In a one-shot CLI context, write both documents. Save this group once settled.
 5. EEO/demographic default answer. Save it once settled.
 6. `auto_submit` — confirm explicitly: "Do you want applications submitted automatically when a form is filled, or do you want a confirm step every time?" Default is `false` (confirm-first). Only flip to `true` on explicit opt-in. Save it immediately once confirmed.
 7. Confirm every item above is written before moving to STEP 12 — nothing here should still be sitting in chat only.
@@ -436,15 +404,23 @@ Save each item below through `careerrat data candidate patch form-defaults --dat
 
 1. Instruct the user: "Drop any candidate-authored writing into `workspace/writing-samples/`. This includes emails, cover letters, docs, Slack posts, blog posts, PR descriptions."
 2. Check: `ls workspace/writing-samples/`. If files are present, run `npm run calibrate:style` and confirm `candidate/writing-style.md` was written.
-3. If no samples are present yet, note that the user can run `npm run calibrate:style` later after adding samples.
+3. When the candidate states writing preferences, emit one honesty confirmation block immediately,
+   even when there are no sample files. Put the complete positive rules in `style.prefer` and the
+   complete negative rules in `style.avoid`; do not merely acknowledge them in prose. In DB mode,
+   write the same complete arrays through `careerrat data candidate patch honesty --data ...`.
+4. If no samples are present yet, note that the user can run `npm run calibrate:style` later after
+   adding samples. Stated preferences remain canonical honesty boundaries and are not replaced by
+   that future calibration unless the candidate approves the change.
 
 ---
 
-## STEP 14b — CAPABILITY OPT-IN (Advanced mode only)
+## STEP 14b — CAPABILITY REFERENCE (ON DEMAND, NOT AN ONBOARDING MENU)
 
-**Basic mode:** skip this step entirely. Note once: "Browser automation and mail capture are available whenever you want them — run `careerrat automation status` to see the full capability matrix and enable what you need."
-
-**Advanced mode:** surface each capability below, ask for each opt-in, then record decisions via the CLI (never hand-edit `candidate/automation.yml`). Everything stays OFF until the user explicitly goes through the CLI steps.
+Skip this during ordinary initial setup. Do not list capabilities and ask the candidate to
+choose among them. Use this section only when a concrete user-requested task needs one of
+the capabilities below. Explain that capability in plain language, ask for its platform-
+specific consent, and record only that decision through the CLI. Everything else stays
+off. Never hand-edit `candidate/automation.yml`.
 
 ---
 
@@ -488,7 +464,9 @@ careerrat automation status
 
 Dry-run is the default (prints the change without writing); `--write` commits. Run `careerrat automation status` at the end to confirm the live verdict. CareerRat records the decision; it does not make it for you. **Never auto-run and never run on a schedule** — every automated session is user-initiated.
 
-After running through all capabilities the user wants: set `automationOffered: true` in `workspace/setup-state.json` and append `capabilities` to `completed[]`.
+If a capability is enabled during setup because the user requested a task that needs it,
+set `automationOffered: true` in `workspace/setup-state.json` and append `capabilities`
+to `completed[]`. Otherwise leave the field false and continue without mentioning it.
 
 ---
 

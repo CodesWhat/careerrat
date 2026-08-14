@@ -3,17 +3,6 @@
 // (POST /api/packet/export), and a per-artifact view link that opens
 // ArtifactViewerModal. Both AI-spending/file-writing actions are
 // explicit-click only — nothing here ever auto-fires from a prop change.
-//
-// KNOWN GAP (not fixed here — src/core/packet/* is out of scope for this
-// task): generatePacket/exportPacketArtifacts (src/core/packet/generate.mjs,
-// exports.mjs) stamp artifacts.resumeSource/resumePdf/resumeDocx (and the
-// coverLetter/answers equivalents) — never the plain artifacts.resume/
-// coverLetter/answers keys that GET /api/packet (and isGatedIn/hasResume in
-// packet-route.mjs) actually reads. A freshly-generated-then-exported packet
-// therefore still reads as "not generated" here; the legacy SSR /packet page
-// (src/core/onboarding/packet-page.mjs) has the identical gap. Artifacts
-// stamped by the OLDER tailor-application flow (appRegisterArtifact, which
-// does write the plain key) view correctly.
 import { useCallback, useEffect, useState } from "react";
 import { Button } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
@@ -26,6 +15,13 @@ const ARTIFACT_KINDS = [
   { key: "coverLetter", label: "Cover letter" },
   { key: "answers", label: "Answers" },
 ];
+
+function isDeferredAnswersGap(gap) {
+  return (
+    String(gap?.kind || "").toLowerCase() === "answers" &&
+    /no application questions captured/i.test(String(gap?.message || ""))
+  );
+}
 
 export function PacketDocumentsCard({ applicationId, gate, onView }) {
   const [packet, setPacket] = useState(null);
@@ -59,10 +55,16 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
     setNotice(null);
     try {
       const res = await generatePacketDocuments({ applicationId, formats: ["pdf"] });
-      const gapCount = Array.isArray(res?.data?.gaps) ? res.data.gaps.length : 0;
-      setNotice(
-        `Packet ${res?.data?.status || "generated"}: ${gapCount} gap${gapCount === 1 ? "" : "s"}.`
-      );
+      const gaps = Array.isArray(res?.data?.gaps) ? res.data.gaps : [];
+      if (gaps.length > 0 && gaps.every(isDeferredAnswersGap)) {
+        setNotice(
+          "Résumé and cover letter are ready. Answers will be added when the application form exposes its questions."
+        );
+      } else {
+        setNotice(
+          `Packet ${res?.data?.status || "generated"}: ${gaps.length} gap${gaps.length === 1 ? "" : "s"}.`
+        );
+      }
       await loadPacket();
     } catch (err) {
       setError(withRetryAction(errorState(err, "Packet action failed"), handleGenerate));
@@ -87,6 +89,10 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
   }
 
   const artifacts = packet?.artifacts || {};
+  const answersDeferred =
+    !artifacts.answers &&
+    Array.isArray(packet?.packet?.gaps) &&
+    packet.packet.gaps.some(isDeferredAnswersGap);
   const canGenerate = String(gate || "").toLowerCase() === "keep";
   const exportedEntries = exportedFiles
     ? Object.entries(exportedFiles).flatMap(([kind, files]) =>
@@ -97,8 +103,8 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
   return (
     <Card title="Documents">
       <p className="field__hint">
-        Generate a tailored resume, cover letter, and short answers, then export them for
-        submission.
+        Generate a tailored résumé and cover letter now. Application answers are added after the
+        employer's form exposes its questions.
       </p>
       {!canGenerate ? (
         <p className="field__hint">A KEEP evaluation is required before tailoring documents.</p>
@@ -127,6 +133,8 @@ export function PacketDocumentsCard({ applicationId, gate, onView }) {
               >
                 View
               </button>
+            ) : key === "answers" && answersDeferred ? (
+              "Waiting for application questions"
             ) : (
               "Not generated yet"
             )}

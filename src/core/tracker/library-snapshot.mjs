@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import { dbExists } from "../db/connection.mjs";
+import { candidateConfigGet } from "../db/verbs/candidate.mjs";
 import { buildDeepIngestViewModel } from "../deep-ingest/view-model.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { loadCandidateDoc } from "../profile/config-store.mjs";
@@ -431,9 +432,21 @@ function buildDeepIngestGaps(model, claims) {
   return gaps.length ? gaps.slice(0, 4) : buildGaps(claims);
 }
 
-function buildSnapshotFromDeepIngest(model) {
+function buildSnapshotFromDeepIngest(model, evidence = null) {
   const confirmed = model?.confirmed || {};
-  const claims = Array.isArray(confirmed.evidence) ? confirmed.evidence : [];
+  // Confirmed onboarding/manual evidence lives in the same canonical
+  // candidate_evidence_claims table as Deep ingest confirmations, but it has
+  // no Deep ingest source/proposal id. The Deep ingest view model intentionally
+  // filters those rows out of its own provenance-scoped `confirmed.evidence`
+  // collection. Library is the candidate's complete reusable bank, so prefer
+  // the canonical candidate evidence document when the DB loader supplies it.
+  // Unconfirmed Deep ingest proposals are never written there, which keeps the
+  // trust boundary intact while making onboarding evidence visible.
+  const claims = Array.isArray(evidence?.claims)
+    ? evidence.claims
+    : Array.isArray(confirmed.evidence)
+      ? confirmed.evidence
+      : [];
   const storyBank = Array.isArray(confirmed.storyBank) ? confirmed.storyBank : [];
   const writingVoice = Array.isArray(confirmed.writingVoice) ? confirmed.writingVoice : [];
   const honestyBoundaries = Array.isArray(confirmed.honestyBoundaries)
@@ -488,7 +501,7 @@ export function buildLibrarySnapshot({
   writingStyleText = "",
   deepIngest = null,
 } = {}) {
-  if (deepIngest) return buildSnapshotFromDeepIngest(deepIngest);
+  if (deepIngest) return buildSnapshotFromDeepIngest(deepIngest, evidence);
 
   const claims = Array.isArray(evidence.claims) ? evidence.claims : [];
   const storyBank = Array.isArray(stories.stories) ? stories.stories : [];
@@ -528,7 +541,9 @@ export function buildLibrarySnapshot({
 
 export function loadLibrarySnapshot({ root = DEFAULT_ROOT, env } = {}) {
   if (dbExists({ repoRoot: root, env })) {
+    const candidate = candidateConfigGet({ repoRoot: root, env });
     return buildLibrarySnapshot({
+      evidence: candidate.evidence,
       deepIngest: buildDeepIngestViewModel({ repoRoot: root, env }),
     });
   }

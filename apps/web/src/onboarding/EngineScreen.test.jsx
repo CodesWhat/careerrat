@@ -460,10 +460,14 @@ describe("EngineScreen — picker mode (2+ ready CLIs)", () => {
     expect(start.props.disabled).toBe(true);
 
     const radio = visit(tree, (n) => n.props?.["aria-label"] === "Select Claude Code")[0];
+    expect(radio.props["aria-pressed"]).toBe(false);
     radio.props.onClick();
     tree = render({ mode: "picker", onReady });
     start = button(tree, "Start the interview");
     expect(start.props.disabled).toBe(false);
+    expect(
+      visit(tree, (n) => n.props?.["aria-label"] === "Select Claude Code")[0].props["aria-pressed"]
+    ).toBe(true);
 
     await start.props.onClick();
     expect(api.selectInstalledAiRuntime).toHaveBeenCalledWith({ runtimeId: "claude" });

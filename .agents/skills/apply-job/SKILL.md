@@ -8,7 +8,7 @@ description: End-to-end job application workflow — gates on app limits and eva
 Use this skill when the user asks to apply, submit, fill an application, or gives
 a JD URL with clear application intent.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## Inputs
 
@@ -401,7 +401,7 @@ Apply the write per mode:
   **stop** — fix it with another `app set-fields` / `comm upsert` call (never
   hand-edit `tracker.json`, it is a regenerated file) and re-run 9b. Do not
   proceed to 9c.
-- **Legacy workspace (no DB):** run validation and re-render in sequence:
+- **Legacy workspace (no DB):** run validation and snapshot in sequence:
   ```
   npm run verify:tracker
   careerrat tracker --verify && careerrat tracker

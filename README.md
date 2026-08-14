@@ -44,7 +44,7 @@ npm install -g careerrat
 careerrat start claude    # or: careerrat start codex
 ```
 
-That sets up your workspace, opens the dashboard at `http://localhost:7777`, and
+That sets up your workspace, opens the local app at `http://localhost:7777`, and
 hands you off to the agent. From there you just talk to it.
 
 ## Your first hour
@@ -62,8 +62,8 @@ hands you off to the agent. From there you just talk to it.
 4. **Paste a recruiter email** and say *"draft a reply."* It writes the reply and
    remembers the thread.
 5. **Open `http://localhost:7777`** and watch the job appear, move through your
-   funnel, and pick up history. The dashboard is read-only on purpose — the agent
-   does the work, the dashboard shows it.
+   funnel, and pick up history. Quick local actions work in the app; longer work
+   opens a visible conversation with the owning skill.
 
 **One first-run thing that looks broken but isn't:** before you've onboarded,
 `careerrat doctor` will report that your setup is incomplete and list
@@ -106,24 +106,24 @@ careerrat doctor     # check your setup is healthy
 careerrat update     # pull the latest code; your data is untouched
 ```
 
-The dashboard comes up with `careerrat start`. To run it on its own:
+The local app comes up with `careerrat start`. To run it on its own:
 
 ```bash
-careerrat tracker        # write a static snapshot to workspace/tracker.html
+careerrat tracker        # snapshot tracker.json for recovery
 careerrat tracker-dev    # serve http://localhost:7777 with live reload
 ```
 
-**Useful flags on `start`:** `--no-agent` (workspace + dashboard only),
-`--no-dashboard`, `--agent <name>` (any CLI on your PATH, e.g. `cursor`),
+**Useful flags on `start`:** `--no-agent` (workspace + local app only),
+`--no-dashboard`, `--agent <name>` (override with a compatible agent command),
 `--port <n>` (default 7777).
 
 ## How it works
 
 CareerRat is an *agent runtime*. The CLI sets up the workspace and serves the
-dashboard, but the job-search work happens inside your agent, reading a set of
+local app, but the job-search work happens inside your agent, reading a set of
 skills that tell it how each step is done. That's why you talk to it in plain
-language instead of memorizing subcommands, and why it works with whichever AI
-CLI you already have.
+language instead of memorizing subcommands. The first run detects supported AI
+CLIs and explains the available choices.
 
 The rule underneath all of it: **no tailoring, no applying, until the job has
 passed a real read of the posting.** Titles and keywords are triage, not truth.
@@ -141,6 +141,7 @@ passed a real read of the posting.** Titles and keywords are triage, not truth.
 git clone https://github.com/CodesWhat/careerrat
 cd careerrat
 npm install
+npm run hooks:install
 npm link
 careerrat start claude
 ```

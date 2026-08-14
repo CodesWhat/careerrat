@@ -166,11 +166,10 @@ export function forbiddenWordingFor(claims, honesty, boundaryRows = []) {
  * @throws {Error}
  */
 export function assertNoForbidden(text, forbidden) {
-  const lowerText = text.toLowerCase();
   const hits = [];
 
   for (const phrase of forbidden) {
-    if (lowerText.includes(phrase.toLowerCase())) {
+    if (containsForbiddenPhrase(text, phrase)) {
       hits.push(phrase);
     }
   }
@@ -180,6 +179,18 @@ export function assertNoForbidden(text, forbidden) {
   }
 
   return true;
+}
+
+export function containsForbiddenPhrase(text, phrase) {
+  const needle = String(phrase ?? "").trim();
+  if (!needle) return false;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const first = needle[0];
+  const last = needle[needle.length - 1];
+  const wordChar = /[\p{L}\p{N}_]/u;
+  const prefix = wordChar.test(first) ? "(?:^|[^\\p{L}\\p{N}_])" : "";
+  const suffix = wordChar.test(last) ? "(?=$|[^\\p{L}\\p{N}_])" : "";
+  return new RegExp(`${prefix}${escaped}${suffix}`, "iu").test(String(text ?? ""));
 }
 
 // ---------------------------------------------------------------------------

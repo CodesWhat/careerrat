@@ -7,7 +7,7 @@
 // the hook harness this component doesn't require.
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { PeopleList } from "./NetworkPage.jsx";
+import { filterPeople, NetworkDrawer, PeopleList, SourcingSection } from "./NetworkPage.jsx";
 
 const SAMPLE_PERSON = {
   id: "acme::jane-doe",
@@ -38,5 +38,93 @@ describe("PeopleList", () => {
     expect(html).not.toContain("network__empty");
     expect(html).not.toContain("Paste a message to capture a contact");
     expect(html).toContain("Jane Doe");
+  });
+});
+
+describe("Network filtering", () => {
+  const people = [
+    SAMPLE_PERSON,
+    {
+      ...SAMPLE_PERSON,
+      id: "globex::alex-smith",
+      name: "Alex Smith",
+      company: "Globex Corporation",
+      type: "Hiring manager",
+      state: "caution",
+      nextTouch: "Follow up today",
+    },
+  ];
+
+  it("searches names, companies, roles, and contact types", () => {
+    expect(filterPeople(people, { query: "globex", state: "all" })).toEqual([people[1]]);
+    expect(filterPeople(people, { query: "hiring manager", state: "all" })).toEqual([people[1]]);
+    expect(filterPeople(people, { query: "jane", state: "all" })).toEqual([people[0]]);
+  });
+
+  it("filters by relationship state and actionable next touch", () => {
+    expect(filterPeople(people, { query: "", state: "caution" })).toEqual([people[1]]);
+    expect(filterPeople(people, { query: "", state: "needs-touch" })).toEqual([people[1]]);
+  });
+});
+
+describe("Network relationship actions", () => {
+  it("renders real approve and reject controls for review leads", () => {
+    const html = renderToStaticMarkup(
+      <SourcingSection
+        busyLeadId={null}
+        leads={[
+          {
+            id: "lead-1",
+            name: "Alex Smith",
+            company: "Globex",
+            title: "Talent partner",
+            platform: "linkedin",
+            note: "Likely recruiter for this role.",
+          },
+        ]}
+        onDecide={() => {}}
+        targets={[]}
+      />
+    );
+
+    expect(html).toContain("Approve lead");
+    expect(html).toContain("Reject lead");
+    expect(html).toContain('type="button"');
+  });
+
+  it("links relationship context to its owning job and renders structured history", () => {
+    const html = renderToStaticMarkup(
+      <NetworkDrawer
+        card={{
+          ...SAMPLE_PERSON,
+          applicationId: "app-123",
+          history: [
+            {
+              id: "message-1",
+              at: "2026-08-10T12:00:00.000Z",
+              direction: "inbound",
+              label: "Email from Jane Doe",
+              summary: "Invited to a recruiter screen.",
+            },
+          ],
+          companyRecord: {
+            company: "Acme Corp",
+            applicationId: "app-123",
+            reuseTitle: "Safe reuse",
+            reuseBody: "Use when specific.",
+            reuseScope: "Same-company routing",
+            nextTouch: "When specific",
+            notes: [],
+          },
+        }}
+        onClose={() => {}}
+      />
+    );
+
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain('href="/app/jobs?open=app-123"');
+    expect(html).toContain("Communication history");
+    expect(html).toContain("Invited to a recruiter screen.");
   });
 });

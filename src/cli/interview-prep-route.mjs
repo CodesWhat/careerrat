@@ -1,4 +1,5 @@
 import { requireDb } from "../core/db/connection.mjs";
+import { markdownToHtml } from "../core/documents/export.mjs";
 import { buildInterviewDossier } from "../core/interview/dossier.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
@@ -30,6 +31,17 @@ function readApplication(repoRoot, env, id) {
   return row ? JSON.parse(row.data) : null;
 }
 
+function withRenderedDossier(data) {
+  if (!data?.dossier?.markdown) return data;
+  return {
+    ...data,
+    dossier: {
+      ...data.dossier,
+      html: markdownToHtml(data.dossier.markdown),
+    },
+  };
+}
+
 export function mountInterviewPrepRoutes({ addRoute, repoRoot, env = process.env } = {}) {
   addRoute("POST", "/api/interview-prep/build", async (req, res) => {
     try {
@@ -42,7 +54,7 @@ export function mountInterviewPrepRoutes({ addRoute, repoRoot, env = process.env
         inviteNotes: body?.inviteNotes,
         jobSignals: body?.jobSignals,
       });
-      sendJson(res, 200, { ok: true, data });
+      sendJson(res, 200, { ok: true, data: withRenderedDossier(data) });
     } catch (error) {
       respondError(res, error);
     }
@@ -63,7 +75,10 @@ export function mountInterviewPrepRoutes({ addRoute, repoRoot, env = process.env
         error.code = "DOSSIER_NOT_FOUND";
         throw error;
       }
-      sendJson(res, 200, { ok: true, data: { applicationId: id, dossier } });
+      sendJson(res, 200, {
+        ok: true,
+        data: withRenderedDossier({ applicationId: id, dossier }),
+      });
     } catch (error) {
       respondError(res, error);
     }

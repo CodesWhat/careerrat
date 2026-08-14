@@ -30,10 +30,10 @@ All entries in this section are copied from `.planning/phases/02-bounded-ai-foun
 - **D-12:** BYOK and managed-proxy paths should preserve comparable usage rows. Proxy metering can remain server-side, but app-visible route metadata should still expose enough information to explain whether AI was used or skipped.
 
 ### Native Structured Outputs
-- **D-13:** Adopt provider-native structured outputs now where available. User asked "switch to it now no?" and the answer is yes, behind Rolester's own wrapper.
-- **D-14:** Native provider enforcement is an optimization and reliability layer, not the trust boundary. Rolester must still run deterministic JSON/schema validation after the model call because provider docs still document invalid-output cases such as refusal, truncation, and schema limits.
+- **D-13:** Adopt provider-native structured outputs now where available. User asked "switch to it now no?" and the answer is yes, behind CareerRat's own wrapper.
+- **D-14:** Native provider enforcement is an optimization and reliability layer, not the trust boundary. CareerRat must still run deterministic JSON/schema validation after the model call because provider docs still document invalid-output cases such as refusal, truncation, and schema limits.
 - **D-15:** The wrapper should support a fallback mode for providers or routes that cannot use native structured output yet: prompt for JSON, extract fenced or bare JSON, validate, and retry once using the existing `runStructuredOneshot()` behavior.
-- **D-16:** Native structured-output support should be hidden behind Rolester's local API contract so app routes do not encode provider-specific request bodies.
+- **D-16:** Native structured-output support should be hidden behind CareerRat's local API contract so app routes do not encode provider-specific request bodies.
 
 ### the agent's Discretion
 The agent may choose exact module names, response field names, and test fixture layout, provided the implementation preserves the decisions above and reuses existing AI routing, schema validation, and usage-log code. A likely owner is a new helper near `src/core/ai/` that route modules call instead of duplicating the one-shot pattern.
@@ -50,7 +50,7 @@ Phase 2 should add one reusable bounded-AI route helper under `src/core/ai/`, no
 
 The implementation should normalize all bounded route outcomes into one envelope: `ok:true` success with route `data`; `AI_SCHEMA_INVALID` for exhausted parse/validation retry; `NO_AI_ROUTE` for missing AI config; and `AI_PROVIDER_FAILED` for provider/proxy/SDK/timeout failures. This is locked by Phase 2 decisions and matches current route behavior that is spread across `assist-route`, `onboard-route`, and `intake/classify`. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md] [VERIFIED: src/cli/assist-route.mjs] [VERIFIED: src/cli/onboard-route.mjs] [VERIFIED: src/core/intake/classify.mjs]
 
-Native structured output should be implemented as a provider adapter beneath the Rolester wrapper. Anthropic currently uses `output_config.format` with `type: "json_schema"`, while OpenAI exposes strict JSON-schema response formats; both providers still require refusal, truncation, schema subset, and local validation handling. [CITED: https://platform.claude.com/docs/en/build-with-claude/structured-outputs] [CITED: https://developers.openai.com/api/docs/guides/structured-outputs]
+Native structured output should be implemented as a provider adapter beneath the CareerRat wrapper. Anthropic currently uses `output_config.format` with `type: "json_schema"`, while OpenAI exposes strict JSON-schema response formats; both providers still require refusal, truncation, schema subset, and local validation handling. [CITED: https://platform.claude.com/docs/en/build-with-claude/structured-outputs] [CITED: https://developers.openai.com/api/docs/guides/structured-outputs]
 
 **Primary recommendation:** Build `src/core/ai/bounded-ai.mjs` with strict label validation, provider-native Anthropic request support through `callAI()`, fallback through `runStructuredOneshot()`, and route helpers that return one shared envelope. [ASSUMED]
 
@@ -77,7 +77,7 @@ Native structured output should be implemented as a provider adapter beneath the
 ## Project Constraints (from AGENTS.md)
 
 - Skills are procedural contracts and the agent should follow the owning skill rather than improvise workflow steps; Phase 2 should preserve skills as contracts while moving cheap bounded calls into local runtime helpers. [VERIFIED: AGENTS.md] [VERIFIED: .planning/architecture/runtime-routing-policy.md]
-- BYOK credentials are stored through `src/core/ai/ai-env.mjs` under the active Rolester home and are never echoed by APIs; route metadata must expose availability, not secret values. [VERIFIED: AGENTS.md]
+- BYOK credentials are stored through `src/core/ai/ai-env.mjs` under the active CareerRat home and are never echoed by APIs; route metadata must expose availability, not secret values. [VERIFIED: AGENTS.md]
 - In active job-search sessions, tracker-visible changes must use DB verbs or the tracker write contract, but Phase 2 is a runtime-code phase and should not mutate tracker state as part of research or planning. [VERIFIED: AGENTS.md]
 - Long/raw job, resume, message, and research bodies belong in local artifacts, not telemetry; usage rows must remain metadata-only. [VERIFIED: AGENTS.md] [VERIFIED: src/core/ai/usage-log.mjs]
 - Candidate-specific AGENTS constraints mark private compensation and candidate context as sensitive; bounded AI telemetry must never store prompts, resumes, JDs, candidate facts, or raw model output. [VERIFIED: candidate/AGENTS.md] [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
@@ -195,7 +195,7 @@ The reason is concrete: `callAI()` only forwards proxy label headers when label 
 
 ### Pattern 2: Native Structured Output Is an Adapter, Not a Route Concern
 
-**What:** Extend `callAI()` or a lower-level adapter to accept provider-native output schema options, while route modules pass only Rolester schema/config. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
+**What:** Extend `callAI()` or a lower-level adapter to accept provider-native output schema options, while route modules pass only CareerRat schema/config. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
 **When to use:** Direct tool-less bounded calls such as assist suggestions and future company seed generation. [VERIFIED: src/cli/assist-route.mjs] [VERIFIED: .planning/architecture/discover-companies-target-contract.md]
 **Example:**
 ```js
@@ -254,7 +254,7 @@ Existing routes already return 422 and 501 statuses, but fields differ and somet
 ## Common Pitfalls
 
 ### Pitfall 1: Label Drift Between BYOK And Proxy
-**What goes wrong:** Proxy requests only include `x-rolester-skill` and `x-rolester-action` if the caller passed them, and usage rows normalize empty labels to null. [VERIFIED: src/core/ai/call-ai.mjs] [VERIFIED: src/core/ai/usage-log.mjs]
+**What goes wrong:** Proxy requests only include `x-careerrat-skill` and `x-careerrat-action` if the caller passed them, and usage rows normalize empty labels to null. [VERIFIED: src/core/ai/call-ai.mjs] [VERIFIED: src/core/ai/usage-log.mjs]
 **Why it happens:** Label validation is currently caller discipline, not an enforced helper contract. [VERIFIED: src/core/ai/call-ai.mjs]
 **How to avoid:** Add wrapper-level `requireBoundedLabels()` and tests that prove missing/blank `skill`, `action`, and `operation` fail before invocation. [ASSUMED]
 **Warning signs:** Tests that inspect only response bodies but not usage rows or proxy headers. [VERIFIED: tests/assist-route.test.mjs] [VERIFIED: tests/call-ai.test.mjs]
@@ -315,7 +315,7 @@ await callAI({
 });
 ```
 
-Proxy calls forward `x-rolester-skill` and `x-rolester-action`; BYOK calls write usage rows directly when `root` is supplied. [VERIFIED: src/core/ai/call-ai.mjs]
+Proxy calls forward `x-careerrat-skill` and `x-careerrat-action`; BYOK calls write usage rows directly when `root` is supplied. [VERIFIED: src/core/ai/call-ai.mjs]
 
 ### Recommended Bounded Helper Shape
 ```js
@@ -386,7 +386,7 @@ Anthropic documents JSON outputs under `output_config.format` and says response 
 2. **RESOLVED: Does Phase 2 need OpenAI runtime support or only an abstraction that will not block it later?**
    - What we know: Current runtime is Anthropic-shaped through `callAI()` and `ai-proxy`; OpenAI docs are selected as cross-provider reference. [VERIFIED: src/core/ai/call-ai.mjs] [VERIFIED: src/cli/ai-proxy.mjs] [CITED: https://developers.openai.com/api/docs/guides/structured-outputs]
    - Answer reflected in plans: Phase 2 implements provider-neutral local API fields and Anthropic native structured-output request support through `callAI()` and the bounded helper. It does not add an OpenAI provider adapter in this phase because no locked decision or requirement scopes that provider implementation. [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-02-PLAN.md] [RESOLVED: .planning/phases/02-bounded-ai-foundation/02-03-PLAN.md]
-   - Cross-provider constraint retained: app routes must call Rolester's local helper/API shape instead of encoding provider-specific request bodies, preserving D-16. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
+   - Cross-provider constraint retained: app routes must call CareerRat's local helper/API shape instead of encoding provider-specific request bodies, preserving D-16. [VERIFIED: .planning/phases/02-bounded-ai-foundation/02-CONTEXT.md]
 
 3. **RESOLVED: Should provider failures use HTTP 500 or 502?**
    - What we know: Current proxy unreachable returns 502; route-local unexpected AI failures often return 500. [VERIFIED: src/cli/ai-proxy.mjs] [VERIFIED: src/cli/assist-route.mjs]
@@ -400,7 +400,7 @@ Anthropic documents JSON outputs under `output_config.format` and says response 
 | Node.js | Runtime and tests | yes | `v24.18.0` | None needed; package requires `>=24`. [VERIFIED: node --version] [VERIFIED: package.json] |
 | npm | Scripts and package metadata | yes | `11.16.0` | None needed. [VERIFIED: npm --version] |
 | Network to providers | Real AI integration tests | not required for unit plan | not probed with live key | Use fake SDK/upstream tests; current tests already do this. [VERIFIED: tests/assist-route.test.mjs] [VERIFIED: tests/call-ai.test.mjs] |
-| `ANTHROPIC_API_KEY` or `ROLESTER_AI_PROXY_URL` | Live AI calls | not required for hermetic tests | environment-dependent | No-AI envelope should return 501/manual metadata. [VERIFIED: src/core/ai/call-ai.mjs] |
+| `ANTHROPIC_API_KEY` or `CAREERRAT_AI_PROXY_URL` | Live AI calls | not required for hermetic tests | environment-dependent | No-AI envelope should return 501/manual metadata. [VERIFIED: src/core/ai/call-ai.mjs] |
 
 **Missing dependencies with no fallback:** none for planning and hermetic implementation tests. [VERIFIED: package.json]
 

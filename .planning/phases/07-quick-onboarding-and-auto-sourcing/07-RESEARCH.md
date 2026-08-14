@@ -440,7 +440,7 @@ export function countDeterministicSources(searchSources = {}, sourcedScan = {}) 
 
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
-| A1 | A SQLite run row plus in-process background promise is sufficient for first-run orchestration in this local app. | Standard Stack / Architecture Patterns | If Rolester needs multi-process workers, run locking and recovery need a stronger queue model. |
+| A1 | A SQLite run row plus in-process background promise is sufficient for first-run orchestration in this local app. | Standard Stack / Architecture Patterns | If CareerRat needs multi-process workers, run locking and recovery need a stronger queue model. |
 | A2 | Basic resume-text quality checks can detect empty/garbled DOCX extraction well enough for onboarding. | Architecture Patterns / Common Pitfalls | If checks are too loose, bad DOCX text can unlock `search_ready`; if too strict, valid resumes need manual fallback. |
 | A3 | Successful scans with attempted deterministic sources can be `Completed` even with zero jobs; runs with zero deterministic sources attempted must be `Failed` with actionable source-setup guidance. | Common Pitfalls | If the UI treats missing deterministic sources as success, users see a completed setup with nothing actionable to fix. |
 
@@ -464,7 +464,7 @@ export function countDeterministicSources(searchSources = {}, sourcedScan = {}) 
 |------------|-------------|-----------|---------|----------|
 | Node.js | Local APIs, `node:sqlite`, tests | Yes | `v24.18.0` | None needed. [VERIFIED: environment command] |
 | npm | Package install and scripts | Yes | `11.16.0` | None needed. [VERIFIED: environment command] |
-| Rolester CLI on PATH | Manual CLI smoke checks | No | `rolester` missing | Use `node bin/rolester.mjs`; it reports `0.5.2`. [VERIFIED: environment command] |
+| CareerRat CLI on PATH | Manual CLI smoke checks | No | `careerrat` missing | Use `node bin/careerrat.mjs`; it reports `0.5.2`. [VERIFIED: environment command] |
 | SQLite service | DB state | Built into Node | `node:sqlite` | No external service required. [VERIFIED: src/core/db/connection.mjs] |
 | Playwright | Existing PDF export and browser capture | Yes in lockfile | `1.60.0` | Not needed for first automatic search. [VERIFIED: package-lock.json] |
 | pandoc | DOCX/PDF packet export support | Yes | `pandoc 3.10` | Existing fallback uses LibreOffice or built-in OOXML. [VERIFIED: environment command] [VERIFIED: src/core/documents/export.mjs] |
@@ -474,7 +474,7 @@ export function countDeterministicSources(searchSources = {}, sourcedScan = {}) 
 - None for planning or local implementation. [VERIFIED: environment command]
 
 **Missing dependencies with fallback:**
-- `rolester` is not on PATH; use `node bin/rolester.mjs` for CLI smoke checks unless the user runs `npm link`. [VERIFIED: environment command] [VERIFIED: ./AGENTS.md]
+- `careerrat` is not on PATH; use `node bin/careerrat.mjs` for CLI smoke checks unless the user runs `npm link`. [VERIFIED: environment command] [VERIFIED: ./AGENTS.md]
 
 ## Validation Architecture
 

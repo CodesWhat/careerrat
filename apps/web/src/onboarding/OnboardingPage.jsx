@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { getInstalledAiRuntimes } from "../lib/api.js";
+import { getInstalledAiRuntimes, initOnboard } from "../lib/api.js";
 import { EngineScreen } from "./EngineScreen.jsx";
 import { InterviewSurface } from "./InterviewSurface.jsx";
 
@@ -31,7 +31,13 @@ export function OnboardingPage() {
 
   async function loadEngineState() {
     setPhase("loading");
+    let initialized = false;
     try {
+      // Onboarding is the explicit fresh-workspace boundary. Establish the
+      // canonical SQLite candidate store before either Paul or the file pane
+      // can write, so doctor, sourcing, and the dashboard read the same state.
+      await initOnboard();
+      initialized = true;
       const next = await getInstalledAiRuntimes();
       setRuntimeState(next);
       const selected = (next.runtimes ?? []).find(
@@ -44,6 +50,10 @@ export function OnboardingPage() {
       const readyCount = (next.runtimes ?? []).filter((r) => r.ready).length;
       setPhase(readyCount === 0 ? "gate" : "picker");
     } catch {
+      if (!initialized) {
+        setPhase("bootstrap-error");
+        return;
+      }
       // A probe failure shouldn't strand the user — fall through to the
       // gate screen, which has its own re-run-probe affordance.
       setRuntimeState({ selectedId: null, providerFallback: false, runtimes: [] });
@@ -88,6 +98,22 @@ export function OnboardingPage() {
     return (
       <div className="onboarding-app">
         <div className="onboarding-loading">Checking this computer…</div>
+      </div>
+    );
+  }
+
+  if (phase === "bootstrap-error") {
+    return (
+      <div className="onboarding-app">
+        <main className="onboarding-hero">
+          <div className="onboarding-hero__copy">
+            <h1>CareerRat couldn’t start setup.</h1>
+            <p>Your local workspace couldn’t be initialized. Nothing was saved or lost.</p>
+          </div>
+          <button type="button" className="btn btn--primary" onClick={() => void loadEngineState()}>
+            Try again
+          </button>
+        </main>
       </div>
     );
   }

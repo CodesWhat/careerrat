@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { ArtifactViewerModal } from "./ArtifactViewerModal.jsx";
+import { ArtifactViewerModal, handleArtifactViewerKeyDown } from "./ArtifactViewerModal.jsx";
 
 describe("ArtifactViewerModal", () => {
   it("renders server-provided HTML through the markdown branch", () => {
@@ -38,5 +38,29 @@ describe("ArtifactViewerModal", () => {
       />
     );
     expect(html).toMatch(/class="[^"]*packet-viewer__close[^"]*"/);
+  });
+
+  it("owns Escape while open and exposes modal semantics", () => {
+    const onClose = vi.fn();
+    const event = {
+      key: "Escape",
+      preventDefault: vi.fn(),
+      stopPropagation: vi.fn(),
+      stopImmediatePropagation: vi.fn(),
+    };
+
+    handleArtifactViewerKeyDown({ event, onClose });
+
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopImmediatePropagation).toHaveBeenCalledOnce();
+    const html = renderToStaticMarkup(
+      <ArtifactViewerModal
+        title="Resume preview"
+        artifact={{ html: "<p>Resume</p>" }}
+        onClose={onClose}
+      />
+    );
+    expect(html).toContain('aria-modal="true"');
   });
 });

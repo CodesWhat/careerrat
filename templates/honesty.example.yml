@@ -20,6 +20,9 @@ claims:
     - "work authorization"
 
 style:
+  prefer:
+    - "plain, direct language"
+    - "concrete evidence"
   avoid:
     - "buzzword-heavy summaries"
     - "unsupported superlatives"

@@ -45,6 +45,12 @@ describe("deriveJobCta", () => {
     }
   });
 
+  it("never sends an already-submitted application back to Evaluate when no gate was imported", () => {
+    for (const status of ["applied", "screen", "interview", "offer", "accepted"]) {
+      expect(deriveJobCta(application({ status }), null), status).toBeNull();
+    }
+  });
+
   it("locks in the current cut-gate behavior: no next-step CTA", () => {
     expect(deriveJobCta(application(), { gate: "cut" })).toBeNull();
   });

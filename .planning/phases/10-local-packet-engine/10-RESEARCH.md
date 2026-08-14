@@ -66,12 +66,12 @@ The user delegated implementation mechanics to planning and execution: exact rou
 | PKT-01 | Evaluate/gate, packet generation, and artifact stamping are app-local APIs that write through DB verbs. [CITED: .planning/REQUIREMENTS.md] | Use thin local packet routes over `requireDb()`, `evaluateGate()`, bounded AI helpers, and `appRegisterArtifact()`; replace ordinary `/api/skill/run` page actions. [CITED: src/cli/packet-route.mjs] [CITED: src/core/evaluate/gate.mjs] [CITED: src/core/db/verbs/app.mjs] |
 | PKT-02 | Packets include ATS-optimized resumes, cover letters when appropriate, and evidence-grounded answers with honesty/placeholder gates. [CITED: .planning/REQUIREMENTS.md] | Build on `src/core/documents/tailor.mjs`, which already selects evidence, blocks forbidden wording, lints placeholders, validates ATS-safe markdown, and builds resume, cover letter, and short-answer artifacts. [CITED: src/core/documents/tailor.mjs] |
 | PKT-03 | Company-specific questions such as "why this company" or recent tools are captured and answered; EEO, disability, and demographic questions are excluded from generated-answer automation. [CITED: .planning/REQUIREMENTS.md] | Use `fetchFormQuestions()`/manual paste normalization and preserve the existing Greenhouse/Ashby demographic-section exclusion behavior; add generated answers only for normalized non-EEO `questions[]`. [CITED: src/core/apply/form-questions.mjs] [CITED: config/form-questions.schema.json] |
-| PKT-04 | Exports support board-required formats, with PDF as standard and DOCX where upload workflows require it. [CITED: .planning/REQUIREMENTS.md] | Reuse `exportArtifact()` and `rolester export`: PDF is default, DOCX auto-detects pandoc, LibreOffice, then built-in OOXML fallback. [CITED: src/core/documents/export.mjs] [CITED: src/cli/export.mjs] |
+| PKT-04 | Exports support board-required formats, with PDF as standard and DOCX where upload workflows require it. [CITED: .planning/REQUIREMENTS.md] | Reuse `exportArtifact()` and `careerrat export`: PDF is default, DOCX auto-detects pandoc, LibreOffice, then built-in OOXML fallback. [CITED: src/core/documents/export.mjs] [CITED: src/cli/export.mjs] |
 </phase_requirements>
 
 ## Project Constraints (from AGENTS.md)
 
-- DB workspaces use `rolester data <verb>`/DB verbs for tracker-visible mutations; agents must not hand-edit generated `workspace/tracker.json` or `workspace/activity.jsonl` in DB mode. [CITED: AGENTS.md]
+- DB workspaces use `careerrat data <verb>`/DB verbs for tracker-visible mutations; agents must not hand-edit generated `workspace/tracker.json` or `workspace/activity.jsonl` in DB mode. [CITED: AGENTS.md]
 - Any grabbed posting must capture the full job description locally at grab time and mirror it to row artifact metadata; a link is not a substitute. [CITED: AGENTS.md]
 - Long generated artifacts belong under local workspace artifact paths such as `workspace/tailored/*`, while DB rows hold references and metadata. [CITED: AGENTS.md]
 - `current_base` and similar private compensation fields must never leave local config or appear in outbound packet prose. [CITED: AGENTS.md] [CITED: .agents/skills/tailor-application/SKILL.md]
@@ -110,7 +110,7 @@ External provider research supports the existing provider boundary: Greenhouse a
 | Library / Module | Version | Purpose | Why Standard |
 |------------------|---------|---------|--------------|
 | Node.js ESM runtime | v24.18.0 observed; project requires `>=24` | Route/core implementation, tests, built-in SQLite access | Matches repo engine and existing CLI/API modules. [VERIFIED: node --version] [CITED: package.json] |
-| Rolester SQLite DB verbs | Local code | Product source of truth and artifact stamping | `runVerb()` centralizes transaction, meta bump, activity, and export behavior; `appRegisterArtifact()` already stamps artifact paths/timestamps. [CITED: src/core/db/verbs/shared.mjs] [CITED: src/core/db/verbs/app.mjs] |
+| CareerRat SQLite DB verbs | Local code | Product source of truth and artifact stamping | `runVerb()` centralizes transaction, meta bump, activity, and export behavior; `appRegisterArtifact()` already stamps artifact paths/timestamps. [CITED: src/core/db/verbs/shared.mjs] [CITED: src/core/db/verbs/app.mjs] |
 | `src/cli/packet-route.mjs` | Local code | Existing packet list/detail/artifact HTTP surface | Already reads SQLite-derived application rows and guards artifact path traversal; extend rather than replace. [CITED: src/cli/packet-route.mjs] |
 | `src/core/evaluate/gate.mjs` | Local code | Deterministic gate prework | Already evaluates keep/cut signals, compensation, excluded companies, sponsorship mismatch, and renders gate blocks. [CITED: src/core/evaluate/gate.mjs] |
 | `runBoundedAI()` / `runStructuredOneshot()` | Local code | Schema-validated finite AI assists | Existing helpers provide labels, schema validation, corrective retry, no-AI 501/manual envelopes, and telemetry-safe metadata. [CITED: src/core/ai/bounded-ai.mjs] [CITED: src/core/ai/structured-oneshot.mjs] |
@@ -332,9 +332,9 @@ const excludedSelfId = Boolean(captured.demographicSectionPresent);
 
 | Category | Items Found | Action Required |
 |----------|-------------|-----------------|
-| Stored data | No active `.rolester/db/rolester.db` exists in this checkout; `node src/cli/data.mjs status --json` fails closed. Existing legacy `workspace/tracker.json`, `workspace/activity.jsonl`, snapshots, captures, and `workspace/tailored/*` artifacts exist. [VERIFIED: command probe] | Implementation tests should use temp DB fixtures; product smoke requires explicit `data init`/`data import` before live packet mutation. Existing artifact paths must remain readable; do not mass-migrate legacy packet files unless a DB import task explicitly owns it. |
-| Live service config | `.internal/ai.env` exists, but no `ANTHROPIC_API_KEY` or `ROLESTER_AI_PROXY_URL` was visible from shell/env-file probe. [VERIFIED: command probe] | No-AI 501/manual review must be a planned acceptance path; do not require AI configuration for deterministic packet UI to load. |
-| OS-registered state | `.internal/*pid` and `.rolester/internal/tracker-dev.pid` files exist for local dev servers; no system-level launchd/systemd migration was found in the repo scan. [VERIFIED: command probe] | Do not edit dev-server PID files for Phase 10; route tests should not depend on a running dashboard. |
+| Stored data | No active `.careerrat/db/careerrat.db` exists in this checkout; `node src/cli/data.mjs status --json` fails closed. Existing legacy `workspace/tracker.json`, `workspace/activity.jsonl`, snapshots, captures, and `workspace/tailored/*` artifacts exist. [VERIFIED: command probe] | Implementation tests should use temp DB fixtures; product smoke requires explicit `data init`/`data import` before live packet mutation. Existing artifact paths must remain readable; do not mass-migrate legacy packet files unless a DB import task explicitly owns it. |
+| Live service config | `.internal/ai.env` exists, but no `ANTHROPIC_API_KEY` or `CAREERRAT_AI_PROXY_URL` was visible from shell/env-file probe. [VERIFIED: command probe] | No-AI 501/manual review must be a planned acceptance path; do not require AI configuration for deterministic packet UI to load. |
+| OS-registered state | `.internal/*pid` and `.careerrat/internal/tracker-dev.pid` files exist for local dev servers; no system-level launchd/systemd migration was found in the repo scan. [VERIFIED: command probe] | Do not edit dev-server PID files for Phase 10; route tests should not depend on a running dashboard. |
 | Secrets/env vars | AI key storage is owned by `src/core/ai/ai-env.mjs`; AGENTS.md states values are chmod `0600` and never echoed back. [CITED: AGENTS.md] | Packet prompts/envelopes must not log raw prompts, model text, current compensation, or secrets. |
 | Build artifacts | Existing generated packet files are present under `workspace/tailored/*`; Playwright browser cache, pandoc, and soffice are available. [VERIFIED: command probe] | Preserve artifact compatibility and write new packets under deterministic workspace paths. Planner should include export smoke tests for PDF and DOCX optional path. |
 
@@ -464,7 +464,7 @@ for (const answer of proposal.body.answers) {
 | Old Approach | Current Approach | When Changed | Impact |
 |--------------|------------------|--------------|--------|
 | Skills are the ordinary product runtime for packet work | Local API and DB-owned packet orchestration is the Phase 10 target | Phase 10 planning context, 2026-07-06 | Planner should replace default `tailor-application`/`answer-question` calls, not wrap them. [CITED: .planning/phases/10-local-packet-engine/10-CONTEXT.md] |
-| Generated tracker/activity files are product state | SQLite DB is canonical; tracker/activity are generated compatibility exports | Phase 6 decisions | Packet APIs must read/write DB and DB verbs. [CITED: .planning/phases/ROL-API-06-canonical-db-app-shell/06-CONTEXT.md] [CITED: AGENTS.md] |
+| Generated tracker/activity files are product state | SQLite DB is canonical; tracker/activity are generated compatibility exports | Phase 6 decisions | Packet APIs must read/write DB and DB verbs. [CITED: .planning/phases/06-canonical-db-app-shell/06-CONTEXT.md] [CITED: AGENTS.md] |
 | AI output trusted by prose instruction | Bounded AI returns schema-validated finite JSON, with deterministic validation around it | Phase 2 decisions | Packet engine should require schemas, labels, manual fallback, and deterministic validators. [CITED: src/core/ai/bounded-ai.mjs] [CITED: src/core/ai/structured-oneshot.mjs] |
 | Provider application questions handled manually by skills | Greenhouse/Ashby/manual normalizers exist locally | Existing code before Phase 10 | Phase 10 can promote these into the product packet path. [CITED: src/core/apply/form-questions.mjs] |
 | DOCX treated as always useful | PDF is the standard packet format; DOCX only when board/upload requires it | Phase 10 locked decision | Planner should make format selection explicit. [CITED: .planning/phases/10-local-packet-engine/10-CONTEXT.md] |
@@ -511,8 +511,8 @@ for (const answer of proposal.body.answers) {
 |------------|-------------|-----------|---------|----------|
 | Node.js | Implementation/tests | yes | v24.18.0 | none needed. [VERIFIED: command probe] |
 | npm | Dependency install/test scripts | yes | 11.16.0 | none needed. [VERIFIED: command probe] |
-| `rolester` shell command | AGENTS-style operator commands | no | command not found | Use `node src/cli/*.mjs` from repo or add explicit `npm link` setup task. [VERIFIED: command probe] |
-| SQLite DB in this checkout | Live product smoke | no | `.rolester/db/rolester.db` absent | Use temp DB tests; live smoke requires explicit `data init`/`data import`. [VERIFIED: command probe] |
+| `careerrat` shell command | AGENTS-style operator commands | no | command not found | Use `node src/cli/*.mjs` from repo or add explicit `npm link` setup task. [VERIFIED: command probe] |
+| SQLite DB in this checkout | Live product smoke | no | `.careerrat/db/careerrat.db` absent | Use temp DB tests; live smoke requires explicit `data init`/`data import`. [VERIFIED: command probe] |
 | `node:sqlite` | DB layer | yes | Node built-in | none needed. [VERIFIED: command probe] |
 | AI route | Bounded AI assists | no configured route visible | `.internal/ai.env` exists, but no key/proxy detected | `runBoundedAI()` no-AI 501/manual envelope. [VERIFIED: command probe] [CITED: src/core/ai/bounded-ai.mjs] |
 | Playwright Chromium | PDF export | yes | Chromium cache present; `playwright@^1.60.0` installed | Planner should not upgrade Playwright without checkpoint. [VERIFIED: command probe] [CITED: package.json] |
@@ -524,7 +524,7 @@ for (const answer of proposal.body.answers) {
 - Active product DB for a real live packet mutation in this checkout; implementation can proceed with temp DB tests, but live validation needs explicit DB initialization/import. [VERIFIED: command probe]
 
 **Missing dependencies with fallback:**
-- `rolester` command on PATH: use repo-local `node src/cli/*.mjs` commands or add `npm link` setup.
+- `careerrat` command on PATH: use repo-local `node src/cli/*.mjs` commands or add `npm link` setup.
 - AI route: bounded AI routes must return manual/no-AI envelope.
 
 ## Validation Architecture

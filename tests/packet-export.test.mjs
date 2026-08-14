@@ -253,6 +253,51 @@ test("exportPacketArtifacts defaults to ATS-safe PDFs and keeps markdown sources
   );
 });
 
+test("exportPacketArtifacts preserves generation readiness and gaps", async () => {
+  const repoRoot = tempRepo();
+  const sources = seedPacketSources(repoRoot, "northstar-staff-platform-engineer");
+  importTrackerFixture(repoRoot, [
+    {
+      id: "app-export",
+      company: "Northstar",
+      role: "Staff Platform Engineer",
+      status: "reviewed-hold",
+      artifacts: sources,
+      packetManifest: {
+        applicationId: "app-export",
+        generatedAt: "2026-07-06T14:00:00Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            message: "answers artifact skipped — no application questions captured yet",
+          },
+        ],
+        artifacts: sources,
+      },
+    },
+  ]);
+  const { exportPacketArtifacts } = await importPacketExports();
+
+  await exportPacketArtifacts({
+    repoRoot,
+    env: tempDownloadsEnv(),
+    appId: "app-export",
+    exportArtifact: fakeExporter([]),
+    now: () => new Date("2026-07-06T15:00:00Z"),
+  });
+
+  const manifest = readApp(repoRoot).packetManifest;
+  assert.equal(manifest.generatedAt, "2026-07-06T14:00:00Z");
+  assert.equal(manifest.exportedAt, "2026-07-06T15:00:00.000Z");
+  assert.equal(manifest.uploadReady, false);
+  assert.equal(manifest.status, "reviewable");
+  assert.equal(manifest.gapCount, 1);
+  assert.equal(manifest.gaps.length, 1);
+});
+
 test("exportPacketArtifacts archives a prior same-named Downloads PDF on re-export", async () => {
   const repoRoot = tempRepo();
   const sources = seedPacketSources(repoRoot);

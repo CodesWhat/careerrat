@@ -56,12 +56,13 @@ function hasResumeArtifact(row) {
 // rows have their own promote/skip flow (Phase A), not this apply ladder.
 export function deriveJobCta(row, gate) {
   if (row?.source !== "application" || row.terminal) return null;
+  if (!PRE_APPLIED_STATUSES.has(row.status)) return null;
   if (!gate) return { label: "Evaluate", section: "evaluate" };
   const verdict = String(gate.gate || "").toLowerCase();
   if (verdict === "keep" && !hasResumeArtifact(row)) {
     return { label: "Generate documents", section: "documents" };
   }
-  if (hasResumeArtifact(row) && PRE_APPLIED_STATUSES.has(row.status)) {
+  if (hasResumeArtifact(row)) {
     return { label: "Mark applied", section: "status" };
   }
   return null;

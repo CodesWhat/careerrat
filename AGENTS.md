@@ -46,18 +46,18 @@ let's get started" (or anything that isn't a specific task):
    - **Go through everything** the profile needs (identity, targeting buckets,
      comp floor, location posture, keep/cut signals, evidence, honesty boundaries)
      — but lead with confirmations and fill gaps with questions.
-   - **Basic vs Advanced mode.** At STEP 0a `ingest-profile` asks whether the user
-     wants Basic (read-only/manual workflow, no browser automation) or Advanced
-     (opts into the authenticated browser + mail capabilities — still per-capability
-     opt-in and defaults OFF; `careerrat automation` governs each switch). This is one
-     question, not a form; Advanced just surfaces the capability install guidance during
-     setup. See the **Browser Automation Contract** for the full permission model.
-   - **Deep vs Shallow + resume-later.** `ingest-profile` also offers deep (full
-     interview now) or shallow (minimum-viable config now, defer the rest). Partial
-     progress saves to `workspace/setup-state.json` after each step — the user can
-     stop and resume by re-running `ingest-profile` (or `careerrat ingest`), which
-     picks up where it left off. `careerrat doctor` reports whether setup is complete
-     or in progress.
+   - **Keep implementation modes internal.** Setup defaults to the full conversational
+     interview with focused questions. Do not ask candidates to choose an automation,
+     depth, or question-style mode before they know the product. When a concrete task
+     later needs browser, mail, calendar, or messaging access, explain that one
+     capability and ask for that permission only. See the **Browser Automation
+     Contract** for the permission model.
+   - **Save progress continuously.** Partial progress saves to
+     `workspace/setup-state.json` after each step. The user can stop and resume by
+     re-running `ingest-profile` (or `careerrat ingest`), which picks up where it left
+     off. If the user explicitly asks for a shorter setup, defer nonessential sections
+     then, without front-loading a mode chooser. `careerrat doctor` reports whether
+     setup is complete or in progress.
 4. **Voice input is fine.** The onboarding interview and paste-dumps are
    conversational by nature — the user can speak answers using any dictation or
    voice-to-text tool (macOS built-in Dictation, Wispr Flow, or similar) instead
@@ -151,7 +151,7 @@ The dashboard is part of the live CareerRat workspace, not a one-off artifact. I
 any active job-search session, make sure `careerrat tracker-dev` is serving the
 tracker before telling the user to open the dashboard.
 
-- The normal entry point, `careerrat start [agent]`, starts the dashboard as a
+- The normal entry point, `careerrat start [agent]`, starts the local app as a
   separate local process and records `.internal/tracker-dev.pid` plus
   `.internal/tracker-dev.log`. Agents opened directly in the repo must perform
   the same check themselves.
@@ -171,20 +171,19 @@ tracker before telling the user to open the dashboard.
   tell the user the actual URL.
 - After changing `workspace/tracker.json`, `candidate/`, dashboard source, or
   other tracker-visible data, keep the dev server running so the open page hot
-  reloads. Re-render with `careerrat tracker` only when a static snapshot is
-  specifically needed.
+  reloads. Run `careerrat tracker` when a recovery snapshot and summary are
+  needed; it no longer publishes a second dashboard.
 - **Live reload is event-driven, not a poll.** `careerrat tracker-dev` watches
   `workspace/tracker.json` (and `activity.jsonl`, `candidate/modes.yml`,
-  `src/core/tracker/*`) with `fs.watch`, re-renders via the canonical CLI, and
+  `src/core/tracker/*`) with `fs.watch`, refreshes its canonical view model, and
   pushes a Server-Sent-Events `reload` to the open page. A write to the source
   of truth reaches the screen within ~120ms — there is no refresh timer.
-- **The static view does not refresh.** A `workspace/tracker.html` opened
-  directly (or served without `careerrat tracker-dev`) fetches its data once at page load:
-  the "last updated" pill is accurate at open but then only ages, it never
-  re-reads. For any live session, point the user at `careerrat tracker-dev`
-  (`http://localhost:7777`), not the static file.
-- The dashboard is read-only. Agents and skills remain the writers of
-  `workspace/tracker.json` and related workspace files.
+- **There is one dashboard.** The old static tracker page is retired. For every
+  live session, point the user at `careerrat tracker-dev`
+  (`http://localhost:7777`).
+- The app writes supported local actions through the canonical domain layer.
+  Agents and skills own longer or tool-heavy workflows. No surface hand-edits
+  generated `workspace/tracker.json` in a database-backed workspace.
 
 ## Actionability Write-Back Contract
 
@@ -227,12 +226,11 @@ following as one logical write, in order, every time:
    `search-jobs`/`relationship-sourcing` when they add rows). Skip it for pure
    comms/scheduling writes (`email-comms`, `schedule-meeting`, `calendar-sync`,
    `interview-prep` dossier saves) — those don't alter the analytics block. Must
-   run **before** re-render so the dashboard picks up the fresh block.
-4. **Re-render:** `careerrat tracker` so the D module + shell publish and
-   the open dev-server page hot-reloads. This re-render IS the hand-off to the
-   dashboard — there is no separate "dashboard agent"; the SSE live-reload closes
-   the loop automatically. Never end a tracker-mutating skill without it (every
-   write path, including early-exit / CUT branches).
+   run **before** the verification snapshot so the dashboard reads the fresh block.
+4. **Snapshot:** run `careerrat tracker` as the durable recovery checkpoint.
+   The open app reloads from the source-file write itself; there is no separate
+   renderer or dashboard agent. Never end a legacy tracker mutation without this
+   checkpoint, including early-exit and CUT branches.
 5. **Log one Activity Pulse event** (`careerrat activity append …`) for any
    tracker-visible change, so the timeline and the pill agree. Include
    `--skill <skill-id>` and `--operation <resource:verb>` (e.g.
@@ -317,11 +315,10 @@ verbs), then exports — do not repeat these by hand in DB mode:
   `app register-artifact`, `comm upsert`, `comm append-message`,
   `comm mark-sent`) skip it — same carve-out as pure comms/scheduling writes.
 - **Export to legacy files**, immediately after commit: `workspace/tracker.json`
-  + `workspace/activity.jsonl` are regenerated so the existing render/dashboard
-  keeps working untouched. If `careerrat tracker-dev` is running, its `fs.watch`
-  on `tracker.json` picks this up and live-reloads — no separate re-render
-  step needed. For a static snapshot, or when the dev server isn't running,
-  still run `careerrat tracker`.
+  + `workspace/activity.jsonl` are regenerated for compatibility and recovery.
+  If `careerrat tracker-dev` is running, its `fs.watch` on `tracker.json` picks
+  this up and live-reloads. Run `careerrat tracker` only when a separate recovery
+  snapshot and summary are useful.
 - **`app set-status`** applies the interview round-completion clearing
   automatically (nulls `nextInterviewAt`/`interviewNote`, and `interviewAt` too
   when no next round is booked) — do not hand-write those nulls in DB mode.
@@ -412,8 +409,8 @@ The company chip on every Jobs row resolves its avatar in one fixed order
    If set, it wins. This is the **standard field a skill writes** when it has a real
    logo in hand: the user asked you to fetch the employer's logo, or you captured one
    while applying. Write the path/URL here and the dashboard picks it up — no other
-   wiring. A relative path resolves against the generated `workspace/tracker.html`
-   (the demo seed uses `../assets/logos/<slug>.png`); a full `https://` URL also works.
+   wiring. A relative path resolves from the current app route (the demo seed uses
+   `../assets/logos/<slug>.png`); a full `https://` URL also works.
 2. **logo.dev lookup** — only when `settings.logoToken` is set (a PRIVATE, opt-in
    publishable token; off by default). Keys on a clean employer domain, else the
    company name. This is the zero-upkeep path for real searches that opt in.
@@ -470,7 +467,7 @@ it is mirrored by the classifier in `src/core/tracker/dashboard-data.js`
 
 The user will often just paste or drop content with no instruction. Take whatever
 they give, **classify it, route it to the owning skill, capture it into the
-tracker, and re-render** — without making them name a skill.
+tracker, and confirm the live app refresh** — without making them name a skill.
 
 **Nothing the user pastes is ever dropped.** Every paste — a job, an email, a
 name, a link, a stray fact, a screenshot, an offhand note — gets captured
@@ -514,7 +511,7 @@ Rules for intake:
   record it touches (application, company, communication, or profile) so it feeds
   fit, drafts, prep, or comp. A capture that doesn't change a downstream decision
   is incomplete.
-- After capturing, re-render the tracker so the new data shows immediately.
+- After capturing, confirm the tracker write reached the live app.
 
 ## Intent Routing
 
@@ -774,8 +771,8 @@ Memory**.
 
 When the user states a **new gate mid-flow** ("never Palantir", "below $190K is a
 no", "add ML-research as a cut", "OpenAI capped me at 5/180d"), the skill that hears
-it **writes it to canonical candidate config** so every other skill inherits it — then
-re-renders / confirms. A stated gate must never live only in chat, and must never be
+it **writes it to canonical candidate config** so every other skill inherits it, then
+confirms the live app refresh. A stated gate must never live only in chat, and must never be
 hardcoded into a skill.
 
 - **Mechanism — use the `gate` helper, don't hand-edit YAML.** `careerrat gate --
@@ -991,7 +988,7 @@ event at the end of that action** — the same "the writer records it" disciplin
   | `search-jobs` | `sourced` | agent | after a source run promotes roles into `sourced[]` — one summary event ("N roles sourced from `<source>`") |
   | `evaluate-job` | `evaluated` | agent | after the gate resolves (title carries the KEEP/CUT/REVIEW verdict) |
   | `tailor-application` | `tailored` | agent | after the résumé / cover-letter artifacts are built |
-  | `apply-job` | `applied` | agent | after STEP 9 writes the application row and re-renders |
+  | `apply-job` | `applied` | agent | after STEP 9 writes the application row and confirms the live refresh |
   | `email-comms` | `drafted` (awaiting send) / `message` (sent) | agent | after the message is persisted to `communications[].messages[]` |
   | `schedule-meeting` | `drafted` (needs-user) | agent | after the scheduling reply is drafted + scheduling state written (a booked meeting's stage change is handed to `track-outcomes` / `interview-prep`, which log it) |
   | `track-outcomes` | `status_change` / `interview` / `offer` / `failure` | world | after the outcome is recorded (it is the only writer of status transitions, including those handed up by `sync-status`) |
@@ -1150,7 +1147,7 @@ loops so prep compounds instead of restarting each round.
   thin spots — bank it now, never gate on a missing detail. Record each gap (a metric
   to confirm, a concrete before/after, a detail that conflicts with committed code) as
   an `open_questions[]` string on the story. `add --write` auto-mirrors `open_questions`
-  into `tracker.storyEnrichment`, which the read-only dashboard renders as a
+  into `tracker.storyEnrichment`, which the local app renders as a
   self-clearing **"give me more context"** card in the Next Steps queue (one per thin
   story). The story's `open_questions` is the source of truth; `tracker.storyEnrichment`
   is the derived browser-side mirror. Clearing a story's `open_questions` and re-`add
@@ -1235,8 +1232,10 @@ in-platform messaging, relationship sourcing, and any other Layer-3 work fan out
 has no such limit and parallelizes freely. The consent predicate (`mayRun()`) always
 runs on the **orchestrator** before any spawn — a subagent never re-checks or bypasses it.
 
-**Local-only + safety.** Screenshots, scraped bodies, and session tokens never leave
-`workspace/`; `comp-guard` still applies to anything outbound; **halt and ask** on a
+**Local storage + safety.** Store screenshots and scraped bodies only under
+`workspace/`; browser tools and their configured providers may process the page
+content they read. Session tokens stay in the selected browser profile and are not
+copied into CareerRat state. `comp-guard` still applies to anything outbound; **halt and ask** on a
 captcha, a 2FA prompt, a mail login wall, or an application-limit blocker.
 **Captures are scratch + hidden by default.** Any screenshot or browser artifact
 (Playwright, the session browser, confirmation shots, render checks) is throwaway:

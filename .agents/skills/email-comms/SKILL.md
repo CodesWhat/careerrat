@@ -5,7 +5,7 @@ description: Draft, reply to, follow up on, summarize, and track job-search emai
 
 # email-comms
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing in-chat commentary around drafts. Apply the register from AGENTS.md#mode-switches. The **drafted artifact itself** (email subject + body) is always written in full regardless of register — `writing-style.md` governs its tone. Register governs the **agent commentary**: `exec-summary` = draft only + one action line; `standard` = draft + short bullets on intent/next-step; `technical` = draft + thread-context summary + strategy note; `verbose` = draft + full thread reconstruction + alternatives.
 
@@ -27,7 +27,7 @@ description: Draft, reply to, follow up on, summarize, and track job-search emai
 - updated `workspace/tracker.json` — communications[].messages[] append + status fields
 - optional `workspace/comms/<thread-id>.md` for long raw thread bodies
 - `~/Downloads/careerrat/email-<company-slug>-<yyyy-mm-dd>.txt` — convenience copy of the draft (`workspace/` stays source of truth)
-- re-rendered tracker dashboard
+- tracker snapshot checkpoint
 
 ---
 
@@ -45,7 +45,7 @@ Treat this as an `outbound-follow-up` (or `thank-you` if the notification kind i
 2. Capture the outbound draft message (STEP 6a/b).
 3. Advance the record status and reset `nextActionDue` (STEP 6b / STEP 8 timer reset).
 4. Persist the baked draft onto the record (STEP 8 — `comm.draft` or `app.followUp.draft`) so the notification bell can show it ready to send.
-5. Validate and re-render — the mode branch from STEP 6(d)/(e) and STEP 8 items 6–7 (DB workspace: `careerrat data verify` + `careerrat tracker --verify`; legacy: `careerrat tracker --verify` then `careerrat tracker`) — this clears the timer from the Needs Attention panel for that item.
+5. Validate and snapshot — the mode branch from STEP 6(d)/(e) and STEP 8 items 6–7 (DB workspace: `careerrat data verify` + `careerrat tracker --verify`; legacy: `careerrat tracker --verify` then `careerrat tracker`) — this clears the timer from the Needs Attention panel for that item.
 
 ---
 
@@ -71,7 +71,7 @@ When the user says they already sent a message, already replied, or already comp
    - **Legacy workspace (no DB):** write to `tracker.json` in one operation — no partial writes.
 3. **Validate:**
    - **DB workspace:** `careerrat data verify` (re-exports + domain integrity), then `careerrat tracker --verify` (schema-level parity).
-   - **Legacy workspace (no DB):** run `careerrat tracker --verify`, confirm clean exit, then **re-render** (`careerrat tracker`).
+   - **Legacy workspace (no DB):** run `careerrat tracker --verify`, confirm clean exit, then **snapshot** (`careerrat tracker`).
 
 The agent not having performed the action is not a reason to leave the CTA up. Record it immediately and clear state.
 
@@ -326,8 +326,8 @@ Execute the following mutation sequence in order:
 
 Confirm it exits clean before proceeding. If it fails, fix the JSON (legacy) or the DB row via another verb call (DB — never hand-edit `tracker.json`, it is a regenerated file) and re-run.
 
-**(e) Re-render:**
-- **DB workspace:** already exported by the calls above; if `careerrat tracker-dev` is running its `fs.watch` already picked it up. For a static snapshot, or to confirm by hand, still run `careerrat tracker`.
+**(e) Snapshot:**
+- **DB workspace:** already exported by the calls above; if `careerrat tracker-dev` is running its `fs.watch` already picked it up. Run `careerrat tracker` only for a recovery checkpoint.
 - **Legacy workspace (no DB):** run `careerrat tracker`.
 
 Then log it to the Activity Pulse feed (the dashboard's live timeline — see **Activity Pulse** in AGENTS.md). If the message is a draft awaiting the user to send, log it as needing the user; if it was already sent, log it sent:
@@ -395,8 +395,8 @@ When the user asks to work follow-ups (or `careerrat tracker --followups` surfac
 6. Validate:
    - **DB workspace:** the calls above already persisted and auto-exported. Run `careerrat data verify` and `careerrat tracker --verify`.
    - **Legacy workspace (no DB):** `careerrat tracker --verify` (also: `npm run verify:tracker`). Confirm clean exit before proceeding.
-7. Re-render:
-   - **DB workspace:** already exported; run `careerrat tracker` to confirm or refresh a static snapshot.
+7. Snapshot:
+   - **DB workspace:** already exported; run `careerrat tracker` only for a recovery checkpoint.
    - **Legacy workspace (no DB):** `careerrat tracker` (so the timer clears from the dashboard).
 
 ---
@@ -414,7 +414,7 @@ For each item returned by `computeFollowUps`:
    - `thank-you`: warm, specific thank-you referencing one detail from `applications[].conversations[]`; keep to 3–5 lines.
    - `needs-reply` / `comm-due` / `waiting-stale`: advance the existing thread per STEP 5's follow-up guidance.
 3. **Persist** the draft to the record (see STEP 8 — "Persist a baked draft" above, including its DB-mode branch).
-4. **Validate and re-render** after all drafts are written — same mode branch as STEP 8 items 6–7: DB workspace runs `careerrat data verify` + `careerrat tracker --verify`; legacy workspace runs `careerrat tracker --verify` then `careerrat tracker`.
+4. **Validate and snapshot** after all drafts are written — same mode branch as STEP 8 items 6–7: DB workspace runs `careerrat data verify` + `careerrat tracker --verify`; legacy workspace runs `careerrat tracker --verify` then `careerrat tracker`.
 
 ---
 

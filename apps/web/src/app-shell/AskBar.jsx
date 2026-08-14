@@ -326,6 +326,8 @@ export function AskBar() {
       resultText: null,
       error: null,
       noEngine: false,
+      request: action,
+      retryable: false,
     });
     setText("");
     setPreview(null);
@@ -351,6 +353,7 @@ export function AskBar() {
               status: isError ? "error" : "done",
               resultText: isError ? null : last?.text || null,
               error: isError ? last?.text || "The action could not be completed." : null,
+              retryable: isError,
               engine: last?.metadata?.engine || null,
               elapsedMs:
                 typeof last?.metadata?.elapsedMs === "number"
@@ -361,7 +364,9 @@ export function AskBar() {
       );
     } catch (err) {
       if (turnIdRef.current !== turnId) return;
-      setTurn((t) => (t ? { ...t, status: "error", error: describeAskBarError(err) } : t));
+      setTurn((t) =>
+        t ? { ...t, status: "error", error: describeAskBarError(err), retryable: true } : t
+      );
     }
   }
 
@@ -379,6 +384,8 @@ export function AskBar() {
       resultText: null,
       error: null,
       noEngine: false,
+      request: { text: trimmed, preview: previewAtCommit },
+      retryable: false,
     });
     setText("");
     setPreview(null);
@@ -392,6 +399,7 @@ export function AskBar() {
               status: "error",
               noEngine: true,
               error: "No AI engine is configured yet. Connect one in Settings.",
+              retryable: false,
             }
           : t
       );
@@ -418,12 +426,15 @@ export function AskBar() {
                   ? last.metadata.elapsedMs
                   : Date.now() - startedAt,
               noEngine: isNoEngine,
+              retryable: isError && !isNoEngine,
             }
           : t
       );
     } catch (err) {
       if (turnIdRef.current !== turnId) return;
-      setTurn((t) => (t ? { ...t, status: "error", error: describeAskBarError(err) } : t));
+      setTurn((t) =>
+        t ? { ...t, status: "error", error: describeAskBarError(err), retryable: true } : t
+      );
     }
   }
 
@@ -442,6 +453,8 @@ export function AskBar() {
       startedAt,
       item: null,
       error: null,
+      request: { text: trimmed },
+      retryable: false,
     });
     setText("");
     setPreview(null);
@@ -456,7 +469,9 @@ export function AskBar() {
     } catch (err) {
       if (turnIdRef.current !== turnId) return;
       setTurn((t) =>
-        t && t.kind === "capture" ? { ...t, status: "error", error: describeCaptureError(err) } : t
+        t && t.kind === "capture"
+          ? { ...t, status: "error", error: describeCaptureError(err), retryable: true }
+          : t
       );
     }
   }
@@ -471,6 +486,8 @@ export function AskBar() {
       startedAt,
       item: null,
       error: null,
+      request: { file },
+      retryable: false,
     });
     setText("");
     setPreview(null);
@@ -485,7 +502,9 @@ export function AskBar() {
     } catch (err) {
       if (turnIdRef.current !== turnId) return;
       setTurn((t) =>
-        t && t.kind === "capture" ? { ...t, status: "error", error: describeCaptureError(err) } : t
+        t && t.kind === "capture"
+          ? { ...t, status: "error", error: describeCaptureError(err), retryable: true }
+          : t
       );
     }
   }
@@ -578,6 +597,25 @@ export function AskBar() {
     if (file) await ingestFile(file);
   }
 
+  function retryTurn() {
+    if (!turn?.retryable) return;
+    if (turn.kind === "answer" && turn.request?.text) {
+      void commitAnswer(turn.request.text, turn.request.preview || null);
+      return;
+    }
+    if (turn.kind === "action" && turn.request) {
+      void commitAction(turn.request);
+      return;
+    }
+    if (turn.kind === "capture" && turn.request?.text) {
+      void commitCaptureText(turn.request.text);
+      return;
+    }
+    if (turn.kind === "capture" && turn.request?.file) {
+      void commitCaptureFile(turn.request.file);
+    }
+  }
+
   const captureRows = Math.min(8, Math.max(3, text.split("\n").length));
 
   return (
@@ -600,6 +638,7 @@ export function AskBar() {
             onConfirm={handleConfirmIntake}
             onReclassify={handleReclassifyIntake}
             onDismiss={handleDismissIntake}
+            onRetry={retryTurn}
           />
         ) : null}
         {needsYouOpen ? (
@@ -887,7 +926,15 @@ function AskBarNeedsYouList({
   );
 }
 
-function AskBarTurn({ turn, decideBusyId, decideError, onConfirm, onReclassify, onDismiss }) {
+function AskBarTurn({
+  turn,
+  decideBusyId,
+  decideError,
+  onConfirm,
+  onReclassify,
+  onDismiss,
+  onRetry,
+}) {
   if (turn.kind === "capture") {
     if (turn.status === "running") {
       return (
@@ -900,6 +947,11 @@ function AskBarTurn({ turn, decideBusyId, decideError, onConfirm, onReclassify, 
       return (
         <div className="ask-bar__turn">
           <p className="ask-bar__error">{turn.error}</p>
+          {turn.retryable ? (
+            <Button variant="secondary" onClick={onRetry}>
+              Try again
+            </Button>
+          ) : null}
         </div>
       );
     }
@@ -933,6 +985,11 @@ function AskBarTurn({ turn, decideBusyId, decideError, onConfirm, onReclassify, 
       <div className="ask-bar__turn">
         <p className="ask-bar__error">{turn.error}</p>
         {turn.noEngine ? <EngineReceipt noEngine /> : null}
+        {turn.retryable ? (
+          <Button variant="secondary" onClick={onRetry}>
+            Try again
+          </Button>
+        ) : null}
       </div>
     );
   }

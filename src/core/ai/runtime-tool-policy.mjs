@@ -50,7 +50,9 @@ function pathDecision({ repoRoot, skill, toolName, input }) {
     leaf === ".env" ||
     leaf.startsWith(".env.")
   ) {
-    return deny(`${toolName} cannot access credentials, internal state, or paths outside CareerRat`);
+    return deny(
+      `${toolName} cannot access credentials, internal state, or paths outside CareerRat`
+    );
   }
 
   const allowedRoots = [

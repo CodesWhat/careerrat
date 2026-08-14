@@ -15,14 +15,84 @@ test("Dashboard adapterbuilds live UI state from tracker JSON", async () => {
     now: new Date("2026-06-15T13:30:00.000Z"),
   });
 
-  assert.equal(vm.stats.inPlay, 23);
-  assert.equal(vm.stats.responseRate, 34);
-  assert.equal(vm.stats.interviews, 4);
+  assert.equal(vm.stats.inPlay, 22);
+  assert.equal(vm.stats.responseRate, 32);
+  assert.equal(vm.stats.interviews, 3);
   assert.equal(vm.jobs.totalCount, tracker.applications.length + tracker.sourced.length);
-  assert.equal(vm.jobs.visibleCount, 32);
+  assert.equal(vm.jobs.visibleCount, 31);
   assert.ok(vm.calendar.weeks[0].days.some((day) => day.events.length > 0));
   assert.ok(vm.latestRoles.some((role) => role.company === "Aperture Science"));
   assert.ok(vm.jobs.sankey.nodes.length > 0);
+});
+
+test("Jobs Sankey uses canonical semantic stages and never numbered rounds", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        {
+          id: "technical-active",
+          company: "Northstar",
+          role: "Platform Engineer",
+          status: "interview",
+          channel: "board",
+          conversations: [{ kind: "technical", date: "2026-08-10" }],
+        },
+        {
+          id: "hm-rejected",
+          company: "Juniper",
+          role: "Backend Engineer",
+          status: "rejected",
+          channel: "recruiter",
+          conversations: [{ kind: "hiring manager", date: "2026-08-11" }],
+        },
+        {
+          id: "awaiting",
+          company: "Aperture",
+          role: "Staff Engineer",
+          status: "applied",
+          channel: "board",
+        },
+      ],
+      sourced: [],
+      sources: [],
+      communications: [],
+    },
+    { now: new Date("2026-08-14T12:00:00.000Z") }
+  );
+
+  const nodes = new Map(vm.jobs.sankey.nodes.map((node) => [node.id, node]));
+  assert.equal(nodes.get("technical")?.label, "Technical");
+  assert.equal(nodes.get("technical")?.filter, "reached-technical");
+  assert.equal(nodes.get("hiring-manager")?.label, "Hiring manager");
+  assert.equal(nodes.get("hiring-manager")?.filter, "reached-hiring-manager");
+  assert.equal(
+    [...nodes.keys()].some((id) => /^round-\d+$/.test(id)),
+    false
+  );
+  assert.equal(
+    vm.jobs.sankey.links.some((link) => link.from === "hiring-manager" && link.to === "rejected"),
+    true
+  );
+});
+
+test("Dashboard adapter excludes reviewed holds from application counts", () => {
+  const vm = buildDashboardViewModel(
+    {
+      meta: {},
+      applications: [
+        { id: "hold-1", company: "Hold One", role: "Engineer", status: "reviewed-hold" },
+        { id: "hold-2", company: "Hold Two", role: "Engineer", status: "reviewed-hold" },
+        { id: "applied-1", company: "Active", role: "Engineer", status: "applied" },
+      ],
+      sourced: [],
+      sources: [],
+      communications: [],
+    },
+    { now: new Date("2026-06-15T13:30:00.000Z") }
+  );
+
+  assert.equal(vm.stats.applied, 1);
+  assert.equal(vm.stats.inPlay, 1);
 });
 
 test("Dashboard sourceshell hydrates through the tracked data module", async () => {
@@ -51,7 +121,7 @@ test("Dashboard source shell exposes the Paper Command Center chrome", async () 
 test("Dashboard shell morphs the top nav from square header to floating pill on scroll", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
 
-  assert.match(html, /<nav class="[^"]*\bis-at-top\b[^"]*"[^>]*data-dashboard-header/);
+  assert.match(html, /<header class="[^"]*\bis-at-top\b[^"]*"[^>]*data-dashboard-header/);
   assert.match(html, /<main class="[^"]*"[^>]*data-dashboard-scroll-root/);
   assert.match(html, /function setupHeaderScrollState\(\)\s*\{/);
   assert.match(html, /document\.querySelector\('\[data-dashboard-scroll-root\]'\)/);
@@ -722,6 +792,12 @@ test("Dashboard adapter builds Network relationship map from live tracker state"
   assert.equal(vm.network.sourcing.reviewLeads[0].company, "Initech");
   assert.equal(vm.network.sourcing.reviewLeads[0].name, "Jamie Rivera");
   assert.equal(vm.network.sourcing.reviewLeads[0].label, "Review lead");
+  assert.equal(vm.network.companies[0].applicationId, "aperture");
+  assert.ok(
+    vm.network.companies[0].history.some(
+      (entry) => entry.applicationId === "aperture" && entry.summary
+    )
+  );
 });
 
 test("Dashboard library snapshot summarizes evidence, stories, voice, and claim gaps", () => {
@@ -784,7 +860,7 @@ test("Dashboard adapter exposes data-backed Evidence Library status", () => {
   const vm = buildDashboardViewModel(tracker, {
     now: new Date("2026-06-17T13:30:00.000Z"),
     library: {
-      metrics: { claims: 2, stories: 1, gaps: 1 },
+      metrics: { claims: 2, stories: 1, voice: 1, honesty: 2, roleSignals: 3, gaps: 1 },
       index: [{ label: "Evidence bank", value: "2" }],
       filters: [{ label: "Agents", count: 2 }],
       cards: [
@@ -797,7 +873,7 @@ test("Dashboard adapter exposes data-backed Evidence Library status", () => {
           note: "Use for applied AI roles.",
         },
       ],
-      readiness: { proof: 1, stories: 1, voice: 1 },
+      readiness: { proof: 1, stories: 1, voice: 1, honesty: 2, roleSignals: 3 },
       gaps: [{ tone: "coral", title: "Do not use yet", body: "Do not invent metrics." }],
       storyLanes: [{ tone: "teal", body: "0-to-1 applied AI systems." }],
     },
@@ -805,6 +881,11 @@ test("Dashboard adapter exposes data-backed Evidence Library status", () => {
 
   assert.equal(vm.library.metrics.claims, 2);
   assert.equal(vm.library.metrics.stories, 1);
+  assert.equal(vm.library.metrics.voice, 1);
+  assert.equal(vm.library.metrics.honesty, 2);
+  assert.equal(vm.library.metrics.roleSignals, 3);
+  assert.equal(vm.library.readiness.honesty, 2);
+  assert.equal(vm.library.readiness.roleSignals, 3);
   assert.equal(vm.library.cards[0].title, "Demo Docs Assistant");
   assert.equal(vm.library.filters[0].label, "Agents");
 });
@@ -900,6 +981,30 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
         fitScore: 82,
         base: "$220K",
         nextInterviewAt: "2026-06-20T17:00:00.000Z",
+        conversations: [
+          {
+            date: "2026-06-10T17:00:00.000Z",
+            kind: "recruiter screen",
+            who: "Avery Recruiter",
+          },
+        ],
+      },
+      {
+        id: "past-loop",
+        company: "Past Loop Co",
+        role: "Platform Engineer",
+        status: "interview",
+        channel: "referral",
+        fitScore: 80,
+        base: "$215K",
+        appliedAt: "2026-06-17",
+        conversations: [
+          {
+            date: "2026-06-17T17:00:00.000Z",
+            kind: "recruiter screen",
+            who: "Avery Recruiter",
+          },
+        ],
       },
       {
         id: "wait",
@@ -985,6 +1090,11 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
   assert.equal(loop.actionState, "interview");
   assert.equal(loop.workstream, "prepare");
   assert.equal(loop.interviewPath, true);
+  assert.equal(loop.action.dueAt, "2026-06-20T17:00:00.000Z");
+
+  const pastLoop = byId.get("past-loop");
+  assert.notEqual(pastLoop.actionState, "interview");
+  assert.notEqual(pastLoop.action.label, "Prep");
 
   const wait = byId.get("wait");
   assert.equal(wait.actionState, "watch");
@@ -1014,6 +1124,161 @@ test("Dashboard adapter builds actionable Jobs row and drawer payloads", () => {
   assert.equal(missing.workstream, "review");
   assert.equal(missing.missingComp, true);
   assert.equal(missing.drawer.nextAction.label, "Comp");
+});
+
+test("Jobs never attaches a communication with another application id to a same-company role", () => {
+  const tracker = {
+    applications: [
+      {
+        id: "black-mesa-research",
+        company: "Black Mesa",
+        role: "Research Engineer",
+        status: "applied",
+      },
+      {
+        id: "black-mesa-applied-ai",
+        company: "Black Mesa",
+        role: "Applied AI Engineer",
+        status: "reviewed-hold",
+        conversations: [
+          {
+            who: "Different Recruiter",
+            kind: "recruiter screen",
+            date: "2026-06-18T12:00:00.000Z",
+            notes: "This belongs only to the Applied AI role.",
+          },
+        ],
+      },
+    ],
+    sourced: [],
+    sources: [],
+    communications: [
+      {
+        id: "black-mesa-receipt",
+        applicationId: "black-mesa-research",
+        company: "Black Mesa",
+        status: "waiting",
+        subject: "Application received — Research Engineer at Black Mesa",
+        messages: [
+          {
+            direction: "inbound",
+            at: "2026-06-17T12:00:00.000Z",
+            from: "Casey Recruiter",
+            summary: "Black Mesa received the Research Engineer application.",
+          },
+        ],
+      },
+    ],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-18T13:30:00.000Z"),
+  });
+  const byId = new Map(vm.jobs.rows.map((row) => [row.id, row]));
+
+  assert.equal(byId.get("black-mesa-research").drawer.emails.length, 1);
+  assert.equal(byId.get("black-mesa-applied-ai").drawer.emails.length, 0);
+  assert.equal(
+    byId
+      .get("black-mesa-applied-ai")
+      .drawer.timeline.some((item) => item.title.includes("Research Engineer")),
+    false
+  );
+  assert.ok(
+    vm.network.companies
+      .find((company) => company.company === "Black Mesa")
+      .history.every(
+        (entry) => !entry.applicationId || entry.applicationId === "black-mesa-research"
+      )
+  );
+  assert.equal(
+    vm.network.companies
+      .find((company) => company.company === "Black Mesa")
+      .notes.includes("This belongs only to the Applied AI role."),
+    false
+  );
+});
+
+test("Network never hides approved contacts or companies behind arbitrary display caps", () => {
+  const applications = Array.from({ length: 7 }, (_, index) => ({
+    id: `app-${index}`,
+    company: `Company ${index}`,
+    role: "Engineer",
+    status: "applied",
+    conversations: [
+      { who: `Recruiter ${index}A`, kind: "recruiter screen", date: "2026-06-01" },
+      { who: `Recruiter ${index}B`, kind: "recruiter screen", date: "2026-06-02" },
+      { who: `Manager ${index}`, kind: "hiring manager", date: "2026-06-03" },
+    ],
+  }));
+  const vm = buildDashboardViewModel(
+    {
+      applications,
+      sourced: [],
+      communications: [],
+      relationshipLeads: [
+        {
+          id: "approved-fourth-contact",
+          applicationId: "app-0",
+          company: "Company 0",
+          name: "Approved Referral",
+          type: "Referral",
+          status: "approved",
+        },
+      ],
+    },
+    { now: new Date("2026-06-18T13:30:00.000Z") }
+  );
+
+  assert.equal(vm.network.companies.length, 7);
+  assert.ok(
+    vm.network.companies[0].contacts.some((contact) => contact.name === "Approved Referral")
+  );
+});
+
+test("Network deduplicates people by identity and never promotes a rejected lead audit note", () => {
+  const vm = buildDashboardViewModel(
+    {
+      applications: [
+        {
+          id: "app-1",
+          company: "Identity Co",
+          role: "Engineer",
+          status: "applied",
+          conversations: [
+            { who: "Alex Smith", kind: "recruiter screen", date: "2026-06-01" },
+            { who: "Alex Smith", kind: "hiring manager", date: "2026-06-02" },
+            {
+              who: "Rejected Person",
+              kind: "relationship lead rejected",
+              date: "2026-06-03",
+              notes: "Candidate rejected this lead from Network review.",
+            },
+          ],
+        },
+      ],
+      sourced: [],
+      communications: [],
+      relationshipLeads: [
+        {
+          id: "rejected-lead",
+          applicationId: "app-1",
+          company: "Identity Co",
+          name: "Rejected Person",
+          type: "Recruiter",
+          status: "rejected",
+        },
+      ],
+    },
+    { now: new Date("2026-06-18T13:30:00.000Z") }
+  );
+
+  const contacts = vm.network.companies[0].contacts;
+  assert.equal(contacts.filter((contact) => contact.name === "Alex Smith").length, 1);
+  assert.equal(
+    contacts.some((contact) => contact.name === "Rejected Person"),
+    false
+  );
 });
 
 // ISSUE-018/ISSUE-035 — jobDetailFromRow's artifact list must never leak the
@@ -1091,6 +1356,34 @@ test("Dashboard adapter's artifact list surfaces friendly notes, never raw paths
       if (artifact.path) assert.notEqual(artifact.note, artifact.path);
     }
   }
+});
+
+test("Dashboard artifact lists never turn prose summaries into document paths", () => {
+  const vm = buildDashboardViewModel({
+    applications: [
+      {
+        id: "legacy-prose-artifacts",
+        company: "Legacy Co",
+        role: "Engineer",
+        status: "applied",
+        artifacts: {
+          jd: "workspace/jobs/legacy-co.md",
+          resume: "Tailored the resume to emphasize platform leadership and reliability.",
+          resumeNote: "Legacy tailoring summary.",
+          coverLetter: "Connected the candidate's evidence to the role in a concise letter.",
+          coverLetterNote: "Legacy cover-letter summary.",
+        },
+      },
+    ],
+    sourced: [],
+    communications: [],
+  });
+
+  const artifacts = vm.jobs.rows[0].drawer.artifacts;
+  assert.deepEqual(
+    artifacts.map((artifact) => artifact.kind),
+    ["Job description"]
+  );
 });
 
 test("Dashboard shell exposes actionable Jobs filters and drawer next-action section", async () => {
@@ -1608,6 +1901,25 @@ test("Dashboard adapter archives cut sourced rows but surfaces manual-apply as a
   assert.equal(byId.get("cut").terminal, true);
   assert.equal(byId.get("blocked").terminal, false);
   assert.equal(byId.get("live").terminal, false);
+});
+
+test("Dashboard adapter keeps an explicit sourced status in the pre-application queue", () => {
+  const tracker = {
+    applications: [],
+    sourced: [{ id: "fresh", company: "Fresh Co", role: "Staff Engineer", status: "sourced" }],
+    sources: [],
+    communications: [],
+  };
+
+  const vm = buildDashboardViewModel(tracker, {
+    now: new Date("2026-06-15T13:30:00.000Z"),
+  });
+
+  assert.equal(vm.jobs.rows[0].stage, "sourced");
+  assert.equal(vm.jobs.rows[0].stageGroupLabel, "Sourced");
+  assert.equal(vm.jobs.rail.fresh, 1);
+  assert.equal(vm.jobs.rail.manualReview, 1);
+  assert.equal(vm.jobs.funnel[1].id, "sourced");
 });
 
 test("Dashboard sourcebuckets count only true recruiter-sourced jobs", () => {

@@ -21,9 +21,7 @@
     "careerrat": "bin/careerrat.mjs"
   },
   "workspaces": [
-    "website",
-    "apps/desktop",
-    "apps/web"
+    "apps/*"
   ],
   "engines": {
     "node": ">=24"
@@ -71,7 +69,6 @@
     "docs/foundations-spec.md",
     "examples",
     "assets",
-    "fonts",
     "apps/web/dist",
     "scripts/analyze-outcomes.mjs",
     "scripts/calibrate-writing-style.mjs",
@@ -84,17 +81,19 @@
     "scripts/verify-tracker.mjs",
     "AGENTS.md",
     "CLAUDE.md",
-    "DATA_CONTRACT.md",
+    "docs/DATA_CONTRACT.md",
     "README.md"
   ],
   "scripts": {
     "postinstall": "node -e \"const f='scripts/install-skills.mjs'; if (require('fs').existsSync(f)) require('child_process').spawnSync(process.execPath,[f,'--soft'],{stdio:'inherit'})\"",
-    "prepare": "lefthook install || true",
+    "hooks:install": "lefthook install",
     "prepack": "npm run build --workspace apps/web",
     "dev": "turbo dev",
-    "build": "turbo build",
-    "web:dev": "npm --workspace website run dev",
-    "web:build": "npm --workspace website run build",
+    "build": "turbo build --filter=!@careerrat/docs",
+    "site:dev": "npm --workspace @careerrat/website run dev",
+    "site:build": "npm --workspace @careerrat/website run build",
+    "docs:dev": "npm --workspace @careerrat/docs run dev",
+    "docs:build": "npm --workspace @careerrat/docs run build",
     "app:dev": "npm run dev --workspace apps/web",
     "app:build": "npm run build --workspace apps/web",
     "desktop": "npm --workspace apps/desktop run dev",

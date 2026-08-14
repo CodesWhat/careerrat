@@ -259,4 +259,4 @@ Candidate facts, generated artifacts, and tracker state stay local.
 
 Reusable skills, scripts, templates, and schemas are public-safe.
 
-See [../DATA_CONTRACT.md](../DATA_CONTRACT.md).
+See [DATA_CONTRACT.md](DATA_CONTRACT.md).

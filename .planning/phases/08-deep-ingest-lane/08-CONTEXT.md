@@ -59,7 +59,7 @@ The user delegated implementation details to the planner and executor: choose ex
 - `candidate/AGENTS.md` — Local candidate context and existing job-search routing rules that deep ingest must not contradict.
 
 ### Prior Phase Decisions
-- `.planning/phases/ROL-API-06-canonical-db-app-shell/06-CONTEXT.md` — DB-only product state, no generated-file fallback, and strict app-route regression posture.
+- `.planning/phases/06-canonical-db-app-shell/06-CONTEXT.md` — DB-only product state, no generated-file fallback, and strict app-route regression posture.
 - `.planning/phases/03-company-discovery-api/03-CONTEXT.md` — Thin local APIs, confirm-first writes, bounded AI as untrusted proposal input, and DB-owned app state.
 - `.planning/phases/02-bounded-ai-foundation/02-CONTEXT.md` — Shared bounded-AI envelopes, schema validation, no-AI degradation, and metadata-only telemetry.
 

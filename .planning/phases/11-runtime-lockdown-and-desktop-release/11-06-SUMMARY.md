@@ -51,7 +51,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D2
-    description: "Desktop README documents `/app`, `/app/onboarding`, packaged `ROLESTER_HOME`, BYOK storage, signed/notarized DMG verification, and compatibility-surface boundaries."
+    description: "Desktop README documents `/app`, `/app/onboarding`, packaged `CAREERRAT_HOME`, BYOK storage, signed/notarized DMG verification, and compatibility-surface boundaries."
     requirement: DESK-02
     verification:
       - kind: unit
@@ -103,7 +103,7 @@ Each task was committed atomically:
 ## Files Created/Modified
 
 - `tests/desktop-docs-release.test.mjs` - Static docs truthfulness guard for DESK-02 pilot-facing docs.
-- `apps/desktop/README.md` - Documents Electron `/app` as the pilot product path, packaged `ROLESTER_HOME`, BYOK storage, signed/notarized DMG verification, compatibility-surface boundaries, and update-readiness truth.
+- `apps/desktop/README.md` - Documents Electron `/app` as the pilot product path, packaged `CAREERRAT_HOME`, BYOK storage, signed/notarized DMG verification, compatibility-surface boundaries, and update-readiness truth.
 - `docs/RELEASE.md` - Adds desktop pilot release checks for signed/notarized DMG evidence, stapling, Gatekeeper assessment, fresh/existing workspace smoke, no checkout dependency, and credential exclusion.
 - `docs/ARCHITECTURE.md` - Adds app-safe default tool profile and explicit tool-heavy retained runtime wording.
 

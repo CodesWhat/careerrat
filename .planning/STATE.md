@@ -14,7 +14,7 @@ progress:
   percent: 100
 ---
 
-# State: Rolester App-First Job Search Runtime
+# State: CareerRat App-First Job Search Runtime
 
 ## Combine (2026-07-06)
 
@@ -37,7 +37,7 @@ Full suite green (1830 pass / 0 fail); release-safety green.
 
 See: `.planning/PROJECT.md` (updated 2026-07-05)
 
-**Core value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
+**Core value:** CareerRat must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
 **Current focus:** Phase 11 — Runtime Lockdown and Desktop Release
 
 ## Current Status
@@ -52,7 +52,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Working Assumptions
 
-- GSD should operate from `/Users/sbenson/code/rolester/.planning`, not the parent `/Users/sbenson/code/.planning`.
+- GSD should operate from `/Users/sbenson/code/careerrat/.planning`, not the parent `/Users/sbenson/code/.planning`.
 - Formal GSD project subagents are not installed in this runtime, so initialization was performed inline.
 - Existing user changes in `tests/release-safety.test.mjs` and `tmp-skill-conversion/` are not part of this GSD initialization.
 - `discover-companies` is now the proof-point migration: local proposal APIs are the default app path, and full skill/chat paths remain explicit.
@@ -166,8 +166,8 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 02-bounded-ai-foundation]: Bounded AI public envelopes whitelist metadata fields so raw prompts, model text, resumes, JDs, candidate facts, and page bodies stay out of responses. — This preserves the Phase 02 privacy and telemetry boundary while still returning renderable manual fallback metadata.
 - [Phase 02-bounded-ai-foundation]: Missing bounded AI labels return a safe AI_LABELS_INVALID envelope from runBoundedAI while requireBoundedAILabels remains a throwing guard for direct callers. — Routes get a stable response shape, and lower-level callers can still fail fast on label regressions before any invocation.
 - [Phase 02-bounded-ai-foundation]: callAI() exposes provider-neutral outputSchema, outputName, and outputMode options while keeping Anthropic output_config construction inside callAI(). — This preserves D-16 by keeping provider-native request bodies below route modules.
-- [Phase 02-bounded-ai-foundation]: Native structured-output proxy calls preserve x-rolester-skill and x-rolester-action headers while client-side usage logging remains BYOK-only. — This preserves D-09 and D-12 telemetry behavior across native output mode.
-- [Phase 02-bounded-ai-foundation]: runBoundedAI() treats provider-native structured output as a reliability optimization, not a trust boundary; native responses still pass through parseStructuredJson(). — This preserves D-14 and keeps Rolester local validation as the final boundary before route data is exposed.
+- [Phase 02-bounded-ai-foundation]: Native structured-output proxy calls preserve x-careerrat-skill and x-careerrat-action headers while client-side usage logging remains BYOK-only. — This preserves D-09 and D-12 telemetry behavior across native output mode.
+- [Phase 02-bounded-ai-foundation]: runBoundedAI() treats provider-native structured output as a reliability optimization, not a trust boundary; native responses still pass through parseStructuredJson(). — This preserves D-14 and keeps CareerRat local validation as the final boundary before route data is exposed.
 - [Phase 02-bounded-ai-foundation]: Native-preferred mode calls callAI() or an injected call seam with outputMode:"native" and outputSchema while routes keep provider-specific request bodies out of their code. — This preserves D-16 by keeping native provider request details inside the helper/callAI boundary.
 - [Phase 02-bounded-ai-foundation]: Fallback mode remains explicit via structuredMode:"fallback" so custom invoke routes continue to use runStructuredOneshot(). — This preserves D-15 compatibility for routes that cannot use provider-native structured output yet.
 - [Phase 02-bounded-ai-foundation]: POST /api/assist/suggest now uses runBoundedAI() fallback mode around the existing tool-less runBareOneshot() path. — This preserves the cheap no-tool assist posture while moving schema retry, no-AI, and envelope behavior into the shared bounded helper.
@@ -283,15 +283,15 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 - [Phase 11]: SEC-01 is enforced by a slice-aware static guard: app-default files and local route slices are scanned while explicit chat, retained runtime owners, legacy/static clients, and test files require named classifications.
 - [Phase 11]: The one-shot runtime's RUNTIME_TOOLS export is now app-safe and excludes Write, Edit, and Bash by default. — Tool-heavy execution must name a profile or pass explicit tools before SDK query under bypassPermissions.
 - [Phase 11]: Explicit tools arrays remain caller authority and are copied before SDK use. — This preserves resume-extract's Read-only pattern while preventing mutable caller arrays from becoming shared runtime profile state.
-- [Phase 11]: Desktop packaged path resolution is centralized in apps/desktop/desktop-runtime.mjs so ROLESTER_HOME is set before dynamic engine imports. — Keeps signed resources read-only and makes packaged runtime behavior directly testable.
+- [Phase 11]: Desktop packaged path resolution is centralized in apps/desktop/desktop-runtime.mjs so CAREERRAT_HOME is set before dynamic engine imports. — Keeps signed resources read-only and makes packaged runtime behavior directly testable.
 - [Phase 11]: Electron external opens are limited to https: and mailto: targets, with unsafe or malformed targets denied recoverably. — Mitigates T-11-09 without changing same-origin app routing.
-- [Phase 11]: BYOK path resolution now passes the active env into userPath(), so packaged ROLESTER_HOME controls both load and write paths. — Ensures desktop BYOK storage shares the same packaged data root as SQLite.
+- [Phase 11]: BYOK path resolution now passes the active env into userPath(), so packaged CAREERRAT_HOME controls both load and write paths. — Ensures desktop BYOK storage shares the same packaged data root as SQLite.
 - [Phase 11]: Runtime config exposes only non-secret app-safe tool profile metadata and the allowed tool-heavy skill names. — GET /api/runtime/config can inform app surfaces without leaking AI keys, Apple credentials, or credential paths.
 - [Phase 11]: Tool-heavy POST requests are rejected before SSE starts unless the requested skill is explicitly classified as a retained tool-heavy workflow. — Broad tool profile selection must be a route/profile decision, not an inherited default or in-band stream failure.
 - [Phase 11]: Chat runtime imports CHAT_RUNTIME_TOOLS directly from runtime-tools.mjs instead of deriving from the one-shot RUNTIME_TOOLS export. — Visible chat handoffs remain available but are classified separately from app-default one-shot runtime behavior.
 - [Phase 11-runtime-lockdown-and-desktop-release]: Pilot macOS packaging now requires forceCodeSigning, hardened runtime entitlements, and electron-builder notarization. — This satisfies DESK-01 and keeps unsigned development packaging out of the pilot success path.
 - [Phase 11-runtime-lockdown-and-desktop-release]: Apple credentials remain outside tracked source; the repo only records credential-neutral keychain and CI environment expectations. — This preserves the Phase 11 Apple credential disclosure boundary while allowing real notarization.
-- [Phase 11-runtime-lockdown-and-desktop-release]: The local notarization readiness gate uses the rolester-notary keychain profile and does not generate or commit release artifacts. — Plan 11-05 verifies credential readiness while Plan 11-07 owns final signed/notarized artifact evidence.
+- [Phase 11-runtime-lockdown-and-desktop-release]: The local notarization readiness gate uses the careerrat-notary keychain profile and does not generate or commit release artifacts. — Plan 11-05 verifies credential readiness while Plan 11-07 owns final signed/notarized artifact evidence.
 - [Phase 11-runtime-lockdown-and-desktop-release]: DESK-02 docs truthfulness is scoped to the desktop README, release checklist, and architecture runtime boundary rather than a broad documentation rewrite. — This preserves D-15 while making pilot-facing docs accurate enough for release.
 - [Phase 11-runtime-lockdown-and-desktop-release]: The desktop pilot docs name Electron /app and /app/onboarding as the normal product path; generated tracker/static pages are compatibility/debug/export support only. — This satisfies DESK-02 without changing retained debug/export surfaces.
 - [Phase 11-runtime-lockdown-and-desktop-release]: Auto-update wording is readiness-only: the package is signed/notarized for future updater work, but the desktop app does not install updates itself. — This preserves D-13 and avoids overclaiming update behavior.

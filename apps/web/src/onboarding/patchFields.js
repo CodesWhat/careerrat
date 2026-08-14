@@ -28,7 +28,8 @@ const SUPPRESSED_PATH_KEYS = new Set(["declined_fields"]);
 // display — the exact instant/timezone doesn't matter for a human-readable
 // pill label, so this is a literal component match rather than a `Date`
 // parse (which would shift the displayed day across timezones).
-const ISO_DATE_RE = /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
+const ISO_DATE_RE =
+  /^(\d{4})-(\d{2})-(\d{2})(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?$/;
 const MONTH_NAMES = [
   "Jan",
   "Feb",
@@ -124,7 +125,10 @@ function truncateValue(text) {
   // characters) and emit a lone surrogate that renders as a replacement glyph.
   const chars = Array.from(text);
   if (chars.length <= MAX_VALUE_LENGTH) return text;
-  return `${chars.slice(0, MAX_VALUE_LENGTH - 1).join("").trimEnd()}…`;
+  return `${chars
+    .slice(0, MAX_VALUE_LENGTH - 1)
+    .join("")
+    .trimEnd()}…`;
 }
 
 function formatLeafValue(value, path) {

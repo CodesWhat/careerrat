@@ -271,6 +271,11 @@ test("deriveProfileSeed carries normalized bare contact URLs end to end", () => 
   assert.equal(seed.candidate.github, "https://github.com/alexrivera");
 });
 
+test("plain-text contact parsing preserves a full country or state name after the comma", () => {
+  const parsed = parseResume("Morgan Hale\nmorgan@example.com | Brooklyn, New York\n");
+  assert.equal(parsed.contact.location, "Brooklyn, New York");
+});
+
 // ---------------------------------------------------------------------------
 // deriveEvidenceSeed
 // ---------------------------------------------------------------------------

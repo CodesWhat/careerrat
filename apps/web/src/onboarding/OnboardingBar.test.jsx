@@ -129,20 +129,20 @@ describe("OnboardingBar — mode", () => {
     expect(byClass(tree, "ask-bar--centered")).toBeUndefined();
   });
 
-  it("shows no upload button of its own — the hero chip owns that affordance", () => {
+  it("keeps the hero chip as the centered upload affordance and adds recovery in docked mode", () => {
     const centered = render({ mode: "centered", onDropResume: vi.fn() });
     expect(byClass(centered, "onboarding-bar__attach")).toBeUndefined();
 
     const docked = render({ mode: "docked", onDropResume: vi.fn() });
-    expect(byClass(docked, "onboarding-bar__attach")).toBeUndefined();
+    expect(byClass(docked, "onboarding-bar__attach")).toBeTruthy();
   });
 
-  it("still wires the hidden file input in centered mode, so the hero chip has a picker to open", () => {
+  it("wires the hidden file input in both modes when résumé handling is available", () => {
     const centered = render({ mode: "centered", onDropResume: vi.fn() });
     expect(byClass(centered, "onboarding-bar__file-input")).toBeTruthy();
 
     const docked = render({ mode: "docked", onDropResume: vi.fn() });
-    expect(byClass(docked, "onboarding-bar__file-input")).toBeUndefined();
+    expect(byClass(docked, "onboarding-bar__file-input")).toBeTruthy();
 
     const noHandler = render({ mode: "centered" });
     expect(byClass(noHandler, "onboarding-bar__file-input")).toBeUndefined();
@@ -300,12 +300,25 @@ describe("OnboardingBar — résumé drop", () => {
     expect(onDropResume).not.toHaveBeenCalled();
   });
 
-  it("docked mode wires no drag handlers at all (no résumé affordance there)", () => {
+  it("docked mode keeps drag-and-drop recovery available after the first chat turn", () => {
     const tree = render({ mode: "docked", onDropResume: vi.fn() });
     const shell = byClass(tree, "ask-bar__shell");
-    expect(shell.props.onDragOver).toBeUndefined();
-    expect(shell.props.onDragLeave).toBeUndefined();
-    expect(shell.props.onDrop).toBeUndefined();
+    expect(shell.props.onDragOver).toBeTypeOf("function");
+    expect(shell.props.onDragLeave).toBeTypeOf("function");
+    expect(shell.props.onDrop).toBeTypeOf("function");
+  });
+
+  it("the docked attach button opens its file picker", () => {
+    const providedFileInputRef = { current: { click: vi.fn() } };
+    const tree = render({
+      mode: "docked",
+      onDropResume: vi.fn(),
+      fileInputRef: providedFileInputRef,
+    });
+    const attach = byClass(tree, "onboarding-bar__attach");
+    expect(attach.props["aria-label"]).toBe("Attach résumé");
+    attach.props.onClick();
+    expect(providedFileInputRef.current.click).toHaveBeenCalledTimes(1);
   });
 });
 

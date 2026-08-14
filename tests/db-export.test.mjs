@@ -9,8 +9,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { closeAll } from "../src/core/db/connection.mjs";
+import { seedDemo } from "../src/core/db/demo-seed.mjs";
 import { exportToTracker } from "../src/core/db/export-to-tracker.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { candidateConfigGet } from "../src/core/db/verbs/candidate.mjs";
+import { readJobDescriptionArtifact } from "../src/core/jobs/job-description.mjs";
+import { computeSetupProgress } from "../src/core/onboarding/setup-progress.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import { validate } from "../src/core/profile/schema-validator.mjs";
 import { loadTrackerData, validateTrackerData } from "../src/core/tracker/tracker-data.mjs";
@@ -83,15 +87,7 @@ test("the exported tracker.json passes the same checks scripts/verify-tracker.mj
   assert.deepEqual(errors, [], `verify-tracker must report 0 errors, got: ${errors.join("; ")}`);
 });
 
-// examples/demo-workspace/tracker.json itself already carries a handful of
-// pre-existing tracker.schema.json violations (some communications[].channel
-// values use the applications/sourced channel vocabulary — "referral"/"board"/
-// "recruiter" — instead of the communications-only enum). That's a demo-data
-// quality issue that predates this DB layer and is out of scope here (fixing
-// examples/demo-workspace/tracker.json is not part of the M6 spec). What
-// matters for the DB layer's correctness is that round-tripping through the
-// db introduces NO NEW schema violations beyond what the source already had.
-test("round-tripping through the db introduces no NEW tracker.schema.json violations vs the source", () => {
+test("the bundled demo and its db round-trip are schema-clean", () => {
   const repoRoot = tempRepo();
   const schema = JSON.parse(readFileSync(SCHEMA_PATH, "utf8"));
   const source = JSON.parse(readFileSync(join(DEMO_DIR, "tracker.json"), "utf8"));
@@ -100,12 +96,91 @@ test("round-tripping through the db introduces no NEW tracker.schema.json violat
   const result = exportToTracker({ repoRoot });
   const exported = JSON.parse(readFileSync(result.trackerPath, "utf8"));
 
-  const sourceErrors = validate(source, schema).errors.map((e) => `${e.path}: ${e.message}`);
-  const exportedErrors = validate(exported, schema).errors.map((e) => `${e.path}: ${e.message}`);
-  assert.deepEqual(
-    exportedErrors.sort(),
-    sourceErrors.sort(),
-    "export must not introduce or fix any schema violations relative to the source — it's a byte-shape-compatible round-trip, not a validator"
+  const sourceResult = validate(source, schema);
+  assert.ok(
+    sourceResult.valid,
+    `bundled demo must validate against tracker.schema.json, got: ${sourceResult.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`
+  );
+
+  const exportedResult = validate(exported, schema);
+  assert.ok(
+    exportedResult.valid,
+    `exported demo must validate against tracker.schema.json, got: ${exportedResult.errors.map((e) => `${e.path}: ${e.message}`).join("; ")}`
+  );
+});
+
+test("the bundled demo uses canonical application status values", () => {
+  const tracker = JSON.parse(readFileSync(join(DEMO_DIR, "tracker.json"), "utf8"));
+  const canonical = new Set([
+    "reviewed-hold",
+    "manual-apply",
+    "applied",
+    "screen",
+    "interview",
+    "assessment",
+    "technical",
+    "hiring-manager",
+    "onsite",
+    "final",
+    "offer",
+    "accepted",
+    "rejected",
+    "withdrawn",
+  ]);
+
+  for (const app of tracker.applications) {
+    assert.ok(canonical.has(app.status), `${app.id} has noncanonical status ${app.status}`);
+  }
+});
+
+test("the bundled demo never stores prose in path-owned document fields", () => {
+  const tracker = JSON.parse(
+    readFileSync(join(REPO_ROOT, "examples/demo-workspace/tracker.json"), "utf8")
+  );
+  for (const row of [...(tracker.applications || []), ...(tracker.sourced || [])]) {
+    for (const key of ["jd", "resume", "coverLetter", "answers"]) {
+      const value = row.artifacts?.[key];
+      if (value == null) continue;
+      assert.match(value, /^workspace\//, `${row.id} artifacts.${key} must be a workspace path`);
+    }
+  }
+});
+
+test("every bundled demo job seeds a readable complete or explicitly partial JD capture", () => {
+  const repoRoot = tempRepo();
+  seedDemo({ repoRoot, env: {}, today: "2026-08-14" });
+  const tracker = JSON.parse(
+    readFileSync(userPath({ repoRoot }, "workspace/tracker.json"), "utf8")
+  );
+  const rows = [
+    ...tracker.applications.map((row) => ({ ...row, recordType: "application" })),
+    ...tracker.sourced.map((row) => ({ ...row, recordType: "sourced" })),
+  ];
+
+  assert.equal(rows.length, 38);
+  for (const row of rows) {
+    assert.match(
+      String(row.artifacts?.jd || ""),
+      /^workspace\/jobs\/.+\.md$/,
+      `${row.id} must point at a canonical job artifact`
+    );
+    const result = readJobDescriptionArtifact({
+      repoRoot,
+      env: {},
+      source: row.recordType,
+      id: row.id,
+    });
+    assert.match(result.artifact.completeness, /^(?:complete|partial)$/);
+    assert.ok(result.artifact.bodyChars > 50, `${row.id} must have a useful captured body`);
+  }
+
+  const candidate = candidateConfigGet({ repoRoot, env: {} });
+  assert.equal(candidate.profile.candidate.full_name, "Riley Chen");
+  assert.equal(candidate.setup.readiness.search_ready, true);
+  assert.equal(
+    computeSetupProgress({ data: candidate, sourceResumePresent: true, keyConfigured: true })
+      .complete,
+    true
   );
 });
 

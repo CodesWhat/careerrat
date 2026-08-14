@@ -55,7 +55,7 @@ vi.mock("react", async (importOriginal) => {
   };
 });
 vi.mock("../lib/api.js", () => api);
-vi.mock("../components/Button.jsx", () => ({ Button: "button" }));
+vi.mock("../components/Button.jsx", () => ({ Button: "button", IconButton: "button" }));
 vi.mock("../components/Card.jsx", () => ({ Card: "section" }));
 vi.mock("../components/Toast.jsx", () => ({ InlineAlert: "inline-alert" }));
 
@@ -101,6 +101,19 @@ beforeEach(() => {
 });
 
 describe("InterviewDossierCard", () => {
+  it("renders a keyboard-dismissible full-page loading preview", () => {
+    const onClose = vi.fn();
+    const tree = renderCard({ applicationId: "app-full", fullPage: true, onClose });
+
+    const dialog = visit(tree, (node) => node.props?.role === "dialog")[0];
+    expect(dialog).toBeTruthy();
+    expect(dialog.props["aria-modal"]).toBe("true");
+    expect(JSON.stringify(tree)).toContain("Loading interview dossier");
+    expect(
+      visit(tree, (node) => node.type === "button" && node.props?.label === "Close")[0]
+    ).toBeTruthy();
+  });
+
   it("renders Build prep dossier and calls buildInterviewDossier on click when no dossier exists", async () => {
     api.getInterviewDossier.mockRejectedValue({
       status: 404,
@@ -141,6 +154,7 @@ describe("InterviewDossierCard", () => {
           round: "Hiring manager",
           generatedAt: "2026-06-10T12:00:00.000Z",
           markdown: "## Likely questions\n- Why this role?",
+          html: "<h2>Likely questions</h2><ul><li>Why this role?</li></ul>",
         },
       },
     });
@@ -153,6 +167,30 @@ describe("InterviewDossierCard", () => {
     expect(JSON.stringify(tree)).toContain("Hiring manager");
     expect(button(tree, "Rebuild")).toBeTruthy();
     expect(button(tree, "Build prep dossier")).toBeFalsy();
+  });
+
+  it("uses the server-rendered safe HTML in the full-page preview", async () => {
+    api.getInterviewDossier.mockResolvedValue({
+      data: {
+        dossier: {
+          title: "Northstar — Solutions Engineer",
+          markdown: "## Likely questions",
+          html: "<h2>Likely questions</h2>",
+        },
+      },
+    });
+
+    renderCard({ applicationId: "app-html", fullPage: true, onClose: vi.fn() });
+    await runEffects();
+    const tree = renderCard({ applicationId: "app-html", fullPage: true, onClose: vi.fn() });
+    const document = visit(tree, (node) =>
+      node.props?.className?.includes("interview-dossier-viewer__document")
+    )[0];
+
+    expect(document.props.dangerouslySetInnerHTML).toEqual({
+      __html: "<h2>Likely questions</h2>",
+    });
+    expect(document.props.children).toBeUndefined();
   });
 
   it("treats a DOSSIER_NOT_FOUND 404 as the expected not-built-yet state, not an error banner", async () => {

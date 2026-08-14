@@ -46,6 +46,10 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
+        "prefer": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
         "avoid": {
           "type": "array",
           "items": { "type": "string" }

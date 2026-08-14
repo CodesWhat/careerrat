@@ -56,7 +56,7 @@ The following constraints are copied from `.planning/phases/03-company-discovery
 - **D-27:** Proposal records should include company name, why it fits, role family or role seen, careers URL, job board URL, provider or unsupported/custom classification, confidence tier, provenance, scan/extraction summary, JD capture status, and proposed action.
 
 ### Write Path
-- **D-28:** Approved supported ATS promotions must write through the existing source-config/companies path: `companyAtsUpsert()` and the `rolester companies` mental model.
+- **D-28:** Approved supported ATS promotions must write through the existing source-config/companies path: `companyAtsUpsert()` and the `careerrat companies` mental model.
 - **D-29:** DB mode is canonical for the app route. Legacy config compatibility can remain in existing CLI paths, but the new app API should not create a second hand-written legacy state path unless the planner finds an existing helper that makes it low risk.
 - **D-30:** Generated dashboard/tracker files are never direct write targets for this phase. DB/source verbs export compatibility state where needed.
 - **D-31:** If approved proposals include captured current jobs, persist them through existing sourced persistence and `sourcedUpsertBatch()` after confirmation, preserving JD artifacts under `workspace/jobs/`.
@@ -109,7 +109,7 @@ The highest-risk planning boundary is state ownership. Proposal generation may w
 ## Project Constraints (from AGENTS.md)
 
 - Skills are operating contracts; when behavior belongs to `discover-companies`, `search-jobs`, `research-boards`, or `setup-searches`, preserve the owning skill's workflow semantics in the API. [VERIFIED: AGENTS.md; VERIFIED: .agents/skills/discover-companies/SKILL.md]
-- In DB workspaces, tracker-visible mutations must go through DB verbs or `rolester data <verb>` patterns; `workspace/tracker.json` and `workspace/activity.jsonl` are generated compatibility files. [VERIFIED: AGENTS.md]
+- In DB workspaces, tracker-visible mutations must go through DB verbs or `careerrat data <verb>` patterns; `workspace/tracker.json` and `workspace/activity.jsonl` are generated compatibility files. [VERIFIED: AGENTS.md]
 - Supported tracked-company additions use the source-config/companies path; unsupported/custom pages must not be written as scannable `sourced-scan` tracked companies in this phase. [VERIFIED: AGENTS.md; VERIFIED: src/cli/companies.mjs]
 - Every grabbed posting must capture its full job-description body locally under `workspace/jobs/` and mirror the artifact path onto the row/proposal before the source disappears. [VERIFIED: AGENTS.md; VERIFIED: src/core/scoring/sourced-persistence.mjs]
 - `discover-companies` is confirm-first by default; auto-add is opt-in only and borderline proposals must remain confirmation-gated. [VERIFIED: AGENTS.md; VERIFIED: .agents/skills/discover-companies/SKILL.md]
@@ -138,7 +138,7 @@ The highest-risk planning boundary is state ownership. Proposal generation may w
 | `src/core/profile/schema-validator.mjs` | Internal | JSON schema validation for structured outputs and request/proposal payloads. | Use for `companySeedSchema`, proposal-decision validation, and cache payload checks. [VERIFIED: src/core/profile/schema-validator.mjs; VERIFIED: src/core/ai/structured-oneshot.mjs] |
 | `src/core/db/transaction.mjs` / `runVerb()` | Internal | Atomic DB verb execution and post-transaction export. | Use for cache/proposal/confirmation verbs; keep network and model calls outside transactions. [VERIFIED: src/core/db/transaction.mjs; VERIFIED: src/core/db/verbs/shared.mjs] |
 | `scripts/scan-sourced.mjs` | Internal | Existing scan orchestration reference. | Use as a reference for source config loading, scanner options, persistence, and JD capture. [VERIFIED: scripts/scan-sourced.mjs] |
-| `src/cli/companies.mjs` | Internal | CLI mental model for supported ATS additions. | Keep API approval semantics aligned with `rolester companies --add --write`. [VERIFIED: src/cli/companies.mjs] |
+| `src/cli/companies.mjs` | Internal | CLI mental model for supported ATS additions. | Keep API approval semantics aligned with `careerrat companies --add --write`. [VERIFIED: src/cli/companies.mjs] |
 | `node:test` | v24.18.0 | Unit/integration tests. | Existing test suite is Node test based and already covers AI/routes/scanners/DB verbs. [VERIFIED: package.json; VERIFIED: focused test run] |
 
 ### Alternatives Considered
@@ -550,14 +550,14 @@ JSON data stored in SQLite should be checked with `json_valid(data)` when validi
 | SQLite CLI | DB inspection/migration debugging | yes | 3.51.0 | `node:sqlite` runtime APIs. [VERIFIED: local command output] |
 | `node:sqlite` | DB verbs and migrations | yes | Node v24.18.0 exposes `DatabaseSync` | none needed. [VERIFIED: local command output; CITED: https://nodejs.org/api/sqlite.html] |
 | git | Optional research commit | yes | available | none needed. [VERIFIED: local command output] |
-| `rolester` binary on PATH | Manual CLI smoke commands | no | none | Use `node src/cli/*.mjs` or npm scripts from repo root. [VERIFIED: local command output] |
+| `careerrat` binary on PATH | Manual CLI smoke commands | no | none | Use `node src/cli/*.mjs` or npm scripts from repo root. [VERIFIED: local command output] |
 | Context7 CLI/MCP | Documentation lookup | no | none | Official web docs and local source reads were used. [VERIFIED: local command output] |
 
 **Missing dependencies with no fallback:**
 - none. [VERIFIED: Environment Availability]
 
 **Missing dependencies with fallback:**
-- `rolester` CLI binary on PATH; use direct `node src/cli/*.mjs` commands or npm scripts during implementation/testing. [VERIFIED: local command output]
+- `careerrat` CLI binary on PATH; use direct `node src/cli/*.mjs` commands or npm scripts during implementation/testing. [VERIFIED: local command output]
 - Context7 CLI/MCP; official documentation URLs and codebase reads are sufficient for this phase. [VERIFIED: local command output]
 
 ## Validation Architecture

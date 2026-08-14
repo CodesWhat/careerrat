@@ -9,7 +9,7 @@
 // new one never requires a matching change here.
 //
 // Claude Code and OpenAI Codex marks are copied verbatim from the marketing
-// site's own inline SVGs (website/src/app/page.tsx's .ai-chip icons) rather
+// site's own inline SVGs (apps/website/src/app/page.tsx's .ai-chip icons) rather
 // than re-sourced, so the two surfaces stay visually identical. Gemini,
 // Copilot, Qwen, OpenCode, Cursor, and Cline are adapted from the
 // simple-icons brand-icon set — their path data is copied in directly
@@ -106,7 +106,10 @@ const ICONS = {
     return (
       <svg viewBox="0 0 240 300" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" {...props}>
         <path d="M180 240H60V120H180V240Z" fill="var(--opencode-mark-dim, #cfcecd)" />
-        <path d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z" fill="var(--opencode-mark-ink, #211e1e)" />
+        <path
+          d="M180 60H60V240H180V60ZM240 300H0V0H240V300Z"
+          fill="var(--opencode-mark-ink, #211e1e)"
+        />
       </svg>
     );
   },

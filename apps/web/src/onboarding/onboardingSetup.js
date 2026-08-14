@@ -95,6 +95,17 @@ export function setupProgressFromState(state) {
   return Object.fromEntries(items.map((item) => [item.key, !!item.done]));
 }
 
+// profile.location.remote starts true as a search-recall fallback, not as a
+// candidate answer. New writes carry mode_preferences_confirmed so the UI can
+// distinguish the two. The setup-progress fallback keeps older completed
+// profiles readable without letting an unrelated profile write expose Remote.
+export function locationModePreferencesConfirmed(state) {
+  const explicit = state?.data?.profile?.location?.mode_preferences_confirmed;
+  if (typeof explicit === "boolean") return explicit;
+  const quickFacts = state?.setupProgress?.items?.find((item) => item?.key === "quickFacts");
+  return quickFacts ? quickFacts.done === true : true;
+}
+
 export function setupCompletedCount(state) {
   return state?.setupProgress?.completedCount ?? 0;
 }
@@ -107,7 +118,94 @@ export function setupTotal(state) {
 }
 
 export function setupIsComplete(state) {
-  return state?.setupProgress?.complete === true;
+  return (
+    state?.setupProgress?.complete === true && state?.data?.setup?.readiness?.search_ready === true
+  );
+}
+
+export function setupDisclosureRows({ state, runtime } = {}) {
+  const data = state?.data ?? {};
+  const profile = data.profile ?? {};
+  const candidate = profile.candidate ?? {};
+  const targeting = data.targeting ?? {};
+  const claims = data.evidence?.claims ?? [];
+  const declined = data["form-defaults"]?.declined_fields ?? {};
+  const roleTitles = (targeting.role_buckets ?? []).flatMap((bucket) => bucket.titles ?? []);
+  const companies = targeting.tracked_companies ?? [];
+  const guardrails = targeting.cut_signals ?? [];
+  const location = candidate.location || profile.location?.home;
+  const modes = locationModePreferencesConfirmed(state)
+    ? [
+        profile.location?.remote ? "Remote" : null,
+        profile.location?.hybrid ? "Hybrid" : null,
+        profile.location?.onsite ? "On-site" : null,
+      ].filter(Boolean)
+    : [];
+  const minimumBase = Number(profile.compensation?.minimum_base);
+  const quickFacts = [
+    candidate.full_name,
+    candidate.email,
+    candidate.phone,
+    location,
+    ...modes,
+    Number.isFinite(minimumBase) && minimumBase > 0
+      ? `$${minimumBase.toLocaleString("en-US")} minimum base`
+      : null,
+  ].filter(Boolean);
+  const authorization = profile.authorization ?? {};
+
+  let resumeValue = "Not provided";
+  if (state?.sourceResumePresent) {
+    resumeValue = `Uploaded · ${claims.length} evidence claim${claims.length === 1 ? "" : "s"}`;
+  } else if (declined.resume) {
+    resumeValue = "Built from your answers";
+  }
+
+  let authorizationValue = "Not provided";
+  if (declined.authorization) authorizationValue = "Declined";
+  else if (authorization.requires_sponsorship === true) authorizationValue = "Needs sponsorship";
+  else if (authorization.work_authorized === true) authorizationValue = "Authorized";
+
+  const evidenceValue = claims.length
+    ? [
+        `${claims.length} claim${claims.length === 1 ? "" : "s"}`,
+        ...claims
+          .slice(0, 2)
+          .map((item) => item?.claim)
+          .filter(Boolean),
+      ].join(" · ")
+    : "Not provided";
+
+  return [
+    { key: "engine", label: SETUP_ITEM_LABELS.engine, value: runtime?.name || "Connected" },
+    { key: "resume", label: SETUP_ITEM_LABELS.resume, value: resumeValue },
+    {
+      key: "roles",
+      label: SETUP_ITEM_LABELS.roles,
+      value: roleTitles.length ? roleTitles.join(", ") : "Not provided",
+    },
+    {
+      key: "companies",
+      label: SETUP_ITEM_LABELS.companies,
+      value: companies.length ? companies.join(", ") : "Not provided",
+    },
+    { key: "evidence", label: SETUP_ITEM_LABELS.evidence, value: evidenceValue },
+    {
+      key: "guardrails",
+      label: SETUP_ITEM_LABELS.guardrails,
+      value: guardrails.length ? guardrails.join(" · ") : "Not provided",
+    },
+    {
+      key: "quickFacts",
+      label: SETUP_ITEM_LABELS.quickFacts,
+      value: quickFacts.length ? quickFacts.join(" · ") : "Not provided",
+    },
+    {
+      key: "authorization",
+      label: SETUP_ITEM_LABELS.authorization,
+      value: authorizationValue,
+    },
+  ];
 }
 
 // Bug 4 fix ("the file pane presents data the user never entered") —
@@ -186,14 +284,22 @@ export function guardrailsDetailLine({ state } = {}) {
 
 export function quickFactsDetailLine({ state } = {}) {
   if (!fileWritten(state, "profile")) return null;
+  const minimumBase = Number(state?.data?.profile?.compensation?.minimum_base);
   const location = state?.data?.profile?.location ?? {};
-  const modes = [
-    location.remote ? "Remote" : null,
-    location.hybrid ? "Hybrid" : null,
-    location.onsite ? "On-site" : null,
-  ].filter(Boolean);
-  if (!modes.length) return null;
-  return modes.join(" · ");
+  const modes = locationModePreferencesConfirmed(state)
+    ? [
+        location.remote ? "Remote" : null,
+        location.hybrid ? "Hybrid" : null,
+        location.onsite ? "On-site" : null,
+      ].filter(Boolean)
+    : [];
+  const hasMinimumBase = Number.isFinite(minimumBase) && minimumBase > 0;
+  if (!modes.length && !hasMinimumBase) return null;
+  const details = [
+    ...modes,
+    hasMinimumBase ? `$${Math.round(minimumBase / 1000)}K floor` : "Add minimum base",
+  ];
+  return details.join(" · ");
 }
 
 export function authorizationDetailLine({ state } = {}) {

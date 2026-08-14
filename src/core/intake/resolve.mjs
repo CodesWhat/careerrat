@@ -139,6 +139,18 @@ async function resolvePlainFetch({ url, fetchImpl, resolveHost, timeoutMs, maxBy
   }
 
   const html = fetched.rawText;
+  for (const canonicalUrl of extractCanonicalAtsUrls(html, fetched.finalUrl || url)) {
+    const canonicalProvider = inferProvider({ careers_url: canonicalUrl });
+    if (!canonicalProvider) continue;
+    const resolved = await resolveViaProviderBoard({
+      provider: canonicalProvider,
+      url: canonicalUrl,
+      fetchImpl,
+    });
+    if (resolved?.bodyText?.trim()) {
+      return { ...resolved, sourceUrl: url };
+    }
+  }
   const bodyText = htmlToTextLiveness(html);
   const classified = classifyLiveness({
     status: fetched.status,
@@ -166,4 +178,48 @@ async function resolvePlainFetch({ url, fetchImpl, resolveHost, timeoutMs, maxBy
     bodyText,
     liveness: classified,
   };
+}
+
+function extractCanonicalAtsUrls(html, baseUrl) {
+  const normalized = String(html || "")
+    .replace(/\\u002f/gi, "/")
+    .replace(/\\\//g, "/")
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, "&");
+  const values = [];
+  for (const match of normalized.matchAll(/\bhref\s*=\s*["']([^"']+)["']/gi)) {
+    values.push(match[1]);
+  }
+  for (const match of normalized.matchAll(/https?:\/\/[^\s"'<>]+/gi)) {
+    values.push(match[0]);
+  }
+
+  const current = normalizeComparableUrl(baseUrl);
+  const seen = new Set();
+  const urls = [];
+  for (const value of values) {
+    let parsed;
+    try {
+      parsed = new URL(value, baseUrl);
+    } catch {
+      continue;
+    }
+    const candidate = parsed.toString();
+    const comparable = normalizeComparableUrl(candidate);
+    if (!comparable || comparable === current || seen.has(comparable)) continue;
+    if (!inferProvider({ careers_url: candidate })) continue;
+    seen.add(comparable);
+    urls.push(candidate);
+  }
+  return urls;
+}
+
+function normalizeComparableUrl(value) {
+  try {
+    const url = new URL(value);
+    url.hash = "";
+    return url.toString().replace(/\/$/, "");
+  } catch {
+    return "";
+  }
 }

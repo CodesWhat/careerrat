@@ -464,7 +464,7 @@ test("ISSUE-012: grounding accepts source-exact text across Markdown whitespace 
 test("ISSUE-012/014: Morgan's explicit honesty and targeting sections become reviewable proposals", async () => {
   const { proposeAutoFromSource } = await import("../src/core/deep-ingest/proposals/auto.mjs");
   const text = await readFile(
-    new URL("../qa/electron-2026-08-08/fixtures/morgan-hale-persona.md", import.meta.url),
+    new URL("fixtures/deep-ingest/morgan-hale-persona.md", import.meta.url),
     "utf8"
   );
   const source = {

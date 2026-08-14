@@ -12,7 +12,7 @@ Phase requirements covered: PUB-01, PUB-02, PUB-03, DSC-01, DSC-02, DSC-03.
 - No personal/candidate data and no individual job postings are synced in this phase.
 - Use the same local SQLite database with separate `public_*` tables.
 - Sync-home may only read from public tables.
-- Onboarding gets a default-on "help improve Rolester" toggle with clear no-private-data copy.
+- Onboarding gets a default-on "help improve CareerRat" toggle with clear no-private-data copy.
 - Scrub validation fails closed when any private field is present.
 - Reachable public custom careers pages should be scraped locally best-effort.
 - Public sync receives metadata/confidence/provenance only, not full page bodies.
@@ -206,7 +206,7 @@ Onboarding:
 - Add sharing toggle near finish/discovery setup.
 - Default on for new setup.
 - Persist preference locally.
-- Show copy that public company/board metadata may improve Rolester and private job-search data is not shared.
+- Show copy that public company/board metadata may improve CareerRat and private job-search data is not shared.
 - Provide saved-state and scrub-failure feedback.
 
 Discovery review:

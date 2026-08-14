@@ -109,49 +109,30 @@ describe("computeSetupProgress", () => {
     assert.equal(progress.items.find((i) => i.key === "guardrails").done, true);
   });
 
-  it("quickFacts flips on home text OR hybrid/onsite/relocation, independently", () => {
+  it("quickFacts requires both a location posture and a minimum base", () => {
     assert.equal(
       computeSetupProgress({ data: { profile: { location: { home: "Austin, TX" } } } }).items.find(
         (i) => i.key === "quickFacts"
       ).done,
-      true
-    );
-    assert.equal(
-      computeSetupProgress({ data: { profile: { location: { hybrid: true } } } }).items.find(
-        (i) => i.key === "quickFacts"
-      ).done,
-      true
-    );
-    assert.equal(
-      computeSetupProgress({ data: { profile: { location: { onsite: true } } } }).items.find(
-        (i) => i.key === "quickFacts"
-      ).done,
-      true
+      false
     );
     assert.equal(
       computeSetupProgress({
-        data: { profile: { location: { relocation: ["Austin, TX"] } } },
+        data: {
+          profile: {
+            location: { home: "Austin, TX", hybrid: true },
+            compensation: { minimum_base: 180000 },
+          },
+        },
       }).items.find((i) => i.key === "quickFacts").done,
       true
     );
     assert.equal(
       computeSetupProgress({
-        data: { profile: { location: { home: "   " } } },
+        data: { profile: { compensation: { minimum_base: 180000 } } },
       }).items.find((i) => i.key === "quickFacts").done,
       false,
-      "whitespace-only home must not count as set"
-    );
-    // `remote` is deliberately excluded — DEFAULTS.profile.location.remote
-    // defaults to true (a scanning/scoring recall default, see
-    // candidate-defaults.mjs), so a bare `remote: true` is never proof the
-    // candidate answered anything; only the fields that default false/empty
-    // count as real evidence here.
-    assert.equal(
-      computeSetupProgress({ data: { profile: { location: { remote: true } } } }).items.find(
-        (i) => i.key === "quickFacts"
-      ).done,
-      false,
-      "remote alone must not count as an answered quick fact (see candidate-defaults.mjs)"
+      "compensation without a location posture is still incomplete"
     );
   });
 
@@ -241,6 +222,7 @@ describe("computeSetupProgress", () => {
           cut_signals: ["Below $200K"],
         },
         profile: {
+          compensation: { minimum_base: 200000 },
           location: { home: "Austin, TX" },
           authorization: { work_authorized: true },
         },
@@ -260,6 +242,7 @@ describe("computeSetupProgress", () => {
         },
         evidence: { claims: [{ claim: "Shipped a thing" }] },
         profile: {
+          compensation: { minimum_base: 200000 },
           location: { home: "Austin, TX" },
           authorization: { work_authorized: true },
         },
@@ -288,6 +271,7 @@ describe("computeSetupProgress", () => {
         },
         evidence: { claims: [{ claim: "Shipped a thing" }] },
         profile: {
+          compensation: { minimum_base: 200000 },
           location: { home: "Austin, TX" },
           authorization: { work_authorized: true },
         },
@@ -511,7 +495,7 @@ describe("GET /api/onboard/state — files[].exists on a freshly-initialized DB 
     }
   });
 
-  it("flips exists:true once the candidate actually writes to profile.yml", async () => {
+  it("flips exists:true without treating the ambient remote fallback as another answer", async () => {
     const repoRoot = buildTempRoot();
     const routes = mountDirectRoutes(repoRoot);
     try {
@@ -522,7 +506,7 @@ describe("GET /api/onboard/state — files[].exists on a freshly-initialized DB 
       const { body } = await getDirect(routes, "/api/onboard/state");
       const profileFile = body.files.find((f) => f.name === "profile");
       assert.equal(profileFile.exists, true);
-      assert.equal(quickFactsDetailLine({ state: body }), "Remote");
+      assert.equal(quickFactsDetailLine({ state: body }), null);
     } finally {
       closeAll();
     }

@@ -59,6 +59,7 @@ function readSavedJobBody(workspaceDir, storedPath) {
     return null;
   }
   const parsed = parseSavedJob(text);
+  if (parsed.frontmatter?.partial === true) return null;
   const body = cleanText(parsed.body || text);
   if (body.length < JOB_BODY_MIN_CHARS) return null;
   return { body, path: storedPath };

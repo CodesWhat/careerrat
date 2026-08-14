@@ -78,7 +78,7 @@
     "context_warnings": true,
     "workflow_guard": true
   },
-  "project_code": "ROL-API",
+  "project_code": "CAREERRAT-API",
   "phase_naming": "sequential",
   "agent_skills": {},
   "claude_md_path": "./.claude/CLAUDE.md",

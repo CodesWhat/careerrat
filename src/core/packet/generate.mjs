@@ -6,6 +6,7 @@ import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import {
   buildCoverLetterScaffold,
   buildStructuredResumeMarkdown,
+  containsForbiddenPhrase,
   forbiddenWordingFor,
   validateAtsSafe,
 } from "../documents/tailor.mjs";
@@ -228,10 +229,6 @@ function forbiddenFor(context = {}) {
 
 const CONFIRMED_BOUNDARY_DISPLAY_CAP = 20;
 
-function normalizeForContains(value) {
-  return String(value || "").toLowerCase();
-}
-
 // Prompt-visible projection of confirmed honesty-boundary rows: most-recent
 // (rows already arrive updated_at DESC, id ASC from the reader verb) capped
 // at 20, forbiddenWording always stripped (mirrors the existing evidence-
@@ -245,10 +242,7 @@ function projectConfirmedBoundaries(boundaryRows, forbidden) {
     const { forbiddenWording: _forbiddenWording, ...rest } = row || {};
     const allowedWording = cleanText(rest.allowedWording);
     const allowedConflicts =
-      allowedWording &&
-      forbidden.some((phrase) =>
-        normalizeForContains(allowedWording).includes(normalizeForContains(phrase))
-      );
+      allowedWording && forbidden.some((phrase) => containsForbiddenPhrase(allowedWording, phrase));
     return { ...rest, allowedWording: allowedConflicts ? "" : allowedWording };
   });
 }
@@ -374,9 +368,7 @@ export function validatePacketGroundedIds({
     const missing = ids.filter((id) => !allowed.has(id));
     if (!ids.length && !/^NEEDS YOU:/i.test(text)) issues.push("confirmed evidence ID is required");
     if (missing.length) issues.push(`missing evidence IDs: ${missing.join(", ")}`);
-    const forbiddenHits = forbidden.filter((phrase) =>
-      text.toLowerCase().includes(String(phrase).toLowerCase())
-    );
+    const forbiddenHits = forbidden.filter((phrase) => containsForbiddenPhrase(text, phrase));
     if (forbiddenHits.length) issues.push(`forbidden wording: ${forbiddenHits.join(", ")}`);
     if (issues.length) {
       gaps.push({
@@ -900,7 +892,8 @@ function writeWorkspaceArtifacts({
         key === "coverLetter"
           ? `coverLetter${format === "pdf" ? "Pdf" : "Docx"}`
           : `${key}${format === "pdf" ? "Pdf" : "Docx"}`;
-      const full = join(tailoredDir, `${base}-${key}.${format}`);
+      const fileKind = key === "coverLetter" ? "cover-letter" : key;
+      const full = join(tailoredDir, `${base}-${fileKind}.${format}`);
       const content = format === "pdf" ? `%PDF-1.4\n% CareerRat packet artifact\n${body}\n` : body;
       writeFileSync(full, content, format === "pdf" ? "utf8" : "utf8");
       artifacts[artifactKey] = workspaceDisplayPath(relative(workspaceDir, full));

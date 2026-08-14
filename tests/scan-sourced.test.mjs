@@ -660,6 +660,79 @@ test("DB mode write:true stamps search-source watermarks in SQLite without writi
   }
 });
 
+test("DB RSS scan replaces a feed preview with the canonical ATS job body before capture", async () => {
+  const repoRoot = tempRepo();
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const atsUrl = "https://job-boards.greenhouse.io/acme/jobs/123456";
+  try {
+    candidateSetupInitialize({ repoRoot });
+    sourceConfigPut({
+      repoRoot,
+      name: "search-sources",
+      data: {
+        searches: [
+          {
+            provider: "RemoteVibeCodingJobs",
+            source_type: "rss",
+            label: "Remote Vibe Coding Jobs",
+            rssUrl: "https://remotevibecodingjobs.com/feed.xml",
+            enabled: true,
+          },
+        ],
+      },
+    });
+
+    const fetchImpl = async (requestedUrl) => {
+      const url = String(requestedUrl);
+      if (url === "https://remotevibecodingjobs.com/feed.xml") {
+        return rssResponse({ company: "Acme", title: "Staff Engineer", url: aggregatorUrl });
+      }
+      if (url === aggregatorUrl) {
+        return new Response(
+          `<html><body><h1>Staff Engineer</h1><a href="${atsUrl}">Apply now</a></body></html>`,
+          { status: 200 }
+        );
+      }
+      if (url.includes("boards-api.greenhouse.io/v1/boards/acme/jobs")) {
+        return new Response(
+          JSON.stringify({
+            jobs: [
+              {
+                title: "Staff Engineer",
+                absolute_url: atsUrl,
+                location: { name: "United States (Remote)" },
+                content: `<p>${"Complete canonical job description. ".repeat(30)}</p>`,
+              },
+            ],
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    };
+
+    const summary = await runSourcedScan({
+      repoRoot,
+      fetchImpl,
+      resolveHost: async () => [{ address: "93.184.216.34", family: 4 }],
+      write: true,
+      intake: false,
+    });
+
+    assert.equal(summary.new, 1);
+    assert.equal(summary.offers[0].url, atsUrl);
+    assert.equal(summary.offers[0].bodyPartial, false);
+    assert.equal(summary.offers[0].capturedUrl, aggregatorUrl);
+    const jdText = readFileSync(userPath({ repoRoot }, summary.offers[0].artifacts.jd), "utf8");
+    assert.match(jdText, /partial: false/);
+    assert.match(jdText, /Complete canonical job description/);
+    assert.match(jdText, new RegExp(`source: "?${atsUrl.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`));
+  } finally {
+    closeAll();
+    rmSync(repoRoot, { recursive: true, force: true });
+  }
+});
+
 test("search-source watermarks advance only after each source finishes", async () => {
   const repoRoot = tempRepo();
   const secondResponse = deferred();

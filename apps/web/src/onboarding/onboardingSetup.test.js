@@ -19,6 +19,7 @@ import {
   SETUP_ITEM_LABELS,
   SETUP_ITEM_ORDER,
   setupCompletedCount,
+  setupDisclosureRows,
   setupIsComplete,
   setupProgressFromState,
   setupTotal,
@@ -114,12 +115,15 @@ describe("setupCompletedCount / setupIsComplete", () => {
     expect(setupIsComplete({})).toBe(false);
   });
 
-  it("reads completedCount and complete straight off state.setupProgress", () => {
+  it("reads completedCount from progress and completion from progress plus readiness", () => {
     const state = { setupProgress: { completedCount: 5, complete: false } };
     expect(setupCompletedCount(state)).toBe(5);
     expect(setupIsComplete(state)).toBe(false);
 
-    const done = { setupProgress: { completedCount: 7, complete: true } };
+    const done = {
+      setupProgress: { completedCount: 7, complete: true },
+      data: { setup: { readiness: { search_ready: true } } },
+    };
     expect(setupCompletedCount(done)).toBe(7);
     expect(setupIsComplete(done)).toBe(true);
   });
@@ -127,6 +131,21 @@ describe("setupCompletedCount / setupIsComplete", () => {
   it("setupIsComplete requires complete to be strictly true", () => {
     expect(setupIsComplete({ setupProgress: { complete: "true" } })).toBe(false);
     expect(setupIsComplete({ setupProgress: { complete: 1 } })).toBe(false);
+  });
+
+  it("does not graduate onboarding until canonical candidate readiness is search-ready", () => {
+    expect(
+      setupIsComplete({
+        setupProgress: { complete: true },
+        data: { setup: { readiness: { search_ready: false } } },
+      })
+    ).toBe(false);
+    expect(
+      setupIsComplete({
+        setupProgress: { complete: true },
+        data: { setup: { readiness: { search_ready: true } } },
+      })
+    ).toBe(true);
   });
 });
 
@@ -139,6 +158,102 @@ describe("setupTotal", () => {
     expect(setupTotal(undefined)).toBe(SETUP_ITEM_ORDER.length);
     expect(setupTotal({})).toBe(SETUP_ITEM_ORDER.length);
     expect(setupTotal({ setupProgress: {} })).toBe(SETUP_ITEM_ORDER.length);
+  });
+});
+
+describe("setupDisclosureRows", () => {
+  it("does not present the ambient remote search fallback as a confirmed preference", () => {
+    const rows = setupDisclosureRows({
+      state: {
+        files: [{ name: "profile", exists: true }],
+        setupProgress: { items: [{ key: "quickFacts", done: false }] },
+        data: {
+          profile: {
+            candidate: { full_name: "Morgan Hale" },
+            location: { home: "", remote: true, hybrid: false, onsite: false },
+            compensation: { minimum_base: null },
+          },
+        },
+      },
+    });
+
+    expect(rows.find((row) => row.key === "quickFacts").value).toBe("Morgan Hale");
+  });
+
+  it("shows the actual saved setup instead of eight done/not-set labels", () => {
+    const state = {
+      sourceResumePresent: true,
+      data: {
+        profile: {
+          candidate: {
+            full_name: "Jamie Rivera",
+            email: "jamie@example.com",
+            phone: "555-0100",
+            location: "Baltimore, MD",
+          },
+          location: { remote: true },
+          compensation: { minimum_base: 180000 },
+          authorization: { work_authorized: true, requires_sponsorship: false },
+        },
+        targeting: {
+          role_buckets: [{ titles: ["Applied AI Engineer", "Forward Deployed Engineer"] }],
+          tracked_companies: ["Anthropic", "OpenAI"],
+          cut_signals: ["Below $180K", "Five days on-site"],
+        },
+        evidence: {
+          claims: [
+            { claim: "Shipped an agent pipeline" },
+            { claim: "Led an identity platform migration" },
+          ],
+        },
+      },
+    };
+
+    expect(setupDisclosureRows({ state, runtime: { name: "Orca CLI" } })).toEqual([
+      { key: "engine", label: "Engine", value: "Orca CLI" },
+      { key: "resume", label: "Resume", value: "Uploaded · 2 evidence claims" },
+      {
+        key: "roles",
+        label: "Roles",
+        value: "Applied AI Engineer, Forward Deployed Engineer",
+      },
+      { key: "companies", label: "Companies", value: "Anthropic, OpenAI" },
+      {
+        key: "evidence",
+        label: "Evidence",
+        value: "2 claims · Shipped an agent pipeline · Led an identity platform migration",
+      },
+      {
+        key: "guardrails",
+        label: "Guardrails",
+        value: "Below $180K · Five days on-site",
+      },
+      {
+        key: "quickFacts",
+        label: "Quick facts",
+        value:
+          "Jamie Rivera · jamie@example.com · 555-0100 · Baltimore, MD · Remote · $180,000 minimum base",
+      },
+      { key: "authorization", label: "Work authorization", value: "Authorized" },
+    ]);
+  });
+
+  it("uses honest fallback copy for values that were declined or not provided", () => {
+    const rows = setupDisclosureRows({
+      state: {
+        data: {
+          "form-defaults": {
+            declined_fields: {
+              resume: { declined_at: "2026-08-13T00:00:00Z" },
+              authorization: { declined_at: "2026-08-13T00:00:00Z" },
+            },
+          },
+        },
+      },
+    });
+    expect(rows.find((row) => row.key === "resume").value).toBe("Built from your answers");
+    expect(rows.find((row) => row.key === "authorization").value).toBe("Declined");
+    expect(rows.find((row) => row.key === "roles").value).toBe("Not provided");
   });
 });
 
@@ -321,22 +436,46 @@ describe("guardrailsDetailLine", () => {
 });
 
 describe("quickFactsDetailLine", () => {
+  it("does not expose the ambient remote fallback after an unrelated profile field is saved", () => {
+    expect(
+      quickFactsDetailLine({
+        state: {
+          files: [{ name: "profile", exists: true }],
+          setupProgress: { items: [{ key: "quickFacts", done: false }] },
+          data: {
+            profile: {
+              candidate: { full_name: "Morgan Hale" },
+              location: { remote: true },
+            },
+          },
+        },
+      })
+    ).toBeNull();
+  });
+
   it("returns null when no location mode is set", () => {
     expect(quickFactsDetailLine({ state: {} })).toBeNull();
     expect(quickFactsDetailLine({ state: { data: { profile: { location: {} } } } })).toBeNull();
   });
 
-  it("joins whichever modes are set, in Remote/Hybrid/On-site order", () => {
+  it("shows location modes with the missing or saved minimum base", () => {
     expect(
       quickFactsDetailLine({
         state: { data: { profile: { location: { remote: true, onsite: true } } } },
       })
-    ).toBe("Remote · On-site");
+    ).toBe("Remote · On-site · Add minimum base");
     expect(
       quickFactsDetailLine({
-        state: { data: { profile: { location: { remote: true, hybrid: true, onsite: true } } } },
+        state: {
+          data: {
+            profile: {
+              location: { remote: true, hybrid: true, onsite: true },
+              compensation: { minimum_base: 180000 },
+            },
+          },
+        },
       })
-    ).toBe("Remote · Hybrid · On-site");
+    ).toBe("Remote · Hybrid · On-site · $180K floor");
   });
 
   it("Bug 4: returns null when state.files marks profile.yml as not existing", () => {

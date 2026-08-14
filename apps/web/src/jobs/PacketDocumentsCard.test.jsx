@@ -145,9 +145,28 @@ describe("PacketDocumentsCard", () => {
         resume: { html: "<p>Resume</p>" },
         coverLetter: { html: "<p>Cover letter</p>" },
       },
+      packet: {
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            message: "answers artifact skipped — no application questions captured yet",
+          },
+        ],
+      },
     });
     api.generatePacketDocuments.mockResolvedValueOnce({
-      data: { status: "reviewable", gaps: [{ kind: "answers", message: "answers skipped" }] },
+      data: {
+        status: "reviewable",
+        gaps: [
+          {
+            kind: "answers",
+            message: "answers artifact skipped — no application questions captured yet",
+          },
+        ],
+      },
     });
     let tree = renderCard();
     await runInitialEffect();
@@ -164,8 +183,11 @@ describe("PacketDocumentsCard", () => {
     tree = materialize(renderCard());
     expect(textOf(tree)).toContain("Resume: View");
     expect(textOf(tree)).toContain("Cover letter: View");
-    expect(textOf(tree)).toContain("Answers: Not generated yet");
-    expect(textOf(tree)).toContain("Packet reviewable: 1 gap.");
+    expect(textOf(tree)).toContain("Answers: Waiting for application questions");
+    expect(textOf(tree)).toContain(
+      "Résumé and cover letter are ready. Answers will be added when the application form exposes its questions."
+    );
+    expect(textOf(tree)).not.toContain("Packet reviewable: 1 gap.");
   });
 
   it("shows a disabled busy label while generation is pending", async () => {

@@ -35,8 +35,10 @@ npm run desktop:dist
 ```
 
 This runs the web app build, stages a self-contained engine copy into
-`staging/careerrat`, then runs `electron-builder --mac dmg`. The pilot target is
-a signed and notarized macOS DMG. The staged runtime uses the same allowlist
+`staging/careerrat`, runs `electron-builder --mac dmg`, signs and notarizes the
+DMG container, staples its ticket, then verifies the app signature, notarization
+ticket, and Gatekeeper assessment. It exits
+nonzero unless it produced a signed and notarized macOS DMG. The staged runtime uses the same allowlist
 `npm pack` ships, plus its own Agent SDK install, so the packaged app does not
 reach back into the source checkout or root `node_modules`.
 
@@ -63,7 +65,7 @@ notarization credentials from the local keychain or CI environment. The tracked
 config intentionally contains no Apple account, team, password, app-specific
 password, or keychain-profile value.
 
-Verify the app and DMG after a pilot build:
+The release build runs these checks automatically. They can also be repeated manually:
 
 ```
 codesign -dv --verbose=2 dist/mac-arm64/CareerRat.app

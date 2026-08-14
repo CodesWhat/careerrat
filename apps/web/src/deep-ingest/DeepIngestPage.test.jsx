@@ -394,40 +394,156 @@ describe("DeepIngestPage wizard", () => {
     expect(capturedNavButton("Continue").disabled).toBe(false);
   });
 
+  it("does not claim an empty deep dive is complete when the user leaves without material", () => {
+    const state = deepIngestState({
+      sources: [],
+      proposals: [],
+      lanes: LANE_KEYS.map((key) => ({ key, status: "not_started" })),
+      readiness: {
+        ready: false,
+        terminalCount: 0,
+        requiredCount: 7,
+        progressText: "0 of 7 lanes terminal",
+      },
+    });
+    renderPage(state);
+
+    capturedNavButton("Continue").onClick();
+    const html = renderPage(state);
+
+    expect(html).toContain("Deep dive paused");
+    expect(html).toContain("0 of 7 lanes finished. Deep ingest is still incomplete.");
+    expect(html).not.toContain("Confirmed material now feeds every");
+    expect(html).not.toContain(
+      'class="onboarding-progress__case onboarding-progress__case--clickable onboarding-progress__case--filled" aria-label="Go to Material"'
+    );
+  });
+
+  it("records source coverage before leaving Material with drafted sources", async () => {
+    const state = deepIngestState({
+      lanes: [
+        { key: "source_coverage", status: "review_needed" },
+        ...LANE_KEYS.map((key) => ({ key, status: "review_needed" })),
+        { key: "open_gaps", status: "not_started" },
+      ],
+    });
+    renderPage(state);
+
+    await capturedNavButton("Continue").onClick();
+
+    expect(apiMock.updateDeepIngestLaneState).toHaveBeenCalledWith({
+      lane: "source_coverage",
+      status: "completed",
+    });
+    expect(renderPage(state)).toContain('class="deep-wizard__step-label">Step 2');
+  });
+
+  it("treats a grounded open-gap result as drafted instead of offering an endless redraft loop", () => {
+    const state = deepIngestState({
+      proposals: [
+        proposalRow({
+          id: "deep_prop_gap_only",
+          lane: "open_gaps",
+          proposalStatus: "gap",
+          payload: { reason: "Add a quantified leadership outcome." },
+        }),
+      ],
+    });
+
+    const html = renderPage(state);
+
+    expect(html).toContain("Drafts ready");
+    expect(capturedButton("Draft proposals").disabled).toBe(true);
+    expect(capturedNavButton("Continue").disabled).toBe(false);
+  });
+
+  it("offers a real finalization write for the two readiness lanes outside the review steps", async () => {
+    const state = deepIngestState({
+      lanes: [
+        { key: "source_coverage", status: "not_started" },
+        ...LANE_KEYS.map((key) => ({ key, status: "completed" })),
+        { key: "open_gaps", status: "not_started" },
+      ],
+      readiness: { ready: false, terminalCount: 5, requiredCount: 7 },
+    });
+    const html = selectStep("Done", state);
+
+    expect(html).toContain("Finish deep ingest");
+    await capturedButton("Finish deep ingest").onClick();
+
+    expect(apiMock.updateDeepIngestLaneState).toHaveBeenNthCalledWith(1, {
+      lane: "source_coverage",
+      status: "completed",
+    });
+    expect(apiMock.updateDeepIngestLaneState).toHaveBeenNthCalledWith(2, {
+      lane: "open_gaps",
+      status: "completed",
+    });
+  });
+
+  it("keeps confirmed open gaps visible as a deferred terminal decision", async () => {
+    const state = deepIngestState({
+      lanes: [
+        { key: "source_coverage", status: "completed" },
+        ...LANE_KEYS.map((key) => ({ key, status: "completed" })),
+        { key: "open_gaps", status: "gap" },
+      ],
+      readiness: { ready: false, terminalCount: 6, requiredCount: 7 },
+      openGaps: [
+        proposalRow({
+          id: "deep_prop_gap_finish",
+          lane: "open_gaps",
+          proposalStatus: "gap",
+          payload: { reason: "Add a quantified leadership outcome." },
+        }),
+      ],
+    });
+    const html = selectStep("Done", state);
+
+    expect(html).toContain("Finish with these gaps");
+    await capturedButton("Finish with these gaps").onClick();
+
+    expect(apiMock.updateDeepIngestLaneState).toHaveBeenCalledWith({
+      lane: "open_gaps",
+      status: "deferred",
+      reason: "Keeping these open gaps to revisit later.",
+    });
+  });
+
   it.each([
     { action: "Confirm", decision: "confirm" },
     { action: "Discard", decision: "reject" },
-  ])("auto-advances after $action resolves the last pending lane proposal", async ({
-    action,
-    decision,
-  }) => {
-    const pending = proposalRow({
-      id: "deep_prop_last",
-      lane: "evidence_claims",
-      title: "Last evidence draft",
-      summary: "The only pending proposal.",
-      version: 7,
-    });
-    const state = deepIngestState({ proposals: [pending] });
-    selectStep("Evidence", state);
-    apiMock.state = {
-      ...state,
-      proposals: [{ ...pending, status: decision === "confirm" ? "confirmed" : "rejected" }],
-    };
+  ])(
+    "auto-advances after $action resolves the last pending lane proposal",
+    async ({ action, decision }) => {
+      const pending = proposalRow({
+        id: "deep_prop_last",
+        lane: "evidence_claims",
+        title: "Last evidence draft",
+        summary: "The only pending proposal.",
+        version: 7,
+      });
+      const state = deepIngestState({ proposals: [pending] });
+      selectStep("Evidence", state);
+      apiMock.state = {
+        ...state,
+        proposals: [{ ...pending, status: decision === "confirm" ? "confirmed" : "rejected" }],
+      };
 
-    if (action === "Confirm") {
-      await capturedButton("Confirm").onClick();
-    } else {
-      await capturedNativeButton("Discard", "deep-wizard__quiet-link").onClick();
+      if (action === "Confirm") {
+        await capturedButton("Confirm").onClick();
+      } else {
+        await capturedNativeButton("Discard", "deep-wizard__quiet-link").onClick();
+      }
+      const html = renderPage(apiMock.state);
+
+      expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith(
+        expect.objectContaining({ proposalId: "deep_prop_last", decision })
+      );
+      expect(html).toContain('class="deep-wizard__step-label">Step 3');
+      expect(html).toContain("Story bank");
     }
-    const html = renderPage(apiMock.state);
-
-    expect(apiMock.decideDeepIngestProposal).toHaveBeenCalledWith(
-      expect.objectContaining({ proposalId: "deep_prop_last", decision })
-    );
-    expect(html).toContain('class="deep-wizard__step-label">Step 3');
-    expect(html).toContain("Story bank");
-  });
+  );
 
   it("preserves structured AI payload fields when reviewer edits are confirmed", async () => {
     const boundary = proposalRow({

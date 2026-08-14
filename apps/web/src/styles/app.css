@@ -188,8 +188,10 @@ button {
     grid-template-areas:
       "brand utilities"
       "nav nav";
-    gap: 12px;
-    padding: 12px 16px;
+    gap: 4px 12px;
+    height: auto;
+    min-height: 88px;
+    padding: 8px 16px 0;
   }
 
   .app-shell__brand-lockup {
@@ -206,8 +208,10 @@ button {
     order: 3;
     justify-content: flex-start;
     overflow-x: auto;
-    padding-bottom: 2px;
+    padding-bottom: 0;
     scrollbar-width: none;
+    -webkit-mask-image: none;
+    mask-image: none;
   }
 
   .app-shell__primary::-webkit-scrollbar {
@@ -298,11 +302,15 @@ button {
 
 @media (max-width: 760px) {
   .nav-list {
-    min-width: max-content;
-    justify-content: flex-start;
-    gap: 20px;
-    padding-right: 10px;
+    min-width: 0;
+    justify-content: space-between;
+    gap: 8px;
+    padding-right: 0;
     overflow-x: visible;
+  }
+
+  .nav-item {
+    font-size: 13px;
   }
 }
 
@@ -5910,6 +5918,76 @@ button.chip {
   align-self: flex-end;
 }
 
+.chat-bubble__content {
+  display: grid;
+  gap: 8px;
+  white-space: normal;
+}
+
+.chat-markdown__heading,
+.chat-markdown__paragraph,
+.chat-markdown__list {
+  margin: 0;
+}
+
+.chat-markdown__heading {
+  font-size: 14px;
+  line-height: 1.35;
+}
+
+.chat-markdown__paragraph {
+  white-space: normal;
+}
+
+.chat-markdown__list {
+  padding-left: 18px;
+}
+
+.chat-markdown__table-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+.chat-markdown__table-wrap table {
+  width: max-content;
+  min-width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+}
+
+.chat-markdown__table-wrap :is(th, td) {
+  padding: 5px 7px;
+  border: 1px solid var(--paper-edge);
+  text-align: left;
+  vertical-align: top;
+}
+
+.chat-markdown__table-wrap th {
+  background: var(--paper-bg);
+}
+
+.chat-proposal {
+  display: grid;
+  gap: 6px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--paper-edge);
+  border-radius: var(--card-radius);
+  background: var(--paper-bg);
+}
+
+.chat-proposal a {
+  color: var(--accent);
+  overflow-wrap: anywhere;
+}
+
+.chat-proposal__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
 .chat-activity-line {
   font-size: 11px;
   color: var(--ink-soft);
@@ -6311,11 +6389,19 @@ button.chip {
  * test's own carve-out comment for that exact distinction). */
 
 .onboarding-app {
+  height: 100vh;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  overflow: hidden;
   background: var(--canvas);
   color: var(--ink);
+}
+
+@supports (height: 100dvh) {
+  .onboarding-app {
+    height: 100dvh;
+  }
 }
 
 .onboarding-app__header {
@@ -6882,6 +6968,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   flex: 1;
   display: flex;
   min-height: 0;
+  overflow: hidden;
 }
 
 .onboarding-interview__chat {
@@ -6892,6 +6979,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   padding: 24px 28px 140px;
   gap: 12px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .onboarding-transcript {
@@ -7159,6 +7247,7 @@ a.onboarding-engine__not-found-chip:focus-visible {
   flex-direction: column;
   gap: 8px;
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .file-pane__heading {
@@ -7179,6 +7268,131 @@ a.onboarding-engine__not-found-chip:focus-visible {
   font-size: 9px;
   letter-spacing: var(--label-tracking);
   color: var(--ink-faint-2);
+}
+
+.file-pane__pending {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--card));
+}
+
+.file-pane__pending-title {
+  color: var(--accent);
+  font-family: var(--label-font);
+  font-size: 8.5px;
+  letter-spacing: var(--label-tracking);
+}
+
+.file-pane__pending-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+}
+
+.file-pane__pending-item {
+  display: grid;
+  gap: 1px;
+}
+
+.file-pane__pending-item dt,
+.file-pane__pending-item dd {
+  margin: 0;
+}
+
+.file-pane__pending-item dt {
+  color: var(--ink-faint);
+  font-size: 9px;
+}
+
+.file-pane__pending-item dd {
+  color: var(--ink);
+  font-size: 10.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.file-pane__resume-reading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--card));
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.file-pane__resume-reading-label {
+  color: var(--accent);
+  font-family: var(--label-font);
+  font-size: 8.5px;
+  letter-spacing: var(--label-tracking);
+}
+
+.file-pane__resume-reading strong {
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.file-pane__candidate {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 11px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--card);
+  overflow-wrap: anywhere;
+}
+
+.file-pane__candidate--empty {
+  border-style: dashed;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.file-pane__candidate-name {
+  font-size: 13px;
+  color: var(--ink);
+}
+
+.file-pane__candidate-headline,
+.file-pane__candidate-facts {
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.file-pane__candidate-facts {
+  display: flex;
+  flex-direction: column;
+}
+
+.file-pane__candidate-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 9px;
+  margin-top: 2px;
+}
+
+.file-pane__candidate-links a {
+  color: var(--accent);
+  font-size: 10px;
+  text-decoration: none;
+}
+
+.file-pane__candidate-links a:hover {
+  text-decoration: underline;
 }
 
 .file-pane__row {
@@ -7328,6 +7542,12 @@ a.onboarding-engine__not-found-chip:focus-visible {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.file-pane__resume-status {
+  color: var(--ink-soft);
+  font-size: 10.5px;
+  line-height: 1.4;
 }
 
 .file-pane__editor-actions {
@@ -11987,7 +12207,11 @@ a.onboarding-engine__not-found-chip:focus-visible {
   inset: 0;
   z-index: 90;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   place-items: center;
+  box-sizing: border-box;
+  padding: clamp(12px, 2vw, 24px);
   background: rgba(var(--rgb-line), 0.35);
 }
 
@@ -11996,8 +12220,10 @@ a.onboarding-engine__not-found-chip:focus-visible {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
-  width: calc(100vw - clamp(24px, 4vw, 48px));
-  height: calc(100vh - clamp(24px, 4vw, 48px));
+  box-sizing: border-box;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
   padding: 12px;
   border: 1px solid rgba(var(--rgb-line), 0.14);
   border-radius: 8px;
@@ -12052,6 +12278,26 @@ a.onboarding-engine__not-found-chip:focus-visible {
 
 .packet-viewer__markdown :first-child {
   margin-top: 0;
+}
+
+.interview-dossier-viewer__body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  box-sizing: border-box;
+  width: min(100%, 800px);
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 34px 30px;
+}
+
+.interview-dossier-viewer__document {
+  width: 100%;
+  color: var(--ink);
+  font-size: 14px;
+  line-height: 1.65;
+  white-space: pre-wrap;
 }
 
 /* ── M10 — Home pipeline snapshot ────────────────────────────────────────── */

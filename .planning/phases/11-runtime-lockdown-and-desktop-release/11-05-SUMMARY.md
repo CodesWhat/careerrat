@@ -32,7 +32,7 @@ key-files:
 key-decisions:
   - "Pilot macOS packaging now requires forceCodeSigning, hardened runtime entitlements, and electron-builder notarization."
   - "Apple credentials remain outside tracked source; the repo only records credential-neutral keychain/CI environment expectations."
-  - "The local notarization readiness gate uses the rolester-notary keychain profile and does not generate or commit release artifacts."
+  - "The local notarization readiness gate uses the careerrat-notary keychain profile and does not generate or commit release artifacts."
 
 patterns-established:
   - "Desktop package tests pin release config without contacting Apple services."
@@ -62,7 +62,7 @@ coverage:
     requirement: DESK-01
     verification:
       - kind: manual_procedural
-        ref: "xcrun notarytool history --keychain-profile rolester-notary"
+        ref: "xcrun notarytool history --keychain-profile careerrat-notary"
         status: pass
     human_judgment: false
 
@@ -73,7 +73,7 @@ status: complete
 
 # Phase 11 Plan 05: Signed and Notarized Desktop Pilot Packaging Summary
 
-**Rolester desktop pilot packaging now requires signed, hardened-runtime, notarized macOS DMG builds with Apple credentials kept outside source.**
+**CareerRat desktop pilot packaging now requires signed, hardened-runtime, notarized macOS DMG builds with Apple credentials kept outside source.**
 
 ## Performance
 
@@ -87,7 +87,7 @@ status: complete
 
 - Added static release tests that pin signing, hardened runtime entitlements, notarization, credential exclusion, and staged runtime resource expectations.
 - Enabled electron-builder macOS pilot packaging with `forceCodeSigning`, `hardenedRuntime`, app/inherited entitlements, and `mac.notarize: true`.
-- Confirmed the `rolester-notary` keychain profile with a non-destructive notarytool history check; no DMG, app bundle, Apple credential, or local release artifact was committed.
+- Confirmed the `careerrat-notary` keychain profile with a non-destructive notarytool history check; no DMG, app bundle, Apple credential, or local release artifact was committed.
 
 ## Task Commits
 
@@ -95,7 +95,7 @@ Each implementation task was committed atomically:
 
 1. **Task 1: Pin signed/notarized package configuration in tests** - `c354a37` (test)
 2. **Task 2: Configure macOS pilot signing and notarization** - `a248416` (feat)
-3. **Task 3: Verify Apple notarization credential readiness** - no code commit; checkpoint verification completed with `rolester-notary`
+3. **Task 3: Verify Apple notarization credential readiness** - no code commit; checkpoint verification completed with `careerrat-notary`
 
 **Plan metadata:** committed after this SUMMARY is written.
 
@@ -112,7 +112,7 @@ Each implementation task was committed atomically:
 
 - PASS: prior commits `c354a37` and `a248416` exist in the current branch ancestry, and the working tree was clean before Task 3.
 - PASS: `node --test tests/desktop-package-resources.test.mjs tests/release-safety.test.mjs`
-- PASS: `xcrun notarytool history --keychain-profile rolester-notary`
+- PASS: `xcrun notarytool history --keychain-profile careerrat-notary`
 - PASS: Apple credential scan found no real Apple ID, app-specific password, or credential value in the plan-touched source files; only placeholder setup text and test regex literals appear in docs/tests.
 - PASS: generated `apps/desktop/dist/` and `apps/desktop/staging/` remain ignored and untracked.
 
@@ -129,7 +129,7 @@ Each implementation task was committed atomically:
 **1. [Rule 3 - Blocking] Used the installed notarytool-compatible history command**
 - **Found during:** Task 3 (Verify Apple notarization credential readiness)
 - **Issue:** The plan's exact command included `--limit 1`, but the installed `xcrun notarytool` 1.1.2 rejects that option as unknown.
-- **Fix:** Re-ran the same non-destructive credential readiness check without the unsupported limit flag: `xcrun notarytool history --keychain-profile rolester-notary`.
+- **Fix:** Re-ran the same non-destructive credential readiness check without the unsupported limit flag: `xcrun notarytool history --keychain-profile careerrat-notary`.
 - **Files modified:** None.
 - **Verification:** The compatible notarytool command succeeded and returned submission history for the keychain profile.
 - **Committed in:** Plan metadata commit.
@@ -137,7 +137,7 @@ Each implementation task was committed atomically:
 ---
 
 **Total deviations:** 1 auto-fixed (Rule 3).
-**Impact on plan:** No source behavior changed. The credential readiness gate still used notarytool and confirmed the same `rolester-notary` keychain profile without exposing secrets.
+**Impact on plan:** No source behavior changed. The credential readiness gate still used notarytool and confirmed the same `careerrat-notary` keychain profile without exposing secrets.
 
 ## Issues Encountered
 
@@ -146,11 +146,11 @@ Each implementation task was committed atomically:
 
 ## Authentication Gates
 
-- The Apple notarization credential checkpoint from the prior executor was resolved by the user before this continuation. The follow-up `notarytool history` check succeeded with `rolester-notary`.
+- The Apple notarization credential checkpoint from the prior executor was resolved by the user before this continuation. The follow-up `notarytool history` check succeeded with `careerrat-notary`.
 
 ## User Setup Required
 
-None remaining for this plan. The local `rolester-notary` keychain profile is confirmed. Plan 11-07 still owns final signed/notarized artifact evidence, stapling or Gatekeeper assessment, code-sign verification, and packaged smoke evidence.
+None remaining for this plan. The local `careerrat-notary` keychain profile is confirmed. Plan 11-07 still owns final signed/notarized artifact evidence, stapling or Gatekeeper assessment, code-sign verification, and packaged smoke evidence.
 
 ## Known Stubs
 

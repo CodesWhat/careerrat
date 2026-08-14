@@ -46,7 +46,7 @@ run("npm", ["--workspace", "apps/web", "run", "build"], {
 copyDirectoryContents(join(REPO, "apps/web/dist"), OUT);
 
 cpSync(join(REPO, "assets"), join(OUT, "assets"), { recursive: true });
-cpSync(join(REPO, "fonts"), join(OUT, "fonts"), { recursive: true });
+cpSync(join(REPO, "assets/fonts"), join(OUT, "fonts"), { recursive: true });
 cpSync(join(REPO, "assets/favicon.ico"), join(OUT, "favicon.ico")); // bare /favicon.ico auto-request
 
 step("Build backward-compatible /design-v3 preview");

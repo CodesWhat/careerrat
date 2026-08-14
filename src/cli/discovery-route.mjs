@@ -3,7 +3,7 @@
 // research-boards and discover-companies are confirm-first skills, and
 // search-jobs must stop at sourced/review state before gate/apply flows.
 
-import { DISCOVERY_PIPELINE } from "../core/agent-guidance.mjs";
+import { DISCOVERY_PIPELINE, recordDiscoveryCompletion } from "../core/agent-guidance.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import { companyProposalBatchLatest } from "../core/db/verbs/company-discovery.mjs";
 import {
@@ -12,6 +12,7 @@ import {
   publicIntelReviewList,
   publicIntelStateGet,
   publicIntelSyncPreview,
+  sourceConfigGet,
 } from "../core/db/verbs.mjs";
 import { applyCompanyProposalDecision } from "../core/discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
@@ -98,10 +99,56 @@ export function buildDiscoveryKickoff({
     .join("\n\n");
 }
 
+export function buildDiscoveryCandidateContext({
+  candidateContext,
+  sourceConfig,
+  companyConfig,
+} = {}) {
+  const configuredSources = (Array.isArray(sourceConfig?.searches) ? sourceConfig.searches : [])
+    .map((source) => {
+      const entry = {};
+      for (const key of ["label", "url", "rssUrl", "target", "provider", "source_type"]) {
+        const value = String(source?.[key] ?? "").trim();
+        if (value) entry[key] = value;
+      }
+      if (typeof source?.enabled === "boolean") entry.enabled = source.enabled;
+      return Object.keys(entry).length ? entry : null;
+    })
+    .filter(Boolean);
+  const configuredCompanies = (
+    Array.isArray(companyConfig?.tracked_companies) ? companyConfig.tracked_companies : []
+  )
+    .map((company) => {
+      const name = String(company?.name || "").trim();
+      const url = String(company?.careers_url || company?.url || "").trim();
+      return name && url ? { name, url } : null;
+    })
+    .filter(Boolean);
+  return {
+    ...(candidateContext && typeof candidateContext === "object" ? candidateContext : {}),
+    configured_sources: configuredSources,
+    configured_companies: configuredCompanies,
+  };
+}
+
 function outboundCandidateContext({ repoRoot, env }) {
   try {
     const config = candidateConfigGet({ repoRoot, env });
-    return buildSearchPromptContext({ repoRoot, env, config });
+    const sourceConfig = sourceConfigGet({ repoRoot, env, name: "search-sources" }).data;
+    const companyConfig = sourceConfigGet({ repoRoot, env, name: "sourced-scan" }).data;
+    const targeting = config.targeting || {};
+    return buildDiscoveryCandidateContext({
+      candidateContext: {
+        ...buildSearchPromptContext({ repoRoot, env, config }),
+        keep_signals: Array.isArray(targeting.keep_signals) ? targeting.keep_signals : [],
+        cut_signals: Array.isArray(targeting.cut_signals) ? targeting.cut_signals : [],
+        tracked_companies: Array.isArray(targeting.tracked_companies)
+          ? targeting.tracked_companies
+          : [],
+      },
+      sourceConfig,
+      companyConfig,
+    });
   } catch {
     return null;
   }
@@ -170,12 +217,15 @@ async function startOrReuseDiscoveryChat({ chatRuntime, guidance, source, candid
   }
 }
 
-function quickStartGuidance(body) {
-  return normalizeDiscoveryGuidance({
-    nextSkill: body?.nextSkill,
-    message: body?.nextMessage,
-    ctaLabel: body?.nextSkill ? `Run ${body.nextSkill}` : null,
-  });
+function quickStartGuidance(body, liveGuidance) {
+  return (
+    normalizeDiscoveryGuidance(liveGuidance) ||
+    normalizeDiscoveryGuidance({
+      nextSkill: body?.nextSkill,
+      message: body?.nextMessage,
+      ctaLabel: body?.nextSkill ? `Run ${body.nextSkill}` : null,
+    })
+  );
 }
 
 function locksFromPrepared(body) {
@@ -432,6 +482,24 @@ export function mountDiscoveryRoutes({
     });
   });
 
+  addRoute("POST", "/api/discovery/complete", async (req, res) => {
+    try {
+      const body = await readJsonBodyCapped(req, COMPANY_PROPOSAL_BODY_MAX_BYTES);
+      const completion = recordDiscoveryCompletion({
+        root: repoRoot,
+        env,
+        step: String(body?.step || "").trim(),
+      });
+      if (!completion.ok) {
+        sendJson(res, 400, completion);
+        return;
+      }
+      sendJson(res, 200, { ok: true, completion });
+    } catch (err) {
+      discoveryRouteError(res, err, err.status || 400);
+    }
+  });
+
   addRoute("POST", "/api/discovery/quick-start", async (_req, res) => {
     const prepared = prepareQuickStart({ repoRoot, env });
     if (prepared.status !== 200) {
@@ -439,7 +507,19 @@ export function mountDiscoveryRoutes({
       return;
     }
 
-    const guidance = quickStartGuidance(prepared.body);
+    const guidance = quickStartGuidance(prepared.body, loadAgentGuidance({ root: repoRoot, env }));
+    if (guidance?.nextSkill === "search-jobs") {
+      sendJson(res, 200, {
+        ...prepared.body,
+        locks: locksFromPrepared(prepared.body),
+        pipeline: DISCOVERY_PIPELINE,
+        guidance,
+        readyForFirstSearch: true,
+        chat: null,
+        activeDiscoveryChat: findActiveDiscoveryChat(chatRuntime),
+      });
+      return;
+    }
     try {
       const handoff = await startOrReuseDiscoveryChat({
         chatRuntime,

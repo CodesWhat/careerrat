@@ -18,7 +18,10 @@ const RULE_CASES = [
   },
   {
     name: "NO_AI_ROUTE code",
-    err: new ApiError(400, { code: "NO_AI_ROUTE", error: "no ai route configured for this workspace" }),
+    err: new ApiError(400, {
+      code: "NO_AI_ROUTE",
+      error: "no ai route configured for this workspace",
+    }),
     message: "No AI engine is connected yet.",
     action: { label: "Open Settings", to: "/settings" },
   },
@@ -61,15 +64,45 @@ const RULE_CASES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    name: "unsupported ATS host",
+    err: new ApiError(400, {
+      error: 'unsupported ATS host — cannot scan "https://example.com/jobs"',
+    }),
+    message:
+      "That isn't a supported company job-board URL. Use a Greenhouse, Lever, Ashby, or Workday board.",
+    action: null,
+  },
+  {
     name: "a scan is already running",
     err: new ApiError(409, { error: "a scan is already running" }),
     message: "A search is already running right now.",
     action: null,
   },
   {
+    name: "application executor unavailable",
+    err: new ApiError(409, {
+      code: "APPLICATION_EXECUTOR_UNAVAILABLE",
+      error: "The authenticated Apply on site executor is not connected.",
+    }),
+    message:
+      "CareerRat can't control the application site in this session, so nothing was submitted. Use “I applied elsewhere” after you finish on the site.",
+    action: null,
+  },
+  {
+    name: "application submission not verified",
+    err: new ApiError(409, {
+      code: "APPLICATION_NOT_VERIFIED",
+      error: "No confirmation page found.",
+    }),
+    message:
+      "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
+    action: null,
+  },
+  {
     name: "PDF/DOCX not supported prefix",
     err: new ApiError(400, { error: "PDF/DOCX not supported yet, use text or markdown" }),
-    message: "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
+    message:
+      "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
     action: null,
   },
   {
@@ -157,7 +190,9 @@ describe("resolveErrorCopy — detail preservation", () => {
   });
 
   it("preserves the raw string verbatim for a body.error object with message", () => {
-    const err = new ApiError(400, { error: { message: "No AI key is configured here", code: "x" } });
+    const err = new ApiError(400, {
+      error: { message: "No AI key is configured here", code: "x" },
+    });
     expect(resolveErrorCopy(err).detail).toBe("No AI key is configured here");
   });
 
@@ -213,7 +248,7 @@ describe("resolveErrorCopy — unmapped/generic fallback", () => {
 });
 
 describe("resolveErrorCopy — regression guard against raw string leakage", () => {
-  const BANNED_SUBSTRINGS = ["rolester", "yml", "sqlite", "body.", "?"];
+  const BANNED_SUBSTRINGS = [["role", "ster"].join(""), "yml", "sqlite", "body.", "?"];
   const ALL_CASES = [
     ...RULE_CASES.map((c) => c.err),
     new ApiError(400, { error: "body.claims must be an array" }),

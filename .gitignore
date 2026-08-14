@@ -6,14 +6,12 @@ node_modules/
 # (CAREERRAT_HOME=./.demo-home) — never real data, never checked in.
 .demo-home/
 
-# Turborepo / website build artifacts
+# Turborepo build artifacts. Each app owns its local Next/Vite output rules.
 .turbo/
-website/.next/
-website/out/
 
 # apps/web build artifacts (M7 SPA shell) — built fresh, shipped via
 # package.json#files["apps/web/dist"], same "gitignored generated release
-# artifact" pattern as website's Next output above.
+# artifact" pattern as the Next app outputs above.
 apps/web/dist/
 
 # apps/desktop build artifacts. staging/ (scripts/stage.mjs's extraResources
@@ -24,7 +22,6 @@ apps/desktop/staging/
 
 # build:demo static bundle (rebuilt per deploy so dates stay evergreen)
 dist/
-website/next-env.d.ts
 *.tsbuildinfo
 .vercel/
 
@@ -46,14 +43,14 @@ venv/
 
 # Agent worktrees / local agent state (the .claude/skills symlink stays tracked)
 .claude/worktrees/
-# Staged release tarballs from scripts/stage-skills-release.sh
+# Staged release tarballs and verification output
 .claude/skills-release-out/
 
 # Browser-automation / Playwright / verification screenshots are SCRATCH by
 # default. They belong under workspace/captures/ (ignored below) and must never
 # be committed to the repo root or workspace root. Backstop-ignore stray PNGs in
 # those two spots so apply/automation captures never clutter the tree — real
-# image assets live in assets/, website/public/, and mockups/. The tracked
+# image assets live in assets/, apps/website/public/, and app-specific trees. The tracked
 # mascot is the one root-PNG exception. Surface a capture in the app only by
 # writing it to a deliberately tracked path.
 /*.png
@@ -86,11 +83,10 @@ docs/COMPARISON.md
 # app against a clean data root (fresh onboarding / fresh-db smoke tests)
 # without touching the real .careerrat/ data root.
 #
-# Match ANY *-fresh data root, not just the current product name. The literal
-# `.rolester-fresh/` was left unignored by the rename and a later `git add -A`
-# committed a real candidate profile (name, email, phone, home address, comp)
-# to this public repo. A name-specific pattern is one rename away from doing
-# that again.
+# Match ANY *-fresh data root, not just the current product name. A stale
+# pre-rename data root was once left unignored and a later `git add -A`
+# committed a real candidate profile. A name-specific pattern is one rename
+# away from repeating that failure.
 .careerrat-fresh/
 *-fresh/
 

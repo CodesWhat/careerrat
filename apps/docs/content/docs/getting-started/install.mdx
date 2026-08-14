@@ -1,0 +1,90 @@
+---
+title: Install & First Run
+description: Install and launch CareerRat in two commands.
+---
+
+## Prerequisites
+
+- **Node.js >= 24** — check with `node -v`
+- **A coding-agent CLI on your PATH** — Claude Code or Codex:
+  - Claude Code: `npm install -g @anthropic-ai/claude-code`
+    ([claude.com/claude-code](https://claude.com/claude-code))
+  - Codex: `npm install -g @openai/codex`
+    ([github.com/openai/codex](https://github.com/openai/codex))
+
+You need one of those on your PATH before running `careerrat start`.
+
+## Public install
+
+```bash
+npm install -g careerrat
+careerrat start claude        # or: careerrat start codex
+```
+
+The `start` command does the whole arc in one shot:
+
+1. Scaffolds `candidate/` and `workspace/` directories (idempotent — safe to re-run).
+2. Installs the skills so your agent sees `/apply-job`, `/evaluate-job`, etc.
+3. Seeds `workspace/tracker.json` from the demo template if not yet present.
+4. Boots the live local app at `http://localhost:7777` with hot reload.
+5. Launches your agent with a starter message.
+
+## Source checkout
+
+Developing from a source checkout uses the same command shape after linking the
+local binary:
+
+```bash
+git clone https://github.com/CodesWhat/careerrat
+cd careerrat
+npm install
+npm run hooks:install
+npm link
+careerrat start claude        # or: careerrat start codex
+```
+
+### Useful flags
+
+| Flag | Effect |
+|------|--------|
+| `--no-agent` | Scaffold + local app only, no agent launch |
+| `--no-dashboard` | Launch agent only, no local app server |
+| `--agent <name>` | Override the agent command launched by the CLI |
+| `--port <n>` | Local app port (default 7777) |
+
+## Manual wiring
+
+If you prefer to open your agent yourself:
+
+```bash
+careerrat doctor     # verify environment + scaffold state
+```
+
+Then open Claude Code or Codex in the repo root and say:
+
+> familiarize yourself and let's get started
+
+The agent reads `AGENTS.md`, verifies the skills shim, and runs `ingest-profile`
+conversationally if your candidate profile is not yet set up.
+
+## Custom data location
+
+By default `workspace/` and `candidate/` live inside the cloned repo. Set
+`CAREERRAT_HOME` to put them somewhere else:
+
+```bash
+export CAREERRAT_HOME=~/careerrat-data
+careerrat start claude
+```
+
+Everything under `CAREERRAT_HOME` is gitignored and never touches the repo tree.
+
+## Health check
+
+```bash
+careerrat doctor
+```
+
+Reports environment health (Node version, agent CLI on PATH), skills
+discoverability, workspace scaffold state, setup completeness, and any config
+schema errors. Run this any time something feels off.

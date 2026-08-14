@@ -331,9 +331,34 @@ test("source and proposal verbs persist reviewable state without requiring candi
   assert.equal(state.sources.length, 1);
   assert.equal(state.proposals.length, 1);
   assert.equal(state.proposals[0].sourceId, created.source.id);
+  assert.equal(state.laneStates.source_coverage.status, "review_needed");
+  assert.equal(state.laneStates.open_gaps.status, "not_started");
 
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/profile.yml")), false);
   assert.equal(existsSync(userPath({ repoRoot }, "candidate/evidence.yml")), false);
+});
+
+test("adding more Deep ingest material reopens completed coverage and gap review", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { deepIngestLaneSetState, deepIngestSourceCreate, deepIngestStateGet } =
+    await loadDeepIngestVerbs();
+  deepIngestLaneSetState({ repoRoot, lane: "source_coverage", status: "completed" });
+  deepIngestLaneSetState({ repoRoot, lane: "open_gaps", status: "completed" });
+
+  deepIngestSourceCreate({
+    repoRoot,
+    input: {
+      targetShape: "auto",
+      sourceKind: "paste",
+      text: "New material that still needs proposal and gap review.",
+    },
+  });
+
+  const state = deepIngestStateGet({ repoRoot });
+  assert.equal(state.laneStates.source_coverage.status, "review_needed");
+  assert.equal(state.laneStates.open_gaps.status, "not_started");
+  assert.equal(state.readiness.ready, false);
 });
 
 test("ISSUE-015: removing an undrafted source cascades its scan stub but protects drafted work", async () => {
@@ -876,6 +901,33 @@ test("confirmed lane outputs and terminal todos are readable through the DB-back
   );
   assert.equal(model.terminalSummary.terminalLanes.includes("open_gaps"), true);
   assert.ok(model.reviewQueue.every((row) => row.status === "review_needed"));
+});
+
+test("Library snapshot includes confirmed onboarding evidence without Deep ingest provenance", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  candidateSetupInitialize({ repoRoot });
+  candidateEvidenceMerge({
+    repoRoot,
+    claims: [
+      {
+        id: "onboarding-evidence-library",
+        claim: "Shipped a production RAG pipeline used by 200 people.",
+        evidence: "Confirmed during onboarding.",
+        metrics: ["200 users"],
+        role_signals: ["prototype-to-production"],
+        allowed_wording: ["production RAG pipeline"],
+      },
+    ],
+  });
+
+  const { loadLibrarySnapshot } = await import("../src/core/tracker/library-snapshot.mjs");
+  const snapshot = loadLibrarySnapshot({ root: repoRoot });
+
+  assert.equal(snapshot.metrics.claims, 1);
+  assert.equal(snapshot.cards.length, 1);
+  assert.equal(snapshot.cards[0].id, "onboarding-evidence-library");
+  assert.equal(snapshot.cards[0].kind, "evidence");
 });
 
 test("Library snapshot projects only confirmed Deep ingest rows from SQLite", async () => {

@@ -127,6 +127,7 @@ function classifyApp(app) {
   const stage = classifyStage(app.status);
   if (stage.id === "withdrawn") return "withdrawn";
   if (TERMINAL_STAGES.has(stage.id)) return "rejected";
+  if (stage.order < 1) return "pre-application";
   if (stage.order >= 2) return "advanced";
   return "awaiting";
 }
@@ -310,16 +311,18 @@ export function buildStats(trackerData) {
   let advanced = 0;
   let rejected = 0;
   let withdrawn = 0;
+  let applied = 0;
 
   for (const app of applications) {
     const cls = classifyApp(app);
+    if (cls === "pre-application") continue;
+    applied++;
     if (cls === "awaiting") awaiting++;
     else if (cls === "advanced") advanced++;
     else if (cls === "rejected") rejected++;
     else if (cls === "withdrawn") withdrawn++;
   }
 
-  const applied = applications.length;
   const inPlay = awaiting + advanced;
   // Candidate withdrawals remove the app from the market-response sample — a withdrawal
   // is not a market signal. Exclude withdrawn from both numerator and denominator so

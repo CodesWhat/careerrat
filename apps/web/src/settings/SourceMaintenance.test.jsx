@@ -37,6 +37,7 @@ describe("SourceMaintenanceView", () => {
             },
           ],
         }}
+        pendingRemoval={null}
         onAddCompany={noop}
         onAddQuery={noop}
         onCompanyDraft={noop}
@@ -67,6 +68,108 @@ describe("SourceMaintenanceView", () => {
     expect(html).toContain("Disabled");
   });
 
+  it("shows human-readable source metadata instead of internal identifiers", () => {
+    const html = renderToStaticMarkup(
+      <SourceMaintenanceView
+        busy={null}
+        companyDraft={{ name: "", url: "" }}
+        error={null}
+        loading={false}
+        model={{
+          searches: [
+            {
+              index: 0,
+              provider: "remotevibecodingjobs",
+              label: "Remote roles",
+              target: "staff engineer",
+              sourceType: "url-query",
+              enabled: true,
+              legitimacy: "supported",
+            },
+            {
+              index: 1,
+              provider: "workingnomads",
+              label: "Working Nomads",
+              target: "https://www.workingnomads.com/api/exposed_jobs/",
+              sourceType: "board",
+              enabled: true,
+              legitimacy: "supported",
+            },
+          ],
+          companies: [],
+        }}
+        pendingRemoval={null}
+        onAddCompany={noop}
+        onAddQuery={noop}
+        onCompanyDraft={noop}
+        onCompanyEdit={noop}
+        onCompanyRemove={noop}
+        onCompanySave={noop}
+        onImportUrl={noop}
+        onQueryDraft={noop}
+        onRemovalCancel={noop}
+        onSearchEdit={noop}
+        onSearchRemove={noop}
+        onSearchSave={noop}
+        onUrlDraft={noop}
+        queryDraft={{ label: "", query: "" }}
+        urlDraft={{ label: "", url: "" }}
+      />
+    );
+
+    expect(html).toContain("Remote Vibe Coding Jobs");
+    expect(html).toContain("Working Nomads");
+    expect(html).toContain("URL query");
+    expect(html).not.toContain("<span>remotevibecodingjobs</span>");
+    expect(html).not.toContain("<span>workingnomads</span>");
+    expect(html).not.toContain("Url-Query");
+  });
+
+  it("requires an explicit second click before removing a source", () => {
+    const html = renderToStaticMarkup(
+      <SourceMaintenanceView
+        busy={null}
+        companyDraft={{ name: "", url: "" }}
+        error={null}
+        loading={false}
+        model={{
+          searches: [
+            {
+              index: 7,
+              provider: "HiringCafe",
+              label: "Staff platform",
+              target: "staff platform engineer",
+              sourceType: "url-query",
+              enabled: true,
+              legitimacy: "supported",
+            },
+          ],
+          companies: [],
+        }}
+        pendingRemoval="search-7"
+        onAddCompany={noop}
+        onAddQuery={noop}
+        onCompanyDraft={noop}
+        onCompanyEdit={noop}
+        onCompanyRemove={noop}
+        onCompanySave={noop}
+        onImportUrl={noop}
+        onQueryDraft={noop}
+        onRemovalCancel={noop}
+        onSearchEdit={noop}
+        onSearchRemove={noop}
+        onSearchSave={noop}
+        onUrlDraft={noop}
+        queryDraft={{ label: "", query: "" }}
+        urlDraft={{ label: "", url: "" }}
+      />
+    );
+
+    expect(html).toContain("Confirm remove");
+    expect(html).toContain("Cancel");
+    expect(html).not.toContain(">Remove</button>");
+  });
+
   it("renders a resolved error's message, retry action, and Technical details disclosure — never the raw string as the primary text", () => {
     const html = renderToStaticMarkup(
       <SourceMaintenanceView
@@ -79,6 +182,7 @@ describe("SourceMaintenanceView", () => {
         }}
         loading={false}
         model={{ searches: [], companies: [] }}
+        pendingRemoval={null}
         onAddCompany={noop}
         onAddQuery={noop}
         onCompanyDraft={noop}
@@ -87,6 +191,7 @@ describe("SourceMaintenanceView", () => {
         onCompanySave={noop}
         onImportUrl={noop}
         onQueryDraft={noop}
+        onRemovalCancel={noop}
         onSearchEdit={noop}
         onSearchRemove={noop}
         onSearchSave={noop}

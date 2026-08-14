@@ -17,7 +17,7 @@ sources:
 ## Purpose
 
 This artifact maps the likely Phase 03 source and test files to the closest
-existing Rolester patterns. It is a planning artifact only. Do not modify runtime
+existing CareerRat patterns. It is a planning artifact only. Do not modify runtime
 source from this file; implementation agents should use it to avoid inventing
 new route, AI, DB, scanner, or persistence seams.
 
@@ -966,7 +966,7 @@ DB temp repo pattern:
 ```javascript
 // tests/db-source-config.test.mjs:17-28
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-source-config-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-source-config-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }

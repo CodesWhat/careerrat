@@ -537,6 +537,7 @@ function EngineChoiceRow({ runtime, compact, selected, busy, onSelect, onRetry, 
           type="button"
           className="onboarding-engine__radio"
           aria-label={`Select ${runtime.name}`}
+          aria-pressed={selected}
           disabled={!runtime.ready}
           onClick={(e) => {
             e?.stopPropagation?.();

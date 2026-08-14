@@ -19,12 +19,12 @@ result: pass
 source: browser-uat
 evidence: Playwright route-mocked the onboarding Companies flow on desktop and 390x844 mobile viewports. The run covered proposal create/read, approve disabled for review-only proposals, stale-version conflict, refresh recovery, no-AI local/manual capability, and confirmed zero `/api/skill/run` calls. Initial mobile UAT found proposal action overflow; the UI was fixed and rerun with no horizontal overflow.
 artifacts:
-  - /tmp/rolester-phase04-uat/desktop-proposals.png
-  - /tmp/rolester-phase04-uat/desktop-conflict.png
-  - /tmp/rolester-phase04-uat/desktop-refreshed.png
-  - /tmp/rolester-phase04-uat/mobile-proposals.png
-  - /tmp/rolester-phase04-uat/mobile-conflict.png
-  - /tmp/rolester-phase04-uat/mobile-refreshed.png
+  - /tmp/careerrat-phase04-uat/desktop-proposals.png
+  - /tmp/careerrat-phase04-uat/desktop-conflict.png
+  - /tmp/careerrat-phase04-uat/desktop-refreshed.png
+  - /tmp/careerrat-phase04-uat/mobile-proposals.png
+  - /tmp/careerrat-phase04-uat/mobile-conflict.png
+  - /tmp/careerrat-phase04-uat/mobile-refreshed.png
 
 ## Summary
 

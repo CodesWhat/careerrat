@@ -161,6 +161,45 @@ describe("parseConfirmBlocks — candidate_patch", () => {
         .blocks
     ).toEqual([]);
   });
+
+  it("normalizes a structured candidate location into the profile schema's string fields", () => {
+    const raw = fence({
+      kind: "candidate_patch",
+      payload: {
+        doc: "profile",
+        patch: {
+          candidate: {
+            location: { city: "Baltimore", state: "MD", country: "United States" },
+          },
+        },
+      },
+    });
+
+    expect(parseConfirmBlocks(raw).blocks[0].payload.patch).toEqual({
+      candidate: { location: "Baltimore, MD, United States" },
+      location: { home: "Baltimore, MD, United States" },
+    });
+  });
+
+  it("fills schema-required role bucket names from their titles", () => {
+    const raw = fence({
+      kind: "candidate_patch",
+      payload: {
+        doc: "targeting",
+        patch: {
+          role_buckets: [
+            { priority: "primary", titles: ["Staff Platform Engineer"] },
+            { priority: "secondary", titles: ["Engineering Manager"] },
+          ],
+        },
+      },
+    });
+
+    expect(parseConfirmBlocks(raw).blocks[0].payload.patch.role_buckets).toEqual([
+      { name: "Staff Platform Engineer", priority: "primary", titles: ["Staff Platform Engineer"] },
+      { name: "Engineering Manager", priority: "secondary", titles: ["Engineering Manager"] },
+    ]);
+  });
 });
 
 describe("parseConfirmBlocks — evidence_claim", () => {

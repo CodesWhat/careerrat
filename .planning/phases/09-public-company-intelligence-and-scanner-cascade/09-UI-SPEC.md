@@ -29,7 +29,7 @@ Do not build a marketing page, hero, public dashboard, legacy tracker UX, or a g
 
 | Property | Value |
 |----------|-------|
-| Tool | none - use existing Rolester React/CSS primitives |
+| Tool | none - use existing CareerRat React/CSS primitives |
 | Preset | not applicable |
 | Component library | local components: `PageScaffold`, `Card`, `Button`, `Toggle`, `Field`, `InlineAlert`, `Toast`, `Chip`, `CompanyAvatar` |
 | Icon library | local inline SVG icons from `apps/web/src/components/icons.jsx`; no icon font, no third-party icon package |
@@ -104,7 +104,7 @@ Accent reserved for: `Save sharing preference`, enabled sync-home toggle, active
 |---------|------|
 | Primary CTA | Save sharing preference |
 | Empty state heading | No scanner reviews |
-| Empty state body | Rolester only asks when public board metadata is ambiguous or conflicting. Clean misses are recorded locally and do not interrupt you. |
+| Empty state body | CareerRat only asks when public board metadata is ambiguous or conflicting. Clean misses are recorded locally and do not interrupt you. |
 | Error state | Public sync blocked: private data was detected. Review the local record and retry after scrub validation passes. |
 | Destructive confirmation | None. Disabling sharing and suppressing a scanner review are reversible local preferences, not destructive deletes. |
 
@@ -114,7 +114,7 @@ Required consent copy:
 |---------|------|
 | Consent card title | Help improve public company data |
 | Toggle label | Share public company and job-board metadata |
-| Consent body | Rolester can share scrubbed public metadata about companies and careers boards to improve future discovery. Resume, profile, notes, compensation, fit scores, jobs, tracker state, and local files never leave this workspace. |
+| Consent body | CareerRat can share scrubbed public metadata about companies and careers boards to improve future discovery. Resume, profile, notes, compensation, fit scores, jobs, tracker state, and local files never leave this workspace. |
 | On state hint | Sharing is on by default and only reads public metadata records. |
 | Off state hint | Sharing is off. Local discovery still works. |
 
@@ -122,10 +122,10 @@ Required scanner review copy:
 
 | State | Copy |
 |-------|------|
-| Ambiguous provider | Multiple board matches found. Choose the source Rolester should use locally. |
+| Ambiguous provider | Multiple board matches found. Choose the source CareerRat should use locally. |
 | Provider changed | The provider appears to have changed since the last scan. Review before updating public metadata. |
 | Robots/blocked with prior data | The page is blocked now, but prior public metadata exists. Keep the prior record, refresh later, or suppress this result. |
-| Low confidence extraction | Rolester found public page text but could not confidently identify the careers board. Review before using it. |
+| Low confidence extraction | CareerRat found public page text but could not confidently identify the careers board. Review before using it. |
 | Found nothing useful | No visible prompt. Store freshness/failure metadata locally and continue. |
 
 ---

@@ -69,6 +69,13 @@ export function AutomationModeChooser({ status, onSetMode, busy = false }) {
 }
 
 function platformLabel(platform) {
+  const labels = {
+    apple_calendar: "Apple Calendar",
+    google_calendar: "Google Calendar",
+    linkedin: "LinkedIn",
+    outlook_calendar: "Outlook Calendar",
+  };
+  if (labels[platform]) return labels[platform];
   return String(platform || "")
     .split("_")
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))

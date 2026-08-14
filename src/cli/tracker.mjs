@@ -72,17 +72,18 @@ function runSnapshot(data) {
   try {
     const snap = snapshotTracker(pathCtx);
     snapshot = snap;
-    if (snap.wrote) {
+    if (!json && snap.wrote) {
       console.log(
         `Snapshot: ${displayPath(pathCtx, `workspace/.snapshots/${snap.wrote.split(/[\\/]/).pop()}`)}`
       );
-    } else if (snap.skipped) {
+    } else if (!json && snap.skipped) {
       console.log(`Snapshot: skipped (${snap.reason})`);
-    } else if (!snap.ok) {
+    } else if (!json && !snap.ok) {
       console.error(`Snapshot warning: ${snap.error}`);
     }
   } catch (err) {
-    console.error(`Snapshot warning: ${err?.message ?? String(err)}`);
+    snapshot = { ok: false, error: err?.message ?? String(err) };
+    if (!json) console.error(`Snapshot warning: ${snapshot.error}`);
   }
   if (json) {
     console.log(

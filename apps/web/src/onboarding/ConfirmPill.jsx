@@ -15,27 +15,27 @@ import { flattenPatchLeaves } from "./patchFields.js";
 //   modeled on .packet-viewer-overlay/.packet-viewer). Every word in that
 //   dialog is code-owned copy; the model's `summary` is never shown for
 //   these two kinds, so the AI can never phrase its own consent language.
-//   consent_capability is only actionable once automationStatus.mode is
-//   "advanced" — mayRun()'s own hard AND already requires advanced mode
-//   server-side, so a pill that could fire before that is just a dead click.
+//   consent_capability is offered only for a concrete task. Confirming it
+//   also enables the internal automation mode, so there is no separate
+//   Basic/Advanced decision in onboarding.
 //
 // ConfirmDialog itself is exported so InterviewSurface.jsx can reuse the
 // exact same overlay for its own "change engine mid-setup" confirmation —
 // one dialog convention, not two.
 //
-// Decline UX (spec's "Decline UX (settled)" section): authorization and
-// consent_mode are the two kinds a candidate can legitimately decline from
-// the chat itself — the agent has no write tools, so without a decline
-// affordance here a user who says "I'd rather not say" mid-interview has no
-// way to get that decline actually recorded. DECLINABLE_KINDS below gates a
-// second, visually secondary "I'd rather not say" action beside the primary
-// pill (single click, no second dialog — the dialog requirement is for the
-// consent GRANT, not the decline). consent_capability and the company kinds
-// never get this: there's nothing to "decline" about suggesting or tracking
-// a company, and consent_capability's decline is just "leave it off," which
-// not clicking the pill already means.
+// Every proposal needs a resolution path. Sensitive-answer prompts use
+// "I'd rather not say" and persist that decline; optional consent uses
+// "Not now"; ordinary candidate/company/evidence proposals use "Dismiss"
+// and make no canonical write. Leaving a rejected proposal permanently
+// pending would strand the completion gate and make typo correction
+// impossible.
+const PRIVATE_DECLINE_KINDS = new Set(["authorization", "consent_mode"]);
 
-const DECLINABLE_KINDS = new Set(["authorization", "consent_mode"]);
+function declineLabel(kind) {
+  if (PRIVATE_DECLINE_KINDS.has(kind)) return "I'd rather not say";
+  if (kind === "consent_capability") return "Not now";
+  return "Dismiss";
+}
 
 // candidate_patch labels list the patch's own leaf fields inline (see
 // candidatePatchPillLabel below) — capped so a patch with many fields can't
@@ -70,15 +70,15 @@ const CONFIRM_LABELS = {
 // confirmBlocks.js — this is the code-owned label per doc, never the
 // model's own wording for which file it's writing to.
 const CANDIDATE_PATCH_DOC_LABELS = {
-  profile: "profile",
-  targeting: "targeting",
-  honesty: "honesty",
-  "form-defaults": "form defaults",
+  profile: "personal details",
+  targeting: "job preferences",
+  honesty: "boundaries",
+  "form-defaults": "application answers",
 };
 
 function candidatePatchPillLabel(block) {
   const doc = CANDIDATE_PATCH_DOC_LABELS[block.payload?.doc] || "details";
-  return `Update ${doc}`;
+  return `Save ${doc}`;
 }
 
 const CONSENT_MODE_COPY = {
@@ -148,18 +148,20 @@ export function ConfirmPill({ block, automationStatus, onConfirm, onDecline }) {
   if (block.kind === "consent_capability") {
     const { capability: capabilityKey, platform } = block.payload || {};
     const capability = findCapability(automationStatus, capabilityKey);
-    const advanced = automationStatus?.mode === "advanced";
     const label = capability?.label || capabilityKey;
     const platformName = platformLabel(platform);
     return (
-      <>
+      <span className="confirm-pill-group">
         <ConfirmPillButton
           label={`Allow ${label} on ${platformName}`}
           status={block.status}
           error={block.error}
-          disabled={!advanced}
-          disabledHint={advanced ? null : "Requires advanced mode"}
           onClick={() => setDialogOpen(true)}
+        />
+        <DeclinePillButton
+          label={declineLabel(block.kind)}
+          status={block.status}
+          onClick={onDecline}
         />
         {dialogOpen ? (
           <ConfirmDialog
@@ -173,7 +175,7 @@ export function ConfirmPill({ block, automationStatus, onConfirm, onDecline }) {
             }}
           />
         ) : null}
-      </>
+      </span>
     );
   }
 
@@ -213,16 +215,19 @@ export function ConfirmPill({ block, automationStatus, onConfirm, onDecline }) {
       onClick={onConfirm}
     />
   );
-  if (!DECLINABLE_KINDS.has(block.kind)) return pillButton;
   return (
     <span className="confirm-pill-group">
       {pillButton}
-      <DeclinePillButton status={block.status} onClick={onDecline} />
+      <DeclinePillButton
+        label={declineLabel(block.kind)}
+        status={block.status}
+        onClick={onDecline}
+      />
     </span>
   );
 }
 
-function DeclinePillButton({ status, onClick }) {
+function DeclinePillButton({ label = "I'd rather not say", status, onClick }) {
   return (
     <button
       type="button"
@@ -230,7 +235,7 @@ function DeclinePillButton({ status, onClick }) {
       onClick={onClick}
       disabled={status === "saving"}
     >
-      I'd rather not say
+      {label}
     </button>
   );
 }

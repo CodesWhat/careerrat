@@ -10,7 +10,7 @@ requires:
 provides:
   - SQLite migration 008 for Deep ingest source, chunk, proposal, lane, story, voice, honesty-boundary, and role-signal state.
   - Deep ingest DB verbs for sources, proposals, expected-version decisions, confirmations, lane states, and aggregate state reads.
-  - `rolester data deep-ingest` CLI commands for state, source, proposal, decision, confirmation, and lane operations.
+  - `careerrat data deep-ingest` CLI commands for state, source, proposal, decision, confirmation, and lane operations.
   - Candidate readiness now derives `deep_ingest_complete` from terminal Deep ingest lane states.
 affects: [08-03-source-scanner-routes, 08-04-bounded-proposals, 08-06-deep-ingest-ui, 08-08-readiness]
 
@@ -97,7 +97,7 @@ status: complete
 
 - Added migration 008 after `sourcing-runs`, creating Deep ingest source, chunk, proposal, lane-state, story-bank, writing-voice, honesty-boundary, and role-signal tables with JSON checks, generated columns, enum guards, and indexes.
 - Implemented Deep ingest DB verbs for creating/listing/getting sources, putting proposals, expected-version decision conflicts, explicit confirmation, lane terminality, and full SQLite state reads.
-- Added `rolester data deep-ingest` CLI commands and wired candidate readiness so `deep_ingest_complete` is driven by terminal lane state rather than candidate files.
+- Added `careerrat data deep-ingest` CLI commands and wired candidate readiness so `deep_ingest_complete` is driven by terminal lane state rather than candidate files.
 
 ## Task Commits
 
@@ -115,7 +115,7 @@ _Note: TDD gate compliance passed: RED commit `4bfb92d` precedes GREEN commit `d
 - `src/core/db/verbs/deep-ingest.mjs` - Adds Deep ingest source/proposal/lane/state DB verbs.
 - `src/core/db/verbs/index.mjs` - Exports Deep ingest verbs from the DB verb barrel.
 - `src/core/db/verbs/candidate.mjs` - Computes `deep_ingest_complete` from terminal Deep ingest lane state.
-- `src/cli/data.mjs` - Adds `rolester data deep-ingest` commands.
+- `src/cli/data.mjs` - Adds `careerrat data deep-ingest` commands.
 - `tests/deep-ingest-db.test.mjs` - Extends RED/GREEN schema, lane status, conflict, and readiness coverage.
 
 ## Verification
@@ -159,7 +159,7 @@ _Note: TDD gate compliance passed: RED commit `4bfb92d` precedes GREEN commit `d
 ## Issues Encountered
 
 - Initial GREEN verification failed on the SQLite row object assertion above; fixed and reran the full gate successfully.
-- Unrelated workspace changes remained unstaged: `.planning/research/` and `.planning/phases/ROL-API-09-public-company-intelligence-and-scanner-cascade/09-UI-SPEC.md`.
+- Unrelated workspace changes remained unstaged: `.planning/research/` and `.planning/phases/CAREERRAT-API-09-public-company-intelligence-and-scanner-cascade/09-UI-SPEC.md`.
 
 ## Known Stubs
 

@@ -9,7 +9,7 @@ Use this skill when a submitted role advances to recruiter screen, technical
 screen, hiring-manager interview, panel, assessment, or offer conversation.
 Also use it when the user pastes interview notes, a transcript, or a debrief.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing packet summaries, prep briefs, or debrief summaries. Apply the register from AGENTS.md#mode-switches. `exec-summary` = verdict + 2–3 bullet signals; `standard` = scannable packet with section headers; `technical` = full signal analysis + coaching depth; `verbose` = everything including full question lists and story texts.
 
@@ -768,8 +768,8 @@ mechanism changes:
   careerrat tracker --verify
   ```
 
-  Run `careerrat tracker` afterward only when a static snapshot is needed or the
-  dev server is not running. Add a richer packet/debrief Activity Pulse event
+  Run `careerrat tracker` afterward only when a recovery snapshot is useful. Add
+  a richer packet/debrief Activity Pulse event
   only if needed with `careerrat data activity append --data '<activity JSON>'`;
   the domain verbs already export and log their own audit events.
 
@@ -851,7 +851,7 @@ npm run verify:tracker
 careerrat tracker
 ```
 
-Both verify commands must pass clean before re-rendering.
+Both verify commands must pass clean before snapshotting.
 
 Then log the packet or debrief to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
 

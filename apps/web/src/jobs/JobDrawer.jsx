@@ -108,6 +108,12 @@ export function trapDrawerTab({ dialog, event, activeElement }) {
   }
 }
 
+export function handleDrawerKeyDown({ event, viewerOpen, onClose, dialog, activeElement }) {
+  if (viewerOpen) return;
+  if (event?.key === "Escape") onClose();
+  else trapDrawerTab({ dialog, event, activeElement });
+}
+
 // Threads a real retry callback through a resolveErrorCopy() result — the
 // resolved `action` carries {label, retry: true} with no callback of its
 // own, so every catch below that wants the "Try again" button to actually do
@@ -139,6 +145,8 @@ export function JobDrawer({ row, onClose, initialSection }) {
   const [jdHint, setJdHint] = useState(null);
   const [jdMeta, setJdMeta] = useState(null); // {completeness} | null
   const drawerRef = useRef(null);
+  const viewerOpenRef = useRef(false);
+  viewerOpenRef.current = Boolean(viewer);
 
   const isApplication = row.source === "application";
 
@@ -195,8 +203,13 @@ export function JobDrawer({ row, onClose, initialSection }) {
     const previouslyFocused = document.activeElement;
     dialog?.focus();
     function onKeyDown(e) {
-      if (e.key === "Escape") onClose();
-      else trapDrawerTab({ dialog, event: e, activeElement: document.activeElement });
+      handleDrawerKeyDown({
+        event: e,
+        viewerOpen: viewerOpenRef.current,
+        onClose,
+        dialog,
+        activeElement: document.activeElement,
+      });
     }
     document.addEventListener("keydown", onKeyDown);
     return () => {
@@ -515,11 +528,21 @@ export function JobDrawer({ row, onClose, initialSection }) {
           {drawer.learnings?.length ? (
             <Card title="Signals & learnings">
               <ul className="job-drawer__list">
-                {drawer.learnings.map((l, i) => (
-                  // learnings is a flat string list with no stable id.
-                  // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
-                  <li key={i}>{l}</li>
-                ))}
+                {drawer.learnings.map((learning, i) => {
+                  const label =
+                    typeof learning === "string" ? learning : String(learning?.label || "");
+                  const note =
+                    typeof learning === "object" && learning ? String(learning.note || "") : "";
+                  return (
+                    // learnings have no stable persisted id.
+                    // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
+                    <li key={i}>
+                      {label ? <strong>{label}</strong> : null}
+                      {label && note ? ": " : null}
+                      {note}
+                    </li>
+                  );
+                })}
               </ul>
             </Card>
           ) : null}

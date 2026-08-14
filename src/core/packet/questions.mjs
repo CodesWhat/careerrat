@@ -1,9 +1,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 import { fetchFormQuestions, parseManualQuestions } from "../apply/form-questions.mjs";
-import { appRegisterPacketQuestionCapture } from "../db/verbs.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
+import { appRegisterPacketQuestionCapture } from "../db/verbs.mjs";
 import { resolveUserPaths } from "../paths/workspace.mjs";
 import { validate } from "../profile/schema-validator.mjs";
 import { packetQuestionCaptureArtifactSchema } from "./schemas/packet-schemas.mjs";
@@ -191,7 +191,12 @@ export async function capturePacketQuestions({
   };
 }
 
-export async function loadPacketQuestionCapture({ repoRoot, env = process.env, appId, applicationId } = {}) {
+export async function loadPacketQuestionCapture({
+  repoRoot,
+  env = process.env,
+  appId,
+  applicationId,
+} = {}) {
   const id = cleanText(applicationId || appId);
   const app = readApplication({ repoRoot, env, appId: id });
   const source = app?.artifacts?.packetQuestionsSource;
@@ -212,4 +217,3 @@ export async function loadPacketQuestionCapture({ repoRoot, env = process.env, a
   validateArtifact(payload);
   return payload;
 }
-

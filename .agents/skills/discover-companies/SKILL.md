@@ -14,7 +14,7 @@ legacy `config/sourced-scan.json` otherwise). Never writes a company without exp
 user confirmation. Never duplicates a company already tracked, applied to, sourced,
 or excluded.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 This is the company analog of `research-boards`. `research-boards` finds **boards/aggregators**;
 `discover-companies` finds **employers** and wires their ATS board into the sweep. The sweep
@@ -43,6 +43,12 @@ setup-searches -> research-boards -> discover-companies -> search-jobs
 ---
 
 ## STEP 0 — Load context (load to decide)
+
+In conversational chat, use the server's `Outbound-safe candidate context`, including
+`configured_companies`, `tracked_companies`, `excluded_companies`, role buckets, keep/cut signals,
+and location, as canonical. Never ask the candidate to enumerate local source config or companies
+already in play. The shell reads below apply to one-shot CLI execution; the web handoff performed
+the local reads before this network-isolated research session began.
 
 Run `careerrat doctor` and confirm it exits clean. If it fails, stop and report.
 
@@ -167,6 +173,28 @@ Present results before writing anything:
 ```
 
 Do not add anything to source config yet.
+
+### Conversational web handoff
+
+In conversational chat, follow the table with one typed proposal block for every NEW company that
+passed the supported-ATS gate. The app renders these as real Track company / Skip controls and owns
+the confirmed source-config write:
+
+```careerrat:discovery
+{"kind":"company_proposal","name":"<company>","url":"https://<supported-ats-host>/<slug>","why":"<one short evidence-based reason>","confidence":"high"}
+```
+
+Use `"confidence":"borderline"` for medium/borderline rows. Never emit a proposal for an
+unsupported ATS. Do not ask the user to type company names or claim that a prose reply wrote
+config. After every proposal block (or immediately after the table when there are zero proposals),
+emit:
+
+```careerrat:discovery
+{"kind":"discovery_complete","step":"discover-companies"}
+```
+
+The app withholds the first-search button until every proposal is tracked or skipped. In a one-shot
+CLI session, keep using STEP 4's CLI confirmation and write procedure instead.
 
 ---
 

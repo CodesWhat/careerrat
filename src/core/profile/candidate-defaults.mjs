@@ -87,7 +87,7 @@ export const CANDIDATE_DEFAULTS = Object.freeze({
     education: { highest_degree: null, add_education_section: false },
     tools: { confirmed: [], adjacent: [], do_not_claim: [] },
     claims: { do_not_fabricate: ["degrees", "employers", "metrics", "tools"] },
-    style: { avoid: [] },
+    style: { prefer: [], avoid: [] },
   },
   "form-defaults": {
     source: "CareerRat",

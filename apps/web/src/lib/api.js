@@ -214,8 +214,8 @@ export function initOnboard() {
   return apiFetch("/api/onboard/init", { method: "POST" });
 }
 
-// The M1 deterministic path — .txt/.md resumes, or the paste-fallback
-// textarea any AI path (resume-ai) degrades to on 422/501/502.
+// The M1 deterministic path for pasted/manual text when the structured AI
+// extractor is unavailable.
 export function parseResumeText(text, { save = true } = {}) {
   return apiFetch("/api/onboard/resume", {
     method: "POST",
@@ -223,8 +223,8 @@ export function parseResumeText(text, { save = true } = {}) {
   });
 }
 
-// POST /api/onboard/resume-ai's frozen contract: the request body IS the
-// file's raw bytes (no JSON envelope) — bypasses apiFetch's
+// POST /api/onboard/resume-ai's frozen contract: PDF, image, or text résumé
+// uploads send the file's raw bytes (no JSON envelope), bypassing apiFetch's
 // content-type:application/json default entirely. `file` is a browser File
 // (from a drop or a picker); its own `.type` becomes the request's
 // Content-Type, which the server ignores (it keys off the `name` query
@@ -497,6 +497,13 @@ export function startDiscoveryNext() {
   return apiFetch("/api/discovery/next", { method: "POST" });
 }
 
+export function completeDiscoveryStep(step) {
+  return apiFetch("/api/discovery/complete", {
+    method: "POST",
+    body: JSON.stringify({ step }),
+  });
+}
+
 // POST /api/assist/suggest — AI-suggest chips. `kind` is "titles" or
 // "keywords"; 501 when no AI route is configured, 422 when the model never
 // produces valid structured output after one retry — both are ordinary
@@ -741,6 +748,21 @@ export function getApplication(id) {
 // this repo's single-user, hundreds-of-rows scale (M10 design doc §2).
 export function getCommunications() {
   return apiFetch("/api/data/communications");
+}
+
+// POST /api/data/relationship/lead-status — the relationship domain verb
+// atomically decides the lead, updates its owning application CTA/history,
+// appends Activity, and exports the refreshed dashboard snapshot.
+export function setRelationshipLeadStatus({ id, status, dueAt, note } = {}) {
+  return apiFetch("/api/data/relationship/lead-status", {
+    method: "POST",
+    body: JSON.stringify({
+      id,
+      status,
+      ...(dueAt ? { dueAt } : {}),
+      ...(note ? { note } : {}),
+    }),
+  });
 }
 
 // Merge helper for the appSetFields shallow-merge trap above: read the

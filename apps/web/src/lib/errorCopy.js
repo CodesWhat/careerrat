@@ -27,7 +27,7 @@ export class UserFacingError extends Error {
 function normalize(err) {
   if (err instanceof ApiError) {
     const body = err.body || {};
-    const raw = typeof body.error === "string" ? body.error : body.error?.message ?? null;
+    const raw = typeof body.error === "string" ? body.error : (body.error?.message ?? null);
     const code = body.code ?? body.error?.code ?? null;
     return { raw, code, status: err.status };
   }
@@ -71,13 +71,32 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ raw }) => startsWith(raw, "unsupported ATS host"),
+    message:
+      "That isn't a supported company job-board URL. Use a Greenhouse, Lever, Ashby, or Workday board.",
+    action: null,
+  },
+  {
     match: ({ raw }) => raw === "a scan is already running",
     message: "A search is already running right now.",
     action: null,
   },
   {
+    match: ({ code }) => code === "APPLICATION_EXECUTOR_UNAVAILABLE",
+    message:
+      "CareerRat can't control the application site in this session, so nothing was submitted. Use “I applied elsewhere” after you finish on the site.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "APPLICATION_NOT_VERIFIED",
+    message:
+      "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
-    message: "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
+    message:
+      "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
     action: null,
   },
   {
@@ -135,7 +154,11 @@ export function resolveErrorCopy(err) {
   if (rule) {
     return { message: rule.message, action: rule.action, detail: raw };
   }
-  return { message: GENERIC_ERROR_MESSAGE, action: { label: "Try again", retry: true }, detail: raw };
+  return {
+    message: GENERIC_ERROR_MESSAGE,
+    action: { label: "Try again", retry: true },
+    detail: raw,
+  };
 }
 
 // Shared by every catch site across the app that resolves an error through

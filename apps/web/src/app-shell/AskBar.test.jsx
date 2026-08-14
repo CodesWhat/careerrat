@@ -654,6 +654,43 @@ describe("AskBar — acting", () => {
     expect(textOf(error)).toBe("The agent hit a snag.");
   });
 
+  it("keeps a failed answer retryable and resends the exact request", async () => {
+    api.sendWorkspaceMessage
+      .mockRejectedValueOnce(new api.ApiError(500, { error: "upstream unavailable" }))
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "text",
+              text: "Recovered answer.",
+              metadata: { engine: { id: "codex", label: "Codex" }, elapsedMs: 900 },
+            },
+          ],
+        },
+      });
+
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "what should I do next?" } });
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const retry = buttonByText(tree, "Try again");
+    expect(retry).toBeTruthy();
+    retry.props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.sendWorkspaceMessage).toHaveBeenCalledTimes(2);
+    expect(api.sendWorkspaceMessage).toHaveBeenNthCalledWith(1, "what should I do next?");
+    expect(api.sendWorkspaceMessage).toHaveBeenNthCalledWith(2, "what should I do next?");
+    expect(textOf(byClass(tree, "ask-bar__answer"))).toBe("Recovered answer.");
+  });
+
   it("commits straight to the NO ENGINE state when the preview says engineAvailable:false, without calling sendWorkspaceMessage", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(answerOnlyPreview({ engineAvailable: false }));
     let tree = render();

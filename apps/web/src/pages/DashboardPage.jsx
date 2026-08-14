@@ -118,7 +118,11 @@ function PriorityFocus({ focus, showDeepIngestNudge }) {
     );
   }
 
-  const ctaTo = focus.detailId ? `/jobs?open=${encodeURIComponent(focus.detailId)}` : "/jobs";
+  const detailTo = focus.detailId ? `/jobs?open=${encodeURIComponent(focus.detailId)}` : "/jobs";
+  const dossierTo = focus.detailId
+    ? `/jobs?dossier=${encodeURIComponent(focus.detailId)}`
+    : "/jobs";
+  const ctaTo = focus.cta === "Open dossier" ? dossierTo : detailTo;
   const toneClass = FOCUS_TONE_CLASS[focus.tone] || FOCUS_TONE_CLASS.secondary;
   const facts = Array.isArray(focus.facts) ? focus.facts : [];
   // Only surface a distinct secondary dossier action — when the primary CTA is
@@ -163,7 +167,7 @@ function PriorityFocus({ focus, showDeepIngestNudge }) {
       </div>
       <div className="dashboard__focus-actions">
         {showDossierLink ? (
-          <Link className="dashboard__secondary-link" to={ctaTo}>
+          <Link className="dashboard__secondary-link" to={dossierTo}>
             <span>Open dossier</span>
           </Link>
         ) : null}
@@ -330,11 +334,14 @@ function buildDashboardModel(data) {
   // Counts every step that needs the user, including the one promoted to the
   // focus card. Only the hero renders, so this tile is the sole signal of how
   // much work is queued behind it.
-  const needsYou = allSteps.length;
+  const focusNeedsUser = data?.focus && data.focus.kind !== "clear";
+  const needsYou = allSteps.length || (focusNeedsUser ? 1 : 0);
   const dueNow = allSteps.filter(
     (step) => step?.tone === "error" || /\b(overdue|today)\b/i.test(step?.dueText || "")
   ).length;
-  const activeJobs = Number(data?.jobs?.visibleCount);
+  const activeApplications = Number(data?.stats?.inPlay);
+  const fallbackActiveJobs = Number(data?.jobs?.visibleCount);
+  const activeJobs = Number.isFinite(activeApplications) ? activeApplications : fallbackActiveJobs;
 
   return {
     todayEvents,
@@ -347,7 +354,7 @@ function buildDashboardModel(data) {
     // read the same counts the scoreboard tiles already render, instead of
     // recomputing them.
     needsYouValue: needsYou,
-    activeJobsValue: Number.isFinite(activeJobs) ? activeJobs : Number(data?.stats?.inPlay || 0),
+    activeJobsValue: Number.isFinite(activeJobs) ? activeJobs : 0,
     metrics: [
       {
         key: "needsYou",
@@ -365,7 +372,7 @@ function buildDashboardModel(data) {
         key: "activeJobs",
         label: "Active",
         tone: "sky",
-        value: Number.isFinite(activeJobs) ? activeJobs : Number(data?.stats?.inPlay || 0),
+        value: Number.isFinite(activeJobs) ? activeJobs : 0,
       },
     ],
   };
@@ -434,7 +441,10 @@ function dashboardTodayEvents(data) {
 
 function dashboardPipeline(data) {
   const rail = data?.jobs?.rail || {};
-  const visibleCount = Number(data?.jobs?.visibleCount || data?.stats?.inPlay || 0);
+  const activeApplications = Number(data?.stats?.inPlay);
+  const visibleCount = Number.isFinite(activeApplications)
+    ? activeApplications
+    : Number(data?.jobs?.visibleCount || 0);
   const items = [
     { key: "manualReview", label: "To decide", value: rail.manualReview },
     { key: "screenPlus", label: "Interviewing", value: rail.screenPlus },
@@ -466,7 +476,8 @@ function dashboardEyebrow(activeJobs) {
     month: "short",
     day: "numeric",
   });
-  return `${dateLabel} · ${formatNumber(activeJobs)} active applications`;
+  const count = Number(activeJobs) || 0;
+  return `${dateLabel} · ${formatNumber(count)} active application${count === 1 ? "" : "s"}`;
 }
 
 // The Archivo headline names how much is queued, echoing the same count the

@@ -35,7 +35,7 @@
 
 | Option | Description | Selected |
 |--------|-------------|----------|
-| One onboarding toggle, default on | Plain "help improve Rolester" consent during setup. | yes |
+| One onboarding toggle, default on | Plain "help improve CareerRat" consent during setup. | yes |
 | Setup section with details, default on | More transparent but heavier onboarding. | |
 | Settings-only control, default on | Low friction but weaker consent visibility. | |
 

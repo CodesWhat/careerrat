@@ -40,6 +40,7 @@ import { dbExists } from "../src/core/db/connection.mjs";
 import { buildDbSeenSets } from "../src/core/db/scan-context.mjs";
 import { deepIngestConfirmedForGeneration } from "../src/core/db/verbs/index.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
+import { resolveJobUrl } from "../src/core/intake/resolve.mjs";
 import { checkUrlLiveness } from "../src/core/liveness/job-link-checker.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
@@ -254,6 +255,27 @@ function captureOffersForOutput({ repoRoot, env, offers, savedAt }) {
   return offersWithCapturedJobs({ repoRoot, env, offers, savedAt });
 }
 
+async function hydratePartialOffer(offer, { fetchImpl, resolveHost } = {}) {
+  if (offer?.bodyPartial !== true || !offer?.url) return offer;
+  try {
+    const resolved = await resolveJobUrl(offer.url, { fetchImpl, resolveHost });
+    const bodyText = String(resolved?.bodyText || "").trim();
+    if (resolved?.bodyFetchStatus !== "resolved" || bodyText.length < 40) return offer;
+    const canonicalUrl = resolved.url || offer.url;
+    return {
+      ...offer,
+      url: canonicalUrl,
+      location: resolved.location || offer.location,
+      comp: resolved.comp || offer.comp,
+      bodyText,
+      bodyPartial: false,
+      ...(canonicalUrl !== offer.url ? { capturedUrl: offer.url } : {}),
+    };
+  } catch {
+    return offer;
+  }
+}
+
 export function buildSeenSetsForRun(pathCtx) {
   if (dbExists(pathCtx)) return buildDbSeenSets(pathCtx);
   return emptySeenContext();
@@ -287,6 +309,7 @@ export async function runSourcedScan({
   repoRoot,
   env = process.env,
   fetchImpl = fetch,
+  resolveHost,
   configPath,
   companyFilter = null,
   write = true,
@@ -368,6 +391,15 @@ export async function runSourcedScan({
       companyPresentationCounts,
       perCompanyCap,
     });
+
+    if (batchFiltered.kept.some((offer) => offer?.bodyPartial === true)) {
+      batchFiltered = {
+        ...batchFiltered,
+        kept: await Promise.all(
+          batchFiltered.kept.map((offer) => hydratePartialOffer(offer, { fetchImpl, resolveHost }))
+        ),
+      };
+    }
 
     if (verify && batchFiltered.kept.length > 0) {
       const checked = [];

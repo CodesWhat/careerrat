@@ -7,7 +7,7 @@ description: Body-read gate for a single job posting — fetch, save, check limi
 
 Mandatory gate before tailoring or applying. Produces an authoritative body-read verdict that overrides any scanner triage estimate.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 > **Agent voice.** Read `candidate/modes.yml#agent_voice` (default `standard`) before producing the gate verdict output. Apply the register from AGENTS.md#mode-switches. The gate block (GATE/FIT/COMP/COMP ANCHOR/ACTION) is always emitted in full regardless of register — it is structured data, not prose. Register governs the **surrounding explanation**: `exec-summary` means emit the gate block + one sentence; `standard` means gate block + short bullets on signals; `technical` means gate block + signal analysis; `verbose` means gate block + full rationale.
 
@@ -314,7 +314,7 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
 
 1. Open `workspace/tracker.json`.
 2. **For sourced roles (in `sourced[]`):** locate the row in the `sourced[]` array where `company` and `role` match the JD.
-   - **GATE: CUT** → set `status: "cut"`. The role is now archived (drops off the active board but stays in `sourced[]`, recoverable). Do not create an `applications[]` row — but still complete the validate + re-render (sub-step 4 below) and log the Activity event; a cut is a tracker-visible change and the dashboard must reflect it.
+   - **GATE: CUT** → set `status: "cut"`. The role is now archived (drops off the active board but stays in `sourced[]`, recoverable). Do not create an `applications[]` row — but still complete the validate + snapshot (sub-step 4 below) and log the Activity event; a cut is a tracker-visible change and the dashboard must reflect it.
    - **GATE: KEEP or REVIEW** → set `status: "reviewed-hold"`. The role has passed the gate and sits on the active board as ready-to-apply.
    - Also set `fitScore`, `fitBucket`, and `fitBasis: "evaluated"` on the sourced row.
    - Also write company-history cautions from STEP 3.25 into `warn`/`note`, and set `action: "manual"` when same-company active/recent history forced manual review.
@@ -328,7 +328,7 @@ If this sourced role came from `search-jobs` triage (has a row in `workspace/tra
    - In that object set `fitScore: <N>`, `fitBucket: "<high|med|stretch>"`, `fitBasis: "evaluated"`.
    - **DB workspace:** `careerrat data app set-fields <id> --data '{"fitScore":<N>,"fitBucket":"<high|med|stretch>","fitBasis":"evaluated"}'`. Not outcome-changing (no analytics refresh) — this is a fit-score annotation on an existing row, not a status transition.
    - **Legacy workspace (no DB):** edit `workspace/tracker.json` directly and set the fields above on the matching `applications[]` row.
-4. Validate and re-render:
+4. Validate and snapshot:
    - **DB workspace:** sub-step 2's `sourced upsert-batch` call (or sub-step 3's `app set-fields` call) already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write Contract, AGENTS.md). Run:
      ```
      careerrat data verify

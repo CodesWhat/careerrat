@@ -6,4 +6,3 @@ export function mountAutomationRoutes({ addRoute, repoRoot } = {}) {
     sendJson(res, 200, automationStatus({ root: repoRoot }));
   });
 }
-

@@ -11,13 +11,15 @@
 // predecessors carried (metrics hero, Coverage panel, Next Touch panel,
 // Relationship Memory panel) is cut per the research verdict: REDUCE to one
 // list, not KEEP the scaffolding around it.
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button, IconButton } from "../components/Button.jsx";
 import { CompanyAvatar } from "../components/CompanyAvatar.jsx";
 import { ArrowRightIcon, CheckIcon, ClockIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
+import { setRelationshipLeadStatus } from "../lib/api.js";
+import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { PREVIEW_NETWORK } from "./networkPreviewData.js";
 import "./NetworkPage.css";
 
@@ -114,6 +116,18 @@ function needsTouch(card) {
   return /today|now|after|follow|ask|reply|due/i.test(card.nextTouch || "");
 }
 
+export function filterPeople(people, { query = "", state = "all" } = {}) {
+  const needle = String(query).trim().toLowerCase();
+  return asArray(people).filter((card) => {
+    if (state === "needs-touch" && !needsTouch(card)) return false;
+    if (state !== "all" && state !== "needs-touch" && card.state !== state) return false;
+    if (!needle) return true;
+    return [card.name, card.company, card.type, card.title, card.email]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(needle));
+  });
+}
+
 function hasNetworkContent(network) {
   return asArray(network?.companies).length > 0;
 }
@@ -173,6 +187,8 @@ function buildPeopleCards(network) {
       title: contact.title || "",
       platform: contact.platform || "",
       note: contact.note || "",
+      applicationId: company.applicationId || "",
+      history: asArray(company.history),
     }));
   });
 }
@@ -207,10 +223,15 @@ function findOpenCard(people, openId) {
 }
 
 export function NetworkPage() {
-  const { data, loading, error, noDatabase } = useDashboardSnapshot();
+  const { data, loading, error, noDatabase, refetch } = useDashboardSnapshot();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [query, setQuery] = useState("");
+  const [state, setState] = useState("all");
+  const [busyLeadId, setBusyLeadId] = useState(null);
+  const [leadError, setLeadError] = useState(null);
   const network = data ? networkForPage(data.network) : null;
   const model = buildNetworkModel(network);
+  const visiblePeople = filterPeople(model.people, { query, state });
   const openCard = findOpenCard(model.people, searchParams.get("open"));
 
   function openDrawer(card) {
@@ -227,6 +248,34 @@ export function NetworkPage() {
       next.delete("open");
       return next;
     });
+  }
+
+  async function decideLead(lead, status) {
+    if (!lead?.id || busyLeadId) return;
+    setBusyLeadId(lead.id);
+    setLeadError(null);
+    try {
+      await setRelationshipLeadStatus({
+        id: lead.id,
+        status,
+        ...(status === "rejected"
+          ? { note: "Candidate rejected this lead from Network review." }
+          : {}),
+      });
+      await refetch();
+    } catch (err) {
+      const resolved = resolveErrorCopy(err);
+      setLeadError(
+        resolved.action?.retry
+          ? {
+              ...resolved,
+              action: { ...resolved.action, onRetry: () => decideLead(lead, status) },
+            }
+          : resolved
+      );
+    } finally {
+      setBusyLeadId(null);
+    }
   }
 
   if (noDatabase) {
@@ -246,11 +295,71 @@ export function NetworkPage() {
       ) : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
-      <PeopleList onOpen={openDrawer} people={model.people} />
+      <NetworkControls
+        count={visiblePeople.length}
+        onQueryChange={setQuery}
+        onStateChange={setState}
+        query={query}
+        state={state}
+      />
 
-      <SourcingSection leads={model.reviewLeads} targets={model.targets} />
+      <PeopleList
+        emptyMessage={
+          model.people.length && !visiblePeople.length
+            ? "No relationships match this search and filter."
+            : ""
+        }
+        onOpen={openDrawer}
+        people={visiblePeople}
+      />
+
+      {leadError ? (
+        <InlineAlert
+          action={leadError.action}
+          detail={leadError.detail}
+          message={leadError.message}
+        />
+      ) : null}
+      <SourcingSection
+        busyLeadId={busyLeadId}
+        leads={model.reviewLeads}
+        onDecide={decideLead}
+        targets={model.targets}
+      />
 
       {openCard ? <NetworkDrawer card={openCard} onClose={closeDrawer} /> : null}
+    </div>
+  );
+}
+
+function NetworkControls({ query, state, count, onQueryChange, onStateChange }) {
+  return (
+    <div className="network__controls">
+      <label className="network__search">
+        <span className="sr-only">Search people and companies</span>
+        <input
+          onChange={(event) => onQueryChange(event.target.value)}
+          placeholder="Search people, companies, or roles"
+          type="search"
+          value={query}
+        />
+      </label>
+      <label className="network__filter">
+        <span className="sr-only">Filter relationships</span>
+        <select onChange={(event) => onStateChange(event.target.value)} value={state}>
+          <option value="all">All relationships</option>
+          <option value="needs-touch">Needs a touch</option>
+          <option value="safe">Warm paths</option>
+          <option value="caution">In process</option>
+          <option value="closed">Closed</option>
+        </select>
+      </label>
+      <span aria-live="polite" className="network__result-count">
+        {formatNumber(count)} {count === 1 ? "person" : "people"}
+      </span>
+      <Button onClick={focusAskBar} variant="secondary">
+        Capture relationship
+      </Button>
     </div>
   );
 }
@@ -285,17 +394,23 @@ function focusAskBar() {
 // real capture path isn't a form on this page (no "add contact" write verb
 // exists) — it's pasting a recruiter/hiring-team message into the docked
 // AskBar, which flips into capture mode and feeds this list automatically.
-export function PeopleList({ onOpen, people }) {
+export function PeopleList({ emptyMessage = "", onOpen, people }) {
   if (!people.length) {
     return (
       <div className="network__empty">
-        <p>
-          Portal-only application threads (no-reply@workday/ashby/greenhouse) are intentionally
-          excluded; this fills in once a human recruiter or hiring-team thread is captured.
-        </p>
-        <Button onClick={focusAskBar} variant="secondary">
-          Paste a message to capture a contact
-        </Button>
+        {emptyMessage ? (
+          <p>{emptyMessage}</p>
+        ) : (
+          <>
+            <p>
+              Portal-only application threads (no-reply@workday/ashby/greenhouse) are intentionally
+              excluded; this fills in once a human recruiter or hiring-team thread is captured.
+            </p>
+            <Button onClick={focusAskBar} variant="secondary">
+              Paste a message to capture a contact
+            </Button>
+          </>
+        )}
       </div>
     );
   }
@@ -351,7 +466,7 @@ function PersonCard({ card, onOpen }) {
 // Sourcing — collapsed, and only rendered when non-empty; relationship-sourcing
 // is opt-in, so most sessions carry zero leads (target shape §4). No empty
 // shell for this section at all when both are empty.
-function SourcingSection({ leads, targets }) {
+export function SourcingSection({ busyLeadId = null, leads, onDecide = () => {}, targets }) {
   const rows = [
     ...leads.map((lead) => ({ ...lead, kind: "lead" })),
     ...targets.map((target) => ({ ...target, kind: "target" })),
@@ -365,7 +480,12 @@ function SourcingSection({ leads, targets }) {
       </summary>
       <div className="network__sourcing-body">
         {rows.map((row) => (
-          <SourcingRow key={`${row.kind}-${row.id}`} row={row} />
+          <SourcingRow
+            busy={busyLeadId === row.id}
+            key={`${row.kind}-${row.id}`}
+            onDecide={onDecide}
+            row={row}
+          />
         ))}
       </div>
     </details>
@@ -379,7 +499,7 @@ function SourcingSection({ leads, targets }) {
 // role + fit instead of the company name twice, and leads show platform on
 // its own line instead of behind a note || summary || platform fallback that
 // hides it whenever a note exists.
-function SourcingRow({ row }) {
+function SourcingRow({ row, busy, onDecide }) {
   const isLead = row.kind === "lead";
   return (
     <div className="network__source-row">
@@ -401,6 +521,21 @@ function SourcingRow({ row }) {
         <span className="network__source-platform">{row.platform || "linkedin"}</span>
       ) : null}
       <p>{isLead ? row.note : row.summary}</p>
+      {isLead ? (
+        <span className="network__source-actions">
+          <Button
+            disabled={busy}
+            loading={busy}
+            onClick={() => onDecide(row, "approved")}
+            variant="secondary"
+          >
+            Approve lead
+          </Button>
+          <Button disabled={busy} onClick={() => onDecide(row, "rejected")} variant="ghost">
+            Reject lead
+          </Button>
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -452,16 +587,74 @@ function ContactSection({ card }) {
   );
 }
 
-function NetworkDrawer({ card, onClose }) {
+const NETWORK_DRAWER_FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+function trapNetworkDrawerTab(dialog, event) {
+  if (!dialog || event.key !== "Tab") return;
+  const focusable = Array.from(dialog.querySelectorAll(NETWORK_DRAWER_FOCUSABLE));
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  if (
+    event.shiftKey &&
+    (document.activeElement === first || !dialog.contains(document.activeElement))
+  ) {
+    event.preventDefault();
+    last.focus();
+  } else if (
+    !event.shiftKey &&
+    (document.activeElement === last || !dialog.contains(document.activeElement))
+  ) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function formatHistoryDate(value) {
+  if (!value) return "Date not captured";
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "Date not captured";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+export function NetworkDrawer({ card, onClose }) {
   const company = card.companyRecord || {};
-  const notes = asArray(company.notes);
+  const history = asArray(card.history?.length ? card.history : company.history);
+  const historySummaries = new Set(history.map((entry) => String(entry.summary || "").trim()));
+  const notes = asArray(company.notes).filter(
+    (note) => note && !historySummaries.has(String(note).trim())
+  );
+  const drawerRef = useRef(null);
 
   useEffect(() => {
+    const drawer = drawerRef.current;
+    const previouslyFocused = document.activeElement;
+    drawer?.focus();
     function onKeyDown(event) {
       if (event.key === "Escape") onClose();
+      else trapNetworkDrawerTab(drawer, event);
     }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus?.();
+    };
   }, [onClose]);
 
   return (
@@ -471,9 +664,12 @@ function NetworkDrawer({ card, onClose }) {
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops backdrop close; not itself interactive */}
       <aside
         aria-label="Relationship detail"
+        aria-modal="true"
         className="job-drawer network__drawer"
         onClick={(event) => event.stopPropagation()}
+        ref={drawerRef}
         role="dialog"
+        tabIndex={-1}
       >
         <IconButton className="job-drawer__close" label="Close network detail" onClick={onClose}>
           ×
@@ -515,22 +711,50 @@ function NetworkDrawer({ card, onClose }) {
           </div>
         </section>
 
+        {card.applicationId || company.applicationId ? (
+          <a
+            className="network__job-link"
+            href={`/app/jobs?open=${encodeURIComponent(card.applicationId || company.applicationId)}`}
+          >
+            Open owning job
+            <ArrowRightIcon />
+          </a>
+        ) : null}
+
+        <section className="network__drawer-section">
+          <h3>Communication history</h3>
+          {history.length ? (
+            <ol className="network__history">
+              {history.map((entry) => (
+                <li key={entry.id || `${entry.at}-${entry.label}-${entry.summary}`}>
+                  <span className="network__history-meta">
+                    <strong>{entry.label || "Relationship activity"}</strong>
+                    <time dateTime={entry.at || undefined}>{formatHistoryDate(entry.at)}</time>
+                  </span>
+                  {entry.subject ? <small>{entry.subject}</small> : null}
+                  {entry.summary ? <p>{entry.summary}</p> : null}
+                </li>
+              ))}
+            </ol>
+          ) : (
+            <p>No dated messages or conversations are captured yet.</p>
+          )}
+        </section>
+
         {/* Notes: company.notes[] as a plain list — no "Conversation
             Timeline" framing and no Signal 1/Signal 2 numbering; notes[] is
             unordered free text extracted from comms summaries, not a
             timestamped sequence, so it shouldn't read as one. */}
-        <section className="network__drawer-section">
-          <h3>Notes</h3>
-          {notes.length ? (
+        {notes.length ? (
+          <section className="network__drawer-section">
+            <h3>Other notes</h3>
             <ul className="network__drawer-list">
               {notes.map((note) => (
                 <li key={note}>{note}</li>
               ))}
             </ul>
-          ) : (
-            <p>No captured notes yet.</p>
-          )}
-        </section>
+          </section>
+        ) : null}
       </aside>
     </div>
   );

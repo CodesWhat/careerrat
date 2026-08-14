@@ -24,7 +24,11 @@ import { Readable } from "node:stream";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
-import { deepMerge, mountOnboardRoutes, normalizeOnboardingDraft } from "../src/cli/onboard-route.mjs";
+import {
+  deepMerge,
+  mountOnboardRoutes,
+  normalizeOnboardingDraft,
+} from "../src/cli/onboard-route.mjs";
 import { appendUsageEvent } from "../src/core/ai/usage-log.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
@@ -1004,6 +1008,7 @@ describe("GET/POST /api/onboard/draft", () => {
         stepIndex: 0,
         completedIndexes: [],
         draftSeeds: {},
+        transcript: [],
         updatedAt: null,
         finishedAt: null,
       });
@@ -1068,6 +1073,37 @@ describe("GET/POST /api/onboard/draft", () => {
     } finally {
       await closeServer(server);
     }
+  });
+
+  it("persists a sanitized onboarding transcript and preserves it across partial draft writes", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    const transcript = [
+      { role: "user", text: "I want platform roles" },
+      {
+        role: "assistant",
+        text: "Got it.",
+        blocks: [
+          {
+            kind: "candidate_patch",
+            status: "resolved",
+            resultSummary: "Targeting saved",
+            hidden: true,
+            payload: { doc: "targeting", patch: { keep_signals: ["platform ownership"] } },
+          },
+        ],
+      },
+      { role: "script", text: "drop me" },
+    ];
+
+    const saved = await postJsonDirect(routes, "/api/onboard/draft", { transcript });
+    assert.equal(saved.body.draft.transcript.length, 2);
+    assert.equal(saved.body.draft.transcript[1].blocks[0].status, "resolved");
+    assert.equal(saved.body.draft.transcript[1].blocks[0].hidden, true);
+
+    const partial = await postJsonDirect(routes, "/api/onboard/draft", { stepIndex: 4 });
+    assert.equal(partial.body.draft.stepIndex, 4);
+    assert.deepEqual(partial.body.draft.transcript, saved.body.draft.transcript);
   });
 
   it("preserves an on-disk finishedAt when POST omits the key and overwrites it when present", async () => {
@@ -1305,6 +1341,28 @@ describe("POST /api/onboard/resume-docx", () => {
     }
   });
 
+  it("reuses one saved upload when the same DOCX bytes are submitted again", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+
+      const first = await postResumeDocxDirect(routes, "resume.docx", VALID_DOCX);
+      const second = await postResumeDocxDirect(routes, "resume.docx", VALID_DOCX);
+
+      assert.equal(first.status, 200);
+      assert.equal(second.status, 200);
+      assert.equal(second.body.savedPath, first.body.savedPath);
+      assert.equal(second.body.reused, true);
+      assert.equal(
+        readdirSync(candidatePath(repoRoot, "workspace/intake/resume-uploads")).length,
+        1
+      );
+    } finally {
+      closeAll();
+    }
+  });
+
   it("uses bounded AI when configured and persists AI-derived seeds and source text", async () => {
     const repoRoot = buildTempRoot();
     const markdown = [
@@ -1421,6 +1479,16 @@ describe("POST /api/onboard/resume-docx", () => {
       assert.match(body.error, /could not read usable text/i);
       assert.match(body.savedPath, /^workspace\/intake\/resume-uploads\/\d+-empty\.docx$/);
       assert.ok(readFileSync(candidatePath(repoRoot, body.savedPath)).equals(emptyDocx));
+
+      const retried = await postResumeDocx(server, "empty.docx", emptyDocx);
+      assert.equal(retried.status, 422);
+      assert.equal(retried.body.savedPath, body.savedPath);
+      assert.equal(retried.body.reused, true);
+      assert.equal(
+        readdirSync(candidatePath(repoRoot, "workspace/intake/resume-uploads")).length,
+        1,
+        "a failed retry must not create another raw upload"
+      );
 
       const state = await (await fetch(`${baseUrl(server)}/api/onboard/state`)).json();
       assert.equal(state.sourceResumePresent, false);
@@ -1598,6 +1666,26 @@ describe("POST /api/onboard/resume-ai", () => {
     }
   });
 
+  it("routes a plain-text upload through the same structured extractor as PDF", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
+    const routes = mountDirectRoutes(repoRoot, {}, { runSkillStream });
+    try {
+      await postJsonDirect(routes, "/api/onboard/init", {});
+      const textBytes = Buffer.from(VALID_FULL_TEXT, "utf8");
+      const { status, body } = await postResumeAiDirect(routes, "resume.txt", textBytes);
+
+      assert.equal(status, 200);
+      assert.equal(body.data.profileSeed.candidate.full_name, "Jane Doe");
+      assert.equal(body.data.evidenceSeed.claims.length, 1);
+      assert.equal(body.data.targetingSeed.role_buckets.length, 2);
+      assert.match(body.data.savedPath, /-resume\.txt$/);
+      assert.ok(readFileSync(candidatePath(repoRoot, body.data.savedPath)).equals(textBytes));
+    } finally {
+      closeAll();
+    }
+  });
+
   it("legacy mode: writes AI-transcribed text to candidate/SOURCE_RESUME.md while preserving the raw upload", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = fakeRunSkillStream([VALID_FENCED_REPLY]);
@@ -1766,6 +1854,26 @@ describe("POST /api/onboard/resume-ai", () => {
     }
   });
 
+  it("502s when an installed runtime reports a failed result instead of throwing", async () => {
+    const repoRoot = buildTempRoot();
+    const runSkillStream = async () => ({
+      ok: false,
+      error: `Installed AI CLI exited with status 1: ${FORBIDDEN_TEXT}`,
+      code: "RUNTIME_EXIT",
+    });
+    const { server } = await bootServer(repoRoot, {}, { runSkillStream });
+    try {
+      const { status, body } = await postResumeAi(server, "resume.pdf", FAKE_PDF_BYTES);
+      assert.equal(status, 502);
+      assert.equal(body.ok, false);
+      assert.equal(body.code, "AI_PROVIDER_FAILED");
+      assert.equal(body.manual.available, true);
+      assertNoSensitiveRouteEnvelope(body);
+    } finally {
+      await closeServer(server);
+    }
+  });
+
   it("502s when runSkillStream rejects with SKILL_NOT_ALLOWED", async () => {
     const repoRoot = buildTempRoot();
     const runSkillStream = async () => {
@@ -1845,13 +1953,13 @@ describe("POST /api/onboard/resume-ai", () => {
     }
   });
 
-  it("400s on an unsupported extension (e.g. .docx / .txt)", async () => {
+  it("400s on an unsupported extension such as .docx", async () => {
     const repoRoot = buildTempRoot();
     const { server } = await bootServer(repoRoot);
     try {
       const { status, body } = await postResumeAi(server, "resume.docx", FAKE_PDF_BYTES);
       assert.equal(status, 400);
-      assert.match(body.error, /resume-ai accepts PDF\/image uploads only/);
+      assert.match(body.error, /resume-ai accepts PDF, image, or text uploads/);
     } finally {
       await closeServer(server);
     }
@@ -1926,6 +2034,7 @@ describe("POST /api/onboard/resume-ai-stream", () => {
         "evidenceSeed",
         "fullText",
         "profileSeed",
+        "reused",
         "savedPath",
         "sections",
         "source",
@@ -1963,7 +2072,7 @@ describe("POST /api/onboard/resume-ai-stream", () => {
     const result = await postResumeAiStreamDirect(routes, "resume.docx", FAKE_PDF_BYTES);
     assert.equal(result.status, 400);
     assert.match(result.contentType, /^application\/json/);
-    assert.match(result.body.error, /resume-ai accepts PDF\/image uploads only/);
+    assert.match(result.body.error, /resume-ai accepts PDF, image, or text uploads/);
     assert.deepEqual(result.frames, []);
   });
 
@@ -2064,7 +2173,6 @@ describe("POST /api/onboard/resume-ai-stream", () => {
       closeAll();
     }
   });
-
 });
 
 describe("extractResumeAi", () => {
@@ -2568,7 +2676,10 @@ describe("POST /api/onboard/evidence-seed", () => {
     try {
       const { status, body } = await postJson(server, "/api/onboard/evidence-seed", {
         claims: [
-          { claim: "Shipped a regression test via evidence-seed.", evidence: "Verified by this suite." },
+          {
+            claim: "Shipped a regression test via evidence-seed.",
+            evidence: "Verified by this suite.",
+          },
         ],
       });
       assert.equal(status, 200);
@@ -2583,7 +2694,11 @@ describe("POST /api/onboard/evidence-seed", () => {
         "Describe the real project",
         "https://example.com/project",
       ]) {
-        assert.equal(rawWritten.includes(banned), false, `must not contain template demo content "${banned}"`);
+        assert.equal(
+          rawWritten.includes(banned),
+          false,
+          `must not contain template demo content "${banned}"`
+        );
       }
 
       const written = parseYaml(rawWritten);

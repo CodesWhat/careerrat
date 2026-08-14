@@ -344,6 +344,7 @@ function computeCandidateSetup(db) {
     id: "source-resume",
     kind: "source-resume",
   });
+  const resumeHandled = hasSourceResume || !!formDefaults.declined_fields?.resume;
   const titlesReady = hasAnyTitle(targeting);
   const locationReady = hasSearchLocation(profile);
   const compReady = hasCompFloor(profile);
@@ -351,7 +352,7 @@ function computeCandidateSetup(db) {
   const evidenceCount = (evidence.claims || []).length;
 
   const searchMissing = [];
-  if (!hasSourceResume) searchMissing.push("source resume");
+  if (!resumeHandled) searchMissing.push("source resume");
   if (!titlesReady) searchMissing.push("role titles");
   if (!locationReady) searchMissing.push("search location or remote posture");
 

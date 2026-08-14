@@ -41,6 +41,10 @@ const hooks = vi.hoisted(() => ({
 }));
 
 const apiMocks = vi.hoisted(() => ({ getOnboardState: vi.fn() }));
+const COMPLETE_ONBOARD_STATE = {
+  setupProgress: { complete: true },
+  data: { setup: { readiness: { search_ready: true } } },
+};
 
 // Controllable stand-in for the router's current location. Tests mutate
 // `routerState.pathname` directly rather than mounting a real Router.
@@ -150,7 +154,7 @@ async function flushEffects() {
 
 async function renderAtWhenComplete(module, path) {
   routerState.pathname = path;
-  apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: true } });
+  apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
   renderApp(module);
   await flushEffects();
   return renderApp(module);
@@ -167,7 +171,7 @@ describe("App — setup gate", () => {
   it("renders nothing while the initial setup check is in flight", async () => {
     const module = await loadApp();
     routerState.pathname = "/jobs";
-    apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: true } });
+    apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
 
     expect(renderApp(module)).toBe("");
   });
@@ -209,7 +213,7 @@ describe("App — setup gate", () => {
   it("renders the normal route table when setup reads complete", async () => {
     const module = await loadApp();
     routerState.pathname = "/jobs";
-    apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: true } });
+    apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
 
     renderApp(module);
     await flushEffects();
@@ -270,7 +274,7 @@ describe("App — setup gate", () => {
     // /onboarding) — the stale "blocked for /jobs" read must not be reused
     // for "/"; App has to re-check before deciding anything.
     routerState.pathname = "/";
-    apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: true } });
+    apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
     expect(renderApp(module)).toBe("");
 
     await flushEffects();
@@ -281,7 +285,7 @@ describe("App — setup gate", () => {
     const module = await loadApp();
 
     routerState.pathname = "/";
-    apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: true } });
+    apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
     renderApp(module);
     await flushEffects();
     expect(renderApp(module)).toContain("dashboard-page");
@@ -319,7 +323,7 @@ describe("App — canonical route table", () => {
   it("routes /onboarding outside AppShell, through its own DashboardProvider", async () => {
     const module = await loadApp();
     routerState.pathname = "/onboarding";
-    apiMocks.getOnboardState.mockResolvedValueOnce({ setupProgress: { complete: true } });
+    apiMocks.getOnboardState.mockResolvedValueOnce(COMPLETE_ONBOARD_STATE);
 
     const html = renderApp(module);
 

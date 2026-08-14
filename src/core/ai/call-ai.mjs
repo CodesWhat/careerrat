@@ -83,8 +83,7 @@ export function resolveAIRoute(
     return {
       type: "byok",
       baseUrl: (
-        String(env.CAREERRAT_ANTHROPIC_BASE_URL || "").trim() ||
-        "https://api.anthropic.com"
+        String(env.CAREERRAT_ANTHROPIC_BASE_URL || "").trim() || "https://api.anthropic.com"
       ).replace(/\/+$/, ""),
       apiKey,
     };

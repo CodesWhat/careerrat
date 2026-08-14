@@ -28,10 +28,10 @@ key-files:
 key-decisions:
   - "callAI() exposes provider-neutral outputSchema, outputName, and outputMode options while keeping Anthropic output_config construction inside callAI()."
   - "output_config.format is emitted only for outputMode:\"native\" calls that provide outputSchema; ordinary calls keep the existing request body."
-  - "Proxy native structured-output calls still forward x-rolester-skill and x-rolester-action, leaving proxy usage metering server-side."
+  - "Proxy native structured-output calls still forward x-careerrat-skill and x-careerrat-action, leaving proxy usage metering server-side."
 
 patterns-established:
-  - "Native output adapter: translate Rolester output options to Anthropic output_config.format inside buildRequest()."
+  - "Native output adapter: translate CareerRat output options to Anthropic output_config.format inside buildRequest()."
   - "Request-shape tests: mock upstreams capture headers and JSON bodies without live AI credentials."
 
 requirements-completed:
@@ -52,7 +52,7 @@ coverage:
         status: pass
     human_judgment: false
   - id: D2
-    description: "Proxy native structured-output requests preserve authorization and Rolester skill/action labels."
+    description: "Proxy native structured-output requests preserve authorization and CareerRat skill/action labels."
     requirement: AIR-04
     verification:
       - kind: unit
@@ -126,7 +126,7 @@ status: complete
 
 - `callAI()` exposes provider-neutral `outputSchema`, `outputName`, and `outputMode` options while keeping Anthropic `output_config` construction inside `callAI()`.
 - `output_config.format` is emitted only for `outputMode:"native"` calls that provide `outputSchema`; ordinary calls keep the existing request body.
-- Proxy native structured-output calls still forward `x-rolester-skill` and `x-rolester-action`, leaving proxy usage metering server-side.
+- Proxy native structured-output calls still forward `x-careerrat-skill` and `x-careerrat-action`, leaving proxy usage metering server-side.
 
 ## Deviations from Plan
 

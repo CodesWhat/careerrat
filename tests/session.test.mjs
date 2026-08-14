@@ -40,10 +40,7 @@ test("defaultProfileRoot resolves under ~/.careerrat/board-profiles for a fresh 
 
 test("profilePath joins the platform onto the resolved default root", () => {
   const home = tempHome();
-  assert.equal(
-    profilePath("linkedin"),
-    join(home, ".careerrat", "board-profiles", "linkedin")
-  );
+  assert.equal(profilePath("linkedin"), join(home, ".careerrat", "board-profiles", "linkedin"));
 });
 
 test("profilePath honors an explicit profileRoot override, ignoring the default entirely", () => {

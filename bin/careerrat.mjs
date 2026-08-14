@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // CareerRat launcher — the `npx careerrat <command>` entrypoint.
 //
-//   careerrat start [ai]  One command: scaffold + skills + live dashboard + agent
+//   careerrat start [ai]  One command: scaffold + skills + local app + agent
 //   careerrat init        Scaffold candidate/ + workspace dirs, print next steps
 //   careerrat doctor      Environment health check
 //   careerrat next        Show the next agent task
@@ -173,7 +173,8 @@ function runInit(extra) {
 
 // Parse `start` args. The first bare word is the agent to launch
 // (`careerrat start claude`); `--agent <name>` is an equivalent alias. Both
-// accept any CLI on your PATH, not just claude/codex.
+// accept an explicitly named compatible command on PATH, in addition to the
+// automatically detected Claude and Codex launchers.
 function parseStartArgs(extra) {
   const out = { agent: null, port: null, noAgent: false, noDashboard: false };
   for (let i = 0; i < extra.length; i++) {
@@ -190,9 +191,9 @@ function parseStartArgs(extra) {
 }
 
 // `careerrat start [agent]` — the one-command front door:
-//   scaffold workspace → install skills → boot the live dashboard (:7777) →
+//   scaffold workspace → install skills → boot the local app (:7777) →
 //   hand off to the named agent (or first found on PATH) with the starter prompt.
-// Usage: careerrat start [claude|codex|<any-cli>]
+// Usage: careerrat start [claude|codex|<compatible-command>]
 //        [--agent <name>] [--no-agent] [--no-dashboard] [--port <n>]
 async function runStart(extra) {
   const opts = parseStartArgs(extra);
@@ -214,7 +215,7 @@ async function runStart(extra) {
     console.log("  (skill shim reported an issue — AGENTS.md-native agents still work)");
   }
 
-  // 3) Seed a tracker so the dashboard can boot. Never clobber real data.
+  // 3) Seed a tracker so the local app can boot. Never clobber real data.
   const trackerJson = userPath(pathCtx, "workspace/tracker.json");
   if (!existsSync(trackerJson)) {
     try {
@@ -224,11 +225,11 @@ async function runStart(extra) {
         `• Seeded ${displayPath(pathCtx, "workspace/tracker.json")} (demo data — replaced as you add real roles)`
       );
     } catch {
-      /* non-fatal: the dashboard simply won't boot until a tracker exists */
+      /* non-fatal: the local app simply won't boot until a tracker exists */
     }
   }
 
-  // 4) Boot the live, hot-reloading dashboard as a durable local service.
+  // 4) Boot the live local app as a durable service.
   let dash = null;
   if (wantDashboard && existsSync(trackerJson)) {
     dash = await startDashboard(opts.port);
@@ -279,7 +280,7 @@ function printManualAgentHandoff(dash) {
   console.log("For a terse CLI handoff, run `careerrat next`.");
   if (dash) {
     console.log(
-      `The dashboard is running separately; stop it with the PID in ${displayPath(pathCtx, ".internal/tracker-dev.pid")}.`
+      `The local app is running separately; stop it with the PID in ${displayPath(pathCtx, ".internal/tracker-dev.pid")}.`
     );
   }
 }
@@ -293,7 +294,7 @@ async function startDashboard(port) {
   const url = `http://localhost:${resolvedPort}`;
 
   if (await urlResponds(url)) {
-    console.log(`• Dashboard already live → ${url}`);
+    console.log(`• Local app already live → ${url}`);
     return { url, existing: true };
   }
 
@@ -320,9 +321,9 @@ async function startDashboard(port) {
     const ready = await waitForUrl(url, 8000);
     const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
     if (ready) {
-      console.log(`• Dashboard live → ${url} (pid ${child.pid}, log ${relLog})`);
+      console.log(`• Local app live → ${url} (pid ${child.pid}, log ${relLog})`);
     } else {
-      console.log(`• Dashboard starting → ${url} (pid ${child.pid}, log ${relLog})`);
+      console.log(`• Local app starting → ${url} (pid ${child.pid}, log ${relLog})`);
     }
     return { url, pid: child.pid, logPath };
   } catch {
@@ -333,7 +334,7 @@ async function startDashboard(port) {
         /* ignore */
       }
     }
-    console.log("• Dashboard could not start — continuing without it");
+    console.log("• Local app could not start; continuing without it");
     return null;
   }
 }
@@ -505,7 +506,7 @@ function printHelp() {
 Usage: careerrat <command> [options]
 
 Commands:
-  start [ai]  Scaffold + install skills + live dashboard + launch your agent
+  start [ai]  Scaffold + install skills + local app + launch your agent
   init        Scaffold candidate/ + workspace dirs, print next steps
   install-skills  Create/repair the .claude/skills -> .agents/skills shim (--check to verify only)
   doctor      Environment health check
@@ -516,7 +517,7 @@ Commands:
   evaluate    Run the body-read gate on a saved job (GATE/FIT/COMP/ACTION)
   questions   Fetch a job's real application-form questions, no browser (Greenhouse/Ashby, or --paste)
   tracker     One-shot tracker snapshot / summary / follow-ups (for the live hot-reloading dev server, use 'careerrat start')
-  tracker-dev  Serve the live hot-reloading dashboard without launching an agent
+  tracker-dev  Serve the live local app without launching an agent
   data        sqlite-backed data layer: status/init/import/export/verify + per-domain verbs (M6)
   restore     Recover workspace/tracker.json from a rolling snapshot (list / restore by index or name)
   modes       Show/change optional usage and application modes
@@ -525,7 +526,7 @@ Commands:
   gate        Safely update gate data such as comp floors and exclusions
   learnings   Read/append per-role-family learnings
   stories     Read/validate/add STAR+R interview stories
-  activity    Read/append/prune the dashboard Activity Pulse feed
+  activity    Read/append/prune the local app Activity Pulse feed
   evidence    Read/validate/add evidence claims
   analytics   Refresh + inspect the persisted outcome-analytics block (--write)
   strategy-review  Stamp the "last reviewed" marker after a strategy review
@@ -536,12 +537,12 @@ Commands:
   help        Show this list
 
 start [ai]:
-  the first bare word picks the agent to launch — claude, codex, or any CLI on
-  your PATH (e.g. careerrat start claude). Omit it to use the first found.
+  the first bare word picks the agent to launch. Claude and Codex are detected
+  automatically; an explicitly named compatible command is also accepted.
   --agent <name>      same as the positional, alternate spelling
-  --no-agent          scaffold + dashboard only, don't launch an agent
-  --no-dashboard      skip the live dashboard
-  --port <n>          dashboard port (default 7777)
+  --no-agent          scaffold + local app only, don't launch an agent
+  --no-dashboard      skip the local app
+  --port <n>          local app port (default 7777)
 
 Run any command with --help for its own options.`);
 }

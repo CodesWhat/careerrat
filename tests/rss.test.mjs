@@ -193,10 +193,17 @@ test("feedItemsToOffers: maps title, url, postedAt from items", () => {
       categories: [],
     },
   ];
-  const offers = feedItemsToOffers(items);
+  const offers = feedItemsToOffers(items, {
+    source: { provider: "RemoteVibeCodingJobs", label: "Remote Vibe Coding Jobs" },
+  });
   assert.equal(offers[0].title, "Senior Engineer at Acme");
   assert.equal(offers[0].url, "https://example.com/job/1");
   assert.equal(offers[0].postedAt, "2026-06-09T12:00:00.000Z");
+  assert.equal(
+    offers[0].bodyPartial,
+    true,
+    "feed descriptions are previews until the posting page is resolved"
+  );
 });
 
 test("feedItemsToOffers: company is null when title has no recognizable pattern", () => {
@@ -350,6 +357,23 @@ test("feedItemsToOffers: location is null when no parenthetical", () => {
   ];
   const offers = feedItemsToOffers(items);
   assert.equal(offers[0].location, null);
+});
+
+test("feedItemsToOffers: uses the structured Location line from the description", () => {
+  const items = [
+    {
+      title: "Staff Backend Engineer at Grafana Labs",
+      link: "https://x.com/1",
+      guid: null,
+      isoDate: null,
+      description:
+        "Company: Grafana Labs\nLocation: Canada (Remote)\nType: Full-time\nApplicants must be in Canada.",
+      categories: [],
+    },
+  ];
+
+  const offers = feedItemsToOffers(items);
+  assert.equal(offers[0].location, "Canada (Remote)");
 });
 
 test("feedItemsToOffers: empty array input returns empty array", () => {

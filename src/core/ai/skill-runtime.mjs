@@ -414,8 +414,8 @@ const CONFIRM_BLOCK_GUIDANCE =
   '{"kind":"authorization","summary":"Authorized to work in your country, no sponsorship needed","patch":{"work_authorized":true,"requires_sponsorship":false}}\n' +
   "```\n" +
   "Only these kinds are recognized — anything else is silently dropped, never rendered: " +
-  "`authorization` (patch: {work_authorized, requires_sponsorship}), `consent_mode` (payload: " +
-  '"basic"|"advanced"), `consent_capability` (payload: {capability, platform}), `companies_suggest` ' +
+  "`authorization` (patch: {work_authorized, requires_sponsorship}), `consent_capability` " +
+  "(payload: {capability, platform}), `companies_suggest` " +
   "(no payload), `company_add` (payload: {name}), `candidate_patch` (payload: {doc, patch} where doc " +
   'is exactly one of "profile", "targeting", "honesty", "form-defaults" and patch is the partial ' +
   "document to merge), `evidence_claim` (payload: {claim, evidence}, both non-empty strings, for " +
@@ -426,8 +426,12 @@ const CONFIRM_BLOCK_GUIDANCE =
   "```careerrat:confirm\n" +
   '{"kind":"evidence_claim","summary":"Ran a 12-person kitchen","payload":{"claim":"Ran a 12-person kitchen","evidence":"Candidate-stated during setup interview"}}\n' +
   "```\n" +
-  "Always propose consent_mode before offering any " +
-  "consent_capability block — a capability pill only works once advanced mode is already set. Keep " +
+  "Do not ask the user to choose Basic or Advanced mode. Offer a consent_capability only when that " +
+  "specific capability is needed for the task they are doing; confirming it enables the internal " +
+  "automation mode and that one platform together. For candidate_patch, follow the stored schemas " +
+  "exactly: profile.candidate.location is a string, while profile.location is an object whose home " +
+  "field is a string; targeting.role_buckets is an array where every item contains non-empty name, " +
+  "priority, and titles fields. Keep " +
   "these blocks fully closed and out of prose otherwise; never describe the JSON to the user in words. " +
   "Emit a confirm block as soon as a fact is settled, not at the end of a topic: if the user gives " +
   "their name and email, send a candidate_patch for those two fields right away rather than waiting " +
@@ -435,7 +439,7 @@ const CONFIRM_BLOCK_GUIDANCE =
   "already answered. Group one coherent set of facts per block: name plus email plus phone together " +
   "is right, a separate pill for each is wrong. Never re-propose a fact the user already saved or " +
   "declined. `current_base` (what the candidate currently earns) is private: whenever a patch sets " +
-  'it, include `current_comp_shareable: false` in the same patch, and it must never appear in any ' +
+  "it, include `current_comp_shareable: false` in the same patch, and it must never appear in any " +
   "outbound artifact. Do not invent kinds outside this closed list; anything not in it is silently " +
   "dropped and the user never sees it.";
 
@@ -554,9 +558,17 @@ export async function runSkillStream({
         cwd: repoRoot,
         env,
         signal,
+        // ANTHROPIC_MODEL is also used for route-specific fast-model
+        // overrides such as résumé extraction. Passing that Claude model id
+        // to Codex/Gemini/etc. makes an otherwise healthy installed CLI fail
+        // at provider selection. The generic installed-runtime override is
+        // cross-provider; the Anthropic override is Claude-only.
         model:
-          String(env.CAREERRAT_INSTALLED_AI_MODEL || env.ANTHROPIC_MODEL || "").trim() ||
-          undefined,
+          String(
+            env.CAREERRAT_INSTALLED_AI_MODEL ||
+              (route.runtime.id === "claude" ? env.ANTHROPIC_MODEL : "") ||
+              ""
+          ).trim() || undefined,
         tools: runtimeTools,
         outputSchema,
       });

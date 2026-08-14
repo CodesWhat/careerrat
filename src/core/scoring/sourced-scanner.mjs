@@ -142,10 +142,7 @@ const TITLE_SPECIALIZATIONS = [
   "support",
 ];
 const TITLE_ENGINEERING_KINDS = new Set(["developer", "engineer", "engineering"]);
-const TITLE_SENIORITY_GROUPS = [
-  new Set(["staff", "principal", "lead"]),
-  new Set(["senior", "sr"]),
-];
+const TITLE_SENIORITY_GROUPS = [new Set(["staff", "principal", "lead"]), new Set(["senior", "sr"])];
 
 function titleTokens(value) {
   return new Set(
@@ -231,8 +228,7 @@ const REMOTE_RE = /\b(remote|work from home|wfh|distributed)\b/i;
 const HYBRID_RE = /\bhybrid\b/i;
 const ONSITE_RE = /\b(on[ -]?site|in[ -]?office|office[ -]?based)\b/i;
 const GLOBAL_REMOTE_RE = /\b(worldwide|anywhere|global)\b/i;
-const US_REMOTE_RE =
-  /\b(united states|u\.?s\.?a?\.?|us[- ](?:only|based)|north america)\b/i;
+const US_REMOTE_RE = /\b(united states|u\.?s\.?a?\.?|us[- ](?:only|based)|north america)\b/i;
 const FOREIGN_REMOTE_RE =
   /\b(ireland|united kingdom|uk|europe|emea|canada|india|asia|apac|australia|new zealand|singapore|germany|france|spain|portugal|poland|netherlands|sweden|norway|denmark|switzerland|israel|brazil|mexico)\b/i;
 const NO_SPONSORSHIP_RE =
@@ -279,9 +275,7 @@ function haversineMiles(left, right) {
   const dLon = radians(right.longitude - left.longitude);
   const lat1 = radians(left.latitude);
   const lat2 = radians(right.latitude);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
   return earthRadiusMiles * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
@@ -308,7 +302,9 @@ function seniorityEligibility(offer, config) {
 }
 
 function homeLooksUs(home) {
-  return US_STATE_RE.test(String(home || "")) || /\bunited states|\busa\b/i.test(String(home || ""));
+  return (
+    US_STATE_RE.test(String(home || "")) || /\bunited states|\busa\b/i.test(String(home || ""))
+  );
 }
 
 function placeMatchesAllowed(location, places) {
@@ -354,9 +350,7 @@ function locationEligibility(offer, config) {
   const hasLocationPolicy =
     Boolean(String(profileLocation?.home || "").trim()) ||
     (Array.isArray(profileLocation?.relocation) && profileLocation.relocation.length > 0) ||
-    ["remote", "hybrid", "onsite"].some(
-      (mode) => typeof profileLocation?.[mode] === "boolean"
-    );
+    ["remote", "hybrid", "onsite"].some((mode) => typeof profileLocation?.[mode] === "boolean");
   if (!hasLocationPolicy) return { eligible: true };
   if (!location) return { eligible: true, unknown: "location" };
 
@@ -427,7 +421,10 @@ function salaryEligibility(offer, config) {
 
 function contentEligibility(offer, config) {
   const body = String(offer?.bodyText || offer?.description || "");
-  if (config?.profile?.authorization?.requires_sponsorship === true && NO_SPONSORSHIP_RE.test(body)) {
+  if (
+    config?.profile?.authorization?.requires_sponsorship === true &&
+    NO_SPONSORSHIP_RE.test(body)
+  ) {
     return { eligible: false, reason: "sponsorship-unavailable" };
   }
   return { eligible: true };
@@ -844,7 +841,9 @@ export function filterAndDedupeOffers(
     });
   }
   for (const offer of qualified) {
-    const companyKey = String(offer.company || "").trim().toLowerCase();
+    const companyKey = String(offer.company || "")
+      .trim()
+      .toLowerCase();
     const presented = Number(companyPresentationCounts.get(companyKey) || 0);
     const { _qualificationInputIndex, ...cleanOffer } = offer;
     if (presented >= cap) {

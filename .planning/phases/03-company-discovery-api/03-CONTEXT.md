@@ -68,7 +68,7 @@ hook that is required for Phase 3 verification.
 - **D-27:** Proposal records should include company name, why it fits, role family or role seen, careers URL, job board URL, provider or unsupported/custom classification, confidence tier, provenance, scan/extraction summary, JD capture status, and proposed action.
 
 ### Write Path
-- **D-28:** Approved supported ATS promotions must write through the existing source-config/companies path: `companyAtsUpsert()` and the `rolester companies` mental model.
+- **D-28:** Approved supported ATS promotions must write through the existing source-config/companies path: `companyAtsUpsert()` and the `careerrat companies` mental model.
 - **D-29:** DB mode is canonical for the app route. Legacy config compatibility can remain in existing CLI paths, but the new app API should not create a second hand-written legacy state path unless the planner finds an existing helper that makes it low risk.
 - **D-30:** Generated dashboard/tracker files are never direct write targets for this phase. DB/source verbs export compatibility state where needed.
 - **D-31:** If approved proposals include captured current jobs, persist them through existing sourced persistence and `sourcedUpsertBatch()` after confirmation, preserving JD artifacts under `workspace/jobs/`.

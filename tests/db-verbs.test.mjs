@@ -107,7 +107,13 @@ function seedFixture(repoRoot) {
     },
   ];
   const sourced = [
-    { id: "sourced-promote-me", company: "Umbrella", role: "Coordinator", fitScore: 82 },
+    {
+      id: "sourced-promote-me",
+      company: "Umbrella",
+      role: "Coordinator",
+      fitScore: 82,
+      note: "Found through a trusted referral and awaiting a careful compensation and scope review.",
+    },
   ];
   const communications = [
     {
@@ -932,7 +938,10 @@ test("sourcedPromote removes the row from sourced and creates it in applications
     .prepare("SELECT data FROM applications WHERE id = ?")
     .get("sourced-promote-me");
   assert.ok(promoted, "the promoted row must now exist in applications");
-  assert.equal(JSON.parse(promoted.data).status, "reviewed-hold");
+  const app = JSON.parse(promoted.data);
+  assert.equal(app.status, "reviewed-hold");
+  assert.equal(app.note, "Found through a trusted referral and awaiting a careful comp");
+  assert.equal(Array.from(app.note).length, 60);
 });
 
 // ---------------------------------------------------------------------------

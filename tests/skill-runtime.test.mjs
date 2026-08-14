@@ -729,7 +729,10 @@ test("runSkillStream: proxy route writes NO usage_event of its own (the proxy al
       skill: "evaluate-job",
       input: "hi",
       repoRoot,
-      env: { CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788", CAREERRAT_AI_PROXY_TOKEN: "devtoken" },
+      env: {
+        CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
+        CAREERRAT_AI_PROXY_TOKEN: "devtoken",
+      },
       onEvent: () => {},
       loadSdk: async () => fakeSdk(SAMPLE_RUN),
     });
@@ -769,7 +772,10 @@ test("runSkillStream: aborting mid-run (client disconnect) stops the loop and re
 
 test("runSkillStream: a selected installed CLI bypasses the Agent SDK and streams bounded events", async () => {
   const repoRoot = tempRepoWithSkill("resume-extract");
-  const env = { CAREERRAT_RUNTIME_SKILLS: "resume-extract" };
+  const env = {
+    CAREERRAT_RUNTIME_SKILLS: "resume-extract",
+    ANTHROPIC_MODEL: "claude-haiku-4-5-20251001",
+  };
   writeInstalledRuntimeSelection({ repoRoot, env, runtimeId: "codex" });
   try {
     const events = [];
@@ -796,6 +802,11 @@ test("runSkillStream: a selected installed CLI bypasses the Agent SDK and stream
     assert.deepEqual(result, { ok: true, aborted: false });
     assert.equal(calls.length, 1);
     assert.equal(calls[0].runtime.id, "codex");
+    assert.equal(
+      calls[0].model,
+      undefined,
+      "an Anthropic-only fast-model override must never be passed to Codex"
+    );
     assert.deepEqual(calls[0].tools, ["Read"]);
     assert.deepEqual(calls[0].outputSchema, {
       type: "object",
@@ -823,11 +834,13 @@ test("buildPrompt: conversational mode includes the confirm-block fence syntax a
   const prompt = buildPrompt({ skill: "ingest-profile", input: "hi", mode: "conversational" });
   assert.match(prompt, /```careerrat:confirm/);
   assert.match(prompt, /"kind":"authorization"/);
-  assert.match(prompt, /consent_mode/);
   assert.match(prompt, /consent_capability/);
   assert.match(prompt, /companies_suggest/);
   assert.match(prompt, /company_add/);
-  assert.match(prompt, /propose consent_mode before/i);
+  assert.doesNotMatch(prompt, /consent_mode/);
+  assert.match(prompt, /candidate\.location.*string/i);
+  assert.match(prompt, /role_buckets.*name.*priority.*titles/i);
+  assert.match(prompt, /capability.*only when.*needed/i);
 });
 
 test("buildPrompt: oneshot mode never gets the confirm-block guidance (byte-identical framing)", () => {

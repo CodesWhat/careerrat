@@ -15,7 +15,7 @@ stays waiting/monitoring until a lead is found, reviewed, and approved by the
 candidate. This skill only creates lead candidates for review; outreach drafts go
 through `email-comms` or `ingest-messages` and sending remains confirm-first.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — Consent gate
 
@@ -118,8 +118,7 @@ careerrat tracker --verify
 normalized `company + name + platform`, clears sourcing-related CTAs on linked
 jobs in the same transaction, writes Activity Pulse, and exports
 `workspace/tracker.json` + `workspace/activity.jsonl`. Run `careerrat tracker`
-afterward only when a static snapshot is needed or the dev server is not
-running.
+afterward only when a recovery snapshot is useful.
 
 **Legacy workspace (no DB):** append review leads to
 `workspace/tracker.json#relationshipLeads[]` directly.
@@ -180,7 +179,7 @@ The same verb records `rejectedAt`, appends the internal note, and if no other
 `review` or `approved` leads remain for that target job, restates
 `nextAction: "Re-run relationship-sourcing for <Company>"` with
 `nextActionDue: null` in the same transaction. Run `careerrat tracker` afterward
-only when a static snapshot is needed or the dev server is not running.
+only when a recovery snapshot is useful.
 
 **Legacy workspace (no DB):**
 

@@ -201,7 +201,9 @@ function extractLocation(lines) {
   for (const line of top) {
     const trimmed = line.trim();
     // Look for patterns like "City, ST" or "City, Country" optionally surrounded by other text.
-    const m = trimmed.match(/\b([A-Z][a-zA-Z\s]+),\s*([A-Z]{2}|[A-Z][a-zA-Z]+)\b/);
+    const m = trimmed.match(
+      /\b([A-Z][a-zA-Z\s]+),\s*([A-Z]{2}|[A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\b/
+    );
     if (m) {
       // Reject if it looks like an org name embedded in a URL.
       if (trimmed.includes("://")) continue;

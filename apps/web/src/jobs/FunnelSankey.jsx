@@ -130,16 +130,6 @@ function buildSankeyLayout(sankey) {
         ? 2 * (staleLaid.y + staleLaid.h + 8) - heardLaid.y - screenH
         : y;
       y = Math.min(maxStart, Math.max(centreScreen, clearFloor));
-    } else if (solo && items.some((node) => node.id === "round-1") && staleLaid) {
-      // round-1 replaced the old "screen" node in the numbered-round rewrite but
-      // never inherited its clearance anchor, so a solo round-1 floated to the
-      // column's natural vertical centre and its inbound band crested up into
-      // Going stale. Push round-1 down until it clears stale's bottom by a
-      // comfortable gap, but never float it ABOVE its natural centred position
-      // (`y` at this point) and never past the column's own floor.
-      const maxTop = TOP + COLUMN_HEIGHT - usedHeight;
-      const clearFloor = staleLaid.y + staleLaid.h + 16;
-      y = Math.min(maxTop, Math.max(y, clearFloor));
     } else if (solo && items.some((node) => node.id === "rejected")) {
       y = TOP + COLUMN_HEIGHT - usedHeight;
     } else if (solo && items.some((node) => node.id === "ghosted")) {
@@ -328,14 +318,13 @@ function renderNodeLabel(node, maxCol) {
 
   const isFirst = node.col === 0;
   const isLast = node.col === maxCol;
-  const isRound = typeof node.id === "string" && node.id.startsWith("round-");
   const isRejected = node.id === "rejected";
   const isAccepted = node.id === "accepted";
-  const sideRight = (isLast || isRejected || isAccepted) && !isRound;
+  const sideRight = isLast || isRejected || isAccepted;
   // Every node in the response/decay waypoint cluster labels the same way —
   // above its own bar — so a packed shared column never mixes an above-placed
   // label with a below-placed one that would drift into a neighbor's space.
-  const labelAbove = WAYPOINT_LABEL_IDS.has(node.id) || isRound;
+  const labelAbove = WAYPOINT_LABEL_IDS.has(node.id);
   const labelX = isFirst
     ? node.x - 8
     : sideRight

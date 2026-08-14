@@ -1,14 +1,14 @@
-# Rolester App-First Job Search Runtime
+# CareerRat App-First Job Search Runtime
 
 ## What This Is
 
-Rolester is a local-first job-search engine that is moving from agent-only skill execution toward an Electron/React app runtime where most work is deterministic TypeScript and AI is used only for bounded judgment. The project keeps the existing skill files as orchestration specs for CLI agents, but product flows should run through local APIs, DB verbs, scanners, validators, and small structured AI calls.
+CareerRat is a local-first job-search engine that is moving from agent-only skill execution toward an Electron/React app runtime where most work is deterministic TypeScript and AI is used only for bounded judgment. The project keeps the existing skill files as orchestration specs for CLI agents, but product flows should run through local APIs, DB verbs, scanners, validators, and small structured AI calls.
 
 The login-backed app and the developer/BYO fallback should use the same core engine. UI buttons, CLI commands, and agents should converge on one local data/API layer instead of starting a whole `SKILL.md` loop for work that code can perform cheaply and reliably. Compatibility exports can remain for agents and debugging, but they are not product requirements.
 
 ## Core Value
 
-Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
+CareerRat must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
 
 ## Business Context
 
@@ -21,12 +21,12 @@ Rolester must complete job-search work locally with predictable cost: determinis
 
 ### Validated
 
-- Rolester has a local dashboard/dev server and Electron shell that can host app-first flows.
-- Rolester has SQLite DB verbs as the atomic write path in DB workspaces.
-- Rolester has `callAI()` for BYOK/proxy routing and usage labeling.
-- Rolester has `runStructuredOneshot()` for schema-validated JSON AI outputs.
-- Rolester has `POST /api/skill/run` for full `SKILL.md` execution through the embedded Agent SDK.
-- Rolester has provider scanners for supported ATS boards: Ashby, Greenhouse, Lever, Workable, and SmartRecruiters.
+- CareerRat has a local dashboard/dev server and Electron shell that can host app-first flows.
+- CareerRat has SQLite DB verbs as the atomic write path in DB workspaces.
+- CareerRat has `callAI()` for BYOK/proxy routing and usage labeling.
+- CareerRat has `runStructuredOneshot()` for schema-validated JSON AI outputs.
+- CareerRat has `POST /api/skill/run` for full `SKILL.md` execution through the embedded Agent SDK.
+- CareerRat has provider scanners for supported ATS boards: Ashby, Greenhouse, Lever, Workable, and SmartRecruiters.
 - Phase 1 validated a skill decomposition inventory that classifies priority workflows into deterministic code, bounded structured AI, retained full-skill runtime, prompt/spec, and deferred owners.
 - Phase 1 validated a `discover-companies` target contract with AI seed schema, deterministic board resolution cache, scanner/extractor cascade, confirmation gate, write path, and bakeoff metrics.
 - Phase 1 validated a routing policy for when UI, CLI, and agents should call local APIs, DB/CLI owners, bounded AI assists, chat, or retained `POST /api/skill/run`.
@@ -56,7 +56,7 @@ Rolester must complete job-search work locally with predictable cost: determinis
 
 The current app already contains both runtime shapes. `src/core/ai/skill-runtime.mjs` can run full skills headlessly through the Claude Agent SDK, while `src/core/ai/call-ai.mjs` and `src/core/ai/structured-oneshot.mjs` support cheaper single-purpose model calls. `src/core/db/verbs/` provides atomic write operations, and `src/core/scoring/sourced-scanner.mjs` already knows how to scan supported ATS providers without AI.
 
-The new architectural decision is to treat a skill as a product contract, not the default implementation mechanism. For example, `discover-companies` should not run an entire agent skill just to find employer names. A bounded AI call can propose candidate company seeds as JSON, then TypeScript can resolve careers URLs, scan roles through existing provider APIs, enforce dedupe/exclusion rules, present proposals, and write confirmed additions through `rolester companies` or DB source-config verbs.
+The new architectural decision is to treat a skill as a product contract, not the default implementation mechanism. For example, `discover-companies` should not run an entire agent skill just to find employer names. A bounded AI call can propose candidate company seeds as JSON, then TypeScript can resolve careers URLs, scan roles through existing provider APIs, enforce dedupe/exclusion rules, present proposals, and write confirmed additions through `careerrat companies` or DB source-config verbs.
 
 Phase 3 turned that `discover-companies` split into working local APIs. Phase 4 routed app surfaces to those APIs by default while keeping explicit chat handoffs and the allowlisted full skill runtime available for workflows that still need tool loops or human-watched orchestration. Phase 5 locked those boundaries with final cost/no-AI regressions, confirm-first write-safety coverage, documentation alignment, and a passing focused verification rollup.
 
@@ -89,7 +89,7 @@ The concise product brief for this milestone is `.planning/APP-PRODUCT-PLAN.md`.
 | Discovery chat and full skill runtime are explicit paths | Agent-led workflows remain available, but only after user action and runtime capability gating | Validated in Phase 4 |
 | Focused verification is the Phase 5 signal | Unrelated local edits in `tests/release-safety.test.mjs` make full `npm test` a noisy signal for this phase | Validated in Phase 5 |
 | Compatibility surfaces are not product requirements | The Electron/React app and DB are the user-facing product; generated tracker/dashboard surfaces can remain as export/debug aids only | Planned for Phase 6 |
-| Quick onboarding should trigger sourcing immediately | The user should not wait for a full profile interview before Rolester starts finding jobs | Planned for Phase 7 |
+| Quick onboarding should trigger sourcing immediately | The user should not wait for a full profile interview before CareerRat starts finding jobs | Planned for Phase 7 |
 | Public intelligence sync is opt-in and on by default | Building shared company/board knowledge is useful, but only scrubbed public records may leave the machine | Planned for Phase 9 |
 | Deep ingest uses both drop-all intake and AI interview | Different candidates have different evidence sources; the app should accept raw material and ask targeted follow-ups based on role/job context | Planned for Phase 8 |
 | PDF is the standard packet format, with board-required formats supported | Job boards commonly accept PDF, but the product must handle upload requirements such as DOCX when needed | Planned for Phase 10 |

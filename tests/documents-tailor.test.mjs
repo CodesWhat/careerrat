@@ -274,6 +274,14 @@ test("assertNoForbidden returns true for clean text", () => {
   assert.equal(result, true);
 });
 
+test("assertNoForbidden matches whole terms instead of substrings inside confirmed tools", () => {
+  assert.equal(assertNoForbidden("Built Node.js and JavaScript services.", ["Java"]), true);
+  assert.throws(
+    () => assertNoForbidden("Built production Java services.", ["Java"]),
+    /forbidden wording/i
+  );
+});
+
 test("assertNoForbidden throws when forbidden phrase appears in text", () => {
   assert.throws(
     () => assertNoForbidden("Led model training for our AI platform.", ["model training"]),

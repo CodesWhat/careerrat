@@ -14,7 +14,7 @@ workspaces it persists to `config/search-sources.yml`. Do not edit source YAML
 directly. Never writes a source without explicit user confirmation. Never duplicates
 an already-configured board.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ---
 
@@ -29,6 +29,12 @@ an already-configured board.
 ---
 
 ## STEP 0 — Load context
+
+In conversational chat, use `Outbound-safe candidate context.configured_sources` from the
+server as the complete canonical dedup set, including when it is an empty array. Never ask the
+candidate for configured source labels or URLs. The candidate should not need to know CareerRat's
+internal source config. The shell commands below apply to one-shot CLI execution; the web handoff
+already performed those local reads before starting this network-isolated research session.
 
 Run `careerrat doctor` and confirm it exits clean. If it fails, stop and report.
 
@@ -145,6 +151,27 @@ embedded filters (domain / role family keyword pre-applied) in the "Why relevant
 when you can determine it from the fetch.
 
 Do not add anything to source config yet.
+
+### Conversational web handoff
+
+In conversational chat, the table is followed by typed proposal blocks that the app renders as
+real Add source / Skip controls. Emit one exact fenced block for every NEW high-confidence or
+borderline board, using the canonical URL the user should review and save:
+
+```careerrat:discovery
+{"kind":"source_proposal","label":"<board>","url":"https://<canonical-board-or-filter-url>","why":"<one short evidence-based reason>","confidence":"high"}
+```
+
+Use `"confidence":"borderline"` for medium/borderline rows. Do not ask the user to type board
+names or claim that a prose reply wrote config. After every proposal block (or immediately after
+the table when there are zero proposals), emit the step marker:
+
+```careerrat:discovery
+{"kind":"discovery_complete","step":"research-boards"}
+```
+
+The app withholds the next-step button until every proposal is added or skipped. In a one-shot CLI
+session, keep using STEP 4's CLI confirmation and write procedure instead.
 
 ---
 

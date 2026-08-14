@@ -16,7 +16,7 @@ writes scheduling state back to the tracker.
 scheduling, hand it back to `email-comms`. This skill draws on the same comms machinery
 (thread match, style gate, message capture, activity logging) but adds the scheduling layer.
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## Inputs
 
@@ -36,7 +36,7 @@ scheduling, hand it back to `email-comms`. This skill draws on the same comms ma
 - updated `workspace/tracker.json` — `communications[].messages[]` + status, a
   `applications[].conversations[]` entry when a meeting is booked, and
   `interviewAt` / `nextInterviewAt` + `interviewNote` on the application row
-- re-rendered tracker dashboard
+- tracker snapshot checkpoint
 
 ---
 
@@ -171,7 +171,7 @@ note when it was taken, and re-ingest before relying on it for a fresh decision.
   `provider + startIso + endIso`, forces `label: "Busy"`, stamps
   `ingestedAt`, bumps meta, logs one activity event, and exports the generated
   legacy files.
-- **Legacy workspace (no DB):** after writing, validate + re-render (`careerrat tracker --verify`
+- **Legacy workspace (no DB):** after writing, validate + snapshot (`careerrat tracker --verify`
   then `careerrat tracker`); the Calendar then shows the windows as muted "Busy" blocks alongside
   actionable events.
 
@@ -353,7 +353,7 @@ compose, back-to-back in the same turn as (a)/(b):
 `applications[].status`, and write the interview datetime fields exactly as described above, all
 in the SAME `tracker.json` write as (a) and (b).
 
-**(d) Validate + re-render:**
+**(d) Validate + snapshot:**
 - **DB workspace:** the calls in (a)–(c) already persisted and auto-exported. Run
   `careerrat data verify` (re-exports + domain integrity) and `careerrat tracker --verify`
   (schema-level parity).
@@ -369,7 +369,7 @@ single write — do not leave the CTA live because the agent did not perform the
     `applications[].status` (c-ii) in the same write.
   - Set `comm.draft = null`; null `nextActionDue`, then set a fresh value if the next event
     is known; advance `comm.status` to `scheduled` / `waiting` as appropriate.
-  - Run verify + re-render (STEP 7d).
+  - Run verify + snapshot (STEP 7d).
   - **DB workspace:** `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"<user-reported completion>"}'`, then the same (c) composition above if a meeting was booked, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `draft`/`nextActionDue`/`status`, then STEP 7(d)'s DB verify.
   - **Legacy workspace (no DB):** apply the bullets above directly in `workspace/tracker.json`, then run STEP 7(d)'s legacy verify.
 
@@ -395,7 +395,7 @@ draft awaiting send → log it as needing the user:
 | Condition | Action | DB-mode command |
 |---|---|---|
 | Meeting booked / confirmed | `applications[].status` + `conversations[]` entry are already written in STEP 7(c). Hand off to `interview-prep` for prep materials using that conversations[] entry as the anchor. No additional write needed here. | Already covered by STEP 7(c)'s DB composition — no additional call. |
-| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + re-render. Without updating the datetime fields the dashboard Focus card still shows the old time. | `careerrat data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `careerrat data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
+| Reschedule agreed | In ONE write: (1) update the existing `conversations[]` entry's `date` + `notes`; (2) update `interviewAt` or `nextInterviewAt` (whichever is set) to the new ISO datetime, and update `interviewNote` to match; (3) append a `messages[]` entry (`direction: note`, summary: "Meeting rescheduled to <new ISO datetime>") so the reschedule is in history; (4) set `comm.nextActionDue = null`, then set a fresh value keyed to the rescheduled slot; (5) run verify + snapshot. Without updating the datetime fields the dashboard Focus card still shows the old time. | `careerrat data app schedule-interview <id> --at <new-iso> --round "<kind>" --note "<updated interviewNote>"` re-books onto the same field (`interviewAt`/`nextInterviewAt`, auto-detected) and appends a fresh `conversations[]` entry rather than editing the old one in place — follow with `careerrat data app set-fields <id> --data '{"conversations":[...]}'` to patch the existing entry's `date`/`notes` in place instead, if that's the desired shape (wholesale array replace). Then `careerrat data comm append-message <comm-id> --data '{"direction":"note","at":"<ISO>","summary":"Meeting rescheduled to <new ISO datetime>"}'`, then read-patch-persist `careerrat data comm upsert --data '<patched full comm row JSON>'` for `nextActionDue`. Then STEP 7(d)'s DB verify. |
 | They go quiet after your proposal | Leave `status: waiting`; STEP 7b's `nextActionDue` surfaces it as a follow-up (handled by `email-comms` / the follow-up timer). | No write here — this is a read/no-op branch. |
 | Thread turns to comp / general reply | Hand off to `email-comms` (general comms / negotiation surface). | No write here — hand-off only. |
 | User states a new availability rule mid-thread ("no Fridays", "never before 10") | Confirm-first, then persist to candidate profile config `availability` (STEP 3 write-back). | DB mode: `careerrat data candidate patch profile --data ...`; legacy mode: guarded candidate-config write path. Never hand-edit YAML in DB mode. |

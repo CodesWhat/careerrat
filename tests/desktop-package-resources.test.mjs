@@ -12,7 +12,7 @@ async function readText(relPath) {
 
 test("desktop dist builds the SPA before staging the packaged runtime", async () => {
   const pkg = JSON.parse(await readText("apps/desktop/package.json"));
-  const dist = pkg.scripts?.dist || "";
+  const dist = pkg.scripts?.["dist:local"] || "";
 
   const buildAt = dist.search(
     /(?:app:build|--workspace\s+apps\/web\s+run\s+build|run\s+build\s+--workspace\s+apps\/web)/
@@ -37,6 +37,26 @@ test("desktop staging validates web dist and mirrors agent skills for Claude-sty
     stageScript,
     /\.claude\/skills/,
     "stage must mirror skills to .claude/skills for Claude-compatible lookup"
+  );
+});
+
+test("desktop staging includes the demo workspace required by data init --demo", async () => {
+  const [stageScript, dataCli, demoSeed] = await Promise.all([
+    readText("apps/desktop/scripts/stage.mjs"),
+    readText("src/cli/data.mjs"),
+    readText("src/core/db/demo-seed.mjs"),
+  ]);
+
+  assert.match(dataCli, /--demo/, "the packaged data CLI exposes demo initialization");
+  assert.match(
+    demoSeed,
+    /examples\/demo-workspace/,
+    "demo initialization reads the bundled fictional workspace"
+  );
+  assert.match(
+    stageScript,
+    /examples\/demo-workspace/,
+    "desktop staging must include the fixture consumed by data init --demo"
   );
 });
 
@@ -132,11 +152,19 @@ test("electron-builder macOS pilot config requires signing, entitlements, and no
   assert.match(macBlock, /\bnotarize:\s+true\b/, "pilot packaging must enable notarization");
 
   const pkg = JSON.parse(pkgText);
-  const dist = pkg.scripts?.dist || "";
-  const stageAt = dist.indexOf("stage");
-  const builderAt = dist.indexOf("electron-builder");
-  assert.ok(stageAt >= 0, "desktop dist must stage before packaging");
+  const localDist = pkg.scripts?.["dist:local"] || "";
+  const releaseDist = pkg.scripts?.dist || "";
+  const releaseDmg = pkg.scripts?.["release:dmg"] || "";
+  const stageAt = localDist.indexOf("stage");
+  const builderAt = localDist.indexOf("electron-builder");
+  assert.ok(stageAt >= 0, "desktop local dist must stage before packaging");
   assert.ok(builderAt > stageAt, "electron-builder must run after staging completes");
+  assert.match(
+    releaseDist,
+    /dist:local[\s\S]*release:dmg[\s\S]*verify:release/,
+    "desktop release dist must notarize the DMG container before release verification"
+  );
+  assert.match(releaseDmg, /release-dmg\.mjs/, "desktop release must own a DMG notarization step");
 
   for (const [label, text] of Object.entries({
     "entitlements.mac.plist": appEntitlements,

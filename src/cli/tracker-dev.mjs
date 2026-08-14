@@ -155,7 +155,7 @@ export function createDevServer({
   const CANDIDATE_DIR = userPaths.candidateDir;
   const TRACKER_SRC_DIR = join(repoRoot, "src/core/tracker");
   const ASSETS_DIR = join(repoRoot, "assets");
-  const FONTS_DIR = join(repoRoot, "fonts");
+  const FONTS_DIR = join(repoRoot, "assets", "fonts");
   // M7 — the Vite + React app shell's built output (see apps/web/). Gitignored,
   // built via `npm run app:build` (or the root `prepack` script before
   // npm pack/publish), shipped via package.json#files["apps/web/dist"].

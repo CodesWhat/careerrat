@@ -7,7 +7,7 @@ tier_2_inputs: [per-source scan results, per-role JD bodies]
 
 # search-jobs
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## AI Web Search mode
 
@@ -310,7 +310,7 @@ Run tracker integrity after any sourced additions:
 npm run verify:tracker
 ```
 
-Report the summary. List any issues found. Re-render the dashboard:
+Report the summary. List any issues found. Snapshot tracker state:
 
 ```
 careerrat tracker

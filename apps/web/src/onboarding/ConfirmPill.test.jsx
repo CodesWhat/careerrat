@@ -163,7 +163,7 @@ describe("ConfirmPill — single-click kinds", () => {
       onConfirm: vi.fn(),
     });
     expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe(
-      "Update profile · Full name: Ada Lovelace · Email: ada@example.com"
+      "Save personal details · Full name: Ada Lovelace · Email: ada@example.com"
     );
     expect(textOf(byClass(tree, "confirm-pill__summary")[0])).toBe("Told me their name and email");
   });
@@ -183,10 +183,10 @@ describe("ConfirmPill — single-click kinds", () => {
           "confirm-pill__label"
         )[0]
       );
-    expect(labelFor("profile")).toBe("Update profile · X: y");
-    expect(labelFor("targeting")).toBe("Update targeting · X: y");
-    expect(labelFor("honesty")).toBe("Update honesty · X: y");
-    expect(labelFor("form-defaults")).toBe("Update form defaults · X: y");
+    expect(labelFor("profile")).toBe("Save personal details · X: y");
+    expect(labelFor("targeting")).toBe("Save job preferences · X: y");
+    expect(labelFor("honesty")).toBe("Save boundaries · X: y");
+    expect(labelFor("form-defaults")).toBe("Save application answers · X: y");
   });
 
   it("evidence_claim: fixed code-owned label, model summary renders alongside it", () => {
@@ -264,7 +264,7 @@ describe("ConfirmPill — candidate_patch leaf-field rendering fixes", () => {
     });
     const label = textOf(byClass(tree, "confirm-pill__label")[0]);
     expect(label).not.toContain("[object Object]");
-    expect(label).toBe("Update targeting · Role buckets: Backend engineering, Platform");
+    expect(label).toBe("Save job preferences · Role buckets: Backend engineering, Platform");
   });
 
   it("a declined_fields-only patch falls back to the plain code-owned label", () => {
@@ -279,7 +279,7 @@ describe("ConfirmPill — candidate_patch leaf-field rendering fixes", () => {
       },
       onConfirm: vi.fn(),
     });
-    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Update form defaults");
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Save application answers");
   });
 
   it("caps the visible leaf field list and appends a '+N more' count", () => {
@@ -295,7 +295,7 @@ describe("ConfirmPill — candidate_patch leaf-field rendering fixes", () => {
       onConfirm: vi.fn(),
     });
     expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe(
-      "Update profile · A: 1 · B: 2 · C: 3 · +2 more"
+      "Save personal details · A: 1 · B: 2 · C: 3 · +2 more"
     );
   });
 
@@ -308,7 +308,9 @@ describe("ConfirmPill — candidate_patch leaf-field rendering fixes", () => {
       },
       onConfirm: vi.fn(),
     });
-    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe("Update profile · A: 1 · B: 2");
+    expect(textOf(byClass(tree, "confirm-pill__label")[0])).toBe(
+      "Save personal details · A: 1 · B: 2"
+    );
   });
 
   // Bug fix round 2 — a long label left the model summary so little room
@@ -358,7 +360,7 @@ describe("ConfirmPill — candidate_patch leaf-field rendering fixes", () => {
 // write tools of its own).
 // ---------------------------------------------------------------------------
 
-describe("ConfirmPill — decline affordance (authorization, consent_mode only)", () => {
+describe("ConfirmPill — decline and dismiss affordances", () => {
   it("authorization: renders a decline button beside the primary pill and calls onDecline directly", () => {
     const onConfirm = vi.fn();
     const onDecline = vi.fn();
@@ -378,20 +380,31 @@ describe("ConfirmPill — decline affordance (authorization, consent_mode only)"
     expect(onConfirm).not.toHaveBeenCalled();
   });
 
-  it("company_add and companies_suggest never render a decline button", () => {
+  it("company and candidate proposals render a Dismiss action", () => {
     const companyAdd = render({
       block: { kind: "company_add", payload: { name: "Anthropic" }, status: "pending" },
       onConfirm: vi.fn(),
       onDecline: vi.fn(),
     });
-    expect(byClass(companyAdd, "confirm-pill__decline")).toHaveLength(0);
+    expect(textOf(byClass(companyAdd, "confirm-pill__decline")[0])).toBe("Dismiss");
 
     const suggest = render({
       block: { kind: "companies_suggest", status: "pending" },
       onConfirm: vi.fn(),
       onDecline: vi.fn(),
     });
-    expect(byClass(suggest, "confirm-pill__decline")).toHaveLength(0);
+    expect(textOf(byClass(suggest, "confirm-pill__decline")[0])).toBe("Dismiss");
+
+    const patch = render({
+      block: {
+        kind: "candidate_patch",
+        payload: { doc: "targeting", patch: { cut_signals: ["Wrong amount"] } },
+        status: "pending",
+      },
+      onConfirm: vi.fn(),
+      onDecline: vi.fn(),
+    });
+    expect(textOf(byClass(patch, "confirm-pill__decline")[0])).toBe("Dismiss");
   });
 
   it("consent_mode: renders a decline button that calls onDecline WITHOUT opening the dialog", () => {
@@ -419,7 +432,7 @@ describe("ConfirmPill — decline affordance (authorization, consent_mode only)"
     expect(byClass(tree, "confirm-pill__decline")[0].props.disabled).toBe(true);
   });
 
-  it("consent_capability never renders a decline button", () => {
+  it("consent_capability renders a Not now action", () => {
     const tree = render({
       block: {
         kind: "consent_capability",
@@ -430,7 +443,7 @@ describe("ConfirmPill — decline affordance (authorization, consent_mode only)"
       onConfirm: vi.fn(),
       onDecline: vi.fn(),
     });
-    expect(byClass(tree, "confirm-pill__decline")).toHaveLength(0);
+    expect(textOf(byClass(tree, "confirm-pill__decline")[0])).toBe("Not now");
   });
 });
 
@@ -504,8 +517,7 @@ describe("ConfirmPill — consent_mode (two-step dialog)", () => {
   });
 });
 
-describe("ConfirmPill — consent_capability (two-step dialog, advanced-mode gated)", () => {
-  const AUTOMATION_STATUS_BASIC = { mode: "basic", capabilities: [] };
+describe("ConfirmPill — consent_capability (two-step, capability-on-demand)", () => {
   const AUTOMATION_STATUS_ADVANCED = {
     mode: "advanced",
     capabilities: [
@@ -524,12 +536,16 @@ describe("ConfirmPill — consent_capability (two-step dialog, advanced-mode gat
     status: "pending",
   };
 
-  it("is disabled with a 'Requires advanced mode' hint when automationStatus.mode isn't advanced", () => {
+  it("stays actionable when the internal automation mode has not been enabled yet", () => {
     const onConfirm = vi.fn();
-    const tree = render({ block: BLOCK, automationStatus: AUTOMATION_STATUS_BASIC, onConfirm });
+    const tree = render({
+      block: BLOCK,
+      automationStatus: { ...AUTOMATION_STATUS_ADVANCED, mode: "basic" },
+      onConfirm,
+    });
     const button = byClass(tree, "confirm-pill")[0];
-    expect(button.props.disabled).toBe(true);
-    expect(textOf(byClass(tree, "confirm-pill__action")[0])).toBe("Requires advanced mode");
+    expect(button.props.disabled).toBe(false);
+    expect(textOf(byClass(tree, "confirm-pill__action")[0])).toBe("Confirm");
   });
 
   it("opens a dialog with code-owned capability/platform copy once advanced mode is on", () => {

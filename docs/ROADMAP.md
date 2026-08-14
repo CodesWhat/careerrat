@@ -8,11 +8,11 @@ locally. AI requests go through the runtime the candidate selects and are subjec
 to that provider's privacy and retention terms.
 
 The active product direction is a conversational local app powered primarily by
-an AI CLI you already have installed and authenticated. Development and QA happen
-web-first for speed; Electron remains the eventual desktop package after the
-experience stabilizes. A managed AI service may return later as an optional
-convenience, but login, billing, and a CareerRat API key are not prerequisites for
-the core first-run path.
+a supported AI CLI you already have installed and authenticated. Development and
+QA happen web-first for speed, and the same app now ships in the packaged Electron
+runtime. The macOS artifact is signed, notarized, stapled, and Gatekeeper-approved.
+A managed AI service may return later as an optional convenience, but login,
+billing, and a CareerRat API key are not prerequisites for the core first-run path.
 
 The opinionated part is the **gate**: don't spray applications, don't trust
 title/keyword matches, read the posting before tailoring, and treat comp,
@@ -43,8 +43,8 @@ nurse, a driver, and an engineer each bring their own config.
 - **Communication memory** (`email-comms`) — draft and track recruiter threads,
   follow-ups, scheduling, and negotiation without re-pasting history. Draft-only
   by default; sending requires explicit confirmation.
-- **Tracker & analytics** — a dependency-free static dashboard rendered from
-  `tracker.json`: stat cards, a funnel, an **Active Pipeline organized by a
+- **Tracker & analytics** — a local app backed by canonical SQLite state: stat
+  cards, a funnel, an **Active Pipeline organized by a
   semantic stage ladder** (Sourced → Applied → Screen → Interview → Final → Offer
   → Accepted, with your raw status labels preserved), an All-Jobs table,
   per-job detail view, and follow-up reminders. Plus outcome analysis.
@@ -56,8 +56,8 @@ nurse, a driver, and an engineer each bring their own config.
   CAPTCHAs and unsupported auth prompts. With explicit `mail_access` consent, it
   can read one recent emailed verification code from any webmail provider and continue.
 - **One-command start** (`careerrat start [agent]`) — scaffolds the workspace,
-  installs the skills, brings up the live dashboard, and launches your agent
-  (Claude Code, Codex, or any CLI on your PATH) with a starter message, so first
+  installs the skills, brings up the local app, and launches a supported detected
+  agent or an explicitly named compatible command with a starter message, so first
   run is a single line.
 - **Packaging** — `careerrat` launcher (`start` / `init` / `install-skills` /
   `doctor` / `next` / `ingest` / `searches` / `companies` / `evaluate` /
@@ -124,11 +124,10 @@ nurse, a driver, and an engineer each bring their own config.
   `mail_access` for generic webmail / Gmail / Outlook. A per-capability, per-platform consent
   switchboard (`careerrat automation`) defaults fully off and stores nothing — nothing runs
   until you read a platform's terms, record consent, and enable it; every session is
-  human-in-the-loop and halts on a CAPTCHA, 2FA, or limit. Onboarding adds basic/advanced
-  setup modes and resumable deep/shallow setup (progress saved to
-  `workspace/setup-state.json`), surfacing the capability install guidance and opt-ins at
-  the right moment. *(Shipped and live-validated; the consent gates remain the boundary for
-  each capability and platform.)*
+  human-in-the-loop and halts on a CAPTCHA, 2FA, or limit. Onboarding asks for each
+  capability only when a concrete action needs it and saves partial progress so setup can
+  resume after a restart. *(Shipped and live-validated; the consent gates remain the boundary
+  for each capability and platform.)*
 - **Settings & configure** (`configure`) — a lightweight settings step you run any time to
   change your config without redoing first-run onboarding: comp floor and target, targeting and
   excluded companies, writing style, form defaults, search sources, and your browser-automation
@@ -233,12 +232,17 @@ nurse, a driver, and an engineer each bring their own config.
   through the same atomic domain verbs whether a human clicks a button, the agent runs a skill,
   or you use the `careerrat data` CLI: one write path, with the activity event, freshness stamp,
   and analytics refresh applied in a single transaction. Existing workspaces migrate only via an
-  explicit `careerrat data import`; the classic `tracker.json` keeps working as a generated
-  export during the transition.
+  explicit `careerrat data import`; `tracker.json` remains a generated compatibility export.
 - **App UI** — a bundled single-page app (`/app`) over the local server with guided onboarding,
   editable settings, AI-assisted proposals, and manual operation when no AI runtime is ready.
   The existing wizard/forms are durable review and correction surfaces; the active redesign
   makes conversation the primary first-run intake experience.
+
+- **Repository structure and hygiene** — product packages now live together under `apps/`
+  (`web`, `desktop`, `website`, and `docs`), design-only landing-page mockups are retained under
+  `.planning/archive/mockups`, shared fonts live under `assets/fonts`, and the monorepo uses one
+  root lockfile and one Turbo build graph. Release guards reject the old root directories,
+  app-local lockfiles, tracked generated Next wiring, and stale build-output paths.
 - **Universal capture** — a docked capture bar plus an Inbox: paste or drop anything (a job
   description, a posting URL, a recruiter email, an interview transcript) and the intake
   pipeline classifies it, matches it against what you're already tracking, and proposes exactly
@@ -247,8 +251,7 @@ nurse, a driver, and an engineer each bring their own config.
 - **App dashboard views** — home (focus card, pipeline snapshot, next steps), a Jobs view with
   glanceable rows and a detail drawer whose actions write through the real domain verbs (status
   changes, interview scheduling, follow-up completion, notes, communications), a week/month
-  calendar, and an activity feed — all rendered from the same server-derived view model as the
-  classic dashboard, so the two never disagree.
+  calendar, and an activity feed, all rendered from one server-derived view model.
 - **Company logos everywhere** — a server-side logo proxy with a local cache (and optional
   brand-search autocomplete when a key is configured), with an initials fallback so nothing
   breaks offline or keyless.
@@ -257,10 +260,10 @@ nurse, a driver, and an engineer each bring their own config.
   your OS browser, and quitting cleanly shuts down every agent session.
 - **Installed AI runtime first** — onboarding and Settings detect supported coding CLIs,
   select an already-authenticated local tool, and run bounded structured calls without
-  copying its credentials or requiring a provider key. Basic mode keeps every external
-  capability off; Advanced exposes individual platform + terms opt-ins. Direct provider
-  keys and managed AI remain explicit fallbacks, and every AI feature still degrades to a
-  manual path.
+  copying its credentials or requiring a provider key. External capabilities stay off until
+  a concrete action needs one, then the app explains and requests that specific permission.
+  Direct provider keys and managed AI remain explicit fallbacks, and every AI feature still
+  degrades to a manual path.
 - **Database-backed setup and sourcing** — onboarding, settings, search setup, and the
   sourcing sweep all read and write the local database first: setup readiness
   (search-ready / gate-ready / apply-ready) is computed from stored facts and gates what
@@ -273,17 +276,96 @@ nurse, a driver, and an engineer each bring their own config.
   path, so scheduling can avoid double-booking in database-backed workspaces.
 - **Network and Library in the app** — company relationship records (contacts and
   conversation history behind a detail drawer) and the full evidence/story/writing-voice
-  bank (uncapped, with type/lane/family filters and search) are now first-class app views;
-  the classic dashboard remains reachable as a "Classic" link.
+  bank (uncapped, with type/lane/family filters and search) are now first-class app views.
+  The retired static tracker has no product route or navigation affordance.
 - **Setup readiness on the home view** — while sourcing runs, the home view shows what's
   still needed to unlock gating and applying (with per-item hints), and gets out of the way
   once setup is complete.
 
 ## In progress / up next
 
-The web app is the daily development surface. Current work is re-sequenced around a
-conversation-first local product; Electron packaging and final desktop QA follow after the
-web experience and contracts stabilize:
+The web app is the daily development surface. The conversation-first product and packaged
+Electron runtime have completed the acceptance sweep below, including the macOS distribution
+gate:
+
+### Full-product acceptance sweep (completed August 14, 2026)
+
+The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
+section remains the release-level source of truth. The sweep recorded 72 findings, and all 72 are
+fixed and live-retested. The web app, CLI, clean npm package, packaged Electron runtime, and macOS
+DMG are accepted as functional and release-ready.
+
+Final verification from the accepted code: 2,355 repository tests passed with 5 intentional
+skips; 646 web tests passed; lint passed with no errors; web, website, docs, and desktop smoke
+builds passed; the final 450-file npm tarball installed into a clean home and passed data, tracker,
+CLI, onboarding, responsive-layout, and console checks. The final one-command desktop build signs
+and notarizes both the app bundle and DMG container, staples the ticket, and passes Gatekeeper.
+
+- **Global shell and workspace conversation** — navigation, setup gating, Ask on every route,
+  durable history, attachments, cancel/retry, confirmation gates, activity notifications,
+  error recovery, reload/restart behavior, responsive layout, keyboard use, and light/dark themes.
+- **Onboarding** — installed-runtime selection; résumé PDF, DOCX, text, no-résumé, retry, and
+  resume-later paths; progressive Paul notes; manual checklist escape hatch; completion truth;
+  first search; and a clean restart at each checkpoint.
+- **Home** — setup readiness, focus item, pipeline summary, next actions, activity state, deep links,
+  empty/loading/error states, and immediate consistency after writes elsewhere in the app.
+- **Jobs** — search and filters, sourced Promote/Skip, drawer actions, full-JD capture, evaluation
+  KEEP/REVIEW/CUT, compensation and fit display, document generation/export, application outcome
+  writes, interview scheduling, communications, stale-link handling, and every preview/close path.
+- **Calendar** — week/month navigation, busy blocks, interview and follow-up dates, timezone and DST
+  handling, empty/loading/error states, deep links, and write-through consistency with Jobs.
+- **Network** — company/contact search, detail drawer, communication history, relationship capture,
+  empty/loading/error states, and links back to the owning job or conversation.
+- **Library and Deep Ingest** — evidence, stories, role signals, writing voice, honesty boundaries,
+  source provenance, edit/remove/confirm flows, filters, empty states, and whether confirmed facts
+  actually influence later evaluation and packet generation.
+- **Settings** — candidate and targeting edits, runtimes, direct-provider fallback, automation
+  consent, source maintenance, validation and recovery, persistence after restart, and honest
+  descriptions of what each installed tool can do.
+- **Compatibility and release surfaces** — explicit retired-dashboard behavior, CLI
+  commands used by the app, docs and website links, npm-pack install smoke, packaged Electron
+  navigation/filesystem/runtime ownership, quit/restart, and a clean-device first run.
+- **Failure matrix** — no AI route, runtime crash/timeout/schema failure, offline and partial network,
+  missing/partial artifacts, unavailable ATS links, empty search, database unavailable, concurrent
+  writes, cancelled work, and restart during a long-running action. No raw stack trace, false
+  success, lost user input, or unexplained dead end is acceptable.
+
+Every row above was live-tested in a fresh home and a populated returning-user home, with each
+result marked pass or fixed. All P0/P1 findings, first-day search-to-application blockers, and
+distribution gates are fixed.
+
+### QA restart gate (passed August 13, 2026)
+
+A clean isolated-home run now covers résumé intake and retry, restart/resume, conversational
+setup, first search, evaluation, packet generation, PDF export, local applied-state write-back,
+and the live dashboard. The repository cleanup and full automated gates below are part of the
+same release contract:
+
+- **Installed-runtime isolation** — run bounded Codex and Claude tasks without inheriting
+  unrelated global MCP failures; surface the actual CLI/runtime error and a working recovery path.
+- **Résumé intake matrix** — verify PDF, DOCX, text, retry, restart, and docked-upload recovery;
+  failed retries must not create duplicate uploads.
+- **Plain-language permissions** — avoid implementation-mode choices. Ask for browser,
+  mail, or authenticated-site access only when a concrete action needs it, and advance the
+  conversation when the user confirms or declines.
+- **Schema-safe Paul actions** — constrain every confirmation card to the candidate API schema,
+  validate before display, keep resolved status after reload, and show field-specific correction
+  guidance when a write fails.
+- **Real candidate review** — Paul's File and the completion disclosure must show the saved name,
+  contact details, role lanes, location modes, compensation posture, companies, evidence, and
+  guardrails. Never display ambient defaults as user-confirmed facts.
+- **Durable conversation** — preserve both sides of the setup thread, avoid duplicate questions,
+  keep action receipts across reload/restart, and make the post-completion Ask bar show its result.
+- **Discovery fallback** — company suggestions must work through the selected runtime or expose
+  the server's manual/no-AI fallback in the UI without forcing the user to invent companies.
+- **One completion contract** — initialize or explicitly select the canonical data mode before
+  graduation. Onboarding, `careerrat doctor`, source readiness, first-search state, and the
+  dashboard must agree; never say "already hunting" until a durable sourcing run exists.
+- **Fresh-install regression** — automate clean-home setup through completion, first search,
+  restart, and dashboard entry, with no unexpected 404/409/5xx responses or silent failures.
+- **Repository hygiene** — keep the website and docs under `apps/`, design history under
+  `.planning/archive`, fonts under `assets/fonts`, generated output ignored, the legacy brand
+  absent from paths and content, and the repository-wide lint gate green.
 
 - **Conversational first ingestion** — accept a résumé, learn desired jobs and hard gates,
   run an adaptive interview that asks only unresolved/high-value questions, then present a
@@ -314,14 +396,12 @@ web experience and contracts stabilize:
   through the same verbs the UI buttons use; the remaining batch is mail/message ingest,
   calendar sync, interview prep, and relationship sourcing (legacy workspaces keep working
   unchanged).
-- **Classic dashboard retirement** — Network and Library now render in the app; what's
-  left on the classic tracker page is the funnel diagram and a final parity check on
-  activity/action state. The classic render path retires only once those are covered.
 - **Coaching loop** — turn a below-floor fit score from a verdict into a plan: name the gaps,
   suggest how to close them, re-ingest the new evidence, re-score.
-- **Desktop integration and packaging** — after web acceptance: desktop-safe runtime/path
-  discovery, filesystem ownership, navigation, exports, signing/notarization, clean-device
-  first run, restart, and packaged end-to-end QA.
+- **Desktop public distribution** — completed August 14, 2026. The restored local Keychain profile
+  and permanent `release:dmg` stage produce a signed, Apple-notarized, stapled, and
+  Gatekeeper-approved DMG in one command. Runtime/path ownership, navigation, clean-device first
+  run, restart, and packaged end-to-end QA also pass.
 
 ## V2 Parking Lot
 

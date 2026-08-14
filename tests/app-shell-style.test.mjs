@@ -153,6 +153,38 @@ describe("app shell styles", () => {
     assert.doesNotMatch(scopedUtility, /border-radius:\s*999px/);
   });
 
+  it("keeps every primary navigation item visible in the mobile two-row header", () => {
+    const css = cssText();
+
+    assert.match(
+      css,
+      /@media \(max-width: 760px\)[\s\S]*?\.app-shell__header\s*\{[^}]*height:\s*auto;[^}]*min-height:\s*88px;/
+    );
+    assert.match(
+      css,
+      /@media \(max-width: 760px\)[\s\S]*?\.app-shell__primary\s*\{[^}]*-webkit-mask-image:\s*none;[^}]*mask-image:\s*none;/
+    );
+    assert.match(
+      css,
+      /@media \(max-width: 760px\)[\s\S]*?\.nav-list\s*\{[^}]*min-width:\s*0;[^}]*justify-content:\s*space-between;/
+    );
+  });
+
+  it("keeps the job artifact viewer inside the capped app canvas", () => {
+    const overlay = cssRule(".packet-viewer-overlay");
+    const viewer = cssRule(".packet-viewer");
+
+    assert.match(overlay, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    assert.match(overlay, /grid-template-rows:\s*minmax\(0,\s*1fr\)/);
+    assert.match(overlay, /box-sizing:\s*border-box/);
+    assert.match(overlay, /padding:\s*clamp/);
+    assert.match(viewer, /box-sizing:\s*border-box/);
+    assert.match(viewer, /width:\s*100%/);
+    assert.match(viewer, /height:\s*100%/);
+    assert.match(viewer, /min-height:\s*0/);
+    assert.doesNotMatch(viewer, /100vw|100vh/);
+  });
+
   it("gives the Jobs board a dashboard product frame instead of scaffold styling", () => {
     const page = cssRule(".jobs-page");
     const hero = cssRule(".jobs-page__hero");

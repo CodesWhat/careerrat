@@ -50,6 +50,7 @@ vi.mock("react", async (importOriginal) => {
 });
 
 const api = vi.hoisted(() => ({
+  initOnboard: vi.fn(),
   getInstalledAiRuntimes: vi.fn(),
 }));
 vi.mock("../lib/api.js", () => api);
@@ -105,6 +106,7 @@ function runtimeState(runtimes, { selectedId = null, providerFallback = false } 
 beforeEach(() => {
   hooks.clear();
   vi.clearAllMocks();
+  api.initOnboard.mockResolvedValue({ ok: true });
   captured.engineScreen = null;
   captured.interviewSurface = null;
 });
@@ -114,6 +116,30 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("OnboardingPage — engine phase gate (unchanged)", () => {
+  it("initializes the canonical candidate store before probing engines", async () => {
+    api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([CLAUDE], { selectedId: "claude" }));
+
+    render();
+    await runEffects();
+
+    expect(api.initOnboard).toHaveBeenCalledTimes(1);
+    expect(api.initOnboard.mock.invocationCallOrder[0]).toBeLessThan(
+      api.getInstalledAiRuntimes.mock.invocationCallOrder[0]
+    );
+  });
+
+  it("does not enter setup when the canonical candidate store cannot initialize", async () => {
+    api.initOnboard.mockRejectedValue(new Error("database unavailable"));
+
+    render();
+    await runEffects();
+    const tree = render();
+
+    expect(api.getInstalledAiRuntimes).not.toHaveBeenCalled();
+    expect(JSON.stringify(tree)).toContain("couldn’t start setup");
+    expect(JSON.stringify(tree)).toContain("Try again");
+  });
+
   it("an already-selected runtime skips straight to the interview and wires onRequestEngineScreen", async () => {
     api.getInstalledAiRuntimes.mockResolvedValue(runtimeState([CLAUDE], { selectedId: "claude" }));
     render();

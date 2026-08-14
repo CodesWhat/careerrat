@@ -190,7 +190,7 @@ function computeCandidateSetup(config) {
 
 **CLI command shape** (`src/cli/data.mjs` lines 1-15, 479-540):
 ```javascript
-// `rolester data <verb>` is a thin argv shim over the exact same lib functions
+// `careerrat data <verb>` is a thin argv shim over the exact same lib functions
 // the HTTP route (src/cli/data-route.mjs) calls.
 
 function cmdCandidate(sub, rest) {
@@ -711,7 +711,7 @@ async function handleSubmit(event) {
   event.preventDefault();
   const result = await createIntake({ text, source: "capture-bar" });
   setResult(result);
-  window.dispatchEvent(new CustomEvent("rolester:intake-changed"));
+  window.dispatchEvent(new CustomEvent("careerrat:intake-changed"));
 }
 
 async function handleDrop(event) {
@@ -790,7 +790,7 @@ it("renders the full uncapped bank", () => {
 const cleanupRoots = [];
 
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-deep-ingest-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-deep-ingest-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -859,7 +859,7 @@ test("migration list must stay sequential", () => {
 **Source:** `AGENTS.md` lines 292-342  
 **Apply to:** all deep-ingest DB writes and APIs
 
-DB workspaces write through SQLite verbs, not hand edits to `workspace/tracker.json`. `rolester data` verbs stamp/export where applicable; proposal/queue-only state should follow existing no-export patterns like intake/company discovery. Run route/API work fail-closed when no database exists.
+DB workspaces write through SQLite verbs, not hand edits to `workspace/tracker.json`. `careerrat data` verbs stamp/export where applicable; proposal/queue-only state should follow existing no-export patterns like intake/company discovery. Run route/API work fail-closed when no database exists.
 
 ### Local API, Not Chat Runtime
 

@@ -131,18 +131,25 @@ test("W4 completion screen kicks off the local first search deterministically", 
   // FinishStep.jsx along with its cadence-preference form
   // (cadencePatch/saveCadencePreference/saveCadenceAndStartFirstSearch/
   // retryFirstSearch/isSourceSetupReady) — design 3e has no cadence UI, just
-  // an automatic kickoff + live status row. That logic now lives in
-  // InterviewSurface.jsx's CompletionScreen (design 3e), which auto-starts
-  // startFirstSearchRun() once and polls getSourcingRun for status. The
-  // assertion this test still owns — first-search kickoff never routes
-  // through chat/skill-run/browser-capture — carries over unchanged.
+  // explicit source discovery and first-search actions. That logic now lives
+  // in InterviewSurface.jsx's CompletionScreen (design 3e): it starts the
+  // canonical first run once, and if that run is already complete it starts a
+  // post-discovery search instead of reusing stale results. The assertion this
+  // test still owns — search kickoff never routes through
+  // chat/skill-run/browser-capture — carries over unchanged.
   const interviewSurface = stripJavaScriptComments(
     source("apps/web/src/onboarding/InterviewSurface.jsx")
   );
   const completionScreen = functionBlock(interviewSurface, "function CompletionScreen");
-  assert.match(completionScreen, /\bstartFirstSearchRun\(\)/);
-  assert.match(completionScreen, /\bgetSourcingRun\(\{ purpose: "first-search" \}\)/);
-  assertNoForbiddenRuntime(completionScreen, "onboarding completion screen first-search kickoff");
+  const firstSearchHandler = functionBlock(
+    completionScreen,
+    "async function handleStartFirstSearch"
+  );
+  assert.match(firstSearchHandler, /\bstartFirstSearchRun\(\)/);
+  assert.match(firstSearchHandler, /\bstartSearchRun\(\)/);
+  assert.match(firstSearchHandler, /firstResult\?\.reused === true/);
+  assert.doesNotMatch(firstSearchHandler, /\bgetSourcingRun\b/);
+  assertNoForbiddenRuntime(firstSearchHandler, "onboarding completion screen first-search kickoff");
 });
 
 test("DB-backed search readiness comes from source config, not generated YAML", () => {

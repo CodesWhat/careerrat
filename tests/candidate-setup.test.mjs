@@ -422,6 +422,32 @@ describe("candidate setup DB readiness and document formats", () => {
     assert.match(config.setup.missing.apply_ready.join("\n"), /compensation floor/i);
   });
 
+  it("lets a résumé-less candidate search after they choose to build their profile from answers", () => {
+    const repoRoot = buildDbRoot();
+
+    candidateConfigPatch({
+      repoRoot,
+      name: "targeting",
+      patch: {
+        role_buckets: [{ name: "Backend", titles: ["Staff Backend Engineer"] }],
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "profile",
+      patch: { location: { home: "Brooklyn, NY", remote: true } },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      name: "form-defaults",
+      patch: { declined_fields: { resume: { declined_at: "2026-08-13T19:00:00Z" } } },
+    });
+
+    const config = candidateConfigGet({ repoRoot });
+    assert.equal(config.setup.readiness.search_ready, true);
+    assert.ok(!config.setup.missing.search_ready.includes("source resume"));
+  });
+
   it("defaults targeting.search_preferences cadence without changing search readiness gates", () => {
     const repoRoot = buildDbRoot();
     const config = candidateConfigGet({ repoRoot });

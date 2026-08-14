@@ -395,7 +395,7 @@ function fontFaceCss() {
 
   const rules = [];
   for (const { file, family, weight } of variants) {
-    const fontPath = join(repoRoot, "fonts", file);
+    const fontPath = join(repoRoot, "assets", "fonts", file);
     let src;
     try {
       const b64 = readFileSync(fontPath).toString("base64");

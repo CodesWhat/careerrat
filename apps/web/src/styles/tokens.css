@@ -15,8 +15,9 @@
  *
  * Fonts: Archivo (display/headings) ships as a local npm dep
  * (@fontsource/archivo, imported below — no CDN). Geist Sans/Mono were
- * already self-hosted (served by tracker-dev.mjs at /fonts/*, no CDN
- * either) and keep that path unchanged.
+ * already self-hosted under the shared assets tree. Vite bundles them into
+ * the app build, while tracker-dev serves the same source files to the
+ * generated dashboard.
  */
 
 @import "@fontsource/archivo/700.css";
@@ -276,13 +277,13 @@
 
 @font-face {
   font-family: "Geist Sans";
-  src: url("/fonts/GeistVF.woff2") format("woff2");
+  src: url("../../../../assets/fonts/GeistVF.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }
 @font-face {
   font-family: "Geist Mono";
-  src: url("/fonts/GeistMonoVF.woff2") format("woff2");
+  src: url("../../../../assets/fonts/GeistMonoVF.woff2") format("woff2");
   font-weight: 100 900;
   font-display: swap;
 }

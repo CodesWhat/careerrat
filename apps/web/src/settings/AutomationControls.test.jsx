@@ -29,9 +29,7 @@ const STATUS = {
       summary: "read opted-in webmail recruiting updates",
       enabled: false,
       liveCount: 0,
-      platforms: [
-        { platform: "gmail", enabled: false, consent: false, allowed: false },
-      ],
+      platforms: [{ platform: "gmail", enabled: false, consent: false, allowed: false }],
     },
   ],
 };
@@ -39,7 +37,10 @@ const STATUS = {
 describe("automation mode and consent controls", () => {
   it("explains that Basic is the recommended hard-off mode and Advanced enables nothing by itself", () => {
     const html = renderToStaticMarkup(
-      <AutomationModeChooser status={{ ...STATUS, mode: "basic", liveCount: 0 }} onSetMode={vi.fn()} />
+      <AutomationModeChooser
+        status={{ ...STATUS, mode: "basic", liveCount: 0 }}
+        onSetMode={vi.fn()}
+      />
     );
     expect(html).toContain("Basic");
     expect(html).toContain("Recommended");
@@ -83,4 +84,3 @@ describe("automation mode and consent controls", () => {
     expect(buildAutomationModePatch(STATUS, "advanced")).toEqual({ setup_mode: "advanced" });
   });
 });
-

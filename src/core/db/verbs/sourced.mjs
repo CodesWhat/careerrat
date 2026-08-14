@@ -15,6 +15,12 @@ function refreshAnalytics(db, now = new Date()) {
   return refreshAnalyticsInDb(db, { buildReevaluationAnalytics, now });
 }
 
+function applicationNote(value) {
+  return Array.from(String(value || "").trim())
+    .slice(0, 60)
+    .join("");
+}
+
 // sourcedUpsertBatch({rows}) — one sweep's worth of sourced rows, upserted in
 // ONE transaction with ONE activity event summarizing the batch (matching
 // search-jobs' own "one sweep, one write" shape rather than one event per
@@ -103,6 +109,7 @@ export function sourcedPromote({ repoRoot, env, id, appRow } = {}) {
       ...(appRow || {}),
     };
     newApp.id = appRow?.id || sourced.id;
+    if (newApp.note) newApp.note = applicationNote(newApp.note);
 
     putRow(db, "applications", newApp.id, newApp);
     deleteRow(db, "sourced", id);

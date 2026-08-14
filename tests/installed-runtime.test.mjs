@@ -187,6 +187,10 @@ test("fixed invocation adapters pass prompts on stdin and never use a shell", ()
   assert.ok(codex.args.includes("--sandbox"));
   assert.ok(codex.args.includes("read-only"));
   assert.ok(codex.args.includes("--ephemeral"));
+  assert.ok(
+    codex.args.includes("--ignore-user-config"),
+    "bounded app calls must not inherit unrelated user MCP servers or hooks"
+  );
   assert.ok(codex.args.includes("--output-schema"));
   assert.equal(codex.args.at(-1), "-");
   assert.equal(codex.options.shell, false);
@@ -323,10 +327,13 @@ test("Codex adapter reads the final agent message from JSONL", async () => {
   writeFileSync(
     executablePath,
     `#!/usr/bin/env node
+const { readFileSync } = require("node:fs");
 process.stdin.resume();
 process.stdin.on("end", () => {
+  const schemaPath = process.argv[process.argv.indexOf("--output-schema") + 1];
+  const schema = JSON.parse(readFileSync(schemaPath, "utf8"));
   process.stdout.write(JSON.stringify({ type: "thread.started", thread_id: "secret-session" }) + "\\n");
-  process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "{\\"verdict\\":\\"keep\\"}" } }) + "\\n");
+  process.stdout.write(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: JSON.stringify({ required: schema.required, candidateRequired: schema.properties.candidate.required, candidateAdditionalProperties: schema.properties.candidate.additionalProperties }) } }) + "\\n");
   process.stdout.write(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 3, output_tokens: 2 } }) + "\\n");
 });
 `,
@@ -337,10 +344,25 @@ process.stdin.on("end", () => {
     const result = await runInstalledRuntime({
       runtime: { id: "codex", path: executablePath },
       prompt: "classify",
-      outputSchema: { type: "object" },
+      outputSchema: {
+        type: "object",
+        properties: {
+          candidate: {
+            type: "object",
+            properties: {
+              full_name: { type: ["string", "null"] },
+              domain: { type: "string" },
+            },
+          },
+        },
+      },
       timeoutMs: 2000,
     });
-    assert.equal(result.text, '{"verdict":"keep"}');
+    assert.deepEqual(JSON.parse(result.text), {
+      required: ["candidate"],
+      candidateRequired: ["full_name", "domain"],
+      candidateAdditionalProperties: false,
+    });
     assert.deepEqual(result.usage, { input_tokens: 3, output_tokens: 2 });
     assert.equal(JSON.stringify(result).includes("secret-session"), false);
   } finally {

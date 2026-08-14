@@ -5,9 +5,23 @@
 // existing chat runtime.
 
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { Readable } from "node:stream";
-import { test } from "node:test";
-import { buildDiscoveryKickoff, mountDiscoveryRoutes } from "../src/cli/discovery-route.mjs";
+import { after, test } from "node:test";
+import {
+  buildDiscoveryCandidateContext,
+  buildDiscoveryKickoff,
+  mountDiscoveryRoutes,
+} from "../src/cli/discovery-route.mjs";
+import { buildSearchPromptContext } from "../src/core/search/search-prompts.mjs";
+
+const roots = [];
+
+after(() => {
+  for (const root of roots) rmSync(root, { recursive: true, force: true });
+});
 
 function fakeChatRuntime() {
   const starts = [];
@@ -30,6 +44,7 @@ function fakeChatRuntime() {
 }
 
 function bootServer({
+  repoRoot = "/tmp/careerrat-discovery-route-test",
   chatRuntime = fakeChatRuntime(),
   prepareQuickStart = () => ({
     status: 200,
@@ -54,7 +69,7 @@ function bootServer({
   }
   mountDiscoveryRoutes({
     addRoute,
-    repoRoot: "/tmp/careerrat-discovery-route-test",
+    repoRoot,
     env: {},
     chatRuntime,
     prepareQuickStart,
@@ -82,7 +97,9 @@ async function invokeJson(server, method, path, payload) {
   const ended = new Promise((resolve) => {
     resolveEnded = resolve;
   });
-  const req = Readable.from(payload === undefined ? [] : [JSON.stringify(payload)]);
+  const req = Readable.from(
+    payload === undefined ? [] : [Buffer.from(JSON.stringify(payload), "utf8")]
+  );
   req.method = method;
   req.url = path;
 
@@ -122,6 +139,60 @@ test("buildDiscoveryKickoff includes server-selected outbound-safe candidate con
   assert.match(kickoff, /"remote":true/);
 });
 
+test("discovery candidate context includes the saved domain instead of asking for it again", () => {
+  const context = buildSearchPromptContext({
+    config: {
+      profile: {
+        candidate: { domain: "software engineering focused on applied AI" },
+        location: { home: "Austin, TX", remote: true, hybrid: true },
+      },
+      targeting: {
+        role_buckets: [
+          {
+            name: "Applied AI and forward-deployed engineering",
+            titles: ["Staff Applied AI Engineer"],
+          },
+        ],
+      },
+    },
+  });
+
+  assert.equal(context.domain, "software engineering focused on applied AI");
+});
+
+test("discovery candidate context carries the configured source dedup set", () => {
+  const context = buildDiscoveryCandidateContext({
+    candidateContext: { domain: "software engineering" },
+    sourceConfig: {
+      searches: [
+        {
+          label: "RemoteOK",
+          url: "https://remoteok.com/remote-dev-jobs",
+          provider: "remoteok",
+          source_type: "board",
+          enabled: true,
+        },
+      ],
+    },
+    companyConfig: {
+      tracked_companies: [{ name: "Acme", careers_url: "https://jobs.ashbyhq.com/acme" }],
+    },
+  });
+
+  assert.deepEqual(context.configured_sources, [
+    {
+      label: "RemoteOK",
+      url: "https://remoteok.com/remote-dev-jobs",
+      provider: "remoteok",
+      source_type: "board",
+      enabled: true,
+    },
+  ]);
+  assert.deepEqual(context.configured_companies, [
+    { name: "Acme", url: "https://jobs.ashbyhq.com/acme" },
+  ]);
+});
+
 test("POST /api/discovery/quick-start prepares sources and starts the visible research-boards chat", async () => {
   const { server, chatRuntime } = await bootServer();
   try {
@@ -141,6 +212,36 @@ test("POST /api/discovery/quick-start prepares sources and starts the visible re
   } finally {
     await closeServer(server);
   }
+});
+
+test("POST /api/discovery/quick-start resumes at the live discovery step", async () => {
+  const { server, chatRuntime } = await bootServer({
+    loadAgentGuidance: () => ({
+      nextSkill: "discover-companies",
+      message: "Board research is complete. Run discover-companies next.",
+    }),
+  });
+  const { status, body } = await postJson(server, "/api/discovery/quick-start");
+
+  assert.equal(status, 200);
+  assert.equal(body.guidance.nextSkill, "discover-companies");
+  assert.equal(body.chat.skill, "discover-companies");
+  assert.equal(chatRuntime.starts[0].skill, "discover-companies");
+});
+
+test("POST /api/discovery/quick-start exposes an explicit first-search gate after discovery", async () => {
+  const { server, chatRuntime } = await bootServer({
+    loadAgentGuidance: () => ({
+      nextSkill: "search-jobs",
+      message: "Discovery is complete. Run the first search next.",
+    }),
+  });
+  const { status, body } = await postJson(server, "/api/discovery/quick-start");
+
+  assert.equal(status, 200);
+  assert.equal(body.readyForFirstSearch, true);
+  assert.equal(body.chat, null);
+  assert.equal(chatRuntime.starts.length, 0);
 });
 
 test("POST /api/discovery/quick-start returns 501 when no AI route can start the handoff", async () => {
@@ -180,6 +281,21 @@ test("POST /api/discovery/next starts the current dashboard-guided discovery ski
   } finally {
     await closeServer(server);
   }
+});
+
+test("POST /api/discovery/complete durably resolves an explicit discovery step", async () => {
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-discovery-complete-"));
+  roots.push(repoRoot);
+  const { server } = await bootServer({ repoRoot });
+
+  const { status, body } = await postJson(server, "/api/discovery/complete", {
+    step: "research-boards",
+  });
+
+  assert.equal(status, 200);
+  assert.equal(body.ok, true);
+  assert.equal(body.completion.added, true);
+  assert.deepEqual(body.completion.completedDiscoverySteps, ["research-boards"]);
 });
 
 test("POST /api/discovery/next returns 501 when no AI route can start the handoff", async () => {

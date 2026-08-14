@@ -7,7 +7,7 @@
 ## Phase Boundary
 
 This phase turns app-first onboarding into a search-starting workflow: once the
-candidate has enough local DB setup to search, Rolester should prepare DB-backed
+candidate has enough local DB setup to search, CareerRat should prepare DB-backed
 deterministic sources, ask for search cadence and whether to search now, start
 the first deterministic job search without chat, and show that first search as a
 simple setup task while the user continues deeper onboarding.
@@ -103,7 +103,7 @@ search mechanism, and does not auto-run authenticated/browser sources.
   background discovery/search, then deeper ingest.
 
 ### Prior Phase Contracts
-- `.planning/phases/ROL-API-06-canonical-db-app-shell/06-CONTEXT.md` - React
+- `.planning/phases/06-canonical-db-app-shell/06-CONTEXT.md` - React
   `/app` plus SQLite DB-derived state is canonical; legacy/static tracker
   surfaces are export/debug only.
 - `.planning/phases/03-company-discovery-api/03-CONTEXT.md` - Local discovery

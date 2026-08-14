@@ -10,7 +10,7 @@
 **System Type:** Structured extraction fallback
 
 **Description:**
-Phase 09 is not a new autonomous AI workflow. It extends the existing Rolester bounded-AI seam so public careers-page scanner output can use a model only after deterministic ATS and public-page parsing found reachable page text but could not confidently structure it. Good behavior means AI reduces manual review for genuinely ambiguous public pages without becoming a source of final URLs, provider identity, source-config writes, or publishable public records.
+Phase 09 is not a new autonomous AI workflow. It extends the existing CareerRat bounded-AI seam so public careers-page scanner output can use a model only after deterministic ATS and public-page parsing found reachable page text but could not confidently structure it. Good behavior means AI reduces manual review for genuinely ambiguous public pages without becoming a source of final URLs, provider identity, source-config writes, or publishable public records.
 
 **Critical Failure Modes:**
 1. AI sees or returns candidate-private data, local paths, tracker IDs, fit scores, compensation floors, private notes, or personal application context.
@@ -27,7 +27,7 @@ Phase 09 is not a new autonomous AI workflow. It extends the existing Rolester b
 
 **Industry Vertical:** Job-search automation / developer tooling
 
-**User Population:** Local Rolester users configuring company and board discovery during onboarding and recurring search sweeps.
+**User Population:** Local CareerRat users configuring company and board discovery during onboarding and recurring search sweeps.
 
 **Stakes Level:** High
 
@@ -37,11 +37,11 @@ Phase 09 is not a new autonomous AI workflow. It extends the existing Rolester b
 
 | Dimension | Good | Bad | Stakes | Source |
 |-----------|------|-----|--------|--------|
-| Privacy separation | Public records contain company/board metadata only | Candidate profile, tracker, local path, comp, or fit data appears in any publish payload | High | Phase 09 discussion decisions and Rolester data contracts |
+| Privacy separation | Public records contain company/board metadata only | Candidate profile, tracker, local path, comp, or fit data appears in any publish payload | High | Phase 09 discussion decisions and CareerRat data contracts |
 | Source authority | Deterministic resolver validates URL, provider, freshness, and conflicts | Model-suggested URL or provider is written directly | High | Prior Phase 03/05 discovery decisions |
 | Cost control | AI runs only on ambiguous reachable public text | AI runs on every custom page, empty page, or known failure | Medium | Phase 09 discussion decisions |
 | User review burden | Review queue contains only ambiguous/conflicting extraction | Clean "found nothing" or unsupported board results interrupt the user | Medium | Phase 09 discussion decisions |
-| Reproducibility | Every AI-assisted result has input hash, schema result, confidence, and deterministic validation status | Final state cannot explain why a board/company was accepted or suppressed | High | Rolester tracker and DB write contracts |
+| Reproducibility | Every AI-assisted result has input hash, schema result, confidence, and deterministic validation status | Final state cannot explain why a board/company was accepted or suppressed | High | CareerRat tracker and DB write contracts |
 
 ### Known Failure Modes in This Domain
 
@@ -59,7 +59,7 @@ No sector-specific regulation is identified for public company metadata itself. 
 
 | Role | Responsibility |
 |------|----------------|
-| Rolester maintainer | Calibrate privacy scrub fixtures, scanner cascade semantics, and cost thresholds |
+| CareerRat maintainer | Calibrate privacy scrub fixtures, scanner cascade semantics, and cost thresholds |
 | Power user / job-search operator | Review ambiguous scanner items for whether the requested decision is useful |
 | Security reviewer | Validate public/private table boundaries, prompt input allowlist, and publish payload scrub invariants |
 
@@ -67,12 +67,12 @@ No sector-specific regulation is identified for public company metadata itself. 
 
 ## 2. Framework Decision
 
-**Selected Framework:** Existing Rolester bounded-AI helpers (`runBoundedAI()`, `callAI()`, `parseStructuredJson()`, JSON Schema validation)
+**Selected Framework:** Existing CareerRat bounded-AI helpers (`runBoundedAI()`, `callAI()`, `parseStructuredJson()`, JSON Schema validation)
 
 **Version:** Repo-local modules in `src/core/ai/*`; no new package dependency
 
 **Rationale:**
-The phase needs a small structured extraction fallback, not an agent framework. Existing Rolester architecture already centralizes provider routing, labels, structured-output parsing, schema validation, corrective retry, BYOK/proxy selection, and public envelope normalization. Reusing that seam preserves the "deterministic first, AI only for judgment" core value and avoids adding orchestration overhead for a last-resort parser.
+The phase needs a small structured extraction fallback, not an agent framework. Existing CareerRat architecture already centralizes provider routing, labels, structured-output parsing, schema validation, corrective retry, BYOK/proxy selection, and public envelope normalization. Reusing that seam preserves the "deterministic first, AI only for judgment" core value and avoids adding orchestration overhead for a last-resort parser.
 
 **Alternatives Considered:**
 
@@ -90,17 +90,17 @@ The phase needs a small structured extraction fallback, not an agent framework. 
 
 ## 3. Framework Quick Reference
 
-> Based on existing Rolester source instead of external framework docs.
+> Based on existing CareerRat source instead of external framework docs.
 
 ### Installation
 
 ```bash
 # No new dependency.
-# Optional AI route configuration is existing Rolester config:
+# Optional AI route configuration is existing CareerRat config:
 export ANTHROPIC_API_KEY=...
 # or
-export ROLESTER_AI_PROXY_URL=...
-export ROLESTER_AI_PROXY_TOKEN=...
+export CAREERRAT_AI_PROXY_URL=...
+export CAREERRAT_AI_PROXY_TOKEN=...
 ```
 
 ### Core Imports
@@ -208,7 +208,7 @@ Prompt only the smallest sanitized public text excerpt needed to identify career
 
 ### Structured Outputs with Pydantic
 
-Rolester source uses JSON Schema validation in JavaScript, not Pydantic at runtime. The Pydantic-equivalent contract below documents the shape evaluators should expect; implementation must remain JSON Schema based.
+CareerRat source uses JSON Schema validation in JavaScript, not Pydantic at runtime. The Pydantic-equivalent contract below documents the shape evaluators should expect; implementation must remain JSON Schema based.
 
 ```python
 from pydantic import BaseModel, Field, HttpUrl

@@ -11,7 +11,7 @@ provides:
   - Final Phase 11 verification rollup
   - Signed, notarized, stapled macOS app and DMG evidence
   - Packaged smoke evidence for fresh and existing data roots
-  - Packaged ROLESTER_HOME SQLite and BYOK storage evidence
+  - Packaged CAREERRAT_HOME SQLite and BYOK storage evidence
   - Regression fix for packaged `desktop-runtime.mjs`
 affects: [runtime-lockdown, desktop-release, pilot-release, phase-11-closeout]
 
@@ -122,16 +122,16 @@ status: complete
 - PASS: `npm run lint:placeholders`
 - PASS: `npm run build`
 - PASS: `node --test tests/desktop-package-resources.test.mjs tests/release-safety.test.mjs`
-- PASS: `APPLE_KEYCHAIN_PROFILE=rolester-notary npm run desktop:dist`
+- PASS: `APPLE_KEYCHAIN_PROFILE=careerrat-notary npm run desktop:dist`
 - PASS: App bundle `codesign --verify --deep --strict`, stapler validation, and Gatekeeper execution assessment.
 - PASS: DMG explicit code-sign, notary submission id `bfc42d9c-6536-4ead-b8bc-314f13ac73c3`, stapling, stapler validation, and Gatekeeper open assessment.
 - PASS: Packaged `--smoke` with isolated fresh and existing user data roots.
-- PASS: Packaged `ROLESTER_HOME` evidence: SQLite at `<USER_DATA>/data/db/rolester.db`, `PRAGMA user_version=9`, 9 migration rows, BYOK at `<USER_DATA>/data/internal/ai.env`, mode `0600`, no writes under signed resources.
+- PASS: Packaged `CAREERRAT_HOME` evidence: SQLite at `<USER_DATA>/data/db/careerrat.db`, `PRAGMA user_version=9`, 9 migration rows, BYOK at `<USER_DATA>/data/internal/ai.env`, mode `0600`, no writes under signed resources.
 - FAIL, unrelated: `npm test` still fails only in existing Phase 08 `tests/deep-ingest-ai.test.mjs` gaps for missing deep-ingest proposal schema/modules/validators.
 
 ## Decisions Made
 
-- Keep Apple credentials out of tracked config and use the existing `rolester-notary` keychain profile only at command time.
+- Keep Apple credentials out of tracked config and use the existing `careerrat-notary` keychain profile only at command time.
 - Treat the DMG as the pilot release container and notarize/staple it explicitly after electron-builder's app-bundle notarization.
 - Record generated `apps/desktop/dist/` and `apps/desktop/staging/` artifacts as ignored local evidence, not tracked project files.
 
@@ -150,8 +150,8 @@ status: complete
 **2. [Rule 3 - Blocking] DMG needed explicit container signing/notarization**
 - **Found during:** Task 2 signed/notarized pilot artifact verification
 - **Issue:** electron-builder notarized and stapled the app bundle, but the generated DMG initially had no stapled ticket and Gatekeeper rejected it with `source=no usable signature`.
-- **Fix:** Explicitly code-signed the DMG, submitted it to Apple notarization with `rolester-notary`, stapled it, and reran Gatekeeper assessment.
-- **Files modified:** None tracked; generated `apps/desktop/dist/Rolester-0.1.0-arm64.dmg` only.
+- **Fix:** Explicitly code-signed the DMG, submitted it to Apple notarization with `careerrat-notary`, stapled it, and reran Gatekeeper assessment.
+- **Files modified:** None tracked; generated `apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` only.
 - **Verification:** `codesign --verify`, `xcrun notarytool submit ... --wait`, `xcrun stapler validate`, and `spctl --assess --type open --context context:primary-signature` all passed.
 - **Committed in:** Not applicable; generated artifact only.
 
@@ -167,7 +167,7 @@ status: complete
 
 ## Authentication Gates
 
-- The local `rolester-notary` keychain profile was already configured by the user before final packaging. `xcrun notarytool history --keychain-profile rolester-notary` and final app/DMG submissions succeeded without printing secrets.
+- The local `careerrat-notary` keychain profile was already configured by the user before final packaging. `xcrun notarytool history --keychain-profile careerrat-notary` and final app/DMG submissions succeeded without printing secrets.
 
 ## User Setup Required
 

@@ -24,7 +24,7 @@
 // fields the server already computed, scattered across many rows, with no
 // business rule invented here (no restaging, no re-deriving which artifacts
 // exist).
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button, IconButton } from "../components/Button.jsx";
@@ -234,12 +234,16 @@ function deepIngestProgressFromState(state) {
   return { terminalCount: Number(readiness.terminalCount) || 0, requiredCount };
 }
 
-function isDeepIngestLibrary(metrics) {
-  return metrics?.honesty !== undefined || metrics?.roleSignals !== undefined;
+function isDeepIngestLibrary(library) {
+  return (
+    library?.metrics?.honesty !== undefined ||
+    library?.metrics?.roleSignals !== undefined ||
+    asArray(library?.cards).some((card) => card.kind === "honesty" || card.kind === "role_signal")
+  );
 }
 
 function typeOptionsForLibrary(library) {
-  return isDeepIngestLibrary(library?.metrics)
+  return isDeepIngestLibrary(library)
     ? [...TYPE_OPTIONS, ...DEEP_INGEST_TYPE_OPTIONS]
     : TYPE_OPTIONS;
 }
@@ -489,6 +493,7 @@ export function LibraryPage() {
       await fn();
       emitDashboardChanged();
       await refetch();
+      return true;
     } catch (err) {
       const resolved = resolveErrorCopy(err);
       setActionError(
@@ -496,6 +501,7 @@ export function LibraryPage() {
           ? { ...resolved, action: { ...resolved.action, onRetry: () => runWrite(key, fn) } }
           : resolved
       );
+      return false;
     } finally {
       setBusyKey(null);
     }
@@ -835,6 +841,41 @@ function DocumentRow({ doc }) {
   );
 }
 
+const LIBRARY_DRAWER_FOCUSABLE = [
+  "a[href]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  '[tabindex]:not([tabindex="-1"])',
+].join(",");
+
+export function trapLibraryDrawerTab({ dialog, event, activeElement }) {
+  if (!dialog || event?.key !== "Tab") return;
+  const focusable = Array.from(dialog.querySelectorAll(LIBRARY_DRAWER_FOCUSABLE));
+  if (!focusable.length) {
+    event.preventDefault();
+    dialog.focus();
+    return;
+  }
+  const first = focusable[0];
+  const last = focusable[focusable.length - 1];
+  const outside = typeof dialog.contains === "function" && !dialog.contains(activeElement);
+  if (event.shiftKey && (activeElement === first || outside)) {
+    event.preventDefault();
+    last.focus();
+  } else if (!event.shiftKey && (activeElement === last || outside)) {
+    event.preventDefault();
+    first.focus();
+  }
+}
+
+function sourceLabelForCard(card) {
+  if (card.sourceRef) return card.sourceRef;
+  if (card.kind === "voice" && !card.storedId) return "Candidate writing style";
+  return "Candidate setup";
+}
+
 function LibraryDrawer({
   actionError,
   busyKey,
@@ -849,6 +890,10 @@ function LibraryDrawer({
   const [values, setValues] = useState(() => editableValuesFromCard(card));
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [syncedCardId, setSyncedCardId] = useState(card.id);
+  const cardId = card.id;
+  const drawerRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   // DashboardContext.jsx's ~10s poll hands this drawer a brand-new `card`
   // object every tick even when the underlying record hasn't changed (see
@@ -877,12 +922,25 @@ function LibraryDrawer({
   }, [card, editing, syncedCardId]);
 
   useEffect(() => {
+    if (!cardId) return undefined;
+    const drawer = drawerRef.current;
+    const previouslyFocused = document.activeElement;
+    drawer?.focus();
     function onKeyDown(event) {
-      if (event.key === "Escape") onClose();
+      if (event.key === "Escape") onCloseRef.current();
+      else
+        trapLibraryDrawerTab({
+          dialog: drawer,
+          event,
+          activeElement: document.activeElement,
+        });
     }
     document.addEventListener("keydown", onKeyDown);
-    return () => document.removeEventListener("keydown", onKeyDown);
-  }, [onClose]);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      if (previouslyFocused?.isConnected) previouslyFocused.focus?.();
+    };
+  }, [cardId]);
 
   // Legacy (non-DB) mode's singular writing-voice card is a derived summary
   // with no candidate_evidence_claims/deep_ingest_* row behind it — no
@@ -906,9 +964,12 @@ function LibraryDrawer({
       {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops backdrop close; not itself interactive */}
       <aside
         aria-label="Library card detail"
+        aria-modal="true"
         className="job-drawer library__drawer"
         onClick={(event) => event.stopPropagation()}
+        ref={drawerRef}
         role="dialog"
+        tabIndex={-1}
       >
         <IconButton
           className="job-drawer__close"
@@ -924,6 +985,16 @@ function LibraryDrawer({
           <h2>{card.title || "Reusable material"}</h2>
           {card.summary ? <p>{card.summary}</p> : null}
           {disclaimer ? <p className="field__hint">{disclaimer}</p> : null}
+          <dl className="library__provenance">
+            <div>
+              <dt>Status</dt>
+              <dd>{card.storedId ? "Confirmed" : "Profile-derived"}</dd>
+            </div>
+            <div>
+              <dt>Source</dt>
+              <dd>{sourceLabelForCard(card)}</dd>
+            </div>
+          </dl>
         </div>
 
         {actionError ? (
@@ -979,9 +1050,8 @@ function LibraryDrawer({
                 <div className="job-drawer__inline-actions">
                   <Button
                     disabled={busyKey === savingKey}
-                    onClick={() => {
-                      onSaveCard(card, values);
-                      setEditing(false);
+                    onClick={async () => {
+                      if (await onSaveCard(card, values)) setEditing(false);
                     }}
                   >
                     {busyKey === savingKey ? "Saving…" : "Save"}

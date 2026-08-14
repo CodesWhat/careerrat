@@ -431,6 +431,81 @@ test("POST /api/packet/gate: reuses existing artifacts.jd when no body is suppli
   }
 });
 
+test("POST /api/packet/gate: refuses to treat an explicitly partial saved JD as complete", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  writeFileSync(
+    join(repoRoot, "workspace/jobs/acme-applied-ai-engineer.md"),
+    [
+      "---",
+      'company: "Acme AI"',
+      'role: "Applied AI Engineer"',
+      "partial: true",
+      "---",
+      "# Job Description",
+      "",
+      "This is a readable but shortened feed preview, not the complete posting.",
+    ].join("\n"),
+    "utf8"
+  );
+  let invoked = 0;
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => {
+      invoked += 1;
+      return `\`\`\`json\n${JSON.stringify(typedGateVerdict())}\n\`\`\``;
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.data?.gate, "review");
+    assert.equal(body.data?.manual?.code, "MISSING_JOB_BODY");
+    assert.equal(invoked, 0, "a shortened preview must never reach the evaluator as a full JD");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: preserves unknown compensation as null instead of a fake $0 band", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const verdict = {
+    ...typedGateVerdict({ gate: "review" }),
+    compensation: {
+      status: "unknown",
+      currency: null,
+      minBase: null,
+      maxBase: null,
+      source: "job-description",
+      summary: "No base compensation range is included in the saved job description.",
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () => `\`\`\`json\n${JSON.stringify(verdict)}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data?.compensation?.minBase, null);
+    assert.equal(body.data?.compensation?.maxBase, null);
+
+    const app = readApp(repoRoot, "app-packet");
+    assert.equal(app.base, null);
+    assert.equal(app.compEstimate?.lowK, null);
+    assert.equal(app.compEstimate?.midpointK, null);
+    assert.equal(app.compEstimate?.highK, null);
+    assert.equal(app.compEstimate?.source, "none");
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/packet/gate: missing JD body returns review/manual state and skips AI", async () => {
   const repoRoot = tempRepo();
   importTrackerFixture(repoRoot, [
@@ -439,6 +514,11 @@ test("POST /api/packet/gate: missing JD body returns review/manual state and ski
       company: "Acme AI",
       role: "Applied AI Engineer",
       status: "reviewed-hold",
+      fitScore: 81,
+      fitBasis: "triage",
+      fitBucket: "high",
+      base: "$200–235K",
+      compEstimate: { source: "comparables", lowK: 200, midpointK: 218, highK: 235 },
       artifacts: {},
     },
   ]);
@@ -459,7 +539,18 @@ test("POST /api/packet/gate: missing JD body returns review/manual state and ski
     assert.equal(body.data?.manual?.required, true);
     assert.equal(body.data?.manual?.code, "MISSING_JOB_BODY");
     assert.equal(aiCalls, 0, "missing JD body must not call bounded AI");
-    assert.equal(readApp(repoRoot, "app-no-jd")?.artifacts?.jd ?? null, null);
+    const app = readApp(repoRoot, "app-no-jd");
+    assert.equal(app?.artifacts?.jd ?? null, null);
+    assert.equal(app.fitScore, 81);
+    assert.equal(app.fitBasis, "triage");
+    assert.equal(app.fitBucket, "high");
+    assert.equal(app.base, "$200–235K");
+    assert.deepEqual(app.compEstimate, {
+      source: "comparables",
+      lowK: 200,
+      midpointK: 218,
+      highK: 235,
+    });
   } finally {
     await closeServer(server);
   }
@@ -592,6 +683,7 @@ test("POST /api/packet/generate: stamps packet source/export artifacts through D
     assert.equal(artifacts.resume, artifacts.resumeSource);
     assert.equal(artifacts.coverLetter, artifacts.coverLetterSource);
     assert.equal(artifacts.answers, artifacts.answersSource);
+    assert.match(artifacts.coverLetterPdf, /-cover-letter\.pdf$/);
 
     const readBack = await getJson(server, "/api/packet?id=app-packet");
     assert.equal(readBack.status, 200);

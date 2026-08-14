@@ -2,7 +2,7 @@
 
 CareerRat is a local, skill-driven job-search workspace. An agent (Claude Code,
 Codex, or any AGENTS.md-aware tool) drives the workflow; the CLI scaffolds,
-renders, and serves the dashboard.
+renders, and serves the local app.
 
 ## Prerequisites
 
@@ -25,11 +25,12 @@ binary once:
 git clone https://github.com/CodesWhat/careerrat
 cd careerrat
 npm install
+npm run hooks:install
 npm link
 careerrat start claude    # or: careerrat start codex
 ```
 
-That scaffolds your workspace, installs the skills, opens the dashboard at
+That scaffolds your workspace, installs the skills, opens the local app at
 http://localhost:7777, and hands off to your agent. Then paste a job posting and say
 "evaluate this" — or try the bundled sample under `examples/sample-jobs/`.
 
@@ -38,14 +39,14 @@ http://localhost:7777, and hands off to your agent. Then paste a job posting and
 1. Scaffolds `candidate/` and `workspace/` directories (idempotent).
 2. Installs skills so Claude Code sees `/apply-job`, `/evaluate-job`, etc.
 3. Seeds `workspace/tracker.json` from the demo template (if not yet present).
-4. Boots the live dashboard at http://localhost:7777 with hot reload.
+4. Boots the live local app at http://localhost:7777 with hot reload.
 5. Launches your agent with the starter message that asks it to read
    `AGENTS.md`, run `careerrat doctor`, and follow the next unfinished skill.
 
-The first bare word picks the agent (`careerrat start claude`, `careerrat start
-codex`, or any CLI on your PATH). Omit it to use the first one found.
+The first bare word picks the agent (`careerrat start claude` or `careerrat start
+codex`). Omit it to use the first supported launcher found.
 
-Flags: `--no-agent` (scaffold + dashboard only), `--no-dashboard`,
+Flags: `--no-agent` (scaffold + local app only), `--no-dashboard`,
 `--agent <name>` (alias for the positional), `--port <n>`.
 
 ## Update Later
@@ -62,7 +63,7 @@ code. Your `workspace/` and `candidate/` data are not touched.
 Prefer to open the agent yourself?
 
 ```bash
-npm install        # also runs install-skills via postinstall
+careerrat install-skills
 careerrat doctor     # confirm the scaffold and environment
 ```
 
@@ -93,36 +94,11 @@ how much discretionary work CareerRat runs, while `application_mode` changes how
 aggressively it pursues already-discovered roles. If the file is absent, the safe
 defaults are `standard` usage and `balanced` application mode.
 
-## Setup Modes
-
-When `ingest-profile` runs for the first time it asks two quick questions before
-the main interview begins.
-
-### Basic vs Advanced
-
-- **Basic** — read-only, manual workflow. The agent researches, drafts, and
-  guides; you copy/paste and click. No browser automation, no extension required.
-- **Advanced** — opt into the authenticated browser + mail capabilities (status
-  sync, authenticated search, in-platform message ingest, one-click apply,
-  profile optimization, and `mail_access` for provider-agnostic verification-code
-  reads via `webmail` plus Gmail/Outlook webmail ingest). Each
-  capability is still individually off by default; nothing runs until you read a
-  platform's terms, record consent, and enable it via `careerrat automation`. The
-  Chrome extension is the preferred path (no separate credential store needed);
-  `careerrat automation status` shows what's live. Choosing Advanced during
-  setup just surfaces the install guidance and opt-in prompts at the right moment
-  — you can enable or disable anything later.
-
-### Deep vs Shallow (and resume-later)
-
-- **Deep** — full onboarding interview in one session: identity, targets, comp,
-  location, evidence, honesty boundaries, writing-style calibration, and (in
-  Advanced mode) capability opt-ins.
-- **Shallow** — collect the minimum-viable config now, defer the rest. The skill
-  saves progress after each step to `workspace/setup-state.json` (written by the
-  agent; gitignored). Re-running `ingest-profile` (or `careerrat ingest`) reads
-  that file and resumes from where you left off, so you can stop and come back
-  without losing ground.
+Setup starts as one plain-language conversation. It uses the résumé and facts
+already available, asks only for missing information, and saves progress after
+each settled answer. You can stop at any point and resume later. External browser,
+mail, calendar, messaging, and application permissions stay off until a concrete
+task needs one; CareerRat explains and asks for that specific capability then.
 
 `careerrat doctor` reports whether setup is complete or still in progress.
 
@@ -139,7 +115,7 @@ filling, or submitting.
 `careerrat start` brings the dashboard up. To run it separately:
 
 ```bash
-careerrat tracker        # one-shot snapshot → workspace/tracker.html
+careerrat tracker        # snapshot tracker.json for recovery
 careerrat tracker-dev    # live-reloading dev server on :7777
 ```
 
@@ -147,10 +123,9 @@ careerrat tracker-dev    # live-reloading dev server on :7777
 writes `.internal/tracker-dev.pid` plus `.internal/tracker-dev.log`, so the page
 stays available while the launched agent works.
 
-`careerrat tracker` publishes the dashboard shell plus
-`workspace/dashboard-data.js`. The live server serves those files alongside
-`workspace/tracker.json`, watches tracker data and dashboard source, and refreshes
-the open page over Server-Sent Events.
+`careerrat tracker` creates a deduplicated recovery snapshot and prints a summary.
+The live server reads the canonical database view directly, watches exported tracker
+state, and refreshes the open page over Server-Sent Events.
 
 ## Workspace Directories
 

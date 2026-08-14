@@ -98,6 +98,8 @@ export function buildSearchPromptContext({ repoRoot, env, config } = {}) {
     .filter(Boolean);
 
   const context = {};
+  const domain = trimString(profile.candidate?.domain);
+  if (domain) context.domain = domain;
   if (roleBuckets.length) context.role_buckets = roleBuckets;
 
   const excludedCompanies = compact(targeting.excluded_companies);

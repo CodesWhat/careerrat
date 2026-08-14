@@ -25,6 +25,44 @@ function isPlainObject(value) {
 
 const CANDIDATE_PATCH_DOCS = new Set(["profile", "targeting", "honesty", "form-defaults"]);
 
+function normalizeCandidatePatchPayload(payload) {
+  if (!isPlainObject(payload?.patch)) return payload;
+  let patch = payload.patch;
+
+  if (payload.doc === "profile" && isPlainObject(patch.candidate?.location)) {
+    const rawLocation = patch.candidate.location;
+    const locationText = [rawLocation.city, rawLocation.state, rawLocation.country]
+      .filter(isNonEmptyString)
+      .map((part) => part.trim())
+      .join(", ");
+    if (locationText) {
+      patch = {
+        ...patch,
+        candidate: { ...patch.candidate, location: locationText },
+        location: { ...(isPlainObject(patch.location) ? patch.location : {}), home: locationText },
+      };
+    }
+  }
+
+  if (payload.doc === "targeting" && Array.isArray(patch.role_buckets)) {
+    patch = {
+      ...patch,
+      role_buckets: patch.role_buckets.map((bucket, index) => {
+        if (!isPlainObject(bucket) || isNonEmptyString(bucket.name)) return bucket;
+        const firstTitle = Array.isArray(bucket.titles)
+          ? bucket.titles.find(isNonEmptyString)?.trim()
+          : null;
+        return {
+          ...bucket,
+          name: firstTitle || (index === 0 ? "Primary" : "Secondary"),
+        };
+      }),
+    };
+  }
+
+  return { ...payload, patch };
+}
+
 const KIND_VALIDATORS = {
   authorization: (block) =>
     block?.patch &&
@@ -92,11 +130,15 @@ export function parseConfirmBlocks(text) {
     const kind = parsed?.kind;
     const validator = kind ? KIND_VALIDATORS[kind] : null;
     if (parsed && validator?.(parsed)) {
+      const payload =
+        kind === "candidate_patch"
+          ? normalizeCandidatePatchPayload(parsed.payload)
+          : (parsed.payload ?? null);
       blocks.push({
         kind,
         summary: isNonEmptyString(parsed.summary) ? parsed.summary.trim() : "",
         patch: parsed.patch && typeof parsed.patch === "object" ? parsed.patch : null,
-        payload: parsed.payload ?? null,
+        payload,
       });
     }
     match = FENCE_RE.exec(raw);

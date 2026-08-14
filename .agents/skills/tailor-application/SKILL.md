@@ -5,7 +5,7 @@ description: Generate finished, honest role-specific resumes, cover letters, sho
 
 # tailor-application
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — Prerequisites: gate check
 
@@ -227,7 +227,7 @@ applications[<id>].artifacts.answers     = "workspace/tailored/<Company> — <Ro
 applications[<id>].artifacts.resumeNote  = "<one-line tailoring approach>"
 ```
 
-Then run the AGENTS.md verify+re-render gate:
+Then run the AGENTS.md verify+snapshot gate:
 
 ```
 careerrat tracker --verify && careerrat tracker
@@ -413,7 +413,7 @@ Writing the app row alone does NOT clear a live comm CTA. Both records must land
 the same write. A ghost comm CTA is a broken contract (see AGENTS.md
 "Completed-action clears its CTA (hard)").
 
-After any write at this step, run the verify+re-render gate again:
+After any write at this step, run the verify+snapshot gate again:
 
 ```
 careerrat tracker --verify && careerrat tracker

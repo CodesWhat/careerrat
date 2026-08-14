@@ -592,7 +592,9 @@ function printStatus(asJson) {
     for (const e of status.errors) console.log(`  ${e.path || "(root)"}: ${e.message}`);
     console.log("");
   }
-  console.log(`Setup mode: ${status.mode} (${status.mode === "basic" ? "all external capabilities hard-off" : "individual opt-ins below"})`);
+  console.log(
+    `Setup mode: ${status.mode} (${status.mode === "basic" ? "all external capabilities hard-off" : "individual opt-ins below"})`
+  );
   console.log(`Live capability×platform pairs: ${status.liveCount}`);
   console.log("");
   for (const cap of status.capabilities) {

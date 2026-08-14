@@ -112,3 +112,18 @@ test("buildStats counts a verbose advanced label as advanced (generalised classi
   assert.equal(stats.awaiting, 1, "only the plain 'applied' is still awaiting");
   assert.equal(stats.rejected, 1);
 });
+
+test("buildStats does not count reviewed holds as applied or active", () => {
+  const stats = buildStats({
+    applications: [
+      { id: "hold-1", status: "reviewed-hold" },
+      { id: "hold-2", status: "reviewed-hold" },
+      { id: "applied-1", status: "applied" },
+    ],
+    sourced: [],
+  });
+
+  assert.equal(stats.applied, 1);
+  assert.equal(stats.awaiting, 1);
+  assert.equal(stats.inPlay, 1);
+});

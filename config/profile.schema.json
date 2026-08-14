@@ -54,6 +54,10 @@
         "remote": { "type": "boolean" },
         "hybrid": { "type": "boolean" },
         "onsite": { "type": "boolean" },
+        "mode_preferences_confirmed": {
+          "type": "boolean",
+          "description": "Whether the candidate explicitly reviewed the remote, hybrid, and on-site preference toggles."
+        },
         "commute_radius_miles": { "type": ["number", "null"], "exclusiveMinimum": 0 },
         "home_latitude": { "type": ["number", "null"], "minimum": -90, "maximum": 90 },
         "home_longitude": { "type": ["number", "null"], "minimum": -180, "maximum": 180 },

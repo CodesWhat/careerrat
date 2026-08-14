@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-Phase 2 makes bounded structured AI calls a first-class Rolester runtime primitive. It should deliver the reusable wrapper, response envelope, validation path, telemetry labels, and no-AI/manual fallback behavior needed by later app APIs. It does not implement the `discover-companies` pipeline yet, choose a job data vendor, or migrate browser-authenticated automation.
+Phase 2 makes bounded structured AI calls a first-class CareerRat runtime primitive. It should deliver the reusable wrapper, response envelope, validation path, telemetry labels, and no-AI/manual fallback behavior needed by later app APIs. It does not implement the `discover-companies` pipeline yet, choose a job data vendor, or migrate browser-authenticated automation.
 
 </domain>
 
@@ -32,10 +32,10 @@ Phase 2 makes bounded structured AI calls a first-class Rolester runtime primiti
 - **D-12:** BYOK and managed-proxy paths should preserve comparable usage rows. Proxy metering can remain server-side, but app-visible route metadata should still expose enough information to explain whether AI was used or skipped.
 
 ### Native Structured Outputs
-- **D-13:** Adopt provider-native structured outputs now where available. User asked "switch to it now no?" and the answer is yes, behind Rolester's own wrapper.
-- **D-14:** Native provider enforcement is an optimization and reliability layer, not the trust boundary. Rolester must still run deterministic JSON/schema validation after the model call because provider docs still document invalid-output cases such as refusal, truncation, and schema limits.
+- **D-13:** Adopt provider-native structured outputs now where available. User asked "switch to it now no?" and the answer is yes, behind CareerRat's own wrapper.
+- **D-14:** Native provider enforcement is an optimization and reliability layer, not the trust boundary. CareerRat must still run deterministic JSON/schema validation after the model call because provider docs still document invalid-output cases such as refusal, truncation, and schema limits.
 - **D-15:** The wrapper should support a fallback mode for providers or routes that cannot use native structured output yet: prompt for JSON, extract fenced or bare JSON, validate, and retry once using the existing `runStructuredOneshot()` behavior.
-- **D-16:** Native structured-output support should be hidden behind Rolester's local API contract so app routes do not encode provider-specific request bodies.
+- **D-16:** Native structured-output support should be hidden behind CareerRat's local API contract so app routes do not encode provider-specific request bodies.
 
 ### the agent's Discretion
 The agent may choose exact module names, response field names, and test fixture layout, provided the implementation preserves the decisions above and reuses existing AI routing, schema validation, and usage-log code. A likely owner is a new helper near `src/core/ai/` that route modules call instead of duplicating the one-shot pattern.

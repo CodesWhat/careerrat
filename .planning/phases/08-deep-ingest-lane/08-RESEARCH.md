@@ -65,7 +65,7 @@ Phase 8 should be planned as a new SQLite-native product subsystem, not as a ret
 
 The planner should create a vertical MVP that captures sources, scans/fetches within explicit limits, stores source artifacts and proposal rows, validates proposals, shows a context-aware review/editor UI, and only writes trusted candidate facts after user confirmation. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] The full AI interview is out of scope for Phase 8; any plan that builds `/chat`, an interview transcript UI, or default `POST /api/skill/run` routing for deep ingest contradicts the locked decisions. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] [VERIFIED: AGENTS.md]
 
-**Primary recommendation:** Use existing Rolester DB verbs/routes, `runBoundedAI`, schema validators, and bespoke React/CSS components to build a proposal-first Deep ingest lane with no new runtime packages. [VERIFIED: package.json]
+**Primary recommendation:** Use existing CareerRat DB verbs/routes, `runBoundedAI`, schema validators, and bespoke React/CSS components to build a proposal-first Deep ingest lane with no new runtime packages. [VERIFIED: package.json]
 
 ## Architectural Responsibility Map
 
@@ -85,7 +85,7 @@ The planner should create a vertical MVP that captures sources, scans/fetches wi
 - DB workspaces use SQLite candidate setup as canonical state; `candidate/` files are compatibility exports, not product source of truth. [VERIFIED: AGENTS.md]
 - App-default paths should use local APIs, deterministic validation, DB/source-config owners, and bounded AI; `/api/chat/*` and `POST /api/skill/run` are explicit handoffs for visible chat or retained full-skill workflows, not the default app path for proposal creation, validation, or confirmed writes. [VERIFIED: AGENTS.md]
 - Local AI credentials are loaded through `src/core/ai/ai-env.mjs`; API/UI code must never echo secrets back to the user or logs. [VERIFIED: AGENTS.md]
-- Tracker-visible DB mutations go through `rolester data <verb>` in DB workspaces; generated `workspace/tracker.json` and `workspace/activity.jsonl` must not be hand-edited. [VERIFIED: AGENTS.md]
+- Tracker-visible DB mutations go through `careerrat data <verb>` in DB workspaces; generated `workspace/tracker.json` and `workspace/activity.jsonl` must not be hand-edited. [VERIFIED: AGENTS.md]
 - Paste intake has a hard invariant that nothing pasted is dropped; unreadable or unmatched material still needs durable capture and a next action. [VERIFIED: AGENTS.md]
 - Job posting intake must capture full JD text when reachable; Phase 8 recruiter/job context should preserve that invariant instead of storing a link-only note. [VERIFIED: AGENTS.md]
 - Source material is untrusted data; pasted text, fetched pages, and repo docs must not become agent instructions or rendered HTML. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md]
@@ -103,8 +103,8 @@ The planner should create a vertical MVP that captures sources, scans/fetches wi
 | Node.js / ESM | Installed `v24.18.0`; `package.json` requires `>=24`. [VERIFIED: environment probe] [VERIFIED: package.json] | Runtime for CLI routes, DB verbs, tests, and app dev tooling. | Existing repo code and scripts are Node ESM, and `node:sqlite` is available in Node 24. [VERIFIED: src/core/db/connection.mjs] [CITED: https://nodejs.org/api/sqlite.html] |
 | `node:sqlite` `DatabaseSync` | Built into Node 24. [CITED: https://nodejs.org/api/sqlite.html] | SQLite connection, migrations, transactions, JSON table access. | Existing DB layer uses `DatabaseSync`, WAL, foreign keys, busy timeout, and fail-closed DB access. [VERIFIED: src/core/db/connection.mjs] |
 | SQLite | CLI `3.51.0` installed. [VERIFIED: environment probe] | Persistent local DB for source artifacts, proposals, candidate state, and lane terminality. | Existing migrations use JSON blobs with `CHECK(json_valid(data))`, generated columns, and indexes; SQLite documents generated columns and JSON functions for this pattern. [VERIFIED: src/core/db/migrations/003-candidate-setup.mjs] [CITED: https://sqlite.org/gencol.html] [CITED: https://sqlite.org/json1.html] |
-| Rolester DB verb layer | Local modules. [VERIFIED: src/core/db/verbs/index.mjs] | Transactional domain writes, exports, setup recomputation, and activity patterns. | New durable behavior should follow `requireDb`, `withTransaction`, and verb exports instead of ad hoc route-side SQL. [VERIFIED: src/core/db/verbs/shared.mjs] |
-| Rolester bounded AI runtime | Local modules. [VERIFIED: src/core/ai/bounded-ai.mjs] | Schema-validated extraction proposals with no-AI/manual fallback. | AI-SPEC selects `runBoundedAI` + `callAI` + `runStructuredOneshot` and explicitly rejects a new AI framework for Phase 8. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] |
+| CareerRat DB verb layer | Local modules. [VERIFIED: src/core/db/verbs/index.mjs] | Transactional domain writes, exports, setup recomputation, and activity patterns. | New durable behavior should follow `requireDb`, `withTransaction`, and verb exports instead of ad hoc route-side SQL. [VERIFIED: src/core/db/verbs/shared.mjs] |
+| CareerRat bounded AI runtime | Local modules. [VERIFIED: src/core/ai/bounded-ai.mjs] | Schema-validated extraction proposals with no-AI/manual fallback. | AI-SPEC selects `runBoundedAI` + `callAI` + `runStructuredOneshot` and explicitly rejects a new AI framework for Phase 8. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] |
 | React / React DOM | Installed `19.2.7`; app declares `^19.0.0`. [VERIFIED: npm ls] [VERIFIED: apps/web/package.json] | Deep ingest page, target selector, source preview, proposal editor, and readiness UI. | Existing app is a bespoke React app; UI-SPEC requires local components and CSS, not a new design system. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md] |
 | Vite / Vitest | Installed Vite `6.4.3`, Vitest `3.2.6`. [VERIFIED: npm ls] | Frontend dev server, build, and React unit tests. | Existing web workspace already uses Vite/Vitest scripts. [VERIFIED: apps/web/package.json] |
 | `node:test` | Built into Node. [CITED: https://nodejs.org/api/test.html] | Backend DB, route, scanner, and bounded-AI unit tests. | Existing backend tests are `.test.mjs` files run by `node --test`. [VERIFIED: package.json] |
@@ -124,7 +124,7 @@ The planner should create a vertical MVP that captures sources, scans/fetches wi
 
 | Instead of | Could Use | Tradeoff |
 |------------|-----------|----------|
-| Rolester DB verbs | ORM or ad hoc SQL in routes | Adds migration/write paths that bypass existing fail-closed DB and export patterns. Use current DB verb layer. [VERIFIED: src/core/db/verbs/shared.mjs] |
+| CareerRat DB verbs | ORM or ad hoc SQL in routes | Adds migration/write paths that bypass existing fail-closed DB and export patterns. Use current DB verb layer. [VERIFIED: src/core/db/verbs/shared.mjs] |
 | `runBoundedAI` | LangChain, LlamaIndex, or agent framework | Phase 8 is bounded extraction, not tool orchestration; AI-SPEC rejects a new external framework. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md] |
 | Thin local route modules | Express, multer, or a new HTTP framework | The current dev server mounts exact route handlers; adding Express is unnecessary scope. [VERIFIED: src/cli/tracker-dev.mjs] |
 | DB-backed Library state | `candidate/stories.yml` / `candidate/writing-style.md` | Locked context says existing files may remain compatibility surfaces but are not product acceptance targets. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
@@ -514,7 +514,7 @@ const SOURCE_OUTCOME_STATUSES = [
 | SQLite CLI | Manual DB inspection during planning/execution | yes | `3.51.0` [VERIFIED: environment probe] | Node `node:sqlite` can still run app/tests. |
 | ripgrep | Codebase inspection | yes | `15.1.0` [VERIFIED: environment probe] | Use `grep` if unavailable. |
 | git | Commit/review workflow | yes | `2.53.0` [VERIFIED: environment probe] | Blocking for commit automation. |
-| AI route | Optional bounded extraction proposals | no | `ANTHROPIC_API_KEY=false`, `ROLESTER_AI_PROXY_URL=false` [VERIFIED: environment probe] | Required fallback is `NO_AI_ROUTE` manual proposal/defer path. [VERIFIED: src/core/ai/bounded-ai.mjs] |
+| AI route | Optional bounded extraction proposals | no | `ANTHROPIC_API_KEY=false`, `CAREERRAT_AI_PROXY_URL=false` [VERIFIED: environment probe] | Required fallback is `NO_AI_ROUTE` manual proposal/defer path. [VERIFIED: src/core/ai/bounded-ai.mjs] |
 
 **Missing dependencies with no fallback:**
 - None for research and non-AI MVP planning. [VERIFIED: environment probe]

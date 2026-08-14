@@ -152,7 +152,7 @@ _Note: Both tasks followed TDD with separate RED and GREEN commits._
 
 ## Issues Encountered
 
-- Biome reported an existing warning for `ROLESTER_TRACKER_HOST` missing from `turbo.json` env configuration while checking `src/cli/tracker-dev.mjs`. This predates 07-06 and was not changed.
+- Biome reported an existing warning for `CAREERRAT_TRACKER_HOST` missing from `turbo.json` env configuration while checking `src/cli/tracker-dev.mjs`. This predates 07-06 and was not changed.
 - The worktree had unrelated pre-existing `.planning` changes and `.planning/research/` untracked files. They were not staged in task commits.
 
 ## Known Stubs

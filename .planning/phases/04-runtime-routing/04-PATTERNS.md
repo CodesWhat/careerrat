@@ -716,7 +716,7 @@ export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
     repoRoot,
     env,
-    envVar: "ROLESTER_RUNTIME_SKILLS",
+    envVar: "CAREERRAT_RUNTIME_SKILLS",
     defaultValue: DEFAULT_RUNTIME_SKILLS,
   });
 }
@@ -732,7 +732,7 @@ export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
     repoRoot,
     env,
-    envVar: "ROLESTER_CHAT_SKILLS",
+    envVar: "CAREERRAT_CHAT_SKILLS",
     defaultValue: DEFAULT_CHAT_SKILLS,
   });
 }
@@ -816,7 +816,7 @@ Proposal generation and decisions must not start `ChatPanel`, `/api/chat/*`, `ru
 
 **Apply to:** `GET /api/runtime/config`, UI capability gating, tests
 
-Resolve runtime skills from `.agents/skills` plus `ROLESTER_RUNTIME_SKILLS`; resolve chat skills from `.agents/skills` plus `ROLESTER_CHAT_SKILLS`. Do not hardcode the lists in React.
+Resolve runtime skills from `.agents/skills` plus `CAREERRAT_RUNTIME_SKILLS`; resolve chat skills from `.agents/skills` plus `CAREERRAT_CHAT_SKILLS`. Do not hardcode the lists in React.
 
 ### React Async State
 

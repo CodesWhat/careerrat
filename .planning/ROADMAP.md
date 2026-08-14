@@ -1,4 +1,4 @@
-# Roadmap: Rolester Skill-to-API Runtime
+# Roadmap: CareerRat Skill-to-API Runtime
 
 **Created:** 2026-07-04
 **Mode:** Vertical MVP

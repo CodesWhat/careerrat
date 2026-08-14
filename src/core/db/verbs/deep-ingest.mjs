@@ -594,6 +594,24 @@ export function deepIngestSourceCreate({ repoRoot, env, input } = {}) {
     const chunks = replaceSourceChunks(db, source, input?.chunks);
     delete source._sourceText;
     putRow(db, SOURCE_TABLE, source.id, source);
+    const sourceCoverage = readRow(db, LANE_TABLE, "source_coverage");
+    putRow(db, LANE_TABLE, "source_coverage", {
+      id: "source_coverage",
+      lane: "source_coverage",
+      status: "review_needed",
+      reason: null,
+      createdAt: sourceCoverage?.createdAt || source.createdAt,
+      updatedAt: source.updatedAt,
+    });
+    const openGaps = readRow(db, LANE_TABLE, "open_gaps");
+    putRow(db, LANE_TABLE, "open_gaps", {
+      id: "open_gaps",
+      lane: "open_gaps",
+      status: "not_started",
+      reason: null,
+      createdAt: openGaps?.createdAt || source.createdAt,
+      updatedAt: source.updatedAt,
+    });
     return {
       ok: true,
       source: readRow(db, SOURCE_TABLE, source.id),

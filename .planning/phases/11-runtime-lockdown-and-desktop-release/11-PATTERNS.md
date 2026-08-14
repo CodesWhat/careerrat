@@ -59,7 +59,7 @@ export function resolveAllowedSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
     repoRoot,
     env,
-    envVar: "ROLESTER_RUNTIME_SKILLS",
+    envVar: "CAREERRAT_RUNTIME_SKILLS",
     defaultValue: DEFAULT_RUNTIME_SKILLS,
   });
 }
@@ -140,7 +140,7 @@ export async function runSkillStream({
   if (!allowed.includes(skill)) {
     const err = new Error(
       `skill "${skill}" is not allowed to run via the embedded runtime (allowed: ` +
-        `${allowed.join(", ") || "none"}) - set ROLESTER_RUNTIME_SKILLS to opt more in`
+        `${allowed.join(", ") || "none"}) - set CAREERRAT_RUNTIME_SKILLS to opt more in`
     );
     err.code = "SKILL_NOT_ALLOWED";
     err.allowed = allowed;
@@ -239,7 +239,7 @@ export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({
     repoRoot,
     env,
-    envVar: "ROLESTER_CHAT_SKILLS",
+    envVar: "CAREERRAT_CHAT_SKILLS",
     defaultValue: DEFAULT_CHAT_SKILLS,
   });
 }
@@ -262,7 +262,7 @@ async function startSession({ skill, input } = {}) {
   if (!allowed.includes(trimmedSkill)) {
     const err = new Error(
       `skill "${trimmedSkill}" is not allowed to run via the chat runtime (allowed: ` +
-        `${allowed.join(", ") || "none"}) - set ROLESTER_CHAT_SKILLS to opt more in`
+        `${allowed.join(", ") || "none"}) - set CAREERRAT_CHAT_SKILLS to opt more in`
     );
     err.code = "SKILL_NOT_ALLOWED";
     err.allowed = allowed;
@@ -292,7 +292,7 @@ const q = query({
     permissionMode: "bypassPermissions",
     allowDangerouslySkipPermissions: true,
     maxTurns,
-    title: `rolester chat: ${trimmedSkill}`,
+    title: `careerrat chat: ${trimmedSkill}`,
   },
 });
 ```
@@ -647,14 +647,14 @@ import { verifySmokeHttpSurface } from "./desktop-smoke.mjs";
 ```javascript
 let repoRoot;
 if (app.isPackaged) {
-  process.env.ROLESTER_HOME = join(app.getPath("userData"), "data");
-  repoRoot = join(process.resourcesPath, "rolester");
+  process.env.CAREERRAT_HOME = join(app.getPath("userData"), "data");
+  repoRoot = join(process.resourcesPath, "careerrat");
 } else {
   repoRoot = join(__dirname, "../..");
 }
 ```
 
-Keep `ROLESTER_HOME` assignment before any Rolester engine import.
+Keep `CAREERRAT_HOME` assignment before any CareerRat engine import.
 
 **First-run route pattern** (lines 117-160):
 
@@ -697,7 +697,7 @@ function createWindow(url, route, { load = true } = {}) {
   win = new BrowserWindow({
     width: 1280,
     height: 860,
-    title: "Rolester",
+    title: "CareerRat",
   });
 
   win.webContents.setWindowOpenHandler(({ url: target }) => {
@@ -799,7 +799,7 @@ import { fileURLToPath } from "node:url";
 
 const desktopDir = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const repoRoot = join(desktopDir, "../..");
-const stagingRoot = join(desktopDir, "staging", "rolester");
+const stagingRoot = join(desktopDir, "staging", "careerrat");
 const webDistIndex = join(repoRoot, "apps/web/dist/index.html");
 
 const EXCLUDE_EXACT = new Set(["examples"]);
@@ -842,22 +842,22 @@ function main() {
 }
 ```
 
-Do not copy `candidate/`, `workspace/`, `.internal/`, `.rolester/`, repo root `node_modules`, tests, docs, or examples into packaged resources.
+Do not copy `candidate/`, `workspace/`, `.internal/`, `.careerrat/`, repo root `node_modules`, tests, docs, or examples into packaged resources.
 
 **Current builder config to update** (`apps/desktop/electron-builder.yml` lines 23-47):
 
 ```yaml
 extraResources:
-  - from: staging/rolester
-    to: rolester
+  - from: staging/careerrat
+    to: careerrat
     filter:
       - "**/*"
       - ".agents/**"
       - ".claude/**"
       - "apps/web/dist/**"
       - "!**/.DS_Store"
-  - from: staging/rolester/node_modules
-    to: rolester/node_modules
+  - from: staging/careerrat/node_modules
+    to: careerrat/node_modules
     filter:
       - "**/*"
       - "!**/.DS_Store"
@@ -969,7 +969,7 @@ test("electron-builder embeds the full staged runtime, including hidden skill di
 
   assert.match(
     config,
-    /from:\s+staging\/rolester[\s\S]*filter:/,
+    /from:\s+staging\/careerrat[\s\S]*filter:/,
     "main staged runtime must use explicit filters"
   );
   for (const pattern of ["**/*", ".agents/**", ".claude/**", "apps/web/dist/**"]) {
@@ -1059,7 +1059,7 @@ import {
 ```javascript
 function tempRepoWithSkill(skillNames = "test-skill") {
   const names = Array.isArray(skillNames) ? skillNames : [skillNames];
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-skill-runtime-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-skill-runtime-"));
   for (const skillName of names) {
     const skillDir = join(repoRoot, ".agents/skills", skillName);
     mkdirSync(skillDir, { recursive: true });
@@ -1174,8 +1174,8 @@ test("GET /api/runtime/config: returns one-shot, chat, AI-route, and discovery c
     {
       repoRoot,
       env: {
-        ROLESTER_RUNTIME_SKILLS: "evaluate-job,answer-question",
-        ROLESTER_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies,search-jobs",
+        CAREERRAT_RUNTIME_SKILLS: "evaluate-job,answer-question",
+        CAREERRAT_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies,search-jobs",
         ANTHROPIC_API_KEY: "sk-ant-test",
       },
     }
@@ -1195,7 +1195,7 @@ test("createChatRuntime.startSession: query() gets CHAT_TOOLS (RUNTIME_TOOLS + W
       repoRoot,
       env: {
         ANTHROPIC_API_KEY: "sk-ant-test",
-        ROLESTER_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies",
+        CAREERRAT_CHAT_SKILLS: "ingest-profile,research-boards,discover-companies",
       },
       loadSdk: async () => ({
         query: (args) => {
@@ -1263,7 +1263,7 @@ Update this only enough to name app-safe default runtime tools and explicit tool
 ```markdown
 ## Run (dist - best-effort)
 
-This stages a self-contained copy of the engine into `staging/rolester`
+This stages a self-contained copy of the engine into `staging/careerrat`
 (`scripts/stage.mjs` - the same allowlist `npm pack` ships, plus its own
 `@anthropic-ai/claude-agent-sdk` install, so the packaged app doesn't reach
 back into the repo checkout or its `node_modules`), then runs
@@ -1297,7 +1297,7 @@ Change "best-effort" and "deferred" posture to pilot-accurate signed/notarized i
 Before tagging a release:
 
 1. All tests pass: `npm test`
-2. Doctor reports clean: `rolester doctor`
+2. Doctor reports clean: `careerrat doctor`
 3. Placeholder linter is clean: `npm run lint:placeholders`
 4. **Privacy/public-split check** - grep all tracked files (`git ls-files`) for
    the private origin codename and any personal identity strings - must return
@@ -1310,7 +1310,7 @@ Before tagging a release:
 9. GitHub release created from the tag with changelog notes.
 ```
 
-Add desktop pilot release gates here or in `apps/desktop/README.md`: stage, build, sign, notarize, staple, assess, smoke fresh workspace, smoke existing candidate, verify app does not need checkout, verify data root under `ROLESTER_HOME`.
+Add desktop pilot release gates here or in `apps/desktop/README.md`: stage, build, sign, notarize, staple, assess, smoke fresh workspace, smoke existing candidate, verify app does not need checkout, verify data root under `CAREERRAT_HOME`.
 
 ## Shared Patterns
 
@@ -1333,7 +1333,7 @@ export function buildDiscoveryKickoff({ skill, message, source = "Continue disco
   return [
     source,
     `Current next discovery skill: ${skill}.`,
-    message || "Continue the Rolester discovery pipeline from the current workspace state.",
+    message || "Continue the CareerRat discovery pipeline from the current workspace state.",
     `Pipeline order: ${DISCOVERY_PIPELINE.join(" -> ")}.`,
     DISCOVERY_STEP_NOTES[skill] || "Run only the current discovery step.",
     "Keep confirm-first prompts visible. Do not auto-approve board or company writes.",
@@ -1355,7 +1355,7 @@ Static guards should list exact product files, strip comments, and produce path-
 
 **Source:** `apps/desktop/main.mjs`, `apps/desktop/desktop-routing.mjs`, `apps/desktop/desktop-smoke.mjs`
 
-Electron-only code stays in `main.mjs`; route decisions and smoke verification stay in pure helpers with node:test coverage. Packaged mode sets `ROLESTER_HOME` before engine imports and uses staged resources under `process.resourcesPath`.
+Electron-only code stays in `main.mjs`; route decisions and smoke verification stay in pure helpers with node:test coverage. Packaged mode sets `CAREERRAT_HOME` before engine imports and uses staged resources under `process.resourcesPath`.
 
 ### Packaging Privacy
 

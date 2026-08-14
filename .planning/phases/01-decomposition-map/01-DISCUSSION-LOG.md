@@ -23,7 +23,7 @@
 
 ### Company Board Cache
 
-**Question:** Can Rolester discover a company job board once and save it?
+**Question:** Can CareerRat discover a company job board once and save it?
 
 **User direction:** Yes. The tool should cache the job board and avoid resolving the same company repeatedly.
 
@@ -33,7 +33,7 @@
 
 **Question:** Are copyright/usual scraping concerns the main blocker?
 
-**User direction:** No. Jobs disappear, and Rolester should prioritize durable capture of public postings.
+**User direction:** No. Jobs disappear, and CareerRat should prioritize durable capture of public postings.
 
 **Captured decision:** Phase 1 should optimize for practical sourcing, reliability, cost, and JD capture. Legal/licensing metadata can be recorded where relevant, but should not block the architecture spike by default.
 

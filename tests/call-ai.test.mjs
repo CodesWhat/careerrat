@@ -14,8 +14,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { callAI, extractSSEEvents, resolveAIRoute } from "../src/core/ai/call-ai.mjs";
-import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
+import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
 function tempRoot() {
   return mkdtempSync(join(tmpdir(), "careerrat-call-ai-"));
@@ -233,9 +233,7 @@ test("resolveAIRoute: selected installed CLI wins in desktop even when a provide
       { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
-        runtimeInventory: [
-          { id: "codex", name: "Codex", path: "/safe/codex", available: true },
-        ],
+        runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
       }
     );
     assert.equal(route.type, "installed");
@@ -260,9 +258,7 @@ test("resolveAIRoute: explicit Advanced provider fallback retains BYOK", () => {
       { CAREERRAT_DESKTOP_SHELL: "1", ANTHROPIC_API_KEY: "sk-ant-test" },
       {
         repoRoot: root,
-        runtimeInventory: [
-          { id: "codex", name: "Codex", path: "/safe/codex", available: true },
-        ],
+        runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
       }
     );
     assert.equal(route.type, "byok");
@@ -291,9 +287,7 @@ test("callAI: routes a structured request through the selected CLI without a pro
       outputMode: "native",
       root,
       env: { CAREERRAT_DESKTOP_SHELL: "1" },
-      runtimeInventory: [
-        { id: "codex", name: "Codex", path: "/safe/codex", available: true },
-      ],
+      runtimeInventory: [{ id: "codex", name: "Codex", path: "/safe/codex", available: true }],
       runInstalledRuntimeImpl: async (input) => {
         calls.push(input);
         return {

@@ -212,4 +212,77 @@ describe("DashboardPage", () => {
     expect(html).not.toContain("Globex packet deadline");
     expect(html).not.toContain("No interviews or calls today");
   });
+
+  it("counts a sourced-only queue as review work, not active applications", () => {
+    const role = {
+      company: "Fresh Co",
+      role: "Staff Engineer",
+      fit: 82,
+      detailId: "fresh-role",
+    };
+    const html = renderDashboardPage({
+      data: {
+        stats: { inPlay: 0, sourced: 7, applied: 0 },
+        focus: {
+          kind: "review",
+          type: "Review",
+          title: "Best new role",
+          company: role.company,
+          role: role.role,
+          cta: "Review roles",
+        },
+        allNextSteps: [],
+        latestRoles: [role],
+        sourcedRoles: [role],
+        reviewHoldRoles: [],
+        calendar: { upcoming: { events: [] } },
+        jobs: {
+          visibleCount: 7,
+          rail: { fresh: 7, highFit: 5, manualReview: 7, screenPlus: 0 },
+        },
+      },
+    });
+
+    expect(html).toContain(">Clear this one and call it done.</h1>");
+    expect(html).toContain("0 active applications");
+    expect(html).not.toContain("7 active applications");
+    expect(html).toContain('data-dashboard-stat="activeJobs">0</strong>');
+  });
+
+  it("uses singular application copy for one active application", () => {
+    const html = renderDashboardPage({
+      data: {
+        stats: { inPlay: 1, sourced: 0, applied: 1 },
+        focus: { kind: "clear" },
+        allNextSteps: [],
+        latestRoles: [],
+        sourcedRoles: [],
+        reviewHoldRoles: [],
+        calendar: { upcoming: { events: [] } },
+        jobs: { visibleCount: 1, rail: {} },
+      },
+    });
+
+    expect(html).toContain("1 active application");
+    expect(html).not.toContain("1 active applications");
+  });
+
+  it("opens a prepared interview dossier in its dedicated full-page route", () => {
+    const html = renderDashboardPage({
+      data: {
+        ...DASHBOARD_DATA,
+        focus: {
+          kind: "interview",
+          title: "Interview dossier",
+          company: "Cyberdyne Systems",
+          role: "Staff Platform Engineer",
+          detailId: "app-cyberdyne",
+          hasDossier: true,
+          cta: "Open dossier",
+        },
+      },
+    });
+
+    expect(html).toContain('class="dashboard__primary-link" href="/jobs?dossier=app-cyberdyne"');
+  });
 });

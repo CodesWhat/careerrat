@@ -26,7 +26,7 @@ This phase does not sync individual job postings home, does not publish candidat
 - **D-06:** Scrub validation is fail-closed. If a public record contains any forbidden private field or value, block the publish and surface a local error instead of silently dropping fields.
 
 ### Consent and Product Copy
-- **D-07:** Onboarding should include one sync-home toggle, default on, framed as helping improve Rolester by sharing public company and job-board metadata.
+- **D-07:** Onboarding should include one sync-home toggle, default on, framed as helping improve CareerRat by sharing public company and job-board metadata.
 - **D-08:** Consent copy must plainly say private data is never shared: resume, profile, notes, compensation, fit scores, jobs, tracker state, and local files are out of bounds.
 
 ### Unsupported Careers Pages
@@ -59,7 +59,7 @@ The user delegated implementation mechanics to planning and execution: exact tab
 - `docs/ARCHITECTURE.md` - Local APIs/DB verbs first, bounded AI for finite judgment, discovery proposal defaults, and source-layer expectations.
 
 ### Prior Phase Decisions
-- `.planning/phases/ROL-API-06-canonical-db-app-shell/06-CONTEXT.md` - `/app` plus SQLite is canonical; generated tracker/activity files are compatibility/export only.
+- `.planning/phases/06-canonical-db-app-shell/06-CONTEXT.md` - `/app` plus SQLite is canonical; generated tracker/activity files are compatibility/export only.
 - `.planning/phases/07-quick-onboarding-and-auto-sourcing/07-CONTEXT.md` - Durable sourcing run state, deterministic first search, and no hidden chat/skill runtime for app sourcing.
 - `.planning/phases/08-deep-ingest-lane/08-CONTEXT.md` - Proposal-first handling of private candidate facts and no leakage of candidate truth without review.
 - `.planning/phases/03-company-discovery-api/03-CONTEXT.md` - Confirm-first company proposals, bounded AI as untrusted seed input, deterministic resolver/scanner/gate checks, and DB-owned proposal state.

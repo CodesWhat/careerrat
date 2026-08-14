@@ -16,7 +16,7 @@ Phase 04 success criteria are: discovery controls call the new company discovery
 
 - Skills are workflow contracts and procedural "how-to" sources; runtime work should use the owning skill when doing job-search execution, but this phase is planning research and should not execute job-search skills. [VERIFIED: AGENTS.md]
 - Discovery workflow order is `setup-searches -> research-boards -> discover-companies -> search-jobs`; Phase 4 must not remove the chat handoffs that support this order. [VERIFIED: AGENTS.md]
-- DB workspaces use `rolester data <verb>` for tracker-visible mutations; generated `workspace/tracker.json` and `workspace/activity.jsonl` must not be hand-edited in DB mode. [VERIFIED: AGENTS.md]
+- DB workspaces use `careerrat data <verb>` for tracker-visible mutations; generated `workspace/tracker.json` and `workspace/activity.jsonl` must not be hand-edited in DB mode. [VERIFIED: AGENTS.md]
 - Consequential discovery writes remain confirm-first; accepted company/source writes must go through the existing source-config or company write path, not UI-side JSON edits. [VERIFIED: AGENTS.md]
 - The browser automation permission model stays opt-in and is outside this phase's default local discovery route. [VERIFIED: AGENTS.md]
 - Code and UI must stay domain-neutral and must not hardcode real employer, role, compensation, or candidate-preference defaults. [VERIFIED: AGENTS.md]
@@ -50,7 +50,7 @@ The current app still contains chat-first discovery controls: `CompaniesStep.jsx
 | Default company discovery control | Browser / Client | API / Backend | The current default control lives in `apps/web/src/onboarding/steps/CompaniesStep.jsx`; it should call app API wrappers instead of embedding a chat panel as the default action. [VERIFIED: codebase grep] |
 | Company proposal generation | API / Backend | Bounded AI | `src/cli/discovery-route.mjs` owns `POST /api/discovery/company-proposals`, and core proposal generation calls bounded/manual seeds plus deterministic resolver/scanner/gate logic. [VERIFIED: codebase grep] [VERIFIED: 03-VERIFICATION.md] |
 | Proposal confirmation writes | API / Backend | Database / Storage | `POST /api/discovery/company-proposal-decisions` delegates to `applyCompanyProposalDecision()` and the confirmed write seams, preserving expected-version conflict handling and source-config/sourced ownership. [VERIFIED: codebase grep] [VERIFIED: .planning/STATE.md] |
-| Retained full skill runtime | API / Backend | Local Agent SDK runtime | `POST /api/skill/run` is mounted by `src/cli/skill-run-route.mjs`, streams SSE, and is narrowed by `resolveAllowedSkills()` over `ROLESTER_RUNTIME_SKILLS`. [VERIFIED: codebase grep] |
+| Retained full skill runtime | API / Backend | Local Agent SDK runtime | `POST /api/skill/run` is mounted by `src/cli/skill-run-route.mjs`, streams SSE, and is narrowed by `resolveAllowedSkills()` over `CAREERRAT_RUNTIME_SKILLS`. [VERIFIED: codebase grep] |
 | Discovery chat handoffs | API / Backend | Browser / Client | `/api/discovery/quick-start` and `/api/discovery/next` start or reuse `/api/chat/*` sessions, while `ChatPanel.jsx` subscribes to the visible session. [VERIFIED: codebase grep] |
 | Runtime capability exposure | API / Backend | Browser / Client | `GET /api/runtime/config` currently returns only one-shot skill names; Phase 4 should extend this read-only route so UI controls do not infer AI/chat availability from hardcoded booleans. [VERIFIED: codebase grep] [ASSUMED] |
 
@@ -211,7 +211,7 @@ This exact shape is a recommendation, not a locked user decision. [ASSUMED]
 - **Defaulting company discovery to `ChatPanel`:** This keeps the expensive conversational runtime as the normal route even though Phase 3 shipped local proposal APIs. [VERIFIED: codebase grep] [VERIFIED: .planning/PROJECT.md]
 - **Silent fallback from local route failure to chat:** This hides runtime cost and can turn deterministic failures into long tool sessions. [VERIFIED: .planning/architecture/runtime-routing-policy.md]
 - **React-side proposal persistence:** This bypasses expected-version conflict protection and the source-config/sourced write seams. [VERIFIED: 03-VERIFICATION.md]
-- **Expanding `ROLESTER_RUNTIME_SKILLS` to discovery by default:** Discovery chat belongs to `ROLESTER_CHAT_SKILLS`; one-shot full runtime defaults are currently evaluate/answer/tailor/resume. [VERIFIED: codebase grep] [VERIFIED: tests]
+- **Expanding `CAREERRAT_RUNTIME_SKILLS` to discovery by default:** Discovery chat belongs to `CAREERRAT_CHAT_SKILLS`; one-shot full runtime defaults are currently evaluate/answer/tailor/resume. [VERIFIED: codebase grep] [VERIFIED: tests]
 - **Treating model/manual URL hints as trusted URLs:** Phase 3 decisions require resolver validation before supported ATS promotion. [VERIFIED: .planning/STATE.md]
 
 ## Don't Hand-Roll
@@ -429,7 +429,7 @@ Security enforcement is enabled in `.planning/config.json`; Phase 4 should keep 
 |---------------|---------|------------------|
 | V2 Authentication | no | The local tracker-dev app does not add user authentication in this phase; AI key storage remains governed by existing BYOK/local env code. [VERIFIED: AGENTS.md] [VERIFIED: codebase grep] |
 | V3 Session Management | yes | Chat sessions use `chat-runtime.mjs` session IDs, lifecycle state, duplicate/max-session guards, close/interrupt, and route tests. [VERIFIED: codebase grep] [VERIFIED: tests] |
-| V4 Access Control | yes | One-shot skills and chat skills are allowlisted through `ROLESTER_RUNTIME_SKILLS` and `ROLESTER_CHAT_SKILLS`, filtered against installed skill directories. [VERIFIED: codebase grep] [VERIFIED: tests] |
+| V4 Access Control | yes | One-shot skills and chat skills are allowlisted through `CAREERRAT_RUNTIME_SKILLS` and `CAREERRAT_CHAT_SKILLS`, filtered against installed skill directories. [VERIFIED: codebase grep] [VERIFIED: tests] |
 | V5 Input Validation | yes | Route bodies use `readJsonBodyCapped()`, proposal batch max is pinned, decision versions protect conflicts, and bounded AI output is validated before use. [VERIFIED: codebase grep] [VERIFIED: .planning/STATE.md] |
 | V6 Cryptography | no new crypto | Phase 4 should not modify key storage or crypto; existing local AI key storage is documented in AGENTS.md. [VERIFIED: AGENTS.md] |
 
@@ -464,7 +464,7 @@ Security enforcement is enabled in `.planning/config.json`; Phase 4 should keep 
 
 ### Secondary (MEDIUM confidence)
 
-- None used for implementation guidance; external web search returned no Rolester-specific authoritative source. [VERIFIED: websearch]
+- None used for implementation guidance; external web search returned no CareerRat-specific authoritative source. [VERIFIED: websearch]
 
 ### Tertiary (LOW confidence)
 

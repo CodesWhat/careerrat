@@ -8,10 +8,10 @@
 //
 // What ships, and why:
 //   - Every entry in the root package.json `files[]` array EXCEPT docs/* and
-//     examples/ (those are developer/marketing surfaces, not runtime — the
-//     packaged app never reads them) and the individual per-skill
-//     `.agents/skills/<name>/SKILL.md` paths (collapsed below into a single
-//     copy of the real `.agents/skills/` directory). After that copy lands,
+//     the individual per-skill `.agents/skills/<name>/SKILL.md` paths
+//     (collapsed below into a single copy of the real `.agents/skills/`
+//     directory). The broad examples/ entry is narrowed to the fictional
+//     examples/demo-workspace fixture required by `data init --demo`. After that copy lands,
 //     staging materializes a real `.claude/skills` mirror too, so packaged
 //     runtimes that still probe Claude's historical lookup path work without
 //     depending on a symlink inside a signed app bundle.
@@ -35,9 +35,9 @@
 // that list transitively reuses that guarantee.
 //
 // Explicitly excluded regardless of `files[]`: workspace/, candidate/,
-// .internal/, .careerrat/, node_modules, tests, website, examples, docs — none
-// of those are in `files[]` in the first place except docs/examples, which
-// are filtered out above.
+// .internal/, .careerrat/, node_modules, tests, site/docs apps, non-demo
+// examples, and docs — none of those are in `files[]` in the first place
+// except docs/examples, which are narrowed or filtered above.
 //
 // Idempotent: staging/ is removed and rebuilt from scratch every run.
 
@@ -51,8 +51,8 @@ const repoRoot = join(desktopDir, "../..");
 const stagingRoot = join(desktopDir, "staging", "careerrat");
 const webDistIndex = join(repoRoot, "apps/web/dist/index.html");
 
-const EXCLUDE_EXACT = new Set(["examples"]);
 const EXCLUDE_PREFIXES = ["docs/"];
+const ENTRY_OVERRIDES = new Map([["examples", "examples/demo-workspace"]]);
 const SKILL_PREFIX = ".agents/skills/";
 
 function log(msg) {
@@ -68,8 +68,8 @@ function readRootPackageJson() {
 // entries into one real-directory copy.
 function resolveEntries(pkg) {
   const entries = new Set();
-  for (const entry of pkg.files || []) {
-    if (EXCLUDE_EXACT.has(entry)) continue;
+  for (const sourceEntry of pkg.files || []) {
+    const entry = ENTRY_OVERRIDES.get(sourceEntry) || sourceEntry;
     if (EXCLUDE_PREFIXES.some((prefix) => entry.startsWith(prefix))) continue;
     if (entry.startsWith(SKILL_PREFIX)) {
       entries.add(".agents/skills");

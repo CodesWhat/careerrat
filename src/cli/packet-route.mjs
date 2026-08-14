@@ -523,12 +523,25 @@ export function mountPacketRoutes({
 
     const workspaceDir = resolveUserPaths(pathCtx).workspaceDir;
     const artifacts = app.artifacts || {};
+    const manifest = app.packetManifest || null;
 
     sendJson(res, 200, {
       id: app.id,
       company: app.company ?? null,
       role: app.role ?? null,
       resumeNote: artifacts.resumeNote ?? null,
+      packet: manifest
+        ? {
+            uploadReady: manifest.uploadReady === true,
+            status: manifest.status ?? null,
+            gapCount: Number.isInteger(manifest.gapCount)
+              ? manifest.gapCount
+              : Array.isArray(manifest.gaps)
+                ? manifest.gaps.length
+                : 0,
+            gaps: Array.isArray(manifest.gaps) ? manifest.gaps : [],
+          }
+        : null,
       artifacts: {
         resume: buildArtifactView(workspaceDir, artifacts.resume, {
           appId: app.id,

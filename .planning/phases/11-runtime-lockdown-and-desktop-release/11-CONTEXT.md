@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-Phase 11 locks down Rolester's app-default runtime path and hardens the Electron desktop product for pilot distribution. The phase should remove broad full-skill tool power from normal product actions, add static guards against new hidden `POST /api/skill/run` app defaults where local owners exist, verify first-run and packaged desktop behavior, wire real macOS signing/notarization readiness for a developer-account pilot, and keep release-critical product docs truthful.
+Phase 11 locks down CareerRat's app-default runtime path and hardens the Electron desktop product for pilot distribution. The phase should remove broad full-skill tool power from normal product actions, add static guards against new hidden `POST /api/skill/run` app defaults where local owners exist, verify first-run and packaged desktop behavior, wire real macOS signing/notarization readiness for a developer-account pilot, and keep release-critical product docs truthful.
 
 This phase does not rebuild the app product surface, migrate another workflow to local APIs, add auto-submit, or perform a broad documentation rewrite. Compatibility surfaces and the retained skill runtime can remain, but they must be explicit, classified, and outside normal product defaults.
 
@@ -29,7 +29,7 @@ This phase does not rebuild the app product surface, migrate another workflow to
 - **D-09:** The guard should be slice-aware rather than a repo-wide string ban. It should fail new product/default uses while preserving explicit retained-runtime tests and routes.
 
 ### Desktop Pilot Release Bar
-- **D-10:** The desktop pilot bar is the full release-hardening bar: first-run routing, database initialization/migrations under `ROLESTER_HOME`, BYOK key storage path, error recovery, app routing, packaged resource staging, smoke verification, external-link containment, signing, notarization, and update readiness.
+- **D-10:** The desktop pilot bar is the full release-hardening bar: first-run routing, database initialization/migrations under `CAREERRAT_HOME`, BYOK key storage path, error recovery, app routing, packaged resource staging, smoke verification, external-link containment, signing, notarization, and update readiness.
 - **D-11:** Because the user has an Apple developer account, notarization should be treated as a real pilot requirement, not only a deferred note. Planning should wire the electron-builder/notarytool path without storing Apple credentials in the repo.
 - **D-12:** A signed and notarized macOS DMG is the pilot target. Local/offline unsigned or signed-only builds may remain useful for development, but they should not be the final pilot success signal.
 - **D-13:** Auto-update infrastructure does not need to become a large new product feature in this phase. The release bar should at least verify the existing update path/readiness story and avoid claiming auto-update exists if it does not.
@@ -59,7 +59,7 @@ The user delegated the exact implementation mechanics for runtime lockdown and s
 - `docs/ARCHITECTURE.md` - Route-class policy: local APIs and DB verbs first, bounded AI for finite judgment, explicit chat handoff, retained full skill runtime only when tool loops are needed.
 
 ### Prior Phase Decisions
-- `.planning/phases/ROL-API-06-canonical-db-app-shell/06-CONTEXT.md` - `/app` plus SQLite is canonical; generated tracker/activity files are compatibility/export only.
+- `.planning/phases/06-canonical-db-app-shell/06-CONTEXT.md` - `/app` plus SQLite is canonical; generated tracker/activity files are compatibility/export only.
 - `.planning/phases/07-quick-onboarding-and-auto-sourcing/07-CONTEXT.md` - First search and repeat sourcing use deterministic local run state, not hidden chat or skill runtime.
 - `.planning/phases/08-deep-ingest-lane/08-CONTEXT.md` - Deep ingest uses SQLite-native proposal/review state and no hidden full-runtime dispatch.
 - `.planning/phases/09-public-company-intelligence-and-scanner-cascade/09-CONTEXT.md` - Public scanner paths are local-first, with bounded AI only for ambiguous reachable text and no hidden runtime escalation.
@@ -77,7 +77,7 @@ The user delegated the exact implementation mechanics for runtime lockdown and s
 - `src/core/ai/answer-page.mjs` - Legacy/static answer page context; useful for guarding remaining explicit retained-runtime surfaces.
 
 ### Desktop and Release Owners
-- `apps/desktop/main.mjs` - Electron shell boot, packaged `ROLESTER_HOME`, dynamic engine import, first-run routing, external link handling, smoke-window verification, and shutdown behavior.
+- `apps/desktop/main.mjs` - Electron shell boot, packaged `CAREERRAT_HOME`, dynamic engine import, first-run routing, external link handling, smoke-window verification, and shutdown behavior.
 - `apps/desktop/desktop-routing.mjs` - Testable first-run route decision: `/app/onboarding` vs `/app`.
 - `apps/desktop/desktop-smoke.mjs` - HTTP smoke verification of health, SPA root, and built app assets.
 - `apps/desktop/electron-builder.yml` - macOS DMG target, hardened runtime, signing/notarization config, and staged resource inclusion.
@@ -109,8 +109,8 @@ The user delegated the exact implementation mechanics for runtime lockdown and s
 - `runSkillStream({ tools })` already supports per-call tool narrowing; `resume-extract` uses this path with `tools: ["Read"]`.
 - `RUNTIME_TOOLS` is the current broad default (`Read`, `Glob`, `Grep`, `WebFetch`, `Write`, `Edit`, `Bash`, `Skill`) and is the main lockdown target.
 - `/api/runtime/config` already exposes runtime capability metadata without secrets and can support more explicit app-safe/tool-heavy capability booleans.
-- Chat handoffs already have a separate allowlist (`ROLESTER_CHAT_SKILLS`) and route surface, which gives planners a natural place to keep explicit human-watched workflows separate from headless app defaults.
-- `apps/desktop/main.mjs` already sets packaged `ROLESTER_HOME`, avoids a global `ELECTRON_RUN_AS_NODE`, routes first-run workspaces to `/app/onboarding`, opens external links outside the app, and verifies renderer mount in smoke mode.
+- Chat handoffs already have a separate allowlist (`CAREERRAT_CHAT_SKILLS`) and route surface, which gives planners a natural place to keep explicit human-watched workflows separate from headless app defaults.
+- `apps/desktop/main.mjs` already sets packaged `CAREERRAT_HOME`, avoids a global `ELECTRON_RUN_AS_NODE`, routes first-run workspaces to `/app/onboarding`, opens external links outside the app, and verifies renderer mount in smoke mode.
 - `apps/desktop/scripts/stage.mjs` already stages from the npm package allowlist, mirrors skills, validates the built SPA, and installs the Agent SDK into the staged runtime.
 - Release-safety and desktop tests already cover package allowlists, private-data leakage, staged resources, route selection, and smoke asset loading.
 

@@ -151,6 +151,31 @@
   font-size: 12px;
 }
 
+.library__provenance {
+  display: grid;
+  gap: 6px;
+  margin: 14px 0 0;
+  font-size: 12px;
+}
+
+.library__provenance > div {
+  display: grid;
+  grid-template-columns: 70px minmax(0, 1fr);
+  gap: 10px;
+}
+
+.library__provenance dt {
+  color: var(--ink-soft);
+  font-weight: 700;
+}
+
+.library__provenance dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--ink);
+}
+
 .library__result-count {
   color: var(--ink-soft);
   font-family: "Geist Mono", ui-monospace, monospace;

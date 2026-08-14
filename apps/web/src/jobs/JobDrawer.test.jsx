@@ -1,3 +1,4 @@
+import { renderToStaticMarkup } from "react-dom/server";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hooks = vi.hoisted(() => ({
@@ -188,6 +189,17 @@ describe("JobDrawer", () => {
     expect(last.focus).toHaveBeenCalledOnce();
   });
 
+  it("leaves keyboard dismissal to the layered artifact viewer while it is open", () => {
+    const onClose = vi.fn();
+    const event = { key: "Escape" };
+
+    jobDrawerModule.handleDrawerKeyDown({ event, viewerOpen: true, onClose });
+    expect(onClose).not.toHaveBeenCalled();
+
+    jobDrawerModule.handleDrawerKeyDown({ event, viewerOpen: false, onClose });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
+
   it("marks the drawer modal and makes it programmatically focusable", async () => {
     renderDrawer(applicationRow);
     await runEffects();
@@ -196,6 +208,27 @@ describe("JobDrawer", () => {
 
     expect(dialog.props["aria-modal"]).toBe("true");
     expect(dialog.props.tabIndex).toBe(-1);
+  });
+
+  it("renders typed signal and learning objects without crashing the drawer", async () => {
+    const row = {
+      ...applicationRow,
+      drawer: {
+        artifacts: [],
+        learnings: [
+          {
+            label: "Stop-deploy question open",
+            note: "Safety ownership remains unresolved heading into decision.",
+          },
+        ],
+      },
+    };
+    renderDrawer(row);
+    await runEffects();
+
+    const html = renderToStaticMarkup(renderDrawer(row));
+    expect(html).toContain("Stop-deploy question open");
+    expect(html).toContain("Safety ownership remains unresolved heading into decision.");
   });
 
   it("shows Promote to pipeline and Skip for sourced rows", async () => {

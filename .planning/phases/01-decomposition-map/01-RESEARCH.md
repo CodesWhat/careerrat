@@ -1,7 +1,7 @@
 # Phase 01: Decomposition Map - Research
 
 **Researched:** 2026-07-04
-**Domain:** Rolester skill-to-local-API decomposition, discovery routing, source scanning
+**Domain:** CareerRat skill-to-local-API decomposition, discovery routing, source scanning
 **Confidence:** HIGH
 
 <user_constraints>
@@ -35,7 +35,7 @@
 - **D-14:** The current "supported ATS only" wording in roadmap/requirements is too narrow for the user's clarified direction. Phase 1 should explicitly reconcile that by separating "promote to supported ATS scanner" from "cache unsupported/custom public career pages for generic extraction."
 
 ### the agent's Discretion
-The agent may choose exact artifact format, route names, schema names, and cache table shape, provided the plan preserves the cascade above, keeps writes confirm-first where current skills require it, and references existing Rolester modules rather than inventing parallel systems.
+The agent may choose exact artifact format, route names, schema names, and cache table shape, provided the plan preserves the cascade above, keeps writes confirm-first where current skills require it, and references existing CareerRat modules rather than inventing parallel systems.
 
 ### Deferred Ideas (OUT OF SCOPE)
 ## Deferred Ideas
@@ -59,7 +59,7 @@ The agent may choose exact artifact format, route names, schema names, and cache
 
 Phase 1 should create planning artifacts only; it should not change runtime behavior. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md] The repo already contains the runtime seams the future phases need: full skill execution through `POST /api/skill/run`, conversational skill sessions through `/api/chat/*`, bounded structured AI helpers, deterministic scanner APIs, DB source-config verbs, and CLI wrappers. [VERIFIED: src/cli/skill-run-route.mjs; src/core/ai/chat-runtime.mjs; src/core/ai/structured-oneshot.mjs; scripts/scan-sourced.mjs; src/core/db/verbs/source-config.mjs]
 
-The most important planning finding is the current supported-ATS gate. `rolester companies` and `companyAtsUpsert()` reject company URLs that cannot be inferred as Ashby, Greenhouse, Lever, Workable, or SmartRecruiters. [VERIFIED: src/cli/companies.mjs; src/core/db/verbs/source-config.mjs; src/core/scoring/sourced-scanner.mjs] That is correct for today's tracked-company scanner, but the locked Phase 1 direction requires a separate cached resolver path for unsupported/custom public career pages so they can be revalidated and scanned by generic extraction later. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md]
+The most important planning finding is the current supported-ATS gate. `careerrat companies` and `companyAtsUpsert()` reject company URLs that cannot be inferred as Ashby, Greenhouse, Lever, Workable, or SmartRecruiters. [VERIFIED: src/cli/companies.mjs; src/core/db/verbs/source-config.mjs; src/core/scoring/sourced-scanner.mjs] That is correct for today's tracked-company scanner, but the locked Phase 1 direction requires a separate cached resolver path for unsupported/custom public career pages so they can be revalidated and scanned by generic extraction later. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md]
 
 **Primary recommendation:** Create `.planning/architecture/skill-decomposition.yml`, `.planning/architecture/discover-companies-target-contract.md`, and `.planning/architecture/runtime-routing-policy.md`; validate them with a focused `tests/decomposition-map.test.mjs` so later phases cannot drift from the documented owner map. [VERIFIED: .planning/REQUIREMENTS.md; .planning/ROADMAP.md]
 
@@ -82,8 +82,8 @@ The most important planning finding is the current supported-ATS gate. `rolester
 - The post-onboarding discovery order is `setup-searches -> research-boards -> discover-companies -> search-jobs`. [VERIFIED: AGENTS.md; src/core/agent-guidance.mjs]
 - Candidate-specific sources and preferences must not leak into shipped docs; discovered boards belong in user source config and workspace research logs, not `docs/SOURCES.md`. [VERIFIED: AGENTS.md; docs/SOURCES.md; tests/release-safety.test.mjs]
 - Tracker-visible writes must be durable workspace or DB state, not chat-only state. [VERIFIED: AGENTS.md]
-- DB workspaces use `rolester data <verb>` for tracker-visible mutations; generated `workspace/tracker.json` and `workspace/activity.jsonl` should not be hand-edited in DB mode. [VERIFIED: AGENTS.md; src/cli/data-route.mjs]
-- Source config writes should go through `rolester searches`, `rolester companies`, or DB source-config verbs, not ad hoc edits in DB workspaces. [VERIFIED: .agents/skills/setup-searches/SKILL.md; .agents/skills/discover-companies/SKILL.md; src/cli/searches.mjs; src/cli/companies.mjs]
+- DB workspaces use `careerrat data <verb>` for tracker-visible mutations; generated `workspace/tracker.json` and `workspace/activity.jsonl` should not be hand-edited in DB mode. [VERIFIED: AGENTS.md; src/cli/data-route.mjs]
+- Source config writes should go through `careerrat searches`, `careerrat companies`, or DB source-config verbs, not ad hoc edits in DB workspaces. [VERIFIED: .agents/skills/setup-searches/SKILL.md; .agents/skills/discover-companies/SKILL.md; src/cli/searches.mjs; src/cli/companies.mjs]
 - `discover-companies` and `research-boards` are confirm-first by default; high-confidence auto-add is explicit opt-in, not the baseline. [VERIFIED: .agents/skills/discover-companies/SKILL.md; .agents/skills/research-boards/SKILL.md]
 - Every grabbed posting must capture the first reachable full JD body locally because live postings disappear or become inaccessible. [VERIFIED: AGENTS.md; .agents/skills/search-jobs/SKILL.md; src/core/scoring/sourced-persistence.mjs]
 - Runtime code and shipped docs must remain domain-neutral; candidate gates live in candidate config, not hardcoded defaults. [VERIFIED: AGENTS.md; docs/SOURCES.md; config/sourced-scan.example.json]
@@ -118,7 +118,7 @@ The most important planning finding is the current supported-ATS gate. `rolester
 | `.planning/architecture/skill-decomposition.yml` plus Markdown | Markdown-only decomposition doc | Markdown-only is easier to read but harder to test for ARCH-02 owner coverage. [VERIFIED: .planning/REQUIREMENTS.md] |
 | `.planning/architecture/` | `docs/ARCHITECTURE.md` immediately | Public docs should update in Phase 5 after behavior is implemented; Phase 1 needs planning artifacts that can reference future owners without overpromising shipped behavior. [VERIFIED: .planning/ROADMAP.md; docs/ARCHITECTURE.md] |
 | Local deterministic routes | `POST /api/skill/run` for all app buttons | Full skill runs are already allowlisted and tool-heavy; deterministic scans and writes have cheaper local owners. [VERIFIED: src/cli/search-route.mjs; src/cli/skill-run-route.mjs] |
-| New source writer | Existing `rolester searches` / `rolester companies` / DB verbs | Existing helpers validate, dedupe, and preserve DB-vs-compat behavior. [VERIFIED: src/cli/searches.mjs; src/cli/companies.mjs; src/core/db/verbs/source-config.mjs] |
+| New source writer | Existing `careerrat searches` / `careerrat companies` / DB verbs | Existing helpers validate, dedupe, and preserve DB-vs-compat behavior. [VERIFIED: src/cli/searches.mjs; src/cli/companies.mjs; src/core/db/verbs/source-config.mjs] |
 
 **Installation:**
 ```bash
@@ -149,7 +149,7 @@ Phase 1 planning input
 Later phases consume the map:
   deterministic code -> src/core/* + src/cli/*-route.mjs
   bounded AI        -> callAI() / runStructuredOneshot()
-  source writes     -> source-config DB verbs / rolester searches / rolester companies
+  source writes     -> source-config DB verbs / careerrat searches / careerrat companies
   full workflows    -> /api/skill/run or /api/chat/* fallback
 ```
 
@@ -254,14 +254,14 @@ Phase 1 should document this target contract, not implement it. [VERIFIED: .plan
 | Generic public extraction | Planned extractor normalized to scanner offer shape | Use Node `fetch` first, then Playwright for public JS-rendered pages; leave authenticated sources to v2. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md; scripts/capture-search-sources.mjs] |
 | Gate/dedupe | Existing scanner filters plus planned company proposal gate | Reuse title/location filters, excluded-company checks, req-id URL dedupe, and scoring where job offers are available. [VERIFIED: src/core/scoring/sourced-scanner.mjs] |
 | Confirmation | Existing discovery route/chat posture; planned local proposal API | Present high-confidence and borderline proposals before writes; default confirm-first. [VERIFIED: src/cli/discovery-route.mjs; .agents/skills/discover-companies/SKILL.md] |
-| Write path | Supported ATS: `rolester companies` / `companyAtsUpsert()`; generic cache: planned cache verb | Supported ATS entries can promote to `sourced-scan`; unsupported/custom pages must remain in resolver cache until generic extraction support can scan them. [VERIFIED: src/cli/companies.mjs; src/core/db/verbs/source-config.mjs; .planning/phases/01-decomposition-map/01-CONTEXT.md] |
+| Write path | Supported ATS: `careerrat companies` / `companyAtsUpsert()`; generic cache: planned cache verb | Supported ATS entries can promote to `sourced-scan`; unsupported/custom pages must remain in resolver cache until generic extraction support can scan them. [VERIFIED: src/cli/companies.mjs; src/core/db/verbs/source-config.mjs; .planning/phases/01-decomposition-map/01-CONTEXT.md] |
 
 ## High-Priority Skill Decomposition Targets
 
 | Skill | Deterministic Pieces | Bounded AI Pieces | Full-Skill Runtime Pieces | Deferred Pieces |
 |-------|----------------------|-------------------|---------------------------|-----------------|
-| `setup-searches` | Candidate config read, source generation, URL import, enable/disable, schema validation via `rolester searches`. [VERIFIED: .agents/skills/setup-searches/SKILL.md; src/cli/searches.mjs] | None required for Phase 1. [VERIFIED: .agents/skills/setup-searches/SKILL.md] | Conversational curation and user corrections. [VERIFIED: .agents/skills/setup-searches/SKILL.md] | Durable source-preference helper gap noted in skill. [VERIFIED: .agents/skills/setup-searches/SKILL.md] |
-| `research-boards` | Dedupe configured sources, add confirmed URLs through `rolester searches`, optional research log. [VERIFIED: .agents/skills/research-boards/SKILL.md; src/cli/searches.mjs] | Later board ranking/extraction could be bounded, but current skill uses web search. [VERIFIED: .agents/skills/research-boards/SKILL.md] | Web-search board discovery and confirm-first screening stays skill/chat until decomposed. [VERIFIED: src/core/ai/chat-runtime.mjs; .agents/skills/research-boards/SKILL.md] | Broad provider bakeoff and candidate-specific board research automation. [VERIFIED: .planning/REQUIREMENTS.md] |
+| `setup-searches` | Candidate config read, source generation, URL import, enable/disable, schema validation via `careerrat searches`. [VERIFIED: .agents/skills/setup-searches/SKILL.md; src/cli/searches.mjs] | None required for Phase 1. [VERIFIED: .agents/skills/setup-searches/SKILL.md] | Conversational curation and user corrections. [VERIFIED: .agents/skills/setup-searches/SKILL.md] | Durable source-preference helper gap noted in skill. [VERIFIED: .agents/skills/setup-searches/SKILL.md] |
+| `research-boards` | Dedupe configured sources, add confirmed URLs through `careerrat searches`, optional research log. [VERIFIED: .agents/skills/research-boards/SKILL.md; src/cli/searches.mjs] | Later board ranking/extraction could be bounded, but current skill uses web search. [VERIFIED: .agents/skills/research-boards/SKILL.md] | Web-search board discovery and confirm-first screening stays skill/chat until decomposed. [VERIFIED: src/core/ai/chat-runtime.mjs; .agents/skills/research-boards/SKILL.md] | Broad provider bakeoff and candidate-specific board research automation. [VERIFIED: .planning/REQUIREMENTS.md] |
 | `discover-companies` | Context load, dedupe, resolver cache, direct ATS scan, generic extraction, proposal/write gate. [VERIFIED: .agents/skills/discover-companies/SKILL.md; .planning/phases/01-decomposition-map/01-CONTEXT.md] | Company seed generation and ambiguous ranking through schema-validated JSON. [VERIFIED: .planning/REQUIREMENTS.md; src/core/ai/structured-oneshot.mjs] | User-led refinement, exploratory search, and ambiguous cases. [VERIFIED: src/core/ai/chat-runtime.mjs; .agents/skills/discover-companies/SKILL.md] | Browser-authenticated sources and vendor commitment. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md] |
 | `search-jobs` | `runSourcedScan()`, provider fetches, scoring, dedupe, liveness, JD capture, sourced writes. [VERIFIED: scripts/scan-sourced.mjs; src/core/scoring/sourced-persistence.mjs] | None required for deterministic scan path. [VERIFIED: scripts/scan-sourced.mjs] | Agent orchestration for browser/auth fallbacks and optional evaluate-job handoff. [VERIFIED: .agents/skills/search-jobs/SKILL.md] | Authenticated saved-search sources beyond explicit consent gates. [VERIFIED: .agents/skills/search-jobs/SKILL.md] |
 | `evaluate-job` | Deterministic legitimacy, comp extraction, saved JD handling, tracker write-back pieces. [VERIFIED: .agents/skills/evaluate-job/SKILL.md; src/core/evaluate/gate.mjs] | Future bounded assists may summarize structured judgments, but body-read gate remains evidence-bound. [VERIFIED: .planning/REQUIREMENTS.md] | Body-read judgment and ambiguous fit/comp/action verdicts remain skill-owned until v2 decomposition. [VERIFIED: .agents/skills/evaluate-job/SKILL.md] | Broader migration is v2 MIGR-02. [VERIFIED: .planning/REQUIREMENTS.md] |
@@ -279,7 +279,7 @@ Phase 1 should document this target contract, not implement it. [VERIFIED: .plan
 | Full skill execution | A new agent runner | `POST /api/skill/run` / `runSkillStream()` / chat runtime | Existing runtimes handle allowlists, tool surfaces, SSE, aborts, and no-AI errors. [VERIFIED: src/cli/skill-run-route.mjs; src/core/ai/skill-runtime.mjs; src/core/ai/chat-runtime.mjs] |
 | Supported ATS scanning | New provider clients | `fetchProvider()` / `scanCompanies()` | Current scanner supports Ashby, Greenhouse, Lever, Workable, SmartRecruiters, and RSS. [VERIFIED: src/core/scoring/sourced-scanner.mjs] |
 | Sourced row persistence | Manual tracker edits | `captureAndPersistOffersIfDb()` / `sourcedUpsertBatch()` | Existing path captures JD files and writes sourced rows through DB verbs in DB mode. [VERIFIED: src/core/scoring/sourced-persistence.mjs; src/core/db/verbs/sourced.mjs] |
-| Search/source writes | Direct YAML/JSON writes in DB workspaces | `rolester searches`, `rolester companies`, source-config verbs | Existing helpers validate, dedupe, and respect DB-vs-compat behavior. [VERIFIED: src/cli/searches.mjs; src/cli/companies.mjs; src/core/db/verbs/source-config.mjs] |
+| Search/source writes | Direct YAML/JSON writes in DB workspaces | `careerrat searches`, `careerrat companies`, source-config verbs | Existing helpers validate, dedupe, and respect DB-vs-compat behavior. [VERIFIED: src/cli/searches.mjs; src/cli/companies.mjs; src/core/db/verbs/source-config.mjs] |
 | Route body parsing | New uncapped body readers | `readJsonBodyCapped()` | Existing route helper enforces a 1MB cap and clean 400/413 responses. [VERIFIED: src/cli/skill-run-route.mjs] |
 | Candidate-specific source registry | Updating shipped `docs/SOURCES.md` | User source config and workspace research logs | Release-safety tests guard against private/candidate-specific source leakage. [VERIFIED: docs/SOURCES.md; tests/release-safety.test.mjs] |
 
@@ -288,7 +288,7 @@ Phase 1 should document this target contract, not implement it. [VERIFIED: .plan
 ## Common Pitfalls
 
 ### Pitfall 1: Supported ATS Gate Hiding the Generic Cache Requirement
-**What goes wrong:** The plan only documents adding companies through `rolester companies`, so unsupported/custom public career pages remain "intel only." [VERIFIED: .agents/skills/discover-companies/SKILL.md; src/cli/companies.mjs]
+**What goes wrong:** The plan only documents adding companies through `careerrat companies`, so unsupported/custom public career pages remain "intel only." [VERIFIED: .agents/skills/discover-companies/SKILL.md; src/cli/companies.mjs]
 **Why it happens:** `companyAtsUpsert()` currently rejects URLs with no supported inferred provider. [VERIFIED: src/core/db/verbs/source-config.mjs]
 **How to avoid:** The target contract must create a separate resolver-cache concept from supported ATS promotion. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md]
 **Warning signs:** A proposed schema only has `tracked_companies[].careers_url` and no cache state for unsupported/custom pages. [VERIFIED: config/sourced-scan.example.json]
@@ -370,7 +370,7 @@ export function companyAtsUpsert({ repoRoot, env, entry } = {}) {
 | Old Approach | Current / Target Approach | When Changed | Impact |
 |--------------|---------------------------|--------------|--------|
 | Whole skill session for discovery actions | Local deterministic APIs and bounded structured AI for decomposed pieces, with skill/chat fallback for exploratory flows | Active project direction dated 2026-07-04 | Phase 1 must document owners before implementation. [VERIFIED: .planning/PROJECT.md; .planning/ROADMAP.md] |
-| `discover-companies` resolves only supported ATS boards for `rolester companies` | Target contract separates supported ATS promotion from unsupported/custom public-page resolver cache | Locked Phase 1 context dated 2026-07-04 | Later plans can implement generic extraction without weakening current supported-ATS writes. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md] |
+| `discover-companies` resolves only supported ATS boards for `careerrat companies` | Target contract separates supported ATS promotion from unsupported/custom public-page resolver cache | Locked Phase 1 context dated 2026-07-04 | Later plans can implement generic extraction without weakening current supported-ATS writes. [VERIFIED: .planning/phases/01-decomposition-map/01-CONTEXT.md] |
 | Scanner-only company watchlist in `config/sourced-scan.json` / DB source config | Existing scanner remains supported-ATS owner; new cache stores board resolution metadata separately | Current code plus Phase 1 direction | Avoid overloading `tracked_companies` with unscannable pages. [VERIFIED: src/core/db/verbs/source-config.mjs; config/sourced-scan.example.json] |
 | App discovery route starts chat sessions for research/discover/search | Future discovery controls should call local APIs for deterministic or bounded-AI pieces | Phase 4 roadmap target, Phase 1 policy prerequisite | Routing policy prevents UI from overusing `/api/skill/run`. [VERIFIED: src/cli/discovery-route.mjs; .planning/ROADMAP.md] |
 
@@ -407,15 +407,15 @@ All factual claims in this research were traced to repo files, phase context, co
 | npm | Scripts and package metadata | yes | 11.16.0 | Use direct `node` commands for focused tests. [VERIFIED: environment probe] |
 | git | Status and optional docs commit | yes | 2.53.0 | None needed. [VERIFIED: environment probe] |
 | ripgrep | Codebase tracing | yes | 15.1.0 | `grep` if unavailable. [VERIFIED: environment probe] |
-| Repo-local Rolester CLI | Local command surface | yes via `node bin/rolester.mjs` | 0.5.2 | Use `npm run <script>` or `node src/cli/*.mjs`. [VERIFIED: environment probe; package.json] |
-| Global `rolester` on PATH | Convenience command | no | command not found | Use `node bin/rolester.mjs`. [VERIFIED: environment probe] |
-| SQLite workspace DB | DB-mode local state | no current DB | `rolester data status` reports no database | Planning phase can proceed; implementation plans should not assume DB state exists in this workspace. [VERIFIED: environment probe] |
+| Repo-local CareerRat CLI | Local command surface | yes via `node bin/careerrat.mjs` | 0.5.2 | Use `npm run <script>` or `node src/cli/*.mjs`. [VERIFIED: environment probe; package.json] |
+| Global `careerrat` on PATH | Convenience command | no | command not found | Use `node bin/careerrat.mjs`. [VERIFIED: environment probe] |
+| SQLite workspace DB | DB-mode local state | no current DB | `careerrat data status` reports no database | Planning phase can proceed; implementation plans should not assume DB state exists in this workspace. [VERIFIED: environment probe] |
 
 **Missing dependencies with no fallback:**
 - None for Phase 1 planning artifacts. [VERIFIED: environment probe]
 
 **Missing dependencies with fallback:**
-- Global `rolester` command is unavailable; use `node bin/rolester.mjs` or npm scripts. [VERIFIED: environment probe]
+- Global `careerrat` command is unavailable; use `node bin/careerrat.mjs` or npm scripts. [VERIFIED: environment probe]
 
 ## Validation Architecture
 
@@ -487,7 +487,7 @@ The command `node --test tests/structured-oneshot.test.mjs tests/discovery-route
 
 ### Secondary (MEDIUM confidence)
 - Targeted test run covering structured one-shot, discovery route, search route, companies CLI, and DB source config. [VERIFIED: test run]
-- Environment probes for Node, npm, git, rg, repo-local Rolester CLI, and DB status. [VERIFIED: environment probe]
+- Environment probes for Node, npm, git, rg, repo-local CareerRat CLI, and DB status. [VERIFIED: environment probe]
 
 ### Tertiary (LOW confidence)
 - None used. No web search results or training-only claims were used. [VERIFIED: research-plan seam returned no external items]

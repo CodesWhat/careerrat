@@ -18,10 +18,17 @@ import {
   classifyChatEvent,
   createChatRuntime,
   resolveAllowedChatSkills,
+  resolveCandidateChatContext,
 } from "../src/core/ai/chat-runtime.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { APP_SAFE_RUNTIME_TOOLS, CHAT_RUNTIME_TOOLS } from "../src/core/ai/runtime-tools.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
+import {
+  candidateArtifactPut,
+  candidateConfigPatch,
+  candidateEvidenceMerge,
+  candidateSetupInitialize,
+} from "../src/core/db/verbs.mjs";
 
 // Forces resolveAIRoute() to resolve route.type === "installed" deterministically
 // (no dependency on any real CLI actually being on this machine's PATH) — the
@@ -83,7 +90,7 @@ function waitForPredicate(predicate, { timeoutMs = 2000, intervalMs = 5 } = {}) 
 // emitting the scripted messages for that turn before looping back to pull
 // the next one. This is what actually exercises "long-lived query() with
 // streaming input" rather than a one-shot fake.
-function fakeStreamingSdk(turns, { onClose, onInterrupt } = {}) {
+function fakeStreamingSdk(turns, { onClose, onInterrupt, onTurnInput } = {}) {
   return {
     query: ({ prompt, options }) => {
       const { signal } = options.abortController;
@@ -95,7 +102,8 @@ function fakeStreamingSdk(turns, { onClose, onInterrupt } = {}) {
           session_id: "sdk-session-1",
           skills: options.skills,
         };
-        for await (const _turnInput of prompt) {
+        for await (const turnInput of prompt) {
+          onTurnInput?.(turnInput);
           if (signal.aborted) {
             const err = new Error("aborted");
             err.name = "AbortError";
@@ -236,7 +244,10 @@ test("resolveAllowedChatSkills: defaults to onboarding, discovery, and intake ch
 test("resolveAllowedChatSkills: an explicit empty env value locks everything out", () => {
   const repoRoot = tempRepoWithSkill("ingest-profile");
   try {
-    assert.deepEqual(resolveAllowedChatSkills({ repoRoot, env: { CAREERRAT_CHAT_SKILLS: "" } }), []);
+    assert.deepEqual(
+      resolveAllowedChatSkills({ repoRoot, env: { CAREERRAT_CHAT_SKILLS: "" } }),
+      []
+    );
   } finally {
     cleanup(repoRoot);
   }
@@ -312,6 +323,18 @@ test("buildChatKickoffPrompt: asks ONE question at a time and drops the one-shot
   assert.match(prompt, /ONE question/);
   assert.match(prompt, /ingest-profile/);
   assert.doesNotMatch(prompt, /non-interactive, headless/);
+});
+
+test("buildChatKickoffPrompt: an 8-of-8 candidate gets a deterministic completion boundary", () => {
+  const prompt = buildChatKickoffPrompt({
+    skill: "ingest-profile",
+    input: "No, I do not want a concurrent secondary position.",
+    candidateContext: { setupProgress: { completedCount: 8, total: 8, complete: true } },
+  });
+
+  assert.match(prompt, /initial setup is complete/i);
+  assert.match(prompt, /ask no new setup questions/i);
+  assert.match(prompt, /optional enrichment belongs after onboarding/i);
 });
 
 // ---------------------------------------------------------------------------
@@ -549,7 +572,10 @@ test("createChatRuntime: proxy route writes NO usage_event of its own (the proxy
   try {
     const chatRuntime = createChatRuntime({
       repoRoot,
-      env: { CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788", CAREERRAT_AI_PROXY_TOKEN: "devtoken" },
+      env: {
+        CAREERRAT_AI_PROXY_URL: "http://127.0.0.1:7788",
+        CAREERRAT_AI_PROXY_TOKEN: "devtoken",
+      },
       loadSdk: async () => fakeStreamingSdk([turnMessages(1)]),
     });
     try {
@@ -972,6 +998,154 @@ test("createChatRuntime.startSession (installed route): runs turns through the s
 
       assert.equal(idleCount(), 2);
       assert.equal(chatRuntime.getSession(chatId).state, "idle");
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime (installed route): refreshes canonical onboarding state before every turn", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    selectInstalledRuntime({ repoRoot, env });
+    let candidateContext = { profile: { candidate: { location: "Austin, TX" } } };
+    const calls = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env,
+      resolveCandidateContextImpl: () => candidateContext,
+      runInstalledRuntimeImpl: async (args) => {
+        calls.push(args);
+        return { text: `Reply ${calls.length}`, usage: null, model: null };
+      },
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((event) => event.type === "chat_state" && event.data.state === "idle").length;
+      await waitForPredicate(() => idleCount() >= 1);
+      assert.match(calls[0].prompt, /Canonical candidate state for this turn/);
+      assert.match(calls[0].prompt, /Austin, TX/);
+
+      candidateContext = {
+        profile: {
+          candidate: { full_name: "Riley Chen", location: "Austin, TX" },
+          compensation: { minimum_base: 190000 },
+        },
+      };
+      chatRuntime.postMessage(chatId, "next answer");
+      await waitForPredicate(() => idleCount() >= 2);
+      assert.match(calls[1].prompt, /Riley Chen/);
+      assert.match(calls[1].prompt, /190000/);
+    } finally {
+      chatRuntime.shutdown();
+    }
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("resolveCandidateChatContext includes saved evidence facts during onboarding", () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    candidateSetupInitialize({ repoRoot });
+    candidateEvidenceMerge({
+      repoRoot,
+      claims: [
+        {
+          claim: "Staff Software Engineer at Acme Robotics from January 2021 through July 2026",
+          evidence: "Candidate-stated during setup interview",
+        },
+      ],
+    });
+
+    const context = resolveCandidateChatContext({ repoRoot, skill: "ingest-profile" });
+    assert.match(JSON.stringify(context), /Staff Software Engineer at Acme Robotics/);
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("resolveCandidateChatContext carries the same exact 8-of-8 completion used by onboarding", () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    const env = {};
+    candidateSetupInitialize({ repoRoot, env });
+    selectInstalledRuntime({ repoRoot, env });
+    candidateConfigPatch({
+      repoRoot,
+      env,
+      name: "profile",
+      patch: {
+        compensation: { minimum_base: 190000 },
+        location: { home: "Austin, TX" },
+        authorization: { work_authorized: true, requires_sponsorship: false },
+      },
+    });
+    candidateConfigPatch({
+      repoRoot,
+      env,
+      name: "targeting",
+      patch: {
+        role_buckets: [
+          { name: "Platform", priority: "primary", titles: ["Staff Platform Engineer"] },
+        ],
+        tracked_companies: ["Acme"],
+        cut_signals: ["Below compensation floor"],
+      },
+    });
+    candidateEvidenceMerge({
+      repoRoot,
+      env,
+      claims: [{ claim: "Led a platform migration", evidence: "Resume" }],
+    });
+    candidateArtifactPut({
+      repoRoot,
+      env,
+      id: "source-resume",
+      kind: "source-resume",
+      data: { source: "test" },
+    });
+
+    const context = resolveCandidateChatContext({ repoRoot, env, skill: "ingest-profile" });
+    assert.equal(context.setupProgress.completedCount, 8);
+    assert.equal(context.setupProgress.complete, true);
+  } finally {
+    cleanup(repoRoot);
+  }
+});
+
+test("createChatRuntime (SDK route): refreshes canonical onboarding state in every user turn", async () => {
+  const repoRoot = tempRepoWithSkill("ingest-profile");
+  try {
+    let candidateContext = { profile: { candidate: { location: "Austin, TX" } } };
+    const turnInputs = [];
+    const chatRuntime = createChatRuntime({
+      repoRoot,
+      env: { ANTHROPIC_API_KEY: "sk-ant-test" },
+      resolveCandidateContextImpl: () => candidateContext,
+      loadSdk: async () =>
+        fakeStreamingSdk([turnMessages(1), turnMessages(2)], {
+          onTurnInput: (input) => turnInputs.push(input),
+        }),
+    });
+    try {
+      const { chatId } = await chatRuntime.startSession({ skill: "ingest-profile" });
+      const events = subscribeCollect(chatRuntime, chatId);
+      const idleCount = () =>
+        events.filter((event) => event.type === "chat_state" && event.data.state === "idle").length;
+      await waitForPredicate(() => idleCount() >= 1);
+      assert.match(turnInputs[0].message.content, /Austin, TX/);
+
+      candidateContext = { profile: { candidate: { full_name: "Riley Chen" } } };
+      chatRuntime.postMessage(chatId, "next answer");
+      await waitForPredicate(() => idleCount() >= 2);
+      assert.match(turnInputs[1].message.content, /Riley Chen/);
+      assert.match(turnInputs[1].message.content, /Candidate's new message:\nnext answer/);
     } finally {
       chatRuntime.shutdown();
     }

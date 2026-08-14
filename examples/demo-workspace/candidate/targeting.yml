@@ -45,6 +45,13 @@ cut_signals:
 excluded_companies:
   - "Acme Defense Contractors Inc."
 
+tracked_companies:
+  - "Aperture Science"
+  - "Cyberdyne Systems"
+  - "E Corp"
+  - "Massive Dynamic"
+  - "Weyland-Yutani"
+
 degree_policy: "Do not fabricate education. Apply despite stated degree requirements — Riley's track record speaks for itself."
 
 # Riley doesn't chase cold applications (the silence usually means no) but does

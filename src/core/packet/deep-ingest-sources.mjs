@@ -4,6 +4,8 @@
 // export here is a plain function over already-loaded rows, called at
 // prompt-build time once the query text (job body) and purpose are known.
 
+import { containsForbiddenPhrase } from "../documents/tailor.mjs";
+
 // ---------------------------------------------------------------------------
 // shared helpers
 // ---------------------------------------------------------------------------
@@ -238,9 +240,8 @@ function isNonemptyVoiceRow(row) {
   );
 }
 
-function containsForbidden(phrase, forbiddenLower) {
-  const lower = cleanScalar(phrase).toLowerCase();
-  return forbiddenLower.some((bad) => bad && lower.includes(bad));
+function containsForbidden(phrase, forbiddenPhrases) {
+  return forbiddenPhrases.some((bad) => containsForbiddenPhrase(phrase, bad));
 }
 
 const WRITING_VOICE_ROW_CAP = 5;
@@ -255,8 +256,8 @@ const WRITING_VOICE_CHAR_CAP = 1500;
 // is a hygiene pass on style guidance, not the enforcement gate itself — the
 // full derived-phrase enforcement still runs downstream in forbiddenWordingFor.
 export function composePacketWritingVoice({ writingVoice = [], forbiddenPhrases = [] } = {}) {
-  const forbiddenLower = (Array.isArray(forbiddenPhrases) ? forbiddenPhrases : [])
-    .map((phrase) => cleanScalar(phrase).toLowerCase())
+  const forbiddenTerms = (Array.isArray(forbiddenPhrases) ? forbiddenPhrases : [])
+    .map(cleanScalar)
     .filter(Boolean);
 
   const rows = (Array.isArray(writingVoice) ? writingVoice : [])
@@ -268,7 +269,7 @@ export function composePacketWritingVoice({ writingVoice = [], forbiddenPhrases 
   for (const row of rows) {
     const summary = cleanScalar(row.summary);
     const doPhrases = (Array.isArray(row.doPhrases) ? row.doPhrases : []).filter(
-      (phrase) => !containsForbidden(phrase, forbiddenLower)
+      (phrase) => !containsForbidden(phrase, forbiddenTerms)
     );
     const avoidPhrases = Array.isArray(row.avoidPhrases) ? row.avoidPhrases : [];
 

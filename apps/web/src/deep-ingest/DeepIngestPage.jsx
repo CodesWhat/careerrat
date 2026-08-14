@@ -212,15 +212,15 @@ function isUnreviewableProposal(row) {
   return isMechanicalScanStub(row) || isBlockedProposal(row);
 }
 
-// A "real" AI-authored draft: not a stub/blocked row, and not one of the
-// admin fallback shapes (`manual_fallback` = the AI call failed and never
-// produced content; `gap` = the AI explicitly punted this finding to manual
-// review). Used to decide whether a source shows "Drafts ready".
+// A reviewable AI result: not a stub/blocked row and not a provider
+// `manual_fallback`. A grounded `gap` is still a finished draft result: it
+// belongs in Done for the candidate to carry forward or resolve, and must
+// not leave Material offering an endless duplicate-redraft loop.
 function isRealDraftRow(row) {
   if (isUnreviewableProposal(row)) return false;
   const inner = row?.proposal;
   if (!inner || typeof inner !== "object") return false;
-  return inner.status !== "manual_fallback" && inner.status !== "gap";
+  return inner.status !== "manual_fallback";
 }
 
 function sourceHasDrafts(sourceId, proposals) {
@@ -390,6 +390,17 @@ function isLaneSettled(laneKey, { lanes, proposals, confirmed }) {
   const laneProposals = proposals.filter((p) => p.lane === laneKey && !isUnreviewableProposal(p));
   if (!laneProposals.length) return false;
   return laneProposals.every((p) => p.status !== "review_needed");
+}
+
+function laneIsTerminal(lanes, laneKey) {
+  const lane = lanes.find((row) => (row.key || row.lane) === laneKey);
+  return ["completed", "deferred", "not_available"].includes(lane?.status);
+}
+
+function genuineOpenGaps(rows) {
+  return asArray(rows).filter(
+    (row) => !isUnreviewableProposal(row) && row?.proposal?.status === "gap"
+  );
 }
 
 export function DeepIngestPage({ initialState = null }) {
@@ -670,12 +681,62 @@ export function DeepIngestPage({ initialState = null }) {
     }
   }
 
-  function handleContinue() {
+  async function handleContinue() {
     if (stepIndex === 0) {
-      setStepIndex(sources.length === 0 ? WIZARD_STEPS.length - 1 : 1);
+      if (sources.length === 0) {
+        setStepIndex(WIZARD_STEPS.length - 1);
+        return;
+      }
+      setBusyLane("source_coverage");
+      setError(null);
+      try {
+        if (!laneIsTerminal(lanes, "source_coverage")) {
+          await updateDeepIngestLaneState({ lane: "source_coverage", status: "completed" });
+          await refresh();
+        }
+        setStepIndex(1);
+      } catch (err) {
+        setError(
+          withRetryAction(
+            errorState(err, "Could not finish reviewing source coverage."),
+            handleContinue
+          )
+        );
+      } finally {
+        setBusyLane(null);
+      }
       return;
     }
     setStepIndex((i) => Math.min(i + 1, WIZARD_STEPS.length - 1));
+  }
+
+  async function handleFinalizeDeepIngest() {
+    setBusyLane("finalize");
+    setError(null);
+    try {
+      if (!laneIsTerminal(lanes, "source_coverage")) {
+        await updateDeepIngestLaneState({ lane: "source_coverage", status: "completed" });
+      }
+      if (!laneIsTerminal(lanes, "open_gaps")) {
+        const thinGaps = genuineOpenGaps(openGaps);
+        await updateDeepIngestLaneState(
+          thinGaps.length
+            ? {
+                lane: "open_gaps",
+                status: "deferred",
+                reason: "Keeping these open gaps to revisit later.",
+              }
+            : { lane: "open_gaps", status: "completed" }
+        );
+      }
+      await refresh();
+    } catch (err) {
+      setError(
+        withRetryAction(errorState(err, "Could not finish Deep ingest."), handleFinalizeDeepIngest)
+      );
+    } finally {
+      setBusyLane(null);
+    }
   }
 
   function handleBack() {
@@ -687,21 +748,46 @@ export function DeepIngestPage({ initialState = null }) {
   const proposals = asArray(state?.proposals);
   const confirmed = state?.confirmed || {};
   const openGaps = asArray(state?.openGaps);
+  const readiness = state?.readiness || null;
 
   const doneFlags = WIZARD_STEPS.map((step, index) => {
-    if (index === 0) return stepIndex > 0;
+    if (index === 0) {
+      return (
+        sources.length > 0 || isLaneSettled("source_coverage", { lanes, proposals, confirmed })
+      );
+    }
     if (!step.laneKey) return false;
     return isLaneSettled(step.laneKey, { lanes, proposals, confirmed });
   });
 
   const currentStep = WIZARD_STEPS[stepIndex];
+  const confirmedCount = Object.values(LANE_CONFIRMED_COUNT_KEY).reduce(
+    (total, key) => total + asArray(confirmed?.[key]).length,
+    0
+  );
+  const displayedStep =
+    currentStep.id === "done" && confirmedCount === 0
+      ? {
+          ...currentStep,
+          heading: readiness?.ready ? "Deep dive reviewed" : "Deep dive paused",
+          payoff: readiness?.ready
+            ? "No new reusable material was confirmed. Your lane decisions are saved."
+            : "Nothing was marked complete. Come back when you have more material.",
+        }
+      : currentStep;
   const laneProposalsAll = currentStep.laneKey
     ? proposals.filter((row) => row.lane === currentStep.laneKey && !isUnreviewableProposal(row))
     : [];
   const laneReviewedCount = laneProposalsAll.filter((row) => row.status !== "review_needed").length;
   const lanePendingProposals = laneProposalsAll.filter((row) => row.status === "review_needed");
   const materialContinueEnabled =
-    sources.length === 0 || sources.some((s) => sourceHasDrafts(s.id, proposals));
+    sources.length === 0 || sources.every((source) => !sourceNeedsReview(source, proposals));
+  const reviewLanesSettled = LANE_STEPS.every((step) =>
+    isLaneSettled(step.key, { lanes, proposals, confirmed })
+  );
+  const sourceCoverageResolved =
+    sources.length > 0 && sources.every((source) => !sourceNeedsReview(source, proposals));
+  const canFinalize = readiness?.ready !== true && reviewLanesSettled && sourceCoverageResolved;
 
   return (
     <div className="deep-wizard">
@@ -725,15 +811,15 @@ export function DeepIngestPage({ initialState = null }) {
             <div className="deep-wizard__stage">
               <section
                 className="deep-wizard__step-card"
-                aria-labelledby={`deep-wizard-heading-${currentStep.id}`}
+                aria-labelledby={`deep-wizard-heading-${displayedStep.id}`}
               >
                 <div className="deep-wizard__step-card-media">
                   <div className="deep-wizard__mark" aria-hidden="true">
-                    {currentStep.emoji}
+                    {displayedStep.emoji}
                   </div>
                   <div className="deep-wizard__media-copy">
-                    <h1 id={`deep-wizard-heading-${currentStep.id}`}>{currentStep.heading}</h1>
-                    {currentStep.payoff ? <p>{currentStep.payoff}</p> : null}
+                    <h1 id={`deep-wizard-heading-${displayedStep.id}`}>{displayedStep.heading}</h1>
+                    {displayedStep.payoff ? <p>{displayedStep.payoff}</p> : null}
                   </div>
                 </div>
 
@@ -785,6 +871,10 @@ export function DeepIngestPage({ initialState = null }) {
                       openGaps={openGaps}
                       sources={sources}
                       proposals={proposals}
+                      readiness={readiness}
+                      canFinalize={canFinalize}
+                      finalizing={busyLane === "finalize"}
+                      onFinalize={handleFinalizeDeepIngest}
                       onAddMoreMaterial={() => setStepIndex(0)}
                     />
                   )}
@@ -803,7 +893,10 @@ export function DeepIngestPage({ initialState = null }) {
                     direction="next"
                     label="Continue"
                     onClick={handleContinue}
-                    disabled={stepIndex === 0 && !materialContinueEnabled}
+                    disabled={
+                      stepIndex === 0 &&
+                      (!materialContinueEnabled || busyLane === "source_coverage")
+                    }
                   />
                 ) : null}
               </div>
@@ -1188,18 +1281,33 @@ function ProposalCard({
   );
 }
 
-function DoneStepContent({ confirmed, openGaps, sources, proposals, onAddMoreMaterial }) {
+function DoneStepContent({
+  confirmed,
+  openGaps,
+  sources,
+  proposals,
+  readiness,
+  canFinalize,
+  finalizing,
+  onFinalize,
+  onAddMoreMaterial,
+}) {
   // Only genuine AI-punted gaps belong under "Still thin". manual_fallback
   // rows in the open_gaps lane carry provider-error reasons, not content.
-  const thinGaps = openGaps.filter(
-    (row) => !isUnreviewableProposal(row) && row?.proposal?.status === "gap"
-  );
+  const thinGaps = genuineOpenGaps(openGaps);
   const pendingSourceCount = asArray(sources).filter((source) =>
     sourceNeedsReview(source, asArray(proposals))
   ).length;
 
   return (
     <>
+      {readiness ? (
+        <p className="deep-wizard__completion-state">
+          {readiness.ready
+            ? `All ${readiness.requiredCount || 7} lanes finished.`
+            : `${readiness.terminalCount || 0} of ${readiness.requiredCount || 7} lanes finished. Deep ingest is still incomplete.`}
+        </p>
+      ) : null}
       <ul className="deep-wizard__done-list">
         {LANE_STEPS.map((lane) => {
           const count = asArray(confirmed?.[LANE_CONFIRMED_COUNT_KEY[lane.key]]).length;
@@ -1234,6 +1342,26 @@ function DoneStepContent({ confirmed, openGaps, sources, proposals, onAddMoreMat
             ))}
           </ul>
         </div>
+      ) : null}
+      {canFinalize ? (
+        <div className="deep-wizard__gaps deep-wizard__finish-review">
+          <p>
+            {thinGaps.length
+              ? "Your confirmed material is saved. Keep these gaps visible and finish this pass."
+              : "Every review lane is settled. Finish this pass to mark Deep ingest complete."}
+          </p>
+          <Button disabled={finalizing} onClick={onFinalize}>
+            {finalizing
+              ? "Finishing…"
+              : thinGaps.length
+                ? "Finish with these gaps"
+                : "Finish deep ingest"}
+          </Button>
+        </div>
+      ) : readiness && !readiness.ready ? (
+        <p className="deep-wizard__completion-help">
+          Review or explicitly skip every unfinished lane before finishing.
+        </p>
       ) : null}
       <div className="deep-wizard__done-actions">
         <Link className="btn btn--primary" to="/">

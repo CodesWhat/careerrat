@@ -4,7 +4,7 @@
 # Why a script and not the dashboard: this is the one piece of the demo pipeline
 # that lives outside the repo, so it was undocumented and got lost in the
 # rename. scripts/deploy-demo.mjs's header claimed this record already existed;
-# it did not, and the old demo.rolester record is what was actually serving.
+# it did not, and the pre-rename demo record was what was actually serving.
 #
 # Auth: a Cloudflare API token in the macOS Keychain. Never an env var in a
 # dotfile, never a literal in this script. Wrangler cannot do this — its OAuth

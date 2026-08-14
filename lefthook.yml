@@ -1,5 +1,5 @@
-# Git hooks for CareerRat. Installed via `npx lefthook install` (runs through the
-# `prepare` npm script after `npm install`).
+# Git hooks for CareerRat. Install them in a source checkout with
+# `npm run hooks:install`.
 #
 # Adoption is incremental: Biome enforces only on the files a commit actually
 # touches (so the pre-existing lint backlog doesn't block work), while the fast

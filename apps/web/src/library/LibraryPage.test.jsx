@@ -88,7 +88,10 @@ vi.mock("react-router-dom", () => ({
 }));
 
 vi.mock("../app-shell/DashboardContext.jsx", () => dashboardContext);
-vi.mock("../lib/api.js", () => apiMocks);
+vi.mock("../lib/api.js", () => ({
+  ...apiMocks,
+  ApiError: class ApiError extends Error {},
+}));
 vi.mock("../lib/dashboard-events.js", () => dashboardEvents);
 vi.mock("../components/Button.jsx", async (importOriginal) => {
   const actual = await importOriginal();
@@ -118,7 +121,7 @@ vi.mock("./libraryPreviewData.js", () => ({
   PREVIEW_LIBRARY: { cards: [], metrics: {}, preview: false },
 }));
 
-import { collectLibraryDocuments, LibraryPage } from "./LibraryPage.jsx";
+import { collectLibraryDocuments, LibraryPage, trapLibraryDrawerTab } from "./LibraryPage.jsx";
 
 function renderLibrary() {
   hookHarness.reset();
@@ -272,6 +275,63 @@ describe("LibraryPage", () => {
     });
   });
 
+  it("keeps edited values visible when a save fails", async () => {
+    apiMocks.saveCandidateFile.mockRejectedValue(new Error("Save failed"));
+    showCard({
+      id: "evidence-save-failure-001",
+      kind: "evidence",
+      label: "Evidence bank",
+      title: "Original claim",
+      summary: "Reusable evidence",
+      note: "Source-grounded claim",
+      tags: [],
+      metadata: {
+        claim: "Original claim",
+        evidence: "Project notes",
+        metrics: [],
+        links: [],
+        allowed_wording: [],
+        forbidden_wording: [],
+        raw: { id: "evidence-save-failure-001", claim: "Original claim" },
+      },
+    });
+    renderLibrary();
+
+    capturedButton("Edit").onClick();
+    renderLibrary();
+    capturedField("library-edit-claim").onChange("Unsaved corrected claim");
+    renderLibrary();
+    await capturedButton("Save").onClick();
+    await Promise.resolve();
+    const html = renderLibrary();
+
+    expect(capturedButton("Save")).toBeDefined();
+    expect(capturedField("library-edit-claim").value).toBe("Unsaved corrected claim");
+    expect(html).toContain("Save failed");
+  });
+
+  it("marks the card drawer as modal and identifies confirmed provenance", () => {
+    showCard({
+      id: "evidence-provenance-001",
+      kind: "evidence",
+      label: "Evidence bank",
+      title: "Grounded claim",
+      summary: "Reusable evidence",
+      note: "Source-grounded claim",
+      tags: [],
+      sourceRef: "resume-source-001 / workspace/intake/resume.pdf",
+      metadata: { raw: { id: "evidence-provenance-001" } },
+    });
+
+    const html = renderLibrary();
+
+    expect(html).toContain('role="dialog"');
+    expect(html).toContain('aria-modal="true"');
+    expect(html).toContain('tabindex="-1"');
+    expect(html).toContain("Confirmed");
+    expect(html).toContain("resume-source-001 / workspace/intake/resume.pdf");
+  });
+
   it("requires inline confirmation before removing an evidence claim", async () => {
     showCard({
       id: "evidence-delete-001",
@@ -363,6 +423,35 @@ describe("LibraryPage", () => {
     );
   });
 
+  it("offers Honesty and Role signal filters whenever those confirmed card kinds exist", () => {
+    dashboardContext.useDashboardSnapshot.mockReturnValue({
+      data: {
+        library: {
+          cards: [
+            { id: "honesty-filter-001", kind: "honesty", title: "Boundary", tags: [] },
+            {
+              id: "role-filter-001",
+              kind: "role_signal",
+              title: "Role preference",
+              tags: [],
+            },
+          ],
+          metrics: { claims: 0, stories: 0, gaps: 0 },
+        },
+        jobs: { rows: [] },
+      },
+      loading: false,
+      error: null,
+      noDatabase: false,
+      refetch: dashboardContext.refetch,
+    });
+
+    const html = renderLibrary();
+
+    expect(html).toContain(">Honesty</button>");
+    expect(html).toContain(">Role signal</button>");
+  });
+
   // ISSUE-017: DashboardContext.jsx's ~10s poll (and this test harness's own
   // non-memoized useMemo mock, which mirrors it) hands LibraryDrawer a
   // brand-new `card` object on every render even when nothing changed. The
@@ -440,6 +529,24 @@ describe("LibraryPage", () => {
     expect(html).toContain("A different story");
     expect(capturedButton("Edit")).toBeDefined();
     expect(captured.buttons.some((props) => props.children === "Save")).toBe(false);
+  });
+});
+
+describe("Library drawer keyboard containment", () => {
+  it("wraps Tab from the last control to the first", () => {
+    const first = { focus: vi.fn() };
+    const last = { focus: vi.fn() };
+    const dialog = {
+      contains: vi.fn(() => true),
+      focus: vi.fn(),
+      querySelectorAll: vi.fn(() => [first, last]),
+    };
+    const event = { key: "Tab", shiftKey: false, preventDefault: vi.fn() };
+
+    trapLibraryDrawerTab({ dialog, event, activeElement: last });
+
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(first.focus).toHaveBeenCalledOnce();
   });
 });
 

@@ -2,24 +2,38 @@ import { appSetFields } from "../db/verbs/app.mjs";
 import { evaluatePacketGate } from "./gate.mjs";
 
 function formatBaseRange(compensation = {}) {
-  const min = Number(compensation.minBase);
-  const max = Number(compensation.maxBase);
-  if (!Number.isFinite(min) && !Number.isFinite(max)) return null;
+  const min = optionalNumber(compensation.minBase);
+  const max = optionalNumber(compensation.maxBase);
+  if (min === null && max === null) return null;
   const money = (value) => `$${Math.round(value).toLocaleString("en-US")}`;
-  if (Number.isFinite(min) && Number.isFinite(max)) return `${money(min)} - ${money(max)}`;
-  return money(Number.isFinite(min) ? min : max);
+  if (min !== null && max !== null) return `${money(min)} - ${money(max)}`;
+  return money(min ?? max);
+}
+
+function optionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 export function packetEvaluationProjection(evaluation) {
-  const compensation = evaluation?.compensation || {};
-  const min = Number(compensation.minBase);
-  const max = Number(compensation.maxBase);
-  const hasMin = Number.isFinite(min);
-  const hasMax = Number.isFinite(max);
-  return {
+  const projection = {
     evaluation,
     // Delete the legacy duplicate when this row predates typed evaluation.
     packetGate: undefined,
+  };
+  if (evaluation?.manual?.required && optionalNumber(evaluation.fitScore) === null) {
+    return projection;
+  }
+
+  const compensation = evaluation?.compensation || {};
+  const min = optionalNumber(compensation.minBase);
+  const max = optionalNumber(compensation.maxBase);
+  const hasMin = min !== null;
+  const hasMax = max !== null;
+  const hasBand = hasMin || hasMax;
+  return {
+    ...projection,
     fitScore: evaluation.fitScore ?? null,
     fitBucket: evaluation.fitBucket ?? null,
     fitBasis: "evaluated",
@@ -27,9 +41,9 @@ export function packetEvaluationProjection(evaluation) {
     compNote: String(compensation.summary || "").slice(0, 140),
     compEstimate: {
       source:
-        compensation.source === "job-description"
+        hasBand && compensation.source === "job-description"
           ? "posted"
-          : compensation.source === "market"
+          : hasBand && compensation.source === "market"
             ? "comparables"
             : "none",
       lowK: hasMin ? Math.round(min / 1000) : null,

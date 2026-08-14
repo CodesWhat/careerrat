@@ -52,8 +52,8 @@ function normalizeVerdict(verdict, { applicationId, ai, source }) {
   const fitScore = Number.isFinite(rawScore) ? Math.max(0, Math.min(100, Math.round(rawScore))) : 0;
   const fitBucket = fitScore >= 85 ? "high" : fitScore >= 65 ? "med" : "stretch";
   const rawComp = verdict?.compensation || {};
-  const minBase = Number.isFinite(Number(rawComp.minBase)) ? Number(rawComp.minBase) : null;
-  const maxBase = Number.isFinite(Number(rawComp.maxBase)) ? Number(rawComp.maxBase) : null;
+  const minBase = optionalNumber(rawComp.minBase);
+  const maxBase = optionalNumber(rawComp.maxBase);
   const compensation = {
     status: ["clears-floor", "below-floor"].includes(rawComp.status) ? rawComp.status : "unknown",
     currency: rawComp.currency ? String(rawComp.currency).slice(0, 12) : null,
@@ -83,6 +83,12 @@ function normalizeVerdict(verdict, { applicationId, ai, source }) {
     source,
     evaluatedAt: new Date().toISOString(),
   };
+}
+
+function optionalNumber(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
 }
 
 function statusCodeForError(err) {

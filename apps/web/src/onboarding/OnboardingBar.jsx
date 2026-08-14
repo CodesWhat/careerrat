@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import { ArrowUpIcon } from "../components/icons.jsx";
+import { ArrowUpIcon, UploadIcon } from "../components/icons.jsx";
 
 // OnboardingBar — the W4 chat-first onboarding surface's interview bar.
 // Per the finalized "Bar reuse" section of the W4 spec: the W3 AskBar.jsx
@@ -23,9 +23,9 @@ import { ArrowUpIcon } from "../components/icons.jsx";
 //     bottom-center) — the same physical bar, just relocated by CSS, per the
 //     spec's "docking is a layout change in the onboarding surface, not a
 //     new component."
-// The bar keeps the hidden file input and the drop target, but shows no upload
-// button of its own: the hero's "Upload my résumé" chip opens that same input,
-// and two upload buttons a few pixels apart read as two different things.
+// The centered hero owns its visible upload chip. Once the bar docks and that
+// hero is gone, the same picker remains reachable through a compact attach
+// button. Drag-and-drop works in both layouts.
 
 export function OnboardingBar({
   mode = "centered",
@@ -74,7 +74,8 @@ export function OnboardingBar({
     handleFiles(e.dataTransfer?.files);
   }
 
-  const showResumeAffordance = mode === "centered" && typeof onDropResume === "function";
+  const showResumeAffordance = typeof onDropResume === "function";
+  const showAttachButton = mode === "docked" && showResumeAffordance;
 
   return (
     <div className={`ask-bar${mode === "centered" ? " ask-bar--centered" : ""}`}>
@@ -102,6 +103,17 @@ export function OnboardingBar({
           />
         ) : null}
         <div className="ask-bar__row">
+          {showAttachButton ? (
+            <button
+              type="button"
+              className="onboarding-bar__attach"
+              aria-label="Attach résumé"
+              disabled={disabled || busy}
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <UploadIcon />
+            </button>
+          ) : null}
           <input
             ref={inputRef}
             type="text"

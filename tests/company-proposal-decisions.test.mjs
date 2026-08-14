@@ -237,7 +237,10 @@ test("POST /api/discovery/company-proposal-decisions approves a pending supporte
   assert.equal(body.data.proposal.version, 2);
   assert.equal(body.meta.version, 2);
 
-  assert.deepEqual(calls.map((call) => call.name), ["companyAtsUpsert"]);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ["companyAtsUpsert"]
+  );
   assert.equal(calls.filter((call) => call.name === "companyAtsUpsert").length, 1);
   assert.deepEqual(calls[0].args.entry, {
     name: "Acme AI",
@@ -761,7 +764,10 @@ test("VER-05 userConfirmed lets a user explicitly keep a borderline supported AT
   assert.equal(response.body.data.decision.action, "approve-supported-ats");
   assert.equal(response.body.data.decision.decidedBy, "user-confirmed");
   assert.equal(response.body.data.sourceConfig.status, "added");
-  assert.deepEqual(calls.map((call) => call.name), ["companyAtsUpsert"]);
+  assert.deepEqual(
+    calls.map((call) => call.name),
+    ["companyAtsUpsert"]
+  );
 
   const stored = companyProposalBatchGet({ repoRoot, batchId: "batch-acme" }).batch;
   assert.equal(stored.proposals[0].decision.decidedBy, "user-confirmed");

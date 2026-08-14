@@ -18,18 +18,24 @@ test("GET automation settings returns the canonical Basic all-off matrix", () =>
     assert.ok(handler);
     let status;
     let body;
-    handler({}, {
-      writeHead(value) {
-        status = value;
-      },
-      end(value) {
-        body = JSON.parse(value);
-      },
-    });
+    handler(
+      {},
+      {
+        writeHead(value) {
+          status = value;
+        },
+        end(value) {
+          body = JSON.parse(value);
+        },
+      }
+    );
     assert.equal(status, 200);
     assert.equal(body.mode, "basic");
     assert.equal(body.liveCount, 0);
-    assert.equal(body.capabilities.every(({ enabled }) => enabled === false), true);
+    assert.equal(
+      body.capabilities.every(({ enabled }) => enabled === false),
+      true
+    );
     assert.equal(
       body.capabilities.every(({ platforms }) => platforms.every(({ allowed }) => !allowed)),
       true
@@ -38,4 +44,3 @@ test("GET automation settings returns the canonical Basic all-off matrix", () =>
     rmSync(repoRoot, { recursive: true, force: true });
   }
 });
-

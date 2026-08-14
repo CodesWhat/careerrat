@@ -119,7 +119,7 @@ Accent reserved for: primary ingest/confirm actions, active controls, focus/drag
 | Empty state body | Paste, drop, or link profile material to create reviewable proposals for evidence, stories, honesty, voice, and role signals. |
 | Error state | Ingest could not finish. The source was saved; review the gap, retry, or enter details manually. |
 | No AI state | AI extraction is unavailable. The source was saved; enter the proposal manually or defer this lane. |
-| Source unreadable state | Source saved, but Rolester could not read enough content. Add text manually, mark it not available, or defer it as a visible todo. |
+| Source unreadable state | Source saved, but CareerRat could not read enough content. Add text manually, mark it not available, or defer it as a visible todo. |
 | Completion state | Deep ingest lanes are terminal. Deferred items remain visible as todos. |
 | Destructive confirmation | Remove source: Remove this source and its proposals from Deep ingest? This cannot be undone. |
 

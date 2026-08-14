@@ -1,7 +1,7 @@
-# Requirements: Rolester Skill-to-API Runtime
+# Requirements: CareerRat Skill-to-API Runtime
 
 **Defined:** 2026-07-04
-**Core Value:** Rolester must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
+**Core Value:** CareerRat must complete job-search work locally with predictable cost: deterministic code does deterministic work, and AI is reserved for judgment that actually needs a model.
 
 ## v1 Requirements
 

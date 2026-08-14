@@ -2,9 +2,11 @@ import { useState } from "react";
 import { Button } from "../components/Button.jsx";
 import { TextArea } from "../components/form.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
-import { closeChat, sendChatMessage, startChat } from "../lib/api.js";
+import { addBoard, closeChat, saveCompanyBoard, sendChatMessage, startChat } from "../lib/api.js";
 import { errorState, withRetryAction } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
+import { renderChatMarkdown } from "./chatMarkdown.jsx";
+import { parseDiscoveryBlocks } from "./discoveryBlocks.js";
 
 // ChatPanel — an embedded live-transcript chat session over the existing
 // chat runtime (src/cli/chat-route.mjs). Ported from
@@ -12,19 +14,9 @@ import { useEventSource } from "../lib/sse.js";
 // pattern to React (assistant/tool_use/tool_result/chat_state/error SSE
 // frames), not a new protocol.
 //
-// DEVIATION FROM THE M8 DESIGN DOC'S "accept/reject chips" framing (noted
-// here per the build brief's own instruction to call this out loudly): the
-// discover-companies skill does not yet emit a parseable fenced-JSON summary
-// alongside its human-readable table (the design doc flagged that as
-// "optional for v1, not committed" — and it wasn't, in the committed M8
-// backend). Parsing row-level accept/reject chips out of free-form assistant
-// prose would be unreliable and isn't something this build should invent by
-// changing the skill. This panel instead ships the documented fallback in
-// its fuller form: a real embedded session (start/stream/reply/close) where
-// confirm-first happens through natural language in the same panel, rather
-// than dropping the panel entirely for a bare "continue in /chat" link.
-// Functionally equivalent (the skill's own STEP 4 confirm-first gate still
-// runs, unchanged), just not chip-shaped.
+// Discovery skills emit typed proposal blocks alongside readable prose. Those
+// blocks become explicit Add/Track/Skip controls here, and the controls call
+// the existing validated source APIs instead of treating chat prose as a write.
 //
 // `initialChatId` (M9 addition) — when the caller already knows a live
 // session exists (the Inbox's Lane-C confirm: src/cli/intake-route.mjs's
@@ -34,12 +26,19 @@ import { useEventSource } from "../lib/sse.js";
 // and subscribes straight to that session's SSE stream. Every existing
 // callers that omit this prop keep the original start-from-scratch behavior
 // unchanged.
-export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
+export function ChatPanel({
+  skill,
+  kickoffLabel,
+  initialChatId = null,
+  completionLabel = null,
+  onComplete = null,
+}) {
   const [chatId, setChatId] = useState(initialChatId);
   const [chatState, setChatState] = useState(initialChatId ? "running" : null);
   const [messages, setMessages] = useState([]);
   const [inputText, setInputText] = useState("");
   const [starting, setStarting] = useState(false);
+  const [completing, setCompleting] = useState(false);
   const [error, setError] = useState(null);
 
   function extractAssistantText(data) {
@@ -59,8 +58,22 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
       data = null;
     }
     if (type === "assistant") {
-      const text = extractAssistantText(data);
-      if (text) setMessages((m) => [...m, { role: "assistant", text }]);
+      const raw = extractAssistantText(data);
+      if (raw) {
+        const { text, blocks } = parseDiscoveryBlocks(raw);
+        if (text || blocks.length) {
+          setMessages((m) => [
+            ...m,
+            {
+              role: "assistant",
+              text,
+              blocks: blocks.map((block) =>
+                block.kind.endsWith("_proposal") ? { ...block, status: "pending" } : block
+              ),
+            },
+          ]);
+        }
+      }
     } else if (type === "tool_use") {
       setMessages((m) => [...m, { role: "activity", text: `tool: ${data?.name || "unknown"}` }]);
     } else if (type === "tool_result") {
@@ -142,6 +155,57 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
     setMessages([]);
   }
 
+  function updateProposal(messageIndex, blockIndex, patch) {
+    setMessages((current) =>
+      current.map((message, index) =>
+        index !== messageIndex
+          ? message
+          : {
+              ...message,
+              blocks: message.blocks.map((block, candidateIndex) =>
+                candidateIndex === blockIndex ? { ...block, ...patch } : block
+              ),
+            }
+      )
+    );
+  }
+
+  async function decideProposal(messageIndex, blockIndex, block, decision) {
+    if (decision === "skip") {
+      updateProposal(messageIndex, blockIndex, { status: "resolved", result: "Skipped" });
+      return;
+    }
+    updateProposal(messageIndex, blockIndex, { status: "saving", error: null });
+    try {
+      if (block.kind === "source_proposal") {
+        await addBoard({ label: block.label, url: block.url });
+        updateProposal(messageIndex, blockIndex, { status: "resolved", result: "Added" });
+      } else {
+        await saveCompanyBoard({ name: block.name, url: block.url, enabled: true });
+        updateProposal(messageIndex, blockIndex, { status: "resolved", result: "Tracked" });
+      }
+    } catch (err) {
+      updateProposal(messageIndex, blockIndex, {
+        status: "error",
+        error: errorState(err, "Save failed.").message,
+      });
+    }
+  }
+
+  async function handleComplete() {
+    if (!onComplete) return;
+    setCompleting(true);
+    setError(null);
+    try {
+      await onComplete({ skill });
+      await closeChat(chatId).catch(() => {});
+    } catch (err) {
+      setError(withRetryAction(errorState(err, "Could not continue discovery."), handleComplete));
+    } finally {
+      setCompleting(false);
+    }
+  }
+
   if (!chatId) {
     return (
       <div className="chat-panel">
@@ -162,6 +226,19 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
       : chatState === "closed"
         ? "Session ended"
         : "Waiting for your reply";
+  const proposalBlocks = messages
+    .flatMap((message) => message.blocks || [])
+    .filter((block) => block.kind?.endsWith("_proposal"));
+  const hasCompletionMarker = messages.some((message) =>
+    (message.blocks || []).some(
+      (block) => block.kind === "discovery_complete" && block.step === skill
+    )
+  );
+  const proposalsResolved = proposalBlocks.every((block) => block.status === "resolved");
+  const canComplete =
+    Boolean(onComplete && completionLabel && hasCompletionMarker) &&
+    proposalsResolved &&
+    chatState === "idle";
 
   return (
     <div className="chat-panel">
@@ -178,7 +255,44 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
           ) : (
             // biome-ignore lint/suspicious/noArrayIndexKey: append-only transcript log
             <div key={i} className={`chat-bubble chat-bubble--${m.role}`}>
-              {m.text}
+              {m.text ? (
+                <div className="chat-bubble__content">{renderChatMarkdown(m.text)}</div>
+              ) : null}
+              {(m.blocks || []).map((block, blockIndex) =>
+                block.kind.endsWith("_proposal") ? (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: model turn blocks are append-only
+                    key={blockIndex}
+                    className="chat-proposal"
+                  >
+                    <strong>{block.kind === "source_proposal" ? block.label : block.name}</strong>
+                    {block.why ? <span>{block.why}</span> : null}
+                    <a href={block.url} target="_blank" rel="noreferrer">
+                      Review source
+                    </a>
+                    {block.status === "resolved" ? (
+                      <span>{block.result}</span>
+                    ) : (
+                      <div className="chat-proposal__actions">
+                        <Button
+                          onClick={() => decideProposal(i, blockIndex, block, "add")}
+                          disabled={block.status === "saving"}
+                        >
+                          {block.kind === "source_proposal" ? "Add source" : "Track company"}
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => decideProposal(i, blockIndex, block, "skip")}
+                          disabled={block.status === "saving"}
+                        >
+                          Skip
+                        </Button>
+                        {block.error ? <span>{block.error}</span> : null}
+                      </div>
+                    )}
+                  </div>
+                ) : null
+              )}
             </div>
           )
         )}
@@ -197,6 +311,11 @@ export function ChatPanel({ skill, kickoffLabel, initialChatId = null }) {
       </div>
       <div className="wizard-actions">
         <span className="field__hint">{statusText}</span>
+        {canComplete ? (
+          <Button onClick={handleComplete} disabled={completing}>
+            {completing ? "Continuing…" : completionLabel}
+          </Button>
+        ) : null}
         <Button variant="secondary" onClick={handleClose}>
           End session
         </Button>

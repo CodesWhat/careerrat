@@ -5,7 +5,7 @@ description: Record application outcomes, execute status transitions in tracker.
 
 # track-outcomes
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — Classify the incoming outcome
 
@@ -199,20 +199,19 @@ draft that backed it is gone — then append a note recording what happened.
 
   If either reports errors, fix the JSON before proceeding. Do not continue to the next step until BOTH exit clean.
 
-  **Refresh the analytics block (required — this is an outcome-changing write).** After both validators pass and BEFORE re-rendering, recompute and persist `tracker.json#analytics` so STEP 6 reads a current reevaluation gate. Skipping this leaves the block one run stale, so a threshold crossed by the rejection you just logged is invisible to STEP 6 and the `reevaluate-strategy` handoff fires late or not at all:
+  **Refresh the analytics block (required — this is an outcome-changing write).** After both validators pass and BEFORE snapshotting, recompute and persist `tracker.json#analytics` so STEP 6 reads a current reevaluation gate. Skipping this leaves the block one run stale, so a threshold crossed by the rejection you just logged is invisible to STEP 6 and the `reevaluate-strategy` handoff fires late or not at all:
 
   ```
   careerrat analytics --write   # recompute tracker.json#analytics: rejection/advance counts + reevaluation.due/dueReasons
   ```
 
-## STEP 4 — Re-render the dashboard
+## STEP 4 — Snapshot tracker state
 
 - **DB workspace:** every `careerrat data <verb>` call in STEP 2/2b already
   re-exported `workspace/tracker.json` + `workspace/activity.jsonl` (Data Write
   Contract, AGENTS.md). If `careerrat tracker-dev` is running, its `fs.watch` on
   `tracker.json` already picked this up and live-reloaded the open page —
-  nothing further to do. For a static snapshot, or to confirm the render by
-  hand, still run:
+  nothing further to do. For a recovery checkpoint, still run:
   ```
   careerrat tracker
   ```
@@ -221,7 +220,7 @@ draft that backed it is gone — then append a note recording what happened.
   careerrat tracker
   ```
 
-Confirm the status change appears correctly in `workspace/tracker.html`. If the render output looks wrong, diagnose before proceeding.
+Confirm the status change appears correctly in the live app. If the app output looks wrong, diagnose before proceeding.
 
 If the outcome creates or extends a follow-up cadence (e.g., interview scheduled, offer pending response, ghosted application to chase), also run (a read, unaffected by DB vs legacy mode):
 
@@ -347,7 +346,7 @@ Include the role family and threshold status in the commit body if a reevaluatio
 
 ## RULES
 
-- Tracker mutations: **DB workspace** (`careerrat data status` exits 0) — go through `careerrat data <verb>` (Data Write Contract, AGENTS.md); never hand-edit `tracker.json`/`activity.jsonl`, they are regenerated files. **Legacy workspace** (no DB) — direct JSON edits + two complementary validation checks + `careerrat tracker` re-render: run `careerrat tracker --verify` (validates JSON shape/structure against config/tracker.schema.json — required keys, field presence) AND `npm run verify:tracker` (validates domain integrity — status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Both must pass; they check different things and neither replaces the other; the legacy tracker CLI itself is read-only (no mutation subcommands). Never fabricate a mutation subcommand beyond what `node src/cli/data.mjs --help` documents.
+- Tracker mutations: **DB workspace** (`careerrat data status` exits 0) — go through `careerrat data <verb>` (Data Write Contract, AGENTS.md); never hand-edit `tracker.json`/`activity.jsonl`, they are regenerated files. **Legacy workspace** (no DB) — direct JSON edits + two complementary validation checks + `careerrat tracker` snapshot: run `careerrat tracker --verify` (validates JSON shape/structure against config/tracker.schema.json — required keys, field presence) AND `npm run verify:tracker` (validates domain integrity — status recognizability, score range 0–100, modes, channels, duplicate company-role pairs). Both must pass; they check different things and neither replaces the other; the legacy tracker CLI itself is read-only (no mutation subcommands). Never fabricate a mutation subcommand beyond what `node src/cli/data.mjs --help` documents.
 - **Never write `current_base` into any tracker field, note, conversations entry, or learning file.** Use `expected_base`, `target_base`, or `minimum_base` only (the `learnings` helper enforces this).
 - Notes must be factual. No superlatives, no invented lessons, no editorializing.
 - Use `email-comms` for drafting follow-ups or replies. This skill records the outcome; it does not draft outbound text.

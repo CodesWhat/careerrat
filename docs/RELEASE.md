@@ -25,7 +25,7 @@ Before tagging a release:
    internal JSON artifacts, `candidate/`, `workspace/`) remain untracked:
    `git status --ignored` must not show any of them as staged or tracked.
 5. `docs/ROADMAP.md` (public) updated — shipped items reflect reality, planned
-   list current. (The private working roadmap `ROADMAP.md` is gitignored.)
+   list current. The private working roadmap lives under `.internal/roadmap/`.
 6. `README.md` version badge / install snippet reflects new version (if any).
 7. `package.json` version bumped.
 8. Git tag created with the concrete release version, for example
@@ -36,7 +36,8 @@ Before tagging a release:
 
 For a desktop pilot release, add these checks before tagging:
 
-1. Build the desktop artifact with `npm run desktop:dist`.
+1. Build the desktop artifact with `npm run desktop:dist`. The command signs and notarizes the app
+   and DMG container, staples the DMG ticket, and fails unless Gatekeeper verification passes.
 2. Confirm the output includes a signed and notarized macOS DMG.
 3. Verify signing and notarization evidence:
    - `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app`

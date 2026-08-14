@@ -1,0 +1,78 @@
+---
+title: Privacy & Data Boundaries
+description: What is local, what is private, and what leaves your machine.
+---
+
+## Local by default
+
+CareerRat's canonical candidate state and local artifacts live on your machine:
+
+- `.careerrat/db/careerrat.db` is the canonical, gitignored SQLite store in new
+  workspaces.
+- `candidate/` and `workspace/` are gitignored compatibility exports and local
+  artifacts, including job bodies, tailored documents, recruiter threads, and
+  research.
+
+No CareerRat-operated server receives your data. The package is code + skills,
+not a service.
+
+## What the agent API receives
+
+When your agent generates text (tailoring a résumé, drafting an email), your
+selected runtime may call its AI provider — Anthropic, OpenAI, Google, or another
+supported provider. The text it sends includes
+the relevant portions of your candidate profile, JD body, and instructions.
+Review that provider's privacy and retention terms before use.
+
+CareerRat does not send that context to a CareerRat-operated service. The local
+app invokes the runtime you selected, and that runtime communicates with its
+provider under the provider's terms.
+
+## Compensation privacy
+
+`profile.yml#compensation.current_base` is a **private gate input**. It is used
+to inform comp strategy and validate offers but must never appear in any outbound
+artifact — résumé, cover letter, recruiter message, interview packet, or any
+tracker field that could be shared.
+
+Outbound comp anchors on `target_base` (or `oe_max_base` for OE roles).
+`minimum_base` is an internal walk-away reference — never surfaced outbound unless
+you explicitly instruct otherwise.
+
+The `careerrat gate`, `careerrat evidence`, and `careerrat learnings` helpers all
+refuse to write an entry that contains `current_base` in any outbound field.
+
+## Git safety
+
+The `.gitignore` in the repo root excludes `candidate/`, `workspace/`, and all
+generated runtime files. As long as you work inside a clone of the repo (the
+canonical install path), your data will not be committed or pushed accidentally.
+
+If you put `CAREERRAT_HOME` outside the repo tree, the protection is the same —
+the files are simply never in a tracked directory.
+
+## Browser automation and credentials
+
+When opt-in browser automation is enabled, CareerRat drives your existing browser
+session — it does not store credentials. The session browser (Chrome extension or
+a persistent browser profile) holds your logins. CareerRat reads pages and fills
+forms through that session without copying raw credentials into CareerRat state.
+
+## The Activity Pulse is visible
+
+Activity history renders in the local app and is schema-validated for
+privacy before every write. The `careerrat activity` helper refuses any entry that
+contains `current_base` or placeholder residue. Activity events are an audit
+trail, not a highlight reel — log only what actually happened.
+
+## Research memory
+
+Company intel and comp benchmarks in `workspace/research/` are treated as
+outbound. The `careerrat research` helper refuses to write an artifact that cites no
+source or contains `current_base`. Three fact tiers are enforced:
+
+1. **Verified evidence** (`candidate/evidence.yml`) — may appear in résumés and cover letters.
+2. **Sourced-web facts** (cited with `[source: …]`) — live in research artifacts only.
+3. **Agent-inferred syntheses** (`[AGENT-INFERRED from: …]`) — live in research artifacts only.
+
+Tiers 2 and 3 are never laundered into evidence claims without your explicit review.

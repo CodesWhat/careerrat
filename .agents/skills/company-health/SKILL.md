@@ -20,7 +20,7 @@ doubling down on it may still be worth a shot.
 > **Runs under AGENTS.md.** These contracts bind without being restated here: Honesty
 > Firewall, Privacy Invariant (`current_base` never outbound), Placeholder/Bracket Ban,
 > Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, and the Tracker
-> Write Contract (stamp → verify → re-render → activity). Inline reminders at point-of-use
+> Write Contract (stamp → verify → snapshot → activity). Inline reminders at point-of-use
 > are intentional. **One extra hard rail for this skill: the rating is an INTERNAL signal
 > only — it must never appear in any outbound artifact** (cover letter, recruiter reply,
 > LinkedIn). No "your company is in freefall" energy reaches a human at the company.
@@ -190,7 +190,7 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
 2. Bump `meta.lastUpdatedAt` (the freshness stamp every writing skill bumps).
    - **DB workspace:** the `set-fields` / `upsert-batch` call in step 1 already bumped `meta.lastUpdatedAt` (and `meta.version`) in the same transaction — no separate action needed.
    - **Legacy workspace (no DB):** stamp it by hand in the same write as step 1.
-3. Verify + re-render (the dashboard handoff):
+3. Verify + snapshot (the dashboard handoff):
    - **DB workspace:** step 1's call already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl`. Run:
      ```
      careerrat data verify

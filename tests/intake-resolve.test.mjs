@@ -158,6 +158,40 @@ test("plain fetch: a long body with a visible apply control -> resolved, active 
   assert.match(result.bodyText, /Staff Engineer/);
 });
 
+test("plain aggregator page: follows a canonical ATS apply link and returns the full provider body", async () => {
+  const aggregatorUrl = "https://remotevibecodingjobs.com/jobs/acme-staff-engineer";
+  const atsUrl = "https://job-boards.greenhouse.io/acme/jobs/123456";
+  const fetchImpl = async (requestedUrl) => {
+    const url = String(requestedUrl);
+    if (url === aggregatorUrl) {
+      return htmlResponse(
+        `<html><body><h1>Staff Engineer</h1><a href="${atsUrl}">Apply now</a></body></html>`,
+        { finalUrl: aggregatorUrl }
+      );
+    }
+    if (url.includes("boards-api.greenhouse.io/v1/boards/acme/jobs")) {
+      return jsonResponse({
+        jobs: [
+          {
+            title: "Staff Engineer",
+            absolute_url: atsUrl,
+            location: { name: "United States (Remote)" },
+            content: `<p>${"Complete canonical job description. ".repeat(30)}</p>`,
+          },
+        ],
+      });
+    }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+
+  const result = await resolveJobUrl(aggregatorUrl, { fetchImpl, resolveHost: publicResolver });
+  assert.equal(result.bodyFetchStatus, "resolved");
+  assert.equal(result.url, atsUrl);
+  assert.equal(result.provider, "greenhouse");
+  assert.equal(result.location, "United States (Remote)");
+  assert.match(result.bodyText, /Complete canonical job description/);
+});
+
 test("plain fetch: short/shell body -> deferred (insufficient_content)", async () => {
   const result = await resolveJobUrl("https://example-startup.com/careers/eng-2", {
     fetchImpl: async () => htmlResponse("<html><body>Loading…</body></html>"),

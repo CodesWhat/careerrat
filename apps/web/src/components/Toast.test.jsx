@@ -43,7 +43,10 @@ describe("InlineAlert — action: link", () => {
   it("renders an in-app link with the label and href", () => {
     const html = renderToStaticMarkup(
       <MemoryRouter>
-        <InlineAlert message="No AI key is connected yet." action={{ label: "Open Settings", to: "/settings" }} />
+        <InlineAlert
+          message="No AI key is connected yet."
+          action={{ label: "Open Settings", to: "/settings" }}
+        />
       </MemoryRouter>
     );
 

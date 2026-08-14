@@ -54,6 +54,27 @@ function legitimacyLabel(value) {
   );
 }
 
+function sourceProviderLabel(value) {
+  const normalized = String(value || "").toLowerCase();
+  return (
+    {
+      remotevibecodingjobs: "Remote Vibe Coding Jobs",
+      remoteok: "RemoteOK",
+      workingnomads: "Working Nomads",
+    }[normalized] || value
+  );
+}
+
+function sourceTypeLabel(value) {
+  return (
+    {
+      "url-query": "URL query",
+      board: "Board",
+      browser: "Browser",
+    }[value] || value
+  );
+}
+
 function replaceAt(rows, index, patch) {
   return rows.map((row, rowIndex) => (rowIndex === index ? { ...row, ...patch } : row));
 }
@@ -66,6 +87,7 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
   const [queryDraft, setQueryDraft] = useState({ label: "", query: "" });
   const [urlDraft, setUrlDraft] = useState({ label: "", url: "" });
   const [companyDraft, setCompanyDraft] = useState({ name: "", url: "" });
+  const [pendingRemoval, setPendingRemoval] = useState(null);
 
   const reload = useCallback(async () => {
     const next = await api.getSourceMaintenance();
@@ -128,6 +150,7 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
       error={error}
       loading={loading}
       model={model}
+      pendingRemoval={pendingRemoval}
       onAddCompany={() =>
         mutate(
           "company-add",
@@ -149,9 +172,15 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
           companies: replaceAt(current.companies, index, patch),
         }))
       }
-      onCompanyRemove={(row) =>
-        mutate(`company-remove-${row.index}`, () => api.removeCompanyBoard(row.name))
-      }
+      onCompanyRemove={(row) => {
+        const key = `company-${row.index}`;
+        if (pendingRemoval !== key) return setPendingRemoval(key);
+        return mutate(
+          `company-remove-${row.index}`,
+          () => api.removeCompanyBoard(row.name),
+          () => setPendingRemoval(null)
+        );
+      }}
       onCompanySave={(row) =>
         mutate(`company-save-${row.index}`, () =>
           api.saveCompanyBoard({
@@ -170,15 +199,22 @@ export function SourceMaintenance({ api = SOURCE_API } = {}) {
         )
       }
       onQueryDraft={setQueryDraft}
+      onRemovalCancel={() => setPendingRemoval(null)}
       onSearchEdit={(index, patch) =>
         setModel((current) => ({
           ...current,
           searches: replaceAt(current.searches, index, patch),
         }))
       }
-      onSearchRemove={(row) =>
-        mutate(`search-remove-${row.index}`, () => api.removeSearchSource(row.index))
-      }
+      onSearchRemove={(row) => {
+        const key = `search-${row.index}`;
+        if (pendingRemoval !== key) return setPendingRemoval(key);
+        return mutate(
+          `search-remove-${row.index}`,
+          () => api.removeSearchSource(row.index),
+          () => setPendingRemoval(null)
+        );
+      }}
       onSearchSave={(row) => mutate(`search-save-${row.index}`, () => api.updateSearchSource(row))}
       onUrlDraft={setUrlDraft}
       queryDraft={queryDraft}
@@ -193,6 +229,7 @@ export function SourceMaintenanceView({
   error,
   loading,
   model,
+  pendingRemoval,
   onAddCompany,
   onAddQuery,
   onCompanyDraft,
@@ -201,6 +238,7 @@ export function SourceMaintenanceView({
   onCompanySave,
   onImportUrl,
   onQueryDraft,
+  onRemovalCancel,
   onSearchEdit,
   onSearchRemove,
   onSearchSave,
@@ -234,8 +272,8 @@ export function SourceMaintenanceView({
             searches.map((row, index) => (
               <article className="settings-sources__row" key={`${row.provider}-${row.index}`}>
                 <div className="settings-sources__meta">
-                  <span>{row.provider}</span>
-                  <span>{row.sourceType}</span>
+                  <span>{sourceProviderLabel(row.provider)}</span>
+                  <span>{sourceTypeLabel(row.sourceType)}</span>
                   <span>{legitimacyLabel(row.legitimacy)}</span>
                   <span>{formatWatermark(row.lastRunAt)}</span>
                 </div>
@@ -264,13 +302,28 @@ export function SourceMaintenanceView({
                   >
                     {busy === `search-save-${row.index}` ? "Saving…" : "Save"}
                   </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={Boolean(busy)}
-                    onClick={() => onSearchRemove(row)}
-                  >
-                    Remove
-                  </Button>
+                  {pendingRemoval === `search-${row.index}` ? (
+                    <>
+                      <Button
+                        variant="danger"
+                        disabled={Boolean(busy)}
+                        onClick={() => onSearchRemove(row)}
+                      >
+                        Confirm remove
+                      </Button>
+                      <Button variant="ghost" disabled={Boolean(busy)} onClick={onRemovalCancel}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => onSearchRemove(row)}
+                    >
+                      Remove
+                    </Button>
+                  )}
                 </div>
               </article>
             ))
@@ -335,7 +388,7 @@ export function SourceMaintenanceView({
             companies.map((row, index) => (
               <article className="settings-sources__row" key={`${row.name}-${row.index}`}>
                 <div className="settings-sources__meta">
-                  <span>{row.provider}</span>
+                  <span>{sourceProviderLabel(row.provider)}</span>
                   <span>{legitimacyLabel(row.legitimacy)}</span>
                   <span>{formatWatermark(row.lastRunAt)}</span>
                 </div>
@@ -366,13 +419,28 @@ export function SourceMaintenanceView({
                   >
                     {busy === `company-save-${row.index}` ? "Saving…" : "Save"}
                   </Button>
-                  <Button
-                    variant="ghost"
-                    disabled={Boolean(busy)}
-                    onClick={() => onCompanyRemove(row)}
-                  >
-                    Remove
-                  </Button>
+                  {pendingRemoval === `company-${row.index}` ? (
+                    <>
+                      <Button
+                        variant="danger"
+                        disabled={Boolean(busy)}
+                        onClick={() => onCompanyRemove(row)}
+                      >
+                        Confirm remove
+                      </Button>
+                      <Button variant="ghost" disabled={Boolean(busy)} onClick={onRemovalCancel}>
+                        Cancel
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      variant="ghost"
+                      disabled={Boolean(busy)}
+                      onClick={() => onCompanyRemove(row)}
+                    >
+                      Remove
+                    </Button>
+                  )}
                 </div>
               </article>
             ))

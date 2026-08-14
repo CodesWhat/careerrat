@@ -9,7 +9,7 @@ requires:
     provides: [SEC-01 app-default runtime guard, SEC-02 app-safe runtime tools]
 provides:
   - Pure desktop runtime path and external URL safety helpers
-  - Packaged ROLESTER_HOME coverage for SQLite migration and BYOK storage
+  - Packaged CAREERRAT_HOME coverage for SQLite migration and BYOK storage
   - Desktop smoke route and built-asset reporting
 affects: [desktop-release, packaged-runtime, byok-storage, sqlite-migrations]
 
@@ -32,9 +32,9 @@ key-files:
     - tests/ai-env.test.mjs
 
 key-decisions:
-  - "Desktop packaged path resolution is centralized in apps/desktop/desktop-runtime.mjs so ROLESTER_HOME is set before dynamic engine imports."
+  - "Desktop packaged path resolution is centralized in apps/desktop/desktop-runtime.mjs so CAREERRAT_HOME is set before dynamic engine imports."
   - "Electron external opens are allowed only for https: and mailto: targets; same-origin navigation stays inside the app and unsafe targets are denied recoverably."
-  - "BYOK path resolution now passes the active env into userPath(), so injected packaged ROLESTER_HOME controls both load and write paths."
+  - "BYOK path resolution now passes the active env into userPath(), so injected packaged CAREERRAT_HOME controls both load and write paths."
 
 patterns-established:
   - "Desktop helpers avoid Electron imports so node:test can verify packaged path and external URL policy directly."
@@ -44,7 +44,7 @@ requirements-completed: [DESK-01]
 
 coverage:
   - id: D1
-    description: "Packaged desktop runtime resolves ROLESTER_HOME under Electron userData/data and repoRoot under resources/rolester."
+    description: "Packaged desktop runtime resolves CAREERRAT_HOME under Electron userData/data and repoRoot under resources/careerrat."
     requirement: DESK-01
     verification:
       - kind: unit
@@ -52,14 +52,14 @@ coverage:
         status: pass
     human_judgment: false
   - id: D2
-    description: "Packaged SQLite initialization and BYOK storage land under ROLESTER_HOME, not staged resources or the checkout."
+    description: "Packaged SQLite initialization and BYOK storage land under CAREERRAT_HOME, not staged resources or the checkout."
     requirement: DESK-01
     verification:
       - kind: unit
-        ref: "tests/desktop-runtime.test.mjs#desktop packaged ROLESTER_HOME storage"
+        ref: "tests/desktop-runtime.test.mjs#desktop packaged CAREERRAT_HOME storage"
         status: pass
       - kind: unit
-        ref: "tests/ai-env.test.mjs#writeLocalAiKey uses ROLESTER_HOME/internal/ai.env when packaged home is set"
+        ref: "tests/ai-env.test.mjs#writeLocalAiKey uses CAREERRAT_HOME/internal/ai.env when packaged home is set"
         status: pass
     human_judgment: false
   - id: D3
@@ -94,8 +94,8 @@ status: complete
 ## Accomplishments
 
 - Added pure desktop runtime helpers for packaged/dev path resolution and safe external URL decisions.
-- Wired Electron main startup to set packaged `ROLESTER_HOME` before dynamic engine imports and to gate every `shell.openExternal()` call.
-- Added desktop runtime coverage proving packaged SQLite migrations and BYOK key storage use `<ROLESTER_HOME>` and smoke checks report the selected route and built assets.
+- Wired Electron main startup to set packaged `CAREERRAT_HOME` before dynamic engine imports and to gate every `shell.openExternal()` call.
+- Added desktop runtime coverage proving packaged SQLite migrations and BYOK key storage use `<CAREERRAT_HOME>` and smoke checks report the selected route and built assets.
 
 ## Task Commits
 
@@ -111,7 +111,7 @@ Each task was committed atomically:
 - `apps/desktop/desktop-runtime.mjs` - Pure packaged/dev path resolution and external URL decision helpers.
 - `apps/desktop/main.mjs` - Uses runtime helpers before engine imports and before external opens.
 - `apps/desktop/desktop-smoke.mjs` - Returns selected route and built app asset paths after smoke verification.
-- `src/core/ai/ai-env.mjs` - Honors caller-provided `env.ROLESTER_HOME` when resolving BYOK load/write paths.
+- `src/core/ai/ai-env.mjs` - Honors caller-provided `env.CAREERRAT_HOME` when resolving BYOK load/write paths.
 - `tests/desktop-runtime.test.mjs` - Covers packaged data root, SQLite migration state, BYOK storage, and URL safety helpers.
 - `tests/desktop-smoke.test.mjs` - Covers smoke route/asset reporting for first-run and existing workspace routes.
 - `tests/ai-env.test.mjs` - Covers packaged BYOK path resolution.
@@ -132,9 +132,9 @@ Each task was committed atomically:
 
 ### Auto-fixed Issues
 
-**1. [Rule 2 - Missing Critical] Honored injected ROLESTER_HOME in BYOK path resolution**
+**1. [Rule 2 - Missing Critical] Honored injected CAREERRAT_HOME in BYOK path resolution**
 - **Found during:** Task 2 (Wire desktop runtime helpers into Electron main)
-- **Issue:** `loadLocalAiEnv()` and `writeLocalAiKey()` accepted an `env` object but did not pass it to `userPath()`, so tests that simulated packaged `ROLESTER_HOME` wrote under the staged repo's `.rolester` root.
+- **Issue:** `loadLocalAiEnv()` and `writeLocalAiKey()` accepted an `env` object but did not pass it to `userPath()`, so tests that simulated packaged `CAREERRAT_HOME` wrote under the staged repo's `.careerrat` root.
 - **Fix:** Passed `{ repoRoot, env }` into `userPath()` for both load and write paths.
 - **Files modified:** `src/core/ai/ai-env.mjs`
 - **Verification:** `node --test tests/desktop-runtime.test.mjs tests/desktop-smoke.test.mjs tests/desktop-routing.test.mjs tests/ai-env.test.mjs tests/db-migrations.test.mjs`

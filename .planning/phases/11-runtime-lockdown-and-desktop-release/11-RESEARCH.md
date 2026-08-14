@@ -24,7 +24,7 @@
 - **D-09:** The guard should be slice-aware rather than a repo-wide string ban. It should fail new product/default uses while preserving explicit retained-runtime tests and routes.
 
 ### Desktop Pilot Release Bar
-- **D-10:** The desktop pilot bar is the full release-hardening bar: first-run routing, database initialization/migrations under `ROLESTER_HOME`, BYOK key storage path, error recovery, app routing, packaged resource staging, smoke verification, external-link containment, signing, notarization, and update readiness.
+- **D-10:** The desktop pilot bar is the full release-hardening bar: first-run routing, database initialization/migrations under `CAREERRAT_HOME`, BYOK key storage path, error recovery, app routing, packaged resource staging, smoke verification, external-link containment, signing, notarization, and update readiness.
 - **D-11:** Because the user has an Apple developer account, notarization should be treated as a real pilot requirement, not only a deferred note. Planning should wire the electron-builder/notarytool path without storing Apple credentials in the repo.
 - **D-12:** A signed and notarized macOS DMG is the pilot target. Local/offline unsigned or signed-only builds may remain useful for development, but they should not be the final pilot success signal.
 - **D-13:** Auto-update infrastructure does not need to become a large new product feature in this phase. The release bar should at least verify the existing update path/readiness story and avoid claiming auto-update exists if it does not.
@@ -49,17 +49,17 @@ Phase 11 should be planned as a boundary-hardening phase, not as another workflo
 
 The central runtime risk is that `src/core/ai/skill-runtime.mjs` currently defines broad default tools including `Write`, `Edit`, and `Bash`, and `runSkillStream()` uses `permissionMode: "bypassPermissions"` when it invokes the Agent SDK. The SDK documents `tools`, `disallowedTools`, `permissionMode`, `skills`, and `env` options; it also documents that `canUseTool` is not invoked for calls already approved by allowed tools/settings/permission mode. The planner should therefore make the default tool list narrow and make any tool-heavy path explicit. [VERIFIED: codebase grep] [CITED: https://code.claude.com/docs/en/agent-sdk/typescript]
 
-The desktop side is close to pilotable but not yet release-grade: the Electron shell already sets packaged `ROLESTER_HOME`, stages resources, has first-run route logic, and has smoke helpers; `electron-builder.yml` currently ships a macOS arm64 DMG with hardened runtime but notarization disabled. Electron and electron-builder official docs both treat signing/notarization as separate release steps for distributed macOS apps, and electron-builder supports notarization with credentials kept outside tracked config. [VERIFIED: codebase grep] [CITED: https://www.electronjs.org/docs/latest/tutorial/code-signing] [CITED: https://www.electron.build/docs/features/code-signing/notarization/]
+The desktop side is close to pilotable but not yet release-grade: the Electron shell already sets packaged `CAREERRAT_HOME`, stages resources, has first-run route logic, and has smoke helpers; `electron-builder.yml` currently ships a macOS arm64 DMG with hardened runtime but notarization disabled. Electron and electron-builder official docs both treat signing/notarization as separate release steps for distributed macOS apps, and electron-builder supports notarization with credentials kept outside tracked config. [VERIFIED: codebase grep] [CITED: https://www.electronjs.org/docs/latest/tutorial/code-signing] [CITED: https://www.electron.build/docs/features/code-signing/notarization/]
 
 **Primary recommendation:** Use the existing stack, add no new package by default, split runtime tools into `app-safe` and explicitly declared `tool-heavy`, add slice-aware static guards for app-default surfaces, then make the desktop pilot gate require signed/notarized DMG verification plus first-run/data-root/package smoke tests. [VERIFIED: codebase grep] [CITED: https://www.electron.build/docs/features/code-signing/notarization/]
 
 ## Project Constraints (from AGENTS.md)
 
-- Skills are the procedure contracts for Rolester workflows; agents should open and follow the owning skill instead of improvising workflow behavior. [VERIFIED: AGENTS.md]
+- Skills are the procedure contracts for CareerRat workflows; agents should open and follow the owning skill instead of improvising workflow behavior. [VERIFIED: AGENTS.md]
 - The app default for company discovery is the local proposal path: `/api/discovery/company-proposals` and `/api/discovery/company-proposal-decisions`. Local proposal errors must not silently start chat, `/api/chat/*`, full skill runtime, or `POST /api/skill/run`. [VERIFIED: AGENTS.md]
 - `/api/discovery/quick-start` and `/api/discovery/next` are explicit user-selected chat handoffs. `POST /api/skill/run` remains the retained allowlisted full skill runtime for tool-heavy, long-running, or human-watched workflows, not the default app path for deterministic validation, dedupe, proposal creation, proposal decisions, or confirmed writes. [VERIFIED: AGENTS.md]
-- Local AI key storage is owned by `src/core/ai/ai-env.mjs`; with `ROLESTER_HOME` set, BYOK credentials live at `<ROLESTER_HOME>/internal/ai.env`, otherwise legacy mode uses `.internal/ai.env`; the file is chmod `0600`, loaded at server boot, and never echoed back by the API. [VERIFIED: AGENTS.md]
-- In DB workspaces, tracker-visible mutations must go through `rolester data <verb>` and generated `workspace/tracker.json` / `workspace/activity.jsonl` must not be hand-edited. [VERIFIED: AGENTS.md]
+- Local AI key storage is owned by `src/core/ai/ai-env.mjs`; with `CAREERRAT_HOME` set, BYOK credentials live at `<CAREERRAT_HOME>/internal/ai.env`, otherwise legacy mode uses `.internal/ai.env`; the file is chmod `0600`, loaded at server boot, and never echoed back by the API. [VERIFIED: AGENTS.md]
+- In DB workspaces, tracker-visible mutations must go through `careerrat data <verb>` and generated `workspace/tracker.json` / `workspace/activity.jsonl` must not be hand-edited. [VERIFIED: AGENTS.md]
 - Browser, mail, calendar, and message automation capabilities are opt-in and capability-gated; session-browser or authenticated automation must not become an implicit app-default behavior. [VERIFIED: AGENTS.md] [VERIFIED: project skills grep]
 - Candidate-specific facts, current compensation, private notes, local paths, raw prompts, raw AI output, page bodies, and job postings must not leak into public or release artifacts. [VERIFIED: AGENTS.md] [VERIFIED: docs/ARCHITECTURE.md]
 - If the implementation mutates tracker-visible state, it must follow the DB write contract or legacy tracker write contract and run the required verification/render steps. Phase 11 research itself does not mutate tracker state. [VERIFIED: AGENTS.md]
@@ -72,7 +72,7 @@ The desktop side is close to pilotable but not yet release-grade: the Electron s
 | Explicit tool-heavy retained runtime | API / Backend | Conversational Chat / Skill Runtime | Tool-heavy workflows remain valid only when the route, skill, or manifest classifies them explicitly. [VERIFIED: 11-CONTEXT.md] |
 | App-default ban guard | Test / Quality Gate | Browser / Client and API / Backend | The guard must scan React `/app`, product HTTP routes, onboarding, search, deep-ingest, packet/evaluate/apply, and Electron wiring while allowing classified retained-runtime surfaces. [VERIFIED: 11-CONTEXT.md] |
 | First-run desktop routing | Desktop Main Process | Browser / Client | `apps/desktop/main.mjs` starts the local server and `desktop-routing.mjs` decides `/app/onboarding` versus `/app`. [VERIFIED: codebase grep] |
-| Packaged data root and BYOK storage | Desktop Main Process | API / Backend | The packaged shell sets `ROLESTER_HOME`; `ai-env.mjs` owns BYOK credential file placement and permissions. [VERIFIED: codebase grep] [VERIFIED: AGENTS.md] |
+| Packaged data root and BYOK storage | Desktop Main Process | API / Backend | The packaged shell sets `CAREERRAT_HOME`; `ai-env.mjs` owns BYOK credential file placement and permissions. [VERIFIED: codebase grep] [VERIFIED: AGENTS.md] |
 | macOS signing/notarization | Build / Release | Desktop Packaging | `electron-builder.yml` owns DMG packaging and should own notarization wiring while credentials stay in keychain/CI env. [VERIFIED: codebase grep] [CITED: https://www.electron.build/docs/features/code-signing/notarization/] |
 | Update readiness | Build / Release | Documentation | Electron auto-update on macOS requires signed apps and update metadata; Phase 11 should verify and document readiness without claiming full auto-update if not implemented. [CITED: https://www.electronjs.org/docs/latest/api/auto-updater] [CITED: https://www.electron.build/docs/features/auto-update/] |
 | Product docs truthfulness | Documentation / Release | Desktop Packaging | DESK-02 is limited to app-first pilot docs and release notes, not a broad docs migration. [VERIFIED: 11-CONTEXT.md] |
@@ -180,7 +180,7 @@ src/cli/
 └── skill-run-route.mjs        # SSE route, runtime config, explicit profile validation
 
 apps/desktop/
-├── main.mjs                   # Shell boot, ROLESTER_HOME, link containment, smoke mode
+├── main.mjs                   # Shell boot, CAREERRAT_HOME, link containment, smoke mode
 ├── electron-builder.yml       # Signing/notarization release config
 ├── build/                     # Entitlements and release-only signing metadata templates
 └── README.md                  # Pilot-accurate desktop docs
@@ -303,7 +303,7 @@ mac:
 
 ### Pattern 5: External-Link Containment
 
-**What:** Keep navigation inside the local Rolester origin and send only validated external URLs to `shell.openExternal`. Electron security docs warn that opening untrusted content with `shell.openExternal` can compromise the host. [VERIFIED: apps/desktop/main.mjs] [CITED: https://www.electronjs.org/docs/latest/tutorial/security]
+**What:** Keep navigation inside the local CareerRat origin and send only validated external URLs to `shell.openExternal`. Electron security docs warn that opening untrusted content with `shell.openExternal` can compromise the host. [VERIFIED: apps/desktop/main.mjs] [CITED: https://www.electronjs.org/docs/latest/tutorial/security]
 
 **When to use:** Update both `setWindowOpenHandler` and `will-navigate` logic so malicious or unexpected protocols do not leave the Electron app. [CITED: https://www.electronjs.org/docs/latest/tutorial/security]
 
@@ -333,7 +333,7 @@ function isAllowedExternalUrl(value) {
 | Tool permission safety | Interactive permission prompts in a headless local server | Narrow SDK `tools` profile plus explicit tool-heavy manifest | The current runtime intentionally bypasses permission prompts, so allowed tools are the practical safety boundary. [VERIFIED: src/core/ai/skill-runtime.mjs] |
 | Runtime authorization policy | Scattered inline arrays in routes | Central `runtime-tools.mjs` or equivalent manifest helper | Existing runtime already centralizes allowlists; central profiles keep SEC-02 testable. [VERIFIED: src/core/ai/skill-runtime.mjs] |
 | Product route migration checks | Manual review of every `/api/skill/run` occurrence | Slice-aware static guard with classified allowed files | Existing regression tests use static guard patterns for DB/app-shell boundaries. [VERIFIED: tests/db-app-shell-regression.test.mjs] |
-| Update feature | Claiming auto-update from `rolester update` or DMG packaging alone | Readiness check and truthful docs unless `electron-updater` is actually implemented | Electron-builder docs require `electron-updater`, published metadata, and macOS zip artifacts for auto-update. [CITED: https://www.electron.build/docs/features/auto-update/] |
+| Update feature | Claiming auto-update from `careerrat update` or DMG packaging alone | Readiness check and truthful docs unless `electron-updater` is actually implemented | Electron-builder docs require `electron-updater`, published metadata, and macOS zip artifacts for auto-update. [CITED: https://www.electron.build/docs/features/auto-update/] |
 | Candidate data protection | Copying workspace/candidate files into desktop resources | Existing staged package allowlist and release-safety scans | Current staging uses package `files[]`, and release-safety tests already guard private data leakage. [VERIFIED: apps/desktop/scripts/stage.mjs] [VERIFIED: tests/release-safety.test.mjs] |
 
 **Key insight:** The phase is not about removing the retained runtime. It is about making the cheap/default product path incapable of reaching broad tool power by accident while preserving explicit, visible, tool-heavy lanes for workflows that genuinely need them. [VERIFIED: 11-CONTEXT.md] [VERIFIED: docs/ARCHITECTURE.md]
@@ -394,9 +394,9 @@ function isAllowedExternalUrl(value) {
 
 **What goes wrong:** A desktop artifact passes on a developer machine but fails for a pilot user because it reads the repo checkout or root `node_modules`. [VERIFIED: apps/desktop/scripts/stage.mjs]
 
-**Why it happens:** The desktop app dynamically imports staged runtime files from `process.resourcesPath/rolester` in packaged mode; staging and package resources must be complete. [VERIFIED: apps/desktop/main.mjs] [VERIFIED: apps/desktop/scripts/stage.mjs]
+**Why it happens:** The desktop app dynamically imports staged runtime files from `process.resourcesPath/careerrat` in packaged mode; staging and package resources must be complete. [VERIFIED: apps/desktop/main.mjs] [VERIFIED: apps/desktop/scripts/stage.mjs]
 
-**How to avoid:** Extend package-resource tests and packaged smoke to assert no checkout dependency, staged SDK presence, web dist presence, and data writes under `ROLESTER_HOME`. [VERIFIED: tests/desktop-package-resources.test.mjs]
+**How to avoid:** Extend package-resource tests and packaged smoke to assert no checkout dependency, staged SDK presence, web dist presence, and data writes under `CAREERRAT_HOME`. [VERIFIED: tests/desktop-package-resources.test.mjs]
 
 **Warning signs:** Smoke passes only with repo root present or after deleting staged resources it still appears to work. [VERIFIED: apps/desktop/desktop-smoke.mjs]
 
@@ -454,7 +454,7 @@ for dmg in apps/desktop/dist/*.dmg; do
   xcrun stapler validate "$dmg"
   spctl --assess --type open --context context:primary-signature --verbose "$dmg"
 done
-codesign --verify --deep --strict --verbose=2 "apps/desktop/dist/mac-arm64/Rolester.app"
+codesign --verify --deep --strict --verbose=2 "apps/desktop/dist/mac-arm64/CareerRat.app"
 ```
 
 ### Release-Safety Static Guard
@@ -496,7 +496,7 @@ for (const file of releaseFacingFiles) {
 | # | Claim | Section | Risk if Wrong |
 |---|-------|---------|---------------|
 | A1 | No new runtime or desktop package is necessary for Phase 11 if the planner treats auto-update as readiness/docs rather than implementation. [ASSUMED] | Standard Stack | If auto-update is pulled into scope, `electron-updater` and publishing metadata need separate package legitimacy, tests, and release tasks. |
-| A2 | The keychain profile name can be chosen during implementation, with `rolester-notary` as an example rather than a locked existing profile. [ASSUMED] | Resolved Open Questions / Environment Availability | If a specific CI/keychain profile already exists, docs and commands should use that exact name. |
+| A2 | The keychain profile name can be chosen during implementation, with `careerrat-notary` as an example rather than a locked existing profile. [ASSUMED] | Resolved Open Questions / Environment Availability | If a specific CI/keychain profile already exists, docs and commands should use that exact name. |
 | A3 | Explicit conversational chat handoffs are retained only as visible, human-watched paths with named profile/classification checks. [ASSUMED] | Resolved Open Questions | If implementation finds a chat path that is not visible to the user, the Phase 11 guard should fail it as an app-default regression. |
 | A4 | `spctl` and `codesign` are expected to be available through local macOS command line tools but were not separately version-probed. [ASSUMED] | Environment Availability | If missing, release verification needs an Xcode command line tools setup task. |
 
@@ -504,7 +504,7 @@ for (const file of releaseFacingFiles) {
 
 1. **Does a `notarytool` keychain profile already exist for this project?**
    - What we know: Developer ID Application identity is present locally, and `notarytool store-credentials` supports keychain-profile storage. [VERIFIED: local command]
-   - Resolution: Plan 11-05 remains non-autonomous and includes a blocking credential checkpoint that runs `xcrun notarytool history --keychain-profile rolester-notary --limit 1` or pauses for the exact keychain profile or CI secret path. Plan 11-07 repeats notarized-artifact evidence in the release rollup and does not allow unsigned or signed-only success for D-11/D-12. Credentials stay outside tracked source.
+   - Resolution: Plan 11-05 remains non-autonomous and includes a blocking credential checkpoint that runs `xcrun notarytool history --keychain-profile careerrat-notary --limit 1` or pauses for the exact keychain profile or CI secret path. Plan 11-07 repeats notarized-artifact evidence in the release rollup and does not allow unsigned or signed-only success for D-11/D-12. Credentials stay outside tracked source.
 
 2. **Will Phase 10 finish removing packet/evaluate app defaults before Phase 11 lands?**
    - What we know: Phase 11 context says Phase 10 moves evaluate/gate and packet generation to local APIs, and Phase 11 guards packet/evaluate/apply surfaces. [VERIFIED: 11-CONTEXT.md]
@@ -556,7 +556,7 @@ for (const file of releaseFacingFiles) {
 | SEC-02 | `runSkillStream()` default tools exclude `Write`, `Edit`, and `Bash`; explicit tool-heavy profile includes them only when declared. | unit | `node --test tests/skill-runtime.test.mjs` | Partial - update existing |
 | SEC-02 | `/api/skill/run` exposes safe runtime metadata and rejects/marks unclassified tool-heavy requests. | unit/integration | `node --test tests/skill-run-route.test.mjs` | Partial - update existing |
 | DESK-01 | Fresh packaged workspace boots to `/app/onboarding`; existing candidate boots to `/app`. | unit/smoke | `node --test tests/desktop-routing.test.mjs tests/desktop-smoke.test.mjs` | Partial - extend existing |
-| DESK-01 | Staged desktop runtime is self-contained, writes user data under `ROLESTER_HOME`, and excludes private workspace/candidate data. | unit/static | `node --test tests/desktop-package-resources.test.mjs tests/release-safety.test.mjs` | Partial - extend existing |
+| DESK-01 | Staged desktop runtime is self-contained, writes user data under `CAREERRAT_HOME`, and excludes private workspace/candidate data. | unit/static | `node --test tests/desktop-package-resources.test.mjs tests/release-safety.test.mjs` | Partial - extend existing |
 | DESK-01 | macOS release config supports signing, hardened runtime, entitlements, notarization, and verification commands. | static/manual gate | `node --test tests/desktop-package-resources.test.mjs` plus manual notarization command | Partial - extend existing |
 | DESK-02 | Pilot-facing docs teach `/app` desktop workflow and do not present tracker/static compatibility surfaces as normal. | static/docs | `node --test tests/release-safety.test.mjs tests/desktop-docs-release.test.mjs` | No - Wave 0 |
 

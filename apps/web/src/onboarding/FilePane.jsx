@@ -1,16 +1,18 @@
 import { useState } from "react";
-import { ChipInput, TextArea, TextField } from "../components/form.jsx";
+import { ChipInput, NumberField, TextArea, TextField } from "../components/form.jsx";
 import { CheckIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { parseResumeText, removeEvidenceClaim, saveCandidateFile } from "../lib/api.js";
 import {
   buildSetupItemViewModels,
   detailLineFor,
+  locationModePreferencesConfirmed,
   setupProgressFromState,
 } from "./onboardingSetup.js";
+import { flattenPatchLeaves } from "./patchFields.js";
 import { normalizeRoleBuckets, RoleLaneFields } from "./steps/RoleLaneEditor.jsx";
 
-// FilePane — "PAUL'S FILE" (design 3b/3c; Paul is the mascot). Rows map 1:1 to the 7 setup
+// FilePane — Paul's live notes (design 3b/3c; Paul is the mascot). Rows map 1:1 to the 7 setup
 // items; done/not-done comes from the server (state.setupProgress — see
 // src/cli/onboard-route.mjs's computeSetupProgress), detail lines from
 // onboardingSetup.js. Clicking a row with an editor opens it IN PLACE
@@ -27,8 +29,10 @@ export function FilePane({
   runtime,
   onReload,
   onFieldSaved,
+  pendingBlocks = [],
   companyProposals = [],
   onDecideCompanyProposal,
+  processingResumeName = null,
 }) {
   const [editingKey, setEditingKey] = useState(null);
   const [overridingKey, setOverridingKey] = useState(null);
@@ -62,9 +66,16 @@ export function FilePane({
   return (
     <aside className="file-pane">
       <div className="file-pane__heading">
-        <span className="file-pane__title">PAUL'S FILE</span>
-        <span className="file-pane__subtitle">LIVE · ~/CANDIDATE</span>
+        <span className="file-pane__title">PAUL'S NOTES</span>
+        <span className="file-pane__subtitle">UPDATES AS YOU TALK</span>
       </div>
+      <PendingNotes blocks={pendingBlocks} />
+      {processingResumeName ? <ResumeReadingState fileName={processingResumeName} /> : null}
+      <CandidateSnapshot
+        state={state}
+        hasPending={pendingBlocks.length > 0}
+        hideEmpty={!!processingResumeName}
+      />
       {items.map((item) => (
         <FilePaneRow
           key={item.key}
@@ -82,6 +93,124 @@ export function FilePane({
         />
       ))}
     </aside>
+  );
+}
+
+function ResumeReadingState({ fileName }) {
+  return (
+    <section className="file-pane__resume-reading" role="status" aria-live="polite">
+      <span className="file-pane__resume-reading-label">READING RÉSUMÉ</span>
+      <strong>{fileName}</strong>
+      <span>Your profile will fill in as Paul reads it.</span>
+    </section>
+  );
+}
+
+function pendingAuthorizationValue(patch) {
+  const authorization = patch?.work_authorized === true ? "Authorized" : "Not authorized";
+  const sponsorship = patch?.requires_sponsorship ? "Sponsorship needed" : "No sponsorship needed";
+  return `${authorization} · ${sponsorship}`;
+}
+
+function pendingLeafValue(leaf) {
+  const numeric = Number(leaf.value);
+  if (/base|salary|compensation/i.test(leaf.label) && Number.isFinite(numeric) && numeric >= 1000) {
+    return `$${numeric.toLocaleString("en-US")}`;
+  }
+  return leaf.value;
+}
+
+function pendingNoteEntries(blocks) {
+  const entries = [];
+  for (const block of blocks) {
+    if (!block || block.hidden || block.status === "resolved") continue;
+    if (block.kind === "candidate_patch") {
+      for (const leaf of flattenPatchLeaves(block.payload?.patch)) {
+        if (leaf.value) entries.push({ label: leaf.label, value: pendingLeafValue(leaf) });
+      }
+    } else if (block.kind === "authorization") {
+      entries.push({ label: "Work authorization", value: pendingAuthorizationValue(block.patch) });
+    } else if (block.kind === "company_add" && block.payload?.name) {
+      entries.push({ label: "Company", value: block.payload.name });
+    } else if (block.kind === "evidence_claim" && block.payload?.claim) {
+      entries.push({ label: "Evidence", value: block.payload.claim });
+    }
+  }
+  const seen = new Set();
+  return entries.filter((entry) => {
+    const key = `${entry.label}\u0000${entry.value}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function PendingNotes({ blocks }) {
+  const entries = pendingNoteEntries(blocks);
+  if (!entries.length) return null;
+  return (
+    <section className="file-pane__pending" aria-label="Details awaiting confirmation">
+      <span className="file-pane__pending-title">WAITING FOR YOUR CONFIRMATION</span>
+      <dl className="file-pane__pending-list">
+        {entries.map((entry) => (
+          <div className="file-pane__pending-item" key={`${entry.label}-${entry.value}`}>
+            <dt>{entry.label}</dt>
+            <dd>{entry.value}</dd>
+          </div>
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+function CandidateSnapshot({ state, hasPending = false, hideEmpty = false }) {
+  const profile = state?.data?.profile ?? {};
+  const candidate = profile.candidate ?? {};
+  const location = candidate.location || profile.location?.home;
+  const facts = [candidate.email, candidate.phone, location].filter(Boolean);
+  const links = [
+    ["LinkedIn", candidate.linkedin],
+    ["GitHub", candidate.github],
+    ["Portfolio", candidate.portfolio],
+  ].filter(([, href]) => href);
+  const hasDetails = !!(candidate.full_name || candidate.headline || facts.length || links.length);
+
+  if (!hasDetails) {
+    if (hideEmpty) return null;
+    return (
+      <div className="file-pane__candidate file-pane__candidate--empty">
+        {hasPending
+          ? "Confirm these notes to add them to your saved profile."
+          : "Your details will fill in here as you talk to Paul."}
+      </div>
+    );
+  }
+
+  return (
+    <section className="file-pane__candidate" aria-label="Candidate profile">
+      {candidate.full_name ? (
+        <strong className="file-pane__candidate-name">{candidate.full_name}</strong>
+      ) : null}
+      {candidate.headline ? (
+        <span className="file-pane__candidate-headline">{candidate.headline}</span>
+      ) : null}
+      {facts.length ? (
+        <div className="file-pane__candidate-facts">
+          {facts.map((fact) => (
+            <span key={fact}>{fact}</span>
+          ))}
+        </div>
+      ) : null}
+      {links.length ? (
+        <div className="file-pane__candidate-links">
+          {links.map(([label, href]) => (
+            <a key={label} href={href} target="_blank" rel="noreferrer">
+              {label}
+            </a>
+          ))}
+        </div>
+      ) : null}
+    </section>
   );
 }
 
@@ -224,9 +353,10 @@ function EditorActions({ onCancel, saving, saveLabel = "Save" }) {
   );
 }
 
-function ResumeRowEditor({ onCommit, onCancel }) {
+function ResumeRowEditor({ state, onCommit, onCancel }) {
   const [text, setText] = useState("");
   const [saving, setSaving] = useState(false);
+  const claimCount = state?.data?.evidence?.claims?.length ?? 0;
 
   async function handleSubmit(e) {
     e.preventDefault();
@@ -243,8 +373,27 @@ function ResumeRowEditor({ onCommit, onCancel }) {
 
   return (
     <form onSubmit={handleSubmit} className="file-pane__editor">
-      <span className="field__hint">Paste résumé text — or drop a file into the bar below.</span>
-      <TextArea value={text} onChange={setText} rows={5} placeholder="Paste résumé text here…" />
+      {state?.sourceResumePresent ? (
+        <span className="file-pane__resume-status">
+          Uploaded résumé parsed into your profile and {claimCount} evidence claim
+          {claimCount === 1 ? "" : "s"}.
+        </span>
+      ) : null}
+      <span className="field__hint">
+        {state?.sourceResumePresent
+          ? "Paste new text to replace the uploaded résumé."
+          : "Paste résumé text, or attach a file in the bar below."}
+      </span>
+      <TextArea
+        value={text}
+        onChange={setText}
+        rows={5}
+        placeholder={
+          state?.sourceResumePresent
+            ? "Paste replacement résumé text here…"
+            : "Paste résumé text here…"
+        }
+      />
       <EditorActions onCancel={onCancel} saving={saving} />
     </form>
   );
@@ -475,23 +624,25 @@ function EvidenceRowEditor({ state, onCommit, onCancel }) {
 
 function QuickFactsRowEditor({ state, onCommit, onCancel }) {
   const location = state?.data?.profile?.location ?? {};
+  const savedMinimumBase = Number(state?.data?.profile?.compensation?.minimum_base);
   const [home, setHome] = useState(location.home || "");
-  const [remote, setRemote] = useState(!!location.remote);
-  // `remote` defaults to true even for a candidate who has answered nothing
-  // (candidate-defaults.mjs's own ambient recall-maximizing default — see
-  // that module's header comment) — unlike hybrid/onsite below, whose false
-  // default is unambiguous, a bare `remote: true` is never proof the
-  // candidate confirmed anything. Track whether the candidate actually
-  // touched this toggle during THIS edit, so a save that only changes the
-  // home city doesn't silently persist the untouched default as though it
-  // were a confirmed answer.
-  const [remoteTouched, setRemoteTouched] = useState(false);
+  const [remote, setRemote] = useState(
+    locationModePreferencesConfirmed(state) && !!location.remote
+  );
   const [hybrid, setHybrid] = useState(!!location.hybrid);
   const [onsite, setOnsite] = useState(!!location.onsite);
+  const [minimumBase, setMinimumBase] = useState(
+    Number.isFinite(savedMinimumBase) && savedMinimumBase > 0 ? savedMinimumBase : null
+  );
+  const [validationError, setValidationError] = useState("");
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit(e) {
     e.preventDefault();
+    if (!Number.isFinite(Number(minimumBase)) || Number(minimumBase) <= 0) {
+      setValidationError("Add the lowest base salary you would accept.");
+      return;
+    }
     setSaving(true);
     try {
       await onCommit({
@@ -506,10 +657,12 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
         patch: {
           location: {
             home,
+            remote,
             hybrid,
             onsite,
-            ...(remoteTouched ? { remote } : {}),
+            mode_preferences_confirmed: true,
           },
+          compensation: { minimum_base: Number(minimumBase) },
         },
         summary: "quick facts",
       });
@@ -524,14 +677,7 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
       <TextField value={home} onChange={setHome} placeholder="City, State" />
       <div className="file-pane__toggle-row">
         <label className="file-pane__toggle">
-          <input
-            type="checkbox"
-            checked={remote}
-            onChange={(e) => {
-              setRemoteTouched(true);
-              setRemote(e.target.checked);
-            }}
-          />
+          <input type="checkbox" checked={remote} onChange={(e) => setRemote(e.target.checked)} />
           Remote
         </label>
         <label className="file-pane__toggle">
@@ -543,6 +689,21 @@ function QuickFactsRowEditor({ state, onCommit, onCancel }) {
           On-site
         </label>
       </div>
+      <span className="field__hint">
+        Minimum base salary — your walk-away number, not your current pay.
+      </span>
+      <NumberField
+        value={minimumBase}
+        onChange={(value) => {
+          setMinimumBase(value);
+          if (Number(value) > 0) setValidationError("");
+        }}
+        min={1000}
+        step={1000}
+        placeholder="e.g. 160000"
+        aria-label="Minimum base salary"
+      />
+      {validationError ? <span className="field__error">{validationError}</span> : null}
       <EditorActions onCancel={onCancel} saving={saving} />
     </form>
   );

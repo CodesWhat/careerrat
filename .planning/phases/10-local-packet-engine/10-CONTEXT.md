@@ -62,7 +62,7 @@ The user delegated implementation mechanics to planning and execution: exact rou
 - `docs/ARCHITECTURE.md` - Local API/DB layer, bounded AI layer, retained full skill runtime boundary, and apply-cycle skill contracts.
 
 ### Prior Phase Decisions
-- `.planning/phases/ROL-API-06-canonical-db-app-shell/06-CONTEXT.md` - `/app` plus SQLite is canonical; generated tracker/activity files are export/debug only.
+- `.planning/phases/06-canonical-db-app-shell/06-CONTEXT.md` - `/app` plus SQLite is canonical; generated tracker/activity files are export/debug only.
 - `.planning/phases/07-quick-onboarding-and-auto-sourcing/07-CONTEXT.md` - Search starts early; gate/apply readiness stays stricter than search readiness; deterministic local work must not hide skill runtime.
 - `.planning/phases/08-deep-ingest-lane/08-CONTEXT.md` - Candidate evidence, stories, honesty boundaries, writing voice, and role signals are DB-backed, proposal-first, and reviewed before becoming reusable facts.
 - `.planning/phases/09-public-company-intelligence-and-scanner-cascade/09-CONTEXT.md` - Public company/job-board intelligence is separate from private candidate data and may support packet context without leaking private state.

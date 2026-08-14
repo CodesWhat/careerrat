@@ -553,7 +553,7 @@ export async function extractResumeAi(file) {
 **Readiness row pattern** (lines 16-37, 78-92):
 ```javascript
 const READINESS_ROWS = [
-  { key: "search_ready", label: "Search", readyDetail: "Rolester can start sourcing roles now." },
+  { key: "search_ready", label: "Search", readyDetail: "CareerRat can start sourcing roles now." },
   { key: "gate_ready", label: "Gate", readyDetail: "Jobs can be evaluated without guessing." },
   { key: "apply_ready", label: "Apply", readyDetail: "Tailoring and application flows are unlocked." },
   { key: "deep_ingest_complete", label: "Deep ingest", readyDetail: "Optional coaching context is complete." },
@@ -779,7 +779,7 @@ export function Card({ title, actions, children, className = "" }) {
 **Temp DB verb test pattern** (`tests/db-source-config.test.mjs` lines 17-28, 30-60):
 ```javascript
 function tempRepo() {
-  const repoRoot = mkdtempSync(join(tmpdir(), "rolester-db-source-config-"));
+  const repoRoot = mkdtempSync(join(tmpdir(), "careerrat-db-source-config-"));
   cleanupRoots.push(repoRoot);
   return repoRoot;
 }
@@ -917,7 +917,7 @@ describe("buildReadinessRows", () => {
       key: "search_ready",
       label: "Search",
       status: "Ready",
-      detail: "Rolester can start sourcing roles now.",
+      detail: "CareerRat can start sourcing roles now.",
       ready: true,
     });
   });

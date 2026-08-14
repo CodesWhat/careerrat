@@ -9,11 +9,11 @@
 // same discipline as PacketDocumentsCard's Generate/Export — nothing here
 // ever auto-fires from a prop change. The dossier's markdown is rendered as
 // plain preformatted text (not dangerouslySetInnerHTML): the build/read
-// routes only ever return raw markdown, never server-rendered HTML (unlike
-// the packet-artifact/job-description routes), so there is nothing safe to
-// inject — React's own text-child escaping plus CSS white-space handles it.
+// routes retain raw markdown as the persisted source and return a safely
+// escaped server-rendered HTML view for the full-page reader. The compact
+// drawer card keeps its plain preformatted source treatment.
 import { useCallback, useEffect, useState } from "react";
-import { Button } from "../components/Button.jsx";
+import { Button, IconButton } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import { buildInterviewDossier, getInterviewDossier } from "../lib/api.js";
@@ -30,7 +30,7 @@ function formatGeneratedAt(iso) {
   return d.toLocaleString();
 }
 
-export function InterviewDossierCard({ applicationId }) {
+export function InterviewDossierCard({ applicationId, fullPage = false, onClose }) {
   const [dossier, setDossier] = useState(null);
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -61,6 +61,15 @@ export function InterviewDossierCard({ applicationId }) {
     loadDossier();
   }, [loadDossier]);
 
+  useEffect(() => {
+    if (!fullPage || !onClose) return undefined;
+    function handleKeyDown(event) {
+      if (event.key === "Escape") onClose();
+    }
+    globalThis.addEventListener?.("keydown", handleKeyDown);
+    return () => globalThis.removeEventListener?.("keydown", handleKeyDown);
+  }, [fullPage, onClose]);
+
   async function handleBuild() {
     setBusy(true);
     setError(null);
@@ -74,10 +83,8 @@ export function InterviewDossierCard({ applicationId }) {
     }
   }
 
-  if (!loaded) return null;
-
-  return (
-    <Card title="Interview prep dossier">
+  const content = loaded ? (
+    <>
       {error ? (
         <InlineAlert message={error.message} action={error.action} detail={error.detail} />
       ) : null}
@@ -87,7 +94,15 @@ export function InterviewDossierCard({ applicationId }) {
             {dossier.round ? `${dossier.round} · ` : ""}
             {formatGeneratedAt(dossier.generatedAt) || "Prepared"}
           </p>
-          <div className="job-drawer__dossier">{dossier.markdown}</div>
+          {fullPage && dossier.html ? (
+            <div
+              className="packet-viewer__markdown interview-dossier-viewer__document"
+              // biome-ignore lint/security/noDangerouslySetInnerHtml: markdownToHtml escapes the persisted dossier before the API returns it
+              dangerouslySetInnerHTML={{ __html: dossier.html }}
+            />
+          ) : (
+            <div className="job-drawer__dossier">{dossier.markdown}</div>
+          )}
           <Button variant="secondary" disabled={busy} onClick={handleBuild}>
             {busy ? "Rebuilding…" : "Rebuild"}
           </Button>
@@ -104,6 +119,41 @@ export function InterviewDossierCard({ applicationId }) {
           </Button>
         </>
       )}
-    </Card>
+    </>
+  ) : (
+    <p className="field__hint">Loading interview dossier…</p>
   );
+
+  if (fullPage) {
+    return (
+      // biome-ignore lint/a11y/noStaticElementInteractions: the backdrop is a mouse convenience; the dialog has a labeled close control and Escape handling
+      // biome-ignore lint/a11y/useKeyWithClickEvents: the backdrop itself is intentionally mouse-only
+      <div className="packet-viewer-overlay" onClick={onClose}>
+        {/* biome-ignore lint/a11y/useKeyWithClickEvents: stops backdrop click propagation; this isn't an interactive control */}
+        <div
+          className="packet-viewer interview-dossier-viewer"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Interview prep dossier"
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="packet-viewer__toolbar">
+            <strong className="packet-viewer__title">
+              {dossier?.title || "Interview prep dossier"}
+            </strong>
+            <IconButton autoFocus label="Close" className="packet-viewer__close" onClick={onClose}>
+              ×
+            </IconButton>
+          </div>
+          <div className="packet-viewer__stage">
+            <div className="interview-dossier-viewer__body">{content}</div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!loaded) return null;
+
+  return <Card title="Interview prep dossier">{content}</Card>;
 }

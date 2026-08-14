@@ -6,7 +6,7 @@
 <domain>
 ## Phase Boundary
 
-Phase 1 produces the implementation map for converting Rolester discovery from whole-skill execution into cheaper app/runtime primitives. It does not implement the new discovery runtime yet. It must define the decomposition artifact, the `discover-companies` target contract, the sourcing cascade, and the routing policy for when Rolester uses deterministic code, bounded AI, external tools, or the retained full skill runtime.
+Phase 1 produces the implementation map for converting CareerRat discovery from whole-skill execution into cheaper app/runtime primitives. It does not implement the new discovery runtime yet. It must define the decomposition artifact, the `discover-companies` target contract, the sourcing cascade, and the routing policy for when CareerRat uses deterministic code, bounded AI, external tools, or the retained full skill runtime.
 
 </domain>
 
@@ -38,7 +38,7 @@ Phase 1 produces the implementation map for converting Rolester discovery from w
 - **D-14:** The current "supported ATS only" wording in roadmap/requirements is too narrow for the user's clarified direction. Phase 1 should explicitly reconcile that by separating "promote to supported ATS scanner" from "cache unsupported/custom public career pages for generic extraction."
 
 ### the agent's Discretion
-The agent may choose exact artifact format, route names, schema names, and cache table shape, provided the plan preserves the cascade above, keeps writes confirm-first where current skills require it, and references existing Rolester modules rather than inventing parallel systems.
+The agent may choose exact artifact format, route names, schema names, and cache table shape, provided the plan preserves the cascade above, keeps writes confirm-first where current skills require it, and references existing CareerRat modules rather than inventing parallel systems.
 
 </decisions>
 
@@ -53,7 +53,7 @@ The agent may choose exact artifact format, route names, schema names, and cache
 - `.planning/ROADMAP.md` - Phase boundaries and success criteria for Decomposition Map and Company Discovery API.
 - `.planning/config.json` - Current GSD quality/automation settings.
 
-### Rolester Operating Contract
+### CareerRat Operating Contract
 - `AGENTS.md` - Data write contracts, JD-body capture invariant, browser automation deferral, and job-search workflow routing.
 - `docs/ARCHITECTURE.md` - Existing skill/script/source layer split and provider adapter expectations.
 - `docs/SOURCES.md` - Source-layer guidance referenced by architecture docs.
@@ -89,7 +89,7 @@ The agent may choose exact artifact format, route names, schema names, and cache
 - Playwright is already in dev dependencies, so public JS-rendered career page extraction can be planned without adding a new browser package.
 
 ### Established Patterns
-- DB workspaces use `rolester data`/DB verbs as source of truth; `workspace/tracker.json` is generated compatibility output.
+- DB workspaces use `careerrat data`/DB verbs as source of truth; `workspace/tracker.json` is generated compatibility output.
 - Confirm-first writes are part of `discover-companies` and `research-boards`; high-confidence auto-add can be a later explicit mode, not the default assumption.
 - Full skill runtime exists and should remain as a fallback for long-running, tool-heavy, or user-led workflows.
 - Source and scan code is domain-neutral; new provider/crawler adapters should not hardcode real employer assumptions.

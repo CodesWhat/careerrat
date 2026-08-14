@@ -136,6 +136,20 @@ function seedStandardFixture(repoRoot) {
       role: "Staff Engineer",
       status: "reviewed-hold",
       artifacts: {},
+      packetManifest: {
+        applicationId: "app-1",
+        generatedAt: "2026-07-06T14:00:00Z",
+        uploadReady: false,
+        status: "reviewable",
+        gapCount: 1,
+        gaps: [
+          {
+            kind: "answers",
+            message: "answers artifact skipped — no application questions captured yet",
+          },
+        ],
+        artifacts: {},
+      },
     },
     {
       id: "app-2",
@@ -329,6 +343,17 @@ test("GET /api/packet?id=: missing artifacts serve as null (never generated)", a
     assert.equal(body.artifacts.resume, null);
     assert.equal(body.artifacts.coverLetter, null);
     assert.equal(body.artifacts.answers, null);
+    assert.deepEqual(body.packet, {
+      uploadReady: false,
+      status: "reviewable",
+      gapCount: 1,
+      gaps: [
+        {
+          kind: "answers",
+          message: "answers artifact skipped — no application questions captured yet",
+        },
+      ],
+    });
   } finally {
     await closeServer(server);
   }

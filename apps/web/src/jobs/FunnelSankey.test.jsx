@@ -51,22 +51,22 @@ const sankey = {
       filter: "stale",
     },
     {
-      id: "round-1",
-      label: "1st round",
+      id: "technical",
+      label: "Technical",
       color: "#7FCBA6",
       count: 3,
       col: 2,
       order: 1,
-      filter: "round-1",
+      filter: "reached-technical",
     },
     {
-      id: "round-2",
-      label: "2nd round",
+      id: "hiring-manager",
+      label: "Hiring manager",
       color: "#5BC4A0",
       count: 1,
       col: 3,
       order: 2,
-      filter: "round-2",
+      filter: "reached-hiring-manager",
     },
     {
       id: "rejected",
@@ -114,28 +114,28 @@ const sankey = {
     },
     {
       from: "heardback",
-      to: "round-1",
+      to: "technical",
       count: 3,
       color: "#7FCBA6",
-      filter: "round-1",
+      filter: "reached-technical",
     },
     {
-      from: "round-1",
-      to: "round-2",
+      from: "heardback",
+      to: "hiring-manager",
       count: 1,
       color: "#5BC4A0",
-      filter: "round-2",
+      filter: "reached-hiring-manager",
     },
     {
-      from: "round-1",
+      from: "technical",
       to: "rejected",
       count: 2,
       color: "#CB5340",
       filter: "terminal",
-      examples: ["Delta Cloud · 1st round"],
+      examples: ["Delta Cloud · Technical"],
     },
     {
-      from: "round-2",
+      from: "hiring-manager",
       to: "accepted",
       count: 1,
       color: "#2F9E55",
@@ -154,7 +154,7 @@ const sankey = {
 };
 
 describe("FunnelSankey", () => {
-  it("renders the legacy Sankey nodes, links, counts, and numbered round depth", () => {
+  it("renders canonical semantic stages without numbered rounds", () => {
     const html = renderToStaticMarkup(<FunnelSankey sankey={sankey} />);
 
     expect(html).toContain("Jobs funnel");
@@ -163,12 +163,13 @@ describe("FunnelSankey", () => {
     expect(html).toContain("Awaiting response");
     expect(html).toContain("Heard back");
     expect(html).toContain("Going stale");
-    expect(html).toContain("1st round");
-    expect(html).toContain("2nd round");
+    expect(html).toContain("Technical");
+    expect(html).toContain("Hiring manager");
+    expect(html).not.toMatch(/\b(?:1st|2nd|3rd|4th) round\b/);
     expect(html).toContain("Rejected");
     expect(html).toContain("Accepted");
-    expect(html).toContain('data-sankey-link="heardback-round-1"');
-    expect(html).toContain('data-sankey-link="round-1-rejected"');
+    expect(html).toContain('data-sankey-link="heardback-technical"');
+    expect(html).toContain('data-sankey-link="technical-rejected"');
     expect(html).toContain("Beta Systems · Screen");
     expect(html).toContain("(3)");
     expect(html).toContain("(1)");
@@ -184,16 +185,20 @@ describe("FunnelSankey", () => {
   it("marks the active stage as selected and dims the rest when interactive", () => {
     const onSelectStage = vi.fn();
     const html = renderToStaticMarkup(
-      <FunnelSankey sankey={sankey} activeFilter="round-1" onSelectStage={onSelectStage} />
+      <FunnelSankey
+        sankey={sankey}
+        activeFilter="reached-technical"
+        onSelectStage={onSelectStage}
+      />
     );
 
-    const roundOneNode = html.match(/<g[^>]*data-sankey-node="round-1"[^>]*>/)?.[0];
+    const technicalNode = html.match(/<g[^>]*data-sankey-node="technical"[^>]*>/)?.[0];
     const coldNode = html.match(/<g[^>]*data-sankey-node="src-cold"[^>]*>/)?.[0];
-    const roundOneLink = html.match(/<path[^>]*data-sankey-link="heardback-round-1"[^>]*>/)?.[0];
+    const technicalLink = html.match(/<path[^>]*data-sankey-link="heardback-technical"[^>]*>/)?.[0];
 
-    expect(roundOneNode).toContain("is-active");
+    expect(technicalNode).toContain("is-active");
     expect(coldNode).toContain("is-dimmed");
-    expect(roundOneLink).toContain("is-active");
+    expect(technicalLink).toContain("is-active");
     expect(html).toContain('role="button"');
     expect(html).toContain('tabindex="0"');
   });

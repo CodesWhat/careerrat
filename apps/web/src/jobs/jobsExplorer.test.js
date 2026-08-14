@@ -44,7 +44,7 @@ function job(patch = {}) {
 }
 
 describe("jobsExplorer stage predicates", () => {
-  it("matches awaiting, heardback, terminal, stale, ghosted, and round filters", () => {
+  it("matches awaiting, heardback, terminal, stale, ghosted, and exact reached-stage filters", () => {
     expect(rowMatchesStage(job({ stage: "applied" }), "awaiting")).toBe(true);
     expect(rowMatchesStage(job({ stage: "screen" }), "awaiting")).toBe(false);
     expect(rowMatchesStage(job({ stage: "technical" }), "heardback")).toBe(true);
@@ -52,8 +52,14 @@ describe("jobsExplorer stage predicates", () => {
     expect(rowMatchesStage(job({ stage: "rejected", terminal: true }), "terminal")).toBe(true);
     expect(rowMatchesStage(job({ stale: true }), "stale")).toBe(true);
     expect(rowMatchesStage(job({ ghosted: true }), "ghosted")).toBe(true);
-    expect(rowMatchesStage(job({ roundsReached: 2, terminal: true }), "round-2")).toBe(true);
-    expect(rowMatchesStage(job({ roundsReached: 1 }), "round-2")).toBe(false);
+    expect(rowMatchesStage(job({ sankeyStage: "technical" }), "reached-technical")).toBe(true);
+    expect(
+      rowMatchesStage(
+        job({ stage: "rejected", terminal: true, sankeyStage: "hiring-manager" }),
+        "reached-hiring-manager"
+      )
+    ).toBe(true);
+    expect(rowMatchesStage(job({ sankeyStage: "screen" }), "reached-technical")).toBe(false);
   });
 
   it("matches source buckets and cumulative named stages from server fields", () => {

@@ -16,7 +16,7 @@ Final Phase 11 verification closed the runtime lockdown and desktop pilot releas
 |---|---:|---|
 | `node --test tests/app-default-runtime-guard.test.mjs tests/skill-runtime.test.mjs tests/skill-run-route.test.mjs tests/chat-runtime.test.mjs tests/desktop-runtime.test.mjs tests/desktop-routing.test.mjs tests/desktop-smoke.test.mjs tests/desktop-package-resources.test.mjs tests/ai-env.test.mjs tests/db-migrations.test.mjs tests/desktop-docs-release.test.mjs tests/release-safety.test.mjs` | PASS | 133 tests, 131 pass, 2 skipped live Agent SDK integration tests, 0 fail. |
 | `npm run lint:placeholders` | PASS | `No unresolved placeholders found.` |
-| `npm run build` | PASS | Turbo build passed for `@rolester/web` and `website` from cache; no build failures. |
+| `npm run build` | PASS | Turbo build passed for `@careerrat/web` and `website` from cache; no build failures. |
 | `node --test tests/desktop-package-resources.test.mjs tests/release-safety.test.mjs` | PASS | 12 tests, 12 pass. Includes the package-resource regression for `desktop-runtime.mjs`. |
 | `npm test` | FAIL, unrelated | 1,789 tests, 1,779 pass, 4 skipped, 6 fail. Every failure is in `tests/deep-ingest-ai.test.mjs` for the existing Phase 08 missing deep-ingest proposal schema/modules/validators: `config/deep-ingest-proposal.schema.json`, `src/core/deep-ingest/proposals/evidence.mjs`, `src/core/deep-ingest/proposals/stories.mjs`, and `src/core/deep-ingest/validators/grounding.mjs`. No Phase 11 tests failed. |
 
@@ -38,46 +38,46 @@ desktop-smoke.mjs=true
 Build command:
 
 ```bash
-APPLE_KEYCHAIN_PROFILE=rolester-notary npm run desktop:dist
+APPLE_KEYCHAIN_PROFILE=careerrat-notary npm run desktop:dist
 ```
 
 Result:
 
 - PASS: `npm run app:build` completed before desktop staging.
 - PASS: desktop staging copied the runtime allowlist, mirrored `.agents/skills` to `.claude/skills`, and installed `@anthropic-ai/claude-agent-sdk` into the staged runtime.
-- PASS: electron-builder signed `apps/desktop/dist/mac-arm64/Rolester.app` with `Developer ID Application: Scott Benson (3524374A2S)`.
-- PASS: electron-builder notarized the app zip. Latest relevant notary history entry: `11b78ae9-385e-4ef0-b37f-27b892f47f41`, `Rolester.zip`, `Accepted`, `2026-07-06T17:34:37.426Z`.
-- PASS: output artifact exists at `apps/desktop/dist/Rolester-0.1.0-arm64.dmg`.
+- PASS: electron-builder signed `apps/desktop/dist/mac-arm64/CareerRat.app` with `Developer ID Application: Scott Benson (3524374A2S)`.
+- PASS: electron-builder notarized the app zip. Latest relevant notary history entry: `11b78ae9-385e-4ef0-b37f-27b892f47f41`, `CareerRat.zip`, `Accepted`, `2026-07-06T17:34:37.426Z`.
+- PASS: output artifact exists at `apps/desktop/dist/CareerRat-0.1.0-arm64.dmg`.
 
 App verification:
 
 | Command | Result |
 |---|---:|
-| `codesign --verify --deep --strict --verbose=2 apps/desktop/dist/mac-arm64/Rolester.app` | PASS: valid on disk; satisfies its Designated Requirement. |
-| `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/Rolester.app` | PASS: `Authority=Developer ID Application: Scott Benson (3524374A2S)`, `TeamIdentifier=3524374A2S`, hardened runtime flag present, `Notarization Ticket=stapled`. |
-| `xcrun stapler validate apps/desktop/dist/mac-arm64/Rolester.app` | PASS: validate action worked. |
-| `spctl --assess --type execute --verbose=4 apps/desktop/dist/mac-arm64/Rolester.app` | PASS: accepted, `source=Notarized Developer ID`. |
+| `codesign --verify --deep --strict --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: valid on disk; satisfies its Designated Requirement. |
+| `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: `Authority=Developer ID Application: Scott Benson (3524374A2S)`, `TeamIdentifier=3524374A2S`, hardened runtime flag present, `Notarization Ticket=stapled`. |
+| `xcrun stapler validate apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: validate action worked. |
+| `spctl --assess --type execute --verbose=4 apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: accepted, `source=Notarized Developer ID`. |
 
 DMG verification:
 
 Electron-builder notarized and stapled the app bundle, but the generated DMG did not initially have its own stapled ticket and Gatekeeper rejected it with `source=no usable signature`. The DMG was then signed and notarized explicitly:
 
 ```bash
-codesign --force --sign "Developer ID Application: Scott Benson (3524374A2S)" --timestamp apps/desktop/dist/Rolester-0.1.0-arm64.dmg
-xcrun notarytool submit apps/desktop/dist/Rolester-0.1.0-arm64.dmg --keychain-profile rolester-notary --wait --output-format json
-xcrun stapler staple apps/desktop/dist/Rolester-0.1.0-arm64.dmg
+codesign --force --sign "Developer ID Application: Scott Benson (3524374A2S)" --timestamp apps/desktop/dist/CareerRat-0.1.0-arm64.dmg
+xcrun notarytool submit apps/desktop/dist/CareerRat-0.1.0-arm64.dmg --keychain-profile careerrat-notary --wait --output-format json
+xcrun stapler staple apps/desktop/dist/CareerRat-0.1.0-arm64.dmg
 ```
 
 Final DMG evidence:
 
 | Command | Result |
 |---|---:|
-| `codesign --verify --verbose=2 apps/desktop/dist/Rolester-0.1.0-arm64.dmg` | PASS: valid on disk; satisfies its Designated Requirement. |
-| `xcrun notarytool submit ... --wait --output-format json` | PASS: `Accepted`, id `bfc42d9c-6536-4ead-b8bc-314f13ac73c3`, `Rolester-0.1.0-arm64.dmg`, `2026-07-06T17:37:51.785Z`. |
-| `xcrun stapler staple apps/desktop/dist/Rolester-0.1.0-arm64.dmg` | PASS: staple and validate action worked. |
-| `xcrun stapler validate apps/desktop/dist/Rolester-0.1.0-arm64.dmg` | PASS: validate action worked. |
-| `spctl --assess --type open --context context:primary-signature --verbose=4 apps/desktop/dist/Rolester-0.1.0-arm64.dmg` | PASS: accepted, `source=Notarized Developer ID`. |
-| `codesign -dv --verbose=2 apps/desktop/dist/Rolester-0.1.0-arm64.dmg` | PASS: `Authority=Developer ID Application: Scott Benson (3524374A2S)`, `TeamIdentifier=3524374A2S`, `Notarization Ticket=stapled`. |
+| `codesign --verify --verbose=2 apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: valid on disk; satisfies its Designated Requirement. |
+| `xcrun notarytool submit ... --wait --output-format json` | PASS: `Accepted`, id `bfc42d9c-6536-4ead-b8bc-314f13ac73c3`, `CareerRat-0.1.0-arm64.dmg`, `2026-07-06T17:37:51.785Z`. |
+| `xcrun stapler staple apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: staple and validate action worked. |
+| `xcrun stapler validate apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: validate action worked. |
+| `spctl --assess --type open --context context:primary-signature --verbose=4 apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: accepted, `source=Notarized Developer ID`. |
+| `codesign -dv --verbose=2 apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: `Authority=Developer ID Application: Scott Benson (3524374A2S)`, `TeamIdentifier=3524374A2S`, `Notarization Ticket=stapled`. |
 
 Generated release artifacts remain ignored and untracked: `apps/desktop/dist/` and `apps/desktop/staging/`.
 
@@ -86,7 +86,7 @@ Generated release artifacts remain ignored and untracked: `apps/desktop/dist/` a
 Fresh workspace smoke:
 
 ```bash
-apps/desktop/dist/mac-arm64/Rolester.app/Contents/MacOS/Rolester --user-data-dir=<FRESH_USER_DATA> --smoke
+apps/desktop/dist/mac-arm64/CareerRat.app/Contents/MacOS/CareerRat --user-data-dir=<FRESH_USER_DATA> --smoke
 ```
 
 Result:
@@ -99,7 +99,7 @@ Result:
 Existing workspace smoke:
 
 ```bash
-apps/desktop/dist/mac-arm64/Rolester.app/Contents/MacOS/Rolester --user-data-dir=<EXISTING_USER_DATA> --smoke
+apps/desktop/dist/mac-arm64/CareerRat.app/Contents/MacOS/CareerRat --user-data-dir=<EXISTING_USER_DATA> --smoke
 ```
 
 Setup:
@@ -113,12 +113,12 @@ Result:
 - PASS: output included `SMOKE OK`.
 - Existing-route behavior is pinned by `tests/desktop-routing.test.mjs`: candidate setup selects `/app`.
 
-## Packaged ROLESTER_HOME Data Evidence
+## Packaged CAREERRAT_HOME Data Evidence
 
-The packaged runtime source under `Rolester.app/Contents/Resources/rolester` was imported with `ROLESTER_HOME=<USER_DATA>/data`.
+The packaged runtime source under `CareerRat.app/Contents/Resources/careerrat` was imported with `CAREERRAT_HOME=<USER_DATA>/data`.
 
 ```text
-db.path=<USER_DATA>/data/db/rolester.db
+db.path=<USER_DATA>/data/db/careerrat.db
 db.user_version=9
 db.expected_latest=9
 db.migration_count=9

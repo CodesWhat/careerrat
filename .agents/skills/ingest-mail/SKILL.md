@@ -7,7 +7,7 @@ tier_2_inputs: [matched-message full bodies]
 
 # ingest-mail
 
-> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+re-render, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
+> **Runs under AGENTS.md.** These contracts bind without being restated here: Privacy Invariant (`current_base` never outbound), Honesty Firewall, Placeholder/Bracket Ban, Gate Write-back, Domain-Neutral Rule, Browser Automation Contract, Activity Pulse logging, Tracker verify+snapshot, and Sent-Clears-Draft. Inline reminders at point-of-use are intentional; standalone restatements point back to the relevant AGENTS.md section.
 
 ## STEP 0 — SOURCE + OPT-IN GATE
 
@@ -371,7 +371,7 @@ Activity Pulse.
 exists, update only `lastRunAt`. If no such entry exists, insert the full
 object. Write the change directly to `workspace/tracker.json`.
 
-## STEP 10 — VERIFY + RE-RENDER
+## STEP 10 — VERIFY + SNAPSHOT
 
 **DB workspace:**
 
@@ -385,8 +385,8 @@ careerrat tracker --summary
 Both verify commands must exit 0. If either fails, do not proceed — show the
 validation errors and ask the user how to resolve them. Confirm new threads
 appear in the follow-ups surface and message counts incremented for the
-matched applications. Run `careerrat tracker` afterward only when a static
-snapshot is needed or the dev server is not running.
+matched applications. Run `careerrat tracker` afterward only when a recovery
+snapshot is useful.
 
 **Legacy workspace (no DB):**
 
@@ -400,7 +400,7 @@ careerrat tracker
 `careerrat tracker --verify` must exit 0. If it fails, do not proceed — show the
 validation errors and ask the user how to resolve them. Confirm new threads
 appear in the follow-ups surface and message counts incremented. The final
-command re-renders `workspace/tracker.html`.
+command creates a deduplicated recovery checkpoint under `workspace/.snapshots/`.
 
 Print a final ingest summary. The counts in this summary are agent-composed
 from the running tallies kept during Steps 5–8 — they are NOT parsed from

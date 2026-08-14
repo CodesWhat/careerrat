@@ -10,6 +10,7 @@ import {
   isAllowedExternalUrl,
   resolveDesktopRuntimePaths,
 } from "../apps/desktop/desktop-runtime.mjs";
+import { verifyDesktopRelease } from "../apps/desktop/release-verification.mjs";
 import { loadLocalAiEnv, writeLocalAiKey } from "../src/core/ai/ai-env.mjs";
 import { closeAll, dbFilePath, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
@@ -214,7 +215,10 @@ describe("desktop external URL decisions", () => {
   });
 
   it("sends off-origin HTTPS targets to the OS browser", () => {
-    for (const target of ["https://example.com/jobs", "https://accounts.google.com/o/oauth2/auth"]) {
+    for (const target of [
+      "https://example.com/jobs",
+      "https://accounts.google.com/o/oauth2/auth",
+    ]) {
       assert.deepEqual(decideExternalOpen({ baseUrl: "http://127.0.0.1:61234", target }), {
         action: "open-external",
         url: target,
@@ -273,5 +277,56 @@ describe("desktop preferred port selection", () => {
       }),
       0
     );
+  });
+});
+
+describe("desktop release verification", () => {
+  const artifacts = {
+    appPath: "/tmp/CareerRat.app",
+    dmgPath: "/tmp/CareerRat.dmg",
+  };
+
+  it("passes only when signing, stapling, and Gatekeeper checks all pass", () => {
+    const calls = [];
+    const result = verifyDesktopRelease({
+      ...artifacts,
+      run(command, args) {
+        calls.push([command, args]);
+        return { status: 0, stdout: "accepted\n", stderr: "" };
+      },
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.checks.length, 3);
+    assert.deepEqual(
+      calls.map(([command]) => command),
+      ["codesign", "xcrun", "spctl"]
+    );
+  });
+
+  it("fails the release when the DMG has no notarization ticket", () => {
+    const result = verifyDesktopRelease({
+      ...artifacts,
+      run(command) {
+        if (command === "xcrun") {
+          return {
+            status: 65,
+            stdout: "",
+            stderr: "The staple and validate action failed! Error 65.",
+          };
+        }
+        return { status: 0, stdout: "accepted\n", stderr: "" };
+      },
+    });
+
+    assert.equal(result.ok, false);
+    assert.deepEqual(
+      result.failures.map((failure) => failure.id),
+      ["notarization-ticket"]
+    );
+    assert.match(result.summary, /not signed, notarized, and Gatekeeper-ready/i);
+    assert.match(result.summary, /APPLE_API_KEY|APPLE_ID|APPLE_KEYCHAIN_PROFILE/);
+    assert.match(result.summary, /APPLE_API_ISSUER/);
+    assert.doesNotMatch(result.summary, /APPLE_API_KEY_ISSUER/);
   });
 });

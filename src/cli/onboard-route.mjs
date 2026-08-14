@@ -49,6 +49,7 @@
 // interview) owns it exclusively. The non-AI wizard seeds/validates candidate
 // files but never claims to have run the interview.
 
+import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
 import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
@@ -60,7 +61,6 @@ import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtim
 import { readUsageEvents, summarizeUsageEvents } from "../core/ai/usage-log.mjs";
 import { dbExists } from "../core/db/connection.mjs";
 import {
-  authorizationDeclared,
   candidateArtifactExists,
   candidateArtifactPut,
   candidateConfigGet,
@@ -87,6 +87,7 @@ import {
   looksLikeUsableResumeText,
   normalizeDocxResumeText,
 } from "../core/onboarding/resume-docx.mjs";
+import { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { cloneCandidateDefault, isCandidateDefault } from "../core/profile/candidate-defaults.mjs";
 import {
@@ -125,10 +126,20 @@ const ONBOARDING_DRAFT_PATH = ".internal/onboarding-draft.json";
 const ONBOARDING_DRAFT_MAX_STEP = 7;
 
 // POST /api/onboard/resume-ai's binary-upload cap (frozen M8 contract: 5MB)
-// and the extensions it accepts — PDF/image only; .txt/.md keep using the
-// existing zero-AI POST /api/onboard/resume above.
+// and the extensions it accepts. Uploaded text résumés use the same structured
+// extractor as PDF/image files; POST /api/onboard/resume remains the zero-AI
+// pasted-text fallback.
 const RESUME_AI_MAX_BYTES = 5 * 1024 * 1024;
-const RESUME_AI_ALLOWED_EXTENSIONS = new Set([".pdf", ".png", ".jpg", ".jpeg", ".webp"]);
+const RESUME_AI_ALLOWED_EXTENSIONS = new Set([
+  ".pdf",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".txt",
+  ".md",
+  ".markdown",
+]);
 const RESUME_DOCX_MAX_BYTES = 5 * 1024 * 1024;
 const RESUME_DOCX_ALLOWED_EXTENSIONS = new Set([".docx"]);
 const RESUME_EXTRACT_SCHEMA_PATH = "config/resume-extract.schema.json";
@@ -259,6 +270,12 @@ export function sanitizeUploadFilename(name) {
       .pop() || "";
   const cleaned = base.replace(/[^A-Za-z0-9._-]/g, "_").replace(/^\.+/, "");
   return cleaned || "upload";
+}
+
+function resumeUploadRelPath(name, bytes) {
+  const digest = createHash("sha256").update(bytes).digest("hex").slice(0, 16);
+  const stableNumericId = BigInt(`0x${digest}`).toString(10);
+  return `workspace/intake/resume-uploads/${stableNumericId}-${sanitizeUploadFilename(name)}`;
 }
 
 export function looksBinary(text) {
@@ -394,10 +411,65 @@ export function normalizeOnboardingDraft(raw = {}) {
     stepIndex,
     completedIndexes: normalizeOnboardingCompletedIndexes(raw?.completedIndexes),
     draftSeeds,
+    transcript: normalizeOnboardingTranscript(raw?.transcript),
     updatedAt: typeof raw?.updatedAt === "string" && raw.updatedAt.trim() ? raw.updatedAt : null,
     finishedAt:
       typeof raw?.finishedAt === "string" && raw.finishedAt.trim() ? raw.finishedAt : null,
   };
+}
+
+const ONBOARDING_TRANSCRIPT_ROLES = new Set(["user", "assistant", "receipt", "system-pill"]);
+const ONBOARDING_BLOCK_STATUSES = new Set(["pending", "saving", "resolved", "error"]);
+const ONBOARDING_BLOCK_KINDS = new Set([
+  "authorization",
+  "consent_mode",
+  "consent_capability",
+  "companies_suggest",
+  "company_add",
+  "candidate_patch",
+  "evidence_claim",
+]);
+
+function cloneJsonValue(value, fallback = null) {
+  try {
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeOnboardingTranscript(value) {
+  if (!Array.isArray(value)) return [];
+  return value.slice(-200).flatMap((message) => {
+    if (!isPlainObject(message) || !ONBOARDING_TRANSCRIPT_ROLES.has(message.role)) return [];
+    const normalized = {
+      role: message.role,
+      text: typeof message.text === "string" ? message.text.slice(0, 20000) : "",
+    };
+    if (message.role === "assistant" && Array.isArray(message.blocks)) {
+      normalized.blocks = message.blocks.slice(0, 20).flatMap((block) => {
+        if (!isPlainObject(block) || !ONBOARDING_BLOCK_KINDS.has(block.kind)) return [];
+        return [
+          {
+            kind: block.kind,
+            summary: typeof block.summary === "string" ? block.summary.slice(0, 500) : "",
+            patch: isPlainObject(block.patch) ? cloneJsonValue(block.patch, null) : null,
+            payload:
+              isPlainObject(block.payload) || typeof block.payload === "string"
+                ? cloneJsonValue(block.payload, null)
+                : null,
+            status: ONBOARDING_BLOCK_STATUSES.has(block.status) ? block.status : "pending",
+            ...(typeof block.resultSummary === "string"
+              ? { resultSummary: block.resultSummary.slice(0, 500) }
+              : {}),
+            ...(typeof block.error === "string" ? { error: block.error.slice(0, 500) } : {}),
+            ...(block.hidden === true ? { hidden: true } : {}),
+          },
+        ];
+      });
+    }
+    return [normalized];
+  });
 }
 
 function normalizeOnboardingCompletedIndexes(values = []) {
@@ -425,9 +497,10 @@ function writeOnboardingDraft(pathCtx, draft) {
   // finishedAt is a one-way completion flag consumed by desktop launch
   // routing; wizard autosaves omit it, and an omitted key must never wipe a
   // stamp that is already on disk.
-  const finishedAt =
-    draft?.finishedAt === undefined ? readOnboardingDraft(pathCtx).finishedAt : draft.finishedAt;
+  const current = readOnboardingDraft(pathCtx);
+  const finishedAt = draft?.finishedAt === undefined ? current.finishedAt : draft.finishedAt;
   const next = normalizeOnboardingDraft({
+    ...current,
     ...draft,
     finishedAt,
     updatedAt: new Date().toISOString(),
@@ -583,73 +656,7 @@ function dbSourceResumePresent(pathCtx) {
 // interview's own consent_mode/consent_capability confirm pills all still
 // read/write candidate/automation.yml exactly as before. It's just no
 // longer part of the SETUP CHECKLIST or setupProgress.complete.
-const SETUP_PROGRESS_ITEMS = [
-  "engine",
-  "resume",
-  "roles",
-  "companies",
-  "evidence",
-  "guardrails",
-  "quickFacts",
-  "authorization",
-];
-
-// "Value present" for authorization reuses candidate.mjs's own declared-split
-// (R3) — a profile.authorization sub-object with real boolean answers for
-// both fields, OR a recorded decline. Kept in sync with computeCandidateSetup's
-// gate/apply-readiness computation rather than re-derived here.
-function authorizationValuePresent(data = {}) {
-  return authorizationDeclared(data.profile || {}, data["form-defaults"] || {});
-}
-
-// "Value present" for resume = a source résumé was saved, OR the candidate
-// told the interview they don't have one (same declined_fields mechanism as
-// authorization). Without the second branch a résumé-less candidate can
-// never reach 8 of 8, so setup never completes for them — and "I don't have
-// a résumé" is a supported way to start, not a failure state.
-function resumeValuePresent(data = {}, sourceResumePresent = false) {
-  if (sourceResumePresent) return true;
-  return !!data["form-defaults"]?.declined_fields?.resume;
-}
-
-export function computeSetupProgress({
-  data = {},
-  sourceResumePresent = false,
-  keyConfigured = false,
-} = {}) {
-  const targeting = data.targeting || {};
-  const profile = data.profile || {};
-  const profileLocation = profile.location || {};
-
-  const done = {
-    engine: !!keyConfigured,
-    resume: resumeValuePresent(data, sourceResumePresent),
-    roles: (targeting.role_buckets ?? []).some((b) => (b?.titles ?? []).length > 0),
-    companies: (targeting.tracked_companies ?? []).length > 0,
-    evidence: (data.evidence?.claims ?? []).length > 0,
-    guardrails: (targeting.cut_signals ?? []).length > 0,
-    // `remote` deliberately does NOT count as evidence here: unlike hybrid/
-    // onsite (which default false, so `true` is unambiguous), DEFAULTS.
-    // profile.location.remote defaults to true for the scanning/scoring
-    // subsystem's own recall-maximizing purposes (see candidate-defaults.mjs)
-    // — reading it here would flip quickFacts "done" for a candidate who
-    // never touched their location at all.
-    quickFacts:
-      !!String(profileLocation.home || "").trim() ||
-      !!profileLocation.hybrid ||
-      !!profileLocation.onsite ||
-      (Array.isArray(profileLocation.relocation) && profileLocation.relocation.length > 0),
-    authorization: authorizationValuePresent(data),
-  };
-
-  const completedCount = SETUP_PROGRESS_ITEMS.filter((key) => done[key]).length;
-  return {
-    items: SETUP_PROGRESS_ITEMS.map((key) => ({ key, done: done[key] })),
-    completedCount,
-    total: SETUP_PROGRESS_ITEMS.length,
-    complete: completedCount === SETUP_PROGRESS_ITEMS.length,
-  };
-}
+export { computeSetupProgress } from "../core/onboarding/setup-progress.mjs";
 
 // Same self-heal-on-read as search-route.mjs's GET /api/search/sources (see
 // healSearchSourceConfig's header comment in first-search-run.mjs) — this is
@@ -1403,10 +1410,11 @@ export function mountOnboardRoutes({
       return;
     }
 
-    const savedRelPath = `workspace/intake/resume-uploads/${Date.now()}-${sanitizeUploadFilename(name)}`;
+    const savedRelPath = resumeUploadRelPath(name, bytes);
     const savedPath = userPath(pathCtx, savedRelPath);
     mkdirSync(dirname(savedPath), { recursive: true });
-    writeFileSync(savedPath, bytes);
+    const reused = existsSync(savedPath);
+    if (!reused) writeFileSync(savedPath, bytes);
 
     let text = "";
     let usable = false;
@@ -1430,6 +1438,7 @@ export function mountOnboardRoutes({
         error:
           "We could not read usable text from that DOCX. The original file was saved; paste text or upload PDF, TXT, or Markdown.",
         savedPath: savedRelPath,
+        reused,
         guidance: "Paste text or upload PDF, TXT, or Markdown.",
       });
       return;
@@ -1496,6 +1505,7 @@ export function mountOnboardRoutes({
             source: "docx",
             extraction: "ai",
             savedPath: savedRelPath,
+            reused,
             ...(aiTargetingSeed?.role_buckets?.length ? { targetingSeed: aiTargetingSeed } : {}),
           });
           return;
@@ -1550,6 +1560,7 @@ export function mountOnboardRoutes({
       source: "docx",
       extraction: "local",
       savedPath: savedRelPath,
+      reused,
       ...(targetingSeed?.role_buckets?.length ? { targetingSeed } : {}),
     });
   });
@@ -1567,8 +1578,8 @@ export function mountOnboardRoutes({
         status: 400,
         body: {
           error:
-            `unsupported file type "${ext || name}" — resume-ai accepts PDF/image uploads only ` +
-            "(.pdf .png .jpg .jpeg .webp); .txt/.md resumes go through POST /api/onboard/resume",
+            `unsupported file type "${ext || name}" — resume-ai accepts PDF, image, or text uploads ` +
+            "(.pdf .png .jpg .jpeg .webp .txt .md .markdown)",
         },
       };
     }
@@ -1583,14 +1594,15 @@ export function mountOnboardRoutes({
       return { ok: false, status: 400, body: { error: "request body is empty" } };
     }
 
-    const savedRelPath = `workspace/intake/resume-uploads/${Date.now()}-${sanitizeUploadFilename(name)}`;
+    const savedRelPath = resumeUploadRelPath(name, bytes);
     const savedPath = userPath(pathCtx, savedRelPath);
     mkdirSync(dirname(savedPath), { recursive: true });
+    const reused = existsSync(savedPath);
     // Raw bytes (a PDF/image) — never atomicWriteFile, which hardcodes utf8
     // and would corrupt binary data.
-    writeFileSync(savedPath, bytes);
+    if (!reused) writeFileSync(savedPath, bytes);
 
-    return { ok: true, savedRelPath, savedPath };
+    return { ok: true, savedRelPath, savedPath, reused };
   }
 
   // -------------------------------------------------------------------------
@@ -1622,7 +1634,7 @@ export function mountOnboardRoutes({
       sendJson(res, upload.status, upload.body);
       return;
     }
-    const { savedRelPath, savedPath } = upload;
+    const { savedRelPath, savedPath, reused } = upload;
 
     const outcome = await runResumeExtractBounded({ savedPath });
 
@@ -1674,6 +1686,7 @@ export function mountOnboardRoutes({
         targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
         source: "ai",
         savedPath: savedRelPath,
+        reused,
       },
     });
   });
@@ -1721,7 +1734,7 @@ export function mountOnboardRoutes({
       sendJson(res, upload.status, upload.body);
       return;
     }
-    const { savedRelPath, savedPath } = upload;
+    const { savedRelPath, savedPath, reused } = upload;
 
     // Client-disconnect guard: `res.on("close")`, not `req.on("close")` —
     // see skill-run-route.mjs's own comment on this exact choice (req's own
@@ -1750,7 +1763,7 @@ export function mountOnboardRoutes({
       }
     }
 
-    emit({ type: "saved", savedPath: savedRelPath });
+    emit({ type: "saved", savedPath: savedRelPath, reused });
 
     const heartbeat = setInterval(() => {
       if (closed) return;
@@ -1815,6 +1828,7 @@ export function mountOnboardRoutes({
           targetingSeed: normalizeTargetingSeed(extracted.targeting_suggestions),
           source: "ai",
           savedPath: savedRelPath,
+          reused,
         },
       });
     } catch {
@@ -1878,7 +1892,7 @@ export function mountOnboardRoutes({
       let rawText = "";
       // Reset every attempt — "at most once per attempt".
       let emittedThinking = false;
-      await runSkillStream({
+      const runtimeResult = await runSkillStream({
         skill: "resume-extract",
         action: RESUME_AI_LABELS.action,
         operation: RESUME_AI_LABELS.operation,
@@ -1924,6 +1938,11 @@ export function mountOnboardRoutes({
           }
         },
       });
+      if (runtimeResult?.ok === false) {
+        const error = new Error(runtimeResult.error || "The selected AI runtime failed.");
+        error.code = runtimeResult.code || "AI_PROVIDER_FAILED";
+        throw error;
+      }
       return rawText;
     }
 

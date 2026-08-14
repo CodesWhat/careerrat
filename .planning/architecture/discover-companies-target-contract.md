@@ -37,7 +37,7 @@ work remain v2 or full-skill/manual fallback territory.
 
 ## Inputs
 
-The future pipeline receives inputs from existing Rolester state and skill
+The future pipeline receives inputs from existing CareerRat state and skill
 contracts:
 
 - Candidate context: role families, keep/cut signals, excluded companies,
@@ -261,7 +261,7 @@ as confirmed.
 Supported ATS promotion:
 
 - Write confirmed supported ATS entries through the existing company/source
-  config owner: `rolester companies` and `companyAtsUpsert()` in
+  config owner: `careerrat companies` and `companyAtsUpsert()` in
   `src/core/db/verbs/source-config.mjs`.
 - Supported ATS promotion feeds `sourced-scan` tracked companies and can be
   scanned by `runSourcedScan()` and `src/core/scoring/sourced-scanner.mjs`.

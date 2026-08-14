@@ -353,7 +353,7 @@ For Phase 05, add a guard that reads all three docs and verifies these stable ph
 | Explicit chat handoff | `/api/discovery/quick-start`, `/api/discovery/next`, and `/api/chat/*` |
 | Retained full runtime | `POST /api/skill/run` and `allowlisted` |
 | No hidden fallback | phrase equivalent to local errors do not silently start chat/full runtime |
-| Confirmed writes | `source config`, `companyAtsUpsert` or `rolester companies`, and confirm-first wording |
+| Confirmed writes | `source config`, `companyAtsUpsert` or `careerrat companies`, and confirm-first wording |
 
 Use normalized substring or section-scoped regex assertions. Avoid asserting whole paragraphs byte-for-byte; the repo already uses section/phrase checks to avoid brittle docs tests.
 

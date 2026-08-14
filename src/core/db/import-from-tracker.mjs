@@ -315,7 +315,11 @@ export function importFromTracker({ repoRoot, env, sourceDir, rebaseToday } = {}
   const sourced = Array.isArray(data.sourced) ? data.sourced : [];
   const sources = Array.isArray(data.sources) ? data.sources : [];
   const communications = Array.isArray(data.communications) ? data.communications : [];
-  const activityEvents = shiftTreeByMs(readActivityLines(activityPath), rebase?.deltaMs || 0);
+  const activityEvents = shiftTreeByMs(
+    readActivityLines(activityPath),
+    rebase?.deltaMs || 0,
+    rebase?.fromAnchor
+  );
 
   const db = openDb({ repoRoot, env });
 

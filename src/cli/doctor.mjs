@@ -16,6 +16,7 @@ import { fileURLToPath } from "node:url";
 import {
   buildAgentGuidance,
   formatAgentGuidanceLines,
+  readDiscoveryCompletions,
   readDiscoverySkips,
   readSetupState,
 } from "../core/agent-guidance.mjs";
@@ -63,7 +64,7 @@ const userPrereqs = [
 const systemPrereqs = [
   "AGENTS.md",
   "CLAUDE.md",
-  "DATA_CONTRACT.md",
+  "docs/DATA_CONTRACT.md",
   "docs/ROADMAP.md",
   ".agents/skills/ingest-profile/SKILL.md",
   ".agents/skills/evaluate-job/SKILL.md",
@@ -159,6 +160,7 @@ const sessionBrowser = detectSession({ data: automationData });
 // the explicit discovery-skip helper; read-only here.
 const setupState = readSetupState({ root });
 const discoverySkips = readDiscoverySkips({ root });
+const discoveryCompleted = readDiscoveryCompletions({ root });
 const setup = setupState
   ? {
       present: true,
@@ -168,6 +170,7 @@ const setup = setupState
       stepsRecorded: Array.isArray(setupState.completed) ? setupState.completed.length : 0,
       deferredCount: Array.isArray(setupState.deferred) ? setupState.deferred.length : 0,
       skippedDiscoverySteps: discoverySkips,
+      completedDiscoverySteps: discoveryCompleted,
     }
   : {
       present: false,
@@ -177,6 +180,7 @@ const setup = setupState
       stepsRecorded: 0,
       deferredCount: 0,
       skippedDiscoverySteps: discoverySkips,
+      completedDiscoverySteps: discoveryCompleted,
     };
 
 const searchReadiness = loadSearchReadiness();
@@ -191,6 +195,7 @@ const agentGuidance = buildAgentGuidance({
   searchReadiness,
   companyAtsReadiness,
   discoverySkips,
+  discoveryCompleted,
 });
 
 const result = {
@@ -233,6 +238,7 @@ const result = {
     broadSources: searchReadiness,
     companyAts: companyAtsReadiness,
     skippedSteps: discoverySkips,
+    completedSteps: discoveryCompleted,
   },
   agentGuidance,
   dataRoot: userPaths.dataRoot,

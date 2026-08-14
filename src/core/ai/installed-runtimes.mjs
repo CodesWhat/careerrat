@@ -278,6 +278,10 @@ export function buildInstalledRuntimeInvocation({
     const args = [
       "exec",
       "--json",
+      // CareerRat supplies the whole bounded task. Keep Codex account auth,
+      // but do not load unrelated global MCP servers, hooks, or defaults
+      // from ~/.codex/config.toml into an app-owned extraction/search call.
+      "--ignore-user-config",
       "--sandbox",
       "read-only",
       "--ephemeral",
@@ -337,6 +341,26 @@ export function sanitizeInstalledOutputSchema(value) {
       .filter(([key]) => key !== "$schema" && key !== "$id")
       .map(([key, entry]) => [key, sanitizeInstalledOutputSchema(entry)])
   );
+}
+
+export function sanitizeCodexOutputSchema(value) {
+  if (Array.isArray(value)) return value.map((entry) => sanitizeCodexOutputSchema(entry));
+  if (!value || typeof value !== "object") return value;
+  const sanitized = Object.fromEntries(
+    Object.entries(value)
+      .filter(([key]) => key !== "$schema" && key !== "$id")
+      .map(([key, entry]) => [key, sanitizeCodexOutputSchema(entry)])
+  );
+  if (sanitized.properties && typeof sanitized.properties === "object") {
+    // Codex/OpenAI strict structured outputs require every declared object
+    // property in `required` and forbid undeclared properties. CareerRat's
+    // canonical schemas intentionally allow some optional fields, so the
+    // CLI receives a stricter projection while the bounded runner still
+    // validates the returned data against the original schema afterward.
+    sanitized.required = Object.keys(sanitized.properties);
+    sanitized.additionalProperties = false;
+  }
+  return sanitized;
 }
 
 // ---------------------------------------------------------------------------
@@ -613,13 +637,9 @@ export async function runInstalledRuntime({
       tempDir = mkdtempSync(join(tmpdir(), "careerrat-runtime-schema-"));
       chmodSync(tempDir, 0o700);
       schemaPath = join(tempDir, "output-schema.json");
-      writeFileSync(
-        schemaPath,
-        `${JSON.stringify(sanitizeInstalledOutputSchema(outputSchema))}\n`,
-        {
-          mode: 0o600,
-        }
-      );
+      writeFileSync(schemaPath, `${JSON.stringify(sanitizeCodexOutputSchema(outputSchema))}\n`, {
+        mode: 0o600,
+      });
     }
     const invocation = buildInstalledRuntimeInvocation({
       runtimeId: runtime.id,
