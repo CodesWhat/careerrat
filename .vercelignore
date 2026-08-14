@@ -41,10 +41,12 @@ out
 !/src/core/security/browser-policy.mjs
 /config
 /templates
-# scripts/ is excluded by contents (not the dir itself) so the one build-time
-# dependency can be re-included. Both Next apps run the shared hardener.
+# scripts/ is excluded by contents (not the dir itself) so the two build-time
+# dependencies can be re-included. The website builds docs content first, and
+# both Next apps run the shared hardener.
 /scripts/*
 !/scripts/harden-static-html.mjs
+!/scripts/build-docs-content.mjs
 /examples
 /tests
 /docs/COMPARISON.md

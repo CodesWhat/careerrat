@@ -165,6 +165,15 @@ test("the published package does not run repository hook setup in consumers", as
   assert.match(pkg.scripts?.["hooks:install"] || "", /lefthook install/);
 });
 
+test("the trusted-publishing workflow installs dependencies before npm publish", async () => {
+  const workflow = await readText(".github/workflows/publish.yml");
+  const installAt = workflow.indexOf("run: npm ci");
+  const publishAt = workflow.indexOf("npm publish --provenance");
+
+  assert.notEqual(installAt, -1, "trusted publishing must install the locked dependency graph");
+  assert.ok(installAt < publishAt, "npm ci must run before npm publish triggers prepack");
+});
+
 test("onboarding previews every explicit candidate fact without waiting for a field bundle", async () => {
   const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
 
@@ -354,6 +363,8 @@ test("local user data roots are excluded from git, docker, and Vercel surfaces",
       `.vercelignore must anchor "${pattern}" as "/${pattern}" so it cannot delete nested app files from the Vercel upload`
     );
   }
+  assert.match(vercelignore, /^!\/scripts\/harden-static-html\.mjs$/m);
+  assert.match(vercelignore, /^!\/scripts\/build-docs-content\.mjs$/m);
 });
 
 test("npm package allowlist names app files, not broad private-data roots", async () => {
