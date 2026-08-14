@@ -259,7 +259,7 @@ describe("App — setup gate", () => {
     }
   });
 
-  it("fails open and renders the route table when the state fetch rejects", async () => {
+  it("fails closed into onboarding when setup state cannot be read", async () => {
     const module = await loadApp();
     routerState.pathname = "/jobs";
     apiMocks.getOnboardState.mockRejectedValueOnce(new Error("offline"));
@@ -268,8 +268,8 @@ describe("App — setup gate", () => {
     await flushEffects();
     const html = renderApp(module);
 
-    expect(html).toContain("jobs-page");
-    expect(html).not.toContain("navigate:");
+    expect(html).toContain("navigate:/onboarding:replace=true");
+    expect(html).not.toContain("jobs-page");
   });
 
   it("skips the gate entirely in static preview mode, even with an incomplete state", async () => {

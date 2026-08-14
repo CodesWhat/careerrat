@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { Navigate, useSearchParams } from "react-router-dom";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button } from "../components/Button.jsx";
 import { Chip } from "../components/Chip.jsx";
@@ -139,6 +139,9 @@ export function JobsPage() {
   const openRow = openId ? model.rows.find((row) => row.id === openId) : null;
   const dossierRow = dossierId ? model.rows.find((row) => row.id === dossierId) : null;
   const sourceSetupReady = hasDbSourceSetup(model.sourceSetup);
+  const sourceSetupLoading = model.sourceSetup == null && sourceSetupError == null;
+  const sourceSetupKnownMissing =
+    !model.preview && model.sourceSetup != null && sourceSetupError == null && !sourceSetupReady;
   const manualSearchRunning = manualSearchPending || model.manualSearchRun?.status === "running";
   const visibleManualSearchError =
     manualSearchError || snapshot?.sourcing?.manualSearchError || null;
@@ -448,6 +451,10 @@ export function JobsPage() {
     );
   }
 
+  if (sourceSetupKnownMissing) {
+    return <Navigate to="/onboarding" replace />;
+  }
+
   return (
     <div className="jobs">
       <header className="jobs__hero">
@@ -544,6 +551,7 @@ export function JobsPage() {
           onSearch={handleManualSearch}
           onSkip={handleSkipSourced}
           skippingId={skippingId}
+          sourceSetupLoading={sourceSetupLoading}
           sourceSetupReady={sourceSetupReady}
         />
       ) : null}
@@ -985,6 +993,7 @@ function SearchView({
   onSearch,
   onSkip,
   skippingId,
+  sourceSetupLoading,
   sourceSetupReady,
 }) {
   const filteredRoles = filterSearchRows(model.sourcedRoles, filter);
@@ -992,14 +1001,28 @@ function SearchView({
     <>
       <section className="jobs__search-launcher" aria-label="Search launchers">
         <SearchModeCard
-          actionLabel={manualSearchRunning ? "Searching…" : "Search Free Boards"}
+          actionLabel={
+            sourceSetupLoading
+              ? "Checking sources…"
+              : manualSearchRunning
+                ? "Searching…"
+                : "Search Free Boards"
+          }
           disabled={!sourceSetupReady || manualSearchRunning}
           eyebrow="Free boards"
-          meta={sourceSetupReady ? "Ready" : "Setup needed"}
+          meta={sourceSetupLoading ? "Checking" : sourceSetupReady ? "Ready" : "Setup needed"}
           onAction={onSearch}
-          title={sourceSetupReady ? "Free Job Board Search" : "Finish Search Setup"}
+          title={
+            sourceSetupLoading
+              ? "Loading Search Sources"
+              : sourceSetupReady
+                ? "Free Job Board Search"
+                : "Search Setup Needs Attention"
+          }
         >
-          {sourceSetupSummary(model.sourceSetup, sourceSetupReady)}
+          {sourceSetupLoading
+            ? "Checking your saved search sources before the next sweep."
+            : sourceSetupSummary(model.sourceSetup, sourceSetupReady)}
         </SearchModeCard>
         <SearchModeCard
           actionLabel={aiSearch.actionLabel}
@@ -1014,13 +1037,6 @@ function SearchView({
         </SearchModeCard>
       </section>
 
-      {!sourceSetupReady ? (
-        <section className="jobs__setup-inline" aria-live="polite">
-          No search sources set up yet. Add tracked companies or a job board in Settings or
-          Onboarding, then reload this page.
-        </section>
-      ) : null}
-
       <section className="jobs__panel">
         <PanelHeader
           icon={<SearchIcon />}
@@ -1030,10 +1046,12 @@ function SearchView({
         <LaneReceipt
           engine="RULES · APPROXIMATE TRIAGE"
           label={
-            manualSearchRunning
-              ? "Finding roles…"
-              : describeManualRunSummary(model.manualSearchRun) ||
-                sourceSetupSummary(model.sourceSetup, sourceSetupReady)
+            sourceSetupLoading
+              ? "Checking your saved search sources before the next sweep."
+              : manualSearchRunning
+                ? "Finding roles…"
+                : describeManualRunSummary(model.manualSearchRun) ||
+                  sourceSetupSummary(model.sourceSetup, sourceSetupReady)
           }
         />
         <LaneReceipt engine={aiSearch.receipt} label={aiSearch.statusText || aiSearch.body} />

@@ -70,11 +70,11 @@ export function App() {
         );
       })
       .catch(() => {
-        // Fail open: a broken/restarting server must not trap an already
-        // onboarded user in onboarding forever. Pages already have their own
-        // no-database/error degrades.
+        // Setup is a hard product gate. If its state cannot be read, keep the
+        // user in Paul instead of guessing that setup finished and exposing a
+        // broken Jobs surface with no search sources.
         if (cancelled) return;
-        setGate(RELEASED);
+        setGate({ status: "blocked", forPath: location.pathname });
       });
     return () => {
       cancelled = true;
