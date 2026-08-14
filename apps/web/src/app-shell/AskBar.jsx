@@ -359,7 +359,7 @@ export function AskBar() {
               resultText: isError ? null : last?.text || null,
               error: isError ? last?.text || "The action could not be completed." : null,
               retryable: isError,
-              artifacts: isError && !last?.artifacts ? [] : last?.artifacts || [],
+              artifacts: last?.artifacts || [],
               metadata: last?.metadata || {},
               engine: last?.metadata?.engine || null,
               elapsedMs:
@@ -1097,15 +1097,18 @@ function JobEvaluationCard({ artifact }) {
 }
 
 function PacketStatus({ artifact }) {
-  const gaps = Array.isArray(artifact.gaps) ? artifact.gaps : [];
+  const fallbackGapCount = Array.isArray(artifact.gaps) ? artifact.gaps.length : 0;
+  const blockingGapCount = Number.isInteger(artifact.blockingGapCount)
+    ? Math.max(0, artifact.blockingGapCount)
+    : fallbackGapCount;
   return (
     <div className="ask-bar__packet-status">
       <strong>
         Application packet: {artifact.uploadReady ? "ready" : artifact.status || "reviewable"}
       </strong>
-      {gaps.length ? (
+      {blockingGapCount ? (
         <span>
-          {gaps.length} item{gaps.length === 1 ? " needs" : "s need"} review.
+          {blockingGapCount} item{blockingGapCount === 1 ? " needs" : "s need"} review.
         </span>
       ) : null}
     </div>

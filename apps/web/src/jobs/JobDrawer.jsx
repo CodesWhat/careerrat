@@ -136,7 +136,7 @@ function toDatetimeLocal(iso) {
 function applyOnSiteNotice(response) {
   const messages = (response?.data || response)?.messages || [];
   const last = messages[messages.length - 1];
-  return last?.metadata?.submissionVerified === true
+  return last?.metadata?.state === "applied" && last?.metadata?.submissionVerified === true
     ? "Application submitted and verified."
     : "Application site is ready. Nothing was marked Applied yet.";
 }
@@ -164,18 +164,25 @@ export function JobDrawer({ row, onClose, initialSection }) {
   const [jdMeta, setJdMeta] = useState(null); // {completeness} | null
   const drawerRef = useRef(null);
   const viewerOpenRef = useRef(false);
+  const rowIdentity = `${row.source}:${row.id}`;
+  const activeRowIdentityRef = useRef(rowIdentity);
+  activeRowIdentityRef.current = rowIdentity;
   viewerOpenRef.current = Boolean(viewer);
 
   const isApplication = row.source === "application";
 
-  async function loadRaw() {
+  async function loadRaw(expectedRowId = row.id, expectedRowIdentity = rowIdentity) {
     if (!isApplication) return;
-    const [appRes, commsRes] = await Promise.all([getApplication(row.id), getCommunications()]);
+    const [appRes, commsRes] = await Promise.all([
+      getApplication(expectedRowId),
+      getCommunications(),
+    ]);
+    if (activeRowIdentityRef.current !== expectedRowIdentity) return;
     setApp(appRes.data);
-    setComms((commsRes.data || []).filter((c) => c.applicationId === row.id));
+    setComms((commsRes.data || []).filter((c) => c.applicationId === expectedRowId));
   }
 
-  // loadRaw is a plain closure over row.id (already a dependency below), not
+  // loadRaw is a plain closure over the row identity (already covered below), not
   // a stable reference — adding it to the array would re-fire this
   // reset-and-fetch effect on every render.
   // biome-ignore lint/correctness/useExhaustiveDependencies: loadRaw closes over row.id, already covered below
@@ -187,6 +194,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
     setActionError(null);
     setNotice(null);
     setHandoffUrl(null);
+    setBusyKey(null);
     setSourcedResolved(false);
     setJdHint(null);
     setJdMeta(null);
@@ -303,20 +311,32 @@ export function JobDrawer({ row, onClose, initialSection }) {
   }
 
   async function runWrite(key, fn, successNote) {
+    const requestedRowId = row.id;
+    const requestedRowIdentity = rowIdentity;
+    const isCurrentRow = () => activeRowIdentityRef.current === requestedRowIdentity;
     setBusyKey(key);
     setActionError(null);
     try {
       const result = await fn();
+      if (!isCurrentRow()) return;
       if (!isApplication && (key === "skip" || key === "promote")) setSourcedResolved(true);
+      if (key === "apply-on-site") setHandoffUrl(applicationHandoffUrl(result));
       emitDashboardChanged();
-      await Promise.all([refetch(), loadRaw()]);
+      await refetch();
+      if (!isCurrentRow()) return;
+      await loadRaw(requestedRowId, requestedRowIdentity);
+      if (!isCurrentRow()) return;
       if (successNote) {
         setNotice(typeof successNote === "function" ? successNote(result) : successNote);
       }
     } catch (err) {
-      setActionError(withRetryAction(resolveErrorCopy(err), () => runWrite(key, fn, successNote)));
+      if (isCurrentRow()) {
+        setActionError(
+          withRetryAction(resolveErrorCopy(err), () => runWrite(key, fn, successNote))
+        );
+      }
     } finally {
-      setBusyKey(null);
+      if (isCurrentRow()) setBusyKey(null);
     }
   }
 
@@ -669,11 +689,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
                         onClick={() =>
                           runWrite(
                             "apply-on-site",
-                            async () => {
-                              const result = await applyOnSite({ id: row.id });
-                              setHandoffUrl(applicationHandoffUrl(result));
-                              return result;
-                            },
+                            () => applyOnSite({ id: row.id }),
                             applyOnSiteNotice
                           )
                         }

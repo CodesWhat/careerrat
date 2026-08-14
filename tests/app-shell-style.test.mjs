@@ -93,6 +93,17 @@ describe("app shell styles", () => {
     assert.doesNotMatch(cssText(), /\.capture-assistant\b/);
   });
 
+  it("keeps the Ask keep gate readable in both themes", () => {
+    const keepGate = cssRule(".ask-bar__gate--keep");
+    const tokens = tokensText();
+    const lightTheme = tokens.match(/:root\s*\{([^}]*)\}/)?.[1] ?? "";
+    const darkTheme = tokens.match(/\[data-theme="dark"\]\s*\{([^}]*)\}/)?.[1] ?? "";
+
+    assert.match(keepGate, /color:\s*var\(--success-ink\)/);
+    assert.match(lightTheme, /--success-ink:\s*#0f6842/);
+    assert.match(darkTheme, /--success-ink:\s*var\(--success\)/);
+  });
+
   it("uses dark-mode header tokens instead of light header literals, flat (no shadow)", () => {
     const header = cssRule(".app-shell__header");
     const utility = cssRule(".app-shell__utility");

@@ -82,12 +82,6 @@ const RULES = [
     action: null,
   },
   {
-    match: ({ code }) => code === "APPLICATION_EXECUTOR_UNAVAILABLE",
-    message:
-      "CareerRat can't control the application site in this session, so nothing was submitted. Use “I applied elsewhere” after you finish on the site.",
-    action: null,
-  },
-  {
     match: ({ code }) => code === "APPLICATION_NOT_VERIFIED",
     message:
       "CareerRat couldn't verify a submission confirmation, so it did not mark this Applied. Check the site, then use “I applied elsewhere” if it went through.",

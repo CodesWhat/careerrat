@@ -6268,7 +6268,7 @@ button.chip {
 
 .ask-bar__gate--keep {
   background: var(--success-bg);
-  color: var(--success);
+  color: var(--success-ink);
 }
 
 .ask-bar__gate--review {

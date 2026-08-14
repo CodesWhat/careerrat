@@ -1030,6 +1030,7 @@ function gapObjects(...lists) {
         ? { kind: "review", message: gap }
         : {
             kind: gap.kind || gap.reason || "review",
+            ...(gap.code ? { code: gap.code } : {}),
             message: gap.message || gap.reason || "review",
           }
     );
@@ -1160,6 +1161,7 @@ export async function generatePacket({
     ? [
         {
           kind: "answers",
+          code: "QUESTION_CAPTURE_DEFERRED",
           message:
             "answers artifact skipped — no application questions captured yet; capture the form questions (packet questions step), then regenerate, to produce answers",
         },

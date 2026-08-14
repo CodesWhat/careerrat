@@ -23,10 +23,12 @@ import { startFirstSearchRun, startManualSearchRun } from "../onboarding/first-s
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import { generateApplicationPacket } from "../packet/generate-operation.mjs";
+import { platformForHost } from "../providers/search-sources.mjs";
 import {
   offersWithCapturedJobs,
   sourcedRowsFromScanOffers,
 } from "../scoring/sourced-persistence.mjs";
+import { inferProvider } from "../scoring/sourced-scanner.mjs";
 import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
@@ -202,10 +204,6 @@ function sourcedForIntent({ repoRoot, env, id }) {
   return JSON.parse(row.data);
 }
 
-function jobRequestError(message, code) {
-  return actionError(message, code);
-}
-
 function requestDate(now) {
   const value = typeof now === "function" ? now() : now;
   const date = value instanceof Date ? value : new Date(value || Date.now());
@@ -225,7 +223,7 @@ async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fet
   const resolved = await resolveJobUrlImpl(jobUrl, { fetchImpl });
   const bodyText = String(resolved?.bodyText || "").trim();
   if (resolved?.bodyFetchStatus !== "resolved" || !bodyText) {
-    throw jobRequestError(
+    throw actionError(
       `CareerRat could not read the full job description from this link yet. ${resolved?.reason || "Open it in the signed-in browser or paste the job description."}`,
       "JOB_BODY_REQUIRES_BROWSER"
     );
@@ -242,7 +240,7 @@ async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fet
   const company = String(resolved.company || match.company || "").trim();
   const title = String(resolved.title || match.role || "").trim();
   if (!company || !title) {
-    throw jobRequestError(
+    throw actionError(
       "CareerRat captured the page but could not identify both the company and role without guessing.",
       "JOB_IDENTITY_REQUIRED"
     );
@@ -271,19 +269,20 @@ async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fet
     ],
   });
   if (!captured?.artifacts?.jd) {
-    throw jobRequestError("CareerRat could not save the job description.", "JOB_CAPTURE_FAILED");
+    throw actionError("CareerRat could not save the job description.", "JOB_CAPTURE_FAILED");
   }
 
+  const exactPostingMatch = new Set(["exact_req_id", "exact_url"]).has(match.confidence);
   let applicationId;
-  if (match.matched && match.recordType === "application") {
+  if (match.matched && exactPostingMatch && match.recordType === "application") {
     applicationId = match.id;
     appSetFields({
       repoRoot,
       env,
       id: applicationId,
-      patch: { link: canonicalUrl, artifacts: { jd: captured.artifacts.jd } },
+      patch: { artifacts: { jd: captured.artifacts.jd } },
     });
-  } else if (match.matched && match.recordType === "sourced") {
+  } else if (match.matched && exactPostingMatch && match.recordType === "sourced") {
     const sourced = sourcedForIntent({ repoRoot, env, id: match.id });
     sourcedUpsertBatch({
       repoRoot,
@@ -309,7 +308,7 @@ async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fet
   } else {
     const rows = sourcedRowsFromScanOffers([captured], savedAt.toISOString());
     if (!rows.length) {
-      throw jobRequestError(
+      throw actionError(
         "CareerRat could not create a tracked job from this link.",
         "JOB_CAPTURE_FAILED"
       );
@@ -406,24 +405,39 @@ function evaluationNextActions(gate, applicationId) {
   ];
 }
 
+const QUESTION_CAPTURE_DEFERRED = "QUESTION_CAPTURE_DEFERRED";
+
 function isQuestionCaptureGap(gap) {
-  const kind = String(gap?.kind || "").toLowerCase();
-  const message = String(gap?.message || "").toLowerCase();
   return (
-    kind === "answers" &&
-    (message.includes("no application questions captured") ||
-      message.includes("capture application questions"))
+    String(gap?.kind || "").toLowerCase() === "answers" &&
+    String(gap?.code || "").toUpperCase() === QUESTION_CAPTURE_DEFERRED
   );
 }
 
-function packetNextActions(gaps, applicationId) {
+function blockingPacketGaps(gaps) {
+  return gaps.filter((gap) => !isQuestionCaptureGap(gap));
+}
+
+function applicationHandoffArtifact(application, applicationId) {
+  const url = safeExternalHttpUrl(application.link || application.url || application.sourceUrl);
+  if (!url) return null;
+  return {
+    kind: "application_handoff",
+    title: `${applicationLabel(application)} — Application site`,
+    applicationId,
+    url,
+    submissionVerified: false,
+  };
+}
+
+function packetNextActions(gaps, applicationId, hasHandoff) {
   const blockingGaps = gaps.filter((gap) => !isQuestionCaptureGap(gap));
-  if (blockingGaps.length === 0) {
+  if (blockingGaps.length === 0 && hasHandoff) {
     return [
       {
-        label: "Open application site",
+        label: "I applied",
         intent: {
-          type: "job.apply",
+          type: "application.record-external",
           entity: { type: "application", id: applicationId },
         },
       },
@@ -438,7 +452,7 @@ function packetNextActions(gaps, applicationId) {
 }
 
 function packetGapText(gaps, questionCaptureDeferred) {
-  const blockingCount = gaps.filter((gap) => !isQuestionCaptureGap(gap)).length;
+  const blockingCount = blockingPacketGaps(gaps).length;
   const questionsPending = questionCaptureDeferred || gaps.some(isQuestionCaptureGap);
   if (questionsPending && blockingCount === 0) {
     return "The base documents are ready. Application questions will be completed on the application site.";
@@ -999,6 +1013,11 @@ export async function executeWorkspaceIntent({
         generateDocumentsImpl,
       });
       const gaps = Array.isArray(packet.gaps) ? packet.gaps : [];
+      const blockingGapCount = blockingPacketGaps(gaps).length;
+      const handoffArtifact =
+        blockingGapCount === 0
+          ? applicationHandoffArtifact(evaluated.application, captured.applicationId)
+          : null;
       const packetArtifact = {
         kind: "packet_generation",
         title: `${applicationLabel(evaluated.application)} — Documents`,
@@ -1007,8 +1026,9 @@ export async function executeWorkspaceIntent({
         uploadReady: Boolean(packet.uploadReady),
         artifacts: packet.artifacts || {},
         gaps,
+        blockingGapCount,
       };
-      const nextActions = packetNextActions(gaps, captured.applicationId);
+      const nextActions = packetNextActions(gaps, captured.applicationId, Boolean(handoffArtifact));
       return appendActionResult({
         repoRoot,
         env,
@@ -1018,12 +1038,13 @@ export async function executeWorkspaceIntent({
           gaps,
           questionCaptureDeferred
         )}`,
-        artifacts: [evaluated.artifact, packetArtifact],
+        artifacts: [evaluated.artifact, packetArtifact, handoffArtifact].filter(Boolean),
         metadata: {
           ...evaluationMetadata,
           state: packet.status || "reviewable",
           uploadReady: Boolean(packet.uploadReady),
           gapCount: gaps.length,
+          blockingGapCount,
           nextActions,
         },
         operationResult: packet,
@@ -1081,6 +1102,11 @@ export async function executeWorkspaceIntent({
           generateDocumentsImpl,
         });
       const gaps = Array.isArray(operation.gaps) ? operation.gaps : [];
+      const blockingGapCount = blockingPacketGaps(gaps).length;
+      const handoffArtifact =
+        blockingGapCount === 0
+          ? applicationHandoffArtifact(application, normalized.entity.id)
+          : null;
       const gapText = packetGapText(gaps, questionCaptureDeferred);
       return appendActionResult({
         repoRoot,
@@ -1097,13 +1123,16 @@ export async function executeWorkspaceIntent({
             uploadReady: Boolean(operation.uploadReady),
             artifacts: operation.artifacts || {},
             gaps,
+            blockingGapCount,
           },
-        ],
+          handoffArtifact,
+        ].filter(Boolean),
         metadata: {
           state: operation.status || "reviewable",
           uploadReady: Boolean(operation.uploadReady),
           gapCount: gaps.length,
-          nextActions: packetNextActions(gaps, normalized.entity.id),
+          blockingGapCount,
+          nextActions: packetNextActions(gaps, normalized.entity.id, Boolean(handoffArtifact)),
         },
         operationResult: operation,
         now,
@@ -1742,15 +1771,9 @@ function looksLikeJobUrl(value) {
     const url = new URL(value);
     const host = url.hostname.toLowerCase();
     const path = url.pathname.toLowerCase();
-    if (
-      /(greenhouse\.io|lever\.co|ashbyhq\.com|workable\.com|smartrecruiters\.com|myworkdayjobs\.com|recruitee\.com)$/.test(
-        host
-      )
-    ) {
-      return true;
-    }
-    if (/linkedin\.com$/.test(host) && path.includes("/jobs/")) return true;
-    if (/wellfound\.com$/.test(host) && path.includes("/jobs/")) return true;
+    if (inferProvider({ careers_url: url.toString() })) return true;
+    const platform = platformForHost(host);
+    if (new Set(["linkedin", "wellfound"]).has(platform) && path.includes("/jobs/")) return true;
     return /\/(?:jobs?|careers?|positions?|openings?)\//.test(path) || /\/viewjob\b/.test(path);
   } catch {
     return false;
@@ -1759,7 +1782,10 @@ function looksLikeJobUrl(value) {
 
 const ACTION_PREVIEW_RULES = [
   {
-    test: (text) => /\b(apply|submit)\b/i.test(text) && Boolean(firstHttpUrl(text)),
+    test: (text) => {
+      const jobUrl = firstHttpUrl(text);
+      return /\b(apply|submit)\b/i.test(text) && Boolean(jobUrl) && looksLikeJobUrl(jobUrl);
+    },
     label: "Evaluate and prepare this application",
     intent: (text) => ({
       type: "job.prepare-request",
@@ -1768,7 +1794,14 @@ const ACTION_PREVIEW_RULES = [
     }),
   },
   {
-    test: (text) => /\b(rate|evaluate|review|assess)\b/i.test(text) && Boolean(firstHttpUrl(text)),
+    test: (text) => {
+      const jobUrl = firstHttpUrl(text);
+      return (
+        /\b(rate|evaluate|review|assess)\b/i.test(text) &&
+        Boolean(jobUrl) &&
+        looksLikeJobUrl(jobUrl)
+      );
+    },
     label: "Capture and evaluate this job",
     intent: (text) => ({
       type: "job.evaluate-request",

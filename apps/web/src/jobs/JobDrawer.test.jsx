@@ -3,15 +3,20 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const hooks = vi.hoisted(() => ({
   cursor: 0,
+  refCursor: 0,
   effects: [],
+  refs: [],
   state: [],
   reset() {
     this.cursor = 0;
+    this.refCursor = 0;
     this.effects = [];
+    this.refs = [];
     this.state = [];
   },
   begin() {
     this.cursor = 0;
+    this.refCursor = 0;
     this.effects = [];
   },
   useState(initial) {
@@ -27,6 +32,11 @@ const hooks = vi.hoisted(() => ({
   },
   useEffect(effect) {
     this.effects.push(effect);
+  },
+  useRef(initial) {
+    const index = this.refCursor++;
+    if (!(index in this.refs)) this.refs[index] = { current: initial };
+    return this.refs[index];
   },
 }));
 
@@ -57,7 +67,7 @@ vi.mock("react", async (importOriginal) => {
     ...actual,
     useCallback: (fn) => fn,
     useEffect: (effect) => hooks.useEffect(effect),
-    useRef: (initial) => ({ current: initial }),
+    useRef: (initial) => hooks.useRef(initial),
     useState: (initial) => hooks.useState(initial),
   };
 });
@@ -359,6 +369,71 @@ describe("JobDrawer", () => {
     tree = renderDrawer(applicationRow);
 
     expect(textOf(tree)).toContain("Application submitted and verified.");
+  });
+
+  it("does not claim submission for a verified manual handoff", async () => {
+    api.applyOnSite.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            kind: "action_result",
+            metadata: { state: "manual-handoff", submissionVerified: true },
+          },
+        ],
+      },
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    let tree = renderDrawer(applicationRow);
+
+    await button(tree, "Apply on site").props.onClick();
+    tree = renderDrawer(applicationRow);
+
+    expect(textOf(tree)).toContain("Application site is ready. Nothing was marked Applied yet.");
+    expect(textOf(tree)).not.toContain("Application submitted and verified.");
+  });
+
+  it("ignores an Apply on site response after the drawer switches jobs", async () => {
+    let resolveApply;
+    api.applyOnSite.mockReturnValue(
+      new Promise((resolve) => {
+        resolveApply = resolve;
+      })
+    );
+    api.getApplication.mockImplementation(async (id) => ({
+      data: { id, status: "reviewed-hold", artifacts: {} },
+    }));
+    renderDrawer(applicationRow);
+    await runEffects();
+    const firstTree = renderDrawer(applicationRow);
+    const pending = button(firstTree, "Apply on site").props.onClick();
+
+    const secondRow = { ...applicationRow, id: "app-2", company: "Second Co" };
+    renderDrawer(secondRow);
+    await runEffects();
+    resolveApply({
+      data: {
+        messages: [
+          {
+            kind: "action_result",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                url: "https://boards.greenhouse.io/northstar/jobs/123",
+              },
+            ],
+            metadata: { state: "manual-handoff", submissionVerified: false },
+          },
+        ],
+      },
+    });
+    await pending;
+    const secondTree = renderDrawer(secondRow);
+
+    expect(textOf(secondTree)).not.toContain("Application site is ready");
+    expect(
+      visit(secondTree, (node) => node.type === "a" && textOf(node) === "Open application site")
+    ).toHaveLength(0);
   });
 
   it("uses the server-persisted typed evaluation without a second client write", async () => {

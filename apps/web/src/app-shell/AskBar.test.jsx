@@ -720,6 +720,7 @@ describe("AskBar — acting", () => {
                   kind: "packet_generation",
                   status: "reviewable",
                   uploadReady: false,
+                  blockingGapCount: 0,
                   gaps: [{ kind: "answers", message: "Application questions are pending." }],
                 },
               ],
@@ -753,7 +754,7 @@ describe("AskBar — acting", () => {
     buttonByText(tree, "Prepare application").props.onClick();
     await flushMicrotasks();
     tree = render();
-    expect(textOf(byClass(tree, "ask-bar__packet-status"))).toContain("1 item needs review.");
+    expect(textOf(byClass(tree, "ask-bar__packet-status"))).not.toContain("needs review");
     expect(api.runWorkspaceIntent).toHaveBeenNthCalledWith(
       2,
       "job.generate-documents",

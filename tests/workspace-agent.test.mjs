@@ -453,6 +453,107 @@ test("job.evaluate-request reuses a matching application while refreshing its JD
   );
 });
 
+test("job.evaluate-request does not overwrite a company-role application match for a different URL", async () => {
+  const repoRoot = tempRepo();
+  const originalLink = "https://jobs.lever.co/temporal/original-role";
+  const jobUrl = "https://jobs.lever.co/temporal/different-role";
+  seedApplication(repoRoot, {
+    link: originalLink,
+    artifacts: { resume: "workspace/original-resume.pdf" },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      provider: "lever",
+      title: "Applied AI Engineer",
+      company: "Temporal Labs",
+      bodyText: "Build a different reliable agent workflow.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "review",
+          fitScore: 74,
+          manual: { required: true },
+        },
+      },
+    }),
+  });
+
+  const applicationId = result.messages.at(-1).metadata.applicationId;
+  assert.notEqual(applicationId, "app-temporal");
+  assert.equal(readApplication(repoRoot, "app-temporal").link, originalLink);
+  assert.equal(
+    readApplication(repoRoot, "app-temporal").artifacts.resume,
+    "workspace/original-resume.pdf"
+  );
+  assert.equal(
+    openDb({ repoRoot, env: {} }).prepare("SELECT COUNT(*) AS count FROM applications").get().count,
+    2
+  );
+});
+
+test("job.evaluate-request does not overwrite a company-role sourced match for a different URL", async () => {
+  const repoRoot = tempRepo();
+  const originalLink = "https://jobs.lever.co/temporal/original-source";
+  const jobUrl = "https://jobs.lever.co/temporal/different-source";
+  seedSourced(repoRoot, {
+    link: originalLink,
+    loc: "Original location",
+    base: "$190k",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      provider: "lever",
+      title: "Staff Platform Engineer",
+      company: "Temporal Labs",
+      location: "New location",
+      comp: "$250k",
+      bodyText: "Build a different platform.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "review",
+          fitScore: 72,
+          manual: { required: true },
+        },
+      },
+    }),
+  });
+
+  const original = readSourced(repoRoot, "sourced-temporal");
+  assert.equal(original.link, originalLink);
+  assert.equal(original.loc, "Original location");
+  assert.equal(original.base, "$190k");
+  assert.notEqual(result.messages.at(-1).metadata.applicationId, "sourced-temporal");
+});
+
 test("job.evaluate-request resolves an explicitly open saved sourced role and promotes it", async () => {
   const repoRoot = tempRepo();
   seedSourced(repoRoot, {
@@ -634,10 +735,14 @@ test("job.prepare-request generates a KEEP packet and returns the review/apply h
   assert.equal(generationCalls[0].body.applyIntent, true);
   assert.deepEqual(
     result.messages.at(-1).artifacts.map((artifact) => artifact.kind),
-    ["job_evaluation", "packet_generation"]
+    ["job_evaluation", "packet_generation", "application_handoff"]
   );
   assert.equal(result.messages.at(-1).metadata.state, "ready");
-  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.apply");
+  assert.equal(result.messages.at(-1).artifacts.at(-1).url, jobUrl);
+  assert.equal(
+    result.messages.at(-1).metadata.nextActions[0].intent.type,
+    "application.record-external"
+  );
 });
 
 test("job.prepare-request keeps moving when application questions are not captured yet", async () => {
@@ -686,7 +791,8 @@ test("job.prepare-request keeps moving when application questions are not captur
         gaps: [
           {
             kind: "answers",
-            message: "answers artifact skipped — no application questions captured yet",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "The site will provide its questions later.",
           },
         ],
         artifacts: { resumePdf: "workspace/tailored/acme-resume.pdf" },
@@ -700,7 +806,13 @@ test("job.prepare-request keeps moving when application questions are not captur
   );
   assert.equal(result.messages.at(-1).metadata.state, "reviewable");
   assert.equal(result.messages.at(-1).metadata.gapCount, 1);
-  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.apply");
+  assert.equal(result.messages.at(-1).metadata.blockingGapCount, 0);
+  assert.equal(result.messages.at(-1).artifacts[1].blockingGapCount, 0);
+  assert.equal(result.messages.at(-1).artifacts[2].kind, "application_handoff");
+  assert.equal(
+    result.messages.at(-1).metadata.nextActions[0].intent.type,
+    "application.record-external"
+  );
   assert.match(result.messages.at(-1).text, /application questions/i);
 });
 
@@ -722,7 +834,13 @@ test("document generation executes behind workspace-main and preserves artifact 
     },
     manifest: { applicationId: "app-temporal" },
     sources: { resume: "full generated resume body intentionally not replayed" },
-    gaps: [{ kind: "answers", message: "Capture application questions before applying." }],
+    gaps: [
+      {
+        kind: "answers",
+        code: "QUESTION_CAPTURE_DEFERRED",
+        message: "Capture application questions before applying.",
+      },
+    ],
     manual: { required: true },
   };
   const calls = [];
@@ -757,11 +875,16 @@ test("document generation executes behind workspace-main and preserves artifact 
     uploadReady: false,
     artifacts: generation.artifacts,
     gaps: generation.gaps,
+    blockingGapCount: 0,
   });
   assert.equal(result.messages[1].metadata.state, "reviewable");
   assert.equal(result.messages[1].metadata.gapCount, 1);
   assert.match(result.messages[1].text, /application questions/i);
-  assert.equal(result.messages[1].metadata.nextActions[0].intent.type, "job.apply");
+  assert.equal(result.messages[1].metadata.blockingGapCount, 0);
+  assert.equal(
+    result.messages[1].metadata.nextActions[0].intent.type,
+    "application.record-external"
+  );
 
   const modelCalls = [];
   await runWorkspaceAgentTurn({
@@ -809,7 +932,8 @@ test("apply-intent document generation degrades to base documents before questio
         gaps: [
           {
             kind: "answers",
-            message: "answers artifact skipped — no application questions captured yet",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "The site will provide its questions later.",
           },
         ],
         artifacts: { resumePdf: "workspace/tailored/temporal-resume.pdf" },
@@ -822,7 +946,11 @@ test("apply-intent document generation degrades to base documents before questio
     [true, false]
   );
   assert.equal(result.messages.at(-1).metadata.gapCount, 1);
-  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.apply");
+  assert.equal(result.messages.at(-1).metadata.blockingGapCount, 0);
+  assert.equal(
+    result.messages.at(-1).metadata.nextActions[0].intent.type,
+    "application.record-external"
+  );
   assert.match(result.messages.at(-1).text, /application questions/i);
 });
 

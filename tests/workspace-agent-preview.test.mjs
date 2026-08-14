@@ -153,14 +153,15 @@ test("previewWorkspaceIntent: never guesses what 'this job' means without an ope
 
 test("previewWorkspaceIntent: a non-job URL stays answer-only", () => {
   const repoRoot = tempRepo();
-  const result = previewWorkspaceIntent({
-    text: "https://example.com/about-us",
-    repoRoot,
-    env: {},
-  });
-
-  assert.equal(result.action, null);
-  assert.match(result.answer.label, /^Answer: /);
+  for (const text of [
+    "https://example.com/about-us",
+    "review https://example.com/about-us",
+    "apply https://example.com/about-us",
+  ]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(result.action, null);
+    assert.match(result.answer.label, /^Answer: /);
+  }
 });
 
 test("previewWorkspaceIntent: non-action phrasing returns answer-only", () => {

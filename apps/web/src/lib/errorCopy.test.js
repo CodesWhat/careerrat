@@ -79,16 +79,6 @@ const RULE_CASES = [
     action: null,
   },
   {
-    name: "application executor unavailable",
-    err: new ApiError(409, {
-      code: "APPLICATION_EXECUTOR_UNAVAILABLE",
-      error: "The authenticated Apply on site executor is not connected.",
-    }),
-    message:
-      "CareerRat can't control the application site in this session, so nothing was submitted. Use “I applied elsewhere” after you finish on the site.",
-    action: null,
-  },
-  {
     name: "application submission not verified",
     err: new ApiError(409, {
       code: "APPLICATION_NOT_VERIFIED",
