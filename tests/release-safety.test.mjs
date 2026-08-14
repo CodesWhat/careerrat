@@ -159,10 +159,13 @@ test("public docs describe the app as an active client over canonical data", asy
   }
 });
 
-test("the published package does not run repository hook setup in consumers", async () => {
+test("the published package runs no consumer lifecycle setup and start installs skills itself", async () => {
   const pkg = JSON.parse(await readText("package.json"));
+  const launcher = await readText("bin/careerrat.mjs");
   assert.equal(pkg.scripts?.prepare, undefined);
+  assert.equal(pkg.scripts?.postinstall, undefined);
   assert.match(pkg.scripts?.["hooks:install"] || "", /lefthook install/);
+  assert.match(launcher, /run\(join\(root, "scripts\/install-skills\.mjs"\), \["--soft"\]\)/);
 });
 
 test("the trusted-publishing workflow installs dependencies before npm publish", async () => {
@@ -240,7 +243,18 @@ test("conversational onboarding stops once the canonical checklist is complete",
   const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
 
   assert.match(skill, /when .*setupProgress\.complete.*true/i);
+  assert.match(skill, /answers a question Paul asked before completion/i);
+  assert.match(skill, /emit its confirmation block before ending/i);
+  assert.match(skill, /never say a new fact is noted or saved/i);
   assert.match(skill, /ask no new initial-setup questions/i);
+});
+
+test("onboarding saves notice period at the supported profile path and does not invent an earliest-start field", async () => {
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+
+  assert.match(skill, /profile\.authorization\.notice_period/i);
+  assert.match(skill, /never save it under `form-defaults\.notice_period`/i);
+  assert.match(skill, /do not ask for an earliest possible start date during initial setup/i);
 });
 
 test("onboarding does not solicit optional company-size preferences by default", async () => {

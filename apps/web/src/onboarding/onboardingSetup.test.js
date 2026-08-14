@@ -553,6 +553,18 @@ describe("quickFactsDetailLine", () => {
         },
       })
     ).toBe("Remote · Hybrid · On-site · $180K floor");
+    expect(
+      quickFactsDetailLine({
+        state: {
+          data: {
+            profile: {
+              location: { remote: true, hybrid: true },
+              compensation: { comp_floors: { remote: 175000, hybrid: 190000 } },
+            },
+          },
+        },
+      })
+    ).toBe("Remote $175K floor · Hybrid $190K floor");
   });
 
   it("Bug 4: returns null when state.files marks profile.yml as not existing", () => {

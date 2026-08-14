@@ -763,6 +763,54 @@ describe("AskBar — acting", () => {
     );
   });
 
+  it("keeps internal result actions inside the mounted /app router", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(jobActionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Evaluated Acme — Staff AI Engineer: Review (72/100 fit).",
+            artifacts: [
+              {
+                kind: "job_evaluation",
+                evaluation: { gate: "review", fitScore: 72 },
+              },
+            ],
+            metadata: {
+              nextActions: [
+                { label: "Review this job", href: "/jobs?open=app-acme" },
+                { label: "Unsafe route", href: "/jobs?open=%22%3E%3Cimg%20src=x%3E" },
+                { label: "Unsafe scheme", href: "javascript:alert(1)" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "rate this job" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const link = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node).trim() === "Review this job"
+    )[0];
+    expect(link.props.href).toBe("/app/jobs?open=app-acme");
+    expect(visit(tree, (node) => node.type === "a")).toHaveLength(1);
+  });
+
   it("renders a manual application handoff without claiming submission", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(
       jobActionPreview({

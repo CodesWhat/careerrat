@@ -26,7 +26,7 @@ description: "Interview a new candidate to produce all user-layer config files: 
 >
 > **Every question is state-aware.** Before composing each response, inspect both saved candidate data and unresolved confirm blocks in the conversation. Never ask for a fact already present in canonical or pending state. A generic save receipt is not the source of truth; the current candidate snapshot and the actual pending block payloads are. Ask again only when the candidate explicitly corrects a value or the saved value is genuinely incomplete for the field being collected.
 >
-> **Conversational completion is a hard boundary.** When canonical state shows `setupProgress.complete: true`, initial setup is complete. Acknowledge the candidate's latest message, ask no new initial-setup questions, and end with a concise statement rather than a question. Optional evidence, form defaults, toolchain choices, and other enrichment belong after onboarding and only when a later task needs them or the candidate asks for them.
+> **Conversational completion is a hard boundary.** When canonical state shows `setupProgress.complete: true`, initial setup is complete. If the candidate's latest message answers a question Paul asked before completion, emit its confirmation block before ending, even though the checklist just became complete. Never say a new fact is noted or saved unless it is already present in canonical state or the same response carries the confirmation block that can save it. Then acknowledge the candidate's latest message, ask no new initial-setup questions, and end with a concise statement rather than a question. Optional evidence, form defaults, toolchain choices, and other enrichment belong after onboarding and only when a later task needs them or the candidate asks for them.
 >
 > **Preserve compensation meaning.** If the candidate repeats a compensation value that matches a saved field and the transcript already establishes its meaning, preserve the stored compensation field. Never ask whether a repeated value is current_base or expected_base; current_base is private and must not be inferred or solicited. Ask about a different compensation concept only when it is required and genuinely missing.
 >
@@ -337,8 +337,8 @@ Save each group the moment it's settled — through `careerrat data candidate pa
 
 1. Which countries is the candidate authorized to work in?
 2. Requires sponsorship now or in the future? Once both answers are in, save this authorization-status group immediately: `careerrat data candidate patch profile --data ...` in DB mode, or confirm-block it (`doc: "profile"`) in chat mode. Don't wait on notice period below.
-3. Notice period (days/weeks) and earliest start date. Save this group the same way as soon as both are answered.
-4. Confirm both groups above are written before moving to STEP 9 — nothing here should still be sitting in chat only.
+3. Ask for the candidate's notice period in days or weeks. Save it immediately as `profile.authorization.notice_period` through `careerrat data candidate patch profile --data ...` in DB mode, or a `candidate_patch` confirm block with `doc: "profile"` in chat mode. Never save it under `form-defaults.notice_period`, which is not a supported field. Do not ask for an earliest possible start date during initial setup; collect availability later when a specific application or scheduling task needs it.
+4. Confirm both authorization status and notice period are written before moving to STEP 9 — nothing here should still be sitting in chat only.
 
 ---
 

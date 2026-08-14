@@ -224,6 +224,20 @@ test("interview-prep route builds and reads the persisted dossier", async () => 
   assert.doesNotMatch(read.body.data.dossier.html, /# Interview Packet/);
 });
 
+test("interview-prep route returns a console-clean missing state before a dossier is built", async () => {
+  const repoRoot = tempRepo();
+  seedCandidate(repoRoot);
+  seedInterview(repoRoot);
+  const routes = mountDirect(repoRoot);
+
+  const read = await callDirect(routes, "GET", "/api/interview-prep?id=app-temporal");
+  assert.equal(read.status, 200);
+  assert.equal(read.body.ok, true);
+  assert.equal(read.body.data.applicationId, "app-temporal");
+  assert.equal(read.body.data.dossier, null);
+  assert.equal(read.body.data.state, "missing");
+});
+
 test("interview-prep route returns typed 404 and 409 failures", async () => {
   const repoRoot = tempRepo();
   seedCandidate(repoRoot);

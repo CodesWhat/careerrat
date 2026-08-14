@@ -305,7 +305,7 @@ count as native app support.
 
 The current build order is:
 
-1. **One onboarding graduation contract** — as soon as Paul has a resume/no-resume decision,
+1. **One onboarding graduation contract (implemented and accepted)** — as soon as Paul has a resume/no-resume decision,
    target roles, and a usable location posture, generate baseline deterministic sources and start
    sourcing in the background while the interview continues. Paul covers the settings needed for
    the candidate's intended workflows. The app cannot graduate setup until source config is durable
@@ -319,6 +319,11 @@ The current build order is:
      Paul's interview is complete;
    - every setting required by the candidate's enabled workflows is confirmed or explicitly
      deferred inside Paul's thread;
+   - Paul never claims a fact is saved unless it is already canonical or the same response exposes
+     the confirmation that writes it, and every confirmation targets a field the owning schema
+     actually supports;
+   - one flat compensation floor or valid arrangement-specific floors satisfy the same readiness
+     contract used later by job evaluation;
    - failed or unavailable setup work offers retry, guided repair, and a durable **Pause setup**
      checkpoint that resumes at the same item;
    - unreadable setup state fails closed to Paul, and a pending source read never flashes a false
@@ -347,29 +352,30 @@ The current build order is:
    contextual shortcut where useful, deterministic entity resolution, visible work, safe decisions,
    a durable linked result, and the next handoff. Internal extraction helpers stay internal but must
    expose progress and errors through the invoking workflow.
-5. **Free/public source parity before AI (implemented, acceptance pending)** — the pinned manifest
+5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
    deterministic registry, and `local-parser` is intentionally excluded with a safety reason.
    URL inference, explicit branded-host selection, normalized output, upstream conformance fixtures,
    scanner dedupe, full-JD hydration, and source provenance are wired. AI remains the fallback for
-   discovery gaps and ambiguous/custom pages, not the default repeated scan path. The fresh
-   acceptance pass below still has to prove the packaged and UI-facing paths.
-6. **Fresh acceptance pass** — rerun clean-home and returning-user QA across every skill-to-screen
-   contract, then web, packaged Electron, npm, lint, build, and distribution gates. The prior 74
-   findings stay closed; this gate tracks the newly exposed cross-workflow gaps honestly.
+   discovery gaps and ambiguous/custom pages, not the default repeated scan path. Clean packed-
+   install CLI and Settings acceptance now covers the manifest and UI-facing source-write path.
+6. **Fresh acceptance pass (current tranche complete)** — clean-home onboarding, restart, Ask
+   rate/apply, provider Settings, native Electron, npm install, lint, tests, and builds pass. The
+   broader original-skill rows stay active in the linked audit instead of being hidden by this gate.
 
-### Full-product acceptance sweep (completed August 14, 2026)
+### Product-surface acceptance sweep (updated August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. The sweep recorded 74 findings, and all 74 are
-fixed and live-retested. The web app, CLI, clean npm package, packaged Electron runtime, and macOS
-DMG are accepted as functional and release-ready.
+section remains the release-level source of truth. The sweep now records 84 findings, and all 84 are
+fixed and live-retested. The broader skill-to-screen audit above remains active until every
+user-facing original skill has a coherent native path.
 
-Final verification from the accepted code: 2,365 repository tests passed with 5 intentional
-skips; 647 web tests passed; lint passed with no errors; web, website, docs, and desktop smoke
-builds passed; the final 450-file npm tarball installed into a clean home and passed data, tracker,
-CLI, onboarding, responsive-layout, and console checks. The final one-command desktop build signs
-and notarizes both the app bundle and DMG container, staples the ticket, and passes Gatekeeper.
+Current verification: 2,487 repository tests passed with 5 intentional skips; 676 web tests passed;
+lint completed with no errors; web, website, docs, and desktop builds passed; and the final 538-file
+npm tarball installed into a clean home without lifecycle warnings. The clean setup, background
+search, restart, Ask rate/apply, provider Settings, and source Electron checks produced no HTTP or
+console errors. The previously accepted desktop release flow signs and notarizes both the app bundle
+and DMG container, staples the ticket, and passes Gatekeeper.
 
 - **Global shell and workspace conversation** — navigation, setup gating, Ask on every route,
   durable history, attachments, cancel/retry, confirmation gates, activity notifications,

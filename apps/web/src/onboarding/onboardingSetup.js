@@ -74,6 +74,27 @@ export const SETUP_CHIP_LABELS = {
   authorization: "AUTHORIZATION",
 };
 
+const ARRANGEMENT_FLOORS = [
+  ["remote", "Remote"],
+  ["hybrid", "Hybrid"],
+  ["onsite", "On-site"],
+  ["relocation", "Relocation"],
+];
+
+function compactFloor(value) {
+  const amount = Number(value);
+  if (!Number.isFinite(amount) || amount <= 0) return null;
+  return `$${Math.round(amount / 1000)}K floor`;
+}
+
+function arrangementFloorDetails(compensation = {}) {
+  const floors = compensation.comp_floors ?? {};
+  return ARRANGEMENT_FLOORS.flatMap(([key, label]) => {
+    const floor = compactFloor(floors[key]);
+    return floor ? [`${label} ${floor}`] : [];
+  });
+}
+
 // Builds the ordered row view model the mini-progress row and the file
 // pane both render from. `doneByKey` comes straight off
 // state.setupProgress.items (server-computed); this never re-derives
@@ -176,6 +197,7 @@ export function setupDisclosureRows({ state, runtime } = {}) {
       ].filter(Boolean)
     : [];
   const minimumBase = Number(profile.compensation?.minimum_base);
+  const arrangementFloors = arrangementFloorDetails(profile.compensation);
   const quickFacts = [
     candidate.full_name,
     candidate.email,
@@ -184,7 +206,7 @@ export function setupDisclosureRows({ state, runtime } = {}) {
     ...modes,
     Number.isFinite(minimumBase) && minimumBase > 0
       ? `$${minimumBase.toLocaleString("en-US")} minimum base`
-      : null,
+      : arrangementFloors.join(" · ") || null,
   ].filter(Boolean);
   const authorization = profile.authorization ?? {};
 
@@ -337,7 +359,8 @@ export function guardrailsDetailLine({ state } = {}) {
 
 export function quickFactsDetailLine({ state } = {}) {
   if (!fileWritten(state, "profile")) return null;
-  const minimumBase = Number(state?.data?.profile?.compensation?.minimum_base);
+  const compensation = state?.data?.profile?.compensation ?? {};
+  const minimumBase = Number(compensation.minimum_base);
   const location = state?.data?.profile?.location ?? {};
   const modes = locationModePreferencesConfirmed(state)
     ? [
@@ -347,7 +370,9 @@ export function quickFactsDetailLine({ state } = {}) {
       ].filter(Boolean)
     : [];
   const hasMinimumBase = Number.isFinite(minimumBase) && minimumBase > 0;
-  if (!modes.length && !hasMinimumBase) return null;
+  const arrangementFloors = arrangementFloorDetails(compensation);
+  if (!modes.length && !hasMinimumBase && !arrangementFloors.length) return null;
+  if (!hasMinimumBase && arrangementFloors.length) return arrangementFloors.join(" · ");
   const details = [
     ...modes,
     hasMinimumBase ? `$${Math.round(minimumBase / 1000)}K floor` : "Add minimum base",

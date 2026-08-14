@@ -79,6 +79,24 @@ function describeAskBarError(err) {
   return resolveErrorCopy(err).message;
 }
 
+function appActionHref(value) {
+  try {
+    const appOrigin = "https://careerrat.invalid";
+    const url = new URL(String(value || "").trim(), appOrigin);
+    if (url.origin !== appOrigin) return null;
+    if (url.pathname !== "/jobs" && url.pathname !== "/app/jobs") return null;
+    if (url.searchParams.getAll("open").length !== 1 || [...url.searchParams.keys()].length !== 1) {
+      return null;
+    }
+
+    const applicationId = url.searchParams.get("open");
+    if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(applicationId || "")) return null;
+    return `/app/jobs?open=${encodeURIComponent(applicationId)}`;
+  } catch {
+    return null;
+  }
+}
+
 // Ported from the deleted CaptureBar.jsx (git show 95f27540~1) — the 409
 // NO_DATABASE hint every /api/data/* route already surfaces for a legacy
 // (pre-migration) workspace; intake is DB-native by construction
@@ -1032,12 +1050,16 @@ function AskBarTurn({
       ) : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
-          {nextActions.map((action) =>
-            action.href ? (
-              <a className="btn btn--secondary" href={action.href} key={action.href}>
-                {action.label || "Open"}
-              </a>
-            ) : action.intent ? (
+          {nextActions.map((action) => {
+            const href = appActionHref(action.href);
+            if (href) {
+              return (
+                <a className="btn btn--secondary" href={href} key={href}>
+                  {action.label || "Open"}
+                </a>
+              );
+            }
+            return action.intent ? (
               <Button
                 variant="secondary"
                 key={`${action.intent.type}:${action.intent.entity?.type}:${action.intent.entity?.id}`}
@@ -1045,8 +1067,8 @@ function AskBarTurn({
               >
                 {action.label || "Continue"}
               </Button>
-            ) : null
-          )}
+            ) : null;
+          })}
         </div>
       ) : null}
       <EngineReceipt engine={turn.engine} elapsedMs={turn.elapsedMs} />

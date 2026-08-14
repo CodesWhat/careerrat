@@ -1107,9 +1107,8 @@ export function buildInterviewDossier({ applicationId, audience, inviteNotes, jo
 }
 
 // GET /api/interview-prep?id= — reads back app.artifacts.interviewDossier.
-// 404 with code DOSSIER_NOT_FOUND is the expected "not built yet" state, not
-// an error banner — callers render the Build action for it, same convention
-// as getJobDescription's JD_NOT_CAPTURED above.
+// A dossier that has not been built yet is a console-clean 200 with
+// data.state:"missing" and dossier:null; callers render the Build action.
 export function getInterviewDossier(id) {
   return apiFetch(`/api/interview-prep?id=${encodeURIComponent(id || "")}`);
 }

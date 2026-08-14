@@ -146,6 +146,18 @@ describe("computeSetupProgress", () => {
       false,
       "compensation without a location posture is still incomplete"
     );
+    assert.equal(
+      computeSetupProgress({
+        data: {
+          profile: {
+            location: { home: "Austin, TX", remote: true, hybrid: true },
+            compensation: { comp_floors: { remote: 180000, hybrid: 195000 } },
+          },
+        },
+      }).items.find((i) => i.key === "quickFacts").done,
+      true,
+      "arrangement-specific floors are a complete compensation gate without a flat fallback"
+    );
   });
 
   it("authorization flips on work_authorized/requires_sponsorship===true, or a recorded decline", () => {

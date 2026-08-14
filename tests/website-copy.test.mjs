@@ -61,6 +61,16 @@ test("website metadata is CareerRat-branded", async () => {
   }
 });
 
+test("deployed sites bundle fonts without Google build-time fetches", async () => {
+  const websiteLayout = await readFile("apps/website/src/app/layout.tsx", "utf8");
+  const docsLayout = await readFile("apps/docs/src/app/layout.tsx", "utf8");
+  const combined = `${websiteLayout}\n${docsLayout}`;
+
+  assert.doesNotMatch(combined, /next\/font\/google|fonts\.(?:googleapis|gstatic)\.com/);
+  assert.match(websiteLayout, /next\/font\/local/);
+  assert.match(docsLayout, /next\/font\/local/);
+});
+
 test("website install copy uses the public careerrat CLI convention", async () => {
   const page = await readFile("apps/website/src/app/page.tsx", "utf8");
   const publicAgents = await readFile("apps/website/public/AGENTS.md", "utf8");

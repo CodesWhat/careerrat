@@ -85,7 +85,6 @@
     "README.md"
   ],
   "scripts": {
-    "postinstall": "node -e \"const f='scripts/install-skills.mjs'; if (require('fs').existsSync(f)) require('child_process').spawnSync(process.execPath,[f,'--soft'],{stdio:'inherit'})\"",
     "hooks:install": "lefthook install",
     "prepack": "npm run build --workspace apps/web",
     "dev": "turbo dev",

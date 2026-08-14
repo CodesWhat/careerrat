@@ -114,9 +114,8 @@
   }
 }
 
-/* Archivo for display/headings — provided via --font-display (next/font/google
-   in layout.tsx), same mechanism as apps/website/src/app/layout.tsx. Body text
-   stays on the IBM Plex Sans set on <body>. */
+/* Archivo is bundled through next/font/local in layout.tsx. Body text stays on
+   the bundled IBM Plex Sans set on <body>. */
 h1,
 h2,
 h3,

@@ -7012,6 +7012,19 @@ a.onboarding-engine__not-found-chip:focus-visible {
   text-decoration: none;
 }
 
+.onboarding-pause-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--ink-faint);
+  font-size: 12px;
+}
+
+.onboarding-pause-action .btn {
+  flex-shrink: 0;
+}
+
 /* Mini-progress row — 7 items, ENGINE pre-ticked. */
 
 .onboarding-progress-row {

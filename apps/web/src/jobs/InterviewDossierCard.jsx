@@ -4,8 +4,9 @@
 // (both a direct /jobs?open= visit and the Focus card's "Prep this
 // interview"/"Open dossier" CTAs) had nowhere to build or read one. On mount
 // this reads back any already-built dossier (GET /api/interview-prep?id=);
-// a DOSSIER_NOT_FOUND 404 is the expected "not built yet" state, never an
-// error banner. Building/rebuilding is an explicit-click AI-spend action —
+// a console-clean 200 with dossier:null is the expected "not built yet" state,
+// never an error banner. The legacy DOSSIER_NOT_FOUND response remains tolerated.
+// Building/rebuilding is an explicit-click AI-spend action —
 // same discipline as PacketDocumentsCard's Generate/Export — nothing here
 // ever auto-fires from a prop change. The dossier's markdown is rendered as
 // plain preformatted text (not dangerouslySetInnerHTML): the build/read

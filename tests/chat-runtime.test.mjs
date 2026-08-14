@@ -333,8 +333,18 @@ test("buildChatKickoffPrompt: an 8-of-8 candidate gets a deterministic completio
   });
 
   assert.match(prompt, /initial setup is complete/i);
+  assert.match(prompt, /answers a question you asked before completion/i);
+  assert.match(prompt, /emit the required confirmation block before ending/i);
+  assert.match(prompt, /do not claim it is noted or saved/i);
   assert.match(prompt, /ask no new setup questions/i);
   assert.match(prompt, /optional enrichment belongs after onboarding/i);
+});
+
+test("buildChatKickoffPrompt: routes notice period to its real profile schema path", () => {
+  const prompt = buildChatKickoffPrompt({ skill: "ingest-profile" });
+  assert.match(prompt, /profile\.authorization\.notice_period/i);
+  assert.match(prompt, /never form-defaults\.notice_period/i);
+  assert.match(prompt, /do not collect an earliest start date during initial setup/i);
 });
 
 // ---------------------------------------------------------------------------

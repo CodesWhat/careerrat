@@ -71,9 +71,11 @@ export function mountInterviewPrepRoutes({ addRoute, repoRoot, env = process.env
       }
       const dossier = app.artifacts?.interviewDossier;
       if (!dossier?.markdown) {
-        const error = new Error("interview dossier has not been prepared yet");
-        error.code = "DOSSIER_NOT_FOUND";
-        throw error;
+        sendJson(res, 200, {
+          ok: true,
+          data: { applicationId: id, dossier: null, state: "missing" },
+        });
+        return;
       }
       sendJson(res, 200, {
         ok: true,
