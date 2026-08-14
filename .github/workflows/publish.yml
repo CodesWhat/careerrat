@@ -40,6 +40,8 @@ jobs:
         with:
           node-version: 24
           registry-url: https://registry.npmjs.org
+      - name: Install locked dependencies
+        run: npm ci
       # Trusted Publishing (OIDC) requires npm >= 11.5.1; pin to latest to be safe.
       - name: Upgrade npm for trusted publishing
         run: npm install -g npm@latest
