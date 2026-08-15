@@ -23,7 +23,14 @@ import { loadAgentGuidanceSnapshot } from "../core/tracker/agent-guidance-snapsh
 import { prepareQuickStartSourcing } from "./onboard-route.mjs";
 import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
-export const DISCOVERY_CHAT_SKILLS = ["research-boards", "discover-companies", "search-jobs"];
+export const DISCOVERY_CHAT_SKILLS = [
+  "research-boards",
+  "discover-companies",
+  "search-jobs",
+  "research-company",
+  "research-comp",
+  "company-health",
+];
 
 const DISCOVERY_STEP_NOTES = {
   "research-boards":
@@ -32,6 +39,12 @@ const DISCOVERY_STEP_NOTES = {
     "Run discover-companies, propose employer ATS boards, and stop at the skill's confirm-first write gate.",
   "search-jobs":
     "Run search-jobs for the first sweep or refresh, save sourced roles, capture reachable JD bodies, and queue sourced roles that still need setup answers.",
+  "research-company":
+    "Run research-company for the requested company and compose a cited workspace/research/<slug>.md artifact.",
+  "research-comp":
+    "Run research-comp for the requested role and location and compose a cited workspace/research/comp-bench-*.md artifact.",
+  "company-health":
+    "Run company-health for the requested company, score a role-scoped rating, and persist it to the tracker.",
 };
 
 const COMPANY_PROPOSAL_BODY_MAX_BYTES = 1024 * 1024;

@@ -165,7 +165,7 @@ function buildCandidateAwareTurn(text, candidateContext) {
 // answer questions there. Same "empty string explicitly locks it down, unset
 // falls back to the default" semantics as CAREERRAT_RUNTIME_SKILLS.
 const DEFAULT_CHAT_SKILLS =
-  "ingest-profile,research-boards,discover-companies,search-jobs,email-comms,track-outcomes";
+  "ingest-profile,research-boards,discover-companies,search-jobs,email-comms,track-outcomes,research-company,research-comp,company-health";
 
 export function resolveAllowedChatSkills({ repoRoot, env = process.env } = {}) {
   return resolveSkillAllowlist({

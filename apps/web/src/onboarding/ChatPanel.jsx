@@ -2,7 +2,15 @@ import { useState } from "react";
 import { Button } from "../components/Button.jsx";
 import { TextArea } from "../components/form.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
-import { addBoard, closeChat, saveCompanyBoard, sendChatMessage, startChat } from "../lib/api.js";
+import {
+  addBoard,
+  closeChat,
+  recordCompanyHealth,
+  recordResearch,
+  saveCompanyBoard,
+  sendChatMessage,
+  startChat,
+} from "../lib/api.js";
 import { errorState, withRetryAction } from "../lib/errorCopy.js";
 import { useEventSource } from "../lib/sse.js";
 import { renderChatMarkdown } from "./chatMarkdown.jsx";
@@ -17,6 +25,12 @@ import { parseDiscoveryBlocks } from "./discoveryBlocks.js";
 // Discovery skills emit typed proposal blocks alongside readable prose. Those
 // blocks become explicit Add/Track/Skip controls here, and the controls call
 // the existing validated source APIs instead of treating chat prose as a write.
+// The research trio (research-company/research-comp/company-health) does the
+// same thing for its finished result: CHAT_RUNTIME_TOOLS has no Bash, so
+// those skills emit a *_result block instead of shelling out to `careerrat
+// research record`/`careerrat health record`, and decideResult below turns
+// it into a Save/Discard control that fires the confirm-first
+// research.record / company.health-record intent server-side.
 //
 // `initialChatId` (M9 addition) — when the caller already knows a live
 // session exists (the Inbox's Lane-C confirm: src/cli/intake-route.mjs's
@@ -68,7 +82,9 @@ export function ChatPanel({
               role: "assistant",
               text,
               blocks: blocks.map((block) =>
-                block.kind.endsWith("_proposal") ? { ...block, status: "pending" } : block
+                block.kind.endsWith("_proposal") || block.kind.endsWith("_result")
+                  ? { ...block, status: "pending" }
+                  : block
               ),
             },
           ]);
@@ -192,6 +208,53 @@ export function ChatPanel({
     }
   }
 
+  // decideResult — the research trio's conversational web handoff (see
+  // research-company/research-comp/company-health SKILL.md's "Conversational
+  // web handoff" section). CHAT_RUNTIME_TOOLS has no Bash, so these sessions
+  // emit their finished result as a typed *_result block instead of shelling
+  // out to `careerrat research record`/`careerrat health record`; this is
+  // the confirm control that fires the matching intent so the write runs
+  // server-side through the exact same guards the CLI path used. "Discard"
+  // never calls the server — it just dismisses the block locally, same as
+  // decideProposal's "skip".
+  async function decideResult(messageIndex, blockIndex, block, decision) {
+    if (decision === "discard") {
+      updateProposal(messageIndex, blockIndex, { status: "resolved", result: "Discarded" });
+      return;
+    }
+    updateProposal(messageIndex, blockIndex, { status: "saving", error: null });
+    try {
+      if (block.kind === "company_research_result") {
+        await recordResearch({
+          type: "company-research",
+          name: block.company,
+          slug: block.slug,
+          markdown: block.markdown,
+        });
+      } else if (block.kind === "comp_benchmark_result") {
+        await recordResearch({
+          type: "comp-benchmark",
+          name: block.role,
+          slug: block.stem,
+          markdown: block.markdown,
+        });
+      } else {
+        await recordCompanyHealth({
+          targetType: block.targetType,
+          targetId: block.targetId,
+          company: block.company,
+          companyHealth: block.companyHealth,
+        });
+      }
+      updateProposal(messageIndex, blockIndex, { status: "resolved", result: "Saved" });
+    } catch (err) {
+      updateProposal(messageIndex, blockIndex, {
+        status: "error",
+        error: errorState(err, "Save failed.").message,
+      });
+    }
+  }
+
   async function handleComplete() {
     if (!onComplete) return;
     setCompleting(true);
@@ -291,6 +354,35 @@ export function ChatPanel({
                       </div>
                     )}
                   </div>
+                ) : block.kind.endsWith("_result") ? (
+                  <div
+                    // biome-ignore lint/suspicious/noArrayIndexKey: model turn blocks are append-only
+                    key={blockIndex}
+                    className="chat-proposal"
+                  >
+                    <strong>{resultBlockTitle(block)}</strong>
+                    <span>{resultBlockSubtitle(block)}</span>
+                    {block.status === "resolved" ? (
+                      <span>{block.result}</span>
+                    ) : (
+                      <div className="chat-proposal__actions">
+                        <Button
+                          onClick={() => decideResult(i, blockIndex, block, "save")}
+                          disabled={block.status === "saving"}
+                        >
+                          Save to workspace
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          onClick={() => decideResult(i, blockIndex, block, "discard")}
+                          disabled={block.status === "saving"}
+                        >
+                          Discard
+                        </Button>
+                        {block.error ? <span>{block.error}</span> : null}
+                      </div>
+                    )}
+                  </div>
                 ) : null
               )}
             </div>
@@ -322,4 +414,20 @@ export function ChatPanel({
       </div>
     </div>
   );
+}
+
+// resultBlockTitle/resultBlockSubtitle — plain-language labels for the
+// research trio's *_result confirm cards (see decideResult above).
+function resultBlockTitle(block) {
+  if (block.kind === "company_research_result") return block.company;
+  if (block.kind === "comp_benchmark_result") {
+    return block.location ? `${block.role} — ${block.location}` : block.role;
+  }
+  return block.company || "Company health";
+}
+
+function resultBlockSubtitle(block) {
+  if (block.kind === "company_research_result") return "Company research";
+  if (block.kind === "comp_benchmark_result") return "Comp benchmark";
+  return `Company health — ${block.companyHealth?.rating || "rated"}`;
 }

@@ -420,7 +420,14 @@ The current build order is:
    and the durable receipt returns to Jobs or Settings. Natural application outcomes and interview
    prep now satisfy the same typed, durable Ask contract. Recruiter drafts and reported sends also
    use that contract, while verified delivery remains open. One-off screening answers now satisfy
-   the same contract with review-before-reuse persistence. The remaining original-skill rows stay
+   the same contract with review-before-reuse persistence. Company research, comp benchmarking, and
+   company health now satisfy the same typed Ask contract too: natural requests resolve through a
+   shared company reference resolver into either a fresh cached result rendered immediately or an
+   embedded supervised research session, with cited dossiers, benchmarks, and ratings each carrying
+   an explicit refresh action. Company-health ratings also gained a validated one-write-path CLI
+   (`careerrat health record`, dry-run by default) that replaces the prior hand-patched write and
+   now render in the Jobs drawer alongside the existing row badge. Headed and packaged acceptance
+   for these three rows remain open. The remaining original-skill rows stay
    tracked in the linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
@@ -550,6 +557,18 @@ same release contract:
   unchanged).
 - **Coaching loop** — turn a below-floor fit score from a verdict into a plan: name the gaps,
   suggest how to close them, re-ingest the new evidence, re-score.
+- **Search-shape eval and tiered AI cost** — decompose the upstream Career Ops search
+  discipline (a cost-gated deterministic-first cascade where the model discovers leads but
+  never certifies them, and every web-sourced lead gets a mandatory liveness re-check)
+  against CareerRat's agent-mediated lanes, then run a staged eval: fixture-corpus
+  recall/precision, LLM-vs-deterministic triage agreement on the same labeled postings, and
+  a live dead-link pass. Port whichever discipline wins; the known gaps are that the AI
+  web-search lane re-derives fit in prose instead of calling the deterministic scorer and
+  persists survivors without a liveness re-check. In parallel, thread per-call model-tier
+  selection through the installed-CLI runtime path (the small-fast tier hint already works
+  for API-key users but is dropped when a subscription CLI runs the call) and pass the
+  orchestrator's computed context digest to fan-out subagents instead of re-reading config
+  per call. Plan and findings: `.planning/SEARCH-SHAPE-EVAL.md`.
 - **Desktop public distribution** — completed August 14, 2026. The restored local Keychain profile
   and permanent `release:dmg` stage produce a signed, Apple-notarized, stapled, and
   Gatekeeper-approved DMG in one command. Runtime/path ownership, navigation, clean-device first

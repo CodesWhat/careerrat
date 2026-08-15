@@ -208,9 +208,34 @@ with zero cited sources.
 Every body claim must carry a provenance marker. A section with unmarked prose will be
 refused by the placeholder lint.
 
+### Conversational web handoff
+
+In conversational chat, this skill runs as an embedded session under the `chat` tool
+profile (`CHAT_RUNTIME_TOOLS`), which has no Bash — there is no shell to run `careerrat
+research record ... --write` from. Once the artifact in STEP 4 is complete and clean (same
+frontmatter, same citation and placeholder-lint requirements — nothing about the artifact
+itself changes), emit it as one exact fenced block instead of writing a draft file:
+
+```careerrat:discovery
+{"kind":"company_research_result","company":"<Canonical Company Name>","slug":"<company-slug>","markdown":"<the full STEP 4 artifact text, frontmatter and body>"}
+```
+
+The app renders this as a real Save to workspace / Discard control. Saving calls the
+confirm-first `research.record` intent, which runs the write server-side through the exact
+same `computeResearchWrite`/`writeResearch` guards (citation-hygiene, placeholder lint,
+`current_base` privacy) STEP 5's CLI path uses — so a bad artifact is refused there too, not
+silently accepted. Do not tell the user the research is saved until they confirm; a prose
+reply is never itself a write. Skip STEP 5's CLI commands entirely in this mode — the
+confirmed intent already logs the Activity Pulse event and updates `meta.lastUpdatedAt`, the
+same as `record --write` does. STEP 5's `careerrat research record` CLI path stays exactly as
+written below for a one-shot, non-embedded (external-agent) run, where there is a real shell.
+
 ---
 
 ## STEP 5 — Dry-run, fix, commit, clean up
+
+**External-agent / one-shot CLI runs only.** In conversational chat, use the Conversational
+web handoff above instead — skip straight to STEP 6.
 
 1. Dry-run to validate and preview:
    ```

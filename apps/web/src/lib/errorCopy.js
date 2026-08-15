@@ -65,6 +65,17 @@ function communicationAmbiguityMessage(details) {
     : "That matches more than one recruiter thread. Name the company, role, or subject more specifically.";
 }
 
+function companyAmbiguityMessage(details) {
+  const matches = Array.isArray(details?.matches) ? details.matches : [];
+  const labels = matches
+    .slice(0, 5)
+    .map(({ company }) => String(company || "").trim())
+    .filter(Boolean);
+  return labels.length
+    ? `That matches more than one saved company: ${labels.join("; ")}. Name it more specifically.`
+    : "That matches more than one saved company. Name it more specifically.";
+}
+
 const RULES = [
   {
     match: ({ raw, code }) => code === "missing_key" || startsWith(raw, "No AI key is configured"),
@@ -157,6 +168,28 @@ const RULES = [
     match: ({ code }) => code === "COMMUNICATION_REFERENCE_NOT_FOUND",
     message:
       "CareerRat couldn't find that recruiter thread. Check the company, role, or subject and try again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMPANY_NOT_FOUND",
+    message:
+      "CareerRat couldn't find that company among your saved jobs. Name it exactly as it appears there.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMPANY_AMBIGUOUS",
+    message: ({ details }) => companyAmbiguityMessage(details),
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMPANY_NOT_TRACKED",
+    message:
+      "Health ratings attach to a saved job. Save this role first, or ask CareerRat to research the company instead.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "RESEARCH_COMP_INPUT_REQUIRED",
+    message: "Tell CareerRat the role and the location so it can look up comp for it.",
     action: null,
   },
   {

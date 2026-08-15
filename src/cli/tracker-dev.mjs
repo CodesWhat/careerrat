@@ -159,6 +159,30 @@ export function createDevServer({
         skill: "research-boards",
         request,
       }),
+    startCompanyResearchImpl: ({ request }) =>
+      startExplicitDiscoveryChat({
+        repoRoot,
+        env,
+        chatRuntime,
+        skill: "research-company",
+        request,
+      }),
+    startCompResearchImpl: ({ request }) =>
+      startExplicitDiscoveryChat({
+        repoRoot,
+        env,
+        chatRuntime,
+        skill: "research-comp",
+        request,
+      }),
+    startCompanyHealthImpl: ({ request }) =>
+      startExplicitDiscoveryChat({
+        repoRoot,
+        env,
+        chatRuntime,
+        skill: "company-health",
+        request,
+      }),
   }),
 } = {}) {
   // Boot-load any stored BYOK key from .internal/ai.env (see ai-env.mjs)

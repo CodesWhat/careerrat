@@ -2093,6 +2093,310 @@ describe("AskBar — acting", () => {
 });
 
 // ---------------------------------------------------------------------------
+// 4.5 Research trio artifacts (research_chat, company_research,
+// comp_benchmark, company_health — research.company/research.comp/
+// company.health's action_result artifacts)
+// ---------------------------------------------------------------------------
+
+describe("AskBar — research trio artifacts", () => {
+  it("renders the research_chat surface with its plain-language headline and the live chat panel", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      action: {
+        label: "Research this company",
+        intent: {
+          type: "research.company",
+          entity: { type: "company", id: "acme-freight" },
+          input: { company: "Acme Freight" },
+        },
+      },
+      answer: { label: "Answer about company research" },
+      engineAvailable: true,
+    });
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Started researching Acme Freight. CareerRat will cite every claim.",
+            artifacts: [
+              {
+                kind: "research_chat",
+                title: "Researching Acme Freight",
+                chatId: "research-company-live",
+                skill: "research-company",
+                state: "running",
+                reused: false,
+              },
+            ],
+            metadata: { state: "running" },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "research Acme Freight" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(byClass(tree, "ask-bar__research-chat-head"))).toBe("Researching Acme Freight");
+    expect(byTag(tree, "chat-panel")).toBeTruthy();
+    expect(chatPanel.props).toMatchObject({
+      skill: "research-company",
+      initialChatId: "research-company-live",
+    });
+  });
+
+  it("renders a company_research card with the company, source count, and an expandable full-research drawer", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      action: {
+        label: "Research this company",
+        intent: {
+          type: "research.company",
+          entity: { type: "company", id: "acme-freight" },
+          input: { company: "Acme Freight" },
+        },
+      },
+      answer: { label: "Answer about company research" },
+      engineAvailable: true,
+    });
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "CareerRat already researched Acme Freight.",
+            artifacts: [
+              {
+                kind: "company_research",
+                company: "Acme Freight",
+                slug: "acme-freight",
+                path: "workspace/research/acme-freight.md",
+                fetchedAt: "2026-08-10",
+                stale: false,
+                sources: 2,
+                markdown: "Acme Freight runs regional logistics across the Midwest.",
+              },
+            ],
+            metadata: { state: "reused" },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "research Acme Freight" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const card = byClass(tree, "ask-bar__research-card");
+    expect(textOf(card)).toContain("Acme Freight");
+    expect(textOf(card)).toContain("2 sources");
+    const details = byTag(tree, "details");
+    expect(textOf(details)).toContain("Read the full research");
+    expect(textOf(details)).toContain("Acme Freight runs regional logistics across the Midwest.");
+  });
+
+  it("renders a comp_benchmark card with formatted currency figures and 'not enough public data' for a null midpoint", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      action: {
+        label: "Research market comp",
+        intent: {
+          type: "research.comp",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { role: "Registered Nurse", location: "Denver, CO" },
+        },
+      },
+      answer: { label: "Answer about market comp" },
+      engineAvailable: true,
+    });
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Started market comp research for Registered Nurse in Denver, CO.",
+            artifacts: [
+              {
+                kind: "comp_benchmark",
+                role: "Registered Nurse",
+                location: "Denver, CO",
+                benchmark: {
+                  floor: 82000,
+                  midpoint: null,
+                  ceiling: 108000,
+                  currency: "USD",
+                  confidence: "med",
+                },
+                fetchedAt: "2026-08-10",
+                path: "workspace/research/comp-bench-registered-nurse-denver-co-2026-08.md",
+                markdown: "Denver registered nurses see a wide range depending on facility type.",
+              },
+            ],
+            metadata: { state: "reused" },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "market comp for a nurse in Denver" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const card = byClass(tree, "ask-bar__research-card");
+    expect(textOf(card)).toContain("Registered Nurse");
+    expect(textOf(card)).toContain("Denver, CO");
+    expect(textOf(card)).toContain("$82,000");
+    expect(textOf(card)).toContain("$108,000");
+    expect(textOf(card)).toContain("not enough public data");
+  });
+
+  it("renders a company_health card with the rating chip, and only shows the fitDelta line when it's nonzero", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      action: {
+        label: "Check company health",
+        intent: {
+          type: "company.health-request",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { companyReference: "Riverside Health" },
+        },
+      },
+      answer: { label: "Answer about company health" },
+      engineAvailable: true,
+    });
+    api.runWorkspaceIntent.mockResolvedValueOnce({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Riverside Health: watch for Registered Nurse, as of 2026-08-10.",
+            artifacts: [
+              {
+                kind: "company_health",
+                applicationId: "app-riverside",
+                company: "Riverside Health",
+                role: "Registered Nurse",
+                rating: "watch",
+                provenance: "built-from-data",
+                asOf: "2026-08-10",
+                dimensions: {
+                  layoffRisk: {
+                    level: "elevated",
+                    note: "Hiring freeze announced for non-clinical roles.",
+                  },
+                },
+                crossCut: ["stability"],
+                fitDelta: -3,
+                rationale: "A hiring freeze was announced for non-clinical roles.",
+              },
+            ],
+            metadata: { state: "reused" },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "how risky is Riverside Health" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    let card = byClass(tree, "ask-bar__research-card");
+    expect(textOf(card)).toContain("Riverside Health");
+    expect(textOf(card)).toContain("Watch");
+    expect(textOf(card)).toMatch(/Lowered this job's fit by 3 points/);
+
+    // Dimensions persist as { level, note, ... } objects, not flat strings
+    // (see validateCompanyHealth) — this must render the nested level and
+    // must not throw React's "objects are not valid as a React child" error.
+    const dim = byClass(card, "ask-bar__health-dim");
+    expect(dim.props["data-level"]).toBe("elevated");
+    expect(textOf(dim)).toContain("elevated");
+
+    // A second, otherwise-identical turn with fitDelta: 0 must NOT show the
+    // fit-impact line — the card only calls out a fit change that actually
+    // happened.
+    api.runWorkspaceIntent.mockResolvedValueOnce({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Riverside Health: healthy for Registered Nurse, as of 2026-08-10.",
+            artifacts: [
+              {
+                kind: "company_health",
+                applicationId: "app-riverside",
+                company: "Riverside Health",
+                role: "Registered Nurse",
+                rating: "healthy",
+                provenance: "built-from-data",
+                asOf: "2026-08-10",
+                dimensions: { layoffRisk: { level: "low", note: "No layoffs reported." } },
+                crossCut: [],
+                fitDelta: 0,
+                rationale: "No concerning signals found in public reporting.",
+              },
+            ],
+            metadata: { state: "reused" },
+          },
+        ],
+      },
+    });
+    input.props.onChange({ target: { value: "how risky is Riverside Health" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    card = byClass(tree, "ask-bar__research-card");
+    expect(textOf(card)).toContain("Healthy");
+    expect(textOf(card)).not.toMatch(/Lowered this job's fit/);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // 5. Turn-id race guard (the fix commit 95f27540 landed)
 // ---------------------------------------------------------------------------
 

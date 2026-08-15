@@ -732,4 +732,60 @@ describe("JobDrawer", () => {
     await alert.props.action.onRetry();
     expect(api.getApplication).toHaveBeenCalledWith("app-1");
   });
+
+  // Company health (port-parity fix, JobDrawer.jsx: dashboard-data.js's
+  // buildHealthBlock already emits drawer.companyHealth; CompanyHealthCard is
+  // the render half that had been missing). Persist-then-render, like the
+  // rest of the drawer's typed blocks — never recomputed client-side.
+  it("renders the company health section from drawer.companyHealth", async () => {
+    const row = {
+      ...applicationRow,
+      drawer: {
+        artifacts: [],
+        companyHealth: {
+          rating: "watch",
+          ratingLabel: "Watch",
+          forFunction: "clinical staffing",
+          asOf: "2026-08-10",
+          provenance: "built-from-data",
+          provenanceLabel: "Based on research CareerRat found",
+          rationale: "A hiring freeze was announced for non-clinical roles.",
+          crossCut: ["stability"],
+          dimensions: [{ label: "Layoffs", level: "elevated", note: "Freeze announced in July." }],
+          signals: [
+            {
+              source: "Local news",
+              date: "2026-07-20",
+              summary: "Hospital freezes hiring.",
+              url: "https://example.com/a",
+            },
+          ],
+        },
+      },
+    };
+    renderDrawer(row);
+    await runEffects();
+    const html = renderToStaticMarkup(renderDrawer(row));
+
+    expect(html).toContain('title="Company health"');
+    expect(html).toContain("Watch");
+    expect(html).toContain("Based on research CareerRat found");
+    expect(html).toContain("as of 2026-08-10");
+    expect(html).toContain("A hiring freeze was announced for non-clinical roles.");
+    expect(html).toContain("Layoffs");
+    expect(html).toContain("elevated");
+    expect(html).toContain("Freeze announced in July.");
+    expect(html).toContain("What this is based on");
+    expect(html).toContain("Hospital freezes hiring.");
+  });
+
+  it("omits the company health section entirely when the row carries no rating", async () => {
+    const row = { ...applicationRow, drawer: { artifacts: [] } };
+    renderDrawer(row);
+    await runEffects();
+    const html = renderToStaticMarkup(renderDrawer(row));
+
+    expect(html).not.toContain('title="Company health"');
+    expect(html).not.toContain("What this is based on");
+  });
 });

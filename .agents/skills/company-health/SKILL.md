@@ -183,12 +183,14 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
    }
    ```
 
-   - **DB workspace:**
-     - **`applications[]` row:** `careerrat data app set-fields <id> --data-file <patch.json>` with `{"companyHealth": {...the object above...}}` (shallow merge one level — replaces the whole `companyHealth` object, which is what's wanted since it's always written in full). Use `--data-file` given the object's size (dimensions + signals).
-     - **`sourced[]` row:** there is no single-field patch verb for `sourced[]` — read the current row from `workspace/tracker.json#sourced[]`, set `companyHealth` on it (carrying every other field over unchanged), and persist the whole row: `careerrat data sourced upsert-batch --data '[<patched full sourced row JSON>]'` (a one-element batch; this is outcome-changing per the Data Write Contract, so it also bumps the stamp and refreshes analytics in the same transaction).
+   - **DB workspace:** write it through the dedicated verb, not `set-fields`/`upsert-batch` — this is the required write path, and the only one that validates the shape (rating/provenance enums, `asOf` format, `fitDelta` sign) and guards against a `current_base` leak before it touches the row:
+     ```
+     careerrat health record <applicationOrSourcedId> --file <rating.json> --write
+     ```
+     `<applicationOrSourcedId>` resolves against `applications[]` first, then `sourced[]` — works for either row without knowing which table it's in. Drop `--write` first to dry-run: it validates the payload and previews the target row without committing anything.
    - **Legacy workspace (no DB):** open `workspace/tracker.json` and set the object above directly on the matching row.
 2. Bump `meta.lastUpdatedAt` (the freshness stamp every writing skill bumps).
-   - **DB workspace:** the `set-fields` / `upsert-batch` call in step 1 already bumped `meta.lastUpdatedAt` (and `meta.version`) in the same transaction — no separate action needed.
+   - **DB workspace:** `careerrat health record --write` already bumped `meta.lastUpdatedAt` (and `meta.version`) in the same transaction — no separate action needed.
    - **Legacy workspace (no DB):** stamp it by hand in the same write as step 1.
 3. Verify + snapshot (the dashboard handoff):
    - **DB workspace:** step 1's call already persisted and auto-exported `workspace/tracker.json` + `workspace/activity.jsonl`. Run:
@@ -202,16 +204,42 @@ PERSISTED onto `workspace/tracker.json`; the renderer only reads it. Mirror the
      ```
    Fix and re-run until it passes clean. Render must never write `tracker.json`.
 
+### Conversational web handoff
+
+In conversational chat, this skill runs as an embedded session under the `chat` tool
+profile (`CHAT_RUNTIME_TOOLS`), which has no Bash — there is no shell to run `careerrat
+health record ... --write` from, and no server-side file access to hand-edit
+`workspace/tracker.json` either. Once the `companyHealth` object above is fully composed
+(same shape, same rating/provenance enums, same `current_base` guard — nothing about the
+payload itself changes), emit it as one exact fenced block instead of running steps 1-3:
+
+```careerrat:discovery
+{"kind":"company_health_result","targetType":"application|sourced","targetId":"<applicationOrSourcedId>","company":"<Company>","companyHealth":{ "rating": "healthy|watch|risky", "forFunction": "<target_function>", "asOf": "YYYY-MM-DD", "provenance": "built-from-data|needs-more-info|stale", "crossCut": [], "fitDelta": 0, "dimensions": {}, "rationale": "...", "signals": [] }}
+```
+
+The app renders this as a real Save to workspace / Discard control. Saving calls the
+confirm-first `company.health-record` intent, which runs the write server-side through the
+exact same `companyHealthSet`/`validateCompanyHealth` guards (rating/provenance enums,
+`asOf` format, `fitDelta` sign, `current_base` leak guard) step 1's `careerrat health record`
+CLI path uses — so a malformed or leaking payload is refused there too, not silently
+accepted. Do not tell the user the rating is saved until they confirm; a prose reply is
+never itself a write. Skip steps 1-3's CLI/manual-edit paths entirely in this mode — the
+confirmed intent already bumps `meta.lastUpdatedAt` and persists + exports
+`workspace/tracker.json`, the same single transaction `careerrat health record --write`
+runs. STEP 5's numbered steps above stay exactly as written for a one-shot, non-embedded
+(external-agent) run, where there is a real shell (DB workspace) or direct file access
+(legacy workspace).
+
 ---
 
 ## STEP 6 — Log to Activity Pulse
 
-- **DB workspace:** step 5's `app set-fields` / `sourced upsert-batch` call already auto-logged
-  a generic event in the same transaction. For the richer, rating-specific type, log an
-  additional event (this verb only logs, it never bumps the stamp):
-  ```
-  careerrat data activity append --data '{"type":"research","actor":"agent","title":"Company health: <Company> — <rating>","summary":"<function>-scoped: <the one driving signal>","refs":{"company":"<Company>"}}'
-  ```
+- **DB workspace:** step 5's `careerrat health record --write` call already logs the
+  rating-specific event ("Company health: `<Company>` — `<rating>`", type `research`) in the
+  same transaction — no separate `careerrat data activity append` call needed. The same is
+  true in conversational chat: the confirmed `company.health-record` intent calls the exact
+  same `companyHealthSet` verb, so the Activity Pulse event is already logged once the user
+  confirms the save — no separate step.
 - **Legacy workspace (no DB):**
   ```
   careerrat activity append --type research --actor agent \

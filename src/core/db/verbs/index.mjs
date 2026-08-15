@@ -46,6 +46,7 @@ export {
   companyProposalBatchPatchState,
   companyProposalBatchPut,
 } from "./company-discovery.mjs";
+export { companyHealthSet, HEALTH_PROVENANCE, HEALTH_RATINGS } from "./company-health.mjs";
 export {
   DEEP_INGEST_LANE_STATUSES,
   DEEP_INGEST_REQUIRED_LANES,

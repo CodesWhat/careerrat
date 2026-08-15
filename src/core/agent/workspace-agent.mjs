@@ -5,6 +5,7 @@ import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
+import { activityAppend } from "../db/verbs/activity.mjs";
 import {
   appCaptureInterviewIntake,
   appScheduleInterview,
@@ -19,6 +20,7 @@ import {
   commSetDraft,
 } from "../db/verbs/comm.mjs";
 import { companyProposalBatchGet } from "../db/verbs/company-discovery.mjs";
+import { companyHealthSet } from "../db/verbs/company-health.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
@@ -43,6 +45,16 @@ import {
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
+import {
+  isStale,
+  listResearch,
+  readCompanyResearch,
+  readResearch,
+  researchRelPath,
+  slugifyCompany,
+  splitFrontmatter,
+  writeResearch,
+} from "../research/research-store.mjs";
 import { planSchedulingReply } from "../scheduling/plan.mjs";
 import {
   offersWithCapturedJobs,
@@ -83,6 +95,13 @@ const EXECUTABLE_INTENTS = new Set([
   "source.discover",
   "company.discover",
   "company.proposal-decide",
+  "research.company",
+  "research.company-request",
+  "research.comp",
+  "research.record",
+  "company.health",
+  "company.health-request",
+  "company.health-record",
   "job.apply",
   "communication.draft",
   "communication.draft-request",
@@ -798,6 +817,222 @@ function resolveReferencedCommunication({ repoRoot, env, communicationReference 
   return matches[0];
 }
 
+const COMPANY_REFERENCE_STOP_WORDS = new Set([
+  "a",
+  "about",
+  "an",
+  "and",
+  "any",
+  "are",
+  "as",
+  "at",
+  "before",
+  "company",
+  "for",
+  "from",
+  "health",
+  "help",
+  "how",
+  "i",
+  "interview",
+  "is",
+  "it",
+  "job",
+  "land",
+  "landing",
+  "layoffs",
+  "me",
+  "my",
+  "of",
+  "on",
+  "opening",
+  "place",
+  "please",
+  "position",
+  "posting",
+  "research",
+  "risky",
+  "role",
+  "s",
+  "safe",
+  "stability",
+  "stable",
+  "that",
+  "the",
+  "there",
+  "this",
+  "to",
+  "was",
+  "what",
+  "whats",
+  "you",
+]);
+
+function companyReferenceTokens(value) {
+  return String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token && !COMPANY_REFERENCE_STOP_WORDS.has(token));
+}
+
+// Every tracked company reference (fuzzy company research, company health)
+// resolves against this same applications+sourced set, deduped by link the
+// same way resolveReferencedJobRequest does — a promoted application and its
+// originating sourced row must never both surface as separate companies.
+function trackedCompanyRows({ repoRoot, env }) {
+  const db = requireDb({ repoRoot, env });
+  const applications = db
+    .prepare("SELECT data FROM applications ORDER BY rowid ASC")
+    .all()
+    .map((row) => ({ recordType: "application", ...JSON.parse(row.data) }));
+  const applicationLinks = new Set(
+    applications
+      .map((row) =>
+        String(row.link || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+  const sourced = db
+    .prepare("SELECT data FROM sourced ORDER BY rowid ASC")
+    .all()
+    .map((row) => ({ recordType: "sourced", ...JSON.parse(row.data) }))
+    .filter(
+      (row) =>
+        !row.link ||
+        !applicationLinks.has(
+          String(row.link || "")
+            .trim()
+            .toLowerCase()
+        )
+    );
+  return [...applications, ...sourced];
+}
+
+// A tracked company can have more than one row (multiple applications, or an
+// application plus the sourced row it hasn't been promoted from). Prefer the
+// application record — it is the one the candidate is actually pursuing —
+// and break remaining ties by most recently updated.
+function primaryCompanyRow(rows) {
+  const rank = (row) => (row.recordType === "application" ? 1 : 0);
+  return [...rows].sort((a, b) => {
+    const rankDiff = rank(b) - rank(a);
+    if (rankDiff !== 0) return rankDiff;
+    return String(b.updatedAt || "").localeCompare(String(a.updatedAt || ""));
+  })[0];
+}
+
+function resolveReferencedCompany({
+  repoRoot,
+  env,
+  companyReference,
+  notFoundCode = "COMPANY_NOT_FOUND",
+  notFoundMessage,
+}) {
+  const tokens = companyReferenceTokens(companyReference);
+  const reference = String(companyReference || "").trim();
+  if (!tokens.length) {
+    throw actionError(
+      notFoundMessage || "Name the company so CareerRat can identify it.",
+      notFoundCode
+    );
+  }
+  const rows = trackedCompanyRows({ repoRoot, env });
+
+  // Exact whole-name match (case-insensitive) always wins first, and is the
+  // ONLY path available when every remaining token is a single character —
+  // e.g. "AT&T" reduces to ["at","t"] and then ["t"] once "at" is dropped as
+  // a stop word. A lone single-char token is too weak to subset-match safely
+  // (it would match any tracked company whose name contains that one letter
+  // as a standalone word), so it falls back to exact-name comparison instead
+  // of the normal subset match below.
+  const referenceKey = reference.toLowerCase();
+  const exactMatches = rows.filter(
+    (row) =>
+      String(row.company || "")
+        .trim()
+        .toLowerCase() === referenceKey
+  );
+  const hasSubsetMatchableToken = tokens.some((token) => token.length >= 2);
+
+  let matches;
+  if (exactMatches.length) {
+    matches = exactMatches;
+  } else if (!hasSubsetMatchableToken) {
+    throw actionError(
+      notFoundMessage || `CareerRat could not find a tracked company matching “${reference}”.`,
+      notFoundCode
+    );
+  } else {
+    matches = rows.filter((row) => {
+      const candidateTokens = new Set(companyReferenceTokens(row.company || ""));
+      return tokens.every((token) => candidateTokens.has(token));
+    });
+  }
+  if (!matches.length) {
+    throw actionError(
+      notFoundMessage || `CareerRat could not find a tracked company matching “${reference}”.`,
+      notFoundCode
+    );
+  }
+  const byCompany = new Map();
+  for (const row of matches) {
+    const key = String(row.company || "")
+      .trim()
+      .toLowerCase();
+    if (!byCompany.has(key)) byCompany.set(key, []);
+    byCompany.get(key).push(row);
+  }
+  if (byCompany.size > 1) {
+    const safeMatches = [...byCompany.values()].slice(0, 5).map((companyRows) => ({
+      company: String(companyRows[0].company || "this company").slice(0, 120),
+    }));
+    const choices = safeMatches.map((row) => row.company).join("; ");
+    const error = actionError(
+      `That matches more than one tracked company: ${choices}. Name the company more specifically.`,
+      "COMPANY_AMBIGUOUS"
+    );
+    error.details = { matches: safeMatches };
+    throw error;
+  }
+  const chosen = primaryCompanyRow([...byCompany.values()][0]);
+  return {
+    company: String(chosen.company || "").trim(),
+    recordType: chosen.recordType,
+    id: chosen.id,
+  };
+}
+
+// Read-only company lookup for an open-job "this company" reference — unlike
+// resolveSavedJobRequest, this never promotes a sourced row to an
+// application; research and health checks are not a commitment to apply.
+function companyFromJobId({ repoRoot, env, jobId }) {
+  let row;
+  try {
+    row = applicationForIntent({ repoRoot, env, id: jobId });
+  } catch (error) {
+    if (error?.code !== "NOT_FOUND") throw error;
+    row = sourcedForIntent({ repoRoot, env, id: jobId });
+  }
+  return String(row.company || "").trim();
+}
+
+function trackedCompanyFromJobId({ repoRoot, env, jobId }) {
+  try {
+    const application = applicationForIntent({ repoRoot, env, id: jobId });
+    return {
+      recordType: "application",
+      id: application.id,
+      company: String(application.company || "").trim(),
+    };
+  } catch (error) {
+    if (error?.code !== "NOT_FOUND") throw error;
+  }
+  const sourced = sourcedForIntent({ repoRoot, env, id: jobId });
+  return { recordType: "sourced", id: sourced.id, company: String(sourced.company || "").trim() };
+}
+
 function readCommunicationArtifact({ repoRoot, env, artifactPath }) {
   const relativePath = String(artifactPath || "").trim();
   if (
@@ -898,6 +1133,44 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
             ? "scheduling.prepare"
             : "communication.record-external",
       entity: { type: "communication", id: communication.id },
+    };
+  }
+  if (intent.type === "research.company-request") {
+    const company = input.jobId
+      ? companyFromJobId({ repoRoot, env, jobId: input.jobId })
+      : resolveReferencedCompany({ repoRoot, env, companyReference: input.companyReference })
+          .company;
+    if (!company) {
+      throw actionError(
+        "CareerRat could not identify the company for this job.",
+        "COMPANY_NOT_FOUND"
+      );
+    }
+    return {
+      ...intent,
+      type: "research.company",
+      entity: { type: "company", id: slugifyCompany(company) },
+      input: { ...input, company },
+    };
+  }
+  if (intent.type === "company.health-request") {
+    const reference = String(input.companyReference || "").trim();
+    const resolved = input.jobId
+      ? trackedCompanyFromJobId({ repoRoot, env, jobId: input.jobId })
+      : resolveReferencedCompany({
+          repoRoot,
+          env,
+          companyReference: reference,
+          notFoundCode: "COMPANY_NOT_TRACKED",
+          notFoundMessage: reference
+            ? `CareerRat could not find “${reference}” among your tracked jobs. Company health attaches to a tracked job, so track it first, or ask CareerRat to research the company instead.`
+            : "Name the company. Company health attaches to a tracked job.",
+        });
+    return {
+      ...intent,
+      type: "company.health",
+      entity: { type: resolved.recordType, id: resolved.id },
+      input: { ...input, company: resolved.company },
     };
   }
   return intent;
@@ -1427,6 +1700,95 @@ function boardDiscoveryChatArtifact(chat = {}) {
   };
 }
 
+function researchChatArtifact(chat = {}, { skill, title }) {
+  const chatId = String(chat.chatId || "").trim();
+  if (!chatId) throw actionError(`${title} did not return a visible chat.`, "NOT_FOUND");
+  return {
+    kind: "research_chat",
+    title,
+    chatId,
+    skill,
+    state: String(chat.state || "running"),
+    reused: chat.reused === true,
+  };
+}
+
+// company_research / comp_benchmark / company_health artifact builders —
+// shared by the freshness-hit reuse path (an already-current artifact just
+// gets re-served) and the confirmed research.record / company.health-record
+// write path below (a freshly written artifact gets served back the same
+// shape), so the client renders the identical card either way.
+function companyResearchArtifact({ fm = {}, company, slug, stale, markdown }) {
+  return {
+    kind: "company_research",
+    company: fm.company || company,
+    slug,
+    path: researchRelPath(slug),
+    fetchedAt: fm.fetchedAt || null,
+    stale,
+    sources: Array.isArray(fm.sources) ? fm.sources.length : 0,
+    markdown,
+  };
+}
+
+function compBenchmarkArtifact({ fm = {}, role, location, path, markdown }) {
+  return {
+    kind: "comp_benchmark",
+    role: fm.role || role,
+    location: fm.location || location,
+    benchmark: fm.benchmark || null,
+    fetchedAt: fm.fetchedAt || null,
+    path,
+    markdown,
+  };
+}
+
+function companyHealthArtifactFromRating({ entityType, rowId, company, role, health }) {
+  return {
+    kind: "company_health",
+    ...(entityType === "application" ? { applicationId: rowId } : { sourcedId: rowId }),
+    company,
+    role,
+    rating: health.rating,
+    provenance: health.provenance,
+    asOf: health.asOf,
+    dimensions: health.dimensions || {},
+    crossCut: health.crossCut || [],
+    fitDelta: health.fitDelta ?? 0,
+    rationale: health.rationale || "",
+  };
+}
+
+// research.record's Activity Pulse summary for a comp-benchmark save — the
+// CLI path (research-comp SKILL.md STEP 5) passes "<floor / midpoint /
+// ceiling synthesized>" by hand; this derives the same shape from the
+// artifact's own parsed frontmatter.benchmark.
+function compBenchmarkActivitySummary(benchmark) {
+  const parts = [];
+  if (benchmark?.floor != null) parts.push(`floor $${benchmark.floor}`);
+  if (benchmark?.midpoint != null) parts.push(`mid $${benchmark.midpoint}`);
+  if (benchmark?.ceiling != null) parts.push(`ceiling $${benchmark.ceiling}`);
+  return parts.join(" / ") || "insufficient public data";
+}
+
+const COMPANY_HEALTH_RECHECK_DAYS_DEFAULT = 14;
+
+// The comp-benchmark artifact stem embeds the year-month it was written
+// (see research-comp's STEP 1), so a fresh hit from an earlier month is
+// still found by role+location prefix rather than requiring an exact stem
+// match. listResearch() already computes `.stale` per item against the
+// artifact's own frontmatter.staleness_days — reused as-is here.
+function findFreshCompBenchmark({ repoRoot, role, location }) {
+  const roleSlug = slugifyCompany(role);
+  const locationSlug = slugifyCompany(location);
+  if (!roleSlug || !locationSlug) return null;
+  const prefix = `comp-bench-${roleSlug}-${locationSlug}-`;
+  const items = listResearch({ root: repoRoot })
+    .filter((item) => item.type === "comp-benchmark" && item.stem.startsWith(prefix) && !item.stale)
+    .sort((a, b) => String(b.fetchedAt || "").localeCompare(String(a.fetchedAt || "")));
+  return items[0] || null;
+}
+
 function searchExpandedCompaniesAction() {
   return {
     label: "Search the expanded company set",
@@ -1615,6 +1977,9 @@ export async function executeWorkspaceIntent({
   addSearchSourceQueryImpl,
   setSearchSourceEnabledImpl,
   startBoardDiscoveryImpl,
+  startCompanyResearchImpl,
+  startCompResearchImpl,
+  startCompanyHealthImpl,
   onSearchStarted,
   searchFetchImpl,
   applyJobImpl,
@@ -2431,6 +2796,400 @@ export async function executeWorkspaceIntent({
           ...(proposalCount ? {} : { nextActions: [searchExpandedCompaniesAction()] }),
         },
         operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "research.company") {
+      const company = String(input.company || "").trim();
+      if (!company) {
+        throw actionError("Name the company CareerRat should research.", "COMPANY_NOT_FOUND");
+      }
+      if (typeof startCompanyResearchImpl !== "function") {
+        const error = actionError(
+          "Company research is not connected in this runtime.",
+          "COMPANY_RESEARCH_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+
+      if (!input.force) {
+        const hit = readCompanyResearch(company, { root: repoRoot });
+        if (hit && !hit.stale) {
+          const fm = hit.frontmatter || {};
+          const slug = slugifyCompany(company);
+          return appendActionResult({
+            repoRoot,
+            env,
+            normalized,
+            intentMessage,
+            text: `CareerRat already researched ${fm.company || company}, fetched ${fm.fetchedAt}. It is still current.`,
+            artifacts: [
+              companyResearchArtifact({
+                fm,
+                company,
+                slug,
+                stale: false,
+                markdown: splitFrontmatter(hit.text).body,
+              }),
+            ],
+            metadata: {
+              state: "reused",
+              nextActions: [
+                {
+                  label: "Refresh research",
+                  intent: {
+                    type: "research.company",
+                    entity: normalized.entity,
+                    input: { company, force: true },
+                  },
+                },
+              ],
+            },
+            now,
+          });
+        }
+      }
+
+      const request = `Research ${company} for the candidate.`;
+      const operation = await startCompanyResearchImpl({ repoRoot, env, request });
+      const artifact = researchChatArtifact(
+        operation?.chat || operation?.activeDiscoveryChat || operation,
+        { skill: "research-company", title: `Researching ${company}` }
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: artifact.reused
+          ? `Reopened the research session for ${company}.`
+          : `Started researching ${company}. CareerRat will cite every claim.`,
+        artifacts: [artifact],
+        metadata: { state: artifact.state },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "research.comp") {
+      let role = String(input.role || "").trim();
+      let location = String(input.location || "").trim();
+      let company = String(input.company || "").trim();
+      if ((!role || !location) && input.jobId) {
+        let jobRow;
+        try {
+          jobRow = applicationForIntent({ repoRoot, env, id: input.jobId });
+        } catch (error) {
+          if (error?.code !== "NOT_FOUND") throw error;
+          jobRow = sourcedForIntent({ repoRoot, env, id: input.jobId });
+        }
+        role = role || String(jobRow.role || "").trim();
+        location = location || String(jobRow.location || jobRow.loc || "").trim();
+        company = company || String(jobRow.company || "").trim();
+      }
+      if (!role || !location) {
+        throw actionError(
+          "Tell CareerRat the role and location so it can research market comp.",
+          "RESEARCH_COMP_INPUT_REQUIRED"
+        );
+      }
+      if (typeof startCompResearchImpl !== "function") {
+        const error = actionError(
+          "Market comp research is not connected in this runtime.",
+          "COMP_RESEARCH_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+
+      if (!input.force) {
+        const fresh = findFreshCompBenchmark({ repoRoot, role, location });
+        if (fresh) {
+          const hit = readResearch(fresh.stem, { root: repoRoot });
+          const fm = hit?.frontmatter || {};
+          return appendActionResult({
+            repoRoot,
+            env,
+            normalized,
+            intentMessage,
+            text: `CareerRat already has a market comp benchmark for ${fm.role || role} in ${fm.location || location}, fetched ${fm.fetchedAt}. It is still current.`,
+            artifacts: [
+              compBenchmarkArtifact({
+                fm,
+                role,
+                location,
+                path: researchRelPath(fresh.stem),
+                markdown: splitFrontmatter(hit.text).body,
+              }),
+            ],
+            metadata: {
+              state: "reused",
+              nextActions: [
+                {
+                  label: "Refresh benchmark",
+                  intent: {
+                    type: "research.comp",
+                    entity: normalized.entity,
+                    input: { role, location, ...(company ? { company } : {}), force: true },
+                  },
+                },
+              ],
+            },
+            now,
+          });
+        }
+      }
+
+      const request = `Benchmark market comp for ${role} in ${location}${company ? ` at ${company}` : ""}.`;
+      const operation = await startCompResearchImpl({ repoRoot, env, request });
+      const artifact = researchChatArtifact(
+        operation?.chat || operation?.activeDiscoveryChat || operation,
+        { skill: "research-comp", title: "Market comp research" }
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: artifact.reused
+          ? `Reopened the market comp research for ${role} in ${location}.`
+          : `Started market comp research for ${role} in ${location}. CareerRat will cite every figure.`,
+        artifacts: [artifact],
+        metadata: { state: artifact.state },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    // The conversational bridge for research-company / research-comp: the
+    // CHAT_RUNTIME_TOOLS profile (src/core/ai/runtime-tools.mjs) never
+    // includes Bash, so an embedded chat session can never shell out to
+    // `careerrat research record ... --write` the way the skills' CLI path
+    // does. Instead the skill emits its finished artifact as a typed block
+    // (see research-company/research-comp SKILL.md's Conversational web
+    // handoff section) and the app turns that into a confirm affordance that
+    // fires this intent — the write itself runs through the exact same
+    // computeResearchWrite/writeResearch guards (citation-hygiene,
+    // placeholder lint, current_base privacy) the CLI path already used.
+    if (normalized.type === "research.record") {
+      const type = String(input.type || "").trim();
+      const allowedTypes = new Set(["company-research", "comp-benchmark"]);
+      if (!allowedTypes.has(type)) {
+        throw actionError(
+          `CareerRat needs to know whether this is company research or a comp benchmark (got ${JSON.stringify(input.type || "")}).`,
+          "RESEARCH_RECORD_TYPE_REQUIRED"
+        );
+      }
+      const markdown = String(input.markdown || "");
+      if (!markdown.trim()) {
+        throw actionError(
+          "CareerRat needs the finished research text before it can save it.",
+          "RESEARCH_RECORD_MARKDOWN_REQUIRED"
+        );
+      }
+      const name = String(input.name || "").trim();
+      const slug = String(input.slug || name || "").trim();
+      if (!slug) {
+        throw actionError(
+          "CareerRat needs a company or role name to file this research under.",
+          "RESEARCH_RECORD_NAME_REQUIRED"
+        );
+      }
+
+      const written = writeResearch({ stem: slug, text: markdown, root: repoRoot });
+      if (!written.ok) {
+        throw actionError(
+          `CareerRat could not save this research: ${written.error}`,
+          "RESEARCH_RECORD_INVALID"
+        );
+      }
+      const fm = written.frontmatter || {};
+      const body = splitFrontmatter(markdown).body;
+      const artifact =
+        type === "company-research"
+          ? companyResearchArtifact({
+              fm,
+              company: fm.company || name,
+              slug: written.stem,
+              stale: written.stale,
+              markdown: body,
+            })
+          : compBenchmarkArtifact({
+              fm,
+              role: fm.role || name,
+              location: fm.location || "",
+              path: written.relPath,
+              markdown: body,
+            });
+      // Best-effort Activity Pulse log, mirroring the explicit `careerrat
+      // activity append` call in research-company/research-comp SKILL.md's
+      // STEP 5 — writeResearch() itself never logs (unlike companyHealthSet,
+      // a research artifact is a plain fs write, not a DB verb). The
+      // artifact write above already succeeded and is the durable result;
+      // a logging hiccup here must not fail the whole confirmed save.
+      try {
+        activityAppend({
+          repoRoot,
+          env,
+          event: {
+            type: "research",
+            actor: "agent",
+            title:
+              type === "company-research"
+                ? `Researched ${artifact.company}`
+                : `Comp benchmark — ${artifact.role}${artifact.location ? ` (${artifact.location})` : ""}`,
+            ...(type === "comp-benchmark"
+              ? { summary: compBenchmarkActivitySummary(fm.benchmark) }
+              : {}),
+            refs:
+              type === "company-research" ? { company: artifact.company } : { role: artifact.role },
+            skill: type === "company-research" ? "research-company" : "research-comp",
+            operation: "research:record",
+          },
+        });
+      } catch {
+        // non-fatal — see comment above
+      }
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text:
+          type === "company-research"
+            ? `Saved research for ${artifact.company} to your workspace.`
+            : `Saved the comp benchmark for ${artifact.role}${artifact.location ? ` in ${artifact.location}` : ""} to your workspace.`,
+        artifacts: [artifact],
+        metadata: { state: "recorded" },
+        now,
+      });
+    }
+
+    if (normalized.type === "company.health") {
+      const entityType = normalized.entity.type;
+      const row =
+        entityType === "application"
+          ? applicationForIntent({ repoRoot, env, id: normalized.entity.id })
+          : sourcedForIntent({ repoRoot, env, id: normalized.entity.id });
+      const company = String(input.company || row.company || "").trim();
+      const role = String(row.role || "").trim();
+      if (!company) {
+        throw actionError("Name the company CareerRat should check.", "COMPANY_NOT_FOUND");
+      }
+
+      if (!input.force && row.companyHealth?.asOf) {
+        const stillFresh = !isStale(
+          row.companyHealth.asOf,
+          COMPANY_HEALTH_RECHECK_DAYS_DEFAULT,
+          requestDate(now).getTime()
+        );
+        if (stillFresh) {
+          const health = row.companyHealth;
+          return appendActionResult({
+            repoRoot,
+            env,
+            normalized,
+            intentMessage,
+            text: `${company || "This company"}: ${health.rating} for ${health.forFunction || role || "this role"}, as of ${health.asOf}.`,
+            artifacts: [
+              companyHealthArtifactFromRating({ entityType, rowId: row.id, company, role, health }),
+            ],
+            metadata: {
+              state: "reused",
+              nextActions: [
+                {
+                  label: "Re-check now",
+                  intent: {
+                    type: "company.health",
+                    entity: normalized.entity,
+                    input: { force: true },
+                  },
+                },
+                { label: "Open in Jobs", href: `/jobs?open=${encodeURIComponent(row.id)}` },
+              ],
+            },
+            now,
+          });
+        }
+      }
+
+      if (typeof startCompanyHealthImpl !== "function") {
+        const error = actionError(
+          "Company health research is not connected in this runtime.",
+          "COMPANY_HEALTH_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+      const request = `Check company health for ${company}${role ? ` (${role} role)` : ""}.`;
+      const operation = await startCompanyHealthImpl({ repoRoot, env, request });
+      const artifact = researchChatArtifact(
+        operation?.chat || operation?.activeDiscoveryChat || operation,
+        { skill: "company-health", title: `Company health — ${company}` }
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: artifact.reused
+          ? `Reopened the company-health check for ${company}.`
+          : `Started a company-health check for ${company}. This stays internal and never reaches the company.`,
+        artifacts: [artifact],
+        metadata: { state: artifact.state },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    // The conversational bridge for company-health, mirroring research.record
+    // above: the embedded chat session emits the finished rating as a typed
+    // block instead of shelling out to `careerrat health record ... --write`,
+    // and this intent performs the write server-side through the same
+    // companyHealthSet validation (rating/provenance enums, asOf format,
+    // fitDelta sign, current_base leak guard) the CLI path already used.
+    if (normalized.type === "company.health-record") {
+      const entityType = normalized.entity.type;
+      const row =
+        entityType === "application"
+          ? applicationForIntent({ repoRoot, env, id: normalized.entity.id })
+          : sourcedForIntent({ repoRoot, env, id: normalized.entity.id });
+      const company = String(input.company || row.company || "").trim();
+      const role = String(row.role || "").trim();
+
+      let result;
+      try {
+        result = companyHealthSet({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          companyHealth: input.companyHealth,
+        });
+      } catch (error) {
+        if (error?.code === "NOT_FOUND") throw error;
+        throw actionError(
+          `CareerRat could not save this company-health rating: ${error.message}`,
+          error?.code || "HEALTH_RECORD_INVALID"
+        );
+      }
+      const health = result.companyHealth;
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${company || "This company"}: ${health.rating} for ${health.forFunction || role || "this role"}, as of ${health.asOf}.`,
+        artifacts: [
+          companyHealthArtifactFromRating({ entityType, rowId: row.id, company, role, health }),
+        ],
+        metadata: {
+          state: "recorded",
+          nextActions: [
+            { label: "Open in Jobs", href: `/jobs?open=${encodeURIComponent(row.id)}` },
+          ],
+        },
         now,
       });
     }
@@ -3771,6 +4530,65 @@ function screeningQuestionRequestFromText(text) {
   return null;
 }
 
+// A captured "research <X>" tail that is itself about companies in the
+// aggregate ("companies", "more companies", "new companies beyond my list")
+// belongs to company.discover, not a single-company research request.
+function looksLikeGenericCompanyDiscoveryPhrase(value) {
+  return /^(?:more|new|additional|other|similar|matching)?\s*compan(?:y|ies)\b/i.test(
+    String(value || "").trim()
+  );
+}
+
+function looksLikeFuzzyCompanyReference(value) {
+  return (
+    /\b(?:role|job|position|posting)'?s\s+company\b/i.test(value) ||
+    /^(?:this|that|the)\s+company\b/i.test(String(value || "").trim())
+  );
+}
+
+function companyResearchRequestFromText(text) {
+  const value = String(text || "").trim();
+  let match =
+    value.match(/^(?:please\s+)?research\s+(.+?)\s*[.?!]*$/i) ||
+    value.match(/^(?:please\s+)?(?:dig into|look into)\s+(.+?)\s*[.?!]*$/i);
+  if (!match) {
+    match = value.match(
+      /^what\s+should\s+i\s+know\s+about\s+(.+?)\s+before\s+(?:the|my|this)\s+interview\s*[.?!]*$/i
+    );
+    if (match) return { company: match[1].trim() };
+    return null;
+  }
+  const captured = match[1].trim();
+  if (!captured || looksLikeGenericCompanyDiscoveryPhrase(captured)) return null;
+  if (/^(?:this|that|the)\s+company\b/i.test(captured)) return { thisCompany: true };
+  if (looksLikeFuzzyCompanyReference(captured)) return { fuzzy: captured };
+  return { company: captured };
+}
+
+function compResearchRequestFromText(text) {
+  const value = String(text || "").trim();
+  let match = value.match(/^market\s+comp\s+for\s+(.+?)\s+in\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { role: match[1].trim(), location: match[2].trim() };
+  match = value.match(/^what'?s\s+the\s+market\s+rate\s+for\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { role: match[1].trim() };
+  if (/^comp\s+benchmark\b/i.test(value)) return {};
+  if (/\bsalary\s+research\b.*\b(?:this\s+)?(?:job|role)\b/i.test(value)) return {};
+  return null;
+}
+
+function companyHealthRequestFromText(text) {
+  const value = String(text || "").trim();
+  let match = value.match(/^is\s+(.+?)\s+a\s+safe\s+place\s+to\s+land\s*[.?!]*$/i);
+  if (match) return { companyReference: match[1].trim() };
+  match = value.match(/^how\s+(?:risky|stable|healthy)\s+is\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { companyReference: match[1].trim() };
+  match = value.match(/^(?:are\s+there\s+any\s+|any\s+)?layoffs\s+at\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { companyReference: match[1].trim() };
+  match = value.match(/^company\s+health\s+(?:for|on|at)\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { companyReference: match[1].trim() };
+  return null;
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -3883,6 +4701,70 @@ const ACTION_PREVIEW_RULES = [
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: { request: text },
     }),
+  },
+  {
+    test: (text) => Boolean(companyResearchRequestFromText(text)),
+    label: "Research this company",
+    intent: (text, context) => {
+      const parsed = companyResearchRequestFromText(text);
+      if (parsed.thisCompany) {
+        return openJobId(context)
+          ? {
+              type: "research.company-request",
+              entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+              input: { jobId: openJobId(context) },
+            }
+          : {
+              type: "research.company-request",
+              entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+              input: { companyReference: "" },
+            };
+      }
+      if (parsed.fuzzy) {
+        return {
+          type: "research.company-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { companyReference: parsed.fuzzy },
+        };
+      }
+      return {
+        type: "research.company",
+        entity: { type: "company", id: slugifyCompany(parsed.company) },
+        input: { company: parsed.company },
+      };
+    },
+  },
+  {
+    test: (text) => Boolean(compResearchRequestFromText(text)),
+    label: "Research market comp",
+    intent: (text, context) => ({
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        ...compResearchRequestFromText(text),
+        ...(openJobId(context) ? { jobId: openJobId(context) } : {}),
+      },
+    }),
+  },
+  {
+    test: (text) => Boolean(companyHealthRequestFromText(text)),
+    label: "Check company health",
+    intent: (text, context) => {
+      const parsed = companyHealthRequestFromText(text);
+      const isThisCompany = /^(?:this|that|the)\s+company\b/i.test(parsed.companyReference);
+      if (isThisCompany && openJobId(context)) {
+        return {
+          type: "company.health-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { jobId: openJobId(context) },
+        };
+      }
+      return {
+        type: "company.health-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: parsed.companyReference },
+      };
+    },
   },
   {
     test: looksLikeCompanyDiscovery,
@@ -4152,6 +5034,9 @@ export function createWorkspaceAgentRuntime({
   addSearchSourceQueryImpl,
   setSearchSourceEnabledImpl,
   startBoardDiscoveryImpl,
+  startCompanyResearchImpl,
+  startCompResearchImpl,
+  startCompanyHealthImpl,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   searchFetchImpl = fetch,
   applyJobImpl,
@@ -4214,6 +5099,9 @@ export function createWorkspaceAgentRuntime({
           addSearchSourceQueryImpl,
           setSearchSourceEnabledImpl,
           startBoardDiscoveryImpl,
+          startCompanyResearchImpl,
+          startCompResearchImpl,
+          startCompanyHealthImpl,
           onSearchStarted: startSearchInBackground,
           searchFetchImpl,
           applyJobImpl,

@@ -6468,6 +6468,117 @@ button.chip {
   font-weight: 700;
 }
 
+/* Ask research trio (research-company/research-comp/company-health) —
+   ResearchChatPanel's plain-language header line, and the three result
+   cards below it. Same card chrome as .ask-bar__scheduling-plan above, no
+   left-edge accent (global UI rule). */
+.ask-bar__research-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ask-bar__research-chat-head {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ask-bar__research-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+
+.ask-bar__research-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.ask-bar__research-meta {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ask-bar__research-details summary {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.ask-bar__research-markdown {
+  margin-top: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: var(--paper-band);
+  font-size: 12px;
+  white-space: pre-wrap;
+}
+
+.ask-bar__comp-values {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+.ask-bar__comp-value {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 11px;
+  color: var(--ink-soft);
+}
+
+.ask-bar__comp-value strong {
+  color: var(--ink);
+  font-size: 14px;
+}
+
+.ask-bar__health-dims {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+}
+
+.ask-bar__health-dim {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: var(--ink-soft);
+}
+
+.ask-bar__health-dim[data-level="good"] {
+  color: var(--success);
+}
+
+.ask-bar__health-dim[data-level="mixed"] {
+  color: var(--mustard);
+}
+
+.ask-bar__health-dim[data-level="poor"] {
+  color: var(--m-error);
+}
+
+.ask-bar__health-fit-note {
+  margin: 0;
+  color: var(--mustard);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .ask-bar__application-session {
   display: flex;
   flex-direction: column;
@@ -12472,6 +12583,80 @@ a.onboarding-engine__not-found-chip:focus-visible {
   background: var(--paper-band);
   font-size: 12px;
   white-space: pre-wrap;
+}
+
+/* Company health (port-parity fix) — rating chip + provenance badge reuse
+   .badge/.badge--ok/--warn/--error and .field__hint (no new color
+   literals); only the per-dimension grid and its level coloring are new. */
+.job-drawer__health-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.job-drawer__health-dims {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.job-drawer__health-dim {
+  display: grid;
+  grid-template-columns: 78px minmax(46px, auto) 1fr;
+  gap: 10px;
+  align-items: baseline;
+}
+
+.job-drawer__health-dim-label {
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.job-drawer__health-dim-level {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  color: var(--ink-soft);
+}
+
+.job-drawer__health-dim-level[data-level="good"] {
+  color: var(--success);
+}
+
+.job-drawer__health-dim-level[data-level="mixed"] {
+  color: var(--mustard);
+}
+
+.job-drawer__health-dim-level[data-level="poor"] {
+  color: var(--m-error);
+}
+
+.job-drawer__health-dim-note {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.job-drawer__health-evidence {
+  margin-top: 10px;
+}
+
+.job-drawer__health-evidence summary {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.job-drawer__health-evidence li {
+  margin-bottom: 6px;
 }
 
 .job-drawer__thread {

@@ -14,6 +14,8 @@ const CONFLICT_CODES = new Set([
   "JOB_REFERENCE_AMBIGUOUS",
   "COMMUNICATION_REFERENCE_AMBIGUOUS",
   "APPLICATION_NOT_VERIFIED",
+  "COMPANY_AMBIGUOUS",
+  "COMPANY_NOT_TRACKED",
   "COMMUNICATION_DRAFT_REQUIRED",
   "COMMUNICATION_EXECUTOR_UNAVAILABLE",
   "COMMUNICATION_NOT_DRAFTABLE",
@@ -31,6 +33,7 @@ function statusForError(error) {
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "JOB_REFERENCE_NOT_FOUND") return 404;
   if (error?.code === "COMMUNICATION_REFERENCE_NOT_FOUND") return 404;
+  if (error?.code === "COMPANY_NOT_FOUND") return 404;
   if (error?.code === "MISSING_JOB_BODY") return 409;
   if (CONFLICT_CODES.has(error?.code)) return 409;
   if (error?.code === "CONFLICT") return 409;
@@ -70,6 +73,23 @@ function statusForError(error) {
       "QUESTION_REQUIRED",
       "NON_DURABLE_ANSWER",
       "UNSUPPORTED_INTENT",
+      "RESEARCH_COMP_INPUT_REQUIRED",
+      "RESEARCH_RECORD_TYPE_REQUIRED",
+      "RESEARCH_RECORD_MARKDOWN_REQUIRED",
+      "RESEARCH_RECORD_NAME_REQUIRED",
+      "RESEARCH_RECORD_INVALID",
+      "BAD_COMPANY_HEALTH",
+      "BAD_HEALTH_RATING",
+      "BAD_HEALTH_PROVENANCE",
+      "BAD_HEALTH_FUNCTION",
+      "BAD_HEALTH_AS_OF",
+      "BAD_HEALTH_RATIONALE",
+      "BAD_HEALTH_DIMENSIONS",
+      "BAD_HEALTH_CROSS_CUT",
+      "BAD_HEALTH_SIGNALS",
+      "BAD_HEALTH_FIT_DELTA",
+      "HEALTH_COMP_LEAK",
+      "HEALTH_RECORD_INVALID",
     ].includes(error?.code)
   ) {
     return 400;

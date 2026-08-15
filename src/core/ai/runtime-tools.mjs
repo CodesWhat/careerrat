@@ -7,7 +7,14 @@ export const APP_SAFE_RUNTIME_TOOLS = Object.freeze(["Read", "Glob", "Grep", "Sk
 // files or credentials, and local-data workflows cannot make outbound calls.
 export const CHAT_RUNTIME_TOOLS = Object.freeze(["WebSearch", "WebFetch", "Skill"]);
 
-const NETWORK_CHAT_SKILLS = new Set(["research-boards", "discover-companies", "search-jobs"]);
+const NETWORK_CHAT_SKILLS = new Set([
+  "research-boards",
+  "discover-companies",
+  "search-jobs",
+  "research-company",
+  "research-comp",
+  "company-health",
+]);
 
 export const RUNTIME_TOOL_PROFILES = Object.freeze({
   "app-safe": APP_SAFE_RUNTIME_TOOLS,

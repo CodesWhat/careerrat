@@ -30,6 +30,11 @@ import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
+import {
+  readResearch,
+  researchRelPath,
+  writeResearch,
+} from "../src/core/research/research-store.mjs";
 
 const cleanupRoots = [];
 
@@ -426,6 +431,675 @@ test("job-board discovery starts a visible research session inside workspace-mai
     { label: "Search jobs", href: "/jobs?tab=search" },
     { label: "Manage sources", href: "/settings" },
   ]);
+});
+
+// ---------------------------------------------------------------------------
+// research.company / research.comp / company.health — the "research trio"
+// (chat-start, freshness short-circuit, and resolveReferencedCompany's
+// not-found/ambiguous/not-tracked guards).
+// ---------------------------------------------------------------------------
+
+test("research.company starts a visible research chat when no company research is on file", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "research.company",
+      entity: { type: "company", id: "swift-logistics" },
+      input: { company: "Swift Logistics" },
+    },
+    startCompanyResearchImpl: async (input) => {
+      calls.push(input);
+      return {
+        chat: {
+          chatId: "research-company-chat",
+          skill: "research-company",
+          state: "running",
+          reused: false,
+        },
+      };
+    },
+    now: () => new Date("2026-08-15T14:00:00.000Z"),
+  });
+
+  assert.deepEqual(calls, [
+    { repoRoot, env: {}, request: "Research Swift Logistics for the candidate." },
+  ]);
+  assert.deepEqual(
+    result.messages.map(({ role, kind }) => ({ role, kind })),
+    [
+      { role: "user", kind: "intent" },
+      { role: "assistant", kind: "action_result" },
+    ]
+  );
+  assert.deepEqual(result.messages.at(-1).artifacts, [
+    {
+      kind: "research_chat",
+      title: "Researching Swift Logistics",
+      chatId: "research-company-chat",
+      skill: "research-company",
+      state: "running",
+      reused: false,
+    },
+  ]);
+  assert.equal(
+    result.messages.at(-1).text,
+    "Started researching Swift Logistics. CareerRat will cite every claim."
+  );
+});
+
+test("research.comp starts a visible research chat when no fresh benchmark is on file", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { role: "Registered Nurse", location: "Denver, CO" },
+    },
+    startCompResearchImpl: async (input) => {
+      calls.push(input);
+      return {
+        chat: {
+          chatId: "research-comp-chat",
+          skill: "research-comp",
+          state: "running",
+          reused: false,
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    { repoRoot, env: {}, request: "Benchmark market comp for Registered Nurse in Denver, CO." },
+  ]);
+  assert.deepEqual(result.messages.at(-1).artifacts, [
+    {
+      kind: "research_chat",
+      title: "Market comp research",
+      chatId: "research-comp-chat",
+      skill: "research-comp",
+      state: "running",
+      reused: false,
+    },
+  ]);
+  assert.equal(
+    result.messages.at(-1).text,
+    "Started market comp research for Registered Nurse in Denver, CO. CareerRat will cite every figure."
+  );
+});
+
+test("company.health starts a visible research chat for a tracked application with no rating on file", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-riverside",
+    company: "Riverside Health",
+    role: "Registered Nurse",
+  });
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.health",
+      entity: { type: "application", id: "app-riverside" },
+      input: {},
+    },
+    startCompanyHealthImpl: async (input) => {
+      calls.push(input);
+      return {
+        chat: {
+          chatId: "company-health-chat",
+          skill: "company-health",
+          state: "running",
+          reused: false,
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(calls, [
+    {
+      repoRoot,
+      env: {},
+      request: "Check company health for Riverside Health (Registered Nurse role).",
+    },
+  ]);
+  assert.deepEqual(result.messages.at(-1).artifacts, [
+    {
+      kind: "research_chat",
+      title: "Company health — Riverside Health",
+      chatId: "company-health-chat",
+      skill: "company-health",
+      state: "running",
+      reused: false,
+    },
+  ]);
+  assert.equal(
+    result.messages.at(-1).text,
+    "Started a company-health check for Riverside Health. This stays internal and never reaches the company."
+  );
+});
+
+test("research.company reuses a fresh company-research artifact without starting a new chat", async () => {
+  const repoRoot = tempRepo();
+  const today = new Date().toISOString().slice(0, 10);
+  writeResearch({
+    stem: "swift-logistics",
+    root: repoRoot,
+    text: [
+      "---",
+      "type: company-research",
+      "company: Swift Logistics",
+      `fetchedAt: ${today}`,
+      "staleness_days: 14",
+      "sources:",
+      '  - url: "https://example.com/swift-logistics"',
+      '    title: "Swift Logistics expands regional routes"',
+      "    confidence: high",
+      "---",
+      "",
+      "## Overview",
+      `Swift Logistics runs regional freight routes. [source: "Swift Logistics expands regional routes" (https://example.com/swift-logistics), fetched ${today}, confidence: high]`,
+      "",
+    ].join("\n"),
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "research.company",
+      entity: { type: "company", id: "swift-logistics" },
+      input: { company: "Swift Logistics" },
+    },
+    startCompanyResearchImpl: async () => {
+      throw new Error("must not start a new chat when research is still fresh");
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "company_research");
+  assert.equal(artifact.company, "Swift Logistics");
+  assert.equal(artifact.slug, "swift-logistics");
+  assert.equal(artifact.path, researchRelPath("swift-logistics"));
+  assert.equal(artifact.stale, false);
+  assert.equal(artifact.sources, 1);
+  assert.match(artifact.markdown, /Swift Logistics runs regional freight routes/);
+  assert.equal(result.messages.at(-1).metadata.state, "reused");
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    {
+      label: "Refresh research",
+      intent: {
+        type: "research.company",
+        entity: { type: "company", id: "swift-logistics" },
+        input: { company: "Swift Logistics", force: true },
+      },
+    },
+  ]);
+});
+
+test("research.comp reuses a fresh comp benchmark without starting a new chat", async () => {
+  const repoRoot = tempRepo();
+  const today = new Date().toISOString().slice(0, 10);
+  writeResearch({
+    stem: "comp-bench-registered-nurse-denver-co-2026-08",
+    root: repoRoot,
+    text: [
+      "---",
+      "type: comp-benchmark",
+      "role: Registered Nurse",
+      "location: Denver, CO",
+      `fetchedAt: ${today}`,
+      "staleness_days: 30",
+      "sources:",
+      '  - url: "https://example.com/nurse-pay"',
+      '    title: "Denver hospital system nurse pay survey"',
+      "    confidence: high",
+      "benchmark:",
+      "  floor: 82000",
+      "  midpoint: 94000",
+      "  ceiling: 108000",
+      '  currency: "USD"',
+      "  confidence: high",
+      "---",
+      "",
+      "## Market range",
+      `Denver registered nurses earn roughly $82,000-$108,000. [source: "Denver hospital system nurse pay survey" (https://example.com/nurse-pay), fetched ${today}, confidence: high]`,
+      "",
+    ].join("\n"),
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { role: "Registered Nurse", location: "Denver, CO" },
+    },
+    startCompResearchImpl: async () => {
+      throw new Error("must not start a new chat when the benchmark is still fresh");
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "comp_benchmark");
+  assert.equal(artifact.role, "Registered Nurse");
+  assert.equal(artifact.location, "Denver, CO");
+  assert.deepEqual(artifact.benchmark, {
+    floor: 82000,
+    midpoint: 94000,
+    ceiling: 108000,
+    currency: "USD",
+    confidence: "high",
+  });
+  assert.match(artifact.markdown, /Denver registered nurses earn roughly/);
+  assert.equal(result.messages.at(-1).metadata.state, "reused");
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    {
+      label: "Refresh benchmark",
+      intent: {
+        type: "research.comp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { role: "Registered Nurse", location: "Denver, CO", force: true },
+      },
+    },
+  ]);
+});
+
+test("company.health reuses a fresh rating already on the tracked row, and input.force bypasses it", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-riverside",
+    company: "Riverside Health",
+    role: "Registered Nurse",
+    companyHealth: {
+      rating: "watch",
+      forFunction: "clinical staffing",
+      asOf: "2026-08-10",
+      provenance: "built-from-data",
+      dimensions: { layoffRisk: "elevated" },
+      crossCut: ["stability"],
+      fitDelta: -3,
+      rationale: "A hiring freeze was announced for non-clinical roles.",
+    },
+  });
+
+  const reused = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.health",
+      entity: { type: "application", id: "app-riverside" },
+      input: {},
+    },
+    startCompanyHealthImpl: async () => {
+      throw new Error("must not start a new chat while the rating is still fresh");
+    },
+    now: () => new Date("2026-08-15T00:00:00.000Z"),
+  });
+
+  const reusedArtifact = reused.messages.at(-1).artifacts[0];
+  assert.equal(reusedArtifact.kind, "company_health");
+  assert.equal(reusedArtifact.applicationId, "app-riverside");
+  assert.equal(reusedArtifact.rating, "watch");
+  assert.equal(reusedArtifact.fitDelta, -3);
+  assert.equal(reused.messages.at(-1).metadata.state, "reused");
+
+  const calls = [];
+  const forced = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.health",
+      entity: { type: "application", id: "app-riverside" },
+      input: { force: true },
+    },
+    startCompanyHealthImpl: async (input) => {
+      calls.push(input);
+      return {
+        chat: {
+          chatId: "company-health-chat-2",
+          skill: "company-health",
+          state: "running",
+          reused: false,
+        },
+      };
+    },
+    now: () => new Date("2026-08-15T00:00:00.000Z"),
+  });
+
+  assert.equal(calls.length, 1, "force:true must bypass the fresh-rating short-circuit");
+  assert.equal(forced.messages.at(-1).artifacts[0].kind, "research_chat");
+});
+
+test("research.company-request throws COMPANY_NOT_FOUND when no tracked company matches", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", company: "Temporal Labs" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "research.company-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: "Nonexistent Freight Co" },
+      },
+    }),
+    (error) => error.code === "COMPANY_NOT_FOUND"
+  );
+});
+
+test("resolveReferencedCompany caps ambiguous matches at 5 and never guesses one", async () => {
+  const repoRoot = tempRepo();
+  const companies = [
+    "Regional Freight Co",
+    "Regional Medical Center",
+    "Regional Logistics Group",
+    "Regional Housing Authority",
+    "Regional Utilities",
+    "Regional Transit Authority",
+  ];
+  companies.forEach((company, index) => {
+    seedSourced(repoRoot, {
+      id: `sourced-regional-${index}`,
+      company,
+      role: "Coordinator",
+      link: `https://jobs.example.test/regional-${index}/coordinator`,
+    });
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "research.company-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: "Regional" },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "COMPANY_AMBIGUOUS");
+      assert.equal(error.details.matches.length, 5, "matches must be capped at 5");
+      for (const match of error.details.matches) {
+        assert.ok(companies.includes(match.company), `unexpected match: ${match.company}`);
+      }
+      return true;
+    }
+  );
+});
+
+test("company.health-request throws COMPANY_NOT_TRACKED for a company with no saved job", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", company: "Temporal Labs" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "company.health-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: "Untracked Freight Co" },
+      },
+    }),
+    (error) => error.code === "COMPANY_NOT_TRACKED"
+  );
+});
+
+test("research.comp requires role and location when there is no open job to infer them from", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "research.comp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {},
+      },
+    }),
+    (error) => error.code === "RESEARCH_COMP_INPUT_REQUIRED"
+  );
+});
+
+// ---------------------------------------------------------------------------
+// research.record / company.health-record — the conversational-chat write
+// bridge (P0 fix): an embedded chat session (CHAT_RUNTIME_TOOLS has no Bash)
+// can never shell out to `careerrat research record`/`careerrat health
+// record`, so it emits its finished result as a typed block and the app
+// fires these confirm-first intents instead. The write itself runs through
+// the exact same guards (computeResearchWrite/writeResearch,
+// validateCompanyHealth) the CLI path already used.
+// ---------------------------------------------------------------------------
+
+function companyResearchDraft({ company = "Beacon Robotics", fetchedAt } = {}) {
+  const today = fetchedAt || new Date().toISOString().slice(0, 10);
+  return [
+    "---",
+    "type: company-research",
+    `company: "${company}"`,
+    `fetchedAt: "${today}"`,
+    "staleness_days: 14",
+    "sources:",
+    '  - url: "https://example.com/beacon-robotics"',
+    '    title: "Beacon Robotics raises Series C"',
+    "    confidence: high",
+    "---",
+    "",
+    "## Overview",
+    `${company} builds warehouse automation robots. [source: "Beacon Robotics raises Series C" (https://example.com/beacon-robotics), fetched ${today}, confidence: high]`,
+    "",
+  ].join("\n");
+}
+
+test("research.record writes a company-research artifact through the research-store guards", async () => {
+  const repoRoot = tempRepo();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "research.record",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        type: "company-research",
+        name: "Beacon Robotics",
+        markdown: companyResearchDraft(),
+      },
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.kind, "action_result");
+  assert.equal(last.artifacts[0].kind, "company_research");
+  assert.equal(last.artifacts[0].company, "Beacon Robotics");
+  assert.equal(last.artifacts[0].slug, "beacon-robotics");
+  assert.equal(last.artifacts[0].path, researchRelPath("beacon-robotics"));
+  assert.equal(last.artifacts[0].sources, 1);
+  assert.match(last.artifacts[0].markdown, /Beacon Robotics builds warehouse automation robots/);
+  assert.equal(last.text, "Saved research for Beacon Robotics to your workspace.");
+
+  const onDisk = readResearch("beacon-robotics", { root: repoRoot });
+  assert.ok(onDisk, "the artifact must actually be written to workspace/research/");
+  assert.equal(onDisk.frontmatter.company, "Beacon Robotics");
+});
+
+test("research.record refuses a draft that leaks the private current_base field", async () => {
+  const repoRoot = tempRepo();
+  const leaking = companyResearchDraft().replace(
+    "## Overview",
+    "## Overview\ncurrent_base: 185000"
+  );
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "research.record",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { type: "company-research", name: "Beacon Robotics", markdown: leaking },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "RESEARCH_RECORD_INVALID");
+      assert.match(error.message, /current_base/);
+      return true;
+    }
+  );
+  assert.equal(readResearch("beacon-robotics", { root: repoRoot }), null);
+});
+
+function companyHealthPayload(overrides = {}) {
+  return {
+    rating: "watch",
+    forFunction: "clinical staffing",
+    asOf: "2026-08-15",
+    provenance: "built-from-data",
+    dimensions: { layoffRisk: { level: "mixed", note: "no function hit yet" } },
+    crossCut: [],
+    fitDelta: 0,
+    rationale: "No function-scoped risk signal yet; company-wide hiring freeze rumored.",
+    ...overrides,
+  };
+}
+
+test("company.health-record writes a rating onto the application row through companyHealthSet", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-riverside",
+    company: "Riverside Health",
+    role: "Registered Nurse",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.health-record",
+      entity: { type: "application", id: "app-riverside" },
+      input: { companyHealth: companyHealthPayload() },
+    },
+  });
+
+  const last = result.messages.at(-1);
+  assert.equal(last.artifacts[0].kind, "company_health");
+  assert.equal(last.artifacts[0].applicationId, "app-riverside");
+  assert.equal(last.artifacts[0].rating, "watch");
+  assert.equal(last.text, "Riverside Health: watch for clinical staffing, as of 2026-08-15.");
+
+  const persisted = readApplication(repoRoot, "app-riverside");
+  assert.equal(persisted.companyHealth.rating, "watch");
+  assert.equal(persisted.companyHealth.forFunction, "clinical staffing");
+});
+
+test("company.health-record rejects an invalid rating enum with a clean 400-family code", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-riverside",
+    company: "Riverside Health",
+    role: "Registered Nurse",
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "company.health-record",
+        entity: { type: "application", id: "app-riverside" },
+        input: { companyHealth: companyHealthPayload({ rating: "great" }) },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "BAD_HEALTH_RATING");
+      assert.doesNotMatch(error.message, /\n\s+at /, "message must not be a raw stack trace");
+      return true;
+    }
+  );
+  assert.equal(readApplication(repoRoot, "app-riverside").companyHealth, undefined);
+});
+
+test("company.health throws COMPANY_NOT_FOUND instead of starting a chat for a blank company", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-blank", company: "", role: "Registered Nurse" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "company.health",
+        entity: { type: "application", id: "app-blank" },
+        input: {},
+      },
+      startCompanyHealthImpl: async () => {
+        throw new Error("must not start a chat for an empty company name");
+      },
+    }),
+    (error) => error.code === "COMPANY_NOT_FOUND"
+  );
+});
+
+test("resolveReferencedCompany never lets a stop-worded reference fall back to a lone single-char token", async () => {
+  const repoRoot = tempRepo();
+  seedSourced(repoRoot, {
+    id: "sourced-att-communications",
+    company: "AT&T Communications",
+    role: "Network Engineer",
+    link: "https://jobs.example.test/att-communications/network-engineer",
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "research.company-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: "AT&T" },
+      },
+    }),
+    (error) => error.code === "COMPANY_NOT_FOUND",
+    '"AT&T" must not subset-match "AT&T Communications" off a lone leftover "t" token'
+  );
+});
+
+test('resolveReferencedCompany still resolves an exact whole-name match like "AT&T"', async () => {
+  const repoRoot = tempRepo();
+  seedSourced(repoRoot, {
+    id: "sourced-att",
+    company: "AT&T",
+    role: "Network Engineer",
+    link: "https://jobs.example.test/att/network-engineer",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "research.company-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { companyReference: "AT&T" },
+    },
+    startCompanyResearchImpl: async () => ({
+      chat: { chatId: "att-chat", skill: "research-company", state: "running", reused: false },
+    }),
+  });
+
+  assert.equal(result.messages.at(-1).artifacts[0].title, "Researching AT&T");
 });
 
 test("a confirmed Ask action adds one board URL and keeps the receipt in workspace-main", async () => {
@@ -4098,6 +4772,12 @@ test("workspace action errors return actionable client statuses instead of serve
     ["CONFLICT", 409],
     ["VALIDATION_FAILED", 422],
     ["NO_AI_ROUTE", 501],
+    ["COMPANY_NOT_FOUND", 404],
+    ["COMPANY_AMBIGUOUS", 409],
+    ["COMPANY_NOT_TRACKED", 409],
+    ["RESEARCH_COMP_INPUT_REQUIRED", 400],
+    ["RESEARCH_RECORD_INVALID", 400],
+    ["BAD_HEALTH_RATING", 400],
   ];
 
   for (const [code, expectedStatus] of cases) {

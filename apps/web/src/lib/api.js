@@ -908,6 +908,80 @@ export function getApplications() {
 }
 
 // ---------------------------------------------------------------------------
+// Ask research trio (research-company / research-comp / company-health
+// skills) — the same runWorkspaceIntent surface every other typed Ask action
+// above already goes through. Each starts (or resumes) a live workspace chat
+// behind a research_chat artifact. COMPANY_NOT_FOUND/COMPANY_AMBIGUOUS/
+// COMPANY_NOT_TRACKED/RESEARCH_COMP_INPUT_REQUIRED map to plain-language
+// copy in errorCopy.js.
+// ---------------------------------------------------------------------------
+
+// research.company/research.comp have no row to scope to (the company/role
+// they act on is free text in `input`, resolved server-side against saved
+// jobs), so — same as every other free-text workspace action (search.run,
+// source.discover, company.discover) — they use the workspace thread itself
+// as their entity, not a real row id.
+const WORKSPACE_ENTITY = { type: "workspace", id: "workspace-main" };
+
+// research.company — web-searches a company already saved from a job (an
+// application or a still-sourced role) across six domain-neutral axes.
+// `company` is free text; COMPANY_NOT_FOUND/COMPANY_AMBIGUOUS resolve it
+// against saved jobs server-side.
+export function researchCompany({ company } = {}) {
+  return runWorkspaceIntent("research.company", WORKSPACE_ENTITY, { company });
+}
+
+// research.comp — web-searches market comp for a role + location, optionally
+// scoped to one saved company (or a saved job's id, which the workspace
+// agent uses to fill in any of role/location/company left blank).
+// `role`/`location` are required (RESEARCH_COMP_INPUT_REQUIRED when either
+// ends up missing).
+export function researchComp({ role, location, company, jobId } = {}) {
+  return runWorkspaceIntent("research.comp", WORKSPACE_ENTITY, {
+    role,
+    location,
+    ...(company ? { company } : {}),
+    ...(jobId ? { jobId } : {}),
+  });
+}
+
+// company.health — role-scoped health/sentiment rating for one saved job
+// (an application or a still-sourced role); COMPANY_NOT_TRACKED when the
+// named company isn't attached to any saved job yet.
+export function companyHealth({ applicationId, sourcedId, company, force } = {}) {
+  return runWorkspaceIntent(
+    "company.health",
+    applicationId ? { type: "application", id: applicationId } : { type: "sourced", id: sourcedId },
+    { ...(company ? { company } : {}), ...(force ? { force: true } : {}) }
+  );
+}
+
+// research.record / company.health-record — the confirm-first write bridge
+// for an embedded research-company/research-comp/company-health chat
+// session. CHAT_RUNTIME_TOOLS has no Bash, so those sessions can never shell
+// out to `careerrat research record`/`careerrat health record`; instead the
+// skill emits its finished result as a typed `careerrat:discovery` block
+// (see ChatPanel.jsx's *_result handling) and the confirm control calls one
+// of these two functions, which perform the actual write server-side
+// through the same research-store/company-health guards the CLI path used.
+export function recordResearch({ type, name, slug, markdown } = {}) {
+  return runWorkspaceIntent("research.record", WORKSPACE_ENTITY, {
+    type,
+    name,
+    ...(slug ? { slug } : {}),
+    markdown,
+  });
+}
+
+export function recordCompanyHealth({ targetType, targetId, company, companyHealth } = {}) {
+  return runWorkspaceIntent(
+    "company.health-record",
+    { type: targetType, id: targetId },
+    { ...(company ? { company } : {}), companyHealth }
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Packet engine (src/cli/packet-route.mjs) — the Jobs drawer's Evaluate/
 // Documents sections. Every route here already existed and is already
 // mounted; this file only adds thin client wrappers, same convention as
