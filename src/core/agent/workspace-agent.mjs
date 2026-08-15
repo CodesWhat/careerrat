@@ -1,5 +1,6 @@
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
+import { buildQuestionsRequest } from "../apply/form-questions.mjs";
 import { requireDb } from "../db/connection.mjs";
 import {
   appCaptureInterviewIntake,
@@ -32,6 +33,7 @@ import {
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import { generateApplicationPacket } from "../packet/generate-operation.mjs";
+import { capturePacketQuestions } from "../packet/questions.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import {
   offersWithCapturedJobs,
@@ -886,7 +888,78 @@ function blockingPacketGaps(gaps) {
   return gaps.filter((gap) => !isQuestionCaptureGap(gap));
 }
 
-function applicationHandoffArtifact(application, applicationId) {
+function questionCaptureFromApplication(application) {
+  const summary = application?.packetManifest?.questions;
+  if (!summary || typeof summary !== "object") return null;
+  return {
+    state: "captured",
+    source: "saved",
+    answerableCount: Number(summary.answerableCount) || 0,
+    excludedCount: Number(summary.excludedCount) || 0,
+    demographicSectionPresent: summary.demographicSectionPresent === true,
+  };
+}
+
+function siteRequiredQuestionCapture(extra = {}) {
+  return {
+    state: "site-required",
+    source: null,
+    answerableCount: 0,
+    excludedCount: 0,
+    demographicSectionPresent: false,
+    ...extra,
+  };
+}
+
+async function prepareApplicationQuestions({
+  repoRoot,
+  env,
+  application,
+  applicationId,
+  captureQuestionsImpl,
+  fetchImpl,
+}) {
+  const saved = questionCaptureFromApplication(application);
+  if (saved) return saved;
+
+  const url = safeExternalHttpUrl(application.link || application.url || application.sourceUrl);
+  const request = url ? buildQuestionsRequest(url) : null;
+  if (!request) return siteRequiredQuestionCapture();
+
+  try {
+    const capture = await captureQuestionsImpl({
+      repoRoot,
+      env,
+      applicationId,
+      source: "url",
+      url,
+      fetchImpl,
+    });
+    return {
+      state: "captured",
+      source: String(capture?.source || request.provider),
+      answerableCount: Array.isArray(capture?.questions) ? capture.questions.length : 0,
+      excludedCount: Array.isArray(capture?.excluded) ? capture.excluded.length : 0,
+      demographicSectionPresent: capture?.demographicSectionPresent === true,
+    };
+  } catch (error) {
+    return siteRequiredQuestionCapture({
+      attempted: true,
+      reason: String(error?.message || "Automatic question capture failed.").slice(0, 500),
+    });
+  }
+}
+
+function questionCaptureText(questionCapture) {
+  if (!questionCapture) return "";
+  if (questionCapture.state === "captured") {
+    const count = questionCapture.answerableCount;
+    return `Captured ${count} application question${count === 1 ? "" : "s"} before generating the packet.`;
+  }
+  return "Open the site, then paste the questions here so CareerRat can rebuild the answers.";
+}
+
+function applicationHandoffArtifact(application, applicationId, questionCapture) {
   const url = safeExternalHttpUrl(application.link || application.url || application.sourceUrl);
   if (!url) return null;
   return {
@@ -895,6 +968,7 @@ function applicationHandoffArtifact(application, applicationId) {
     applicationId,
     url,
     submissionVerified: false,
+    ...(questionCapture ? { questionCapture } : {}),
   };
 }
 
@@ -939,12 +1013,13 @@ function tailoredPacketNextActions(applicationId) {
 function packetGapText(gaps, questionCaptureDeferred, { tailoring = false } = {}) {
   const blockingCount = blockingPacketGaps(gaps).length;
   const questionsPending = questionCaptureDeferred || gaps.some(isQuestionCaptureGap);
+  const reviewVerb = blockingCount === 1 ? "needs" : "need";
   if (tailoring) {
     if (questionsPending && blockingCount === 0) {
       return "The tailored documents are ready. Screening answers will be handled only if you later choose to apply.";
     }
     if (blockingCount > 0) {
-      return `${blockingCount} item${blockingCount === 1 ? "" : "s"} still needs review${
+      return `${blockingCount} item${blockingCount === 1 ? "" : "s"} still ${reviewVerb} review${
         questionsPending ? "; screening answers stay pending until you choose to apply" : ""
       }.`;
     }
@@ -954,7 +1029,7 @@ function packetGapText(gaps, questionCaptureDeferred, { tailoring = false } = {}
     return "The base documents are ready. Application questions will be completed on the application site.";
   }
   if (blockingCount > 0) {
-    return `${blockingCount} item${blockingCount === 1 ? "" : "s"} still needs review${
+    return `${blockingCount} item${blockingCount === 1 ? "" : "s"} still ${reviewVerb} review${
       questionsPending ? "; application questions will be completed on the site" : ""
     }.`;
   }
@@ -1387,6 +1462,7 @@ export async function executeWorkspaceIntent({
   onSearchStarted,
   searchFetchImpl,
   applyJobImpl,
+  captureQuestionsImpl = capturePacketQuestions,
   callAIImpl = callAI,
   sendCommunicationImpl,
   now = () => new Date(),
@@ -1629,6 +1705,16 @@ export async function executeWorkspaceIntent({
       }
 
       const applyIntent = normalized.type === "job.prepare-request";
+      const questionCapture = applyIntent
+        ? await prepareApplicationQuestions({
+            repoRoot,
+            env,
+            application: evaluated.application,
+            applicationId: captured.applicationId,
+            captureQuestionsImpl,
+            fetchImpl: searchFetchImpl,
+          })
+        : null;
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
         repoRoot,
         env,
@@ -1641,7 +1727,11 @@ export async function executeWorkspaceIntent({
       const blockingGapCount = blockingPacketGaps(gaps).length;
       const handoffArtifact =
         applyIntent && blockingGapCount === 0
-          ? applicationHandoffArtifact(evaluated.application, captured.applicationId)
+          ? applicationHandoffArtifact(
+              evaluated.application,
+              captured.applicationId,
+              questionCapture
+            )
           : null;
       const packetArtifact = {
         kind: "packet_generation",
@@ -1661,7 +1751,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `${evaluated.text} Generated the ${
+        text: `${evaluated.text} ${questionCaptureText(questionCapture)} Generated the ${
           applyIntent ? "application" : "tailored application"
         } packet. ${packetGapText(gaps, questionCaptureDeferred, { tailoring: !applyIntent })}`,
         artifacts: [evaluated.artifact, packetArtifact, handoffArtifact].filter(Boolean),
@@ -1719,12 +1809,23 @@ export async function executeWorkspaceIntent({
             ["pdf", "docx"].includes(value)
           )
         : ["pdf"];
+      const applyIntent = input.applyIntent === true;
+      const questionCapture = applyIntent
+        ? await prepareApplicationQuestions({
+            repoRoot,
+            env,
+            application,
+            applicationId: normalized.entity.id,
+            captureQuestionsImpl,
+            fetchImpl: searchFetchImpl,
+          })
+        : null;
       const { packet: operation, questionCaptureDeferred } =
         await generateDocumentsWithQuestionFallback({
           repoRoot,
           env,
           applicationId: normalized.entity.id,
-          applyIntent: input.applyIntent === true,
+          applyIntent,
           formats: formats.length ? formats : ["pdf"],
           generateDocumentsImpl,
         });
@@ -1732,7 +1833,7 @@ export async function executeWorkspaceIntent({
       const blockingGapCount = blockingPacketGaps(gaps).length;
       const handoffArtifact =
         blockingGapCount === 0
-          ? applicationHandoffArtifact(application, normalized.entity.id)
+          ? applicationHandoffArtifact(application, normalized.entity.id, questionCapture)
           : null;
       const gapText = packetGapText(gaps, questionCaptureDeferred);
       return appendActionResult({
@@ -1740,7 +1841,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `Generated documents for ${applicationLabel(application)}. ${gapText}`,
+        text: `${questionCaptureText(questionCapture)} Generated documents for ${applicationLabel(application)}. ${gapText}`.trim(),
         artifacts: [
           {
             kind: "packet_generation",
@@ -2583,6 +2684,15 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    const questionCapture = await prepareApplicationQuestions({
+      repoRoot,
+      env,
+      application,
+      applicationId: normalized.entity.id,
+      captureQuestionsImpl,
+      fetchImpl: searchFetchImpl,
+    });
+
     if (typeof applyJobImpl !== "function") {
       const postingUrl = safeExternalHttpUrl(
         application.link || application.url || application.sourceUrl
@@ -2592,7 +2702,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `CareerRat prepared the handoff for ${applicationLabel(application)}, but the authenticated submission executor is not connected. Open the posting to submit it; this application was not marked Applied.`,
+        text: `CareerRat prepared the handoff for ${applicationLabel(application)}. ${questionCaptureText(questionCapture)} The authenticated submission executor is not connected, so open the posting to submit it; this application was not marked Applied.`,
         artifacts: [
           {
             kind: "application_handoff",
@@ -2600,6 +2710,7 @@ export async function executeWorkspaceIntent({
             applicationId: normalized.entity.id,
             url: postingUrl,
             submissionVerified: false,
+            questionCapture,
           },
         ],
         metadata: {
@@ -2625,6 +2736,7 @@ export async function executeWorkspaceIntent({
       applicationId: normalized.entity.id,
       application,
       postingUrl: application.link || application.url || application.sourceUrl || null,
+      questionCapture,
       input,
     });
     if (execution?.verified !== true) {
@@ -3295,6 +3407,7 @@ export function createWorkspaceAgentRuntime({
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   searchFetchImpl = fetch,
   applyJobImpl,
+  captureQuestionsImpl = capturePacketQuestions,
   captureIntakeImpl,
   sendCommunicationImpl,
 } = {}) {
@@ -3354,6 +3467,7 @@ export function createWorkspaceAgentRuntime({
           onSearchStarted: startSearchInBackground,
           searchFetchImpl,
           applyJobImpl,
+          captureQuestionsImpl,
           callAIImpl,
           sendCommunicationImpl,
           ...input,

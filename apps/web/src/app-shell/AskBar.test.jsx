@@ -136,6 +136,7 @@ const api = vi.hoisted(() => ({
   reclassifyIntake: vi.fn(),
   dismissIntake: vi.fn(),
   completeDiscoveryStep: vi.fn(),
+  capturePacketQuestions: vi.fn(),
 }));
 vi.mock("../lib/api.js", () => api);
 
@@ -1353,6 +1354,188 @@ describe("AskBar — acting", () => {
     expect(siteLink.props.href).toBe("https://boards.greenhouse.io/acme/jobs/123");
     expect(buttonByText(tree, "I applied")).toBeTruthy();
     expect(textOf(tree)).not.toContain("Application submitted and verified");
+  });
+
+  it("captures pasted application questions and rebuilds answers inside Ask", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({
+        type: "job.prepare-request",
+        label: "Evaluate and prepare this application",
+      })
+    );
+    api.runWorkspaceIntent
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "The packet is ready. Paste the questions here when the site shows them.",
+              artifacts: [
+                {
+                  kind: "application_handoff",
+                  title: "Acme — Staff AI Engineer — Application site",
+                  applicationId: "app-acme",
+                  url: "https://careers.example.test/jobs/staff-ai",
+                  submissionVerified: false,
+                  questionCapture: {
+                    state: "site-required",
+                    source: null,
+                    answerableCount: 0,
+                    excludedCount: 0,
+                    demographicSectionPresent: false,
+                  },
+                },
+              ],
+              metadata: { state: "manual-handoff", submissionVerified: false },
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Generated documents for Acme — Staff AI Engineer.",
+              artifacts: [],
+              metadata: { state: "ready" },
+            },
+          ],
+        },
+      });
+    api.capturePacketQuestions.mockResolvedValue({
+      data: {
+        questions: [{ id: "q1", label: "Why Acme?", required: true }],
+        excluded: [],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "apply to the Acme role" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const questions = visit(
+      tree,
+      (node) => node.type === "textarea" && node.props["aria-label"] === "Application questions"
+    )[0];
+    questions.props.onChange({
+      target: { value: "Why do you want to work at Acme?\nDescribe a system you owned." },
+    });
+    tree = render();
+    await buttonByText(tree, "Save questions and rebuild answers").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.capturePacketQuestions).toHaveBeenCalledWith({
+      applicationId: "app-acme",
+      source: "paste",
+      manualText: "Why do you want to work at Acme?\nDescribe a system you owned.",
+      url: "https://careers.example.test/jobs/staff-ai",
+    });
+    expect(api.runWorkspaceIntent).toHaveBeenLastCalledWith(
+      "job.generate-documents",
+      { type: "application", id: "app-acme" },
+      { applyIntent: true, formats: ["pdf"] }
+    );
+    expect(textOf(tree)).toContain("Captured 1 application question and rebuilt the answers.");
+  });
+
+  it("keeps captured questions saved when rebuilding answers fails", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({
+        type: "job.prepare-request",
+        label: "Evaluate and prepare this application",
+      })
+    );
+    api.runWorkspaceIntent
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Paste the questions here when the site shows them.",
+              artifacts: [
+                {
+                  kind: "application_handoff",
+                  applicationId: "app-acme",
+                  url: "https://careers.example.test/jobs/staff-ai",
+                  submissionVerified: false,
+                  questionCapture: {
+                    state: "site-required",
+                    answerableCount: 0,
+                    excludedCount: 0,
+                  },
+                },
+              ],
+            },
+          ],
+        },
+      })
+      .mockRejectedValueOnce(new Error("Packet build unavailable"))
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Generated documents for Acme — Staff AI Engineer.",
+              artifacts: [],
+              metadata: { state: "ready" },
+            },
+          ],
+        },
+      });
+    api.capturePacketQuestions.mockResolvedValue({
+      data: {
+        questions: [{ id: "q1", label: "Why Acme?", required: true }],
+        excluded: [],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "apply to the Acme role" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const questions = visit(
+      tree,
+      (node) => node.type === "textarea" && node.props["aria-label"] === "Application questions"
+    )[0];
+    questions.props.onChange({ target: { value: "Why do you want to work at Acme?" } });
+    tree = render();
+    await buttonByText(tree, "Save questions and rebuild answers").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("1 application question captured");
+    expect(textOf(tree)).toContain("Questions were saved, but the answers could not be rebuilt:");
+    expect(textOf(tree)).not.toContain("Packet build unavailable");
+    await buttonByText(tree, "Retry answer build").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("Captured 1 application question and rebuilt the answers.");
+    expect(textOf(tree)).not.toContain("Retry answer build");
   });
 
   it("does not render an executable application handoff URL", async () => {

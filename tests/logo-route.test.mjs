@@ -450,3 +450,20 @@ test("GET /api/logos/img: upstream non-2xx (or logo.dev's own fallback=404) degr
     await closeServer(server);
   }
 });
+
+test("GET /api/logos/img: initials fallback turns an expected upstream miss into a quiet 204", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot, {
+    fetchImpl: async () => new Response("not found", { status: 404 }),
+  });
+  try {
+    const res = await fetch(
+      `${baseUrl(server)}/api/logos/img?name=${encodeURIComponent("Missing Company")}&fallback=initials`
+    );
+    assert.equal(res.status, 204);
+    assert.match(res.headers.get("cache-control") || "", /max-age=/);
+    assert.equal(await res.text(), "");
+  } finally {
+    await closeServer(server);
+  }
+});

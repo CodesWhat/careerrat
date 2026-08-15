@@ -1223,6 +1223,163 @@ test("job.prepare-request generates a KEEP packet and returns the review/apply h
   );
 });
 
+test("job.prepare-request captures public application questions before generating the packet", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/123";
+  const steps = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    captureQuestionsImpl: async (input) => {
+      steps.push({ step: "questions", input });
+      return {
+        source: "greenhouse",
+        questions: [
+          {
+            id: "why-acme",
+            label: "Why do you want to work here?",
+            type: "textarea",
+            required: true,
+            options: null,
+          },
+        ],
+        excluded: [{ id: "eeo", label: "Voluntary self identification" }],
+        demographicSectionPresent: true,
+      };
+    },
+    generateDocumentsImpl: async (input) => {
+      steps.push({ step: "packet", input });
+      return {
+        status: "ready",
+        uploadReady: true,
+        gaps: [],
+        artifacts: {
+          resumePdf: "workspace/tailored/acme-resume.pdf",
+          answers: "workspace/tailored/acme-answers.md",
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(
+    steps.map(({ step }) => step),
+    ["questions", "packet"]
+  );
+  assert.equal(steps[0].input.applicationId, result.messages.at(-1).metadata.applicationId);
+  assert.equal(steps[0].input.source, "url");
+  assert.equal(steps[0].input.url, jobUrl);
+  assert.equal(steps[1].input.body.applyIntent, true);
+  const handoff = result.messages
+    .at(-1)
+    .artifacts.find((artifact) => artifact.kind === "application_handoff");
+  assert.deepEqual(handoff.questionCapture, {
+    state: "captured",
+    source: "greenhouse",
+    answerableCount: 1,
+    excludedCount: 1,
+    demographicSectionPresent: true,
+  });
+  assert.match(result.messages.at(-1).text, /captured 1 application question/i);
+});
+
+test("job.prepare-request keeps a paste-and-resume question path for unsupported sites", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://careers.example.test/jobs/staff-ai";
+  let captureCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    captureQuestionsImpl: async () => {
+      captureCalls += 1;
+      return {};
+    },
+    generateDocumentsImpl: async (input) => {
+      if (input.body.applyIntent) {
+        const error = new Error("Capture the application questions first.");
+        error.code = "BAD_QUESTION_CAPTURE";
+        throw error;
+      }
+      return {
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "The site will provide its questions later.",
+          },
+        ],
+        artifacts: { resumePdf: "workspace/tailored/acme-resume.pdf" },
+      };
+    },
+  });
+
+  assert.equal(captureCalls, 0);
+  const handoff = result.messages
+    .at(-1)
+    .artifacts.find((artifact) => artifact.kind === "application_handoff");
+  assert.deepEqual(handoff.questionCapture, {
+    state: "site-required",
+    source: null,
+    answerableCount: 0,
+    excludedCount: 0,
+    demographicSectionPresent: false,
+  });
+  assert.match(result.messages.at(-1).text, /paste the questions here/i);
+});
+
 test("job.prepare-request keeps moving when application questions are not captured yet", async () => {
   const repoRoot = tempRepo();
   const jobUrl = "https://boards.greenhouse.io/acme/jobs/keep-role";
@@ -1596,6 +1753,37 @@ test("apply-intent document generation degrades to base documents before questio
     "application.record-external"
   );
   assert.match(result.messages.at(-1).text, /application questions/i);
+});
+
+test("document generation reports plural review gaps grammatically", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    evaluation: { gate: "keep" },
+    artifacts: { jd: "workspace/jobs/temporal.md" },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.generate-documents",
+      entity: { type: "application", id: "app-temporal" },
+      input: { applyIntent: true, formats: ["pdf"] },
+    },
+    generateDocumentsImpl: async () => ({
+      applicationId: "app-temporal",
+      status: "reviewable",
+      uploadReady: false,
+      gaps: [
+        { kind: "answers", message: "Confirm the start date." },
+        { kind: "answers", message: "Confirm the office cadence." },
+      ],
+      artifacts: { resumePdf: "workspace/tailored/temporal-resume.pdf" },
+    }),
+  });
+
+  assert.match(result.messages.at(-1).text, /2 items still need review/i);
+  assert.doesNotMatch(result.messages.at(-1).text, /2 items still needs review/i);
 });
 
 test("document export executes behind workspace-main and preserves packaged file context", async () => {
@@ -2898,6 +3086,43 @@ test("Apply on site never returns an executable manual-handoff URL", async () =>
 
   assert.equal(result.messages.at(-1).artifacts[0].url, null);
   assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+});
+
+test("Apply on site captures supported public questions before the supervised handoff", async () => {
+  const repoRoot = tempRepo();
+  const link = "https://boards.greenhouse.io/temporal/jobs/123";
+  seedApplication(repoRoot, { link });
+  const captures = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    captureQuestionsImpl: async (input) => {
+      captures.push(input);
+      return {
+        source: "greenhouse",
+        questions: [{ id: "q1", label: "Why Temporal?" }],
+        excluded: [],
+        demographicSectionPresent: false,
+      };
+    },
+  });
+
+  assert.equal(captures.length, 1);
+  assert.equal(captures[0].applicationId, "app-temporal");
+  assert.equal(captures[0].url, link);
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+  assert.deepEqual(result.messages.at(-1).artifacts[0].questionCapture, {
+    state: "captured",
+    source: "greenhouse",
+    answerableCount: 1,
+    excludedCount: 0,
+    demographicSectionPresent: false,
+  });
 });
 
 test("Apply on site writes Applied only after its executor returns verified confirmation", async () => {

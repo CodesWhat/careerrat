@@ -346,6 +346,39 @@ describe("JobDrawer", () => {
     expect(handoff.props.href).toBe("https://boards.greenhouse.io/northstar/jobs/123");
   });
 
+  it("shows question-capture progress in the direct Apply on site handoff", async () => {
+    api.applyOnSite.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            kind: "action_result",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                url: "https://boards.greenhouse.io/northstar/jobs/123",
+                questionCapture: {
+                  state: "captured",
+                  answerableCount: 2,
+                  excludedCount: 1,
+                },
+              },
+            ],
+            metadata: { state: "manual-handoff", submissionVerified: false },
+          },
+        ],
+      },
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    let tree = renderDrawer(applicationRow);
+
+    await button(tree, "Apply on site").props.onClick();
+    tree = renderDrawer(applicationRow);
+
+    expect(textOf(tree)).toContain("Saved 2 application questions for packet generation.");
+    expect(textOf(tree)).toContain("Nothing was marked Applied yet.");
+  });
+
   it("does not render an executable manual-handoff URL", async () => {
     api.applyOnSite.mockResolvedValue({
       data: {

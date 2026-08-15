@@ -399,6 +399,56 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
       risks: [],
     });
     assert.match(seen[0], /minimum_base|targeting|evidence/i);
+    assert.match(seen[0], /complete plain-English sentences/i);
+    assert.match(seen[0], /fitReasons.*72 characters/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: keeps budget-limited evaluation copy readable", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const clippedReason =
+    "Riley owns discovery-through-deployment AI rollouts for enterprise customers,cut";
+  const clippedRisk =
+    "The role requires three days per week in an office; Riley is open to hybrid and";
+  const clippedComp =
+    "Posted annual salary range is $200,000–$320,000 USD. The minimum clears Riley’s $190,000 base floor, and the range includes the $215,000base";
+  assert.equal(clippedReason.length, 80);
+  assert.equal(clippedRisk.length, 79);
+  assert.equal(clippedComp.length, 140);
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () =>
+      [
+        "```json",
+        JSON.stringify({
+          ...typedGateVerdict(),
+          compensation: { ...typedGateVerdict().compensation, summary: clippedComp },
+          fitReasons: [clippedReason],
+          fitRisks: [clippedRisk],
+        }),
+        "```",
+      ].join("\n"),
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(
+      body.data.fitReasons[0],
+      "Riley owns discovery-through-deployment AI rollouts for enterprise customers…"
+    );
+    assert.equal(
+      body.data.fitRisks[0],
+      "The role requires three days per week in an office; Riley is open to hybrid…"
+    );
+    assert.equal(
+      body.data.compensation.summary,
+      "Posted annual salary range is $200,000–$320,000 USD. The minimum clears Riley’s $190,000 base floor, and the range includes the…"
+    );
   } finally {
     await closeServer(server);
   }

@@ -6378,6 +6378,77 @@ button.chip {
   font-weight: 700;
 }
 
+.ask-bar__application-session {
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--row-radius);
+  background: var(--surface);
+}
+
+.ask-bar__application-session-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ask-bar__application-session-head > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.ask-bar__application-session-head strong {
+  color: var(--ink);
+  font-size: 13px;
+}
+
+.ask-bar__application-session-head span,
+.ask-bar__application-session-state,
+.ask-bar__question-capture p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ask-bar__question-capture {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.ask-bar__question-capture label {
+  color: var(--ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ask-bar__question-capture textarea {
+  width: 100%;
+  min-height: 76px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--row-radius);
+  background: var(--paper);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.4;
+}
+
+.ask-bar__question-capture textarea:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.ask-bar__question-capture .btn {
+  align-self: flex-start;
+}
+
 .ask-bar__next-actions {
   display: flex;
   flex-wrap: wrap;

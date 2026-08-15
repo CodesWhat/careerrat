@@ -3,6 +3,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { Button, IconButton } from "../components/Button.jsx";
 import { ArrowUpIcon, PaperclipIcon } from "../components/icons.jsx";
 import {
+  capturePacketQuestions,
   completeDiscoveryStep,
   confirmIntake,
   createIntake,
@@ -1173,7 +1174,6 @@ function AskBarTurn({
   const searchSourceArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "search_source"
   );
-  const handoffUrl = safeExternalHttpUrl(handoffArtifact?.url);
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1193,11 +1193,7 @@ function AskBarTurn({
           onComplete={() => completeDiscoveryStep("research-boards")}
         />
       ) : null}
-      {handoffUrl ? (
-        <a className="ask-bar__handoff-link" href={handoffUrl} target="_blank" rel="noreferrer">
-          Open application site
-        </a>
-      ) : null}
+      {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
           {nextActions.map((action) => {
@@ -1223,6 +1219,161 @@ function AskBarTurn({
       ) : null}
       <EngineReceipt engine={turn.engine} elapsedMs={turn.elapsedMs} />
     </div>
+  );
+}
+
+function ApplicationHandoffCard({ artifact }) {
+  const [questions, setQuestions] = useState("");
+  const [capture, setCapture] = useState(artifact.questionCapture || null);
+  const [answersNeedRebuild, setAnswersNeedRebuild] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState(null);
+  const [error, setError] = useState(null);
+  const handoffUrl = safeExternalHttpUrl(artifact.url);
+  const applicationId = String(artifact.applicationId || "").trim();
+  const captureRequired = capture?.state === "site-required";
+  const inputId = `application-questions-${applicationId || "current"}`;
+
+  async function rebuildAnswers() {
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      await runWorkspaceIntent(
+        "job.generate-documents",
+        { type: "application", id: applicationId },
+        { applyIntent: true, formats: ["pdf"] }
+      );
+      setAnswersNeedRebuild(false);
+      setNotice(
+        `Captured ${capture?.answerableCount || 0} application question${capture?.answerableCount === 1 ? "" : "s"} and rebuilt the answers.`
+      );
+      emitDashboardChanged();
+    } catch (err) {
+      setError(
+        `Questions were saved, but the answers could not be rebuilt: ${resolveErrorCopy(err).message}`
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleQuestionCapture() {
+    const manualText = questions.trim();
+    if (!manualText || !applicationId) return;
+    setBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await capturePacketQuestions({
+        applicationId,
+        source: "paste",
+        manualText,
+        url: handoffUrl || artifact.url || "",
+      });
+      const result = response?.data || response;
+      const answerableCount = Array.isArray(result?.questions) ? result.questions.length : 0;
+      const excludedCount = Array.isArray(result?.excluded) ? result.excluded.length : 0;
+      if (answerableCount + excludedCount === 0) {
+        setError("No application questions were recognized. Paste one question per line.");
+        return;
+      }
+      const nextCapture = {
+        state: "captured",
+        source: "manual",
+        answerableCount,
+        excludedCount,
+        demographicSectionPresent: result?.demographicSectionPresent === true,
+      };
+      setCapture(nextCapture);
+      setAnswersNeedRebuild(true);
+      setQuestions("");
+      emitDashboardChanged();
+      try {
+        await runWorkspaceIntent(
+          "job.generate-documents",
+          { type: "application", id: applicationId },
+          { applyIntent: true, formats: ["pdf"] }
+        );
+        setAnswersNeedRebuild(false);
+        setNotice(
+          `Captured ${answerableCount} application question${answerableCount === 1 ? "" : "s"} and rebuilt the answers.`
+        );
+        emitDashboardChanged();
+      } catch (err) {
+        setError(
+          `Questions were saved, but the answers could not be rebuilt: ${resolveErrorCopy(err).message}`
+        );
+      }
+    } catch (err) {
+      setError(resolveErrorCopy(err).message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="ask-bar__application-session" aria-label="Application handoff">
+      <div className="ask-bar__application-session-head">
+        <div>
+          <strong>Finish this application</strong>
+          <span>CareerRat will not mark it Applied until submission is confirmed.</span>
+        </div>
+        <span className="badge badge--warn">Supervised</span>
+      </div>
+      {capture?.state === "captured" ? (
+        <p className="ask-bar__application-session-state">
+          {capture.answerableCount} application question
+          {capture.answerableCount === 1 ? "" : "s"} captured.{" "}
+          {answersNeedRebuild
+            ? "Rebuild the answer sheet before submitting."
+            : "The packet includes the latest answers."}
+        </p>
+      ) : null}
+      {answersNeedRebuild ? (
+        <Button disabled={busy} onClick={rebuildAnswers}>
+          {busy ? "Rebuilding answers…" : "Retry answer build"}
+        </Button>
+      ) : null}
+      {captureRequired ? (
+        <div className="ask-bar__question-capture">
+          <p>
+            Open the site. When its employer questions appear, paste them here and CareerRat will
+            rebuild the answer sheet before you submit.
+          </p>
+          {capture.attempted && capture.reason ? (
+            <p className="field__hint">Automatic capture was unavailable: {capture.reason}</p>
+          ) : null}
+          <label htmlFor={inputId}>Application questions</label>
+          <textarea
+            id={inputId}
+            aria-label="Application questions"
+            rows={3}
+            value={questions}
+            placeholder="Paste the employer's questions here"
+            onChange={(event) => setQuestions(event.target.value)}
+          />
+          <Button disabled={busy || !questions.trim()} onClick={handleQuestionCapture}>
+            {busy ? "Rebuilding answers…" : "Save questions and rebuild answers"}
+          </Button>
+        </div>
+      ) : null}
+      {error ? (
+        <p className="ask-bar__error" aria-live="polite">
+          {error}
+        </p>
+      ) : null}
+      {notice ? (
+        <p className="ask-bar__application-session-state" aria-live="polite">
+          {notice}
+        </p>
+      ) : null}
+      {handoffUrl ? (
+        <a className="ask-bar__handoff-link" href={handoffUrl} target="_blank" rel="noreferrer">
+          Open application site
+        </a>
+      ) : null}
+    </section>
   );
 }
 

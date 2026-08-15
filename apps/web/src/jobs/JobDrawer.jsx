@@ -136,9 +136,20 @@ function toDatetimeLocal(iso) {
 function applyOnSiteNotice(response) {
   const messages = (response?.data || response)?.messages || [];
   const last = messages[messages.length - 1];
-  return last?.metadata?.state === "applied" && last?.metadata?.submissionVerified === true
-    ? "Application submitted and verified."
-    : "Application site is ready. Nothing was marked Applied yet.";
+  if (last?.metadata?.state === "applied" && last?.metadata?.submissionVerified === true) {
+    return "Application submitted and verified.";
+  }
+  const questionCapture = last?.artifacts?.find(
+    (artifact) => artifact.kind === "application_handoff"
+  )?.questionCapture;
+  const capturedCount = Number(questionCapture?.answerableCount) || 0;
+  const questionNote =
+    questionCapture?.state === "captured"
+      ? ` Saved ${capturedCount} application question${capturedCount === 1 ? "" : "s"} for packet generation.`
+      : questionCapture?.state === "site-required"
+        ? " Use Ask to paste the employer questions when the site shows them."
+        : "";
+  return `Application site is ready.${questionNote} Nothing was marked Applied yet.`;
 }
 
 function applicationHandoffUrl(response) {

@@ -22,9 +22,10 @@
 //                                      workspace/logos/<sanitized>.webp from
 //                                      disk if already cached; otherwise
 //                                      fetches img.logo.dev, caches, serves.
-//                                      404 on a miss (the client's existing
-//                                      <img onerror> → initials-chip fallback
-//                                      fires either way, unchanged).
+//                                      404 on an API miss, or a quiet 204 when
+//                                      the SPA requests `fallback=initials` so
+//                                      <img onerror> can render the initials chip
+//                                      without logging an expected HTTP error.
 //
 // TWO DIFFERENT LOGO.DEV CREDENTIALS — verified live against logo.dev's own
 // docs during implementation (the M8 design doc had flagged this auth shape
@@ -73,6 +74,15 @@ export const DEFAULT_LOGO_DEV_PUBLIC_KEY = "pk_SgppRPhNTWqQdH-WZX5BWA";
 function queryParam(req, name) {
   const url = new URL(req.url, "http://127.0.0.1");
   return url.searchParams.get(name);
+}
+
+function sendImageMiss(req, res) {
+  if (queryParam(req, "fallback") === "initials") {
+    res.writeHead(204, { "Cache-Control": "public, max-age=3600" });
+    res.end();
+    return;
+  }
+  sendJson(res, 404, { error: "no logo for this domain" });
 }
 
 // ---------------------------------------------------------------------------
@@ -323,7 +333,7 @@ export function mountLogoRoutes({ addRoute, repoRoot, env = process.env, fetchIm
       try {
         bytes = readFileSync(cachePath);
       } catch {
-        sendJson(res, 404, { error: "no logo for this domain" });
+        sendImageMiss(req, res);
         return;
       }
       res.writeHead(200, {
@@ -344,12 +354,12 @@ export function mountLogoRoutes({ addRoute, repoRoot, env = process.env, fetchIm
     try {
       upstream = await fetchImpl(upstreamUrl);
     } catch {
-      sendJson(res, 404, { error: "no logo for this domain" });
+      sendImageMiss(req, res);
       return;
     }
 
     if (!upstream.ok) {
-      sendJson(res, 404, { error: "no logo for this domain" });
+      sendImageMiss(req, res);
       return;
     }
 
@@ -358,7 +368,7 @@ export function mountLogoRoutes({ addRoute, repoRoot, env = process.env, fetchIm
       const arrayBuffer = await upstream.arrayBuffer();
       bytes = Buffer.from(arrayBuffer);
     } catch {
-      sendJson(res, 404, { error: "no logo for this domain" });
+      sendImageMiss(req, res);
       return;
     }
 
