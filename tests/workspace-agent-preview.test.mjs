@@ -567,7 +567,25 @@ test("previewWorkspaceIntent: a role-and-location comp request maps to research.
     intent: {
       type: "research.comp",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
-      input: { role: "a nurse", location: "Denver" },
+      // The leading article on the role is stripped ("nurse", not "a nurse").
+      input: { role: "nurse", location: "Denver" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: 'research market comp for X in Y' routes to research.comp, not research.company", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "research market comp for a nurse in Denver",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Research market comp",
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { role: "nurse", location: "Denver" },
     },
   });
 });

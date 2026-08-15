@@ -57,7 +57,10 @@ function validHealthPayload(overrides = {}) {
     forFunction: "clinical staffing",
     asOf: "2026-08-10",
     provenance: "built-from-data",
-    dimensions: { layoffRisk: "elevated", hiringMomentum: "steady" },
+    dimensions: {
+      layoffRisk: { level: "elevated", note: "Hiring freeze for non-clinical roles." },
+      hiringMomentum: { level: "steady" },
+    },
     crossCut: ["stability"],
     fitDelta: -3,
     rationale: "A hiring freeze was announced for non-clinical roles at this hospital system.",
@@ -235,6 +238,13 @@ const REJECTION_CASES = [
     name: "missing dimensions object",
     overrides: { dimensions: null },
     code: "BAD_HEALTH_DIMENSIONS",
+  },
+  {
+    // The contract shape is { level, note, functionHit?, trend? } — a flat
+    // string level (the pre-contract legacy form) is rejected, not coerced.
+    name: "a flat string dimension entry",
+    overrides: { dimensions: { layoffRisk: "elevated" } },
+    code: "BAD_HEALTH_DIMENSION_ENTRY",
   },
   {
     name: "crossCut not an array",

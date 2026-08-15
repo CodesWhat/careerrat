@@ -80,6 +80,27 @@ export function validateCompanyHealth(companyHealth) {
     err.code = "BAD_HEALTH_DIMENSIONS";
     throw err;
   }
+  // Each dimension entry is { level, note, functionHit?, trend? } per the
+  // contract (docs/DATA_CONTRACT.md, SKILL.md) — a flat string level (e.g.
+  // { layoffRisk: "elevated" }) is not the shape and is rejected here, not
+  // silently coerced. The feature is unreleased, so no legacy data depends
+  // on the flat form; the client keeps its own defensive fallback for
+  // anything that slips through some other path.
+  for (const [key, entry] of Object.entries(dimensions)) {
+    if (
+      !entry ||
+      typeof entry !== "object" ||
+      Array.isArray(entry) ||
+      typeof entry.level !== "string" ||
+      !entry.level.trim()
+    ) {
+      const err = new Error(
+        `companyHealthSet: dimensions.${key} must be an object with a non-empty string level (got ${JSON.stringify(entry)})`
+      );
+      err.code = "BAD_HEALTH_DIMENSION_ENTRY";
+      throw err;
+    }
+  }
   if (crossCut !== undefined && !Array.isArray(crossCut)) {
     const err = new Error("companyHealthSet: crossCut must be an array");
     err.code = "BAD_HEALTH_CROSS_CUT";
@@ -106,8 +127,11 @@ export function validateCompanyHealth(companyHealth) {
   // research-store.mjs's computeResearchWrite leak guard.
   const leak = findCurrentBaseToken(JSON.stringify(companyHealth));
   if (leak) {
+    // Name the guard that tripped, never the matched value — that value is
+    // the private input itself, and this error travels over HTTP via
+    // sendError to the client.
     const err = new Error(
-      `companyHealthSet: refusing to persist a private comp input: "${leak.match}"`
+      "companyHealthSet: refusing to persist a private compensation input (current_base leak guard)"
     );
     err.code = "HEALTH_COMP_LEAK";
     throw err;

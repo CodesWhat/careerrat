@@ -1710,6 +1710,7 @@ function CompanyHealthCard({ artifact }) {
       </div>
       <p className="ask-bar__research-meta">
         {[
+          artifact.forFunction ? `for ${artifact.forFunction}` : null,
           healthProvenanceLabel(artifact.provenance),
           artifact.asOf ? `as of ${artifact.asOf}` : null,
         ]
@@ -1724,15 +1725,18 @@ function CompanyHealthCard({ artifact }) {
             // each entry is normally { level, note, functionHit?, trend? },
             // but a legacy flat string level still falls through here.
             const level = detail?.level ?? detail;
+            const levelText =
+              typeof level === "string" || typeof level === "number" ? String(level) : "";
             const note = detail?.note;
+            if (!levelText) return null;
             return (
               <span
                 className="ask-bar__health-dim"
-                data-level={level}
+                data-level={levelText}
                 key={key}
                 title={note || undefined}
               >
-                {healthDimLabel(key)}: {level}
+                {healthDimLabel(key)}: {levelText}
               </span>
             );
           })}

@@ -1749,6 +1749,7 @@ function companyHealthArtifactFromRating({ entityType, rowId, company, role, hea
     ...(entityType === "application" ? { applicationId: rowId } : { sourcedId: rowId }),
     company,
     role,
+    forFunction: health.forFunction || null,
     rating: health.rating,
     provenance: health.provenance,
     asOf: health.asOf,
@@ -1772,6 +1773,17 @@ function compBenchmarkActivitySummary(benchmark) {
 }
 
 const COMPANY_HEALTH_RECHECK_DAYS_DEFAULT = 14;
+
+// candidate/modes.yml#company_health.recheck_days (SKILL.md's freshness
+// contract) — candidateConfigGet's DB-first accessor already returns the
+// raw modes doc whole (readSingleton stores/reads the JSON blob as-is), so
+// the company_health block just falls out of the same call this file
+// already makes elsewhere; no new config machinery needed.
+function companyHealthRecheckDays({ repoRoot, env }) {
+  const modes = candidateConfigGet({ repoRoot, env }).modes || {};
+  const days = Number(modes.company_health?.recheck_days);
+  return Number.isFinite(days) && days > 0 ? days : COMPANY_HEALTH_RECHECK_DAYS_DEFAULT;
+}
 
 // The comp-benchmark artifact stem embeds the year-month it was written
 // (see research-comp's STEP 1), so a fresh hit from an earlier month is
@@ -2906,9 +2918,12 @@ export async function executeWorkspaceIntent({
 
       if (!input.force) {
         const fresh = findFreshCompBenchmark({ repoRoot, role, location });
-        if (fresh) {
-          const hit = readResearch(fresh.stem, { root: repoRoot });
-          const fm = hit?.frontmatter || {};
+        // findFreshCompBenchmark's listResearch() scan and this readResearch()
+        // read aren't atomic; if the file's gone by the time we read it, fall
+        // through to the fresh-run path below instead of dereferencing null.
+        const hit = fresh ? readResearch(fresh.stem, { root: repoRoot }) : null;
+        if (fresh && hit) {
+          const fm = hit.frontmatter || {};
           return appendActionResult({
             repoRoot,
             env,
@@ -3082,7 +3097,7 @@ export async function executeWorkspaceIntent({
       if (!input.force && row.companyHealth?.asOf) {
         const stillFresh = !isStale(
           row.companyHealth.asOf,
-          COMPANY_HEALTH_RECHECK_DAYS_DEFAULT,
+          companyHealthRecheckDays({ repoRoot, env }),
           requestDate(now).getTime()
         );
         if (stillFresh) {
@@ -4548,6 +4563,11 @@ function looksLikeFuzzyCompanyReference(value) {
 
 function companyResearchRequestFromText(text) {
   const value = String(text || "").trim();
+  // "research market comp for a nurse in Denver" etc. is a comp-research
+  // request, not company research — this generic "^research (.+)$" match
+  // below would otherwise swallow it before compResearchRequestFromText's
+  // own ACTION_PREVIEW_RULES entry ever sees it.
+  if (compResearchRequestFromText(value)) return null;
   let match =
     value.match(/^(?:please\s+)?research\s+(.+?)\s*[.?!]*$/i) ||
     value.match(/^(?:please\s+)?(?:dig into|look into)\s+(.+?)\s*[.?!]*$/i);
@@ -4565,14 +4585,26 @@ function companyResearchRequestFromText(text) {
   return { company: captured };
 }
 
+// "market comp for a nurse in Denver" should benchmark "nurse", not "a
+// nurse" — strip a leading article off the parsed role.
+function stripLeadingArticle(text) {
+  return String(text || "")
+    .trim()
+    .replace(/^(?:a|an|the)\s+/i, "");
+}
+
 function compResearchRequestFromText(text) {
   const value = String(text || "").trim();
-  let match = value.match(/^market\s+comp\s+for\s+(.+?)\s+in\s+(.+?)\s*[.?!]*$/i);
-  if (match) return { role: match[1].trim(), location: match[2].trim() };
-  match = value.match(/^what'?s\s+the\s+market\s+rate\s+for\s+(.+?)\s*[.?!]*$/i);
-  if (match) return { role: match[1].trim() };
-  if (/^comp\s+benchmark\b/i.test(value)) return {};
-  if (/\bsalary\s+research\b.*\b(?:this\s+)?(?:job|role)\b/i.test(value)) return {};
+  // Accept an optional leading "research " so "research market comp for a
+  // nurse in Denver" routes here instead of being swallowed by
+  // companyResearchRequestFromText's generic "^research (.+)$" match.
+  const stripped = value.replace(/^(?:please\s+)?research\s+/i, "").trim();
+  let match = stripped.match(/^market\s+comp\s+for\s+(.+?)\s+in\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { role: stripLeadingArticle(match[1]), location: match[2].trim() };
+  match = stripped.match(/^what'?s\s+the\s+market\s+rate\s+for\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { role: stripLeadingArticle(match[1]) };
+  if (/^comp\s+benchmark\b/i.test(stripped)) return {};
+  if (/\bsalary\s+research\b.*\b(?:this\s+)?(?:job|role)\b/i.test(stripped)) return {};
   return null;
 }
 

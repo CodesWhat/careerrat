@@ -53,8 +53,8 @@ It's the concrete artifact you open right before a recruiter comp call, to see a
 ### 6. Company-health rating has no pill and no drawer section
 **Status: fixed.** The card pill was already wired (`JobsPage.jsx`'s `HealthBadge`, reading `row.healthBadge`, landed separately); the drawer section was the real gap and is now wired too.
 **Jobs, high value.**
-The Watch/Risky badge on job cards and the full drawer breakdown (rating, rationale, per-dimension levels, cited sources) are gone.
-Company-health is a first-class routed skill whose whole purpose is surfacing layoff/finance/morale risk on a role. Persisting the rating and never showing it defeats the point of running the skill.
+The Watch/Risky badge on job cards and the full drawer breakdown (rating, rationale, per-dimension levels, cited sources) were gone.
+Company-health is a first-class routed skill whose whole purpose is surfacing layoff/finance/morale risk on a role. Persisting the rating and never showing it defeated the point of running the skill.
 - **Original:** `buildHealthBlock`/`buildHealthBadge` (`dashboard-data.js:3812-3859`); card pill at `:5645-5648`; drawer detail at `dashboard-shell.html:8838-8910`.
 - **React:** `JobsPage.jsx`'s `HealthBadge` (row/card views) already reads `row.healthBadge`. `JobDrawer.jsx`'s `CompanyHealthCard` now reads `drawer.companyHealth` and renders the rating chip, provenance, as-of date, per-dimension levels, rationale, and a collapsible sourced-evidence list.
 - **Data:** `row.healthBadge` (`:4089`,`:4171`), `drawer.companyHealth` (`:4016`), both computed, both now read.

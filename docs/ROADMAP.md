@@ -424,9 +424,11 @@ The current build order is:
    company health now satisfy the same typed Ask contract too: natural requests resolve through a
    shared company reference resolver into either a fresh cached result rendered immediately or an
    embedded supervised research session, with cited dossiers, benchmarks, and ratings each carrying
-   an explicit refresh action. Company-health ratings also gained a validated one-write-path CLI
-   (`careerrat health record`, dry-run by default) that replaces the prior hand-patched write and
-   now render in the Jobs drawer alongside the existing row badge. Headed isolated-home acceptance
+   an explicit refresh action. Company-health ratings also gained a single validated writer,
+   `companyHealthSet`, reached through two entry points — the dry-run-default CLI (`careerrat
+   health record`) and the confirm-first `company.health-record` intent for shell-less embedded
+   sessions — replacing the prior hand-patched write, and now render in the Jobs drawer alongside
+   the existing row badge. Headed isolated-home acceptance
    passed on 2026-08-15 against the real server: routing, cached-result reuse, the health write
    path through to the drawer, ambiguity and missing-input recovery, confirmed saves with the
    private-comp refusal, clean no-AI degradation, and restart durability all held with no server

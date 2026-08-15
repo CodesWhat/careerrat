@@ -1092,6 +1092,7 @@ function CompanyHealthCard({ health }) {
   if (!health?.rating) return null;
   const dims = Array.isArray(health.dimensions) ? health.dimensions : [];
   const signals = Array.isArray(health.signals) ? health.signals : [];
+  const crossCut = Array.isArray(health.crossCut) ? health.crossCut.filter(Boolean) : [];
   return (
     <Card title="Company health">
       <div className="job-drawer__health-head">
@@ -1103,7 +1104,11 @@ function CompanyHealthCard({ health }) {
         ) : null}
         {health.asOf ? <span className="field__hint">as of {health.asOf}</span> : null}
       </div>
+      {health.forFunction ? <p className="field__hint">Scoped to {health.forFunction}</p> : null}
       {health.rationale ? <p>{health.rationale}</p> : null}
+      {crossCut.length ? (
+        <p className="field__hint">Touches what you said you need: {crossCut.join(", ")}</p>
+      ) : null}
       {dims.length ? (
         <div className="job-drawer__health-dims">
           {dims.map((dim) => (

@@ -51,11 +51,12 @@ the `company-health` skill, read by `evaluate-job` (fit cross-cut) and the dashb
 | `signals` | array | Optional, defaults to `[]`. `{ source, date, summary, url }` evidence entries. |
 
 **Internal signal only** — this object never appears in any outbound artifact (cover letter,
-recruiter reply, LinkedIn). **Write path:** `careerrat health record <applicationOrSourcedId>
---file <rating.json> --write` (`src/cli/health.mjs`, backed by the `companyHealthSet` verb in
-`src/core/db/verbs/company-health.mjs`) — the only writer; it validates the shape above and
-refuses a payload naming the private `current_base` field. Dry-run by default (omit `--write`
-to preview).
+recruiter reply, LinkedIn). **Write path:** the `companyHealthSet` verb in
+`src/core/db/verbs/company-health.mjs` is the single validated writer, reached through two entry
+points — the dry-run-default CLI, `careerrat health record <applicationOrSourcedId> --file
+<rating.json> --write` (`src/cli/health.mjs`), and the confirm-first `company.health-record`
+intent for shell-less embedded sessions. Both validate the shape above and refuse a payload
+naming the private `current_base` field.
 
 ## System Layer
 

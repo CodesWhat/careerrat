@@ -35,19 +35,21 @@ function dataCli(repoRoot, args) {
 // case has to go through the catch branch — execFileSync throws on a
 // non-zero exit, carrying the captured stdout/stderr on the error object.
 function healthCli(repoRoot, args, { expectFailure = false } = {}) {
+  let out;
   try {
-    const out = execFileSync(
+    out = execFileSync(
       process.execPath,
       ["src/cli/health.mjs", "--root", repoRoot, "--json", ...args],
       { cwd: repo, encoding: "utf8" }
     );
-    if (expectFailure)
-      throw new Error(`expected ${args.join(" ")} to exit non-zero but it exited 0`);
-    return { status: 0, json: JSON.parse(out) };
   } catch (err) {
     if (!expectFailure) throw err;
     return { status: err.status, json: JSON.parse(err.stdout) };
   }
+  if (expectFailure) {
+    throw new Error(`expected ${args.join(" ")} to exit non-zero but it exited 0`);
+  }
+  return { status: 0, json: JSON.parse(out) };
 }
 
 function writePayload(repoRoot, name, payload) {
@@ -67,7 +69,7 @@ const validPayload = {
   forFunction: "clinical staffing",
   asOf: "2026-08-10",
   provenance: "built-from-data",
-  dimensions: { layoffRisk: "elevated" },
+  dimensions: { layoffRisk: { level: "elevated", note: "Hiring freeze for non-clinical roles." } },
   crossCut: ["stability"],
   fitDelta: -3,
   rationale: "A hiring freeze was announced for non-clinical roles at this hospital system.",
