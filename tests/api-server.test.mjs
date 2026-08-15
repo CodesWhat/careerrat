@@ -336,14 +336,19 @@ async function waitForSseEvent(url, eventName, { onConnected, timeoutMs = 4000 }
   }
 }
 
-test("touching tracker.json emits a tracker-update SSE event", async () => {
+test("changing tracker.json emits a tracker-update SSE event", async () => {
   const repoRoot = tempRepo();
   writeTracker(repoRoot);
   const dev = await bootServer(repoRoot);
   try {
     const trackerPath = join(resolveUserPaths({ repoRoot }).workspaceDir, "tracker.json");
     await waitForSseEvent(`${baseUrl(dev)}/__livereload`, "tracker-update", {
-      onConnected: () => writeFileSync(trackerPath, JSON.stringify(MINIMAL_TRACKER), "utf8"),
+      onConnected: () =>
+        writeFileSync(
+          trackerPath,
+          JSON.stringify({ ...MINIMAL_TRACKER, meta: { version: 1 } }),
+          "utf8"
+        ),
     });
   } finally {
     teardown(dev, repoRoot);

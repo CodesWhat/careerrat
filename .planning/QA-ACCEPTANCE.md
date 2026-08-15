@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-14
 
-Gate result: all 84 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 85 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, restart, and native Electron checks pass. The
 broader native skill-to-screen build gate remains tracked separately in `SKILL-UX-AUDIT.md`.
 
@@ -1542,3 +1542,18 @@ Test homes:
   `javascript:` scheme.
 - Live retest: focused Ask coverage and the complete web suite pass; exact-head CodeQL is the
   external acceptance check.
+
+### `F-085` Live-reload acceptance writes byte-identical tracker state
+
+- Status: `FIXED`
+- Severity: P1 release blocker, the full release suite can time out even though tracker live reload
+  works because the acceptance test relies on a filesystem event for a byte-identical overwrite.
+- Reproduction: run the complete repository suite under load; the isolated SSE test passes while
+  the parallel suite can coalesce the no-op write and miss `tracker-update`.
+- Root cause: the test rewrote `tracker.json` with exactly the bytes already on disk. Filesystem
+  watchers do not promise a distinct notification for a no-op state rewrite.
+- Fix: mutate the tracker version after the SSE connection is ready, matching the real product
+  contract where tracker-visible writes change durable state.
+- Regression: the focused SSE test passes 50 consecutive runs before the full release suite.
+- Live retest: PASS in the complete 0.7.1 release suite: 2,487 repository tests passed with five
+  intentional skips, including the watcher assertion under full parallel load.
