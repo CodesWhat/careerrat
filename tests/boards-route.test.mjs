@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { mountBoardsRoutes } from "../src/cli/boards-route.mjs";
+import { mountBoardsRoutes, setSearchSourceEnabled } from "../src/cli/boards-route.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
@@ -392,6 +392,69 @@ test("source maintenance adds a deterministic Career Ops provider query", async 
   } finally {
     await closeServer(server);
   }
+});
+
+test("source maintenance deduplicates the same provider query case-insensitively", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    let response = await postJson(server, "/api/boards/search/add", {
+      query: "Staff AI Engineer",
+      provider: "HiringCafe",
+    });
+    assert.equal(response.status, 200);
+    response = await postJson(server, "/api/boards/search/add", {
+      query: "staff ai engineer",
+      provider: "hiringcafe",
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.body.searches.length, 1);
+    assert.equal(sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.length, 1);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("source toggles prefer an exact visible label over another source's hostname", () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  sourceConfigPut({
+    repoRoot,
+    name: "search-sources",
+    data: {
+      searches: [
+        {
+          provider: "remoteok",
+          source_type: "board",
+          label: "RemoteOK",
+          url: "https://remoteok.com/api",
+          enabled: true,
+        },
+        {
+          provider: "remoteok.com",
+          source_type: "browser",
+          label: "remoteok.com",
+          url: "https://remoteok.com/jobs",
+          enabled: true,
+        },
+      ],
+    },
+  });
+
+  const result = setSearchSourceEnabled({ repoRoot, selector: "remoteok.com", enabled: false });
+
+  assert.equal(result.source.label, "remoteok.com");
+  assert.deepEqual(
+    sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches.map((source) => ({
+      label: source.label,
+      enabled: source.enabled,
+    })),
+    [
+      { label: "RemoteOK", enabled: true },
+      { label: "remoteok.com", enabled: false },
+    ]
+  );
 });
 
 test("source maintenance adds, edits, disables, and removes a supported company board", async () => {

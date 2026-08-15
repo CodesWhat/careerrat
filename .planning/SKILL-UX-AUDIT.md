@@ -135,7 +135,7 @@ Status meanings:
 | Original skill | Current app path | Status | Build gate |
 | --- | --- | --- | --- |
 | `ingest-profile` | Chat-first onboarding and editable file pane | partial | Replace form-like company collection with a company-thesis conversation and carry the thread into normal Ask. |
-| `setup-searches` | Onboarding/Settings source setup | partial | Make natural-language source changes visible and durable in the workspace thread. |
+| `setup-searches` | Onboarding baseline plus Ask URL/query imports and source toggles, with Settings maintenance | native | Add packaged-install acceptance plus headed authenticated-off and ambiguous-name recovery coverage. |
 | `research-boards` | Ask starts or reopens an embedded guided board search with Add source/Skip review | native | Keep clean-home and packaged acceptance for new-source, duplicate-source, skip-all, and runtime-restart paths. |
 | `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
@@ -214,6 +214,24 @@ recorded in the durable workspace thread, starts or reopens the visible
 configured-source dedup set, and embeds the live progress directly in Ask. Every
 proposed source still requires Add source or Skip. Approved sources write through
 the validated source API, then the receipt links back to Jobs and Settings.
+
+## Natural source setup
+
+Routine source changes no longer require the user to understand Settings fields or
+provider IDs. Ask recognizes explicit requests to add a pasted job-board URL, add a
+keyword job search, or enable/disable a named source. The typed preview is the
+confirmation boundary. Execution reuses the same validated SQLite source-config
+owners as Settings, keeps authenticated imports off until their separate browser
+consent exists, treats exact URL and case-only query duplicates as no-ops, and
+records a compact source-state receipt in the durable workspace thread. The receipt
+links directly to Jobs and source maintenance. Destructive removal remains a
+double-confirmed Settings action.
+
+Headed repository-build acceptance passed on 2026-08-14. A fresh zero-record DB
+imported and enabled a Greenhouse board through Ask with no console errors; an
+isolated populated DB also passed exact duplicate no-op, visible-label toggle,
+query add/dedup, continuous follow-up typing, and durable DB/UI receipt checks.
+Packaged-install acceptance remains open.
 
 ## Deterministic source parity
 

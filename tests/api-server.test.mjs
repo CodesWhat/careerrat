@@ -8,17 +8,19 @@
 // SSE events on /__livereload.
 
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request as httpRequest } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { createDevServer } from "../src/cli/tracker-dev.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
-import { intakeCapture, intakeOne, intakeUpdate } from "../src/core/db/verbs.mjs";
+import { intakeCapture, intakeOne, intakeUpdate, sourceConfigGet } from "../src/core/db/verbs.mjs";
 import { resolveUserPaths } from "../src/core/paths/workspace.mjs";
 import { defaultAdapter } from "../src/core/storage/storage-adapter.mjs";
 import { resolveTrackerBindHost } from "../src/core/tracker/request-security.mjs";
+
+const REAL_ROOT = new URL("..", import.meta.url);
 
 // A minimal valid tracker.json — shape trimmed from templates/tracker.json, just
 // enough for adapter.readTracker()/JSON.parse to round-trip.
@@ -294,6 +296,86 @@ test("the production workspace runtime starts explicit board discovery with the 
     assert.equal(starts[0].skill, "research-boards");
     assert.match(starts[0].input, /Outbound-safe candidate context|Run research-boards/);
     assert.equal(body.data.messages.at(-1).artifacts[0].chatId, "research-boards-live");
+  } finally {
+    teardown(dev, repoRoot);
+  }
+});
+
+test("the production workspace runtime imports an explicitly confirmed board URL", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  openDb({ repoRoot });
+  mkdirSync(join(repoRoot, "config"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, "config/search-sources.schema.json"),
+    readFileSync(new URL("config/search-sources.schema.json", REAL_ROOT))
+  );
+  const dev = createDevServer({ repoRoot });
+  dev.startWatching();
+  await new Promise((resolve) => dev.server.listen(0, resolve));
+  const sourceUrl = "https://remoteok.com/remote-dev-jobs?order_by=date";
+  try {
+    const res = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        intent: {
+          type: "source.add",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { url: sourceUrl },
+        },
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    const result = body.data.messages.at(-1);
+    assert.equal(result.artifacts[0].kind, "search_source");
+    assert.equal(result.artifacts[0].target, sourceUrl);
+    assert.equal(result.artifacts[0].added, true);
+    const duplicateRes = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        intent: {
+          type: "source.add",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { url: sourceUrl },
+        },
+      }),
+    });
+    assert.equal(duplicateRes.status, 200);
+    const duplicateBody = await duplicateRes.json();
+    assert.equal(duplicateBody.data.messages.at(-1).artifacts[0].added, false);
+    const toggleRes = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        intent: {
+          type: "source.set-enabled",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { selector: "RemoteOK", enabled: false },
+        },
+      }),
+    });
+    assert.equal(toggleRes.status, 200);
+    assert.equal((await toggleRes.json()).data.messages.at(-1).artifacts[0].enabled, false);
+    const queryRes = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        intent: {
+          type: "source.query-add",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { query: "staff AI engineer" },
+        },
+      }),
+    });
+    assert.equal(queryRes.status, 200);
+    const stored = sourceConfigGet({ repoRoot, name: "search-sources" }).data.searches;
+    assert.equal(stored.length, 2);
+    assert.equal(stored[0].url, sourceUrl);
+    assert.equal(stored[0].enabled, false);
+    assert.equal(stored[1].query, "staff AI engineer");
   } finally {
     teardown(dev, repoRoot);
   }

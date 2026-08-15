@@ -142,6 +142,165 @@ function validateAndWriteSearchConfig(pathCtx, next) {
   return maintenanceView(pathCtx);
 }
 
+export function addBoardSource({ repoRoot, env = process.env, url, label } = {}) {
+  const pathCtx = { repoRoot, env };
+  const normalizedUrl = String(url || "").trim();
+  if (!normalizedUrl) badRequest("body.url is required");
+  let canonicalUrl;
+  try {
+    canonicalUrl = new URL(normalizedUrl).toString();
+  } catch {
+    badRequest(`addSearchFromUrl: unparseable URL: ${normalizedUrl}`);
+  }
+
+  const current = readDbSearchSources(pathCtx);
+  const currentSearches = listSearches(current);
+  const existing = currentSearches.find((source) => {
+    try {
+      return new URL(source.target).toString() === canonicalUrl;
+    } catch {
+      return false;
+    }
+  });
+  if (existing) {
+    return {
+      added: false,
+      source: {
+        ...existing,
+        sourceType: existing.source_type,
+        auth: existing.auth === true,
+      },
+      searches: currentSearches,
+    };
+  }
+  const next = addSearchFromUrl(current, normalizedUrl, {
+    label: label ? String(label) : undefined,
+  });
+  const schema = JSON.parse(readFileSync(join(repoRoot, SEARCH_SOURCES_SCHEMA_PATH), "utf8"));
+  const { valid, errors } = validateConfig(next, schema);
+  if (!valid) {
+    const error = new Error(
+      errors
+        .map((item) => item.message)
+        .filter(Boolean)
+        .join("; ") || "Invalid source config"
+    );
+    error.code = "BAD_REQUEST";
+    throw error;
+  }
+  const stored = writeDbSearchSources(pathCtx, next);
+  const searches = listSearches(stored);
+  const addedSource = searches.at(-1);
+  return {
+    added: true,
+    source: addedSource
+      ? {
+          ...addedSource,
+          sourceType: addedSource.source_type,
+          auth: addedSource.auth === true,
+        }
+      : null,
+    searches,
+  };
+}
+
+export function addSearchSourceQuery({
+  repoRoot,
+  env = process.env,
+  query,
+  provider = "HiringCafe",
+  label,
+} = {}) {
+  const pathCtx = { repoRoot, env };
+  const normalizedQuery = String(query || "").trim();
+  if (!normalizedQuery) badRequest("body.query is required");
+  const normalizedProvider = String(provider || "HiringCafe").trim() || "HiringCafe";
+  const current = readDbSearchSources(pathCtx);
+  const currentModel = maintenanceView(pathCtx);
+  const existing = currentModel.searches.find(
+    (entry) =>
+      String(entry.provider || "").toLowerCase() === normalizedProvider.toLowerCase() &&
+      String(entry.target || "").toLowerCase() === normalizedQuery.toLowerCase()
+  );
+  if (existing) return { added: false, source: existing, model: currentModel };
+  const sourceOptions = {
+    query: normalizedQuery,
+    label: String(label || "").trim() || undefined,
+    provider: normalizedProvider,
+  };
+  const next =
+    normalizedProvider.toLowerCase() === "hiringcafe"
+      ? addSearchFromQuery(current, sourceOptions)
+      : addProviderSource(current, sourceOptions);
+  const added = next !== current;
+  const model = added ? validateAndWriteSearchConfig(pathCtx, next) : currentModel;
+  const source = model.searches.find(
+    (entry) =>
+      String(entry.provider || "").toLowerCase() === normalizedProvider.toLowerCase() &&
+      String(entry.target || "").toLowerCase() === normalizedQuery.toLowerCase()
+  );
+  return { added, source: source || null, model };
+}
+
+function sourceSelectorKey(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function sourceSelectorTiers(source) {
+  const tiers = [source.label, source.provider, source.platform].map(
+    (value) => new Set([sourceSelectorKey(value)].filter(Boolean))
+  );
+  const hostKeys = [];
+  try {
+    const host = new URL(source.target).hostname.replace(/^www\./, "");
+    hostKeys.push(sourceSelectorKey(host), sourceSelectorKey(host.split(".")[0]));
+  } catch {
+    // Query-only sources have no URL-derived selector.
+  }
+  tiers.push(new Set(hostKeys.filter(Boolean)));
+  return tiers;
+}
+
+export function setSearchSourceEnabled({ repoRoot, env = process.env, selector, enabled } = {}) {
+  const pathCtx = { repoRoot, env };
+  const normalizedSelector = sourceSelectorKey(selector);
+  if (!normalizedSelector) badRequest("source selector is required");
+  if (typeof enabled !== "boolean") badRequest("source enabled state must be boolean");
+  const current = readDbSearchSources(pathCtx);
+  const model = maintenanceView(pathCtx);
+  let matches = [];
+  for (let tier = 0; tier < 4; tier += 1) {
+    matches = model.searches.filter((source) =>
+      sourceSelectorTiers(source)[tier].has(normalizedSelector)
+    );
+    if (matches.length) break;
+  }
+  if (!matches.length) badRequest(`No search source matches "${selector}"`);
+  if (matches.length > 1) {
+    badRequest(
+      `More than one search source matches "${selector}": ${matches
+        .map((source) => source.label)
+        .join(", ")}`
+    );
+  }
+  const match = matches[0];
+  const searches = Array.isArray(current.searches) ? current.searches.slice() : [];
+  const existing = searches[match.index];
+  const { enabled_reason: _generatedEnabledReason, ...userOwned } = existing;
+  const changed = existing.enabled !== enabled || existing.enabled_reason != null;
+  searches[match.index] = { ...userOwned, enabled };
+  const nextModel = changed
+    ? validateAndWriteSearchConfig(pathCtx, { ...current, searches })
+    : model;
+  return {
+    changed,
+    source: nextModel.searches.find((source) => source.index === match.index) || null,
+    model: nextModel,
+  };
+}
+
 export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
   const pathCtx = { repoRoot, env };
 
@@ -234,38 +393,12 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       return;
     }
 
-    let current;
     try {
-      current = readDbSearchSources(pathCtx);
+      const operation = addBoardSource({ repoRoot, env, url, label });
+      sendJson(res, 200, { ok: true, searches: operation.searches });
     } catch (err) {
       sendSourceConfigError(res, err);
-      return;
     }
-
-    let next;
-    try {
-      next = addSearchFromUrl(current, url, { label });
-    } catch (err) {
-      sendJson(res, 400, { error: err.message });
-      return;
-    }
-
-    const schema = JSON.parse(readFileSync(join(repoRoot, SEARCH_SOURCES_SCHEMA_PATH), "utf8"));
-    const { valid, errors } = validateConfig(next, schema);
-    if (!valid) {
-      sendJson(res, 400, { ok: false, errors });
-      return;
-    }
-
-    let stored;
-    try {
-      stored = writeDbSearchSources(pathCtx, next);
-    } catch (err) {
-      sendSourceConfigError(res, err);
-      return;
-    }
-
-    sendJson(res, 200, { ok: true, searches: listSearches(stored) });
   });
 
   addRoute("POST", "/api/boards/search/add", async (req, res) => {
@@ -274,18 +407,15 @@ export function mountBoardsRoutes({ addRoute, repoRoot, env = process.env }) {
       body = await readJsonBodyCapped(req, MAX_BODY_BYTES);
       const query = String(body?.query || "").trim();
       if (!query) badRequest("body.query is required");
-      const current = readDbSearchSources(pathCtx);
       const provider = String(body?.provider || "HiringCafe").trim() || "HiringCafe";
-      const sourceOptions = {
+      const operation = addSearchSourceQuery({
+        repoRoot,
+        env,
         query,
         label: String(body?.label || "").trim() || undefined,
         provider,
-      };
-      const next =
-        provider.toLowerCase() === "hiringcafe"
-          ? addSearchFromQuery(current, sourceOptions)
-          : addProviderSource(current, sourceOptions);
-      sendJson(res, 200, { ok: true, ...validateAndWriteSearchConfig(pathCtx, next) });
+      });
+      sendJson(res, 200, { ok: true, ...operation.model });
     } catch (err) {
       sendSourceConfigError(res, err);
     }

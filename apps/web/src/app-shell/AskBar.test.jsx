@@ -289,6 +289,21 @@ function boardDiscoveryActionPreview() {
   };
 }
 
+function sourceSetupActionPreview() {
+  return {
+    action: {
+      label: "Add this job board",
+      intent: {
+        type: "source.add",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { url: "https://remoteok.com/remote-dev-jobs?order_by=date" },
+      },
+    },
+    answer: { label: "Answer about source setup" },
+    engineAvailable: true,
+  };
+}
+
 function answerOnlyPreview({ engineAvailable = true } = {}) {
   return {
     action: null,
@@ -977,6 +992,105 @@ describe("AskBar — acting", () => {
       ["Search jobs", "/app/jobs?tab=search"],
       ["Manage sources", "/app/settings"],
     ]);
+  });
+
+  it("renders a durable source-setup receipt with its enabled state and handoffs", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(sourceSetupActionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Added remoteok.com to your search sources. It is enabled for future searches.",
+            artifacts: [
+              {
+                kind: "search_source",
+                title: "remoteok.com — Added",
+                provider: "remoteok",
+                label: "remoteok.com",
+                target: "https://remoteok.com/remote-dev-jobs?order_by=date",
+                sourceType: "ats",
+                enabled: true,
+                auth: false,
+                added: true,
+              },
+            ],
+            metadata: {
+              state: "added",
+              nextActions: [
+                { label: "Search jobs", href: "/jobs?tab=search" },
+                { label: "Manage sources", href: "/settings" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({
+      target: { value: "add this job board https://remoteok.com/remote-dev-jobs?order_by=date" },
+    });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const card = byClass(tree, "ask-bar__source-status");
+    expect(textOf(card)).toContain("remoteok.com");
+    expect(textOf(card)).toContain("remoteok");
+    expect(textOf(card)).toContain("Enabled");
+    const links = visit(tree, (node) => node.type === "a");
+    expect(links.map((link) => [textOf(link).trim(), link.props.href])).toEqual([
+      ["Search jobs", "/app/jobs?tab=search"],
+      ["Manage sources", "/app/settings"],
+    ]);
+  });
+
+  it("keeps the active Ask input ready to preview the next request after an action", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(sourceSetupActionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Added remoteok.com to your search sources.",
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "add this job board https://remoteok.com/jobs" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "disable the RemoteOK source" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+
+    expect(byClass(tree, "ask-bar__preview")).toBeTruthy();
+    expect(textOf(byClass(tree, "ask-bar__preview"))).toContain("Add this job board");
   });
 
   it("shows recurring company proposals immediately while the job search continues", async () => {

@@ -365,8 +365,11 @@ The current build order is:
    expose progress and errors through the invoking workflow. Post-setup job-board discovery now has
    a typed Ask entry that stays distinct from an ordinary source sweep, embeds the guided
    `research-boards` session in Ask, preserves Add source/Skip confirmation, and links approved
-   source work back to Jobs and Settings. The remaining original-skill rows stay tracked in the
-   linked audit.
+   source work back to Jobs and Settings. Natural source setup now recognizes explicit board-URL
+   imports, keyword-search additions, and named source enable/disable requests; the Ask preview is
+   the confirmation boundary, writes reuse validated SQLite source config, duplicates are no-ops,
+   and the durable receipt returns to Jobs or Settings. The remaining original-skill rows stay
+   tracked in the linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
    deterministic registry, and `local-parser` is intentionally excluded with a safety reason.

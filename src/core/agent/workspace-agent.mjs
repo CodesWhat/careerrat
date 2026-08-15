@@ -59,6 +59,9 @@ const EXECUTABLE_INTENTS = new Set([
   "sourced.promote",
   "sourced.skip",
   "application.record-external",
+  "source.add",
+  "source.query-add",
+  "source.set-enabled",
   "source.discover",
   "company.discover",
   "company.proposal-decide",
@@ -168,7 +171,11 @@ function messageForModel(message) {
     const companyContext = companies
       ? `\n[Company proposal state: ${JSON.stringify(companies).slice(0, 8_000)}]`
       : "";
-    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}${companyContext}`;
+    const source = message.artifacts?.find((artifact) => artifact.kind === "search_source");
+    const sourceContext = source
+      ? `\n[Search source state: ${JSON.stringify(source).slice(0, 4_000)}]`
+      : "";
+    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}${companyContext}${sourceContext}`;
   } else if (message.kind === "action_error") {
     content = `[Action failed: ${message.error?.code || "ACTION_FAILED"}] ${content}`;
   } else if (message.kind === "agent_error") {
@@ -1136,6 +1143,9 @@ export async function executeWorkspaceIntent({
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
+  addBoardSourceImpl,
+  addSearchSourceQueryImpl,
+  setSearchSourceEnabledImpl,
   startBoardDiscoveryImpl,
   onSearchStarted,
   searchFetchImpl,
@@ -1542,6 +1552,176 @@ export async function executeWorkspaceIntent({
           state: "exported",
           fileCount,
           downloadsErrorCount: downloadsErrors.length,
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "source.add") {
+      if (typeof addBoardSourceImpl !== "function") {
+        const error = actionError(
+          "Job-board setup is not connected in this runtime.",
+          "SOURCE_SETUP_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+      const url = String(input.url || "").trim();
+      if (!url) throw actionError("A job-board URL is required.", "SOURCE_URL_REQUIRED");
+      const operation = await addBoardSourceImpl({ repoRoot, env, url });
+      const source = operation?.source || {};
+      const label = String(source.label || source.provider || "This source");
+      const added = operation?.added !== false;
+      const enabled = source.enabled !== false;
+      const authPending = source.auth === true && !enabled;
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: added
+          ? `Added ${label} to your search sources.${
+              authPending
+                ? " It stays off until you enable browser access for this provider."
+                : " It is enabled for future searches."
+            }`
+          : `${label} is already in your search sources. Nothing changed.`,
+        artifacts: [
+          {
+            kind: "search_source",
+            title: `${label} — ${added ? "Added" : "Already configured"}`,
+            added,
+            index: source.index ?? null,
+            provider: source.provider || null,
+            label,
+            target: source.target || url,
+            sourceType: source.sourceType || source.source_type || null,
+            enabled,
+            auth: source.auth === true,
+          },
+        ],
+        metadata: {
+          state: added ? "added" : "existing",
+          nextActions: [
+            { label: "Search jobs", href: "/jobs?tab=search" },
+            { label: "Manage sources", href: "/settings" },
+          ],
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "source.query-add") {
+      if (typeof addSearchSourceQueryImpl !== "function") {
+        const error = actionError(
+          "Keyword search setup is not connected in this runtime.",
+          "SOURCE_SETUP_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+      const query = String(input.query || "").trim();
+      if (!query) throw actionError("A search phrase is required.", "SOURCE_QUERY_REQUIRED");
+      const provider = String(input.provider || "HiringCafe").trim() || "HiringCafe";
+      const operation = await addSearchSourceQueryImpl({ repoRoot, env, query, provider });
+      const source = operation?.source || {};
+      const label = String(source.label || query);
+      const added = operation?.added !== false;
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: added
+          ? `Added ${label} to your search sources. It is enabled for future searches.`
+          : `${label} is already in your search sources. Nothing changed.`,
+        artifacts: [
+          {
+            kind: "search_source",
+            title: `${label} — ${added ? "Added" : "Already configured"}`,
+            added,
+            index: source.index ?? null,
+            provider: source.provider || provider,
+            label,
+            target: source.target || query,
+            sourceType: source.sourceType || source.source_type || null,
+            enabled: source.enabled !== false,
+            auth: source.auth === true,
+          },
+        ],
+        metadata: {
+          state: added ? "added" : "existing",
+          nextActions: [
+            { label: "Search jobs", href: "/jobs?tab=search" },
+            { label: "Manage sources", href: "/settings" },
+          ],
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "source.set-enabled") {
+      if (typeof setSearchSourceEnabledImpl !== "function") {
+        const error = actionError(
+          "Search-source controls are not connected in this runtime.",
+          "SOURCE_SETUP_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+      const selector = String(input.selector || "").trim();
+      if (!selector) throw actionError("Name the search source to change.", "SOURCE_REQUIRED");
+      if (typeof input.enabled !== "boolean") {
+        throw actionError(
+          "Choose whether to enable or disable the source.",
+          "SOURCE_STATE_REQUIRED"
+        );
+      }
+      const operation = await setSearchSourceEnabledImpl({
+        repoRoot,
+        env,
+        selector,
+        enabled: input.enabled,
+      });
+      const source = operation?.source || {};
+      const label = String(source.label || source.provider || selector);
+      const changed = operation?.changed !== false;
+      const stateLabel = input.enabled ? "Enabled" : "Disabled";
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: changed
+          ? `${stateLabel} ${label} for future searches.${
+              input.enabled && source.auth === true
+                ? " Browser access still needs separate consent before CareerRat can use it."
+                : ""
+            }`
+          : `${label} is already ${input.enabled ? "enabled" : "disabled"}. Nothing changed.`,
+        artifacts: [
+          {
+            kind: "search_source",
+            title: `${label} — ${stateLabel}`,
+            changed,
+            index: source.index ?? null,
+            provider: source.provider || null,
+            label,
+            target: source.target || null,
+            sourceType: source.sourceType || source.source_type || null,
+            enabled: input.enabled,
+            auth: source.auth === true,
+          },
+        ],
+        metadata: {
+          state: input.enabled ? "enabled" : "disabled",
+          nextActions: [
+            { label: "Search jobs", href: "/jobs?tab=search" },
+            { label: "Manage sources", href: "/settings" },
+          ],
         },
         operationResult: operation,
         now,
@@ -2393,7 +2573,65 @@ function looksLikeBoardDiscovery(text) {
   );
 }
 
+function looksLikeSourceAdd(text) {
+  return Boolean(
+    firstHttpUrl(text) &&
+      /\b(?:add|use|include|import|track)\b/i.test(text) &&
+      /\b(?:job\s+)?(?:board|source)\b/i.test(text)
+  );
+}
+
+function sourceQueryFromText(text) {
+  const match = String(text || "").match(
+    /\badd\s+(?:a\s+)?(?:new\s+)?(?:job\s+)?search\s+(?:source\s+)?(?:for|on)\s+(.+?)\s*[.?!]*$/i
+  );
+  return String(match?.[1] || "").trim() || null;
+}
+
+function sourceToggleFromText(text) {
+  const match = String(text || "")
+    .trim()
+    .match(
+      /^(?:please\s+)?(enable|disable)\s+(?:the\s+)?(.+?)\s+(?:(?:job\s+)?(?:board|source))\s*[.?!]*$/i
+    );
+  if (!match) return null;
+  return {
+    selector: String(match[2]).trim(),
+    enabled: match[1].toLowerCase() === "enable",
+  };
+}
+
 const ACTION_PREVIEW_RULES = [
+  {
+    test: looksLikeSourceAdd,
+    label: "Add this job board",
+    intent: (text) => ({
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: firstHttpUrl(text) },
+    }),
+  },
+  {
+    test: (text) => Boolean(sourceToggleFromText(text)),
+    label: (text) =>
+      sourceToggleFromText(text)?.enabled
+        ? "Enable this search source"
+        : "Disable this search source",
+    intent: (text) => ({
+      type: "source.set-enabled",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: sourceToggleFromText(text),
+    }),
+  },
+  {
+    test: (text) => Boolean(!firstHttpUrl(text) && sourceQueryFromText(text)),
+    label: "Add a job search",
+    intent: (text) => ({
+      type: "source.query-add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { query: sourceQueryFromText(text) },
+    }),
+  },
   {
     test: looksLikeBoardDiscovery,
     label: "Find and review new job boards",
@@ -2538,7 +2776,12 @@ export function previewWorkspaceIntent({ text, context, repoRoot, env = process.
     return { action: null, answer: { label: "Ask the workspace agent." }, engineAvailable };
   }
   const rule = ACTION_PREVIEW_RULES.find((candidate) => candidate.test(trimmed, context));
-  const action = rule ? { label: rule.label, intent: rule.intent(trimmed, context) } : null;
+  const action = rule
+    ? {
+        label: typeof rule.label === "function" ? rule.label(trimmed, context) : rule.label,
+        intent: rule.intent(trimmed, context),
+      }
+    : null;
   return { action, answer: { label: previewAnswerLabel(trimmed) }, engineAvailable };
 }
 
@@ -2625,6 +2868,9 @@ export function createWorkspaceAgentRuntime({
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
+  addBoardSourceImpl,
+  addSearchSourceQueryImpl,
+  setSearchSourceEnabledImpl,
   startBoardDiscoveryImpl,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   searchFetchImpl = fetch,
@@ -2681,6 +2927,9 @@ export function createWorkspaceAgentRuntime({
           decideCompanyProposalImpl,
           getCompanyProposalBatchImpl,
           companyDiscoveryCadenceImpl,
+          addBoardSourceImpl,
+          addSearchSourceQueryImpl,
+          setSearchSourceEnabledImpl,
           startBoardDiscoveryImpl,
           onSearchStarted: startSearchInBackground,
           searchFetchImpl,

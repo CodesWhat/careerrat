@@ -407,7 +407,6 @@ export function AskBar() {
     });
     setText("");
     setPreview(null);
-    setFocused(false);
 
     try {
       const res = await runWorkspaceIntent(
@@ -475,7 +474,6 @@ export function AskBar() {
     });
     setText("");
     setPreview(null);
-    setFocused(false);
 
     if (previewAtCommit?.engineAvailable === false) {
       setTurn((t) =>
@@ -544,7 +542,6 @@ export function AskBar() {
     });
     setText("");
     setPreview(null);
-    setFocused(false);
     setCaptureMode(false);
     setCaptureAction(null);
 
@@ -1170,6 +1167,9 @@ function AskBarTurn({
   const boardDiscoveryArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "board_discovery_chat"
   );
+  const searchSourceArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "search_source"
+  );
   const handoffUrl = safeExternalHttpUrl(handoffArtifact?.url);
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
@@ -1178,6 +1178,7 @@ function AskBarTurn({
       {turn.resultText ? <p className="ask-bar__summary">{turn.resultText}</p> : null}
       {evaluationArtifact ? <JobEvaluationCard artifact={evaluationArtifact} /> : null}
       {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
+      {searchSourceArtifact ? <SearchSourceStatus artifact={searchSourceArtifact} /> : null}
       {companyProposalsArtifact ? (
         <CompanyProposalsCard artifact={companyProposalsArtifact} onRunAction={onRunAction} />
       ) : null}
@@ -1219,6 +1220,23 @@ function AskBarTurn({
       ) : null}
       <EngineReceipt engine={turn.engine} elapsedMs={turn.elapsedMs} />
     </div>
+  );
+}
+
+function SearchSourceStatus({ artifact }) {
+  const label = artifact.label || artifact.provider || "Search source";
+  const details = [artifact.provider, artifact.sourceType].filter(Boolean).join(" · ");
+  return (
+    <section className="ask-bar__source-status" aria-label="Search source result">
+      <strong>{label}</strong>
+      {details ? <span>{details}</span> : null}
+      <span className="ask-bar__source-state">
+        {artifact.enabled === false ? "Disabled" : "Enabled"}
+      </span>
+      {artifact.auth === true && artifact.enabled === false ? (
+        <span>Browser consent required before use</span>
+      ) : null}
+    </section>
   );
 }
 
