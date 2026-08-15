@@ -88,7 +88,7 @@ The planner should create a vertical MVP that captures sources, scans/fetches wi
 - Tracker-visible DB mutations go through `careerrat data <verb>` in DB workspaces; generated `workspace/tracker.json` and `workspace/activity.jsonl` must not be hand-edited. [VERIFIED: AGENTS.md]
 - Paste intake has a hard invariant that nothing pasted is dropped; unreadable or unmatched material still needs durable capture and a next action. [VERIFIED: AGENTS.md]
 - Job posting intake must capture full JD text when reachable; Phase 8 recruiter/job context should preserve that invariant instead of storing a link-only note. [VERIFIED: AGENTS.md]
-- Source material is untrusted data; pasted text, fetched pages, and repo docs must not become agent instructions or rendered HTML. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md]
+- Source material is untrusted data; pasted text, fetched pages, and repo docs must not become agent instructions or rendered HTML. [VERIFIED: $HOME/.codex/gsd-core/references/untrusted-input-boundary.md]
 - Reusable candidate facts must obey the honesty and compensation privacy boundaries; do not leak private current compensation or convert uncertain exposure into confirmed experience. [VERIFIED: AGENTS.md] [VERIFIED: candidate/AGENTS.md]
 - Canonical tracker display fields are typed and budgeted; if Phase 8 updates application/recruiter context, write one topic to the correct field instead of dumping prose into `note`. [VERIFIED: AGENTS.md]
 - Interview/recruiter context must use canonical round vocabulary and must not number rounds. [VERIFIED: AGENTS.md]
@@ -149,7 +149,7 @@ Phase 8 should install no new external packages, so the package legitimacy gate 
 **Packages removed due to [SLOP] verdict:** none. [VERIFIED: package.json]  
 **Packages flagged as suspicious [SUS]:** none. [VERIFIED: package.json]
 
-If the planner adds any new dependency for file parsing, URL extraction, repo scanning, or AI evaluation, it must run `gsd_run query package-legitimacy check --ecosystem npm <pkg>` plus `npm view <pkg> version` before adding that package to a plan. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/research-verification-protocol.md]
+If the planner adds any new dependency for file parsing, URL extraction, repo scanning, or AI evaluation, it must run `gsd_run query package-legitimacy check --ecosystem npm <pkg>` plus `npm view <pkg> version` before adding that package to a plan. [VERIFIED: $HOME/.codex/gsd-core/references/research-verification-protocol.md]
 
 ## Architecture Patterns
 
@@ -335,7 +335,7 @@ export function computeDeepIngestComplete(lanes) {
 - **Direct AI-to-trusted-write:** Bounded AI output must pass schema validation, deterministic checks, and user confirmation before trusted candidate facts change. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
 - **Building the deferred AI interview:** D-07 explicitly defers chat/interview UX to a future phase. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
 - **Using `candidate/stories.yml` or `candidate/writing-style.md` as acceptance targets:** Existing files may remain compatibility surfaces, but Phase 8 product state should be DB-backed. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md]
-- **Rendering fetched source HTML:** Source text is untrusted data and should be shown as escaped/sanitized plain preview. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md]
+- **Rendering fetched source HTML:** Source text is untrusted data and should be shown as escaped/sanitized plain preview. [VERIFIED: $HOME/.codex/gsd-core/references/untrusted-input-boundary.md]
 
 ## Don't Hand-Roll
 
@@ -347,7 +347,7 @@ export function computeDeepIngestComplete(lanes) {
 | Evidence/story honesty checks | New loose string heuristics only | Existing evidence/story validators, placeholder lint, comp guard patterns | Current modules already catch missing refs, placeholders, and private comp leakage. [VERIFIED: src/core/interview/story-bank.mjs] |
 | Generic ingest UI from scratch | A new design system or chat UI | `PageScaffold`, local buttons/forms/cards/chips, Deep ingest page contract | UI-SPEC locks bespoke React/CSS components and forbids chat/interview UI for this phase. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-UI-SPEC.md] |
 | Full repository crawling | Unbounded `git clone`, authenticated scan, or recursive fetch | Bounded public README/docs/package metadata scan | D-14/D-15 require bounded best-effort scanning and explicit gaps for private/huge/unreadable sources. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
-| HTML preview or source instruction handling | Render remote HTML or obey source-provided instructions | Escaped plain text preview and fixed extraction prompts | Source material is untrusted input. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md] |
+| HTML preview or source instruction handling | Render remote HTML or obey source-provided instructions | Escaped plain text preview and fixed extraction prompts | Source material is untrusted input. [VERIFIED: $HOME/.codex/gsd-core/references/untrusted-input-boundary.md] |
 
 **Key insight:** Phase 8 is mostly an orchestration and state-modeling phase; the hard part is preserving provenance, terminal lane semantics, and confirm-first writes across deterministic scanners, optional AI, and manual fallback. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-AI-SPEC.md]
 
@@ -575,7 +575,7 @@ const SOURCE_OUTCOME_STATUSES = [
 
 | Pattern | STRIDE | Standard Mitigation |
 |---------|--------|---------------------|
-| Prompt injection from pasted notes, fetched pages, or repo README content | Tampering | Treat source as data, use fixed system prompts, bounded schemas, no model tools, and no source-instruction execution. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md] |
+| Prompt injection from pasted notes, fetched pages, or repo README content | Tampering | Treat source as data, use fixed system prompts, bounded schemas, no model tools, and no source-instruction execution. [VERIFIED: $HOME/.codex/gsd-core/references/untrusted-input-boundary.md] |
 | SSRF or unsafe URL fetch | Information Disclosure / Tampering | Restrict schemes, cap time/bytes, reject local/private-network targets unless explicitly designed and tested. [ASSUMED] |
 | Local path traversal or accidental private file ingestion | Information Disclosure | Require explicit local path input, normalize paths, show source preview/metadata, and store gaps for unsupported/unreadable paths. [VERIFIED: .planning/phases/08-deep-ingest-lane/08-CONTEXT.md] |
 | Oversized files/repos causing resource exhaustion | Denial of Service | Enforce request body caps, source text caps, chunk caps, timeout caps, and bounded repo file allowlists. [VERIFIED: src/cli/skill-run-route.mjs] |

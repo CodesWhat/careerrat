@@ -66,10 +66,10 @@ compatibility export and quick-start.
 | `node --test tests/onboard-route.test.mjs tests/db-app-shell-regression.test.mjs` | Passed: 57 tests, 0 failed |
 | `npm --workspace apps/web run test -- src/onboarding/steps/FinishStep.test.jsx` | Passed: 16 tests, 0 failed |
 | `npm run build && npm test` | Passed: full build, 1660 tests passed, 4 skipped, 0 failed |
-| `node /Users/sbenson/.codex/gsd-core/bin/gsd-tools.cjs check verify.schema-drift 06-canonical-db-app-shell --raw` | Passed: no schema drift |
-| `node /Users/sbenson/.codex/gsd-core/bin/gsd-tools.cjs check verify.codebase-drift 06-canonical-db-app-shell --raw` | Skipped: no structure map, non-blocking |
-| `node /Users/sbenson/.codex/gsd-core/bin/gsd-tools.cjs check ui.safety-gate 06-canonical-db-app-shell --raw` | Non-blocking pass: no UI-spec gate block |
-| `node /Users/sbenson/.codex/gsd-core/bin/gsd-tools.cjs check tdd.review-checkpoint 06-canonical-db-app-shell --raw` | Passed/skipped: no type:tdd plans |
+| `node $HOME/.codex/gsd-core/bin/gsd-tools.cjs check verify.schema-drift 06-canonical-db-app-shell --raw` | Passed: no schema drift |
+| `node $HOME/.codex/gsd-core/bin/gsd-tools.cjs check verify.codebase-drift 06-canonical-db-app-shell --raw` | Skipped: no structure map, non-blocking |
+| `node $HOME/.codex/gsd-core/bin/gsd-tools.cjs check ui.safety-gate 06-canonical-db-app-shell --raw` | Non-blocking pass: no UI-spec gate block |
+| `node $HOME/.codex/gsd-core/bin/gsd-tools.cjs check tdd.review-checkpoint 06-canonical-db-app-shell --raw` | Passed/skipped: no type:tdd plans |
 
 ## Code Review
 

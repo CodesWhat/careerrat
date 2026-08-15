@@ -292,7 +292,7 @@ await appRegisterArtifact({
 
 ### Pattern 4: Treat Provider Questions and Public Job Text as Untrusted Input
 
-**What:** Normalize provider/manual questions as data, filter excluded sections before AI, and never execute instructions embedded in job descriptions or form prompts. [CITED: src/core/apply/form-questions.mjs] [CITED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md]  
+**What:** Normalize provider/manual questions as data, filter excluded sections before AI, and never execute instructions embedded in job descriptions or form prompts. [CITED: src/core/apply/form-questions.mjs] [CITED: $HOME/.codex/gsd-core/references/untrusted-input-boundary.md]
 **When to use:** All question capture and generated-answer prompts.  
 **Example:**
 
@@ -581,7 +581,7 @@ Focused baseline run on 2026-07-06 passed 208 tests across packet routes, form q
 
 | Pattern | STRIDE | Standard Mitigation |
 |---------|--------|---------------------|
-| Prompt injection from JD text, company pages, or form questions | Tampering / Information Disclosure | Treat all external text as untrusted data, constrain prompts to schema output, and validate evidence IDs before prose leaves the app. [CITED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md] [CITED: src/core/ai/structured-oneshot.mjs] |
+| Prompt injection from JD text, company pages, or form questions | Tampering / Information Disclosure | Treat all external text as untrusted data, constrain prompts to schema output, and validate evidence IDs before prose leaves the app. [CITED: $HOME/.codex/gsd-core/references/untrusted-input-boundary.md] [CITED: src/core/ai/structured-oneshot.mjs] |
 | Candidate privacy leak, especially current compensation | Information Disclosure | Never include `current_base` in prompts or artifacts; use target/expected comp only when needed. [CITED: AGENTS.md] [CITED: .agents/skills/tailor-application/SKILL.md] |
 | Sensitive self-identification automation | Information Disclosure / Repudiation | Exclude EEO/disability/veteran/demographic prompts before AI and show user-visible excluded state only. [CITED: .planning/REQUIREMENTS.md] [CITED: https://www.eeoc.gov/publications/employers-guide] |
 | Path traversal in artifact serving | Tampering / Information Disclosure | Preserve existing artifact resolver behavior that collapses unsafe/unreadable paths to null. [CITED: src/cli/packet-route.mjs] [CITED: tests/packet-route.test.mjs] |

@@ -45,7 +45,7 @@ Result:
 
 - PASS: `npm run app:build` completed before desktop staging.
 - PASS: desktop staging copied the runtime allowlist, mirrored `.agents/skills` to `.claude/skills`, and installed `@anthropic-ai/claude-agent-sdk` into the staged runtime.
-- PASS: electron-builder signed `apps/desktop/dist/mac-arm64/CareerRat.app` with `Developer ID Application: Scott Benson (3524374A2S)`.
+- PASS: electron-builder signed `apps/desktop/dist/mac-arm64/CareerRat.app` with the local Developer ID Application certificate.
 - PASS: electron-builder notarized the app zip. Latest relevant notary history entry: `11b78ae9-385e-4ef0-b37f-27b892f47f41`, `CareerRat.zip`, `Accepted`, `2026-07-06T17:34:37.426Z`.
 - PASS: output artifact exists at `apps/desktop/dist/CareerRat-0.1.0-arm64.dmg`.
 
@@ -54,7 +54,7 @@ App verification:
 | Command | Result |
 |---|---:|
 | `codesign --verify --deep --strict --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: valid on disk; satisfies its Designated Requirement. |
-| `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: `Authority=Developer ID Application: Scott Benson (3524374A2S)`, `TeamIdentifier=3524374A2S`, hardened runtime flag present, `Notarization Ticket=stapled`. |
+| `codesign -dv --verbose=2 apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: Developer ID Application authority and TeamIdentifier present, hardened runtime flag present, `Notarization Ticket=stapled`. |
 | `xcrun stapler validate apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: validate action worked. |
 | `spctl --assess --type execute --verbose=4 apps/desktop/dist/mac-arm64/CareerRat.app` | PASS: accepted, `source=Notarized Developer ID`. |
 
@@ -63,7 +63,7 @@ DMG verification:
 Electron-builder notarized and stapled the app bundle, but the generated DMG did not initially have its own stapled ticket and Gatekeeper rejected it with `source=no usable signature`. The DMG was then signed and notarized explicitly:
 
 ```bash
-codesign --force --sign "Developer ID Application: Scott Benson (3524374A2S)" --timestamp apps/desktop/dist/CareerRat-0.1.0-arm64.dmg
+codesign --force --sign "$CSC_NAME" --timestamp apps/desktop/dist/CareerRat-0.1.0-arm64.dmg
 xcrun notarytool submit apps/desktop/dist/CareerRat-0.1.0-arm64.dmg --keychain-profile careerrat-notary --wait --output-format json
 xcrun stapler staple apps/desktop/dist/CareerRat-0.1.0-arm64.dmg
 ```
@@ -77,7 +77,7 @@ Final DMG evidence:
 | `xcrun stapler staple apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: staple and validate action worked. |
 | `xcrun stapler validate apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: validate action worked. |
 | `spctl --assess --type open --context context:primary-signature --verbose=4 apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: accepted, `source=Notarized Developer ID`. |
-| `codesign -dv --verbose=2 apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: `Authority=Developer ID Application: Scott Benson (3524374A2S)`, `TeamIdentifier=3524374A2S`, `Notarization Ticket=stapled`. |
+| `codesign -dv --verbose=2 apps/desktop/dist/CareerRat-0.1.0-arm64.dmg` | PASS: Developer ID Application authority and TeamIdentifier present, `Notarization Ticket=stapled`. |
 
 Generated release artifacts remain ignored and untracked: `apps/desktop/dist/` and `apps/desktop/staging/`.
 

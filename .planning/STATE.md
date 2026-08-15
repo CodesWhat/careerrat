@@ -52,7 +52,7 @@ See: `.planning/PROJECT.md` (updated 2026-07-05)
 
 ## Working Assumptions
 
-- GSD should operate from `/Users/sbenson/code/careerrat/.planning`, not the parent `/Users/sbenson/code/.planning`.
+- GSD should operate from `$HOME/code/careerrat/.planning`, not the parent `$HOME/code/.planning`.
 - Formal GSD project subagents are not installed in this runtime, so initialization was performed inline.
 - Existing user changes in `tests/release-safety.test.mjs` and `tmp-skill-conversion/` are not part of this GSD initialization.
 - `discover-companies` is now the proof-point migration: local proposal APIs are the default app path, and full skill/chat paths remain explicit.

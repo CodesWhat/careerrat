@@ -56,7 +56,7 @@ const SECRET_TOKENS = [
   "SOURCE_BODY_SECRET_08_01",
   "CURRENT_BASE_SECRET_08_01",
   "PRIVATE_TOKEN_SECRET_08_01",
-  "/Users/sbenson/private/profile.md",
+  "/Users/example/private/profile.md",
   "ssn 123-45-6789",
   "medical disability accommodation",
 ];
