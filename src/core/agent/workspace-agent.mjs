@@ -14,12 +14,20 @@ import {
   commMarkSent,
   commSetDraft,
 } from "../db/verbs/comm.mjs";
+import { companyProposalBatchGet } from "../db/verbs/company-discovery.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
+import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
+import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
+import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
 import { matchTrackerRecord } from "../intake/match.mjs";
 import { resolveJobUrl } from "../intake/resolve.mjs";
 import { buildInterviewDossier } from "../interview/dossier.mjs";
-import { startFirstSearchRun, startManualSearchRun } from "../onboarding/first-search-run.mjs";
+import {
+  runFirstSearchInBackground,
+  startFirstSearchRun,
+  startManualSearchRun,
+} from "../onboarding/first-search-run.mjs";
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import { generateApplicationPacket } from "../packet/generate-operation.mjs";
@@ -50,6 +58,8 @@ const EXECUTABLE_INTENTS = new Set([
   "sourced.promote",
   "sourced.skip",
   "application.record-external",
+  "company.discover",
+  "company.proposal-decide",
   "job.apply",
   "communication.draft",
   "communication.send",
@@ -101,6 +111,7 @@ function compactCandidateSnapshot({ repoRoot, env }) {
       cut_signals: config.targeting?.cut_signals || [],
       tracked_companies: config.targeting?.tracked_companies || [],
       excluded_companies: config.targeting?.excluded_companies || [],
+      company_preferences: config.targeting?.company_preferences || {},
     },
     evidence: config.evidence?.claims || [],
     honesty: config.honesty || {},
@@ -151,7 +162,11 @@ function messageForModel(message) {
     const searchContext = search
       ? `\n[Job search state: ${JSON.stringify(search).slice(0, 8_000)}]`
       : "";
-    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}`;
+    const companies = message.artifacts?.find((artifact) => artifact.kind === "company_proposals");
+    const companyContext = companies
+      ? `\n[Company proposal state: ${JSON.stringify(companies).slice(0, 8_000)}]`
+      : "";
+    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}${companyContext}`;
   } else if (message.kind === "action_error") {
     content = `[Action failed: ${message.error?.code || "ACTION_FAILED"}] ${content}`;
   } else if (message.kind === "agent_error") {
@@ -886,6 +901,80 @@ function searchResultText(run) {
   return `The job search is waiting: ${run?.error?.message || "add a search location before running it."}`;
 }
 
+function pendingCompanyProposals(proposals) {
+  return (Array.isArray(proposals) ? proposals : []).filter((proposal) => !proposal?.decision);
+}
+
+function compactCompanyProposal(proposal) {
+  const compact = JSON.parse(JSON.stringify(proposal || {}));
+  delete compact.capturedOffers;
+  return compact;
+}
+
+function companyProposalArtifact(batch = {}, meta = {}) {
+  const proposals = pendingCompanyProposals(batch.proposals);
+  const rejected = Array.isArray(batch.rejected) ? batch.rejected : [];
+  return {
+    kind: "company_proposals",
+    title: proposals.length
+      ? `Company discovery: ${proposals.length} to review`
+      : "Company discovery: review complete",
+    batchId: String(batch.batchId || ""),
+    version: Number(meta.version ?? batch.version ?? 0),
+    proposals: proposals.map(compactCompanyProposal),
+    rejected: JSON.parse(JSON.stringify(rejected)),
+    counts: JSON.parse(
+      JSON.stringify(
+        batch.counts || {
+          seeds: proposals.length + rejected.length,
+          proposals: proposals.length,
+          rejected: rejected.length,
+        }
+      )
+    ),
+    seedSource: meta.seedSource || null,
+    ...((meta.trigger || batch.trigger) && { trigger: meta.trigger || batch.trigger }),
+  };
+}
+
+function searchExpandedCompaniesAction() {
+  return {
+    label: "Search the expanded company set",
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "manual-search" },
+    },
+  };
+}
+
+function currentSearchAction() {
+  return { label: "Review the current job search", href: "/jobs?tab=search" };
+}
+
+function companyProposalOperationError(operation) {
+  const error = actionError(
+    operation?.body?.error?.message || "Company discovery could not create proposals.",
+    operation?.body?.code || "COMPANY_DISCOVERY_FAILED"
+  );
+  error.status = operation?.status;
+  return error;
+}
+
+function compactCompanyDiscoveryState(state = {}, overrides = {}) {
+  return Object.fromEntries(
+    Object.entries({
+      status: state.status,
+      due: state.due,
+      reason: state.reason,
+      dueAt: state.dueAt,
+      batchId: state.batchId,
+      pendingCount: state.pendingCount,
+      ...overrides,
+    }).filter(([, value]) => value !== undefined)
+  );
+}
+
 export function recordWorkspaceSearchCompletion({ repoRoot, env = process.env, run, now } = {}) {
   const runId = String(run?.id || "").trim();
   const status = String(run?.status || "").trim();
@@ -1028,6 +1117,11 @@ export async function executeWorkspaceIntent({
   packetExportArtifact,
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
+  createCompanyProposalsImpl = createCompanyProposalBatch,
+  decideCompanyProposalImpl = applyCompanyProposalDecision,
+  getCompanyProposalBatchImpl = companyProposalBatchGet,
+  companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
+  onSearchStarted,
   searchFetchImpl,
   applyJobImpl,
   callAIImpl = callAI,
@@ -1438,6 +1532,119 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "company.discover") {
+      const requestedCount = Number(input.requestedCount);
+      const body = {
+        requestedCount:
+          Number.isInteger(requestedCount) && requestedCount > 0 ? requestedCount : 12,
+        ...(String(input.request || "").trim()
+          ? { request: String(input.request).trim().slice(0, 500) }
+          : {}),
+      };
+      const operation = await createCompanyProposalsImpl({
+        repoRoot,
+        env,
+        body,
+        fetchImpl: searchFetchImpl,
+        seedCall: callAIImpl,
+        now: requestDate(now),
+      });
+      if (operation?.body) {
+        throw companyProposalOperationError(operation);
+      }
+      const artifact = companyProposalArtifact(operation?.data, operation?.meta);
+      const proposalCount = artifact.proposals.length;
+      const reviewedCount = Number(artifact.counts.seeds || 0);
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: proposalCount
+          ? `Found ${proposalCount} new compan${proposalCount === 1 ? "y" : "ies"} beyond your focus examples. Review each one before CareerRat tracks its job board.`
+          : `Reviewed ${reviewedCount} compan${reviewedCount === 1 ? "y" : "ies"} beyond your focus examples. No new supported job boards need approval right now.`,
+        artifacts: [artifact],
+        metadata: {
+          state: proposalCount ? "needs-review" : "complete",
+          proposalCount,
+          rejectedCount: artifact.rejected.length,
+          ...(proposalCount ? {} : { nextActions: [searchExpandedCompaniesAction()] }),
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "company.proposal-decide") {
+      const action = String(input.action || "").trim();
+      if (!new Set(["approve-supported-ats", "reject"]).has(action)) {
+        throw actionError(
+          "Company proposals can only be tracked or skipped from Ask.",
+          "BAD_COMPANY_PROPOSAL_ACTION"
+        );
+      }
+      const proposalId = normalized.entity.id;
+      if (input.proposalId && String(input.proposalId) !== proposalId) {
+        throw actionError(
+          "The company proposal action does not match the selected proposal.",
+          "BAD_INTENT_ENTITY"
+        );
+      }
+      const operation = await decideCompanyProposalImpl({
+        repoRoot,
+        env,
+        body: {
+          batchId: input.batchId,
+          proposalId,
+          action,
+          expectedVersion: input.expectedVersion,
+          ...(action === "approve-supported-ats" ? { userConfirmed: true } : {}),
+        },
+        fetchImpl: searchFetchImpl,
+        now: requestDate(now),
+      });
+      const batch = getCompanyProposalBatchImpl({
+        repoRoot,
+        env,
+        batchId: input.batchId,
+      })?.batch;
+      if (!batch) throw actionError("Company proposal batch not found.", "NOT_FOUND");
+      const artifact = companyProposalArtifact(batch);
+      const remaining = artifact.proposals.length;
+      const name =
+        operation?.data?.proposal?.company?.name ||
+        operation?.data?.refreshedProposal?.company?.name ||
+        "that company";
+      const decisionText =
+        action === "approve-supported-ats" ? `Tracking ${name}.` : `Skipped ${name}.`;
+      const returnToCurrentSearch =
+        batch.trigger?.kind === "search-run" || String(input.searchRunId || "").trim();
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: remaining
+          ? `${decisionText} ${remaining} compan${remaining === 1 ? "y still needs" : "ies still need"} review.`
+          : `${decisionText} All company proposals are reviewed.`,
+        artifacts: [artifact],
+        metadata: {
+          state: remaining ? "needs-review" : "complete",
+          proposalCount: remaining,
+          decision: action,
+          ...(remaining
+            ? {}
+            : {
+                nextActions: [
+                  returnToCurrentSearch ? currentSearchAction() : searchExpandedCompaniesAction(),
+                ],
+              }),
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
     if (normalized.type === "search.run") {
       const purpose = input.purpose === "first-search" ? "first-search" : "manual-search";
       const operation =
@@ -1460,13 +1667,82 @@ export async function executeWorkspaceIntent({
         reused: operation?.reused === true,
         parked: operation?.parked === true,
       });
+      onSearchStarted?.({ operation, run: { ...run, purpose: run.purpose || purpose } });
+      let companyArtifact = null;
+      let companyDiscovery = null;
+      if (
+        purpose === "manual-search" &&
+        artifact.runId &&
+        new Set(["running", "completed"]).has(artifact.status)
+      ) {
+        try {
+          const cadence = companyDiscoveryCadenceImpl({
+            repoRoot,
+            env,
+            now: requestDate(now),
+          });
+          companyDiscovery = compactCompanyDiscoveryState(cadence);
+          if (cadence?.status === "needs-review" && cadence.batchId) {
+            const batch = getCompanyProposalBatchImpl({
+              repoRoot,
+              env,
+              batchId: cadence.batchId,
+            })?.batch;
+            if (batch) {
+              companyArtifact = companyProposalArtifact(batch, {
+                trigger: { kind: "search-run", id: artifact.runId },
+              });
+            }
+          } else if (cadence?.due === true) {
+            const trigger = { kind: "search-run", id: artifact.runId };
+            const proposalOperation = await createCompanyProposalsImpl({
+              repoRoot,
+              env,
+              body: { requestedCount: 12, trigger },
+              fetchImpl: searchFetchImpl,
+              seedCall: callAIImpl,
+              now: requestDate(now),
+            });
+            if (proposalOperation?.body) throw companyProposalOperationError(proposalOperation);
+            companyArtifact = companyProposalArtifact(proposalOperation?.data, {
+              ...proposalOperation?.meta,
+              trigger,
+            });
+          }
+          if (companyArtifact) {
+            const proposalCount = companyArtifact.proposals.length;
+            companyDiscovery = compactCompanyDiscoveryState(cadence, {
+              status: proposalCount ? "needs-review" : "complete",
+              batchId: companyArtifact.batchId,
+              pendingCount: proposalCount,
+            });
+          }
+        } catch (error) {
+          companyDiscovery = compactCompanyDiscoveryState(companyDiscovery, {
+            status: "failed",
+            error: {
+              code: String(error?.code || "COMPANY_DISCOVERY_FAILED").slice(0, 120),
+              message: String(error?.message || "Company discovery failed.").slice(0, 500),
+            },
+          });
+        }
+      }
+      const companyReviewCount = companyArtifact?.proposals.length || 0;
+      const text = [
+        searchResultText({ ...run, purpose: run.purpose || purpose }),
+        companyReviewCount
+          ? `Company discovery also found ${companyReviewCount} compan${companyReviewCount === 1 ? "y" : "ies"}; ${companyReviewCount === 1 ? "it needs" : "they need"} review.`
+          : null,
+      ]
+        .filter(Boolean)
+        .join(" ");
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: searchResultText({ ...run, purpose: run.purpose || purpose }),
-        artifacts: [artifact],
+        text,
+        artifacts: [artifact, companyArtifact].filter(Boolean),
         metadata: {
           state: artifact.status,
           purpose: artifact.purpose,
@@ -1474,6 +1750,8 @@ export async function executeWorkspaceIntent({
           searchTerminal: ["completed", "failed"].includes(artifact.status),
           reused: artifact.reused,
           parked: artifact.parked,
+          companyReview: companyReviewCount > 0,
+          ...(companyDiscovery ? { companyDiscovery } : {}),
         },
         operationResult: operation,
         now,
@@ -2033,7 +2311,24 @@ function looksLikeJobUrl(value) {
   }
 }
 
+function looksLikeCompanyDiscovery(text) {
+  if (/\bcompany discovery\b/i.test(text)) return true;
+  const match = String(text).match(
+    /\b(?:find|discover|research|expand|refresh|look for)\b.{0,40}\bcompan(?:y|ies)\b/i
+  );
+  return Boolean(match && !/\b(?:jobs?|roles?|postings?|openings?)\b/i.test(match[0]));
+}
+
 const ACTION_PREVIEW_RULES = [
+  {
+    test: looksLikeCompanyDiscovery,
+    label: "Discover more matching companies",
+    intent: (text) => ({
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { requestedCount: 12, request: text },
+    }),
+  },
   {
     test: (text) => {
       const jobUrl = firstHttpUrl(text);
@@ -2243,12 +2538,18 @@ export function createWorkspaceAgentRuntime({
   packetExportArtifact,
   startFirstSearchImpl = startFirstSearchRun,
   startManualSearchImpl = startManualSearchRun,
+  createCompanyProposalsImpl = createCompanyProposalBatch,
+  decideCompanyProposalImpl = applyCompanyProposalDecision,
+  getCompanyProposalBatchImpl = companyProposalBatchGet,
+  companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
+  runSearchInBackgroundImpl = runFirstSearchInBackground,
   searchFetchImpl = fetch,
   applyJobImpl,
   captureIntakeImpl,
   sendCommunicationImpl,
 } = {}) {
   let tail = Promise.resolve();
+  let runtime;
 
   function enqueue(operation) {
     const current = tail.then(operation, operation);
@@ -2259,7 +2560,23 @@ export function createWorkspaceAgentRuntime({
     return current;
   }
 
-  return {
+  function startSearchInBackground({ operation, run }) {
+    if (operation?.reused === true || run?.status !== "running" || !run?.id) return;
+    void Promise.resolve()
+      .then(() =>
+        runSearchInBackgroundImpl({
+          repoRoot,
+          env,
+          fetchImpl: searchFetchImpl,
+          runId: run.id,
+        })
+      )
+      .then((terminalRun) => runtime.recordSearchCompletion({ run: terminalRun }))
+      .catch(() => {});
+  }
+
+  runtime = {
+    startsSearchInBackground: true,
     runTurn(input = {}) {
       return enqueue(() => runWorkspaceAgentTurn({ repoRoot, env, callAIImpl, ...input }));
     },
@@ -2276,6 +2593,11 @@ export function createWorkspaceAgentRuntime({
           packetExportArtifact,
           startFirstSearchImpl,
           startManualSearchImpl,
+          createCompanyProposalsImpl,
+          decideCompanyProposalImpl,
+          getCompanyProposalBatchImpl,
+          companyDiscoveryCadenceImpl,
+          onSearchStarted: startSearchInBackground,
           searchFetchImpl,
           applyJobImpl,
           callAIImpl,
@@ -2294,4 +2616,5 @@ export function createWorkspaceAgentRuntime({
       return enqueue(() => captureWorkspaceIntake({ repoRoot, env, captureIntakeImpl, ...input }));
     },
   };
+  return runtime;
 }

@@ -467,3 +467,38 @@ test("product search buttons dispatch through workspace-main and return backgrou
     await closeServer(server);
   }
 });
+
+test("the sourcing route does not duplicate a sweep owned by the workspace runtime", async () => {
+  const repoRoot = tempRepo();
+  let directBackgroundCalls = 0;
+  const workspaceAgentRuntime = {
+    startsSearchInBackground: true,
+    async executeIntent() {
+      return {
+        operationResult: {
+          ok: true,
+          reused: false,
+          run: {
+            id: "manual-search-runtime-owned",
+            purpose: "manual-search",
+            status: "running",
+          },
+        },
+      };
+    },
+  };
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime,
+    runSearchInBackgroundImpl: async () => {
+      directBackgroundCalls += 1;
+    },
+  });
+  try {
+    const result = await postJson(server, "/api/sourcing/search/start", {});
+    assert.equal(result.status, 202);
+    assert.equal(result.body.run.id, "manual-search-runtime-owned");
+    assert.equal(directBackgroundCalls, 0);
+  } finally {
+    await closeServer(server);
+  }
+});

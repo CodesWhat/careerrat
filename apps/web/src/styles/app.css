@@ -6298,6 +6298,52 @@ button.chip {
   font-size: 12px;
 }
 
+.ask-bar__company-proposals {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ask-bar__company-proposal {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--row-radius);
+  background: var(--surface);
+}
+
+.ask-bar__company-proposal p,
+.ask-bar__company-proposals-empty {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ask-bar__company-proposal-head,
+.ask-bar__company-proposal-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.ask-bar__company-proposal-head {
+  justify-content: space-between;
+  font-size: 13px;
+}
+
+.ask-bar__company-proposal-meta {
+  color: var(--ink-faint);
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
 .ask-bar__handoff-link {
   width: fit-content;
   color: var(--accent);

@@ -14,6 +14,7 @@ import {
   publicIntelSyncPreview,
   sourceConfigGet,
 } from "../core/db/verbs.mjs";
+import { companyDiscoveryCadenceState } from "../core/discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../core/discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../core/discovery/company-proposals.mjs";
 import { scanPublicIntelSeeds } from "../core/discovery/scanner-cascade.mjs";
@@ -237,6 +238,15 @@ function locksFromPrepared(body) {
   );
 }
 
+function publicCompanyDiscoveryState(state) {
+  if (!state || typeof state !== "object") return null;
+  return Object.fromEntries(
+    ["status", "due", "reason", "dueAt", "batchId", "pendingCount"]
+      .filter((key) => state[key] !== undefined)
+      .map((key) => [key, state[key]])
+  );
+}
+
 function discoveryRouteError(res, err, fallbackCode) {
   const status = err.status || fallbackCode;
   sendJson(res, status, {
@@ -299,6 +309,7 @@ export function mountDiscoveryRoutes({
   publicIntelReviewListImpl = publicIntelReviewList,
   publicIntelReviewDecisionImpl = defaultPublicIntelReviewDecision,
   publicIntelSyncPreviewImpl = publicIntelSyncPreview,
+  companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
 }) {
   addRoute("GET", "/api/discovery/public-intel/state", (_req, res) => {
     try {
@@ -465,11 +476,19 @@ export function mountDiscoveryRoutes({
 
   addRoute("GET", "/api/discovery/state", (_req, res) => {
     let locks = { readiness: null, missing: null, locks: { gateReady: false, applyReady: false } };
+    let companyDiscovery = null;
     try {
       locks = readReadinessLocks({ repoRoot, env });
     } catch {
       // Discovery state is a UI affordance; no-DB and corrupt setup degrade to
       // locks rather than making the whole app page fail.
+    }
+    try {
+      companyDiscovery = publicCompanyDiscoveryState(
+        companyDiscoveryCadenceImpl({ repoRoot, env, now: typeof now === "function" ? now() : now })
+      );
+    } catch {
+      // A missing or incomplete DB cannot block the rest of discovery state.
     }
     const guidance = normalizeDiscoveryGuidance(loadAgentGuidance({ root: repoRoot, env }));
     const activeDiscoveryChat = findActiveDiscoveryChat(chatRuntime);
@@ -478,6 +497,7 @@ export function mountDiscoveryRoutes({
       pipeline: DISCOVERY_PIPELINE,
       guidance,
       activeDiscoveryChat,
+      companyDiscovery,
       ...locks,
     });
   });

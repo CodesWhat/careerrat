@@ -62,6 +62,14 @@ function bootServer({
     message: "Ask your agent to run research-boards next.",
     ctaLabel: "Run research-boards",
   }),
+  companyDiscoveryCadenceImpl = () => ({
+    status: "current",
+    due: false,
+    reason: "cadence-current",
+    dueAt: "2026-08-17T12:00:00.000Z",
+    batchId: "batch-current",
+    pendingCount: 0,
+  }),
 } = {}) {
   const routes = new Map();
   function addRoute(method, path, handler) {
@@ -74,6 +82,7 @@ function bootServer({
     chatRuntime,
     prepareQuickStart,
     loadAgentGuidance,
+    companyDiscoveryCadenceImpl,
   });
 
   return { server: { routes }, chatRuntime };
@@ -411,6 +420,14 @@ test("GET /api/discovery/state returns guidance and the active discovery chat wi
     assert.equal(body.ok, true);
     assert.equal(body.guidance.nextSkill, "search-jobs");
     assert.equal(body.activeDiscoveryChat.chatId, "search-chat");
+    assert.deepEqual(body.companyDiscovery, {
+      status: "current",
+      due: false,
+      reason: "cadence-current",
+      dueAt: "2026-08-17T12:00:00.000Z",
+      batchId: "batch-current",
+      pendingCount: 0,
+    });
     assert.equal(chatRuntime.starts.length, 0);
   } finally {
     await closeServer(server);

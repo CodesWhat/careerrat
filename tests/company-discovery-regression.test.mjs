@@ -398,6 +398,7 @@ test("AI seed prompts, route data, telemetry, proposals, and rejections omit pri
 
   const response = await postJson(server, "/api/discovery/company-proposals", {
     requestedCount: 1,
+    request: "Find more companies with local customer-facing engineering teams.",
   });
 
   assert.equal(response.status, 200);
@@ -411,6 +412,10 @@ test("AI seed prompts, route data, telemetry, proposals, and rejections omit pri
   assert.match(aiCalls[0].messages[0].content, /agentic developer workflows/);
   assert.match(aiCalls[0].messages[0].content, /Excluded Co/);
   assert.match(aiCalls[0].messages[0].content, /200000/);
+  assert.match(
+    aiCalls[0].messages[0].content,
+    /Find more companies with local customer-facing engineering teams\./
+  );
   assert.equal(response.body.meta.ai.skill, "discover-companies");
   assert.equal(response.body.meta.ai.action, "seed-generate");
   assert.equal(response.body.meta.ai.operation, "company-seeds");

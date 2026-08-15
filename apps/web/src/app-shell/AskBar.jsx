@@ -85,9 +85,12 @@ function appActionHref(value) {
     const url = new URL(String(value || "").trim(), appOrigin);
     if (url.origin !== appOrigin) return null;
     if (url.pathname !== "/jobs" && url.pathname !== "/app/jobs") return null;
-    if (url.searchParams.getAll("open").length !== 1 || [...url.searchParams.keys()].length !== 1) {
-      return null;
+    if ([...url.searchParams.keys()].length !== 1) return null;
+
+    if (url.searchParams.getAll("tab").length === 1) {
+      return url.searchParams.get("tab") === "search" ? "/app/jobs?tab=search" : null;
     }
+    if (url.searchParams.getAll("open").length !== 1) return null;
 
     const applicationId = url.searchParams.get("open");
     if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(applicationId || "")) return null;
@@ -156,6 +159,14 @@ function isTerminalActionMessage(message) {
   if (!message) return false;
   if (message.kind === "action_error") return true;
   if (message.kind !== "action_result") return false;
+  if (
+    message.metadata?.companyReview === true &&
+    message.artifacts?.some(
+      (artifact) => artifact.kind === "company_proposals" && artifact.proposals?.length
+    )
+  ) {
+    return true;
+  }
   // search.run starts in the background — recordWorkspaceSearchCompletion
   // (workspace-agent.mjs) appends a later terminal message once it finishes;
   // every other intent type is awaited fully server-side, so its first
@@ -1078,6 +1089,9 @@ function AskBarTurn({
   const handoffArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "application_handoff"
   );
+  const companyProposalsArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "company_proposals"
+  );
   const handoffUrl = safeExternalHttpUrl(handoffArtifact?.url);
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
@@ -1086,6 +1100,9 @@ function AskBarTurn({
       {turn.resultText ? <p className="ask-bar__summary">{turn.resultText}</p> : null}
       {evaluationArtifact ? <JobEvaluationCard artifact={evaluationArtifact} /> : null}
       {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
+      {companyProposalsArtifact ? (
+        <CompanyProposalsCard artifact={companyProposalsArtifact} onRunAction={onRunAction} />
+      ) : null}
       {handoffUrl ? (
         <a className="ask-bar__handoff-link" href={handoffUrl} target="_blank" rel="noreferrer">
           Open application site
@@ -1177,5 +1194,90 @@ function PacketStatus({ artifact }) {
         </span>
       ) : null}
     </div>
+  );
+}
+
+function CompanyProposalsCard({ artifact, onRunAction }) {
+  const proposals = Array.isArray(artifact.proposals) ? artifact.proposals : [];
+  const rejectedCount = Array.isArray(artifact.rejected) ? artifact.rejected.length : 0;
+  return (
+    <section className="ask-bar__company-proposals" aria-label="Company proposals">
+      {proposals.length ? (
+        proposals.map((proposal) => {
+          const name = proposal.company?.name || proposal.name || "Company";
+          const role = proposal.roleSeen || proposal.roleFamily || null;
+          return (
+            <article className="ask-bar__company-proposal" key={proposal.proposalId}>
+              <div className="ask-bar__company-proposal-head">
+                <strong>{name}</strong>
+                <span className="badge badge--muted">
+                  {proposal.confidenceTier === "high-confidence" ? "High confidence" : "Review"}
+                </span>
+              </div>
+              {proposal.why ? <p>{proposal.why}</p> : null}
+              {role || proposal.atsProvider ? (
+                <span className="ask-bar__company-proposal-meta">
+                  {[role, proposal.atsProvider].filter(Boolean).join(" · ")}
+                </span>
+              ) : null}
+              <div className="ask-bar__company-proposal-actions">
+                <Button
+                  onClick={() =>
+                    onRunAction?.({
+                      label: `Track ${name}`,
+                      intent: {
+                        type: "company.proposal-decide",
+                        entity: { type: "company-proposal", id: proposal.proposalId },
+                        input: {
+                          batchId: artifact.batchId,
+                          proposalId: proposal.proposalId,
+                          action: "approve-supported-ats",
+                          expectedVersion: proposal.version,
+                          ...(artifact.trigger?.kind === "search-run"
+                            ? { searchRunId: artifact.trigger.id }
+                            : {}),
+                        },
+                      },
+                    })
+                  }
+                >
+                  Track
+                </Button>
+                <Button
+                  variant="secondary"
+                  onClick={() =>
+                    onRunAction?.({
+                      label: `Skip ${name}`,
+                      intent: {
+                        type: "company.proposal-decide",
+                        entity: { type: "company-proposal", id: proposal.proposalId },
+                        input: {
+                          batchId: artifact.batchId,
+                          proposalId: proposal.proposalId,
+                          action: "reject",
+                          expectedVersion: proposal.version,
+                          ...(artifact.trigger?.kind === "search-run"
+                            ? { searchRunId: artifact.trigger.id }
+                            : {}),
+                        },
+                      },
+                    })
+                  }
+                >
+                  Skip
+                </Button>
+              </div>
+            </article>
+          );
+        })
+      ) : (
+        <p className="ask-bar__company-proposals-empty">No company proposals need review.</p>
+      )}
+      {rejectedCount ? (
+        <span className="ask-bar__company-proposal-meta">
+          {rejectedCount} compan{rejectedCount === 1 ? "y was" : "ies were"} screened out.
+        </span>
+      ) : null}
+    </section>
   );
 }

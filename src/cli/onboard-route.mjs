@@ -994,7 +994,11 @@ export async function prepareQuickStartFirstSearch({
       error.code = "SEARCH_START_FAILED";
       throw error;
     }
-    if (result.reused !== true && result.run?.status === "running") {
+    if (
+      !workspaceAgentRuntime?.startsSearchInBackground &&
+      result.reused !== true &&
+      result.run?.status === "running"
+    ) {
       void runSearchInBackgroundImpl({ repoRoot, env, fetchImpl, runId: result.run.id })
         .then((run) => workspaceAgentRuntime?.recordSearchCompletion?.({ run }))
         .catch(() => {});
