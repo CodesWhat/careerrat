@@ -249,6 +249,20 @@ test("conversational onboarding stops once the canonical checklist is complete",
   assert.match(skill, /ask no new initial-setup questions/i);
 });
 
+test("onboarding starts baseline sourcing before the deeper discovery handoff", async () => {
+  const router = await readText("AGENTS.md");
+  const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
+  const launcher = await readText("bin/careerrat.mjs");
+
+  for (const text of [router, skill, launcher]) {
+    assert.match(text, /search_ready|search-ready/i);
+    assert.match(text, /baseline search/i);
+  }
+  assert.match(skill, /while Paul continues/i);
+  assert.match(skill, /Pause setup/i);
+  assert.doesNotMatch(launcher, /before the first job sweep/i);
+});
+
 test("onboarding saves notice period at the supported profile path and does not invent an earliest-start field", async () => {
   const skill = await readText(".agents/skills/ingest-profile/SKILL.md");
 
