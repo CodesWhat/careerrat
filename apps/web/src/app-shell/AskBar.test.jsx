@@ -108,6 +108,14 @@ vi.mock("../components/icons.jsx", () => ({
   PaperclipIcon: () => null,
 }));
 
+const chatPanel = vi.hoisted(() => ({ props: null }));
+vi.mock("../onboarding/ChatPanel.jsx", () => ({
+  ChatPanel: (props) => {
+    chatPanel.props = props;
+    return { type: "chat-panel", props };
+  },
+}));
+
 const api = vi.hoisted(() => ({
   ApiError: class ApiError extends Error {
     constructor(status, body) {
@@ -127,6 +135,7 @@ const api = vi.hoisted(() => ({
   confirmIntake: vi.fn(),
   reclassifyIntake: vi.fn(),
   dismissIntake: vi.fn(),
+  completeDiscoveryStep: vi.fn(),
 }));
 vi.mock("../lib/api.js", () => api);
 
@@ -265,6 +274,21 @@ function companyActionPreview() {
   };
 }
 
+function boardDiscoveryActionPreview() {
+  return {
+    action: {
+      label: "Find and review new job boards",
+      intent: {
+        type: "source.discover",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { request: "find more job boards for me" },
+      },
+    },
+    answer: { label: "Answer about job board discovery" },
+    engineAvailable: true,
+  };
+}
+
 function answerOnlyPreview({ engineAvailable = true } = {}) {
   return {
     action: null,
@@ -340,6 +364,7 @@ beforeEach(() => {
   routerState.searchParams = new URLSearchParams();
   shortcut.key = null;
   shortcut.trigger = null;
+  chatPanel.props = null;
   globalThis.document = {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
@@ -886,6 +911,72 @@ describe("AskBar — acting", () => {
     );
     expect(textOf(tree)).toContain("All company proposals are reviewed");
     expect(buttonByText(tree, "Search the expanded company set")).toBeTruthy();
+  });
+
+  it("keeps post-setup job-board discovery visible in Ask and returns to Jobs or Settings", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(boardDiscoveryActionPreview());
+    api.completeDiscoveryStep.mockResolvedValue({ ok: true });
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Started a guided search for new job boards. Review every source before adding it.",
+            artifacts: [
+              {
+                kind: "board_discovery_chat",
+                title: "Job board discovery",
+                chatId: "research-boards-live",
+                skill: "research-boards",
+                state: "running",
+                reused: false,
+              },
+            ],
+            metadata: {
+              state: "running",
+              nextActions: [
+                { label: "Search jobs", href: "/jobs?tab=search" },
+                { label: "Manage sources", href: "/settings" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "find more job boards for me" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.runWorkspaceIntent).toHaveBeenCalledWith(
+      "source.discover",
+      { type: "workspace", id: "workspace-main" },
+      { request: "find more job boards for me" }
+    );
+    expect(byTag(tree, "chat-panel")).toBeTruthy();
+    expect(chatPanel.props).toMatchObject({
+      skill: "research-boards",
+      initialChatId: "research-boards-live",
+      completionLabel: "Finish board review",
+    });
+    await chatPanel.props.onComplete();
+    expect(api.completeDiscoveryStep).toHaveBeenCalledWith("research-boards");
+
+    const links = visit(tree, (node) => node.type === "a");
+    expect(links.map((link) => [textOf(link).trim(), link.props.href])).toEqual([
+      ["Search jobs", "/app/jobs?tab=search"],
+      ["Manage sources", "/app/settings"],
+    ]);
   });
 
   it("shows recurring company proposals immediately while the job search continues", async () => {

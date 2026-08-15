@@ -136,7 +136,7 @@ Status meanings:
 | --- | --- | --- | --- |
 | `ingest-profile` | Chat-first onboarding and editable file pane | partial | Replace form-like company collection with a company-thesis conversation and carry the thread into normal Ask. |
 | `setup-searches` | Onboarding/Settings source setup | partial | Make natural-language source changes visible and durable in the workspace thread. |
-| `research-boards` | Guided onboarding discovery chat | partial | Provide a normal post-setup Ask entry and return approved sources to Jobs/Settings. |
+| `research-boards` | Ask starts or reopens an embedded guided board search with Add source/Skip review | native | Keep clean-home and packaged acceptance for new-source, duplicate-source, skip-all, and runtime-restart paths. |
 | `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | partial | Run clean-home and packaged acceptance for every input shape, including ambiguity and recovery. |
@@ -203,6 +203,17 @@ directly and returns reviewable proposals with confirm-first Track/Skip actions 
 same durable thread. Manual job sweeps start their deterministic search immediately,
 then refresh company discovery every seven days or whenever the targeting thesis
 changes. Pending proposals reopen instead of spawning a duplicate batch.
+
+## Recurring job-board discovery
+
+Board research is available after onboarding through ordinary Ask requests such
+as "find more job boards." CareerRat keeps that distinct from "sweep my boards,"
+which searches sources already configured. The typed `source.discover` action is
+recorded in the durable workspace thread, starts or reopens the visible
+`research-boards` session with outbound-safe candidate context and the complete
+configured-source dedup set, and embeds the live progress directly in Ask. Every
+proposed source still requires Add source or Skip. Approved sources write through
+the validated source API, then the receipt links back to Jobs and Settings.
 
 ## Deterministic source parity
 

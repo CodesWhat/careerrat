@@ -59,6 +59,7 @@ const EXECUTABLE_INTENTS = new Set([
   "sourced.promote",
   "sourced.skip",
   "application.record-external",
+  "source.discover",
   "company.discover",
   "company.proposal-decide",
   "job.apply",
@@ -938,6 +939,19 @@ function companyProposalArtifact(batch = {}, meta = {}) {
   };
 }
 
+function boardDiscoveryChatArtifact(chat = {}) {
+  const chatId = String(chat.chatId || "").trim();
+  if (!chatId) throw actionError("Board discovery did not return a visible chat.", "NOT_FOUND");
+  return {
+    kind: "board_discovery_chat",
+    title: "Job board discovery",
+    chatId,
+    skill: "research-boards",
+    state: String(chat.state || "running"),
+    reused: chat.reused === true,
+  };
+}
+
 function searchExpandedCompaniesAction() {
   return {
     label: "Search the expanded company set",
@@ -1122,6 +1136,7 @@ export async function executeWorkspaceIntent({
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
+  startBoardDiscoveryImpl,
   onSearchStarted,
   searchFetchImpl,
   applyJobImpl,
@@ -1527,6 +1542,43 @@ export async function executeWorkspaceIntent({
           state: "exported",
           fileCount,
           downloadsErrorCount: downloadsErrors.length,
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "source.discover") {
+      if (typeof startBoardDiscoveryImpl !== "function") {
+        const error = actionError(
+          "Guided board discovery is not connected in this runtime.",
+          "BOARD_DISCOVERY_UNAVAILABLE"
+        );
+        error.status = 501;
+        throw error;
+      }
+      const request = String(input.request || "")
+        .trim()
+        .slice(0, 500);
+      const operation = await startBoardDiscoveryImpl({ repoRoot, env, request });
+      const artifact = boardDiscoveryChatArtifact(
+        operation?.chat || operation?.activeDiscoveryChat || operation
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: artifact.reused
+          ? "Reopened your job-board discovery. Review every source before adding it."
+          : "Started a guided search for new job boards. Review every source before adding it.",
+        artifacts: [artifact],
+        metadata: {
+          state: artifact.state,
+          nextActions: [
+            { label: "Search jobs", href: "/jobs?tab=search" },
+            { label: "Manage sources", href: "/settings" },
+          ],
         },
         operationResult: operation,
         now,
@@ -2329,7 +2381,28 @@ function looksLikeCompanyDiscovery(text) {
   return Boolean(match && !/\b(?:jobs?|roles?|postings?|openings?)\b/i.test(match[0]));
 }
 
+function looksLikeBoardDiscovery(text) {
+  if (/\b(?:job\s+)?board discovery\b/i.test(text)) return true;
+  if (
+    /\b(?:discover|research|add|expand)\b.{0,40}\b(?:job\s+)?(?:boards?|sources?)\b/i.test(text)
+  ) {
+    return true;
+  }
+  return /\b(?:find|look for)\b.{0,30}\b(?:more|new|additional|other|niche)\b.{0,30}\b(?:job\s+)?(?:boards?|sources?)\b/i.test(
+    text
+  );
+}
+
 const ACTION_PREVIEW_RULES = [
+  {
+    test: looksLikeBoardDiscovery,
+    label: "Find and review new job boards",
+    intent: (text) => ({
+      type: "source.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { request: text },
+    }),
+  },
   {
     test: looksLikeCompanyDiscovery,
     label: "Discover more matching companies",
@@ -2552,6 +2625,7 @@ export function createWorkspaceAgentRuntime({
   decideCompanyProposalImpl = applyCompanyProposalDecision,
   getCompanyProposalBatchImpl = companyProposalBatchGet,
   companyDiscoveryCadenceImpl = companyDiscoveryCadenceState,
+  startBoardDiscoveryImpl,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
   searchFetchImpl = fetch,
   applyJobImpl,
@@ -2607,6 +2681,7 @@ export function createWorkspaceAgentRuntime({
           decideCompanyProposalImpl,
           getCompanyProposalBatchImpl,
           companyDiscoveryCadenceImpl,
+          startBoardDiscoveryImpl,
           onSearchStarted: startSearchInBackground,
           searchFetchImpl,
           applyJobImpl,

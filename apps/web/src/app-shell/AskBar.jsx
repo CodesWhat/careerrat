@@ -3,6 +3,7 @@ import { useLocation, useSearchParams } from "react-router-dom";
 import { Button, IconButton } from "../components/Button.jsx";
 import { ArrowUpIcon, PaperclipIcon } from "../components/icons.jsx";
 import {
+  completeDiscoveryStep,
   confirmIntake,
   createIntake,
   dismissIntake,
@@ -18,6 +19,7 @@ import { emitIntakeChanged } from "../lib/intake-events.js";
 import { kindLabel } from "../lib/intake-labels.js";
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
+import { ChatPanel } from "../onboarding/ChatPanel.jsx";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
 // AskBar — the W3 shell-docked ask bar (DESIGN-SPEC.md "Ask bar (component)").
@@ -84,6 +86,10 @@ function appActionHref(value) {
     const appOrigin = "https://careerrat.invalid";
     const url = new URL(String(value || "").trim(), appOrigin);
     if (url.origin !== appOrigin) return null;
+    if (url.pathname === "/settings" || url.pathname === "/app/settings") {
+      if (url.search || url.hash) return null;
+      return "/app/settings";
+    }
     if (url.pathname !== "/jobs" && url.pathname !== "/app/jobs") return null;
     if ([...url.searchParams.keys()].length !== 1) return null;
 
@@ -1161,6 +1167,9 @@ function AskBarTurn({
   const companyProposalsArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "company_proposals"
   );
+  const boardDiscoveryArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "board_discovery_chat"
+  );
   const handoffUrl = safeExternalHttpUrl(handoffArtifact?.url);
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
@@ -1171,6 +1180,14 @@ function AskBarTurn({
       {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
       {companyProposalsArtifact ? (
         <CompanyProposalsCard artifact={companyProposalsArtifact} onRunAction={onRunAction} />
+      ) : null}
+      {boardDiscoveryArtifact ? (
+        <ChatPanel
+          skill="research-boards"
+          initialChatId={boardDiscoveryArtifact.chatId}
+          completionLabel="Finish board review"
+          onComplete={() => completeDiscoveryStep("research-boards")}
+        />
       ) : null}
       {handoffUrl ? (
         <a className="ask-bar__handoff-link" href={handoffUrl} target="_blank" rel="noreferrer">

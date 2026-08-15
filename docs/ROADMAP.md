@@ -362,7 +362,11 @@ The current build order is:
 4. **Original-skill native parity** — every user-facing original skill gets an Ask entry and
    contextual shortcut where useful, deterministic entity resolution, visible work, safe decisions,
    a durable linked result, and the next handoff. Internal extraction helpers stay internal but must
-   expose progress and errors through the invoking workflow.
+   expose progress and errors through the invoking workflow. Post-setup job-board discovery now has
+   a typed Ask entry that stays distinct from an ordinary source sweep, embeds the guided
+   `research-boards` session in Ask, preserves Add source/Skip confirmation, and links approved
+   source work back to Jobs and Settings. The remaining original-skill rows stay tracked in the
+   linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
    deterministic registry, and `local-parser` is intentionally excluded with a safety reason.
