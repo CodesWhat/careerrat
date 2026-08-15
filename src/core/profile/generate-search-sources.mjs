@@ -15,7 +15,8 @@ import { buildWellfoundUrl } from "../providers/wellfound.mjs";
 // configured targeting titles (never a hardcoded personal/tech default —
 // see the repo's domain-neutrality rule). Only when NEITHER an explicit
 // tech domain NOR tech-shaped titles are present do we generate general
-// aggregators only (HiringCafe / LinkedIn / Google Jobs).
+// aggregators only, including the zero-auth Arbeitnow feed used as the
+// deterministic first-search floor.
 // ---------------------------------------------------------------------------
 
 const TECH_DOMAINS = new Set([
@@ -406,12 +407,11 @@ export function buildSearchSources(targeting, profile) {
     });
   }
 
-  // Board-wide aggregator feeds (RemoteOK / Remotive / Working Nomads): unlike
+  // Board-wide remote aggregator feeds (RemoteOK / Remotive / Working Nomads): unlike
   // RemoteVibeCodingJobs/Wellfound above (tech-only, omitted entirely for other
-  // domains), these three are seeded for EVERY domain so a fresh install always
-  // has at least one working deterministic source (see AGENTS.md's
-  // deterministic-first-search contract) — just enabled by default only for
-  // tech domains. Any domain can flip one on in config/search-sources.yml;
+  // domains), these three are seeded for EVERY domain so the user can enable
+  // them later, but are enabled by default only for tech domains. Any domain
+  // can flip one on in config/search-sources.yml;
   // title_filter/location_filter narrow the broad feed the same way they
   // narrow every other sourced-scan lane. `provider` values are lowercase to
   // match sourced-scanner.mjs's BOARD_PROVIDERS registry keys exactly.
@@ -441,9 +441,34 @@ export function buildSearchSources(targeting, profile) {
     });
   }
 
+  // Every search-ready candidate needs at least one runnable public source,
+  // including non-tech and local-role targets that only produce browser query
+  // URLs above. Arbeitnow is a zero-auth, board-wide feed; the scanner's shared
+  // title and location gates keep its broad results candidate-specific. One
+  // page bounds first-run cost while still giving Paul a real deterministic
+  // lane instead of graduating into a zero-source repair screen.
+  if (positiveTitles.length > 0 && !location_filter.needs_location) {
+    searches.push({
+      provider: "arbeitnow",
+      source_type: "board",
+      label: "Arbeitnow",
+      url: "https://www.arbeitnow.com/api/job-board-api",
+      enabled: true,
+      enabled_reason: "baseline",
+      max_pages: 1,
+    });
+  }
+
   // --- source_catalog (fixed reference) ---
   const source_catalog = {
-    aggregators: ["HiringCafe", "RemoteVibeCodingJobs", "Wellfound", "LinkedIn", "Google Jobs"],
+    aggregators: [
+      "HiringCafe",
+      "Arbeitnow",
+      "RemoteVibeCodingJobs",
+      "Wellfound",
+      "LinkedIn",
+      "Google Jobs",
+    ],
     ats: ["Ashby", "Greenhouse", "Lever", "Workable", "SmartRecruiters", "Recruitee", "Workday"],
     remote_boards: ["RemoteOK", "Jobicy", "Working Nomads", "We Work Remotely", "Remotive"],
     deterministic_providers: [...CAREER_OPS_PUBLIC_PROVIDER_IDS],

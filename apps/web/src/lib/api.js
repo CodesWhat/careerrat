@@ -107,6 +107,13 @@ export function saveOnboardingDraft(draft) {
   });
 }
 
+export function finishOnboarding() {
+  return apiFetch("/api/onboard/finish", {
+    method: "POST",
+    body: JSON.stringify({}),
+  });
+}
+
 export function getAiSettings() {
   return apiFetch("/api/settings/ai");
 }

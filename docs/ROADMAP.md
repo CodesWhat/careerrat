@@ -317,6 +317,8 @@ The current build order is:
 
    - source generation and the first search begin at minimum search readiness, before the rest of
      Paul's interview is complete;
+   - every search-ready target, including local and non-tech roles, receives at least one bounded,
+     zero-auth deterministic source so a valid profile cannot graduate into source repair;
    - every setting required by the candidate's enabled workflows is confirmed or explicitly
      deferred inside Paul's thread;
    - Paul never claims a fact is saved unless it is already canonical or the same response exposes
@@ -330,6 +332,9 @@ The current build order is:
      zero-source error; and
    - the main app opens only after usable source config is durable and the first search is running
      or completed, with progress or results already visible;
+   - entering the app commits one server-verified graduation boundary, stamps setup complete only
+     after that commit succeeds, and prepends the bounded Paul transcript to the canonical Ask
+     thread without duplicating it on retry or losing search work already in progress;
    - `careerrat start` and update/relaunch paths compare the live `/api/health` version with the
      installed version, safely replace only the recorded CareerRat-owned server when it is stale,
      and never accept an old in-memory app just because port 7777 returns HTTP 200; and
@@ -391,8 +396,8 @@ section remains the release-level source of truth. All 88 recorded findings are 
 live-retested. The broader skill-to-screen audit above remains active until every user-facing
 original skill has a coherent native path.
 
-Current verification: 2,508 repository tests passed with 5 intentional skips; 681 web tests passed;
-lint completed with no errors; web, website, docs, and desktop builds passed; and the final 539-file
+Current verification: 2,550 repository tests passed with 5 intentional skips; 693 web tests passed;
+lint completed with no errors; web, website, docs, and desktop builds passed; and the final 541-file
 npm tarball installed into a clean home without lifecycle warnings. The clean setup, background
 search, restart, Ask rate/apply, provider Settings, and source Electron checks produced no HTTP or
 console errors. The previously accepted desktop release flow signs and notarizes both the app bundle
@@ -451,8 +456,10 @@ same release contract:
 - **Real candidate review** — Paul's File and the completion disclosure must show the saved name,
   contact details, role lanes, location modes, compensation posture, companies, evidence, and
   guardrails. Never display ambient defaults as user-confirmed facts.
-- **Durable conversation** — preserve both sides of the setup thread, avoid duplicate questions,
-  keep action receipts across reload/restart, and make the post-completion Ask bar show its result.
+- **Durable conversation** — both sides of Paul's setup thread now carry into the canonical Ask
+  thread through an idempotent graduation commit, ahead of any first-search work already recorded.
+  Preserve this across clean install, reload, restart, and graduation retry acceptance, and keep the
+  post-completion Ask bar's result visible.
 - **Discovery fallback** — company suggestions must work through the selected runtime or expose
   the server's manual/no-AI fallback in the UI without forcing the user to invent companies.
 - **One completion contract** — initialize or explicitly select the canonical data mode before
@@ -475,9 +482,10 @@ same release contract:
   setup-only chat. Contextual buttons submit visible typed intents with entity IDs into that same
   thread; the agent reloads fresh canonical state and invokes deterministic operations or
   safety-isolated skill workers internally, with every result returning to the one user-facing
-  conversation. Backend foundation now persists one canonical workspace thread, replays its
-  durable history through the selected runtime, and routes interview-prep intents/results back
-  into that history. The remaining work is natural-language entity/action resolution, inline
+  conversation. Backend foundation now persists one canonical workspace thread, prepends Paul's
+  bounded setup transcript at a server-verified graduation boundary, replays its durable history
+  through the selected runtime, and routes interview-prep intents/results back into that history.
+  The remaining work is natural-language entity/action resolution, inline
   workflow progress and results, executor wiring, and complete skill-to-screen parity.
 - **Bring-your-own authenticated CLI** — use a supported installed agent as the normal AI
   runtime. Be precise about which adapters are fully supported; direct provider keys are an

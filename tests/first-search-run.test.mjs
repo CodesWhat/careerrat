@@ -148,6 +148,13 @@ function seedNoDeterministicSources(repoRoot) {
           url: "https://example.test/search?q=ai",
           enabled: true,
         },
+        {
+          provider: "arbeitnow",
+          label: "Arbeitnow",
+          source_type: "board",
+          url: "https://www.arbeitnow.com/api/job-board-api",
+          enabled: false,
+        },
       ],
       tracked_companies: [],
       source_catalog: {},
@@ -568,15 +575,20 @@ test("zero-result scans with attempted deterministic sources complete with zero-
     repoRoot,
     env: {},
     runId: start.run.id,
-    fetchImpl: async () =>
-      new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
+    fetchImpl: async (url) =>
+      new URL(url).hostname === "www.arbeitnow.com"
+        ? new Response(JSON.stringify({ data: [] }), {
+            status: 200,
+            headers: { "content-type": "application/json" },
+          })
+        : new Response('<?xml version="1.0"?><rss><channel></channel></rss>', { status: 200 }),
   });
 
   const latest = sourcingRunLatest({ repoRoot, purpose: "first-search" });
   assert.equal(latest.run.status, "completed");
   assert.equal(latest.run.summary.new, 0);
   assert.equal(latest.run.summary.zeroResults, true);
-  assert.equal(latest.run.summary.deterministicSources.attempted, 1);
+  assert.equal(latest.run.summary.deterministicSources.attempted, 2);
 });
 
 test("background first search publishes a growing found count before completion", async () => {

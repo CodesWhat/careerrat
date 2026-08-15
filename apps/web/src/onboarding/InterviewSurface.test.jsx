@@ -51,6 +51,7 @@ const hooks = vi.hoisted(() => ({
     this.effects.push(effect);
   },
 }));
+const navigate = vi.hoisted(() => vi.fn());
 
 vi.mock("react", async (importOriginal) => {
   const actual = await importOriginal();
@@ -75,6 +76,7 @@ vi.mock("react-router-dom", () => ({
       {children}
     </a>
   ),
+  useNavigate: () => navigate,
 }));
 
 const captured = vi.hoisted(() => ({ filePane: null, onboardingBar: null }));
@@ -116,6 +118,7 @@ const api = vi.hoisted(() => ({
   decideCompanyProposal: vi.fn(),
   extractResumeAi: vi.fn(),
   extractResumeDocx: vi.fn(),
+  finishOnboarding: vi.fn(),
   findChatBySkill: vi.fn(),
   getAutomationSettings: vi.fn(),
   getCompanyProposals: vi.fn(),
@@ -314,6 +317,7 @@ beforeEach(() => {
   api.getOnboardingDraft.mockResolvedValue({ draft: { transcript: [] } });
   api.getOnboardState.mockResolvedValue(NOT_COMPLETE_STATE);
   api.saveOnboardingDraft.mockResolvedValue({ ok: true });
+  api.finishOnboarding.mockResolvedValue({ ok: true });
 });
 
 // ---------------------------------------------------------------------------
@@ -2643,10 +2647,64 @@ describe("InterviewSurface — completion screen (3e)", () => {
       await flush();
       const tree = render({ runtime: RUNTIME });
 
-      const cta = visit(tree, (n) => n.type === "a" && n.props?.href === "/")[0];
+      const cta = visit(
+        tree,
+        (n) => n.type === "button" && textOf(n) === "Go to your dashboard"
+      )[0];
       expect(cta).toBeTruthy();
       expect(textOf(cta)).toBe("Go to your dashboard");
       expect(api.startFirstSearchRun).not.toHaveBeenCalled();
+
+      await cta.props.onClick();
+      expect(api.finishOnboarding).toHaveBeenCalledTimes(1);
+      expect(navigate).toHaveBeenCalledWith("/");
+    } finally {
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps the user with Paul when graduation cannot be committed", async () => {
+    vi.useFakeTimers();
+    try {
+      api.getOnboardState.mockResolvedValue(
+        stateFixture({
+          doneKeys: ALL_SETUP_KEYS,
+          complete: true,
+          data: {
+            sourcing: {
+              sourceSetup: { deterministicSources: { attempted: 1 } },
+              firstSearchRun: {
+                status: "running",
+                run: { id: "first-run-ready", status: "running" },
+              },
+            },
+          },
+        })
+      );
+      api.finishOnboarding.mockRejectedValue(new Error("Search setup changed. Try again."));
+
+      render({ runtime: RUNTIME });
+      await runEffects();
+      render({ runtime: RUNTIME });
+      await runEffects();
+      await flush();
+      let tree = render({ runtime: RUNTIME });
+      const cta = visit(
+        tree,
+        (n) => n.type === "button" && textOf(n) === "Go to your dashboard"
+      )[0];
+      await cta.props.onClick();
+      await flush();
+      tree = render({ runtime: RUNTIME });
+
+      expect(navigate).not.toHaveBeenCalled();
+      expect(visit(tree, (n) => n.type === "inline-alert")[0].props.message).toBe(
+        "Paul couldn't finish setup. Your answers are still saved. Try again."
+      );
+      expect(
+        visit(tree, (n) => n.type === "button" && textOf(n) === "Go to your dashboard")[0]
+      ).toBeTruthy();
     } finally {
       vi.clearAllTimers();
       vi.useRealTimers();

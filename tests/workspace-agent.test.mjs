@@ -17,6 +17,7 @@ import {
   WORKSPACE_THREAD_ID,
   workspaceIntentAppend,
   workspaceMessageAppend,
+  workspaceOnboardingHandoff,
   workspaceThreadOpen,
   workspaceThreadRead,
 } from "../src/core/agent/workspace-thread.mjs";
@@ -178,6 +179,112 @@ test("all ordinary messages and contextual intents append to one canonical durab
   });
   assert.equal(workspaceThreadOpen({ repoRoot, env: {} }).thread.id, WORKSPACE_THREAD_ID);
   assert.equal(workspaceThreadRead({ repoRoot, env: {} }).messages.length, 2);
+});
+
+test("onboarding handoff prepends Paul context once without disturbing work already in flight", () => {
+  const repoRoot = tempRepo();
+  workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "user",
+    kind: "intent",
+    text: "Search for qualified jobs (workspace:workspace-main).",
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "first-search" },
+    },
+    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    now: new Date("2026-08-14T20:00:00.000Z"),
+    id: "existing-search-intent",
+  });
+
+  const input = {
+    repoRoot,
+    env: {},
+    transcript: [
+      { role: "receipt", text: "Résumé saved." },
+      { role: "user", text: "I want product-facing fintech roles at large companies." },
+      { role: "assistant", text: "Got it. I’ll keep all companies in play and focus there." },
+      { role: "assistant", text: "   " },
+    ],
+    handoffText: "Setup is complete and your first search is underway. I’ll continue here.",
+    finishedAt: "2026-08-14T20:01:00.000Z",
+    now: new Date("2026-08-14T20:01:00.000Z"),
+  };
+
+  const first = workspaceOnboardingHandoff(input);
+  assert.equal(first.reused, false);
+  assert.deepEqual(
+    workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => ({
+      id: message.id,
+      sequence: message.sequence,
+      role: message.role,
+      kind: message.kind,
+      text: message.text,
+      source: message.metadata?.source,
+    })),
+    [
+      {
+        id: first.messages[0].id,
+        sequence: 1,
+        role: "user",
+        kind: "text",
+        text: "I want product-facing fintech roles at large companies.",
+        source: "onboarding",
+      },
+      {
+        id: first.messages[1].id,
+        sequence: 2,
+        role: "assistant",
+        kind: "text",
+        text: "Got it. I’ll keep all companies in play and focus there.",
+        source: "onboarding",
+      },
+      {
+        id: first.messages[2].id,
+        sequence: 3,
+        role: "assistant",
+        kind: "text",
+        text: "Setup is complete and your first search is underway. I’ll continue here.",
+        source: "onboarding",
+      },
+      {
+        id: "existing-search-intent",
+        sequence: 4,
+        role: "user",
+        kind: "intent",
+        text: "Search for qualified jobs (workspace:workspace-main).",
+        source: undefined,
+      },
+    ]
+  );
+
+  const replay = workspaceOnboardingHandoff(input);
+  assert.equal(replay.reused, true);
+  assert.equal(workspaceThreadRead({ repoRoot, env: {} }).messages.length, 4);
+
+  const changed = workspaceOnboardingHandoff({
+    ...input,
+    transcript: [...input.transcript, { role: "user", text: "Remote is fine too." }],
+    now: new Date("2026-08-14T20:02:00.000Z"),
+  });
+  assert.equal(changed.reused, false);
+  const changedMessages = workspaceThreadRead({ repoRoot, env: {} }).messages;
+  assert.deepEqual(
+    changedMessages.map((message) => message.text),
+    [
+      "I want product-facing fintech roles at large companies.",
+      "Got it. I’ll keep all companies in play and focus there.",
+      "Remote is fine too.",
+      "Setup is complete and your first search is underway. I’ll continue here.",
+      "Search for qualified jobs (workspace:workspace-main).",
+    ]
+  );
+  assert.equal(
+    changedMessages.filter((message) => message.id === "existing-search-intent").length,
+    1
+  );
 });
 
 test("typed intents reject unknown action types and mismatched entity types before persistence", () => {

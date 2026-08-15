@@ -26,9 +26,12 @@ import { fileURLToPath } from "node:url";
 import { ApiError, extractResumeAi } from "../apps/web/src/lib/api.js";
 import {
   deepMerge,
+  finishOnboarding,
   mountOnboardRoutes,
   normalizeOnboardingDraft,
+  readOnboardingDraft,
 } from "../src/cli/onboard-route.mjs";
+import { workspaceThreadRead } from "../src/core/agent/workspace-thread.mjs";
 import { appendUsageEvent } from "../src/core/ai/usage-log.mjs";
 import { closeAll, dbExists } from "../src/core/db/connection.mjs";
 import { sourceConfigGet, sourceConfigPut } from "../src/core/db/verbs/source-config.mjs";
@@ -1132,6 +1135,109 @@ describe("GET/POST /api/onboard/draft", () => {
       finishedAt: "",
     });
     assert.equal(cleared.body.draft.finishedAt, null);
+  });
+});
+
+describe("POST /api/onboard/finish", () => {
+  it("refuses to graduate an incomplete setup", async () => {
+    const repoRoot = buildTempRoot();
+    const routes = mountDirectRoutes(repoRoot);
+
+    const response = await postJsonDirect(routes, "/api/onboard/finish", {});
+
+    assert.equal(response.status, 409);
+    assert.equal(response.body.ok, false);
+    assert.equal(response.body.code, "ONBOARDING_NOT_READY");
+    assert.equal(readOnboardingDraft({ repoRoot }).finishedAt, null);
+  });
+
+  it("mounts graduation through the injected commit boundary", async () => {
+    const repoRoot = buildTempRoot();
+    const calls = [];
+    const routes = mountDirectRoutes(
+      repoRoot,
+      {},
+      {
+        finishOnboardingImpl(input) {
+          calls.push(input);
+          return { status: 200, body: { ok: true, handoff: { reused: false } } };
+        },
+      }
+    );
+
+    const response = await postJsonDirect(routes, "/api/onboard/finish", {});
+
+    assert.equal(response.status, 200);
+    assert.deepEqual(response.body, { ok: true, handoff: { reused: false } });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].repoRoot, repoRoot);
+  });
+
+  it("commits a complete Paul transcript only after sources and the first search are ready", async () => {
+    const repoRoot = buildTempRoot();
+    const env = { ANTHROPIC_API_KEY: "sk-ant-onboarding-finish-test" };
+    const routes = mountDirectRoutes(repoRoot, env, {
+      fetchImpl: firstSearchFetchStub(),
+    });
+    await postJsonDirect(routes, "/api/onboard/init", {});
+    await postJsonDirect(routes, "/api/onboard/resume", {
+      text: "Ada Lovelace\nada@example.com\nNew York, NY\n\nBuilt agent workflows.",
+      save: true,
+    });
+    await postJsonDirect(routes, "/api/onboard/candidate/profile", {
+      data: {
+        candidate: { full_name: "Ada Lovelace", email: "ada@example.com" },
+        compensation: { currency: "USD", minimum_base: 150000 },
+        location: { home: "New York, NY", remote: true },
+        authorization: { work_authorized: true, requires_sponsorship: false },
+      },
+    });
+    await postJsonDirect(routes, "/api/onboard/candidate/targeting", {
+      data: {
+        role_buckets: [
+          { name: "Applied AI", priority: "primary", titles: ["Applied AI Engineer"] },
+        ],
+        cut_signals: ["adtech"],
+        company_preferences: {
+          confirmed: true,
+          industries: ["fintech"],
+          organization_types: ["large corporations"],
+        },
+      },
+    });
+    await postJsonDirect(routes, "/api/onboard/candidate/evidence", {
+      data: {
+        claims: [
+          { id: "claim-1", claim: "Built agent workflows", evidence: "Production delivery" },
+        ],
+      },
+    });
+    await postJsonDirect(routes, "/api/onboard/draft", {
+      transcript: [
+        { role: "user", text: "I prefer fintech and large companies." },
+        { role: "assistant", text: "I’ll use that as a focus, not a closed company list." },
+      ],
+    });
+    const kickoff = await postJsonDirect(routes, "/api/onboard/quick-start", {});
+    assert.equal(kickoff.status, 202);
+
+    const result = finishOnboarding({
+      repoRoot,
+      env,
+      now: new Date("2026-08-14T20:30:00.000Z"),
+    });
+
+    assert.equal(result.status, 200);
+    assert.equal(result.body.ok, true);
+    assert.equal(result.body.draft.finishedAt, "2026-08-14T20:30:00.000Z");
+    assert.deepEqual(
+      workspaceThreadRead({ repoRoot, env }).messages.map((message) => message.text),
+      [
+        "I prefer fintech and large companies.",
+        "I’ll use that as a focus, not a closed company list.",
+        "Setup is complete and your first search is underway. I’ll continue here with your job search.",
+      ]
+    );
   });
 });
 

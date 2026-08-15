@@ -63,14 +63,21 @@ Required behavior:
 
 Current implementation starts baseline sourcing at candidate `search_ready`, requires
 usable source config plus a running/completed first search for graduation, and keeps
-failed or paused setup inside Paul. Clean packed-install QA proved sourcing at 4 of 8,
-269 postings scanned while the interview continued, two qualified roles waiting on
-Jobs at graduation, no false zero-source state, exact pause/resume restoration, and
-the same ready state after a full server restart. A later screenshot of the retired
-zero-source dead end was traced to an owned 0.7.0 local server that remained alive after
-the checkout and installed package reached 0.7.1. The onboarding behavior remains fixed;
-runtime-version handshaking, safe owned-server replacement, update relaunch, and foreign-port
-fallback are now implemented and accepted under `F-088`.
+failed or paused setup inside Paul. Graduation now goes through one server-verified commit
+that rechecks the canonical checklist, deterministic source count, and durable first-search
+run, then prepends a bounded user/Paul transcript to `workspace-main`. Retries reuse the same
+handoff, changed onboarding history replaces the prior import, and first-search messages already
+in flight keep their order after the imported setup context. Clean packed-install QA proved
+sourcing at 4 of 8, 269 postings scanned while the interview continued, two qualified roles
+waiting on Jobs at graduation, no false zero-source state, exact pause/resume restoration, and the
+same ready state after a full server restart. A second packaged pass used the domain-neutral target
+"local CPA roles at small accounting firms in Denver" and proved the zero-auth baseline scanned
+100 postings, completed with an honest zero-result state, graduated without a source error, and
+carried Paul's exact target context into the first Ask response. A later screenshot of the retired zero-source dead
+end was traced to an owned 0.7.0 local server that remained alive after the checkout and installed
+package reached 0.7.1. The onboarding behavior remains fixed; runtime-version handshaking, safe
+owned-server replacement, update relaunch, and foreign-port fallback are now implemented and
+accepted under `F-088`.
 
 ### "Rate this job"
 
@@ -134,7 +141,7 @@ Status meanings:
 
 | Original skill | Current app path | Status | Build gate |
 | --- | --- | --- | --- |
-| `ingest-profile` | Chat-first onboarding and editable file pane | partial | Replace form-like company collection with a company-thesis conversation and carry the thread into normal Ask. |
+| `ingest-profile` | Chat-first onboarding, company thesis, editable file pane, and durable graduation into Ask | native | Run clean-home and packaged acceptance for transcript continuity, retry idempotency, restart, and a first search already in flight. |
 | `setup-searches` | Onboarding baseline plus Ask URL/query imports and source toggles, with Settings maintenance | native | Add packaged-install acceptance plus headed authenticated-off and ambiguous-name recovery coverage. |
 | `research-boards` | Ask starts or reopens an embedded guided board search with Add source/Skip review | native | Keep clean-home and packaged acceptance for new-source, duplicate-source, skip-all, and runtime-restart paths. |
 | `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
