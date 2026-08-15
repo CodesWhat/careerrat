@@ -305,7 +305,7 @@ count as native app support.
 
 The current build order is:
 
-1. **One onboarding graduation contract (implemented; stale-runtime guard pending)** — as soon as Paul has a resume/no-resume decision,
+1. **One onboarding graduation contract (implemented and accepted)** — as soon as Paul has a resume/no-resume decision,
    target roles, and a usable location posture, generate baseline deterministic sources and start
    sourcing in the background while the interview continues. Paul covers the settings needed for
    the candidate's intended workflows. The app cannot graduate setup until source config is durable
@@ -373,12 +373,12 @@ The current build order is:
 ### Product-surface acceptance sweep (updated August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. The sweep now records 88 findings: 87 are fixed
-and live-retested, and the stale-runtime lifecycle blocker is open. The broader skill-to-screen
-audit above remains active until every user-facing original skill has a coherent native path.
+section remains the release-level source of truth. All 88 recorded findings are fixed and
+live-retested. The broader skill-to-screen audit above remains active until every user-facing
+original skill has a coherent native path.
 
-Current verification: 2,487 repository tests passed with 5 intentional skips; 676 web tests passed;
-lint completed with no errors; web, website, docs, and desktop builds passed; and the final 538-file
+Current verification: 2,508 repository tests passed with 5 intentional skips; 681 web tests passed;
+lint completed with no errors; web, website, docs, and desktop builds passed; and the final 539-file
 npm tarball installed into a clean home without lifecycle warnings. The clean setup, background
 search, restart, Ask rate/apply, provider Settings, and source Electron checks produced no HTTP or
 console errors. The previously accepted desktop release flow signs and notarizes both the app bundle

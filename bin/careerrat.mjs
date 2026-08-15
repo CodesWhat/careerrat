@@ -48,6 +48,14 @@ import {
 } from "../src/core/ai/installed-runtimes.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../src/core/paths/workspace.mjs";
 import {
+  classifyLocalAppRuntime,
+  commandMatchesTrackerScript,
+  findAvailableLoopbackPort,
+  parseRecordedPid,
+  readLocalAppHealth,
+  trackerCommandPort,
+} from "../src/core/update/local-app-runtime.mjs";
+import {
   extractOver,
   fetchTarball,
   findUserDataLeaks,
@@ -290,20 +298,67 @@ function printManualAgentHandoff(dash) {
 async function startDashboard(port) {
   const portCandidate = port ?? process.env.CAREERRAT_DEV_PORT ?? 7777;
   const parsedPort = Number(portCandidate);
-  const resolvedPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 7777;
-  const url = `http://localhost:${resolvedPort}`;
-
-  if (await urlResponds(url)) {
-    console.log(`• Local app already live → ${url}`);
-    return { url, existing: true };
-  }
-
+  let resolvedPort = Number.isInteger(parsedPort) && parsedPort > 0 ? parsedPort : 7777;
+  let url = `http://localhost:${resolvedPort}`;
+  const installedVersion = readVersion();
+  const trackerScript = join(root, "src/cli/tracker-dev.mjs");
   const internalDir = resolveUserPaths(pathCtx).internalDir;
   mkdirSync(internalDir, { recursive: true });
   const pidPath = join(internalDir, "tracker-dev.pid");
   const logPath = join(internalDir, "tracker-dev.log");
-  const args = [join(root, "src/cli/tracker-dev.mjs")];
-  if (port) args.push("--port", String(port));
+  const recordedPid = readRecordedDashboardPid(pidPath);
+  const recordedCommand = recordedTrackerProcessCommand(recordedPid);
+  const recordedProcessIsTracker =
+    commandMatchesTrackerScript(recordedCommand, trackerScript) &&
+    trackerCommandPort(recordedCommand) === resolvedPort;
+  const health = await readLocalAppHealth(url);
+  const runtime = classifyLocalAppRuntime({
+    health,
+    installedVersion,
+    recordedPid,
+    recordedProcessIsTracker,
+  });
+
+  if (runtime.state === "current") {
+    console.log(`• Local app already live → ${url}`);
+    return { url, existing: true };
+  }
+
+  if (runtime.state === "stale-owned") {
+    console.log(
+      `• Replacing stale local app v${runtime.runningVersion || "unknown"} with v${installedVersion}…`
+    );
+    try {
+      process.kill(runtime.pid, "SIGTERM");
+    } catch {
+      console.log("• Stale local app could not be stopped safely; continuing without replacing it");
+      return null;
+    }
+    if (!(await waitForUrlToStop(url, 5000))) {
+      console.log("• Stale local app did not stop cleanly; continuing without replacing it");
+      return null;
+    }
+  } else if (runtime.state === "foreign" || runtime.state === "stale-unowned") {
+    const fallbackPort = await findAvailableLoopbackPort({ startPort: resolvedPort + 1 });
+    if (!fallbackPort) {
+      console.log("• Local app could not find a safe loopback port; continuing without it");
+      return null;
+    }
+    if (runtime.state === "foreign") {
+      console.log(
+        `• Port ${resolvedPort} belongs to another process; leaving it untouched and using ${fallbackPort}`
+      );
+    } else {
+      console.log(
+        `• Stale unowned CareerRat v${runtime.runningVersion || "unknown"} is using port ${resolvedPort}; leaving it untouched and using ${fallbackPort}`
+      );
+    }
+    resolvedPort = fallbackPort;
+    url = `http://localhost:${resolvedPort}`;
+  }
+
+  const args = [trackerScript];
+  if (resolvedPort !== 7777 || port != null) args.push("--port", String(resolvedPort));
 
   let logFd;
   try {
@@ -318,7 +373,7 @@ async function startDashboard(port) {
     child.unref();
     writeFileSync(pidPath, `${child.pid}\n`);
 
-    const ready = await waitForUrl(url, 8000);
+    const ready = await waitForUrl(url, installedVersion, 8000);
     const relLog = displayPath(pathCtx, ".internal/tracker-dev.log");
     if (ready) {
       console.log(`• Local app live → ${url} (pid ${child.pid}, log ${relLog})`);
@@ -339,27 +394,57 @@ async function startDashboard(port) {
   }
 }
 
-async function waitForUrl(url, timeoutMs) {
+function readRecordedDashboardPid(pidPath) {
+  try {
+    return parseRecordedPid(readFileSync(pidPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+function recordedTrackerProcessCommand(pid) {
+  if (!pid) return "";
+  try {
+    process.kill(pid, 0);
+  } catch {
+    return "";
+  }
+  const inspected =
+    process.platform === "win32"
+      ? spawnSync(
+          "powershell.exe",
+          [
+            "-NoProfile",
+            "-NonInteractive",
+            "-Command",
+            `(Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}').CommandLine`,
+          ],
+          { encoding: "utf8" }
+        )
+      : spawnSync("ps", ["-p", String(pid), "-o", "command="], {
+          encoding: "utf8",
+        });
+  return inspected.status === 0 ? inspected.stdout : "";
+}
+
+async function waitForUrl(url, installedVersion, timeoutMs) {
   const started = Date.now();
   while (Date.now() - started < timeoutMs) {
-    if (await urlResponds(url)) return true;
+    const health = await readLocalAppHealth(url);
+    if (health.careerrat && health.version === installedVersion) return true;
     await delay(150);
   }
   return false;
 }
 
-async function urlResponds(url, timeoutMs = 500) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  timer.unref?.();
-  try {
-    const res = await fetch(url, { signal: controller.signal });
-    return res.ok;
-  } catch {
-    return false;
-  } finally {
-    clearTimeout(timer);
+async function waitForUrlToStop(url, timeoutMs) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const health = await readLocalAppHealth(url);
+    if (!health.responding) return true;
+    await delay(100);
   }
+  return false;
 }
 
 function delay(ms) {
@@ -452,6 +537,8 @@ function runUpdate(extra) {
     return 0;
   }
 
+  const runningDashboard = activeRecordedDashboard();
+
   console.log(`• Fetching careerrat@${latest}…`);
   let pkg;
   try {
@@ -485,7 +572,41 @@ function runUpdate(extra) {
   run(join(root, "scripts/install-skills.mjs"), ["--soft"]);
   console.log(`• Updated ${current} → ${readVersion()}. Running doctor…`);
   run(join(root, CLIS.doctor), []);
+  if (runningDashboard && restartDashboardAfterUpdate(runningDashboard) !== 0) {
+    console.error("CareerRat updated, but the running local app could not be refreshed.");
+    return 1;
+  }
   return 0;
+}
+
+function activeRecordedDashboard() {
+  const internalDir = resolveUserPaths(pathCtx).internalDir;
+  const pid = readRecordedDashboardPid(join(internalDir, "tracker-dev.pid"));
+  const trackerScript = join(root, "src/cli/tracker-dev.mjs");
+  const command = recordedTrackerProcessCommand(pid);
+  if (!commandMatchesTrackerScript(command, trackerScript)) return null;
+  const port = trackerCommandPort(command, {
+    defaultPort: Number(process.env.CAREERRAT_DEV_PORT || 7777),
+  });
+  if (port == null) return null;
+  return {
+    pid,
+    port: Number.isInteger(port) && port > 0 && port <= 65535 ? port : 7777,
+  };
+}
+
+function restartDashboardAfterUpdate({ port }) {
+  console.log("• Refreshing the running local app with the updated code…");
+  const result = spawnSync(
+    process.execPath,
+    [join(root, "bin/careerrat.mjs"), "start", "--no-agent", "--port", String(port)],
+    { cwd: root, stdio: "inherit", env: process.env }
+  );
+  if (result.error) {
+    console.error(result.error.message);
+    return 1;
+  }
+  return result.status == null ? 1 : result.status;
 }
 
 // Print a cached "newer version available" notice (no network) and kick a detached,

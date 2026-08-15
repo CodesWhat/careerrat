@@ -69,8 +69,8 @@ Jobs at graduation, no false zero-source state, exact pause/resume restoration, 
 the same ready state after a full server restart. A later screenshot of the retired
 zero-source dead end was traced to an owned 0.7.0 local server that remained alive after
 the checkout and installed package reached 0.7.1. The onboarding behavior remains fixed;
-runtime-version handshaking and safe owned-server restart are now the open lifecycle
-blocker in `F-088`.
+runtime-version handshaking, safe owned-server replacement, update relaunch, and foreign-port
+fallback are now implemented and accepted under `F-088`.
 
 ### "Rate this job"
 

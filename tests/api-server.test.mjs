@@ -119,7 +119,7 @@ function teardown(dev, repoRoot) {
 // GET /api/health
 // ---------------------------------------------------------------------------
 
-test("GET /api/health returns ok + the running package version", async () => {
+test("GET /api/health identifies the running CareerRat version and process", async () => {
   const repoRoot = tempRepo();
   writeTracker(repoRoot);
   const dev = await bootServer(repoRoot);
@@ -128,8 +128,10 @@ test("GET /api/health returns ok + the running package version", async () => {
     assert.equal(res.status, 200);
     const body = await res.json();
     assert.equal(body.ok, true);
+    assert.equal(body.product, "careerrat");
     assert.equal(typeof body.version, "string");
     assert.ok(body.version.length > 0);
+    assert.equal(body.pid, process.pid);
   } finally {
     teardown(dev, repoRoot);
   }

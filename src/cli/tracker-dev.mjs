@@ -249,7 +249,12 @@ export function createDevServer({
   }
 
   addRoute("GET", "/api/health", (_req, res) => {
-    sendJson(res, 200, { ok: true, version: PACKAGE_VERSION });
+    sendJson(res, 200, {
+      ok: true,
+      product: "careerrat",
+      version: PACKAGE_VERSION,
+      pid: process.pid,
+    });
   });
 
   // P0-4 — the embedded AI skill runtime. See src/cli/skill-run-route.mjs for

@@ -56,7 +56,10 @@ careerrat update     # fetches the latest published code; your data is untouched
 ```
 
 The update command pulls the latest release from npm and overwrites only the
-code. Your `workspace/` and `candidate/` data are not touched.
+code. Your `workspace/` and `candidate/` data are not touched. If the local app
+is running, the updated launcher verifies its version and safely replaces only
+that recorded CareerRat process. An unrelated process on the preferred port is
+left alone and CareerRat uses another loopback port.
 
 ## Manual Wiring
 
