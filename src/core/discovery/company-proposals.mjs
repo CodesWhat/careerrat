@@ -12,6 +12,7 @@ import {
   resolveCompanyBoard as defaultResolveCompanyBoard,
 } from "./company-board-resolver.mjs";
 import { buildCompanySeedContext } from "./company-context.mjs";
+import { companyDiscoveryFingerprint } from "./company-discovery-cadence.mjs";
 import { buildCompanyProposal } from "./company-proposal-gate.mjs";
 import { generateCompanySeeds } from "./company-seeds.mjs";
 
@@ -47,6 +48,18 @@ function manualSeedsFromBody(body = {}) {
 
 function requestedCountFromBody(body = {}) {
   return body.requestedCount || body.requested_count || COMPANY_DISCOVERY_BATCH_MAX;
+}
+
+function discoveryRequestFromBody(body = {}) {
+  return String(body.request || body.discoveryRequest || body.discovery_request || "")
+    .trim()
+    .slice(0, 500);
+}
+
+function discoveryTriggerFromBody(body = {}) {
+  const kind = String(body.trigger?.kind || "").trim();
+  const id = String(body.trigger?.id || "").trim();
+  return kind === "search-run" && id ? { kind, id: id.slice(0, 160) } : null;
 }
 
 function scoringConfigFromContext(context = {}) {
@@ -179,7 +192,9 @@ export async function createCompanyProposalBatch({
   now = new Date(),
 } = {}) {
   const manualSeeds = manualSeedsFromBody(body);
-  const context = buildSeedContext({ repoRoot, env });
+  const baseContext = buildSeedContext({ repoRoot, env });
+  const discoveryRequest = discoveryRequestFromBody(body);
+  const context = discoveryRequest ? { ...baseContext, discoveryRequest } : baseContext;
   const seedResult = await generateSeeds({
     repoRoot,
     env,
@@ -196,6 +211,7 @@ export async function createCompanyProposalBatch({
   const createdDate = nowDate(now);
   const createdAt = createdDate.toISOString();
   const batchId = stableId("cpb", [createdAt, seeds.map((seed) => seed.name).join(",")]);
+  const trigger = discoveryTriggerFromBody(body);
   const proposals = [];
   const rejected = [];
 
@@ -222,6 +238,8 @@ export async function createCompanyProposalBatch({
     status: "pending",
     createdAt,
     version: 1,
+    contextFingerprint: companyDiscoveryFingerprint(context),
+    ...(trigger ? { trigger } : {}),
     proposals,
     rejected,
     counts: {

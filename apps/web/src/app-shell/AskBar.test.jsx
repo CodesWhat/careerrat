@@ -250,6 +250,21 @@ function jobActionPreview({
   };
 }
 
+function companyActionPreview() {
+  return {
+    action: {
+      label: "Discover more matching companies",
+      intent: {
+        type: "company.discover",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { requestedCount: 12, request: "find more companies for me" },
+      },
+    },
+    answer: { label: "Answer about company discovery" },
+    engineAvailable: true,
+  };
+}
+
 function answerOnlyPreview({ engineAvailable = true } = {}) {
   return {
     action: null,
@@ -761,6 +776,209 @@ describe("AskBar — acting", () => {
       { type: "application", id: "app-acme" },
       { applyIntent: true, formats: ["pdf"] }
     );
+  });
+
+  it("renders company proposals and keeps Track or Skip decisions in the workspace thread", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(companyActionPreview());
+    const proposal = {
+      proposalId: "proposal-acme",
+      company: { name: "Acme AI" },
+      why: "Matches your applied AI focus.",
+      roleSeen: "Applied AI Engineer",
+      atsProvider: "lever",
+      confidenceTier: "high-confidence",
+      version: 1,
+    };
+    api.runWorkspaceIntent
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Found 1 new company beyond your focus examples.",
+              artifacts: [
+                {
+                  kind: "company_proposals",
+                  title: "Company discovery: 1 to review",
+                  batchId: "batch-acme",
+                  version: 1,
+                  proposals: [proposal],
+                  rejected: [],
+                  counts: { seeds: 1, proposals: 1, rejected: 0 },
+                  seedSource: "ai",
+                },
+              ],
+              metadata: { state: "needs-review" },
+            },
+          ],
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          messages: [
+            {
+              role: "assistant",
+              kind: "action_result",
+              text: "Tracking Acme AI. All company proposals are reviewed.",
+              artifacts: [
+                {
+                  kind: "company_proposals",
+                  title: "Company discovery: review complete",
+                  batchId: "batch-acme",
+                  version: 2,
+                  proposals: [],
+                  rejected: [],
+                  counts: { seeds: 1, proposals: 1, rejected: 0 },
+                  seedSource: null,
+                },
+              ],
+              metadata: {
+                state: "complete",
+                nextActions: [
+                  {
+                    label: "Search the expanded company set",
+                    intent: {
+                      type: "search.run",
+                      entity: { type: "workspace", id: "workspace-main" },
+                      input: { purpose: "manual-search" },
+                    },
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "find more companies for me" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const card = byClass(tree, "ask-bar__company-proposals");
+    expect(textOf(card)).toContain("Acme AI");
+    expect(textOf(card)).toContain("Matches your applied AI focus.");
+    expect(textOf(card)).toContain("Applied AI Engineer");
+
+    buttonByText(tree, "Track").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.runWorkspaceIntent).toHaveBeenNthCalledWith(
+      2,
+      "company.proposal-decide",
+      { type: "company-proposal", id: "proposal-acme" },
+      {
+        batchId: "batch-acme",
+        proposalId: "proposal-acme",
+        action: "approve-supported-ats",
+        expectedVersion: 1,
+      }
+    );
+    expect(textOf(tree)).toContain("All company proposals are reviewed");
+    expect(buttonByText(tree, "Search the expanded company set")).toBeTruthy();
+  });
+
+  it("shows recurring company proposals immediately while the job search continues", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Job search started. 1 company needs review while it runs.",
+            artifacts: [
+              {
+                kind: "search_run",
+                runId: "manual-search-recurring",
+                status: "running",
+              },
+              {
+                kind: "company_proposals",
+                batchId: "batch-recurring",
+                proposals: [
+                  {
+                    proposalId: "proposal-recurring",
+                    company: { name: "Recurring Co" },
+                    version: 1,
+                  },
+                ],
+                rejected: [],
+              },
+            ],
+            metadata: {
+              searchRunId: "manual-search-recurring",
+              searchTerminal: false,
+              companyReview: true,
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("Recurring Co");
+    expect(api.getWorkspaceThread).not.toHaveBeenCalled();
+  });
+
+  it("allows the company-review handoff to open the current Jobs search tab", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(companyActionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "All company proposals are reviewed.",
+            metadata: {
+              nextActions: [
+                { label: "Review the current job search", href: "/jobs?tab=search" },
+                { label: "Unsafe tab", href: "/jobs?tab=settings" },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "find more companies" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const links = visit(tree, (node) => node.type === "a");
+    expect(links).toHaveLength(1);
+    expect(links[0].props.href).toBe("/app/jobs?tab=search");
   });
 
   it("keeps internal result actions inside the mounted /app router", async () => {

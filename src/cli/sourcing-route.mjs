@@ -97,14 +97,16 @@ export function mountSourcingRoutes({
             retryFailed,
           })
         : await startFirstSearchImpl({ repoRoot, env, fetchImpl, retryFailed });
-      startBackground({
-        repoRoot,
-        env,
-        fetchImpl,
-        result,
-        runSearchInBackgroundImpl,
-        workspaceAgentRuntime,
-      });
+      if (!workspaceAgentRuntime?.startsSearchInBackground) {
+        startBackground({
+          repoRoot,
+          env,
+          fetchImpl,
+          result,
+          runSearchInBackgroundImpl,
+          workspaceAgentRuntime,
+        });
+      }
       sendJson(res, result.reused ? 200 : 202, result);
     } catch (err) {
       sendRouteError(res, err);
@@ -120,14 +122,16 @@ export function mountSourcingRoutes({
             retryFailed: false,
           })
         : await startManualSearchImpl({ repoRoot, env, fetchImpl });
-      startBackground({
-        repoRoot,
-        env,
-        fetchImpl,
-        result,
-        runSearchInBackgroundImpl,
-        workspaceAgentRuntime,
-      });
+      if (!workspaceAgentRuntime?.startsSearchInBackground) {
+        startBackground({
+          repoRoot,
+          env,
+          fetchImpl,
+          result,
+          runSearchInBackgroundImpl,
+          workspaceAgentRuntime,
+        });
+      }
       sendJson(res, result.reused ? 200 : 202, result);
     } catch (err) {
       sendRouteError(res, err);

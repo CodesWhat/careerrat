@@ -208,6 +208,33 @@ test("typed intents reject unknown action types and mismatched entity types befo
   assert.equal(workspaceThreadRead({ repoRoot, env: {} }).messages.length, 0);
 });
 
+test("company discovery and proposal decisions are typed workspace intents", () => {
+  const repoRoot = tempRepo();
+
+  workspaceIntentAppend({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    },
+  });
+  workspaceIntentAppend({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.proposal-decide",
+      entity: { type: "company-proposal", id: "proposal-acme" },
+      input: { batchId: "batch-acme", action: "reject", expectedVersion: 1 },
+    },
+  });
+
+  assert.deepEqual(
+    workspaceThreadRead({ repoRoot, env: {} }).messages.map((message) => message.intent.type),
+    ["company.discover", "company.proposal-decide"]
+  );
+});
+
 test("interview prep executes behind the same thread and appends its artifact result", async () => {
   const repoRoot = tempRepo();
   const calls = [];
@@ -1198,6 +1225,7 @@ test("ISSUE-032 search buttons start work in workspace-main and preserve bounded
       calls.push(input);
       return started;
     },
+    companyDiscoveryCadenceImpl: () => ({ status: "current", due: false }),
     now: () => new Date("2026-08-09T14:05:00.000Z"),
   });
 
@@ -1224,6 +1252,347 @@ test("ISSUE-032 search buttons start work in workspace-main and preserve bounded
   });
   assert.equal(result.messages[1].metadata.state, "running");
   assert.match(result.messages[1].text, /search started/i);
+});
+
+test("a due manual search starts recurring company discovery and returns proposals for review", async () => {
+  const repoRoot = tempRepo();
+  const companyCalls = [];
+  const started = {
+    ok: true,
+    run: {
+      id: "manual-search-with-companies",
+      purpose: "manual-search",
+      status: "running",
+    },
+  };
+  const proposal = {
+    proposalId: "proposal-recurring",
+    company: { name: "Recurring Co" },
+    why: "Matches the candidate's company thesis.",
+    jobBoardUrl: "https://jobs.ashbyhq.com/recurring",
+    atsProvider: "ashby",
+    version: 1,
+  };
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "manual-search" },
+    },
+    startManualSearchImpl: async () => started,
+    companyDiscoveryCadenceImpl: () => ({
+      status: "due",
+      due: true,
+      reason: "weekly-cadence",
+    }),
+    createCompanyProposalsImpl: async (input) => {
+      companyCalls.push(input);
+      return {
+        data: {
+          batchId: "batch-recurring",
+          proposals: [proposal],
+          rejected: [],
+          counts: { seeds: 1, proposals: 1, rejected: 0 },
+        },
+        meta: { version: 1, seedSource: "ai" },
+      };
+    },
+    now: () => new Date("2026-08-17T12:00:00.000Z"),
+  });
+
+  assert.equal(companyCalls.length, 1);
+  assert.deepEqual(companyCalls[0].body, {
+    requestedCount: 12,
+    trigger: { kind: "search-run", id: "manual-search-with-companies" },
+  });
+  const message = result.messages.at(-1);
+  assert.deepEqual(
+    message.artifacts.map((artifact) => artifact.kind),
+    ["search_run", "company_proposals"]
+  );
+  assert.equal(message.metadata.searchTerminal, false);
+  assert.equal(message.metadata.companyReview, true);
+  assert.equal(message.metadata.companyDiscovery.reason, "weekly-cadence");
+  assert.match(message.text, /1 company.*needs review/i);
+});
+
+test("the workspace runtime starts the job sweep before recurring company discovery finishes", async () => {
+  const repoRoot = tempRepo();
+  let releaseCompanyDiscovery;
+  const companyDiscoveryBlocked = new Promise((resolve) => {
+    releaseCompanyDiscovery = resolve;
+  });
+  let markBackgroundStarted;
+  const backgroundStarted = new Promise((resolve) => {
+    markBackgroundStarted = resolve;
+  });
+  const runtime = createWorkspaceAgentRuntime({
+    repoRoot,
+    env: {},
+    startManualSearchImpl: async () => ({
+      ok: true,
+      run: { id: "manual-search-concurrent", purpose: "manual-search", status: "running" },
+    }),
+    companyDiscoveryCadenceImpl: () => ({ status: "due", due: true, reason: "never-run" }),
+    createCompanyProposalsImpl: async () => {
+      await companyDiscoveryBlocked;
+      return {
+        data: {
+          batchId: "batch-concurrent",
+          proposals: [],
+          rejected: [],
+          counts: { seeds: 0, proposals: 0, rejected: 0 },
+        },
+        meta: { version: 1, seedSource: "ai" },
+      };
+    },
+    runSearchInBackgroundImpl: async ({ runId }) => {
+      markBackgroundStarted(runId);
+      return {
+        id: runId,
+        purpose: "manual-search",
+        status: "completed",
+        summary: { scanned: 1, presented: 1, filtered: 0, reconciled: 1 },
+      };
+    },
+  });
+
+  const turn = runtime.executeIntent({
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "manual-search" },
+    },
+  });
+
+  assert.equal(await backgroundStarted, "manual-search-concurrent");
+  releaseCompanyDiscovery();
+  await turn;
+});
+
+test("a manual search reopens pending company proposals instead of creating a duplicate batch", async () => {
+  const repoRoot = tempRepo();
+  let createCalls = 0;
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "search.run",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { purpose: "manual-search" },
+    },
+    startManualSearchImpl: async () => ({
+      ok: true,
+      run: { id: "manual-search-pending", purpose: "manual-search", status: "running" },
+    }),
+    companyDiscoveryCadenceImpl: () => ({
+      status: "needs-review",
+      due: false,
+      reason: "pending-review",
+      batchId: "batch-pending",
+      pendingCount: 1,
+    }),
+    createCompanyProposalsImpl: async () => {
+      createCalls += 1;
+      throw new Error("must not create a duplicate batch");
+    },
+    getCompanyProposalBatchImpl: () => ({
+      batch: {
+        batchId: "batch-pending",
+        status: "pending",
+        version: 3,
+        proposals: [
+          {
+            proposalId: "proposal-pending",
+            company: { name: "Pending Co" },
+            version: 3,
+          },
+        ],
+        rejected: [],
+        counts: { seeds: 1, proposals: 1, rejected: 0 },
+      },
+    }),
+  });
+
+  assert.equal(createCalls, 0);
+  assert.equal(result.messages.at(-1).artifacts[1].batchId, "batch-pending");
+  assert.equal(result.messages.at(-1).metadata.companyReview, true);
+});
+
+test("finishing search-triggered company review links to the running search", async () => {
+  const repoRoot = tempRepo();
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.proposal-decide",
+      entity: { type: "company-proposal", id: "proposal-recurring" },
+      input: {
+        batchId: "batch-recurring",
+        action: "reject",
+        expectedVersion: 1,
+      },
+    },
+    decideCompanyProposalImpl: async () => ({
+      data: {
+        proposal: { proposalId: "proposal-recurring", company: { name: "Recurring Co" } },
+      },
+    }),
+    getCompanyProposalBatchImpl: () => ({
+      batch: {
+        batchId: "batch-recurring",
+        status: "rejected",
+        version: 2,
+        trigger: { kind: "search-run", id: "manual-search-with-companies" },
+        proposals: [
+          {
+            proposalId: "proposal-recurring",
+            company: { name: "Recurring Co" },
+            version: 2,
+            decision: { action: "reject", status: "rejected" },
+          },
+        ],
+        rejected: [],
+        counts: { seeds: 1, proposals: 1, rejected: 0 },
+      },
+    }),
+  });
+
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    { label: "Review the current job search", href: "/jobs?tab=search" },
+  ]);
+});
+
+test("company discovery returns reviewable proposals in workspace-main without writing sources", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+  const proposal = {
+    proposalId: "proposal-acme",
+    company: { name: "Acme AI", domain: "acme.example" },
+    why: "Matches the candidate's applied AI focus.",
+    roleSeen: "Applied AI Engineer",
+    jobBoardUrl: "https://jobs.lever.co/acme",
+    atsProvider: "lever",
+    classification: "supported_ats",
+    confidenceTier: "high-confidence",
+    capturedOffers: [
+      {
+        title: "Applied AI Engineer",
+        bodyText: "FULL JD BODY MUST STAY IN THE JOB ARTIFACT",
+        artifacts: { jd: "workspace/jobs/acme-applied-ai-engineer.md" },
+      },
+    ],
+    version: 1,
+  };
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { requestedCount: 8, request: "find companies like my focus examples" },
+    },
+    createCompanyProposalsImpl: async (input) => {
+      calls.push(input);
+      return {
+        data: {
+          batchId: "batch-acme",
+          proposals: [proposal],
+          rejected: [],
+          counts: { seeds: 1, proposals: 1, rejected: 0 },
+        },
+        meta: { version: 1, seedSource: "ai", ai: { used: true } },
+      };
+    },
+    now: () => new Date("2026-08-09T14:05:00.000Z"),
+  });
+
+  assert.equal(calls.length, 1);
+  assert.deepEqual(calls[0].body, {
+    requestedCount: 8,
+    request: "find companies like my focus examples",
+  });
+  const { capturedOffers: _capturedOffers, ...compactProposal } = proposal;
+  assert.equal(result.messages.at(-1).kind, "action_result");
+  assert.equal(result.messages.at(-1).metadata.state, "needs-review");
+  assert.deepEqual(result.messages.at(-1).artifacts[0], {
+    kind: "company_proposals",
+    title: "Company discovery: 1 to review",
+    batchId: "batch-acme",
+    version: 1,
+    proposals: [compactProposal],
+    rejected: [],
+    counts: { seeds: 1, proposals: 1, rejected: 0 },
+    seedSource: "ai",
+  });
+  assert.doesNotMatch(JSON.stringify(result.messages.at(-1)), /FULL JD BODY/);
+  assert.match(result.messages.at(-1).text, /beyond your focus examples/i);
+});
+
+test("a confirmed company decision stays in the workspace thread and hands off to search", async () => {
+  const repoRoot = tempRepo();
+  const decisions = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "company.proposal-decide",
+      entity: { type: "company-proposal", id: "proposal-acme" },
+      input: {
+        batchId: "batch-acme",
+        action: "approve-supported-ats",
+        expectedVersion: 1,
+      },
+    },
+    decideCompanyProposalImpl: async (input) => {
+      decisions.push(input);
+      return {
+        data: {
+          decision: { action: "approve-supported-ats", status: "approved" },
+          proposal: {
+            proposalId: "proposal-acme",
+            company: { name: "Acme AI" },
+            version: 2,
+          },
+        },
+        meta: { version: 2 },
+      };
+    },
+    getCompanyProposalBatchImpl: () => ({
+      batch: {
+        batchId: "batch-acme",
+        status: "approved",
+        version: 2,
+        proposals: [
+          {
+            proposalId: "proposal-acme",
+            company: { name: "Acme AI" },
+            version: 2,
+            decision: { action: "approve-supported-ats", status: "approved" },
+          },
+        ],
+        rejected: [],
+        counts: { seeds: 1, proposals: 1, rejected: 0 },
+      },
+    }),
+  });
+
+  assert.deepEqual(decisions[0].body, {
+    batchId: "batch-acme",
+    proposalId: "proposal-acme",
+    action: "approve-supported-ats",
+    expectedVersion: 1,
+    userConfirmed: true,
+  });
+  const message = result.messages.at(-1);
+  assert.match(message.text, /Tracking Acme AI/i);
+  assert.equal(message.metadata.state, "complete");
+  assert.equal(message.metadata.nextActions[0].intent.type, "search.run");
+  assert.equal(message.artifacts[0].proposals.length, 0);
 });
 
 test("completed search results return to the same agent without replaying fetched job bodies", async () => {
@@ -2119,7 +2488,7 @@ test("workspace agent routes expose the one thread and route button intents thro
   assert.equal(acted.body.data.messages.length, 2);
 });
 
-test("workspace job-request errors return actionable client statuses instead of server errors", async () => {
+test("workspace action errors return actionable client statuses instead of server errors", async () => {
   const repoRoot = tempRepo();
   const cases = [
     ["JOB_URL_REQUIRED", 400],
@@ -2128,6 +2497,9 @@ test("workspace job-request errors return actionable client statuses instead of 
     ["JOB_REFERENCE_AMBIGUOUS", 409],
     ["JOB_CAPTURE_FAILED", 409],
     ["JOB_BODY_REQUIRES_BROWSER", 409],
+    ["CONFLICT", 409],
+    ["VALIDATION_FAILED", 422],
+    ["NO_AI_ROUTE", 501],
   ];
 
   for (const [code, expectedStatus] of cases) {

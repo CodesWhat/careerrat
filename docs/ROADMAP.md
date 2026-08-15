@@ -348,13 +348,16 @@ The current build order is:
    fail visibly instead of guessing. They never mark Applied without confirmation. Remaining work
    is preserving direct apply intent on an initial pasted/attached JD, the connected authenticated
    executor and automatic form-question capture, plus clean-home and packaged acceptance coverage.
-3. **Company thesis, not a company allowlist** — Paul asks about companies or kinds of companies
+3. **Company thesis, not a company allowlist (implemented, acceptance in progress)** — Paul asks about companies or kinds of companies
    whose values, industry, size, stage, business model, or local presence the user likes. He turns
    answers such as fintech, large corporations, fast-food chains, or small Denver accounting firms
    into reusable discovery signals. Named employers are priority examples; all non-excluded
    companies remain fair game. Manual focus seeds and broader discovery must run together, leaving
    the answer blank must still discover companies, and discovery refreshes after setup instead of
-   becoming a one-time step.
+   becoming a one-time step. Ask now accepts natural company-discovery requests, returns reviewable
+   proposals with Track/Skip confirmation, and preserves every decision in the workspace thread.
+   Manual job sweeps start immediately, then refresh discovery weekly or whenever the targeting
+   thesis changes. An unresolved proposal batch is reopened instead of duplicated.
 4. **Original-skill native parity** — every user-facing original skill gets an Ask entry and
    contextual shortcut where useful, deterministic entity resolution, visible work, safe decisions,
    a durable linked result, and the next handoff. Internal extraction helpers stay internal but must

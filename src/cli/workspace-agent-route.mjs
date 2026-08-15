@@ -22,11 +22,16 @@ const CONFLICT_CODES = new Set([
 ]);
 
 function statusForError(error) {
+  const explicitStatus = Number(error?.status);
+  if (new Set([400, 404, 409, 422, 501, 502]).has(explicitStatus)) return explicitStatus;
   if (error?.code === "NO_DATABASE") return 409;
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "JOB_REFERENCE_NOT_FOUND") return 404;
   if (error?.code === "MISSING_JOB_BODY") return 409;
   if (CONFLICT_CODES.has(error?.code)) return 409;
+  if (error?.code === "CONFLICT") return 409;
+  if (error?.code === "VALIDATION_FAILED") return 422;
+  if (new Set(["NO_AI_ROUTE", "SDK_NOT_INSTALLED"]).has(error?.code)) return 501;
   if (
     [
       "BAD_DATE",
@@ -52,6 +57,7 @@ function statusForError(error) {
       "BAD_INTERVIEW_AT",
       "BAD_INTERVIEW_ARTIFACT",
       "BAD_QUESTION_CAPTURE",
+      "BAD_COMPANY_PROPOSAL_ACTION",
       "EMPTY_COMMUNICATION_NOTE",
       "INTERVIEW_APPLICATION_REQUIRED",
       "TEXT_TOO_LONG",

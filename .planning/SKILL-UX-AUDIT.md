@@ -136,7 +136,7 @@ Status meanings:
 | `ingest-profile` | Chat-first onboarding and editable file pane | partial | Replace form-like company collection with a company-thesis conversation and carry the thread into normal Ask. |
 | `setup-searches` | Onboarding/Settings source setup | partial | Make natural-language source changes visible and durable in the workspace thread. |
 | `research-boards` | Guided onboarding discovery chat | partial | Provide a normal post-setup Ask entry and return approved sources to Jobs/Settings. |
-| `discover-companies` | Proposal UI plus guided onboarding chat | partial | Learn a company thesis, mix focus seeds with broad discovery, and run recurring expansion after setup. |
+| `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | partial | Run clean-home and packaged acceptance for every input shape, including ambiguity and recovery. |
 | `tailor-application` | Job packet actions plus the open-job Apply Ask chain | partial | Add standalone natural tailoring requests and browser-captured screening questions; keep returning gaps/artifacts in chat. |
@@ -197,8 +197,11 @@ Required behavior:
 Current implementation persists a confirmed structured company thesis separately
 from resolved ATS sources. Named examples are priority seeds, broader generated and
 deterministic seeds still run, exclusions remain the only hard boundary, and résumé
-employers no longer masquerade as target companies. Recurring post-setup discovery
-cadence remains part of the broader native orchestration gate.
+employers no longer masquerade as target companies. Ask can start company discovery
+directly and returns reviewable proposals with confirm-first Track/Skip actions in the
+same durable thread. Manual job sweeps start their deterministic search immediately,
+then refresh company discovery every seven days or whenever the targeting thesis
+changes. Pending proposals reopen instead of spawning a duplicate batch.
 
 ## Deterministic source parity
 
