@@ -21,6 +21,7 @@ import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cad
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
 import { matchTrackerRecord } from "../intake/match.mjs";
+import { normalizeIntakeRequestedAction } from "../intake/requested-action.mjs";
 import { resolveJobUrl } from "../intake/resolve.mjs";
 import { buildInterviewDossier } from "../interview/dossier.mjs";
 import {
@@ -2211,6 +2212,7 @@ export async function captureWorkspaceIntake({
   if (inputKind !== undefined && inputKind !== "text" && inputKind !== "url") {
     throw actionError('Intake kind must be "text" or "url".', "BAD_INTAKE_KIND");
   }
+  const normalizedRequestedAction = normalizeIntakeRequestedAction(requestedAction);
 
   const intakeMessage = workspaceMessageAppend({
     repoRoot,
@@ -2218,7 +2220,7 @@ export async function captureWorkspaceIntake({
     role: "user",
     kind: "intake",
     text: rawText,
-    metadata: { inputKind: inputKind || "auto", requestedAction: requestedAction || null },
+    metadata: { inputKind: inputKind || "auto", requestedAction: normalizedRequestedAction },
     now,
   });
 
@@ -2234,7 +2236,7 @@ export async function captureWorkspaceIntake({
       env,
       text: rawText,
       inputKind,
-      ...(requestedAction ? { requestedAction } : {}),
+      ...(normalizedRequestedAction ? { requestedAction: normalizedRequestedAction } : {}),
     });
     const proposedAction = String(item?.classification?.proposedAction || "").trim();
     const needsReason = String(item?.classification?.needsUserReason || item?.error || "").trim();

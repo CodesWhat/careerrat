@@ -61,6 +61,7 @@ function statusForError(error) {
       "EMPTY_COMMUNICATION_NOTE",
       "INTERVIEW_APPLICATION_REQUIRED",
       "TEXT_TOO_LONG",
+      "BAD_REQUESTED_ACTION",
       "UNSUPPORTED_INTENT",
     ].includes(error?.code)
   ) {
