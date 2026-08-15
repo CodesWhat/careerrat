@@ -457,6 +457,19 @@ describe("AskBar — idle", () => {
     tree = render();
     expect(byClass(tree, "ask-bar__kbd")).toBeUndefined();
   });
+
+  it("accepts contextual screen handoffs as a prefilled Ask request", () => {
+    render();
+    runPendingEffects();
+    const listener = document.addEventListener.mock.calls.find(
+      ([name]) => name === "careerrat:ask-request"
+    )?.[1];
+    expect(listener).toBeTypeOf("function");
+    listener({ detail: { text: "Help me schedule the Northstar interview." } });
+    const input = byTag(render(), "input");
+    expect(input.props.value).toBe("Help me schedule the Northstar interview.");
+    expect(input.props["aria-expanded"]).toBe(true);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1288,6 +1301,136 @@ describe("AskBar — acting", () => {
       (node) => node.type === "a" && textOf(node).trim() === "Open dossier"
     )[0];
     expect(link.props.href).toBe("/app/jobs?dossier=app-acme");
+  });
+
+  it("renders a scheduling draft, timezone, busy-check receipt, and tentative ICS hold", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      data: {
+        action: {
+          label: "Plan this interview scheduling reply",
+          intent: {
+            type: "scheduling.prepare-request",
+            entity: { type: "workspace", id: "workspace-main" },
+            input: {
+              communicationReference: "the Acme recruiter",
+              instruction: "Accept Wednesday at 2 PM ET.",
+            },
+          },
+        },
+        answer: { label: "Answer" },
+        engineAvailable: true,
+      },
+    });
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Prepared the reply and a tentative hold. Nothing was sent or booked.",
+            artifacts: [
+              {
+                kind: "scheduling_plan",
+                status: "ready",
+                calendarChecked: true,
+                plan: {
+                  state: "tentative_hold",
+                  timezone: "America/New_York",
+                  subject: "Re: Interview availability",
+                  body: "Hi Avery, Wednesday at 2:00 PM ET works for me. Best, Sam",
+                  slots: [
+                    {
+                      startIso: "2030-08-14T18:00:00.000Z",
+                      endIso: "2030-08-14T18:30:00.000Z",
+                      label: "Wed Aug 14, 2:00 PM ET",
+                    },
+                  ],
+                },
+                hold: {
+                  filename: "acme-recruiter-screen-hold-2030-08-14.ics",
+                  ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR",
+                },
+              },
+            ],
+            metadata: {
+              requiresReview: true,
+              nextActions: [{ label: "Review job and reply", href: "/jobs?open=app-acme" }],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "Accept the Acme interview time." } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const card = byClass(tree, "ask-bar__scheduling-plan");
+    expect(textOf(card)).toContain("America/New_York");
+    expect(textOf(card)).toContain("Calendar conflicts checked");
+    expect(textOf(card)).toContain("Wednesday at 2:00 PM ET works for me");
+    expect(textOf(card)).toContain("Wed Aug 14, 2:00 PM ET");
+    const hold = visit(card, (node) => node.type === "a")[0];
+    expect(hold.props.download).toBe("acme-recruiter-screen-hold-2030-08-14.ics");
+    expect(hold.props.href).toContain("data:text/calendar");
+    const review = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node).trim() === "Review job and reply"
+    )[0];
+    expect(review.props.href).toBe("/app/jobs?open=app-acme");
+  });
+
+  it("renders missing scheduling facts without a fake draft or hold", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Tell me which days or times work and confirm your timezone.",
+            artifacts: [
+              {
+                kind: "scheduling_plan",
+                status: "needs_user",
+                calendarChecked: false,
+                missing: ["availability", "timezone"],
+                plan: null,
+                hold: null,
+              },
+            ],
+            metadata: { state: "needs-user" },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "sweep my boards" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const card = byClass(tree, "ask-bar__scheduling-plan");
+    expect(textOf(card)).toContain("Needs your availability and timezone");
+    expect(textOf(card)).toContain("Calendar conflicts not checked");
+    expect(visit(card, (node) => node.type === "a")).toHaveLength(0);
   });
 
   it("renders a manual application handoff without claiming submission", async () => {

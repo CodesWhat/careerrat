@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
@@ -24,6 +24,8 @@ import {
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import { appUpsert } from "../src/core/db/verbs/app.mjs";
+import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
+import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
@@ -2980,6 +2982,157 @@ test("manual interview scheduling is a typed workspace action with canonical rou
   assert.equal(result.messages[0].intent.type, "interview.schedule");
   assert.equal(result.messages[1].metadata.state, "scheduled");
   assert.equal(result.messages[1].metadata.round, "hiring manager");
+});
+
+test("natural scheduling requests prepare a timezone-explicit draft and tentative hold in Ask", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { status: "interview" });
+  const threadArtifact = "workspace/comms/temporal-interview-availability.md";
+  mkdirSync(join(repoRoot, "workspace", "comms"), { recursive: true });
+  writeFileSync(
+    join(repoRoot, threadArtifact),
+    "Avery offered Wednesday August 14 at 2:00 PM ET for the recruiter screen."
+  );
+  seedCommunication(repoRoot, {
+    messages: [
+      {
+        direction: "inbound",
+        at: "2026-08-09T13:00:00.000Z",
+        summary: "Recruiter offered a time.",
+        artifactPath: threadArtifact,
+      },
+    ],
+  });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "profile",
+    patch: {
+      candidate: { preferred_name: "Sam" },
+      location: { home: "New York, NY" },
+      availability: {
+        timezone: "America/New_York",
+        working_hours: "09:00-18:00",
+        preferred_days: ["Tue", "Wed", "Thu"],
+        preferred_times: "afternoons",
+        buffer_minutes: 15,
+        default_meeting_minutes: 30,
+      },
+    },
+  });
+  calendarBusyUpsert({
+    repoRoot,
+    env: {},
+    blocks: [
+      {
+        provider: "google_calendar",
+        startIso: "2030-08-13T16:00:00.000Z",
+        endIso: "2030-08-13T16:30:00.000Z",
+      },
+    ],
+  });
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Accept Wednesday at 2 PM ET and prepare the reply.",
+      },
+    },
+    prepareSchedulingPlanImpl: async (input) => {
+      calls.push(input);
+      return {
+        status: "ready",
+        plan: {
+          state: "tentative_hold",
+          timezone: "America/New_York",
+          timezoneAssumed: false,
+          timezoneNote: "",
+          subject: "Re: Interview availability",
+          body: "Hi Avery, Wednesday at 2:00 PM ET works for me. Best, Sam",
+          round: "recruiter screen",
+          contactName: "Avery",
+          durationMinutes: 30,
+          selectedSlotIndex: 0,
+          slots: [
+            {
+              startIso: "2030-08-14T18:00:00.000Z",
+              endIso: "2030-08-14T18:30:00.000Z",
+              label: "Wed Aug 14, 2:00 PM ET",
+            },
+          ],
+          missing: [],
+        },
+        calendarChecked: true,
+        hold: {
+          filename: "temporal-labs-recruiter-screen-hold-2030-08-14.ics",
+          ics: "BEGIN:VCALENDAR\r\nEND:VCALENDAR",
+        },
+        ai: { engine: { label: "Codex" }, elapsedMs: 12 },
+      };
+    },
+    now: () => new Date("2030-08-10T12:00:00.000Z"),
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].communication.id, "comm-temporal-recruiter");
+  assert.equal(calls[0].application.id, "app-temporal");
+  assert.equal(calls[0].profile.availability.timezone, "America/New_York");
+  assert.equal(calls[0].calendarBusy.length, 1);
+  assert.match(calls[0].communication.messages[0].body, /Wednesday August 14 at 2:00 PM ET/);
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(comm.status, "drafted");
+  assert.match(comm.draft.body, /2:00 PM ET/);
+  assert.equal(readApplication(repoRoot, "app-temporal").interviewAt, undefined);
+  const message = result.messages.at(-1);
+  assert.doesNotMatch(message.text, /—/);
+  assert.equal(message.artifacts[0].kind, "scheduling_plan");
+  assert.equal(message.artifacts[0].hold.filename.endsWith(".ics"), true);
+  assert.equal(message.metadata.requiresReview, true);
+  assert.equal(message.metadata.calendarChecked, true);
+  assert.deepEqual(message.metadata.nextActions, [
+    { label: "Review job and reply", href: "/jobs?open=app-temporal" },
+  ]);
+});
+
+test("scheduling needs-you results do not create a draft or invent a booked interview", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { status: "interview" });
+  seedCommunication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Handle scheduling.",
+      },
+    },
+    prepareSchedulingPlanImpl: async () => ({
+      status: "needs_user",
+      missing: ["availability", "timezone"],
+      message: "Tell me which days or times work and confirm your timezone.",
+      calendarChecked: false,
+      ai: { used: false },
+    }),
+  });
+
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(comm.status, "needs-reply");
+  assert.equal(comm.draft, undefined);
+  assert.equal(readApplication(repoRoot, "app-temporal").interviewAt, undefined);
+  const message = result.messages.at(-1);
+  assert.equal(message.metadata.state, "needs-user");
+  assert.equal(message.artifacts[0].kind, "scheduling_plan");
+  assert.deepEqual(message.artifacts[0].missing, ["availability", "timezone"]);
 });
 
 test("communication notes and user-reported sends stay in workspace-main", async () => {

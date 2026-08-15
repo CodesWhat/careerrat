@@ -439,6 +439,41 @@ test("previewWorkspaceIntent: recruiter reply requests become typed communicatio
   });
 });
 
+test("previewWorkspaceIntent: scheduling language routes to the meeting planner before generic drafting", () => {
+  const repoRoot = tempRepo();
+  const text = "Reply to the Temporal Labs recruiter with my availability Tuesday afternoon.";
+  assert.deepEqual(previewWorkspaceIntent({ text, repoRoot, env: {} }).action, {
+    label: "Plan this interview scheduling reply",
+    intent: {
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: text,
+      },
+    },
+  });
+
+  const handle = "Handle the interview availability email from the Temporal Labs recruiter.";
+  assert.equal(
+    previewWorkspaceIntent({ text: handle, repoRoot, env: {} }).action.intent.type,
+    "scheduling.prepare-request"
+  );
+
+  const accept = "Reply to the Temporal Labs recruiter accepting Tuesday August 18 at 2 PM ET.";
+  assert.deepEqual(previewWorkspaceIntent({ text: accept, repoRoot, env: {} }).action, {
+    label: "Plan this interview scheduling reply",
+    intent: {
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: accept,
+      },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: a non-job URL stays answer-only", () => {
   const repoRoot = tempRepo();
   for (const text of [

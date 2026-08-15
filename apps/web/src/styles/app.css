@@ -6313,6 +6313,47 @@ button.chip {
   color: var(--ink);
 }
 
+.ask-bar__scheduling-plan {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+
+.ask-bar__scheduling-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ask-bar__scheduling-state,
+.ask-bar__scheduling-plan p,
+.ask-bar__scheduling-slots {
+  margin: 0;
+}
+
+.ask-bar__scheduling-state {
+  color: var(--ink-soft);
+  font-size: 12px;
+}
+
+.ask-bar__scheduling-slots {
+  padding-left: 20px;
+  color: var(--ink-soft);
+}
+
+.ask-bar__scheduling-subject {
+  font-size: 13px;
+}
+
+.ask-bar__scheduling-draft {
+  white-space: pre-wrap;
+  color: var(--ink-soft);
+}
+
 .ask-bar__source-state {
   padding: 2px 7px;
   border-radius: var(--pill-radius);
@@ -12410,6 +12451,24 @@ a.onboarding-engine__not-found-chip:focus-visible {
 
 .job-drawer__inline-actions .text-input {
   flex: 1;
+}
+
+.job-drawer__manual-schedule {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--paper-edge);
+}
+
+.job-drawer__manual-schedule summary {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.job-drawer__manual-schedule[open] {
+  display: grid;
+  gap: 10px;
 }
 
 /* Drawer header's derived next-step CTA (Phase D) and the Artifacts card's

@@ -1,7 +1,10 @@
+import { closeSync, openSync, readSync } from "node:fs";
+
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
 import { requireDb } from "../db/connection.mjs";
+import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import {
   appCaptureInterviewIntake,
   appScheduleInterview,
@@ -34,7 +37,9 @@ import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import { generateApplicationPacket } from "../packet/generate-operation.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
+import { userPath } from "../paths/workspace.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
+import { planSchedulingReply } from "../scheduling/plan.mjs";
 import {
   offersWithCapturedJobs,
   sourcedRowsFromScanOffers,
@@ -53,6 +58,8 @@ const EXECUTABLE_INTENTS = new Set([
   "interview.prepare-request",
   "interview.schedule",
   "interview.capture-context",
+  "scheduling.prepare",
+  "scheduling.prepare-request",
   "job.evaluate",
   "job.evaluate-request",
   "job.prepare-request",
@@ -118,6 +125,7 @@ function compactCandidateSnapshot({ repoRoot, env }) {
       target_total_comp: compensation.target_total_comp ?? null,
     },
     authorization: profile.authorization || {},
+    availability: profile.availability || {},
     targeting: {
       role_buckets: config.targeting?.role_buckets || [],
       keep_signals: config.targeting?.keep_signals || [],
@@ -183,7 +191,11 @@ function messageForModel(message) {
     const sourceContext = source
       ? `\n[Search source state: ${JSON.stringify(source).slice(0, 4_000)}]`
       : "";
-    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}${companyContext}${sourceContext}`;
+    const scheduling = message.artifacts?.find((artifact) => artifact.kind === "scheduling_plan");
+    const schedulingContext = scheduling
+      ? `\n[Scheduling plan state: ${JSON.stringify(scheduling).slice(0, 6_000)}]`
+      : "";
+    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}${companyContext}${sourceContext}${schedulingContext}`;
   } else if (message.kind === "action_error") {
     content = `[Action failed: ${message.error?.code || "ACTION_FAILED"}] ${content}`;
   } else if (message.kind === "agent_error") {
@@ -683,24 +695,43 @@ function resolveReferencedApplication({ repoRoot, env, jobReference, interviewOn
 const COMMUNICATION_REFERENCE_STOP_WORDS = new Set([
   "a",
   "about",
+  "availability",
+  "calendar",
   "can",
+  "confirm",
   "draft",
   "email",
   "for",
+  "from",
+  "handle",
+  "help",
   "i",
+  "interview",
+  "job",
   "mark",
+  "me",
   "message",
   "my",
+  "offer",
+  "plan",
   "please",
   "record",
   "recruiter",
   "reply",
   "response",
+  "role",
+  "schedule",
+  "scheduling",
   "send",
   "sent",
+  "slot",
+  "slots",
   "the",
+  "time",
+  "times",
   "thread",
   "to",
+  "with",
   "write",
   "you",
 ]);
@@ -757,6 +788,48 @@ function resolveReferencedCommunication({ repoRoot, env, communicationReference 
   return matches[0];
 }
 
+function readCommunicationArtifact({ repoRoot, env, artifactPath }) {
+  const relativePath = String(artifactPath || "").trim();
+  if (
+    !relativePath.startsWith("workspace/") ||
+    relativePath.includes("\0") ||
+    relativePath.includes("../")
+  ) {
+    return "";
+  }
+  let descriptor;
+  try {
+    descriptor = openSync(userPath({ repoRoot, env }, relativePath), "r");
+    const buffer = Buffer.alloc(12_000);
+    const bytesRead = readSync(descriptor, buffer, 0, buffer.length, 0);
+    return buffer.subarray(0, bytesRead).toString("utf8");
+  } catch {
+    return "";
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
+
+function communicationWithArtifactBodies({ repoRoot, env, communication }) {
+  return {
+    ...communication,
+    messages: (Array.isArray(communication.messages) ? communication.messages : []).map(
+      (message) => ({
+        ...message,
+        ...(!message?.body && message?.artifactPath
+          ? {
+              body: readCommunicationArtifact({
+                repoRoot,
+                env,
+                artifactPath: message.artifactPath,
+              }),
+            }
+          : {}),
+      })
+    ),
+  };
+}
+
 function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
   const input = intent.input || {};
   if (intent.type === "outcome.record-request") {
@@ -798,7 +871,8 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
   }
   if (
     intent.type === "communication.draft-request" ||
-    intent.type === "communication.record-external-request"
+    intent.type === "communication.record-external-request" ||
+    intent.type === "scheduling.prepare-request"
   ) {
     const communication = resolveReferencedCommunication({
       repoRoot,
@@ -810,7 +884,9 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
       type:
         intent.type === "communication.draft-request"
           ? "communication.draft"
-          : "communication.record-external",
+          : intent.type === "scheduling.prepare-request"
+            ? "scheduling.prepare"
+            : "communication.record-external",
       entity: { type: "communication", id: communication.id },
     };
   }
@@ -1471,6 +1547,7 @@ export async function executeWorkspaceIntent({
   searchFetchImpl,
   applyJobImpl,
   captureQuestionsImpl = capturePacketQuestions,
+  prepareSchedulingPlanImpl = planSchedulingReply,
   callAIImpl = callAI,
   sendCommunicationImpl,
   now = () => new Date(),
@@ -2439,6 +2516,117 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "scheduling.prepare") {
+      const communication = communicationForIntent({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+      });
+      if (!communication.applicationId) {
+        throw actionError(
+          "Link this recruiter thread to a tracked application before planning the interview.",
+          "SCHEDULING_APPLICATION_REQUIRED"
+        );
+      }
+      const application = applicationForIntent({
+        repoRoot,
+        env,
+        id: communication.applicationId,
+      });
+      const profile = candidateConfigGet({ repoRoot, env }).profile || {};
+      const tracker = assembleTrackerObject(requireDb({ repoRoot, env }));
+      const schedulingTarget = [communication.company, communication.role, communication.subject]
+        .filter(Boolean)
+        .join(", ");
+      const scheduling = await prepareSchedulingPlanImpl({
+        repoRoot,
+        env,
+        communication: communicationWithArtifactBodies({ repoRoot, env, communication }),
+        application,
+        profile,
+        calendarBusy: tracker.calendarBusy || [],
+        instruction: String(input.instruction || "").trim(),
+        now,
+      });
+      const artifact = {
+        kind: "scheduling_plan",
+        title: `${schedulingTarget || "Recruiter thread"}: scheduling`,
+        communicationId: communication.id,
+        applicationId: application.id,
+        status: scheduling.status,
+        calendarChecked: scheduling.calendarChecked === true,
+        missing: scheduling.missing || [],
+        message: scheduling.message || null,
+        plan: scheduling.plan || null,
+        hold: scheduling.hold || null,
+      };
+      if (scheduling.status !== "ready") {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text:
+            scheduling.message ||
+            "I need a little more scheduling context before I can prepare the reply.",
+          artifacts: [artifact],
+          metadata: {
+            state: scheduling.status === "needs_user" ? "needs-user" : "manual-fallback",
+            sent: false,
+            booked: false,
+            calendarChecked: scheduling.calendarChecked === true,
+            missing: scheduling.missing || [],
+            engine: scheduling.ai?.engine || null,
+            elapsedMs: scheduling.ai?.elapsedMs ?? null,
+          },
+          now,
+        });
+      }
+
+      const draftedAt = resolvedCommunicationDate(undefined, now);
+      const operation = commSetDraft({
+        repoRoot,
+        env,
+        id: communication.id,
+        draft: {
+          ...(scheduling.plan.subject ? { subject: scheduling.plan.subject } : {}),
+          body: scheduling.plan.body,
+        },
+        summary: scheduling.hold
+          ? "Scheduling reply and tentative hold prepared for review."
+          : "Scheduling reply prepared for review.",
+        at: draftedAt,
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: scheduling.hold
+          ? `Prepared the reply and a tentative hold for ${schedulingTarget || "the recruiter thread"}. Nothing was sent or booked.`
+          : `Prepared the scheduling reply for ${schedulingTarget || "the recruiter thread"}. Nothing was sent or booked.`,
+        artifacts: [artifact],
+        metadata: {
+          state: scheduling.hold ? "tentative-hold" : "drafted",
+          sent: false,
+          booked: false,
+          requiresReview: true,
+          draftedAt,
+          calendarChecked: scheduling.calendarChecked === true,
+          engine: scheduling.ai?.engine || null,
+          elapsedMs: scheduling.ai?.elapsedMs ?? null,
+          nextActions: [
+            {
+              label: "Review job and reply",
+              href: `/jobs?open=${encodeURIComponent(application.id)}`,
+            },
+          ],
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
     if (normalized.type === "communication.draft") {
       const communication = communicationForIntent({
         repoRoot,
@@ -3051,6 +3239,40 @@ function communicationSentRequestFromText(text) {
   return { communicationReference };
 }
 
+function schedulingRequestFromText(text) {
+  const value = String(text || "").trim();
+  const namesScheduling =
+    /\b(?:availability|schedul(?:e|ing)|time\s+slots?|interview\s+times?|calendar\s+hold)\b/i.test(
+      value
+    );
+  const acceptsDatedSlot =
+    /\b(?:accept|confirm)(?:ing)?\b/i.test(value) &&
+    /\b(?:recruiter|interview|call|meeting|slot)\b/i.test(value) &&
+    (/\b(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday|today|tomorrow)\b/i.test(
+      value
+    ) ||
+      /\b\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)\b/i.test(value));
+  if (!namesScheduling && !acceptsDatedSlot) {
+    return null;
+  }
+  if (
+    !/\b(?:accept|confirm|draft|handle|offer|plan|prepare|reply|respond|schedul(?:e|ing)|write)\b/i.test(
+      value
+    )
+  ) {
+    return null;
+  }
+  const reference = value.match(
+    /\b(?:to|from)\s+(.+?)(?=\s+(?:with|about|for|regarding|saying|accepting|confirming|and\s+say)\b|[.?!]*$)/i
+  )?.[1];
+  return {
+    communicationReference: String(reference || value)
+      .replace(/[.?!]+$/g, "")
+      .trim(),
+    instruction: value,
+  };
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: looksLikeReportedApplication,
@@ -3068,6 +3290,15 @@ const ACTION_PREVIEW_RULES = [
       type: "outcome.record-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: { jobReference: text, ...reportedOutcomeFromText(text) },
+    }),
+  },
+  {
+    test: (text) => Boolean(schedulingRequestFromText(text)),
+    label: "Plan this interview scheduling reply",
+    intent: (text) => ({
+      type: "scheduling.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: schedulingRequestFromText(text),
     }),
   },
   {
