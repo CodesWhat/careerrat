@@ -19,7 +19,7 @@ import { candidateConfigSource, loadCandidateDoc } from "../profile/config-store
 import { atomicWriteFile, findKeyPath, setScalar, validateText } from "../profile/gate-writer.mjs";
 import { validate } from "../profile/schema-validator.mjs";
 import { parseYaml } from "../profile/yaml.mjs";
-import { PROVIDERS } from "./session.mjs";
+import { describeProviders, detectSession, PROVIDERS } from "./session.mjs";
 
 const DEFAULT_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
@@ -130,7 +130,7 @@ export function defaultAutomation() {
     setup_mode: "basic",
     consent,
     capabilities,
-    session: { provider: "extension", profile_root: null },
+    session: { provider: "auto", profile_root: null },
   };
 }
 
@@ -294,9 +294,13 @@ export function automationStatus({ root = DEFAULT_ROOT } = {}) {
   });
 
   const liveCount = capabilities.reduce((n, c) => n + c.liveCount, 0);
+  const detectedSession = detectSession({ data: cfg });
   const session = {
-    provider: cfg.session?.provider || "extension",
-    profileRoot: cfg.session?.profile_root || null,
+    provider: detectedSession.configuredProvider,
+    effectiveProvider: detectedSession.provider,
+    profileRoot: detectedSession.profileRoot,
+    presence: detectedSession.presence,
+    options: describeProviders().map(({ id, label, needs }) => ({ id, label, needs })),
   };
 
   return {

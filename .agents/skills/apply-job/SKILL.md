@@ -185,7 +185,10 @@ Read applicant facts from `candidate/form-defaults.yml`:
 - `eeo_default` — use for EEO/demographic fields when present.
 - `screening_answers` — exact pre-reviewed answers for recurring custom questions.
 
-Navigate to the application URL using the session browser (prefer Claude-in-Chrome; fall back to Playwright with login-pause — see `docs/BROWSER.md`). Take an accessibility snapshot of the current DOM before each interaction to confirm page state.
+Navigate to the application URL using the session browser. Keep the provider on `auto`
+unless the user explicitly changes it; CareerRat resolves the current session browser
+(see `docs/BROWSER.md`). Take an accessibility snapshot of the current DOM before each
+interaction to confirm page state.
 
 **ATS detection:** call `hostnameToPortal(url)` (from `src/core/apply/form-fill.mjs`) on the application URL to identify the ATS. Use the matching `PORTAL_RECIPE` from that module as the canonical field-mapping reference for that platform. If the hostname is unknown, `genericMatch` applies — the patterns below are drawn from those generic defaults and the known recipes.
 
@@ -236,7 +239,11 @@ State clearly: this capability is OFF by default; enabling it is a deliberate ch
 
 ### Session browser + live DOM
 
-Open the job posting URL in the session browser tool-agnostically. Prefer the Chrome extension (it already holds the user's LinkedIn login); fall back to a Playwright persistent profile the user has signed into once at `~/.careerrat/board-profiles/linkedin` (see `docs/BROWSER.md`). Snapshot or read the current page state before each action. Drive the live DOM turn by turn — no hardcoded selectors, same model as STEP 7.
+Open the job posting URL in the session browser tool-agnostically. Keep the provider on
+`auto` unless the user explicitly changes it; CareerRat resolves the current session
+browser and reuses its signed-in session (see `docs/BROWSER.md`). Snapshot or read the
+current page state before each action. Drive the live DOM turn by turn — no hardcoded
+selectors, same model as STEP 7.
 
 If you encounter a login wall, captcha, platform 2FA / two-step-verification prompt, or any unexpected interstitial at any point: **halt immediately** — do not attempt to bypass or automate around it. Write the blocked state to the tracker row (`status: "manual-apply"`, note: `"manual-apply: LinkedIn 2FA / two-step-verification prompt — resume at <url>"` or similar), report to the user, and offer re-entry at the top of STEP 7b Fill once cleared. If the interstitial specifically says an emailed verification code was sent, use the STEP 8 verification-code protocol below instead of treating it as generic 2FA.
 

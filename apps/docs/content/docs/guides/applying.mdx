@@ -60,8 +60,8 @@ The `apply-job` skill:
 
 1. Confirms the gate has passed (runs or verifies `evaluate-job` as step zero).
 2. Captures public Greenhouse or Ashby application questions before building the packet.
-3. For other ATS forms, opens a supervised Ask card where you can paste the questions
-   shown on the site and rebuild the answer sheet without restarting the application.
+3. For other ATS forms, captures rendered questions from the supervised browser and
+   rebuilds the answer sheet without restarting the application. Paste remains the fallback.
 4. Shows the generated résumé, cover letter, answers, unresolved facts, and safe site link.
 5. Uses an authenticated session browser to fill the form when that executor is available.
    Otherwise, it gives you a concrete supervised handoff instead of claiming automation ran.
@@ -87,7 +87,7 @@ company. A cap breach surfaces as `ACTION: hold` in the gate output.
 ## What "manual" means
 
 If the posting needs authentication the session browser cannot handle, or if the
-form is too complex for the recipe, `apply-job` surfaces it as `manual apply
-needed` rather than failing silently. The native app currently uses this supervised
-handoff for authenticated DOM work. It logs the role, preserves captured questions,
-and links to the ATS page so you can finish the form without losing the packet.
+form is too complex for the current step, `apply-job` surfaces the exact blocker
+rather than failing silently. The native app preserves captured questions and the
+packet, reports filled, uploaded, and unresolved fields in Ask, and never records
+Applied until a confirmation page and screenshot are captured or the user reports completion.

@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-15
 
-Gate result: all 96 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 101 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, update/restart, and native Electron checks pass.
 The broader native skill-to-screen build gate remains tracked separately in
 `SKILL-UX-AUDIT.md`.
@@ -59,6 +59,8 @@ Test homes:
 - [x] `J-07` Apply on site cannot mark Applied without verified or user-reported completion.
 - [x] `J-08` Status, follow-up, note, communication, and interview actions clear satisfied CTAs.
 - [x] `J-09` Jobs writes update Home, Calendar, Network, Library inputs, activity, and Ask context.
+- [x] `J-10` Supervised Apply captures the live form, fills only confirmed values, stops before
+  Submit, and requires confirmation-page screenshot evidence before writing Applied.
 
 ## Calendar
 
@@ -1826,3 +1828,28 @@ Test homes:
 - Live retest: a real paste and a real file-picker upload in the packed app both persisted
   `requestedAction: tailor`, returned KEEP verdicts, generated only résumé and cover letter
   artifacts, and exposed no Apply handoff or submission write.
+
+### `F-101` Native Apply stops before the application form
+
+- Status: `FIXED`
+- Severity: P0 first-day workflow blocker, CareerRat could prepare an application packet but had no
+  connected production executor to open the real form, fill known answers, or verify the outcome.
+- Reproduction: ask CareerRat to apply to a saved KEEP job from the packaged app and follow the
+  generated handoff. The workflow stopped at a manual site link with no visible browser session,
+  field progress, blocker state, or confirmation evidence.
+- Root cause: the workspace agent exposed an optional `applyJobImpl` seam, but tracker-dev never
+  supplied one. Form-question capture also depended on provider-specific schemas instead of the
+  rendered form, and browser provider selection exposed implementation choices to the user.
+- Fix: automatically select the available session browser, connect the Orca executor in production,
+  capture the rendered form before every action, rebuild answers when new questions appear, fill
+  deterministic fields and generated documents, stop on identity/security blockers, preserve the
+  user's final Submit boundary, and require a confirmation re-scan plus screenshot before writing
+  Applied. Ask and the job drawer now show the live session, filled fields, unresolved work, and
+  blockers instead of implying completion.
+- Regression: Orca executor, session selection, workspace-agent, packet-answer, AskBar, JobDrawer,
+  Settings, consent, and schema suites cover automatic provider choice, safe fill/upload behavior,
+  rendered-question rebuilds, manual-submit handoff, and verified-only outcome write-back.
+- Live retest: a clean packed npm install automatically selected Orca for a controlled local form,
+  filled name, email, and work authorization, left the optional portfolio blank, and stopped before
+  Submit. After the explicit test submission, re-scan found the confirmation page, captured a local
+  PNG receipt, and only then moved the application to Applied. No employer form was submitted.

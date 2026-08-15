@@ -91,10 +91,23 @@ export function filterAnswerableQuestions({ captures } = {}) {
   return { answerable, excluded, demographicSectionPresent };
 }
 
-async function captureFromInput({ source, url, manualText, text, fetchImpl }) {
+async function captureFromInput({ source, url, manualText, text, questions, fetchImpl }) {
   if (source === "url" || source === "greenhouse" || source === "ashby") {
     if (!url) throw new Error("capturePacketQuestions: url is required for url source");
     return fetchFormQuestions(url, { fetchImpl });
+  }
+  if (source === "rendered") {
+    if (!Array.isArray(questions) || questions.length === 0) {
+      throw new Error("capturePacketQuestions: questions are required for rendered source");
+    }
+    return {
+      source: "rendered",
+      url: url || null,
+      questions,
+      demographicSectionPresent: questions.some(
+        (question) => classifySelfIdentificationQuestion(question?.label).excluded
+      ),
+    };
   }
   const pasted = cleanText(manualText || text);
   if (!pasted) throw new Error("capturePacketQuestions: manualText is required for paste source");
@@ -142,10 +155,18 @@ export async function capturePacketQuestions({
   url = "",
   manualText = "",
   text = "",
+  questions,
   fetchImpl,
 } = {}) {
   const id = cleanText(applicationId || appId);
-  const capture = await captureFromInput({ source, url, manualText, text, fetchImpl });
+  const capture = await captureFromInput({
+    source,
+    url,
+    manualText,
+    text,
+    questions,
+    fetchImpl,
+  });
   const filtered = filterAnswerableQuestions({ captures: [capture] });
   const capturedAt = new Date().toISOString();
   const payload = artifactPayload({ capture, filtered, capturedAt });

@@ -33,7 +33,9 @@ const CAPABILITY_LABELS = {
 };
 
 const PROVIDER_LABELS = {
+  auto: "Automatic browser connection",
   extension: "Browser extension",
+  orca: "Orca supervised browser",
   playwright: "Playwright profile",
 };
 

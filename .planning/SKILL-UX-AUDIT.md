@@ -127,12 +127,13 @@ confirms the exact evaluate or evaluate-to-packet plan, and returns the structur
 evaluation, generated packet, and supervised application handoff in the same Ask
 receipt. The chain stops on `CUT`/`REVIEW`, generates base documents on `KEEP`, keeps
 moving when application questions are not discoverable until the form opens, and never
-marks the job Applied from a manual handoff. Public Greenhouse and Ashby forms are now
-captured deterministically before packet generation. Every other ATS gets an in-Ask
-paste-and-resume card that persists the questions, rebuilds the answer sheet, and keeps
-the saved capture available when a rebuild must be retried. The Jobs drawer reports the
-same capture state before exposing the safe site link. A verified executor result is
-still the only path that writes Applied.
+marks the job Applied from a manual handoff. Public Greenhouse and Ashby forms are captured
+deterministically before packet generation. With an automatically selected Orca browser,
+other forms are inspected live: rendered questions are persisted, the packet rebuilds,
+known fields and generated PDFs are filled from a fresh snapshot before every action, and
+Ask reports blockers and unresolved fields. The executor never clicks Submit. A later
+re-scan must find a confirmation page and save screenshot evidence before Applied is written.
+Paste-and-resume remains available when no session browser is ready.
 
 Headed packed-install acceptance passed on 2026-08-15 against Anthropic's live Greenhouse
 board. One Ask request captured the full JD, returned a KEEP evaluation, collected all 19
@@ -143,8 +144,11 @@ treats the generated résumé as the upload answer; leaves unresolved optional f
 and reports one plain-English action per required unknown. The clean rebuild reduced 26
 duplicated validator/linter messages to four real review actions, fixed relocation and
 hybrid-office answers, and removed a false private-compensation warning caused by the phrase
-"current base" in a location sentence. Remaining work is the connected authenticated
-executor and automatic rendered-form capture for sites without a public question API.
+"current base" in a location sentence. A packed controlled-form acceptance pass on
+2026-08-15 automatically selected Orca, filled three saved facts, left an unknown optional
+Portfolio blank, stopped before Submit, then captured a 45 KB confirmation screenshot and
+wrote Applied only after the explicit test submit. Remaining work is safe multi-step ATS
+advancement and full clean-home packed acceptance for pasted and attached AI-backed chains.
 
 Final packed acceptance also covered both Universal Intake routes. A pasted JD produced a
 92/100 KEEP, generated the packet, and stopped on the real review actions; an attached JD
@@ -173,7 +177,7 @@ Status meanings:
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | native | Preserve full-JD capture, typed verdict rendering, deterministic resolution, and ambiguity recovery in clean packed-install acceptance. |
 | `tailor-application` | Ask handles URL, pasted, attached, open-job, and named-job tailoring as a documents-only workflow | native | Preserve the separate tailoring/apply boundary, typed artifacts, and packed URL/paste/file-picker acceptance. |
-| `apply-job` | Ask/manual handoff, deterministic Greenhouse/Ashby question capture, paste-and-resume fallback, Apply on site, and skill runtime | partial | Connect the authenticated executor and rendered-form capture for non-public ATS forms; preserve verified-only Applied write-back. |
+| `apply-job` | Ask, deterministic/public and rendered question capture, automatic Orca fill, supervised Submit boundary, confirmation evidence, and manual fallback | partial | Add safe multi-step ATS advancement and extension/Playwright executor bridges; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Keep ambiguity, missing-reference, and durable write-back coverage in clean-home and packaged acceptance. |
 | `email-comms` | Draft, note, external-send controls, and natural Ask draft/sent-report flows | partial | Add natural note capture and connect a verified send executor or explicit supervised handoff. |
 | `schedule-meeting` | Ask plus job-drawer shortcut reads the saved thread, availability, timezone, and busy blocks; returns a reviewable reply and tentative hold | native | Preserve no-conflict/no-draft behavior, explicit timezone, tentative ICS validity, full-thread artifact reads, and separate confirmed-time write-back in packaged acceptance. |

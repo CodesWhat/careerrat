@@ -400,6 +400,43 @@ describe("JobDrawer", () => {
     expect(textOf(tree)).toContain("Nothing was marked Applied yet.");
   });
 
+  it("reports supervised browser progress without implying submission", async () => {
+    api.applyOnSite.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            kind: "action_result",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                url: "https://careers.example.test/jobs/staff-ai/apply",
+                session: {
+                  provider: "orca",
+                  filledCount: 6,
+                  uploadedCount: 2,
+                  unresolved: [{ label: "Portfolio", required: true }],
+                },
+              },
+            ],
+            metadata: { state: "awaiting-submit", submissionVerified: false },
+          },
+        ],
+      },
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    let tree = renderDrawer(applicationRow);
+
+    await button(tree, "Apply on site").props.onClick();
+    tree = renderDrawer(applicationRow);
+
+    expect(textOf(tree)).toContain("Supervised browser filled 6 fields");
+    expect(textOf(tree)).toContain("attached 2 files");
+    expect(textOf(tree)).toContain("1 field still needs you");
+    expect(textOf(tree)).toContain("Nothing was marked Applied yet");
+    expect(textOf(tree)).not.toContain("Application submitted and verified");
+  });
+
   it("does not render an executable manual-handoff URL", async () => {
     api.applyOnSite.mockResolvedValue({
       data: {

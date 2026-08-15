@@ -67,6 +67,7 @@ test("automation consent: calendar_sync supports calendar providers and automati
 test("automation consent: mail_access defaults fully off", () => {
   const cfg = defaultAutomation();
   assert.equal(cfg.setup_mode, "basic");
+  assert.equal(cfg.session.provider, "auto");
   assert.equal(cfg.consent.gmail, false);
   assert.equal(cfg.consent.outlook, false);
   assert.equal(cfg.consent.webmail, false);
@@ -182,6 +183,15 @@ test("automation consent: status output includes mail_access platforms", () => {
     cap.platforms.map((p) => p.platform),
     ["gmail", "outlook", "webmail"]
   );
+});
+
+test("automation consent: status exposes automatic browser setup and the effective provider", () => {
+  const status = automationStatus({ root });
+  assert.ok(status.session);
+  assert.ok(Array.isArray(status.session.options));
+  assert.equal(status.session.options[0].id, "auto");
+  assert.equal(typeof status.session.effectiveProvider, "string");
+  assert.ok(status.session.presence?.status);
 });
 
 test("automation consent: status output includes relationship_sourcing platforms", () => {

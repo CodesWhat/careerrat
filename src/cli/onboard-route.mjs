@@ -755,8 +755,8 @@ function dbSourceResumePresent(pathCtx) {
 // brand-new, non-power-user candidate to consent to browser automation
 // before they've seen a single job is a decision they have no context for
 // yet, and gating setup completion on it was also a live lockout bug: the
-// ingest-profile skill's Basic mode never writes candidate/automation.yml at
-// all, so a CLI/Basic-mode-onboarded candidate could never flip this item
+// ingest-profile may not write candidate/automation.yml at all, so a CLI-onboarded
+// candidate could never flip this item
 // and sat at 8 of 9 forever, permanently redirected to /onboarding. The
 // underlying automation-consent feature is untouched and still works —
 // Settings' automation controls, src/core/automation/consent.mjs, and the

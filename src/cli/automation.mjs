@@ -267,7 +267,7 @@ function nextData() {
   return data;
 }
 
-// `session <extension|playwright>` — change WHICH provider drives the session
+// `session <auto|extension|orca|playwright>` — change WHICH provider drives the session
 // browser. Distinct from the capability/consent toggles: it's a string, not a
 // boolean, and it never affects mayRun() (provider is HOW a session runs, not
 // WHETHER a capability is allowed). Same safety as the toggles: dry-run by
@@ -275,7 +275,7 @@ function nextData() {
 function handleSession(provider) {
   if (!provider) {
     fail(
-      `Usage: session <provider>. Providers: ${PROVIDER_PREFERENCE.join(", ")} (extension preferred).`
+      `Usage: session <provider>. Providers: ${PROVIDER_PREFERENCE.join(", ")} (auto recommended).`
     );
   }
   if (!PROVIDERS[provider]) {
@@ -608,7 +608,7 @@ function printStatus(asJson) {
     console.log("");
   }
   console.log(
-    `Session browser: ${session.provider}${session.profileRoot ? ` (profiles: ${session.profileRoot})` : ""} - prefer extension, Playwright fallback. Change: \`careerrat automation session <extension|playwright> --write\`.`
+    `Session browser: ${session.provider}${session.configuredProvider === "auto" ? " (automatic)" : ""}${session.profileRoot ? ` (profiles: ${session.profileRoot})` : ""}. Change: \`careerrat automation session <auto|extension|orca|playwright> --write\`.`
   );
   console.log(
     "Toggle: `careerrat automation enable <capability> [platform] --write`, `consent <platform> --write`."
@@ -639,7 +639,7 @@ Usage:
   node src/cli/automation.mjs revoke  <platform> --write   Withdraw consent
   node src/cli/automation.mjs enable  <capability> [platform] --write
   node src/cli/automation.mjs disable <capability> [platform] --write
-  node src/cli/automation.mjs session <extension|playwright> [--write]  Set the session-browser provider
+  node src/cli/automation.mjs session <auto|extension|orca|playwright> [--write]  Set the session-browser provider
   node src/cli/automation.mjs --list [--json]          List capabilities + platforms
   node src/cli/automation.mjs --help
 

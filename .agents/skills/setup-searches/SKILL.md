@@ -91,7 +91,11 @@ careerrat automation enable authenticated_search <platform> --write
 careerrat automation status
 ```
 
-No credentials are stored. The logged-in session is held by the session browser (extension preferred; Playwright persistent profile as fallback) — see AGENTS.md → Browser Automation Contract and `docs/BROWSER.md`. Do not proceed with the platform if `mayRun({ capability: "authenticated_search", platform })` returns `allowed: false`; surface the `reasons` and stop.
+No credentials are stored. Keep the session provider on `auto` unless the user explicitly
+changes it; CareerRat resolves the current session browser and that browser holds the
+login. See AGENTS.md → Browser Automation Contract and `docs/BROWSER.md`. Do not proceed with the
+platform if `mayRun({ capability: "authenticated_search", platform })` returns `allowed: false`;
+surface the `reasons` and stop.
 
 **(c) Enable / disable entries:**
 

@@ -1046,6 +1046,31 @@ function questionCaptureText(questionCapture, application = null) {
   return "Open the site, then paste the questions here so CareerRat can rebuild the answers.";
 }
 
+const ACTIVE_APPLICATION_SESSION_STATES = new Set([
+  "questions-captured",
+  "awaiting-submit",
+  "blocked",
+]);
+
+function applicationSessionText(execution) {
+  const filledCount = Number(execution?.session?.filledCount) || 0;
+  const uploadedCount = Number(execution?.session?.uploadedCount) || 0;
+  const unresolvedCount = Array.isArray(execution?.session?.unresolved)
+    ? execution.session.unresolved.length
+    : 0;
+  const filled = filledCount
+    ? `CareerRat filled ${filledCount} field${filledCount === 1 ? "" : "s"}. `
+    : "";
+  const uploaded = uploadedCount
+    ? `CareerRat attached ${uploadedCount} file${uploadedCount === 1 ? "" : "s"}. `
+    : "";
+  const unresolved = unresolvedCount
+    ? `${unresolvedCount} field${unresolvedCount === 1 ? "" : "s"} still ${unresolvedCount === 1 ? "needs" : "need"} your review. `
+    : "";
+  const detail = String(execution?.reason || "Review the live application form.").trim();
+  return `${filled}${uploaded}${unresolved}${detail} This application was not marked Applied.`.trim();
+}
+
 function packetGapsForApplication(gaps, application, applyIntent) {
   const next = Array.isArray(gaps) ? [...gaps] : [];
   if (
@@ -1063,7 +1088,12 @@ function packetGapsForApplication(gaps, application, applyIntent) {
   return next;
 }
 
-function applicationHandoffArtifact(application, applicationId, questionCapture) {
+function applicationHandoffArtifact(
+  application,
+  applicationId,
+  questionCapture,
+  { executorAvailable = false } = {}
+) {
   const url = safeExternalHttpUrl(application.link || application.url || application.sourceUrl);
   if (!url) return null;
   return {
@@ -1072,13 +1102,25 @@ function applicationHandoffArtifact(application, applicationId, questionCapture)
     applicationId,
     url,
     submissionVerified: false,
+    executorAvailable,
     ...(questionCapture ? { questionCapture } : {}),
   };
 }
 
-function packetNextActions(gaps, applicationId, hasHandoff) {
+function packetNextActions(gaps, applicationId, hasHandoff, executorAvailable = false) {
   const blockingGaps = gaps.filter((gap) => !isQuestionCaptureGap(gap));
   if (blockingGaps.length === 0 && hasHandoff) {
+    if (executorAvailable) {
+      return [
+        {
+          label: "Start supervised apply",
+          intent: {
+            type: "job.apply",
+            entity: { type: "application", id: applicationId },
+          },
+        },
+      ];
+    }
     return [
       {
         label: "I applied",
@@ -1835,7 +1877,8 @@ export async function executeWorkspaceIntent({
           ? applicationHandoffArtifact(
               evaluated.application,
               captured.applicationId,
-              questionCapture
+              questionCapture,
+              { executorAvailable: typeof applyJobImpl === "function" }
             )
           : null;
       const packetArtifact = {
@@ -1850,7 +1893,12 @@ export async function executeWorkspaceIntent({
         blockingGapCount,
       };
       const nextActions = applyIntent
-        ? packetNextActions(gaps, captured.applicationId, Boolean(handoffArtifact))
+        ? packetNextActions(
+            gaps,
+            captured.applicationId,
+            Boolean(handoffArtifact),
+            typeof applyJobImpl === "function"
+          )
         : tailoredPacketNextActions(captured.applicationId);
       return appendActionResult({
         repoRoot,
@@ -1941,7 +1989,9 @@ export async function executeWorkspaceIntent({
       const blockingGapCount = blockingPacketGaps(gaps).length;
       const handoffArtifact =
         applyIntent && blockingGapCount === 0
-          ? applicationHandoffArtifact(application, normalized.entity.id, questionCapture)
+          ? applicationHandoffArtifact(application, normalized.entity.id, questionCapture, {
+              executorAvailable: typeof applyJobImpl === "function",
+            })
           : null;
       const gapText = packetGapText(gaps, questionCaptureDeferred, {
         tailoring: !applyIntent,
@@ -1976,7 +2026,12 @@ export async function executeWorkspaceIntent({
           gapCount: gaps.length,
           blockingGapCount,
           nextActions: applyIntent
-            ? packetNextActions(gaps, normalized.entity.id, Boolean(handoffArtifact))
+            ? packetNextActions(
+                gaps,
+                normalized.entity.id,
+                Boolean(handoffArtifact),
+                typeof applyJobImpl === "function"
+              )
             : tailoredPacketNextActions(normalized.entity.id),
         },
         operationResult: { ...operation, gaps },
@@ -2849,7 +2904,7 @@ export async function executeWorkspaceIntent({
       });
     }
 
-    const application = applicationForIntent({
+    let application = applicationForIntent({
       repoRoot,
       env,
       id: normalized.entity.id,
@@ -2912,48 +2967,143 @@ export async function executeWorkspaceIntent({
       });
     }
 
-    const questionCapture = await prepareApplicationQuestions({
-      repoRoot,
-      env,
-      application,
-      applicationId: normalized.entity.id,
-      captureQuestionsImpl,
-      fetchImpl: searchFetchImpl,
-    });
-
-    if (typeof applyJobImpl !== "function") {
-      const postingUrl = safeExternalHttpUrl(
-        application.link || application.url || application.sourceUrl
-      );
-      if (!postingUrl) {
-        return appendActionResult({
-          repoRoot,
-          env,
-          normalized,
-          intentMessage,
-          text: `CareerRat cannot open the supervised handoff for ${applicationLabel(application)} yet. Paste the application link; this application was not marked Applied.`,
-          artifacts: [
-            {
-              kind: "application_link_required",
-              title: `${applicationLabel(application)} — Application link needed`,
-              applicationId: normalized.entity.id,
-              code: "APPLICATION_URL_REQUIRED",
-            },
-          ],
-          metadata: {
-            state: "needs-input",
-            applicationId: normalized.entity.id,
-            submissionVerified: false,
-          },
-          now,
-        });
-      }
+    const postingUrl = safeExternalHttpUrl(
+      application.link || application.url || application.sourceUrl
+    );
+    if (!postingUrl) {
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `CareerRat prepared the handoff for ${applicationLabel(application)}. ${questionCaptureText(questionCapture, application)} The authenticated submission executor is not connected, so open the posting to submit it; this application was not marked Applied.`,
+        text: `CareerRat cannot open the supervised handoff for ${applicationLabel(application)} yet. Paste the application link; this application was not marked Applied.`,
+        artifacts: [
+          {
+            kind: "application_link_required",
+            title: `${applicationLabel(application)} — Application link needed`,
+            applicationId: normalized.entity.id,
+            code: "APPLICATION_URL_REQUIRED",
+          },
+        ],
+        metadata: {
+          state: "needs-input",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+        },
+        now,
+      });
+    }
+
+    let questionCapture = null;
+
+    if (input.resumeSession !== true) {
+      const evaluated = await evaluateApplicationRequest({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+        evaluateJobImpl,
+      });
+      if (evaluated.gate !== "keep") {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `${evaluated.text} CareerRat did not open the application form.`,
+          artifacts: [evaluated.artifact],
+          metadata: {
+            state: evaluated.gate,
+            applicationId: normalized.entity.id,
+            fitScore: evaluated.evaluation.fitScore ?? null,
+            manualRequired: Boolean(evaluated.evaluation.manual?.required),
+            submissionVerified: false,
+            nextActions: evaluationNextActions(evaluated.gate, normalized.entity.id),
+          },
+          now,
+        });
+      }
+
+      questionCapture = await prepareApplicationQuestions({
+        repoRoot,
+        env,
+        application,
+        applicationId: normalized.entity.id,
+        captureQuestionsImpl,
+        fetchImpl: searchFetchImpl,
+      });
+
+      const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+        applyIntent: true,
+        formats: ["pdf"],
+        generateDocumentsImpl,
+      });
+      const gaps = packetGapsForApplication(packet.gaps, application, true);
+      const blockingGapCount = blockingPacketGaps(gaps).length;
+      if (blockingGapCount > 0) {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `${evaluated.text} Generated the application packet. ${packetGapText(
+            gaps,
+            questionCaptureDeferred
+          )}`,
+          artifacts: [
+            evaluated.artifact,
+            {
+              kind: "packet_generation",
+              purpose: "application",
+              title: `${applicationLabel(application)} — Documents`,
+              applicationId: normalized.entity.id,
+              status: packet.status || "reviewable",
+              uploadReady: Boolean(packet.uploadReady),
+              artifacts: packet.artifacts || {},
+              gaps,
+              blockingGapCount,
+            },
+          ],
+          metadata: {
+            state: packet.status || "reviewable",
+            applicationId: normalized.entity.id,
+            submissionVerified: false,
+            uploadReady: Boolean(packet.uploadReady),
+            gapCount: gaps.length,
+            blockingGapCount,
+            nextActions: [
+              {
+                label: "Review application",
+                href: `/jobs?open=${encodeURIComponent(normalized.entity.id)}`,
+              },
+            ],
+          },
+          operationResult: { ...packet, gaps },
+          now,
+        });
+      }
+      application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      questionCapture = questionCaptureFromApplication(application) || questionCapture;
+    } else {
+      questionCapture = await prepareApplicationQuestions({
+        repoRoot,
+        env,
+        application,
+        applicationId: normalized.entity.id,
+        captureQuestionsImpl,
+        fetchImpl: searchFetchImpl,
+      });
+    }
+
+    if (typeof applyJobImpl !== "function") {
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `CareerRat prepared the handoff for ${applicationLabel(application)}. ${questionCaptureText(questionCapture, application)} CareerRat couldn't connect to a supervised browser, so open the posting to submit it; this application was not marked Applied.`,
         artifacts: [
           {
             kind: "application_handoff",
@@ -2981,15 +3131,187 @@ export async function executeWorkspaceIntent({
         now,
       });
     }
-    const execution = await applyJobImpl({
+    let execution = await applyJobImpl({
       repoRoot,
       env,
       applicationId: normalized.entity.id,
       application,
-      postingUrl: application.link || application.url || application.sourceUrl || null,
+      postingUrl,
       questionCapture,
       input,
     });
+    if (execution?.state === "questions-captured" && execution?.questionCaptureUpdated === true) {
+      application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      questionCapture = questionCaptureFromApplication(application) || questionCapture;
+      const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+        applyIntent: true,
+        formats: ["pdf"],
+        generateDocumentsImpl,
+      });
+      const gaps = packetGapsForApplication(packet.gaps, application, true);
+      const blockingGapCount = blockingPacketGaps(gaps).length;
+      if (blockingGapCount > 0) {
+        const sessionUrl = safeExternalHttpUrl(execution.currentUrl || postingUrl);
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `CareerRat captured the live application questions and rebuilt the packet. ${packetGapText(
+            gaps,
+            questionCaptureDeferred
+          )} The application was not marked Applied.`,
+          artifacts: [
+            {
+              kind: "packet_generation",
+              purpose: "application",
+              title: `${applicationLabel(application)} — Documents`,
+              applicationId: normalized.entity.id,
+              status: packet.status || "reviewable",
+              uploadReady: Boolean(packet.uploadReady),
+              artifacts: packet.artifacts || {},
+              gaps,
+              blockingGapCount,
+            },
+            {
+              kind: "application_handoff",
+              title: `${applicationLabel(application)} — Supervised application`,
+              applicationId: normalized.entity.id,
+              ...(sessionUrl ? { url: sessionUrl } : {}),
+              submissionVerified: false,
+              questionCapture,
+              executorAvailable: true,
+              session: execution.session || { provider: "session-browser" },
+            },
+          ],
+          metadata: {
+            state: "needs-input",
+            applicationId: normalized.entity.id,
+            submissionVerified: false,
+            uploadReady: Boolean(packet.uploadReady),
+            gapCount: gaps.length,
+            blockingGapCount,
+            nextActions: [
+              {
+                label: "Review application",
+                href: `/jobs?open=${encodeURIComponent(normalized.entity.id)}`,
+              },
+              {
+                label: "Resume supervised apply",
+                intent: {
+                  type: "job.apply",
+                  entity: { type: "application", id: normalized.entity.id },
+                  input: { resumeSession: true },
+                },
+              },
+            ],
+          },
+          operationResult: { ...packet, gaps },
+          now,
+        });
+      }
+      application = applicationForIntent({ repoRoot, env, id: normalized.entity.id });
+      execution = await applyJobImpl({
+        repoRoot,
+        env,
+        applicationId: normalized.entity.id,
+        application,
+        postingUrl,
+        questionCapture,
+        input: { ...input, resumeSession: true, renderedQuestionsReady: true },
+      });
+    }
+    if (execution?.available === false || execution?.state === "unavailable") {
+      const postingUrl = safeExternalHttpUrl(
+        application.link || application.url || application.sourceUrl
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${String(execution?.reason || "The supervised browser is unavailable.")} Open the posting to finish the application; it was not marked Applied.`,
+        artifacts: postingUrl
+          ? [
+              {
+                kind: "application_handoff",
+                title: `${applicationLabel(application)} — Application site`,
+                applicationId: normalized.entity.id,
+                url: postingUrl,
+                submissionVerified: false,
+                questionCapture,
+                executorAvailable: false,
+              },
+            ]
+          : undefined,
+        metadata: {
+          state: "manual-handoff",
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          nextActions: [
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+          ],
+        },
+        now,
+      });
+    }
+    if (execution?.verified !== true && ACTIVE_APPLICATION_SESSION_STATES.has(execution?.state)) {
+      const sessionUrl = safeExternalHttpUrl(
+        execution.currentUrl || application.link || application.url || application.sourceUrl
+      );
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: applicationSessionText(execution),
+        artifacts: [
+          {
+            kind: "application_handoff",
+            title: `${applicationLabel(application)} — Supervised application`,
+            applicationId: normalized.entity.id,
+            ...(sessionUrl ? { url: sessionUrl } : {}),
+            submissionVerified: false,
+            questionCapture,
+            executorAvailable: true,
+            session: execution.session || { provider: "session-browser" },
+          },
+        ],
+        metadata: {
+          state: execution.state,
+          applicationId: normalized.entity.id,
+          submissionVerified: false,
+          nextActions: [
+            {
+              label: "Rescan and verify",
+              intent: {
+                type: "job.apply",
+                entity: { type: "application", id: normalized.entity.id },
+                input: { resumeSession: true },
+              },
+            },
+            {
+              label: "I applied",
+              intent: {
+                type: "application.record-external",
+                entity: { type: "application", id: normalized.entity.id },
+              },
+            },
+          ],
+        },
+        operationResult: execution,
+        now,
+      });
+    }
     if (execution?.verified !== true) {
       const detail = String(
         execution?.reason || "No verified submission confirmation was returned."

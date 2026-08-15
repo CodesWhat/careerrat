@@ -61,9 +61,8 @@ statuses; the orchestrator normalizes (STEP 3) and hands transitions to `track-o
 
 For each allowed, in-scope platform, navigate to that platform's candidate
 portal URL in the session browser. The session browser is Layer 3 per
-`docs/BROWSER.md`: prefer the Chrome extension (it already holds the user's
-logins), fall back to Playwright with a one-time login pause (a persistent
-profile the user signs into once).
+`docs/BROWSER.md`. Keep the provider on `auto` unless the user explicitly changes it;
+CareerRat resolves the current session browser and reuses its signed-in session.
 
 Before reading each application row, snapshot or read the current page state —
 never rely on hardcoded selectors. Drive the live DOM turn-by-turn.
@@ -174,7 +173,9 @@ the comm thread open after a portal-confirmed transition.
 - Opt-in and OFF by default. Only poll platforms where `careerrat automation status --json` shows `status_polling` `allowed: true` for that platform. The `allowed` field encodes the three-part AND (global switch, platform switch, ToS consent) from `mayRun()` — never re-derive the predicate in prose.
 - Never run on a schedule or unattended. Always user-initiated with the agent in the loop.
 - Halt and ask on captcha, 2FA, login wall, or any unexpected interstitial. Never attempt to bypass an auth challenge.
-- Use tool-agnostic browser prose: "the session browser," "snapshot or read the page." Prefer the Chrome extension (holds existing logins); fall back to Playwright with a one-time login pause. Never name an MCP namespace or vendor tool.
+- Use tool-agnostic browser prose: "the session browser," "snapshot or read the page."
+  Keep the provider on `auto`; never ask the user to choose a CLI, extension, or browser
+  driver, and never name an MCP namespace or vendor tool.
 - Status normalization is deterministic via `careerrat status-map`. Do not hand-map raw portal labels by eye.
 - Local-only. Scraped bodies and screenshots stay under `workspace/`. Nothing goes outbound.
 - Domain-neutral. No hardcoded companies, roles, or candidate-specific values. No bracketed placeholder tokens anywhere — if a detail is unknown, omit it or go generic; never emit `[Company]`, `[Role]`, or any bracket.
