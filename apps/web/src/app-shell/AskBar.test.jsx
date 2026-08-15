@@ -1238,6 +1238,57 @@ describe("AskBar — acting", () => {
     expect(visit(tree, (node) => node.type === "a")).toHaveLength(1);
   });
 
+  it("opens an interview dossier directly from the Ask result", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      data: {
+        action: {
+          label: "Prepare this interview",
+          intent: {
+            type: "interview.prepare-request",
+            entity: { type: "workspace", id: "workspace-main" },
+            input: { jobReference: "Prepare me for my Acme interview." },
+          },
+        },
+        answer: { label: "Answer" },
+        engineAvailable: true,
+      },
+    });
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Prepared the interview packet for Acme — Staff AI Engineer.",
+            artifacts: [{ kind: "interview_dossier", title: "Acme interview dossier" }],
+            metadata: {
+              nextActions: [{ label: "Open dossier", href: "/jobs?dossier=app-acme" }],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "Prepare me for my Acme interview." } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const link = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node).trim() === "Open dossier"
+    )[0];
+    expect(link.props.href).toBe("/app/jobs?dossier=app-acme");
+  });
+
   it("renders a manual application handoff without claiming submission", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(
       jobActionPreview({

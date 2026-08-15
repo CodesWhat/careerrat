@@ -19,6 +19,7 @@ const ONBOARDING_TRANSCRIPT_CHAR_LIMIT = 16_000;
 
 export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "interview.prepare": ["application"],
+  "interview.prepare-request": ["workspace"],
   "interview.schedule": ["application"],
   "interview.capture-context": ["intake"],
   "job.evaluate": ["application", "sourced"],
@@ -29,6 +30,7 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "job.export-documents": ["application"],
   "job.apply": ["application"],
   "application.record-external": ["application"],
+  "application.record-external-request": ["workspace"],
   "source.add": ["workspace"],
   "source.query-add": ["workspace"],
   "source.set-enabled": ["workspace"],
@@ -39,11 +41,14 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "sourced.promote": ["sourced"],
   "sourced.skip": ["sourced"],
   "communication.draft": ["communication"],
+  "communication.draft-request": ["workspace"],
   "communication.send": ["communication"],
   "communication.add-note": ["communication"],
   "communication.record-external": ["communication"],
+  "communication.record-external-request": ["workspace"],
   "communication.capture-inbound": ["intake"],
   "outcome.record": ["application"],
+  "outcome.record-request": ["workspace"],
   "profile.enrich": ["candidate"],
 });
 
@@ -322,6 +327,7 @@ export function normalizeWorkspaceIntent(value) {
 function intentText(intent) {
   const descriptions = {
     "interview.prepare": "Prepare this interview",
+    "interview.prepare-request": "Resolve and prepare this interview",
     "interview.schedule": "Schedule this interview",
     "interview.capture-context": "Capture this interview context",
     "job.evaluate": "Evaluate this job",
@@ -332,6 +338,7 @@ function intentText(intent) {
     "job.export-documents": "Export packaged application documents",
     "job.apply": "Apply on this site",
     "application.record-external": "Record that I applied elsewhere",
+    "application.record-external-request": "Resolve and record that I applied elsewhere",
     "source.add": "Add this job board",
     "source.query-add": "Add a job search",
     "source.set-enabled": "Change this search source",
@@ -342,11 +349,14 @@ function intentText(intent) {
     "sourced.promote": "Promote this qualified role",
     "sourced.skip": "Skip this role",
     "communication.draft": "Draft a response",
+    "communication.draft-request": "Resolve and draft a response",
     "communication.send": "Send the reviewed response",
     "communication.add-note": "Add a note to this conversation",
     "communication.record-external": "Record that I sent this response elsewhere",
+    "communication.record-external-request": "Resolve and record this external response",
     "communication.capture-inbound": "Capture this inbound recruiter message",
     "outcome.record": "Record this outcome",
+    "outcome.record-request": "Resolve and record this outcome",
     "profile.enrich": "Enrich my profile",
   };
   return `${descriptions[intent.type]} (${intent.entity.type}:${intent.entity.id}).`;

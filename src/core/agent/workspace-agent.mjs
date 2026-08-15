@@ -48,6 +48,7 @@ import {
 
 const EXECUTABLE_INTENTS = new Set([
   "interview.prepare",
+  "interview.prepare-request",
   "interview.schedule",
   "interview.capture-context",
   "job.evaluate",
@@ -60,6 +61,7 @@ const EXECUTABLE_INTENTS = new Set([
   "sourced.promote",
   "sourced.skip",
   "application.record-external",
+  "application.record-external-request",
   "source.add",
   "source.query-add",
   "source.set-enabled",
@@ -68,11 +70,14 @@ const EXECUTABLE_INTENTS = new Set([
   "company.proposal-decide",
   "job.apply",
   "communication.draft",
+  "communication.draft-request",
   "communication.send",
   "communication.add-note",
   "communication.record-external",
+  "communication.record-external-request",
   "communication.capture-inbound",
   "outcome.record",
+  "outcome.record-request",
 ]);
 
 function compactCandidateSnapshot({ repoRoot, env }) {
@@ -512,30 +517,51 @@ function resolveSavedJobRequest({ repoRoot, env, jobId }) {
 const JOB_REFERENCE_STOP_WORDS = new Set([
   "a",
   "an",
+  "application",
   "apply",
+  "applied",
+  "as",
   "assess",
   "at",
+  "by",
   "can",
   "could",
   "evaluate",
   "for",
+  "from",
+  "got",
+  "have",
+  "help",
   "i",
+  "interview",
   "it",
   "job",
+  "just",
+  "made",
   "me",
   "my",
+  "offer",
   "opening",
   "please",
   "posting",
+  "prep",
+  "prepare",
   "rate",
+  "received",
+  "record",
+  "rejected",
   "review",
   "role",
+  "submitted",
   "submit",
   "that",
   "the",
   "this",
   "to",
   "want",
+  "was",
+  "withdrew",
+  "withdrawn",
   "you",
 ]);
 
@@ -605,6 +631,188 @@ function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
     throw error;
   }
   return resolveSavedJobRequest({ repoRoot, env, jobId: matches[0].id });
+}
+
+function resolveReferencedApplication({ repoRoot, env, jobReference, interviewOnly = false }) {
+  const tokens = jobReferenceTokens(jobReference);
+  const db = requireDb({ repoRoot, env });
+  const applications = db
+    .prepare("SELECT data FROM applications ORDER BY rowid ASC")
+    .all()
+    .map((row) => JSON.parse(row.data))
+    .filter((application) => {
+      if (!interviewOnly) return true;
+      return Boolean(
+        application.status === "interview" || application.interviewAt || application.nextInterviewAt
+      );
+    });
+  const matches = tokens.length
+    ? applications.filter((application) => {
+        const candidateTokens = new Set(
+          jobReferenceTokens(`${application.company || ""} ${application.role || ""}`)
+        );
+        return tokens.every((token) => candidateTokens.has(token));
+      })
+    : applications;
+  if (!matches.length) {
+    throw actionError(
+      interviewOnly
+        ? "CareerRat could not find a matching saved interview. Name the company or role."
+        : `CareerRat could not find a saved job matching “${String(jobReference).trim()}”.`,
+      "JOB_REFERENCE_NOT_FOUND"
+    );
+  }
+  if (matches.length > 1) {
+    const safeMatches = matches.slice(0, 5).map((application) => ({
+      company: String(application.company || "this company").slice(0, 120),
+      role: String(application.role || "this role").slice(0, 160),
+    }));
+    const choices = safeMatches.map((row) => `${row.company} — ${row.role}`).join("; ");
+    const error = actionError(
+      `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
+      "JOB_REFERENCE_AMBIGUOUS"
+    );
+    error.details = { matches: safeMatches };
+    throw error;
+  }
+  return matches[0];
+}
+
+const COMMUNICATION_REFERENCE_STOP_WORDS = new Set([
+  "a",
+  "about",
+  "can",
+  "draft",
+  "email",
+  "for",
+  "i",
+  "mark",
+  "message",
+  "my",
+  "please",
+  "record",
+  "recruiter",
+  "reply",
+  "response",
+  "send",
+  "sent",
+  "the",
+  "thread",
+  "to",
+  "write",
+  "you",
+]);
+
+function communicationReferenceTokens(value) {
+  return String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token && !COMMUNICATION_REFERENCE_STOP_WORDS.has(token));
+}
+
+function resolveReferencedCommunication({ repoRoot, env, communicationReference }) {
+  const tokens = communicationReferenceTokens(communicationReference);
+  const db = requireDb({ repoRoot, env });
+  const communications = db
+    .prepare("SELECT data FROM communications ORDER BY rowid ASC")
+    .all()
+    .map((row) => JSON.parse(row.data));
+  const matches = tokens.length
+    ? communications.filter((communication) => {
+        const participants = (communication.participants || [])
+          .map((participant) => `${participant?.name || ""} ${participant?.email || ""}`)
+          .join(" ");
+        const candidateTokens = new Set(
+          communicationReferenceTokens(
+            `${communication.company || ""} ${communication.role || ""} ${communication.subject || ""} ${participants}`
+          )
+        );
+        return tokens.every((token) => candidateTokens.has(token));
+      })
+    : communications;
+  if (!matches.length) {
+    throw actionError(
+      `CareerRat could not find a recruiter thread matching “${String(communicationReference).trim()}”.`,
+      "COMMUNICATION_REFERENCE_NOT_FOUND"
+    );
+  }
+  if (matches.length > 1) {
+    const safeMatches = matches.slice(0, 5).map((communication) => ({
+      company: String(communication.company || "this company").slice(0, 120),
+      role: String(communication.role || "this role").slice(0, 160),
+      subject: String(communication.subject || "this conversation").slice(0, 160),
+    }));
+    const choices = safeMatches
+      .map((row) => `${row.company} — ${row.role} — ${row.subject}`)
+      .join("; ");
+    const error = actionError(
+      `That matches more than one recruiter thread: ${choices}. Name the company, role, or subject more specifically.`,
+      "COMMUNICATION_REFERENCE_AMBIGUOUS"
+    );
+    error.details = { matches: safeMatches };
+    throw error;
+  }
+  return matches[0];
+}
+
+function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
+  const input = intent.input || {};
+  if (intent.type === "outcome.record-request") {
+    const application = resolveReferencedApplication({
+      repoRoot,
+      env,
+      jobReference: input.jobReference,
+    });
+    return {
+      ...intent,
+      type: "outcome.record",
+      entity: { type: "application", id: application.id },
+    };
+  }
+  if (intent.type === "application.record-external-request") {
+    const application = resolveReferencedApplication({
+      repoRoot,
+      env,
+      jobReference: input.jobReference,
+    });
+    return {
+      ...intent,
+      type: "application.record-external",
+      entity: { type: "application", id: application.id },
+    };
+  }
+  if (intent.type === "interview.prepare-request") {
+    const application = resolveReferencedApplication({
+      repoRoot,
+      env,
+      jobReference: input.jobReference,
+      interviewOnly: true,
+    });
+    return {
+      ...intent,
+      type: "interview.prepare",
+      entity: { type: "application", id: application.id },
+    };
+  }
+  if (
+    intent.type === "communication.draft-request" ||
+    intent.type === "communication.record-external-request"
+  ) {
+    const communication = resolveReferencedCommunication({
+      repoRoot,
+      env,
+      communicationReference: input.communicationReference,
+    });
+    return {
+      ...intent,
+      type:
+        intent.type === "communication.draft-request"
+          ? "communication.draft"
+          : "communication.record-external",
+      entity: { type: "communication", id: communication.id },
+    };
+  }
+  return intent;
 }
 
 async function evaluateApplicationRequest({
@@ -1183,11 +1391,12 @@ export async function executeWorkspaceIntent({
   sendCommunicationImpl,
   now = () => new Date(),
 } = {}) {
-  const normalized = normalizeWorkspaceIntent(intent);
+  let normalized = normalizeWorkspaceIntent(intent);
   if (!EXECUTABLE_INTENTS.has(normalized.type)) throw unsupported(normalized.type);
 
   const intentMessage = workspaceIntentAppend({ repoRoot, env, intent: normalized, now });
   try {
+    normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
     const input = normalized.input || {};
     if (normalized.type === "communication.capture-inbound") {
       const item = intakeOne({ repoRoot, env, id: normalized.entity.id });
@@ -1336,6 +1545,16 @@ export async function executeWorkspaceIntent({
             markdown: operation.dossier.markdown,
           },
         ],
+        metadata: {
+          state: "ready",
+          applicationId: normalized.entity.id,
+          nextActions: [
+            {
+              label: "Open dossier",
+              href: `/jobs?dossier=${encodeURIComponent(normalized.entity.id)}`,
+            },
+          ],
+        },
         now,
       });
     }
@@ -2645,7 +2864,127 @@ function looksLikeTailoringRequest(text) {
   );
 }
 
+function reportedOutcomeFromText(text) {
+  const value = String(text || "").trim();
+  let to = null;
+  if (
+    /\bi\s+(?:just\s+)?(?:got|was)\s+(?:rejected|declined)\b/i.test(value) ||
+    /\bmy\s+application\s+(?:got|was)\s+(?:rejected|declined)\b/i.test(value) ||
+    /\b(?:rejected|declined)\s+me\b/i.test(value)
+  ) {
+    to = "rejected";
+  } else if (
+    /\bi\s+(?:just\s+)?(?:got|received)\s+an?\s+offer\b/i.test(value) ||
+    /\bmade\s+me\s+an?\s+offer\b/i.test(value)
+  ) {
+    to = "offer";
+  } else if (/\bi\s+(?:just\s+)?withdrew\b|\bi\s+have\s+withdrawn\b/i.test(value)) {
+    to = "withdrawn";
+  } else if (
+    /\bi\s+(?:just\s+)?(?:got|landed|have)\b.{0,50}\binterview\b/i.test(value) ||
+    /\bi\s+was\s+invited\b.{0,50}\binterview\b/i.test(value)
+  ) {
+    to = "interview";
+  } else if (/\bi(?:'m|\s+am)\s+(?:now\s+)?waiting\s+to\s+hear\s+back\b/i.test(value)) {
+    to = "awaiting";
+  }
+  return to ? { to, note: value.slice(0, 120) } : null;
+}
+
+function looksLikeReportedApplication(text) {
+  return /^\s*i\s+(?:just\s+)?(?:applied\b|submitted\s+(?:my\s+)?application\b)/i.test(
+    String(text || "")
+  );
+}
+
+function looksLikeInterviewPrep(text) {
+  return (
+    /\b(?:prepare|prep|get\s+ready)\b.{0,60}\binterview\b/i.test(String(text || "")) ||
+    /\binterview\s+prep\b/i.test(String(text || ""))
+  );
+}
+
+function communicationDraftRequestFromText(text) {
+  const value = String(text || "").trim();
+  const match = value.match(
+    /^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?(?:draft|write|prepare)\s+(?:me\s+)?(?:a\s+)?(?:reply|response)\b(?:\s+to)?\s*(.*)$/i
+  );
+  if (!match) return null;
+  const remainder = String(match[1] || "").trim();
+  const split = remainder.match(/^(.*?)(?:\s+(?:saying|and\s+say|that\s+says?)\s+|:\s*)(.+)$/i);
+  return {
+    communicationReference: String(split?.[1] || remainder)
+      .replace(/[.?!]+$/g, "")
+      .trim(),
+    instruction: String(split?.[2] || "").trim(),
+  };
+}
+
+function communicationSentRequestFromText(text) {
+  const value = String(text || "").trim();
+  if (!/^i\s+(?:just\s+)?sent\s+/i.test(value)) return null;
+  const communicationReference = value
+    .replace(/^i\s+(?:just\s+)?sent\s+/i, "")
+    .replace(/\s+(?:reply|response|message|email)[.?!]*$/i, "")
+    .replace(/[.?!]+$/g, "")
+    .trim();
+  return { communicationReference };
+}
+
 const ACTION_PREVIEW_RULES = [
+  {
+    test: looksLikeReportedApplication,
+    label: "Record that I applied",
+    intent: (text) => ({
+      type: "application.record-external-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: text },
+    }),
+  },
+  {
+    test: (text) => Boolean(reportedOutcomeFromText(text)),
+    label: (text) => `Record this application as ${reportedOutcomeFromText(text)?.to || "updated"}`,
+    intent: (text) => ({
+      type: "outcome.record-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: text, ...reportedOutcomeFromText(text) },
+    }),
+  },
+  {
+    test: (text) => Boolean(communicationDraftRequestFromText(text)),
+    label: "Draft this recruiter reply",
+    intent: (text) => ({
+      type: "communication.draft-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: communicationDraftRequestFromText(text),
+    }),
+  },
+  {
+    test: (text) => Boolean(communicationSentRequestFromText(text)),
+    label: "Record that I sent this reply",
+    intent: (text) => ({
+      type: "communication.record-external-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: communicationSentRequestFromText(text),
+    }),
+  },
+  {
+    test: (text, context) => Boolean(openJobId(context)) && looksLikeInterviewPrep(text),
+    label: "Prepare this interview",
+    intent: (_text, context) => ({
+      type: "interview.prepare",
+      entity: { type: "application", id: openJobId(context) },
+    }),
+  },
+  {
+    test: looksLikeInterviewPrep,
+    label: "Prepare this interview",
+    intent: (text) => ({
+      type: "interview.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: text },
+    }),
+  },
   {
     test: looksLikeSourceAdd,
     label: "Add this job board",

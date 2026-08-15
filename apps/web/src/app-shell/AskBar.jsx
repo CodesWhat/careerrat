@@ -92,16 +92,17 @@ function appActionHref(value) {
       return "/app/settings";
     }
     if (url.pathname !== "/jobs" && url.pathname !== "/app/jobs") return null;
-    if ([...url.searchParams.keys()].length !== 1) return null;
+    if (url.hash || [...url.searchParams.keys()].length !== 1) return null;
 
     if (url.searchParams.getAll("tab").length === 1) {
       return url.searchParams.get("tab") === "search" ? "/app/jobs?tab=search" : null;
     }
-    if (url.searchParams.getAll("open").length !== 1) return null;
+    const param = url.searchParams.getAll("open").length === 1 ? "open" : "dossier";
+    if (url.searchParams.getAll(param).length !== 1) return null;
 
-    const applicationId = url.searchParams.get("open");
+    const applicationId = url.searchParams.get(param);
     if (!/^[a-z0-9][a-z0-9._:-]{0,127}$/i.test(applicationId || "")) return null;
-    return `/app/jobs?open=${encodeURIComponent(applicationId)}`;
+    return `/app/jobs?${param}=${encodeURIComponent(applicationId)}`;
   } catch {
     return null;
   }

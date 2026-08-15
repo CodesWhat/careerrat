@@ -12,6 +12,7 @@ const CONFLICT_CODES = new Set([
   "JOB_BODY_REQUIRES_BROWSER",
   "JOB_CAPTURE_FAILED",
   "JOB_REFERENCE_AMBIGUOUS",
+  "COMMUNICATION_REFERENCE_AMBIGUOUS",
   "APPLICATION_NOT_VERIFIED",
   "COMMUNICATION_DRAFT_REQUIRED",
   "COMMUNICATION_EXECUTOR_UNAVAILABLE",
@@ -27,6 +28,7 @@ function statusForError(error) {
   if (error?.code === "NO_DATABASE") return 409;
   if (error?.code === "NOT_FOUND") return 404;
   if (error?.code === "JOB_REFERENCE_NOT_FOUND") return 404;
+  if (error?.code === "COMMUNICATION_REFERENCE_NOT_FOUND") return 404;
   if (error?.code === "MISSING_JOB_BODY") return 409;
   if (CONFLICT_CODES.has(error?.code)) return 409;
   if (error?.code === "CONFLICT") return 409;

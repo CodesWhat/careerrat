@@ -2,9 +2,9 @@
 
 Started: 2026-08-13
 Reopened: 2026-08-14
-Current tranche completed: 2026-08-14
+Current tranche completed: 2026-08-15
 
-Gate result: all 88 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 90 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, update/restart, and native Electron checks pass.
 The broader native skill-to-screen build gate remains tracked separately in
 `SKILL-UX-AUDIT.md`.
@@ -1619,3 +1619,33 @@ Test homes:
   preserved the workspace tracker byte-for-byte. A separate foreign service on port 7793 remained
   alive and unchanged while CareerRat selected 7794. The real default app is now serving 0.7.1 and
   routes the source-less workspace back to Paul with no current-page console errors.
+
+### `F-089` Natural recruiter ambiguity renders as a generic server error
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, Ask refused to guess between recruiter threads but returned HTTP
+  500 and generic computer-error copy instead of telling the user how to clarify.
+- Reproduction: ask CareerRat to draft a reply for a company with more than one saved recruiter
+  thread and omit the role or subject.
+- Root cause: the new deterministic communication resolver emitted missing and ambiguous codes,
+  but the workspace HTTP boundary and candidate-facing error translator did not classify them.
+- Fix: map a missing recruiter thread to 404, ambiguity to 409, and render only bounded structured
+  company, role, and subject choices with no blind retry action.
+- Regression: workspace route and error-copy tests cover both codes, safe labels, and status values.
+- Live retest: an ambiguous natural Ask request displayed both candidate-safe thread choices and
+  left every thread unchanged instead of selecting one.
+
+### `F-090` Ask interview-prep receipt loses company and role
+
+- Status: `FIXED`
+- Severity: P1 product-coherence blocker, a successfully generated dossier could leave Ask saying
+  `Prepared the interview packet for undefined — undefined.`
+- Reproduction: prepare an interview through natural Ask against the real dossier builder rather
+  than the injected unit-test seam.
+- Root cause: the dossier builder persisted the correct title but omitted `company` and `role` from
+  its return object, while Ask used those fields for the completion receipt.
+- Fix: return the canonical application company and role with the persisted dossier and expose an
+  allowlisted `/app/jobs?dossier=<application-id>` next action.
+- Regression: dossier and Ask tests pin the returned identity, safe deep link, and rendered action.
+- Live retest: natural Ask prepared `Northstar — Staff AI Engineer`, rendered the exact company and
+  role, and opened the saved dossier at the application-scoped Jobs deep link.
