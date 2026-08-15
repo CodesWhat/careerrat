@@ -62,7 +62,12 @@ import {
 import { dispatchHttpRoute } from "../core/tracker/route-dispatch.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountAutomationRoutes } from "./automation-route.mjs";
-import { mountBoardsRoutes } from "./boards-route.mjs";
+import {
+  addBoardSource,
+  addSearchSourceQuery,
+  mountBoardsRoutes,
+  setSearchSourceEnabled,
+} from "./boards-route.mjs";
 import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
@@ -140,6 +145,9 @@ export function createDevServer({
     repoRoot,
     env,
     captureIntakeImpl: captureIntakeText,
+    addBoardSourceImpl: addBoardSource,
+    addSearchSourceQueryImpl: addSearchSourceQuery,
+    setSearchSourceEnabledImpl: setSearchSourceEnabled,
     startBoardDiscoveryImpl: ({ request }) =>
       startExplicitDiscoveryChat({
         repoRoot,

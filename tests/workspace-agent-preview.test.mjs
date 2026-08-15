@@ -102,6 +102,76 @@ test("previewWorkspaceIntent: new board discovery stays distinct from a job swee
   );
 });
 
+test("previewWorkspaceIntent: an explicit board URL import maps to a source write", () => {
+  const repoRoot = tempRepo();
+  const sourceUrl = "https://remoteok.com/remote-dev-jobs?order_by=date";
+  for (const text of [
+    `add this job board ${sourceUrl}`,
+    `use this source for my searches ${sourceUrl}`,
+  ]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(result.action, {
+      label: "Add this job board",
+      intent: {
+        type: "source.add",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { url: sourceUrl },
+      },
+    });
+  }
+});
+
+test("previewWorkspaceIntent: an explicit query request maps to source setup, not a sweep", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "add a job search for staff AI engineer",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Add a job search",
+    intent: {
+      type: "source.query-add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { query: "staff AI engineer" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: explicit source toggles become reviewable source writes", () => {
+  const repoRoot = tempRepo();
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "disable the LinkedIn source",
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Disable this search source",
+      intent: {
+        type: "source.set-enabled",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { selector: "LinkedIn", enabled: false },
+      },
+    }
+  );
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "enable the RemoteOK job board",
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Enable this search source",
+      intent: {
+        type: "source.set-enabled",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { selector: "RemoteOK", enabled: true },
+      },
+    }
+  );
+});
+
 test("previewWorkspaceIntent: rate or evaluate plus a job URL maps to job.evaluate-request", () => {
   const repoRoot = tempRepo();
   const jobUrl = "https://boards.greenhouse.io/acme/jobs/12345";

@@ -291,6 +291,159 @@ test("job-board discovery starts a visible research session inside workspace-mai
   ]);
 });
 
+test("a confirmed Ask action adds one board URL and keeps the receipt in workspace-main", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+  const sourceUrl = "https://remoteok.com/remote-dev-jobs?order_by=date";
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: sourceUrl },
+    },
+    addBoardSourceImpl: (input) => {
+      calls.push(input);
+      return {
+        added: true,
+        source: {
+          index: 3,
+          provider: "remoteok",
+          label: "remoteok.com",
+          target: sourceUrl,
+          sourceType: "ats",
+          enabled: true,
+          auth: false,
+        },
+      };
+    },
+    now: () => new Date("2026-08-09T14:02:45.000Z"),
+  });
+
+  assert.deepEqual(calls, [{ repoRoot, env: {}, url: sourceUrl }]);
+  assert.deepEqual(
+    result.messages.map(({ role, kind }) => ({ role, kind })),
+    [
+      { role: "user", kind: "intent" },
+      { role: "assistant", kind: "action_result" },
+    ]
+  );
+  assert.match(result.messages.at(-1).text, /Added remoteok\.com to your search sources/i);
+  assert.deepEqual(result.messages.at(-1).artifacts, [
+    {
+      kind: "search_source",
+      title: "remoteok.com — Added",
+      added: true,
+      index: 3,
+      provider: "remoteok",
+      label: "remoteok.com",
+      target: sourceUrl,
+      sourceType: "ats",
+      enabled: true,
+      auth: false,
+    },
+  ]);
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    { label: "Search jobs", href: "/jobs?tab=search" },
+    { label: "Manage sources", href: "/settings" },
+  ]);
+});
+
+test("a confirmed Ask action adds one keyword search through source setup", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.query-add",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { query: "staff AI engineer" },
+    },
+    addSearchSourceQueryImpl: (input) => {
+      calls.push(input);
+      return {
+        added: true,
+        source: {
+          index: 2,
+          provider: "HiringCafe",
+          label: "staff AI engineer",
+          target: "staff AI engineer",
+          sourceType: "url-query",
+          enabled: true,
+          auth: false,
+        },
+      };
+    },
+    now: () => new Date("2026-08-09T14:02:50.000Z"),
+  });
+
+  assert.deepEqual(calls, [
+    { repoRoot, env: {}, query: "staff AI engineer", provider: "HiringCafe" },
+  ]);
+  assert.match(result.messages.at(-1).text, /Added staff AI engineer/i);
+  assert.equal(result.messages.at(-1).artifacts[0].kind, "search_source");
+  assert.equal(result.messages.at(-1).artifacts[0].added, true);
+  assert.equal(result.messages.at(-1).artifacts[0].target, "staff AI engineer");
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    { label: "Search jobs", href: "/jobs?tab=search" },
+    { label: "Manage sources", href: "/settings" },
+  ]);
+});
+
+test("a confirmed Ask action toggles one deterministically resolved search source", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.set-enabled",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { selector: "LinkedIn", enabled: false },
+    },
+    setSearchSourceEnabledImpl: (input) => {
+      calls.push(input);
+      return {
+        changed: true,
+        source: {
+          index: 1,
+          provider: "linkedin.com",
+          label: "LinkedIn search",
+          target: "https://www.linkedin.com/jobs/search/?keywords=AI",
+          sourceType: "browser",
+          enabled: false,
+          auth: true,
+        },
+      };
+    },
+    now: () => new Date("2026-08-09T14:02:55.000Z"),
+  });
+
+  assert.deepEqual(calls, [{ repoRoot, env: {}, selector: "LinkedIn", enabled: false }]);
+  assert.match(result.messages.at(-1).text, /Disabled LinkedIn search/i);
+  assert.deepEqual(result.messages.at(-1).artifacts, [
+    {
+      kind: "search_source",
+      title: "LinkedIn search — Disabled",
+      changed: true,
+      index: 1,
+      provider: "linkedin.com",
+      label: "LinkedIn search",
+      target: "https://www.linkedin.com/jobs/search/?keywords=AI",
+      sourceType: "browser",
+      enabled: false,
+      auth: true,
+    },
+  ]);
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    { label: "Search jobs", href: "/jobs?tab=search" },
+    { label: "Manage sources", href: "/settings" },
+  ]);
+});
+
 test("interview prep executes behind the same thread and appends its artifact result", async () => {
   const repoRoot = tempRepo();
   const calls = [];

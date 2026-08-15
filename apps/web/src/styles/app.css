@@ -6298,6 +6298,33 @@ button.chip {
   font-size: 12px;
 }
 
+.ask-bar__source-status {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.ask-bar__source-status strong {
+  color: var(--ink);
+}
+
+.ask-bar__source-state {
+  padding: 2px 7px;
+  border-radius: var(--pill-radius);
+  background: var(--paper-band);
+  color: var(--ink-soft);
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
 .ask-bar__company-proposals {
   display: flex;
   flex-direction: column;
