@@ -84,6 +84,7 @@ const CLIS = {
   automation: "src/cli/automation.mjs",
   activity: "src/cli/activity.mjs",
   research: "src/cli/research.mjs",
+  health: "src/cli/health.mjs",
   stories: "src/cli/stories.mjs",
   "strategy-review": "src/cli/strategy-review.mjs",
   analytics: "src/cli/analytics.mjs",
@@ -644,6 +645,7 @@ Commands:
   modes       Show/change optional usage and application modes
   automation  Show/toggle opt-in browser-automation config (defaults OFF)
   research    Read/record web-research artifacts
+  health      Record the company-health skill's role-scoped companyHealth rating
   gate        Safely update gate data such as comp floors and exclusions
   learnings   Read/append per-role-family learnings
   stories     Read/validate/add STAR+R interview stories

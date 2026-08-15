@@ -187,13 +187,13 @@ Status meanings:
 | `ingest-messages` | External agent/session-browser workflow | agent-only | Add an opt-in native entry for LinkedIn/Wellfound message sync with the same review contract. |
 | `sync-status` | External agent/session-browser workflow | agent-only | Add an opt-in job/status sync action with proposed transitions before writes. |
 | `relationship-sourcing` | Review existing leads in Network | partial | Let Ask or a company screen start sourcing and return reviewable leads to Network. |
-| `research-company` | External agent workflow | agent-only | Add job/company Ask routing and a cited research result linked to the company. |
-| `research-comp` | External agent workflow | agent-only | Add role/location Ask routing and persist a cited benchmark for later evaluation. |
+| `research-company` | Ask resolves natural company requests ("research Acme") to a fresh cached dossier or an embedded research session, cited and linked to the company | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and company-not-found paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
+| `research-comp` | Ask resolves natural comp requests ("market comp for a nurse in Denver") to a fresh cached benchmark or an embedded research session, cited to role and location | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, and missing-role/location paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
 | `optimize-linkedin` | External agent/session-browser workflow | agent-only | Add opt-in read, diff, approval, and separate write-back steps in the app. |
 | `reevaluate-strategy` | Server-derived strategy view model | partial | Render the strategy surface and route the review CTA through the workspace thread. |
 | `configure` | Settings pages | partial | Let Ask explain and propose validated settings changes without creating a second write path. |
 | `answer-question` | Explicit application/screening questions route through Ask to grounded review cards and confirmed reusable-answer saves | native | Keep profile reuse, evidence-backed prose, NEEDS YOU, self-identification exclusion, tracked-answer append, and restart persistence in regression coverage. |
-| `company-health` | External agent workflow | agent-only | Add job/company Ask routing and a cited health result linked to the tracked company. |
+| `company-health` | Ask resolves natural health requests ("is Acme a safe place to land") through the company reference resolver to a fresh cached rating or an embedded research session, with a validated `careerrat health record` write path | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and not-tracked-company paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
 | `report-issue` | External agent workflow | agent-only | Add a native error-context entry, redacted diagnostic review, explicit GitHub confirmation, and durable result. |
 | `resume-extract` | Internal onboarding helper with visible streamed progress and retry | internal | Keep extraction progress, failure, retry, and manual fallback inside Paul's setup flow. |
 | `intake-extract` | Internal Universal Intake helper with visible progress and review | internal | Keep extraction progress, errors, and decisions inside the invoking Ask capture flow. |
@@ -341,6 +341,65 @@ and exposed only Export documents and Review documents. A real pasted JD and a r
 file-picker upload both preserved `requestedAction: tailor`, showed the exact
 capture/evaluate/tailor confirmation, returned 89/100 and 92/100 KEEP verdicts, and
 produced the same documents-only result with no application handoff or submission write.
+
+## Company research, comp benchmarks, and company health in Ask
+
+Three previously agent-only skills now have native Ask entries. Natural phrasings
+("research Acme", "market comp for a nurse in Denver", "is Acme a safe place to
+land") resolve to typed `research.company`, `research.comp`, and `company.health`
+intents; the `-request` variants for company-scoped asks resolve through a shared
+company reference resolver that token-matches tracked applications and sourced
+rows, caps ambiguity choices at five, and returns specific recovery copy for
+company-not-found, ambiguous, not-tracked, and missing-role/location cases.
+
+A fresh result short-circuits the round trip: a company-research dossier inside
+its staleness window, a comp benchmark inside its own staleness window, or a
+companyHealth rating inside its recheck window renders immediately as a result
+card — cited markdown dossier, floor/midpoint/ceiling benchmark, or rating with
+per-dimension levels and any fit cross-cut — with an explicit refresh action.
+Otherwise Ask starts or reuses an embedded research chat session, scoped to the
+skill's own network tool profile (`CHAT_RUNTIME_TOOLS`: WebSearch/WebFetch/Skill,
+no Bash). That profile gap means persistence is NOT the same mechanism board
+discovery uses — board/company discovery write their proposals directly from a
+server-held batch on confirmation, but an embedded research/comp/health session
+has no shell to run `careerrat research record`/`careerrat health record` from.
+Instead the skill finishes its work and emits the result as a typed
+`careerrat:discovery` block (`company_research_result` / `comp_benchmark_result` /
+`company_health_result`); the app renders it as a Save to workspace / Discard
+control, and Save fires a separate confirmed intent (`research.record` or
+`company.health-record`) that performs the write server-side, deterministically,
+through the exact same validated guards the CLI path used — `computeResearchWrite`/
+`writeResearch` (citation-hygiene, placeholder lint, `current_base` leak) for the
+research pair, `companyHealthSet`/`validateCompanyHealth` (rating/provenance/asOf
+enums, `fitDelta` clamped to <= 0, the same `current_base` leak guard) for health.
+The chat session itself never writes; saving is always the separate, explicit,
+confirm-first step.
+
+Confirm boundaries hold across all three: starting a research or health session
+is itself an explicit user ask, not a background action, and so is the follow-up
+save. The company-health write path (CLI or conversational) is dry-run-by-default/
+confirm-first either way — `careerrat health record <id> --file rating.json
+[--write]` from a one-shot CLI run, or the confirm-first `company.health-record`
+intent from an embedded chat session — with the same rating/provenance/asOf
+validation, `fitDelta` clamped to <= 0, and `current_base` privacy guard in both
+cases; a company-health rating never enters an outbound artifact regardless of
+how it was triggered. Both paths call the identical `companyHealthSet` verb, so
+both log the required Activity Pulse event in the same transaction; this replaced
+the prior hand-patched `set-fields`/`upsert-batch` path with one validated verb.
+
+Headed isolated-home acceptance passed on 2026-08-15 against the real server and
+HTTP API with a non-tech seed (a nurse, a driver, and a medical assistant): all
+new preview phrasings routed to the correct typed intents while board and company
+discovery phrasings kept their old routes; the `careerrat health record` write
+surfaced in the company.health short-circuit, the dashboard drawer, and the
+Activity Pulse event; fresh research artifacts returned reused result cards with
+no session start; `force` with no AI runtime degraded to the actionable
+NO_AI_ROUTE message with no stack trace; ambiguity, not-tracked, and
+missing-input cases returned their exact codes and statuses; `research.record`
+persisted a real artifact and refused a `current_base` payload; and every prior
+thread message, rating, and artifact survived a full server restart. No 5xx and
+no console errors were observed. Packaged/clean-install acceptance and a live
+embedded research session with a real AI runtime remain open for these rows.
 
 ## Deterministic source parity
 

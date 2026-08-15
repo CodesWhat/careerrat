@@ -524,6 +524,151 @@ test("previewWorkspaceIntent: scheduling language routes to the meeting planner 
   });
 });
 
+test("previewWorkspaceIntent: a named company research request maps to research.company", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({ text: "research Acme", repoRoot, env: {} });
+  assert.deepEqual(result.action, {
+    label: "Research this company",
+    intent: {
+      type: "research.company",
+      entity: { type: "company", id: "acme" },
+      input: { company: "Acme" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: 'research this company' with an open job resolves through the job id", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "research this company",
+    context: { pathname: "/jobs", jobId: "app-acme" },
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Research this company",
+    intent: {
+      type: "research.company-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: "app-acme" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: a role-and-location comp request maps to research.comp", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "market comp for a nurse in Denver",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Research market comp",
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      // The leading article on the role is stripped ("nurse", not "a nurse").
+      input: { role: "nurse", location: "Denver" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: 'research market comp for X in Y' routes to research.comp, not research.company", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "research market comp for a nurse in Denver",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Research market comp",
+    intent: {
+      type: "research.comp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { role: "nurse", location: "Denver" },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: company-health phrasings map to company.health-request", () => {
+  const repoRoot = tempRepo();
+  const phrasings = ["is Acme a safe place to land", "how risky is Acme", "any layoffs at Acme"];
+  for (const text of phrasings) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(
+      result.action,
+      {
+        label: "Check company health",
+        intent: {
+          type: "company.health-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { companyReference: "Acme" },
+        },
+      },
+      `expected "${text}" to map to company.health-request`
+    );
+  }
+});
+
+test("previewWorkspaceIntent: board and generic company phrasings keep their pre-existing routes", () => {
+  const repoRoot = tempRepo();
+
+  // "research boards" still reads as a board-discovery request, not a
+  // single-company research request — looksLikeBoardDiscovery wins because
+  // its ACTION_PREVIEW_RULES entry is checked before company research.
+  assert.deepEqual(previewWorkspaceIntent({ text: "research boards", repoRoot, env: {} }).action, {
+    label: "Find and review new job boards",
+    intent: {
+      type: "source.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { request: "research boards" },
+    },
+  });
+
+  // "sweep my boards" stays a job sweep, never board or company research.
+  assert.equal(
+    previewWorkspaceIntent({ text: "sweep my boards", repoRoot, env: {} }).action.intent.type,
+    "search.run"
+  );
+
+  // "find companies matching my targeting" stays company.discover, not a
+  // single-company research request.
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "find companies matching my targeting",
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Discover more matching companies",
+      intent: {
+        type: "company.discover",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { requestedCount: 12, request: "find companies matching my targeting" },
+      },
+    }
+  );
+
+  // "research companies beyond my list" is a generic company phrase (plural
+  // "companies"), so it stays company.discover instead of being captured as
+  // a single named-company research request.
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "research companies beyond my list",
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Discover more matching companies",
+      intent: {
+        type: "company.discover",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { requestedCount: 12, request: "research companies beyond my list" },
+      },
+    }
+  );
+});
+
 test("previewWorkspaceIntent: a non-job URL stays answer-only", () => {
   const repoRoot = tempRepo();
   for (const text of [

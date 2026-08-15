@@ -179,6 +179,48 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "company research: no tracked company matches",
+    err: new ApiError(404, {
+      code: "COMPANY_NOT_FOUND",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "CareerRat couldn't find that company among your saved jobs. Name it exactly as it appears there.",
+    action: null,
+  },
+  {
+    name: "company research: ambiguous tracked company reference",
+    err: new ApiError(409, {
+      code: "COMPANY_AMBIGUOUS",
+      error: { message: "internal text must not render" },
+      details: {
+        matches: [{ company: "Acme Freight" }, { company: "Acme Medical" }],
+      },
+    }),
+    message:
+      "That matches more than one saved company: Acme Freight; Acme Medical. Name it more specifically.",
+    action: null,
+  },
+  {
+    name: "company health: company is not a tracked job",
+    err: new ApiError(409, {
+      code: "COMPANY_NOT_TRACKED",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "Health ratings attach to a saved job. Save this role first, or ask CareerRat to research the company instead.",
+    action: null,
+  },
+  {
+    name: "market comp: role and location required",
+    err: new ApiError(400, {
+      code: "RESEARCH_COMP_INPUT_REQUIRED",
+      error: { message: "internal text must not render" },
+    }),
+    message: "Tell CareerRat the role and the location so it can look up comp for it.",
+    action: null,
+  },
+  {
     name: "PDF/DOCX not supported prefix",
     err: new ApiError(400, { error: "PDF/DOCX not supported yet, use text or markdown" }),
     message:

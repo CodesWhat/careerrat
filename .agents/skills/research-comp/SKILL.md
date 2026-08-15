@@ -166,9 +166,36 @@ Market data only; no private candidate compensation inputs are present in this a
 
 **Do not write `current_base` anywhere in the draft.** The `record` guard refuses a literal `current_base` token; also refuse to print the candidate's current-compensation number in the "vs. candidate targets" section — compare against `minimum_base` and `target_base` only.
 
+### Conversational web handoff
+
+In conversational chat, this skill runs as an embedded session under the `chat` tool
+profile (`CHAT_RUNTIME_TOOLS`), which has no Bash — there is no shell to run `careerrat
+research record ... --write` from. Once the draft above is complete and clean (same
+frontmatter, same citation, conflict, and `current_base` requirements — nothing about the
+artifact itself changes), emit it as one exact fenced block instead of writing to a temp file:
+
+```careerrat:discovery
+{"kind":"comp_benchmark_result","role":"<role title>","location":"<market/location>","stem":"comp-bench-<role-slug>-<loc-slug>-<yyyy-mm>","benchmark":{"floor":<number or null>,"midpoint":<number or null>,"ceiling":<number or null>,"currency":"USD","confidence":"high|med|low"},"markdown":"<the full artifact text, frontmatter and body>"}
+```
+
+The app renders this as a real Save to workspace / Discard control. Saving calls the
+confirm-first `research.record` intent, which runs the write server-side through the exact
+same `computeResearchWrite`/`writeResearch` guards (citation-hygiene, placeholder lint,
+`current_base` privacy) STEP 5's CLI path uses — so a bad artifact is refused there too, not
+silently accepted. Do not tell the user the benchmark is saved until they confirm; a prose
+reply is never itself a write. Skip STEP 5's CLI commands entirely in this mode — the
+confirmed intent already logs the Activity Pulse event and updates `meta.lastUpdatedAt`, the
+same as `record --write` does. STEP 5's `careerrat research record` CLI path stays exactly as
+written below for a one-shot, non-embedded (external-agent) run, where there is a real shell.
+STEP 6's COMP BENCHMARK addendum and STEP 7's gate proposal still apply either way — they
+read from the now-saved artifact, not from how it got saved.
+
 ---
 
 ## STEP 5 — Record the artifact
+
+**External-agent / one-shot CLI runs only.** In conversational chat, use the Conversational
+web handoff above instead — skip straight to STEP 6.
 
 **Dry-run first** (validates frontmatter, ≥1 cited source, placeholder lint, `current_base` guard):
 

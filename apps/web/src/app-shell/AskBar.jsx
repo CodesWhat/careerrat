@@ -1199,6 +1199,18 @@ function AskBarTurn({
   const boardDiscoveryArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "board_discovery_chat"
   );
+  const researchChatArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "research_chat"
+  );
+  const companyResearchArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "company_research"
+  );
+  const compBenchmarkArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "comp_benchmark"
+  );
+  const companyHealthArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "company_health"
+  );
   const searchSourceArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "search_source"
   );
@@ -1224,13 +1236,23 @@ function AskBarTurn({
         <CompanyProposalsCard artifact={companyProposalsArtifact} onRunAction={onRunAction} />
       ) : null}
       {boardDiscoveryArtifact ? (
-        <ChatPanel
+        <ResearchChatPanel
+          artifact={boardDiscoveryArtifact}
           skill="research-boards"
-          initialChatId={boardDiscoveryArtifact.chatId}
           completionLabel="Finish board review"
           onComplete={() => completeDiscoveryStep("research-boards")}
         />
       ) : null}
+      {researchChatArtifact ? (
+        <ResearchChatPanel
+          artifact={researchChatArtifact}
+          skill={researchChatArtifact.skill}
+          headline={researchChatHeadline(researchChatArtifact)}
+        />
+      ) : null}
+      {companyResearchArtifact ? <CompanyResearchCard artifact={companyResearchArtifact} /> : null}
+      {compBenchmarkArtifact ? <CompBenchmarkCard artifact={compBenchmarkArtifact} /> : null}
+      {companyHealthArtifact ? <CompanyHealthCard artifact={companyHealthArtifact} /> : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -1464,6 +1486,273 @@ function SearchSourceStatus({ artifact }) {
       </span>
       {artifact.auth === true && artifact.enabled === false ? (
         <span>Browser consent required before use</span>
+      ) : null}
+    </section>
+  );
+}
+
+// ResearchChatPanel — the embedded live chat surface for a discovery-style
+// session (board discovery, and now research-company/research-comp/
+// company-health). Generalizes the board-discovery-only ChatPanel wiring
+// that used to live inline in renderTurn: same session fields (chatId etc),
+// same completion contract, just an optional plain-language `headline` line
+// above the transcript so a candidate glancing at Ask knows what Paul is
+// doing without reading the chat itself.
+function ResearchChatPanel({
+  artifact,
+  skill,
+  completionLabel = null,
+  headline = null,
+  onComplete,
+}) {
+  return (
+    <div className="ask-bar__research-chat">
+      {headline ? <p className="ask-bar__research-chat-head">{headline}</p> : null}
+      <ChatPanel
+        skill={skill}
+        initialChatId={artifact.chatId}
+        completionLabel={completionLabel}
+        onComplete={onComplete}
+      />
+    </div>
+  );
+}
+
+// research_chat's plain-language headline. The workspace agent already
+// composes one per skill onto the artifact (researchChatArtifact in
+// workspace-agent.mjs: "Researching Acme", "Market comp research",
+// "Company health — Acme") — research_chat carries no separate company/role
+// field of its own (those live on the follow-up company_research/
+// comp_benchmark/company_health artifacts once the skill finishes), so this
+// reuses that title rather than re-deriving one.
+function researchChatHeadline(artifact) {
+  return String(artifact?.title || "").trim() || "Researching";
+}
+
+// "Researched 2 days ago" / "Researched today" — same rough day-bucket math
+// as the rest of the app's relative-date helpers (e.g. NetworkPage.jsx's
+// formatRelativeDate), duplicated locally rather than shared since none of
+// them are exported from a common lib today.
+const RELATIVE_DATE_FORMAT = new Intl.DateTimeFormat("en-US", {
+  month: "short",
+  day: "numeric",
+  year: "numeric",
+});
+function formatRelativeDate(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return "";
+  const dayMs = 24 * 60 * 60 * 1000;
+  const startOfDay = (d) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
+  const days = Math.round((startOfDay(new Date()) - startOfDay(date)) / dayMs);
+  if (days <= 0) return "today";
+  if (days === 1) return "yesterday";
+  if (days < 7) return `${days} days ago`;
+  return RELATIVE_DATE_FORMAT.format(date);
+}
+
+// CompanyResearchCard — the `company_research` artifact (research-company
+// skill): company name, when it was researched, how many sources backed it,
+// and the full cited markdown collapsed behind a <details> (same plain
+// pre-wrapped-text treatment as the interview dossier's compact drawer view
+// — see InterviewDossierCard.jsx's own header comment on why this stays raw
+// markdown rather than server-rendered HTML). The turn's Refresh action (and
+// any other nextActions) render through the generic nextActions block below,
+// same as every other card here.
+function CompanyResearchCard({ artifact }) {
+  const company = artifact.company || "This company";
+  const researchedLabel = formatRelativeDate(artifact.fetchedAt);
+  const sourceCount = Number(artifact.sources) || 0;
+  return (
+    <section className="ask-bar__research-card" aria-label="Company research">
+      <div className="ask-bar__research-head">
+        <strong>{company}</strong>
+        {artifact.stale ? <span className="badge badge--warn">May be out of date</span> : null}
+      </div>
+      <p className="ask-bar__research-meta">
+        {researchedLabel ? `Researched ${researchedLabel}` : "Researched"}
+        {sourceCount
+          ? ` · ${sourceCount} source${sourceCount === 1 ? "" : "s"}`
+          : " · no sources cited"}
+      </p>
+      {artifact.markdown ? (
+        <details className="ask-bar__research-details">
+          <summary>Read the full research</summary>
+          <div className="ask-bar__research-markdown">{artifact.markdown}</div>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+function confidenceLabel(value) {
+  const text = String(value || "").trim();
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : "";
+}
+
+// Never fabricate a $0 for a value the research couldn't find — a missing
+// floor/midpoint/ceiling reads as "not enough public data", never a number.
+function formatBenchmarkValue(value, currency) {
+  if (value == null || value === "") return "not enough public data";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "not enough public data";
+  try {
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency || "USD",
+      maximumFractionDigits: 0,
+    }).format(number);
+  } catch {
+    return `${currency ? `${currency} ` : ""}${Math.round(number)}`;
+  }
+}
+
+// CompBenchmarkCard — the `comp_benchmark` artifact (research-comp skill).
+function CompBenchmarkCard({ artifact }) {
+  const benchmark = artifact.benchmark || {};
+  const currency = benchmark.currency || "USD";
+  const checkedLabel = formatRelativeDate(artifact.fetchedAt);
+  const title = [artifact.role, artifact.location].filter(Boolean).join(" · ") || "Comp benchmark";
+  return (
+    <section className="ask-bar__research-card" aria-label="Comp benchmark">
+      <div className="ask-bar__research-head">
+        <strong>{title}</strong>
+        {benchmark.confidence ? (
+          <span className="badge badge--muted">
+            {confidenceLabel(benchmark.confidence)} confidence
+          </span>
+        ) : null}
+      </div>
+      <div className="ask-bar__comp-values">
+        <span className="ask-bar__comp-value">
+          <span>Floor</span>
+          <strong>{formatBenchmarkValue(benchmark.floor, currency)}</strong>
+        </span>
+        <span className="ask-bar__comp-value">
+          <span>Midpoint</span>
+          <strong>{formatBenchmarkValue(benchmark.midpoint, currency)}</strong>
+        </span>
+        <span className="ask-bar__comp-value">
+          <span>Ceiling</span>
+          <strong>{formatBenchmarkValue(benchmark.ceiling, currency)}</strong>
+        </span>
+      </div>
+      {checkedLabel ? <p className="ask-bar__research-meta">Checked {checkedLabel}</p> : null}
+      {artifact.markdown ? (
+        <details className="ask-bar__research-details">
+          <summary>Read the full comp notes</summary>
+          <div className="ask-bar__research-markdown">{artifact.markdown}</div>
+        </details>
+      ) : null}
+    </section>
+  );
+}
+
+// Plain-language phrasing for the raw provenance code — never the word
+// "provenance" itself in front of a candidate (copy rule: say what it's
+// based on instead).
+const HEALTH_PROVENANCE_COPY = {
+  "built-from-data": "Based on research CareerRat found",
+  "needs-more-info": "Not enough public information yet",
+  stale: "Based on older information",
+};
+function healthProvenanceLabel(provenance) {
+  const key = String(provenance || "").trim();
+  if (!key) return "";
+  return HEALTH_PROVENANCE_COPY[key] || `Based on ${key.replace(/-/g, " ")}`;
+}
+
+const HEALTH_DIM_LABEL = {
+  layoffRisk: "Layoffs",
+  hiringMomentum: "Hiring",
+  financial: "Financial",
+  sentiment: "Sentiment",
+  leadership: "Leadership",
+};
+function healthDimLabel(key) {
+  return (
+    HEALTH_DIM_LABEL[key] ||
+    String(key)
+      .replace(/([A-Z])/g, " $1")
+      .replace(/^./, (c) => c.toUpperCase())
+  );
+}
+
+function healthRatingBadgeClass(rating) {
+  if (rating === "healthy") return "badge--ok";
+  if (rating === "risky") return "badge--error";
+  return "badge--warn";
+}
+
+function healthRatingLabel(rating) {
+  if (rating === "healthy") return "Healthy";
+  if (rating === "risky") return "Risky";
+  return "Watch";
+}
+
+// CompanyHealthCard — the `company_health` artifact (company-health skill).
+// Internal signal only: this never phrases the rating as advice to
+// withdraw, only context (see the skill's own SKILL.md).
+function CompanyHealthCard({ artifact }) {
+  const dims =
+    artifact.dimensions && typeof artifact.dimensions === "object" ? artifact.dimensions : {};
+  const dimEntries = Object.entries(dims).filter(([, detail]) => detail);
+  const crossCut = Array.isArray(artifact.crossCut) ? artifact.crossCut.filter(Boolean) : [];
+  const fitDelta = Number(artifact.fitDelta) || 0;
+  const title = [artifact.company, artifact.role].filter(Boolean).join(" · ") || "Company health";
+  return (
+    <section className="ask-bar__research-card" aria-label="Company health">
+      <div className="ask-bar__research-head">
+        <strong>{title}</strong>
+        <span className={`badge ${healthRatingBadgeClass(artifact.rating)}`}>
+          {healthRatingLabel(artifact.rating)}
+        </span>
+      </div>
+      <p className="ask-bar__research-meta">
+        {[
+          artifact.forFunction ? `for ${artifact.forFunction}` : null,
+          healthProvenanceLabel(artifact.provenance),
+          artifact.asOf ? `as of ${artifact.asOf}` : null,
+        ]
+          .filter(Boolean)
+          .join(" · ")}
+      </p>
+      {dimEntries.length ? (
+        <div className="ask-bar__health-dims">
+          {dimEntries.map(([key, detail]) => {
+            // dimensions is the raw persisted companyHealth shape (see
+            // validateCompanyHealth in src/core/db/verbs/company-health.mjs):
+            // each entry is normally { level, note, functionHit?, trend? },
+            // but a legacy flat string level still falls through here.
+            const level = detail?.level ?? detail;
+            const levelText =
+              typeof level === "string" || typeof level === "number" ? String(level) : "";
+            const note = detail?.note;
+            if (!levelText) return null;
+            return (
+              <span
+                className="ask-bar__health-dim"
+                data-level={levelText}
+                key={key}
+                title={note || undefined}
+              >
+                {healthDimLabel(key)}: {levelText}
+              </span>
+            );
+          })}
+        </div>
+      ) : null}
+      {artifact.rationale ? <p className="ask-bar__research-meta">{artifact.rationale}</p> : null}
+      {crossCut.length ? (
+        <p className="ask-bar__research-meta">
+          Touches what you said you need: {crossCut.join(", ")}
+        </p>
+      ) : null}
+      {fitDelta ? (
+        <p className="ask-bar__health-fit-note">
+          Lowered this job's fit by {Math.abs(fitDelta)} point{Math.abs(fitDelta) === 1 ? "" : "s"}{" "}
+          because it touches what you said you need.
+        </p>
       ) : null}
     </section>
   );

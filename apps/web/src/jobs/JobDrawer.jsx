@@ -572,6 +572,13 @@ export function JobDrawer({ row, onClose, initialSection }) {
             }
           />
 
+          {/* Company health (port-parity fix — dashboard-data.js's
+            buildHealthBlock already emits drawer.companyHealth; the card
+            pill (row.healthBadge, above in JobsPage.jsx's HealthBadge) was
+            the only half of this that had been wired). Internal signal
+            only: never phrased as advice to withdraw, just context. */}
+          <CompanyHealthCard health={drawer.companyHealth} />
+
           {/* 5. Communications thread */}
           {isApplication ? (
             <CommsThreadCard
@@ -1061,6 +1068,90 @@ function CompFitCard({ row, drawer, app, isApplication, busy, onSaveCompNote }) 
             {value ? "Edit comp note" : "Add comp note"}
           </Button>
         )
+      ) : null}
+    </Card>
+  );
+}
+
+// Company health — reads dashboard-data.js's buildHealthBlock output
+// (drawer.companyHealth) exactly: { rating, ratingLabel, forFunction, asOf,
+// provenance, provenanceLabel, rationale, crossCut, dimensions: [{label,
+// level, note, functionHit, trend}], signals: [{source, date, summary,
+// url}] }. Hides entirely when the row carries no rating (persist-then-
+// render, like CompBar above — never recomputed client-side). Rating chip
+// reuses the app's existing three-state badge tokens (badge--ok/--warn/
+// --error), same ones JobsPage.jsx's HealthBadge and the gate chips already
+// use, so light/dark just work with zero new color literals.
+function healthRatingBadgeClass(rating) {
+  if (rating === "healthy") return "badge--ok";
+  if (rating === "risky") return "badge--error";
+  return "badge--warn";
+}
+
+function CompanyHealthCard({ health }) {
+  if (!health?.rating) return null;
+  const dims = Array.isArray(health.dimensions) ? health.dimensions : [];
+  const signals = Array.isArray(health.signals) ? health.signals : [];
+  const crossCut = Array.isArray(health.crossCut) ? health.crossCut.filter(Boolean) : [];
+  return (
+    <Card title="Company health">
+      <div className="job-drawer__health-head">
+        <span className={`badge ${healthRatingBadgeClass(health.rating)}`}>
+          {health.ratingLabel || health.rating}
+        </span>
+        {health.provenanceLabel ? (
+          <span className="badge badge--muted">{health.provenanceLabel}</span>
+        ) : null}
+        {health.asOf ? <span className="field__hint">as of {health.asOf}</span> : null}
+      </div>
+      {health.forFunction ? <p className="field__hint">Scoped to {health.forFunction}</p> : null}
+      {health.rationale ? <p>{health.rationale}</p> : null}
+      {crossCut.length ? (
+        <p className="field__hint">Touches what you said you need: {crossCut.join(", ")}</p>
+      ) : null}
+      {dims.length ? (
+        <div className="job-drawer__health-dims">
+          {dims.map((dim) => (
+            <div className="job-drawer__health-dim" key={dim.label}>
+              <span className="job-drawer__health-dim-label">{dim.label}</span>
+              <span className="job-drawer__health-dim-level" data-level={dim.level}>
+                {dim.level}
+              </span>
+              {dim.note ? <span className="job-drawer__health-dim-note">{dim.note}</span> : null}
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {signals.length ? (
+        <details className="job-drawer__health-evidence">
+          <summary>What this is based on</summary>
+          <ul className="job-drawer__list">
+            {signals.map((sig, i) => {
+              const url = safeExternalHttpUrl(sig.url);
+              return (
+                // signals is a flat list with no stable id.
+                // biome-ignore lint/suspicious/noArrayIndexKey: no stable id available
+                <li key={i}>
+                  {sig.summary || sig.source}
+                  {sig.source || sig.date ? (
+                    <span className="field__hint">
+                      {" "}
+                      {[sig.source, sig.date].filter(Boolean).join(" · ")}
+                    </span>
+                  ) : null}
+                  {url ? (
+                    <>
+                      {" "}
+                      <a href={url} target="_blank" rel="noreferrer">
+                        source
+                      </a>
+                    </>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        </details>
       ) : null}
     </Card>
   );

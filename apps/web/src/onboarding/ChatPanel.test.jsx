@@ -55,6 +55,8 @@ const api = vi.hoisted(() => ({
   },
   addBoard: vi.fn(),
   closeChat: vi.fn(),
+  recordCompanyHealth: vi.fn(),
+  recordResearch: vi.fn(),
   saveCompanyBoard: vi.fn(),
   sendChatMessage: vi.fn(),
   startChat: vi.fn(),
@@ -325,5 +327,83 @@ describe("ChatPanel — typed discovery proposals", () => {
       enabled: true,
     });
     expect(textOf(tree)).toContain("Tracked");
+  });
+});
+
+describe("ChatPanel — research trio conversational web handoff", () => {
+  it("saves a company_research_result block through research.record instead of shelling out", async () => {
+    api.recordResearch.mockResolvedValue({ ok: true });
+    const props = { skill: "research-company", initialChatId: "research-chat" };
+    render(props);
+    sse.calls.at(-1).opts.onEvent(
+      "assistant",
+      JSON.stringify({
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `\`\`\`careerrat:discovery\n${JSON.stringify({
+                kind: "company_research_result",
+                company: "Beacon Robotics",
+                slug: "beacon-robotics",
+                markdown: "---\ntype: company-research\n---\n\n## Overview\nBeacon builds robots.",
+              })}\n\`\`\``,
+            },
+          ],
+        },
+      })
+    );
+
+    let tree = render(props);
+    await button(tree, "Save to workspace").props.onClick();
+    await flush();
+    tree = render(props);
+
+    expect(api.recordResearch).toHaveBeenCalledWith({
+      type: "company-research",
+      name: "Beacon Robotics",
+      slug: "beacon-robotics",
+      markdown: "---\ntype: company-research\n---\n\n## Overview\nBeacon builds robots.",
+    });
+    expect(textOf(tree)).toContain("Saved");
+  });
+
+  it("discarding a result block never calls the server", async () => {
+    const props = { skill: "company-health", initialChatId: "health-chat" };
+    render(props);
+    sse.calls.at(-1).opts.onEvent(
+      "assistant",
+      JSON.stringify({
+        message: {
+          content: [
+            {
+              type: "text",
+              text: `\`\`\`careerrat:discovery\n${JSON.stringify({
+                kind: "company_health_result",
+                targetType: "application",
+                targetId: "app-riverside",
+                company: "Riverside Health",
+                companyHealth: {
+                  rating: "watch",
+                  forFunction: "clinical staffing",
+                  asOf: "2026-08-15",
+                  provenance: "built-from-data",
+                  dimensions: {},
+                  rationale: "Hiring freeze rumored.",
+                },
+              })}\n\`\`\``,
+            },
+          ],
+        },
+      })
+    );
+
+    let tree = render(props);
+    await button(tree, "Discard").props.onClick();
+    await flush();
+    tree = render(props);
+
+    expect(api.recordCompanyHealth).not.toHaveBeenCalled();
+    expect(textOf(tree)).toContain("Discarded");
   });
 });

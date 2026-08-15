@@ -44,6 +44,45 @@ function normalizeBlock(value) {
   if (value.kind === "discovery_complete" && DISCOVERY_STEPS.has(value.step)) {
     return { kind: value.kind, step: value.step };
   }
+  // The research trio's conversational web handoff (research-company /
+  // research-comp / company-health SKILL.md "Conversational web handoff"):
+  // CHAT_RUNTIME_TOOLS has no Bash, so an embedded session can never shell
+  // out to `careerrat research record`/`careerrat health record` — it emits
+  // its finished result as one of these three typed blocks instead, and
+  // ChatPanel.jsx turns each into a "Save" confirm control that fires the
+  // matching research.record / company.health-record intent server-side.
+  if (value.kind === "company_research_result") {
+    const company = clean(value.company);
+    const slug = clean(value.slug);
+    const markdown = typeof value.markdown === "string" ? value.markdown : "";
+    if (!company || !markdown.trim()) return null;
+    return { kind: value.kind, company, slug, markdown };
+  }
+  if (value.kind === "comp_benchmark_result") {
+    const role = clean(value.role);
+    const location = clean(value.location);
+    const stem = clean(value.stem);
+    const markdown = typeof value.markdown === "string" ? value.markdown : "";
+    if (!role || !markdown.trim()) return null;
+    return {
+      kind: value.kind,
+      role,
+      location,
+      stem,
+      benchmark: value.benchmark && typeof value.benchmark === "object" ? value.benchmark : null,
+      markdown,
+    };
+  }
+  if (value.kind === "company_health_result") {
+    const targetType =
+      value.targetType === "sourced" || value.targetType === "application" ? value.targetType : "";
+    const targetId = clean(value.targetId);
+    const company = clean(value.company);
+    const companyHealth =
+      value.companyHealth && typeof value.companyHealth === "object" ? value.companyHealth : null;
+    if (!targetType || !targetId || !companyHealth) return null;
+    return { kind: value.kind, targetType, targetId, company, companyHealth };
+  }
   return null;
 }
 

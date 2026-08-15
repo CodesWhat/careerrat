@@ -31,6 +31,33 @@ confirmation.
 | `workspace/research/` | Cited web-research artifacts (company intel, comp benchmarks) from the research-* skills. Treated as outbound; never contains `current_base`. |
 | `workspace/tracker.*` | Application and sourced-role tracker state. |
 
+### `companyHealth` (tracker row field)
+
+A role-scoped company-health rating lives as a `companyHealth` object on an individual
+`applications[]` or `sourced[]` row in `workspace/tracker.*` (not a separate file). Written by
+the `company-health` skill, read by `evaluate-job` (fit cross-cut) and the dashboard
+(`src/core/tracker/dashboard-data.js`'s `buildHealthBlock`/`buildHealthBadge`).
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `rating` | `"healthy" \| "watch" \| "risky"` | Required. |
+| `forFunction` | string | Required. The candidate's target function the rating is scoped to (never hardcoded). |
+| `asOf` | `YYYY-MM-DD` | Required. Decays past `modes.yml#company_health.recheck_days`. |
+| `provenance` | `"built-from-data" \| "needs-more-info" \| "stale"` | Required. |
+| `dimensions` | object | Required. Per-dimension `{ level, note, functionHit?, trend? }` (layoffRisk/hiringMomentum/financial/sentiment/leadership). |
+| `rationale` | string | Required. One-paragraph, role-scoped. |
+| `crossCut` | string[] | Optional, defaults to `[]`. Candidate needs (from `targeting.yml`) this rating intersected. |
+| `fitDelta` | number | Optional, defaults to `0`. A small negative nudge applied to fit only via `crossCut`; never positive. |
+| `signals` | array | Optional, defaults to `[]`. `{ source, date, summary, url }` evidence entries. |
+
+**Internal signal only** — this object never appears in any outbound artifact (cover letter,
+recruiter reply, LinkedIn). **Write path:** the `companyHealthSet` verb in
+`src/core/db/verbs/company-health.mjs` is the single validated writer, reached through two entry
+points — the dry-run-default CLI, `careerrat health record <applicationOrSourcedId> --file
+<rating.json> --write` (`src/cli/health.mjs`), and the confirm-first `company.health-record`
+intent for shell-less embedded sessions. Both validate the shape above and refuse a payload
+naming the private `current_base` field.
+
 ## System Layer
 
 These files are safe for CareerRat updates and public distribution.
