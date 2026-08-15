@@ -550,6 +550,7 @@ export function logoImageUrl(input) {
   const name = String(source.name || "").trim();
   if (domain) parts.push(`domain=${encodeURIComponent(domain)}`);
   if (name) parts.push(`name=${encodeURIComponent(name)}`);
+  parts.push("fallback=initials");
   return `/api/logos/img?${parts.join("&")}`;
 }
 
@@ -928,9 +929,16 @@ export function runPacketGate({ applicationId, jobBody, jobUrl } = {}) {
   });
 }
 
-// POST /api/packet/generate — generatePacket. Requires packet questions to
-// already be captured for this application (POST /api/packet/questions,
-// out of this UI's scope) — an application with none throws
+export function capturePacketQuestions({ applicationId, source, manualText, url } = {}) {
+  return apiFetch("/api/packet/questions", {
+    method: "POST",
+    body: JSON.stringify({ applicationId, source, manualText, url }),
+  });
+}
+
+// POST /api/packet/generate — generatePacket. Apply-intent calls capture public
+// questions first or use Ask's paste-and-resume question surface; a request with
+// no captured questions throws
 // BAD_QUESTION_CAPTURE, surfaced as an ordinary ApiError.
 export function generatePacketDocuments({ applicationId, applyIntent, formats } = {}) {
   return apiFetch("/api/packet/generate", {

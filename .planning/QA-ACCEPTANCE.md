@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-15
 
-Gate result: all 90 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 93 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, update/restart, and native Electron checks pass.
 The broader native skill-to-screen build gate remains tracked separately in
 `SKILL-UX-AUDIT.md`.
@@ -1649,3 +1649,55 @@ Test homes:
 - Regression: dossier and Ask tests pin the returned identity, safe deep link, and rendered action.
 - Live retest: natural Ask prepared `Northstar — Staff AI Engineer`, rendered the exact company and
   role, and opened the saved dossier at the application-scoped Jobs deep link.
+
+### `F-091` Native apply handoff skips the existing application-question capture path
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, Ask could generate a packet and hand the user to the ATS without
+  collecting the employer's actual questions even when a public form API exposed them.
+- Reproduction: ask CareerRat to apply to a Greenhouse or Ashby posting, then inspect the packet
+  manifest and supervised handoff.
+- Root cause: deterministic Greenhouse/Ashby question adapters and the packet-question API existed,
+  but `job.prepare-request`, `job.generate-documents`, and `job.apply` never called that owner.
+- Fix: capture supported public form questions before packet generation, preserve the typed capture
+  state in the handoff, and provide an in-Ask paste-and-resume surface for every other ATS. A failed
+  answer rebuild keeps the captured questions and exposes a retry. Applied remains verified-only.
+- Regression: workspace-agent, AskBar, JobDrawer, form-question, and packet tests cover supported,
+  unsupported, failed-rebuild, unsafe-URL, and verified-completion paths.
+- Live retest: one headed Ask request against Anthropic's live Greenhouse board captured the full JD,
+  all 19 public application fields, and a 96/100 KEEP verdict; generated the résumé, cover letter,
+  and answer sheet; stopped on human-review gaps; and left the application in Reviewed Hold.
+
+### `F-092` Evaluation copy is clipped mid-word and uses broken plural grammar
+
+- Status: `FIXED`
+- Severity: P1 product-quality blocker, a successful live evaluation rendered fragments such as
+  `customers,cut`, an incomplete trailing conjunction, and `5 items still needs review`.
+- Reproduction: run a real packet gate whose structured fields reach the 80/140/160-character
+  budgets, then prepare a packet with more than one unresolved item.
+- Root cause: structured output retries could land exactly on the schema budgets, and normalization
+  used raw string slicing. The packet receipt also hardcoded the singular verb for every count.
+- Fix: prompt for complete plain-English copy with safety margin, normalize budget-edge fragments at
+  word boundaries with an ellipsis, remove dangling connectors, and select the singular/plural verb
+  from the actual count.
+- Regression: packet-gate tests pin exact-budget and dangling-connector inputs; workspace-agent
+  coverage pins plural packet-gap copy.
+- Live retest: the final Anthropic evaluation rendered complete concise English fit/comp sentences,
+  three readable reasons and risks, and `4 items still need review`.
+
+### `F-093` Expected logo misses pollute the browser console
+
+- Status: `FIXED`
+- Severity: P2 acceptance noise, an unavailable company logo rendered the correct initials but also
+  logged an HTTP 404 on every clean Jobs-page load.
+- Reproduction: load a real company without a logo.dev match, such as Recare Deutschland GmbH, and
+  inspect the browser console.
+- Root cause: the image route deliberately used 404 as the control signal for the React `onError`
+  initials fallback. The visual fallback worked, but Chromium correctly logged the failed request.
+- Fix: the SPA opts into `fallback=initials`; expected upstream/cache misses then return a cacheable
+  empty 204 that still fires the image fallback. Invalid and direct API requests retain 400/404
+  semantics.
+- Regression: logo-route and CompanyAvatar tests pin the opt-in URL, quiet 204, legacy 404, and
+  traversal-safe behavior.
+- Live retest: a fresh headed Jobs load rendered the `RD` initials fallback and the complete apply
+  handoff with zero console errors and zero warnings.

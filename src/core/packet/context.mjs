@@ -261,5 +261,6 @@ export function packetPromptFromContext(context) {
     JSON.stringify(candidateContext, null, 2),
     "",
     "Return one typed packet-gate verdict. Base fit only on the candidate context and saved job description. Parse posted base compensation into numeric minBase/maxBase when present; otherwise use nulls and status unknown. Never invent compensation or evidence.",
+    "Use complete plain-English sentences. Keep fitSummary within 150 characters, compensation.summary within 130 characters, and every fitReasons/fitRisks item within 72 characters. Never shorten copy by switching languages, clipping words, or appending fragments.",
   ].join("\n");
 }

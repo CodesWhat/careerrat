@@ -56,7 +56,9 @@ nurse, a driver, and an engineer each bring their own config.
   CAPTCHAs and unsupported auth prompts. With explicit `mail_access` consent, it
   can read one recent emailed verification code from any webmail provider and continue.
   The agent-led workflow and safety gates are shipped. Native Ask and Apply on site
-  now provide a truthful manual handoff; connecting them to the supervised executor
+  deterministically capture public Greenhouse and Ashby questions before packet
+  generation, provide an in-chat paste-and-resume path for every other ATS, and never
+  write Applied from a handoff. Connecting the native app to the authenticated executor
   remains part of the active product coherence gate below.
 - **One-command start** (`careerrat start [agent]`) — scaffolds the workspace,
   installs the skills, brings up the local app, and launches a supported detected
@@ -355,8 +357,11 @@ The current build order is:
    confirmation. Standalone résumé, cover-letter, and application-material tailoring now resolves
    a URL, the open job, or one named saved job, evaluates it first, generates only on KEEP, and
    returns review/export actions without implying submission. Remaining work is the connected
-   authenticated executor and automatic form-question capture, plus clean-home and packaged
-   acceptance coverage for pasted and attached input. Explicit natural outcome reports now resolve
+   authenticated executor and rendered-form capture for sites without a public question API, plus
+   clean-home and packaged acceptance coverage for pasted and attached input. Greenhouse and Ashby
+   question schemas are captured before packet generation; other ATS forms now use a durable
+   in-Ask paste-and-resume path that can retry answer generation without losing the saved questions.
+   Explicit natural outcome reports now resolve
    one saved application and write the typed transition in the same Ask thread; ambiguous or
    missing references stop with specific clarification copy and no mutation. Natural recruiter
    requests now resolve one communication for an AI-backed reviewable draft or a user-reported
@@ -400,11 +405,11 @@ The current build order is:
 ### Product-surface acceptance sweep (updated August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. All 90 recorded findings are fixed and
+section remains the release-level source of truth. All 93 recorded findings are fixed and
 live-retested. The broader skill-to-screen audit above remains active until every user-facing
 original skill has a coherent native path.
 
-Current verification: 2,565 repository tests completed with 5 intentional skips; 696 web tests passed;
+Current verification: 2,570 repository tests passed with 5 intentional skips; 700 web tests passed;
 lint completed with no errors; web, website, docs, and desktop builds passed; and the final 541-file
 npm tarball installed into a clean home without lifecycle warnings. The clean setup, background
 search, restart, Ask rate/apply, provider Settings, and source Electron checks produced no HTTP or

@@ -399,6 +399,75 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
       risks: [],
     });
     assert.match(seen[0], /minimum_base|targeting|evidence/i);
+    assert.match(seen[0], /complete plain-English sentences/i);
+    assert.match(seen[0], /fitReasons.*72 characters/i);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: keeps budget-limited evaluation copy readable", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const clippedReason =
+    "Riley owns discovery-through-deployment AI rollouts for enterprise customers,cut";
+  const clippedRisk =
+    "The role requires three days per week in an office; Riley is open to hybrid and";
+  const clippedComp =
+    "Posted annual salary range is $200,000–$320,000 USD. The minimum clears Riley’s $190,000 base floor, and the range includes the $215,000base";
+  assert.equal(clippedReason.length, 80);
+  assert.equal(clippedRisk.length, 79);
+  assert.equal(clippedComp.length, 140);
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () =>
+      [
+        "```json",
+        JSON.stringify({
+          ...typedGateVerdict(),
+          compensation: { ...typedGateVerdict().compensation, summary: clippedComp },
+          fitReasons: [clippedReason],
+          fitRisks: [clippedRisk],
+        }),
+        "```",
+      ].join("\n"),
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.ok(body.data.fitReasons[0].length <= 72);
+    assert.ok(body.data.fitRisks[0].length <= 72);
+    assert.ok(body.data.compensation.summary.length <= 130);
+    assert.match(body.data.fitReasons[0], /…$/);
+    assert.match(body.data.fitRisks[0], /…$/);
+    assert.doesNotMatch(body.data.fitRisks[0], /\band…$/i);
+    assert.match(body.data.compensation.summary, /…$/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: replaces blank summaries with the typed fallbacks", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () =>
+      `\`\`\`json\n${JSON.stringify({
+        ...typedGateVerdict(),
+        fitSummary: "   ",
+        compensation: { ...typedGateVerdict().compensation, summary: "" },
+      })}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data.fitSummary, "Fit needs review.");
+    assert.equal(body.data.compensation.summary, "Compensation needs review.");
   } finally {
     await closeServer(server);
   }

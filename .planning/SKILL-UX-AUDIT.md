@@ -123,10 +123,20 @@ confirms the exact evaluate or evaluate-to-packet plan, and returns the structur
 evaluation, generated packet, and supervised application handoff in the same Ask
 receipt. The chain stops on `CUT`/`REVIEW`, generates base documents on `KEEP`, keeps
 moving when application questions are not discoverable until the form opens, and never
-marks the job Applied from a manual handoff. A verified executor result is still the
-only path that writes Applied. Packed-app QA proves the REVIEW/CUT stop without a false
-Applied action. Remaining work is the connected authenticated executor, automatic
-form-question capture, and clean-home/packaged acceptance for pasted and attached input.
+marks the job Applied from a manual handoff. Public Greenhouse and Ashby forms are now
+captured deterministically before packet generation. Every other ATS gets an in-Ask
+paste-and-resume card that persists the questions, rebuilds the answer sheet, and keeps
+the saved capture available when a rebuild must be retried. The Jobs drawer reports the
+same capture state before exposing the safe site link. A verified executor result is
+still the only path that writes Applied.
+
+Headed isolated-home acceptance passed on 2026-08-15 against Anthropic's live Greenhouse
+board. One Ask request captured the full JD, returned a 96/100 KEEP evaluation, collected
+all 19 public application fields, generated the résumé, cover letter, and answer sheet,
+stopped on five human-review gaps, and left the application in Reviewed Hold. Remaining
+work is the connected authenticated executor, automatic rendered-form capture for sites
+without a public question API, and clean-home/packaged acceptance for pasted and attached
+input.
 
 ## Original skill inventory
 
@@ -147,8 +157,8 @@ Status meanings:
 | `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | partial | Run clean-home and packaged acceptance for every input shape, including ambiguity and recovery. |
-| `tailor-application` | Job packet actions plus URL, open-job, and named-job tailoring/apply Ask chains | partial | Add browser-captured screening questions; keep returning gaps/artifacts in chat and keep tailoring separate from submission. |
-| `apply-job` | Ask/manual handoff, Apply on site, and skill runtime | partial | Connect the supervised executor and automatic form-question capture; preserve verified-only Applied write-back. |
+| `tailor-application` | Job packet actions plus URL, open-job, and named-job tailoring/apply Ask chains | partial | Keep returning gaps/artifacts in chat, keep tailoring separate from form capture and submission, and add packaged-input acceptance. |
+| `apply-job` | Ask/manual handoff, deterministic Greenhouse/Ashby question capture, paste-and-resume fallback, Apply on site, and skill runtime | partial | Connect the authenticated executor and rendered-form capture for non-public ATS forms; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Keep ambiguity, missing-reference, and durable write-back coverage in clean-home and packaged acceptance. |
 | `email-comms` | Draft, note, external-send controls, and natural Ask draft/sent-report flows | partial | Add natural note capture and connect a verified send executor or explicit supervised handoff. |
 | `schedule-meeting` | Manual interview scheduling form | partial | Add availability, timezone, busy-calendar, thread reply, hold, and next-action flow. |
@@ -273,8 +283,10 @@ or one unambiguous named saved job is captured and evaluated first. KEEP generat
 the honest role-specific packet with `applyIntent:false`, returns the evaluation,
 document paths, gaps, Export documents, and Review documents in the workspace
 thread, and never shows an application handoff or claims submission. REVIEW/CUT
-stop before document generation. Automatic browser-side screening-question capture
-remains part of the supervised apply executor gate.
+stop before document generation. Screening-question capture stays intentionally out of
+standalone tailoring. It begins only when the user chooses the supervised apply path,
+where public Greenhouse/Ashby fields are captured automatically and other sites use the
+in-Ask paste-and-resume handoff.
 
 Headed isolated-home repository-build acceptance passed on 2026-08-14 with the
 installed Codex runtime. Ask previewed the open job, REVIEW stopped before
@@ -282,7 +294,7 @@ generation, and a real KEEP 96 run persisted the tailored résumé and cover let
 while leaving the application Interested. The receipt offered only Export documents
 and Review documents, deferred screening answers unless the user later chooses to
 apply, refreshed the open drawer immediately, and produced no HTTP or console errors.
-Packaged-input and supervised-browser-question acceptance remain open.
+Packaged-input acceptance remains open.
 
 ## Deterministic source parity
 

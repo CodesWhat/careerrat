@@ -446,6 +446,89 @@ test("GET /api/logos/img: upstream non-2xx (or logo.dev's own fallback=404) degr
   try {
     const res = await fetch(`${baseUrl(server)}/api/logos/img?domain=doesnotexist.com`);
     assert.equal(res.status, 404);
+    assert.match(res.headers.get("cache-control") || "", /max-age=/);
+    assert.deepEqual(await res.json(), { error: "no logo for this domain" });
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("GET /api/logos/img: initials fallback turns an expected upstream miss into a quiet 204", async () => {
+  const repoRoot = tempRepo();
+  const server = await bootServer(repoRoot, {
+    fetchImpl: async () => new Response("not found", { status: 404 }),
+  });
+  try {
+    const res = await fetch(
+      `${baseUrl(server)}/api/logos/img?name=${encodeURIComponent("Missing Company")}&fallback=initials`
+    );
+    assert.equal(res.status, 204);
+    assert.match(res.headers.get("cache-control") || "", /max-age=/);
+    assert.equal(await res.text(), "");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("GET /api/logos/img: initials fallback does not cache transient failures", async () => {
+  const scenarios = [
+    {
+      name: "network failure",
+      fetchImpl: async () => {
+        throw new Error("temporary network failure");
+      },
+    },
+    {
+      name: "upstream 503",
+      fetchImpl: async () => new Response("unavailable", { status: 503 }),
+    },
+    {
+      name: "body read failure",
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        arrayBuffer: async () => {
+          throw new Error("truncated response");
+        },
+      }),
+    },
+  ];
+
+  for (const scenario of scenarios) {
+    const repoRoot = tempRepo();
+    const server = await bootServer(repoRoot, { fetchImpl: scenario.fetchImpl });
+    try {
+      const fallbackRes = await fetch(
+        `${baseUrl(server)}/api/logos/img?domain=temporary.example&fallback=initials`
+      );
+      assert.equal(fallbackRes.status, 204, scenario.name);
+      assert.equal(fallbackRes.headers.get("cache-control"), "no-store", scenario.name);
+
+      const directRes = await fetch(`${baseUrl(server)}/api/logos/img?domain=temporary.example`);
+      assert.equal(directRes.status, 404, scenario.name);
+      assert.equal(directRes.headers.get("cache-control"), "no-store", scenario.name);
+      assert.deepEqual(await directRes.json(), { error: "no logo for this domain" }, scenario.name);
+    } finally {
+      await closeServer(server);
+    }
+  }
+});
+
+test("GET /api/logos/img: initials fallback does not cache an unreadable local cache entry", async () => {
+  const repoRoot = tempRepo();
+  const cachePath = userPath({ repoRoot }, "workspace/logos/temporary.example.webp");
+  mkdirSync(cachePath, { recursive: true });
+  const server = await bootServer(repoRoot, {
+    fetchImpl: async () => {
+      throw new Error("cache hit must not fetch");
+    },
+  });
+  try {
+    const res = await fetch(
+      `${baseUrl(server)}/api/logos/img?domain=temporary.example&fallback=initials`
+    );
+    assert.equal(res.status, 204);
+    assert.equal(res.headers.get("cache-control"), "no-store");
   } finally {
     await closeServer(server);
   }

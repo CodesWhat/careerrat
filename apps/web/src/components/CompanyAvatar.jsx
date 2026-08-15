@@ -9,9 +9,9 @@ import { logoImageUrl } from "../lib/api.js";
 // algorithm silently drifting between them (M10 design doc §4). Onboarding's
 // CompaniesStep now imports this instead of defining its own copy.
 //
-// Degrade path: GET /api/logos/img?domain= or ?name= always 404s rather
-// than erroring on any miss (bad input, upstream failure — see logo-route.mjs)
-// — the <img onError> below is the actual "no logo" branch, by design.
+// Degrade path: logoImageUrl() adds fallback=initials, which makes an expected
+// logo miss a quiet 204. The <img onError> below then renders initials without
+// adding an expected 404 to the browser console. Direct API calls keep the JSON 404.
 function initials(name) {
   return String(name || "")
     .trim()
