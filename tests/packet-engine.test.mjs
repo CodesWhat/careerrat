@@ -333,6 +333,26 @@ test("generatePacket never passes empty cover-letter prose blocks into the scaff
   assert.match(result.sources.answers, /customer-facing AI workflows/);
 });
 
+test("standalone tailoring never enters application-answer drafting", async () => {
+  const { generatePacket } = await loadGenerateModule();
+
+  const result = await generatePacket({
+    context: PACKET_CONTEXT,
+    applyIntent: false,
+    draftResumeProposal: RESUME_DRAFT,
+    draftCoverLetterBlocks: async () => ({
+      blocks: [{ text: "Evidence-backed cover letter block.", evidenceIds: ["ev-ai-001"] }],
+    }),
+    draftPacketAnswers: async () => {
+      throw new Error("standalone tailoring entered application-answer drafting");
+    },
+    exportPacketArtifacts: async () => ({ formats: ["pdf"], outputs: {} }),
+  });
+
+  assert.equal(result.sources.answers ?? null, null);
+  assert.equal(result.manifest.questions.length, 0);
+});
+
 test("generatePacket carries captured questions into packetManifest.questions by application id", async () => {
   const { generatePacket } = await loadGenerateModule();
 

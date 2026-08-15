@@ -2132,6 +2132,30 @@ describe("AskBar — Lane B: paste routing", () => {
       requestedAction: "prepare",
     });
   });
+
+  it("preserves a typed tailoring request when a JD is pasted after it", async () => {
+    api.createIntake.mockResolvedValue({
+      item: intakeItem({ status: "proposed", requestedAction: "tailor" }),
+    });
+    let tree = render();
+    byClass(tree, "ask-bar__input").props.onChange({
+      target: { value: "Tailor my resume for this job" },
+    });
+    tree = render();
+    byClass(tree, "ask-bar__input").props.onPaste(
+      pasteEvent("Acme\nSRE\nKeep production reliable.")
+    );
+    tree = render();
+
+    expect(textOf(optionRows(tree)[0])).toContain("tailor documents");
+    byTag(tree, "textarea").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+
+    expect(api.createIntake).toHaveBeenCalledWith({
+      text: "Acme\nSRE\nKeep production reliable.",
+      requestedAction: "tailor",
+    });
+  });
 });
 
 describe("AskBar — Lane B: drop", () => {
@@ -2185,6 +2209,23 @@ describe("AskBar — Lane B: attach", () => {
     });
 
     expect(api.uploadIntakeFile).toHaveBeenCalledWith(file, { requestedAction: "prepare" });
+  });
+
+  it("passes a typed tailoring request with an attached binary JD", async () => {
+    api.uploadIntakeFile.mockResolvedValue({
+      item: intakeItem({ status: "proposed", requestedAction: "tailor" }),
+    });
+    let tree = render();
+    byClass(tree, "ask-bar__input").props.onChange({
+      target: { value: "Write a cover letter for this job" },
+    });
+    tree = render();
+    const file = { name: "jd.pdf", type: "application/pdf" };
+    await byClass(tree, "ask-bar__file-input").props.onChange({
+      target: { files: [file], value: "x" },
+    });
+
+    expect(api.uploadIntakeFile).toHaveBeenCalledWith(file, { requestedAction: "tailor" });
   });
 });
 
@@ -2304,6 +2345,57 @@ describe("AskBar — Lane B: capture receipt decide actions", () => {
       (node) => node.type === "a" && textOf(node) === "Open application site"
     )[0];
     expect(handoff.props.href).toBe("https://boards.greenhouse.io/acme/jobs/123");
+  });
+
+  it("labels standalone packet results as tailored documents", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      action: {
+        label: "Evaluate and tailor this job",
+        intent: {
+          type: "job.tailor-request",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { jobReference: "Acme Staff AI Engineer" },
+        },
+      },
+    });
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Generated the tailored résumé and cover letter.",
+            artifacts: [
+              {
+                kind: "packet_generation",
+                purpose: "tailoring",
+                status: "reviewable",
+                uploadReady: false,
+                blockingGapCount: 1,
+                gaps: [{ kind: "coverLetter", message: "Confirm the proof points." }],
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onChange({ target: { value: "tailor my resume for Acme Staff AI Engineer" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(byClass(tree, "ask-bar__packet-status"))).toContain(
+      "Tailored documents: reviewable"
+    );
   });
 
   it("Reclassify and Dismiss are offered (not Confirm) for a needs_you item, and hit their APIs", async () => {

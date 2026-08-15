@@ -172,7 +172,7 @@ Status meanings:
 | `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | native | Preserve full-JD capture, typed verdict rendering, deterministic resolution, and ambiguity recovery in clean packed-install acceptance. |
-| `tailor-application` | Job packet actions plus URL, open-job, and named-job tailoring/apply Ask chains | partial | Keep returning gaps/artifacts in chat, keep tailoring separate from form capture and submission, and add packaged-input acceptance. |
+| `tailor-application` | Ask handles URL, pasted, attached, open-job, and named-job tailoring as a documents-only workflow | native | Preserve the separate tailoring/apply boundary, typed artifacts, and packed URL/paste/file-picker acceptance. |
 | `apply-job` | Ask/manual handoff, deterministic Greenhouse/Ashby question capture, paste-and-resume fallback, Apply on site, and skill runtime | partial | Connect the authenticated executor and rendered-form capture for non-public ATS forms; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Keep ambiguity, missing-reference, and durable write-back coverage in clean-home and packaged acceptance. |
 | `email-comms` | Draft, note, external-send controls, and natural Ask draft/sent-report flows | partial | Add natural note capture and connect a verified send executor or explicit supervised handoff. |
@@ -309,7 +309,16 @@ generation, and a real KEEP 96 run persisted the tailored résumé and cover let
 while leaving the application Interested. The receipt offered only Export documents
 and Review documents, deferred screening answers unless the user later chooses to
 apply, refreshed the open drawer immediately, and produced no HTTP or console errors.
-Packaged-input acceptance remains open.
+
+Final packed-install acceptance passed on 2026-08-15 for every supported input. A
+live Anthropic URL exposed that standalone tailoring was inheriting screening questions
+saved by an earlier Apply run. The packet boundary now includes answers only for explicit
+Apply intent or an explicit low-level question capture. A rebuilt package generated only
+the résumé and cover letter, made no answers-model call, rendered **Tailored documents**,
+and exposed only Export documents and Review documents. A real pasted JD and a real
+file-picker upload both preserved `requestedAction: tailor`, showed the exact
+capture/evaluate/tailor confirmation, returned 89/100 and 92/100 KEEP verdicts, and
+produced the same documents-only result with no application handoff or submission write.
 
 ## Deterministic source parity
 

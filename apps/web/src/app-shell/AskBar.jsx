@@ -155,6 +155,16 @@ function requestedJobAction(text) {
     .trim();
   const prefix = /^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?/i;
   const target = "(?:this|the)\\s+(?:job|role|posting|opening)";
+  const document =
+    "(?:(?:my|the)\\s+)?(?:resume|résumé|cv|cover\\s+letter|application\\s+(?:materials?|documents?))";
+  if (
+    new RegExp(
+      `${prefix.source}(?:(?:tailor|customi[sz]e|rewrite|revise|adapt)\\s+${document}|(?:write|draft|create)\\s+(?:a\\s+|the\\s+)?cover\\s+letter)(?:\\s+(?:to|for))?\\s+${target}$`,
+      "i"
+    ).test(instruction)
+  ) {
+    return "tailor";
+  }
   if (
     new RegExp(
       `${prefix.source}(?:apply|submit|prepare)(?:\\s+(?:to|for))?\\s+${target}$`,
@@ -891,9 +901,11 @@ function AskBarPreview({ preview, pending, selected, onSelect, captureMode, capt
           <span className="ask-bar__preview-label">
             {captureAction === "prepare"
               ? "Capture, evaluate, and prepare this application"
-              : captureAction === "evaluate"
-                ? "Capture and evaluate this job"
-                : "Send to triage"}
+              : captureAction === "tailor"
+                ? "Capture, evaluate, and tailor documents for this job"
+                : captureAction === "evaluate"
+                  ? "Capture and evaluate this job"
+                  : "Send to triage"}
           </span>
           <span className="ask-bar__preview-kbd">↵ Send</span>
         </button>
@@ -1521,10 +1533,11 @@ function PacketStatus({ artifact }) {
   const blockingGapCount = Number.isInteger(artifact.blockingGapCount)
     ? Math.max(0, artifact.blockingGapCount)
     : fallbackGapCount;
+  const label = artifact.purpose === "tailoring" ? "Tailored documents" : "Application packet";
   return (
     <div className="ask-bar__packet-status">
       <strong>
-        Application packet: {artifact.uploadReady ? "ready" : artifact.status || "reviewable"}
+        {label}: {artifact.uploadReady ? "ready" : artifact.status || "reviewable"}
       </strong>
       {blockingGapCount ? (
         <span>

@@ -1792,3 +1792,37 @@ Test homes:
   submitting; an attached JD resolved the existing tracked application, returned a 91/100 REVIEW,
   and stopped before packet generation. The final package previewed `Prepare the application for
   Anthropic Applied AI Engineer` as a `job.prepare-request` action.
+
+### `F-099` Standalone tailoring inherits screening questions from an earlier Apply run
+
+- Status: `FIXED`
+- Severity: P1 workflow-boundary blocker, asking only for a tailored résumé could regenerate an
+  answer sheet from application questions captured during an unrelated earlier Apply flow.
+- Reproduction: capture public Greenhouse questions through Apply, then ask CareerRat to tailor the
+  same job with `applyIntent:false` and inspect the packet artifacts and model calls.
+- Root cause: packet generation always fell back to the persisted question capture, regardless of
+  whether the current workflow intended to apply.
+- Fix: include screening answers only for explicit Apply intent or an explicit low-level question
+  capture. Standalone tailoring uses an empty capture boundary, labels the artifact purpose as
+  tailoring, and exposes only document review/export actions.
+- Regression: packet-generator and workspace-agent tests pin persisted-capture isolation, explicit
+  capture compatibility, documents-only artifacts, and the absence of an application handoff.
+- Live retest: the rebuilt package tailored Anthropic's live job URL without an answers artifact or
+  answers-model call, then rendered `Tailored documents` with only Export and Review actions.
+
+### `F-100` Pasted and attached Tailor requests lose their requested action
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, the URL path could tailor a job while Universal Intake reduced
+  pasted or attached requests to evaluation or application preparation.
+- Reproduction: type `Tailor my resume for this job`, then paste a JD or choose a text JD with the
+  file picker and inspect the proposed dispatch.
+- Root cause: Universal Intake modeled only `evaluate` and `prepare`, and the Ask attachment path
+  could not preserve a dedicated tailoring intent alongside the captured document.
+- Fix: add the typed `tailor` requested action end to end, map it to `job.tailor-request`, and render
+  the confirm-first `capture, evaluate, and tailor documents` plan for paste and attachment inputs.
+- Regression: intake action, dispatch, route, summary, and AskBar suites pin natural Tailor phrases,
+  both capture paths, and the typed workspace intent.
+- Live retest: a real paste and a real file-picker upload in the packed app both persisted
+  `requestedAction: tailor`, returned KEEP verdicts, generated only résumé and cover letter
+  artifacts, and exposed no Apply handoff or submission write.
