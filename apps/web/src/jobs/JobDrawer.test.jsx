@@ -182,6 +182,26 @@ beforeEach(() => {
 });
 
 describe("JobDrawer", () => {
+  it("renders only real HTTP posting links, never internal intake provenance", async () => {
+    const internal = {
+      ...applicationRow,
+      drawer: { artifacts: [], link: "careerrat://intake/intake-1" },
+    };
+    renderDrawer(internal);
+    await runEffects();
+    expect(renderToStaticMarkup(renderDrawer(internal))).not.toContain("View posting");
+
+    const external = {
+      ...applicationRow,
+      drawer: { artifacts: [], link: "https://jobs.example.test/northstar/solutions" },
+    };
+    renderDrawer(external);
+    await runEffects();
+    const html = renderToStaticMarkup(renderDrawer(external));
+    expect(html).toContain("View posting");
+    expect(html).toContain("https://jobs.example.test/northstar/solutions");
+  });
+
   it("wraps Tab focus inside the drawer", () => {
     expect(typeof jobDrawerModule.trapDrawerTab).toBe("function");
     const first = { focus: vi.fn() };

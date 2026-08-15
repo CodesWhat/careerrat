@@ -43,5 +43,11 @@ export function summarizeDispatch(dispatch) {
   ) {
     return "capture this interview context in your workspace conversation";
   }
+  if (
+    dispatch.action === "workspace_intent" &&
+    dispatch.params.intentType === "job.evaluate-request"
+  ) {
+    return "capture and evaluate this job in your workspace";
+  }
   return dispatch.action;
 }

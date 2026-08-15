@@ -950,6 +950,42 @@ describe("AskBar — acting", () => {
     expect(textOf(error)).toBe("The agent hit a snag.");
   });
 
+  it("shows saved-job ambiguity as a clarification without a blind retry", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      actionPreview({ type: "job.evaluate-request", label: "Evaluate this saved job" })
+    );
+    api.runWorkspaceIntent.mockRejectedValue(
+      new api.ApiError(409, {
+        code: "JOB_REFERENCE_AMBIGUOUS",
+        error: { message: "internal text must not render" },
+        details: {
+          matches: [
+            { company: "Acme", role: "Senior AI Engineer" },
+            { company: "Acme", role: "Staff Platform Engineer" },
+          ],
+        },
+      })
+    );
+
+    let tree = render();
+    let input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "rate the Acme role" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    input = byTag(tree, "input");
+    input.props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(byClass(tree, "ask-bar__error"))).toContain("Acme — Senior AI Engineer");
+    expect(textOf(byClass(tree, "ask-bar__error"))).toContain("Acme — Staff Platform Engineer");
+    expect(buttonByText(tree, "Try again")).toBeFalsy();
+  });
+
   it("keeps a failed answer retryable and resends the exact request", async () => {
     api.sendWorkspaceMessage
       .mockRejectedValueOnce(new api.ApiError(500, { error: "upstream unavailable" }))
@@ -1263,6 +1299,51 @@ describe("AskBar — Lane B: capture receipt decide actions", () => {
     expect(api.confirmIntake).toHaveBeenCalledWith("intake-1");
     tree = render();
     expect(textOf(byClass(tree, "ask-bar__intake"))).toContain("Running");
+  });
+
+  it("renders a confirmed JD's evaluation and a safe link to its saved job", async () => {
+    api.createIntake.mockResolvedValue({ item: intakeItem({ status: "proposed" }) });
+    api.confirmIntake.mockResolvedValue({
+      item: intakeItem({
+        status: "done",
+        dispatch: {
+          lane: "W",
+          action: "workspace_intent",
+          params: { intentType: "job.evaluate-request" },
+        },
+        result: {
+          summary: "Evaluated Acme — SRE: Keep (91/100 fit).",
+          applicationId: "app-acme",
+          evaluation: {
+            gate: "keep",
+            fitScore: 91,
+            fitReasons: ["Strong reliability evidence"],
+          },
+          nextActions: [
+            {
+              label: "Prepare application",
+              intent: {
+                type: "job.generate-documents",
+                entity: { type: "application", id: "app-acme" },
+                input: { applyIntent: true, formats: ["pdf"] },
+              },
+            },
+          ],
+        },
+      }),
+    });
+    let tree = await commitLongPaste();
+    buttonByText(tree, "Confirm").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(byClass(tree, "ask-bar__receipt"))).toContain(
+      "Evaluated Acme — SRE: Keep (91/100 fit)."
+    );
+    expect(textOf(byClass(tree, "ask-bar__evaluation"))).toContain("91/100 fit");
+    const link = visit(tree, (node) => node.type === "a" && textOf(node) === "Review this job")[0];
+    expect(link.props.href).toBe("/app/jobs?open=app-acme");
+    expect(buttonByText(tree, "Prepare application")).toBeTruthy();
   });
 
   it("Reclassify and Dismiss are offered (not Confirm) for a needs_you item, and hit their APIs", async () => {

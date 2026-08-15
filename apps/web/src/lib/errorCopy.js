@@ -29,12 +29,25 @@ function normalize(err) {
     const body = err.body || {};
     const raw = typeof body.error === "string" ? body.error : (body.error?.message ?? null);
     const code = body.code ?? body.error?.code ?? null;
-    return { raw, code, status: err.status };
+    return { raw, code, status: err.status, details: body.details || null };
   }
   if (err instanceof Error) {
-    return { raw: err.message || null, code: null, status: null };
+    return { raw: err.message || null, code: null, status: null, details: null };
   }
-  return { raw: null, code: null, status: null };
+  return { raw: null, code: null, status: null, details: null };
+}
+
+function savedJobAmbiguityMessage(details) {
+  const matches = Array.isArray(details?.matches) ? details.matches : [];
+  const labels = matches
+    .slice(0, 5)
+    .map(({ company, role }) =>
+      [String(company || "").trim(), String(role || "").trim()].filter(Boolean).join(" — ")
+    )
+    .filter(Boolean);
+  return labels.length
+    ? `That matches more than one saved job: ${labels.join("; ")}. Name the company and role more specifically.`
+    : "That matches more than one saved job. Name the company and role more specifically.";
 }
 
 const RULES = [
@@ -111,6 +124,16 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "JOB_REFERENCE_AMBIGUOUS",
+    message: ({ details }) => savedJobAmbiguityMessage(details),
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "JOB_REFERENCE_NOT_FOUND",
+    message: "CareerRat couldn't find that saved job. Check the company or role and try again.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
@@ -166,10 +189,15 @@ export function resolveErrorCopy(err) {
   if (err instanceof UserFacingError) {
     return { message: err.message, action: err.action, detail: null };
   }
-  const { raw, code, status } = normalize(err);
-  const rule = RULES.find((candidate) => candidate.match({ raw, code, status }));
+  const { raw, code, status, details } = normalize(err);
+  const context = { raw, code, status, details };
+  const rule = RULES.find((candidate) => candidate.match(context));
   if (rule) {
-    return { message: rule.message, action: rule.action, detail: raw };
+    return {
+      message: typeof rule.message === "function" ? rule.message(context) : rule.message,
+      action: rule.action,
+      detail: raw,
+    };
   }
   return {
     message: GENERIC_ERROR_MESSAGE,

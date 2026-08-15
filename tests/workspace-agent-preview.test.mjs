@@ -151,6 +151,38 @@ test("previewWorkspaceIntent: never guesses what 'this job' means without an ope
   assert.equal(result.action, null);
 });
 
+test("previewWorkspaceIntent: named saved job references are resolved by the executor", () => {
+  const repoRoot = tempRepo();
+
+  const rate = previewWorkspaceIntent({
+    text: "Can you rate the Acme role?",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(rate.action, {
+    label: "Evaluate this saved job",
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "Can you rate the Acme role?" },
+    },
+  });
+
+  const apply = previewWorkspaceIntent({
+    text: "Apply to the Northstar Staff AI role",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(apply.action, {
+    label: "Evaluate and prepare this saved job",
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "Apply to the Northstar Staff AI role" },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: a non-job URL stays answer-only", () => {
   const repoRoot = tempRepo();
   for (const text of [

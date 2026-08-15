@@ -702,6 +702,9 @@ async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime
   const actionResult = [...(result.messages || [])]
     .reverse()
     .find((message) => message.kind === "action_result");
+  const evaluationArtifact = actionResult?.artifacts?.find(
+    (artifact) => artifact.kind === "job_evaluation"
+  );
   return intakeUpdate({
     repoRoot,
     env,
@@ -711,8 +714,12 @@ async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime
       result: {
         threadId: result.thread?.id || "workspace-main",
         intentType: dispatch.params.intentType,
+        summary: actionResult?.text || null,
         communicationId: actionResult?.metadata?.communicationId || null,
         applicationId: actionResult?.metadata?.applicationId || null,
+        evaluation: evaluationArtifact?.evaluation || null,
+        state: actionResult?.metadata?.state || null,
+        nextActions: actionResult?.metadata?.nextActions || [],
       },
       error: null,
     },

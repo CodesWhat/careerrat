@@ -327,6 +327,143 @@ async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fet
   };
 }
 
+async function captureIntakeJobRequest({
+  repoRoot,
+  env,
+  intakeId,
+  resolveJobUrlImpl,
+  fetchImpl,
+  now,
+}) {
+  const item = intakeOne({ repoRoot, env, id: intakeId });
+  if (!item) throw actionError(`Intake item not found: ${intakeId}`, "NOT_FOUND");
+  if (item.status !== "confirmed" || item.decision !== "confirm") {
+    throw actionError(
+      "Review and confirm this job before CareerRat saves and evaluates it.",
+      "INTAKE_CONFIRMATION_REQUIRED"
+    );
+  }
+  if (item.kind === "job-url") {
+    const jobUrl = String(item.classification?.entities?.url || item.rawInput || "").trim();
+    if (!jobUrl) throw actionError("The confirmed job link is missing.", "JOB_URL_REQUIRED");
+    return {
+      ...(await captureJobRequest({
+        repoRoot,
+        env,
+        jobUrl,
+        resolveJobUrlImpl,
+        fetchImpl,
+        now,
+      })),
+      sourceIntakeId: item.id,
+    };
+  }
+  if (item.kind !== "jd-text") {
+    throw actionError(
+      "Only confirmed job descriptions and job links can be evaluated as jobs.",
+      "BAD_INTAKE_KIND"
+    );
+  }
+
+  const bodyText = String(item.rawInput || "").trim();
+  const entities = item.classification?.entities || {};
+  const company = String(entities.company || item.trackerMatch?.company || "").trim();
+  const title = String(entities.role || item.trackerMatch?.role || "").trim();
+  if (!bodyText) throw actionError("The confirmed job description is empty.", "MISSING_JOB_BODY");
+  if (!company || !title) {
+    throw actionError(
+      "CareerRat needs both the company and role before it can save this job without guessing.",
+      "JOB_IDENTITY_REQUIRED"
+    );
+  }
+
+  const db = requireDb({ repoRoot, env });
+  const match = matchTrackerRecord({ db, company, role: title });
+  const savedAt = requestDate(now);
+  const intakeUrl = `careerrat://intake/${item.id}`;
+  const [captured] = offersWithCapturedJobs({
+    repoRoot,
+    env,
+    savedAt,
+    offers: [
+      {
+        company,
+        title,
+        url: intakeUrl,
+        location: entities.location || "",
+        comp: entities.comp || "verify",
+        bodyText,
+        source: "ask-intake",
+        sourceProvider: "intake",
+        capturedUrl: item.sourceFilePath || item.capturedPath || null,
+        gate: "review",
+        fit: "",
+        score: 0,
+      },
+    ],
+  });
+  if (!captured?.artifacts?.jd) {
+    throw actionError("CareerRat could not save the job description.", "JOB_CAPTURE_FAILED");
+  }
+
+  let applicationId;
+  if (match.matched && match.recordType === "application") {
+    appSetFields({
+      repoRoot,
+      env,
+      id: match.id,
+      patch: {
+        artifacts: { jd: captured.artifacts.jd },
+        sourceMeta: { sourceIntakeId: item.id },
+      },
+    });
+    applicationId = match.id;
+  } else if (match.matched && match.recordType === "sourced") {
+    const sourced = sourcedForIntent({ repoRoot, env, id: match.id });
+    sourcedUpsertBatch({
+      repoRoot,
+      env,
+      rows: [
+        {
+          ...sourced,
+          artifacts: { ...(sourced.artifacts || {}), jd: captured.artifacts.jd },
+          sourceMeta: { ...(sourced.sourceMeta || {}), sourceIntakeId: item.id },
+          scanner: { ...(sourced.scanner || {}), bodyChars: bodyText.length },
+          updatedAt: savedAt.toISOString(),
+        },
+      ],
+    });
+    applicationId = sourcedPromote({ repoRoot, env, id: match.id }).id;
+  } else {
+    const rows = sourcedRowsFromScanOffers([captured], savedAt.toISOString());
+    if (!rows.length) {
+      throw actionError("CareerRat could not create a tracked job.", "JOB_CAPTURE_FAILED");
+    }
+    sourcedUpsertBatch({ repoRoot, env, rows });
+    applicationId = sourcedPromote({ repoRoot, env, id: rows[0].id }).id;
+    appSetFields({
+      repoRoot,
+      env,
+      id: applicationId,
+      patch: {
+        link: null,
+        sourceMeta: { sourceIntakeId: item.id },
+      },
+    });
+  }
+
+  const application = applicationForIntent({ repoRoot, env, id: applicationId });
+  return {
+    applicationId,
+    application,
+    bodyText,
+    jobUrl: application.link || application.url || application.sourceUrl || intakeUrl,
+    jdPath: captured.artifacts.jd,
+    match,
+    sourceIntakeId: item.id,
+  };
+}
+
 function resolveSavedJobRequest({ repoRoot, env, jobId }) {
   let application;
   try {
@@ -345,6 +482,104 @@ function resolveSavedJobRequest({ repoRoot, env, jobId }) {
     jdPath: application.artifacts?.jd || null,
     match: { matched: true, recordType: "application", id: application.id },
   };
+}
+
+const JOB_REFERENCE_STOP_WORDS = new Set([
+  "a",
+  "an",
+  "apply",
+  "assess",
+  "at",
+  "can",
+  "could",
+  "evaluate",
+  "for",
+  "i",
+  "it",
+  "job",
+  "me",
+  "my",
+  "opening",
+  "please",
+  "posting",
+  "rate",
+  "review",
+  "role",
+  "submit",
+  "that",
+  "the",
+  "this",
+  "to",
+  "want",
+  "you",
+]);
+
+function jobReferenceTokens(value) {
+  return String(value || "")
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((token) => token && !JOB_REFERENCE_STOP_WORDS.has(token));
+}
+
+function resolveReferencedJobRequest({ repoRoot, env, jobReference }) {
+  const tokens = jobReferenceTokens(jobReference);
+  if (!tokens.length) {
+    throw actionError(
+      "Name the company or role so CareerRat can identify the saved job.",
+      "JOB_REFERENCE_NOT_FOUND"
+    );
+  }
+  const db = requireDb({ repoRoot, env });
+  const applications = db
+    .prepare("SELECT data FROM applications ORDER BY rowid ASC")
+    .all()
+    .map((row) => ({ recordType: "application", ...JSON.parse(row.data) }));
+  const applicationLinks = new Set(
+    applications
+      .map((row) =>
+        String(row.link || "")
+          .trim()
+          .toLowerCase()
+      )
+      .filter(Boolean)
+  );
+  const sourced = db
+    .prepare("SELECT data FROM sourced ORDER BY rowid ASC")
+    .all()
+    .map((row) => ({ recordType: "sourced", ...JSON.parse(row.data) }))
+    .filter(
+      (row) =>
+        !row.link ||
+        !applicationLinks.has(
+          String(row.link || "")
+            .trim()
+            .toLowerCase()
+        )
+    );
+  const matches = [...applications, ...sourced].filter((row) => {
+    const candidateTokens = new Set(jobReferenceTokens(`${row.company || ""} ${row.role || ""}`));
+    return tokens.every((token) => candidateTokens.has(token));
+  });
+  if (!matches.length) {
+    throw actionError(
+      `CareerRat could not find a saved job matching “${String(jobReference).trim()}”.`,
+      "JOB_REFERENCE_NOT_FOUND"
+    );
+  }
+  if (matches.length > 1) {
+    const safeMatches = matches.slice(0, 5).map((row) => ({
+      company: String(row.company || "this company").slice(0, 120),
+      role: String(row.role || "this role").slice(0, 160),
+    }));
+    const choices = safeMatches.map((row) => `${row.company} — ${row.role}`).join("; ");
+    const error = actionError(
+      `That matches more than one saved job: ${choices}. Name the company and role more specifically.`,
+      "JOB_REFERENCE_AMBIGUOUS"
+    );
+    error.details = { matches: safeMatches };
+    throw error;
+  }
+  return resolveSavedJobRequest({ repoRoot, env, jobId: matches[0].id });
 }
 
 async function evaluateApplicationRequest({
@@ -959,19 +1194,35 @@ export async function executeWorkspaceIntent({
     if (normalized.type === "job.evaluate-request" || normalized.type === "job.prepare-request") {
       const jobUrl = String(input.jobUrl || "").trim();
       const jobId = String(input.jobId || "").trim();
-      if (!jobUrl && !jobId) {
-        throw actionError("A job URL or saved job is required.", "JOB_URL_REQUIRED");
+      const jobReference = String(input.jobReference || "").trim();
+      const intakeId = normalized.entity.type === "intake" ? normalized.entity.id : "";
+      if (!jobUrl && !jobId && !jobReference && !intakeId) {
+        throw actionError(
+          "A job URL, confirmed job description, or saved job is required.",
+          "JOB_URL_REQUIRED"
+        );
       }
-      const captured = jobUrl
-        ? await captureJobRequest({
+      const captured = intakeId
+        ? await captureIntakeJobRequest({
             repoRoot,
             env,
-            jobUrl,
+            intakeId,
             resolveJobUrlImpl,
             fetchImpl: searchFetchImpl,
             now,
           })
-        : resolveSavedJobRequest({ repoRoot, env, jobId });
+        : jobUrl
+          ? await captureJobRequest({
+              repoRoot,
+              env,
+              jobUrl,
+              resolveJobUrlImpl,
+              fetchImpl: searchFetchImpl,
+              now,
+            })
+          : jobId
+            ? resolveSavedJobRequest({ repoRoot, env, jobId })
+            : resolveReferencedJobRequest({ repoRoot, env, jobReference });
       const evaluated = await evaluateApplicationRequest({
         repoRoot,
         env,
@@ -997,6 +1248,7 @@ export async function executeWorkspaceIntent({
           artifacts: [evaluated.artifact],
           metadata: {
             ...evaluationMetadata,
+            ...(captured.sourceIntakeId ? { sourceIntakeId: captured.sourceIntakeId } : {}),
             state: evaluated.gate,
             nextActions: evaluationNextActions(evaluated.gate, captured.applicationId),
           },
@@ -1041,6 +1293,7 @@ export async function executeWorkspaceIntent({
         artifacts: [evaluated.artifact, packetArtifact, handoffArtifact].filter(Boolean),
         metadata: {
           ...evaluationMetadata,
+          ...(captured.sourceIntakeId ? { sourceIntakeId: captured.sourceIntakeId } : {}),
           state: packet.status || "reviewable",
           uploadReady: Boolean(packet.uploadReady),
           gapCount: gaps.length,
@@ -1831,6 +2084,32 @@ const ACTION_PREVIEW_RULES = [
       type: "job.evaluate-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: { jobId: openJobId(context) },
+    }),
+  },
+  {
+    test: (text) =>
+      !firstHttpUrl(text) &&
+      /\b(apply|submit)\b/i.test(text) &&
+      /\b(job|role|posting|opening)\b/i.test(text) &&
+      jobReferenceTokens(text).length > 0,
+    label: "Evaluate and prepare this saved job",
+    intent: (text) => ({
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: text },
+    }),
+  },
+  {
+    test: (text) =>
+      !firstHttpUrl(text) &&
+      /\b(rate|evaluate|review|assess)\b/i.test(text) &&
+      /\b(job|role|posting|opening)\b/i.test(text) &&
+      jobReferenceTokens(text).length > 0,
+    label: "Evaluate this saved job",
+    intent: (text) => ({
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: text },
     }),
   },
   {

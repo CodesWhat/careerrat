@@ -341,6 +341,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
   }
 
   const drawer = row.drawer || {};
+  const postingUrl = safeExternalHttpUrl(drawer.link);
   const sourcedActionable =
     !isApplication &&
     !sourcedResolved &&
@@ -383,8 +384,8 @@ export function JobDrawer({ row, onClose, initialSection }) {
             <span className="badge badge--muted">{drawer.stage || row.stageLabel}</span>
           </div>
           {row.statusNote ? <p className="field__hint">{row.statusNote}</p> : null}
-          {drawer.link ? (
-            <a className="job-drawer__link" href={drawer.link} target="_blank" rel="noreferrer">
+          {postingUrl ? (
+            <a className="job-drawer__link" href={postingUrl} target="_blank" rel="noreferrer">
               View posting
             </a>
           ) : null}
