@@ -1034,13 +1034,33 @@ async function prepareApplicationQuestions({
   }
 }
 
-function questionCaptureText(questionCapture) {
+function questionCaptureText(questionCapture, application = null) {
   if (!questionCapture) return "";
   if (questionCapture.state === "captured") {
     const count = questionCapture.answerableCount;
     return `Captured ${count} application question${count === 1 ? "" : "s"} before generating the packet.`;
   }
+  if (!safeExternalHttpUrl(application?.link || application?.url || application?.sourceUrl)) {
+    return "Paste the application link so CareerRat can capture the form questions and open the supervised handoff.";
+  }
   return "Open the site, then paste the questions here so CareerRat can rebuild the answers.";
+}
+
+function packetGapsForApplication(gaps, application, applyIntent) {
+  const next = Array.isArray(gaps) ? [...gaps] : [];
+  if (
+    applyIntent &&
+    !safeExternalHttpUrl(application?.link || application?.url || application?.sourceUrl) &&
+    !next.some((gap) => String(gap?.code || "") === "APPLICATION_URL_REQUIRED")
+  ) {
+    next.push({
+      kind: "application",
+      code: "APPLICATION_URL_REQUIRED",
+      message:
+        "Paste the application link so CareerRat can capture the form and open the supervised handoff.",
+    });
+  }
+  return next;
 }
 
 function applicationHandoffArtifact(application, applicationId, questionCapture) {
@@ -1808,7 +1828,7 @@ export async function executeWorkspaceIntent({
         formats: ["pdf"],
         generateDocumentsImpl,
       });
-      const gaps = Array.isArray(packet.gaps) ? packet.gaps : [];
+      const gaps = packetGapsForApplication(packet.gaps, evaluated.application, applyIntent);
       const blockingGapCount = blockingPacketGaps(gaps).length;
       const handoffArtifact =
         applyIntent && blockingGapCount === 0
@@ -1836,7 +1856,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `${evaluated.text} ${questionCaptureText(questionCapture)} Generated the ${
+        text: `${evaluated.text} ${questionCaptureText(questionCapture, evaluated.application)} Generated the ${
           applyIntent ? "application" : "tailored application"
         } packet. ${packetGapText(gaps, questionCaptureDeferred, { tailoring: !applyIntent })}`,
         artifacts: [evaluated.artifact, packetArtifact, handoffArtifact].filter(Boolean),
@@ -1849,7 +1869,7 @@ export async function executeWorkspaceIntent({
           blockingGapCount,
           nextActions,
         },
-        operationResult: packet,
+        operationResult: { ...packet, gaps },
         now,
       });
     }
@@ -1914,7 +1934,7 @@ export async function executeWorkspaceIntent({
           formats: formats.length ? formats : ["pdf"],
           generateDocumentsImpl,
         });
-      const gaps = Array.isArray(operation.gaps) ? operation.gaps : [];
+      const gaps = packetGapsForApplication(operation.gaps, application, applyIntent);
       const blockingGapCount = blockingPacketGaps(gaps).length;
       const handoffArtifact =
         blockingGapCount === 0
@@ -1926,7 +1946,7 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `${questionCaptureText(questionCapture)} Generated documents for ${applicationLabel(application)}. ${gapText}`.trim(),
+        text: `${questionCaptureText(questionCapture, application)} Generated documents for ${applicationLabel(application)}. ${gapText}`.trim(),
         artifacts: [
           {
             kind: "packet_generation",
@@ -1947,7 +1967,7 @@ export async function executeWorkspaceIntent({
           blockingGapCount,
           nextActions: packetNextActions(gaps, normalized.entity.id, Boolean(handoffArtifact)),
         },
-        operationResult: operation,
+        operationResult: { ...operation, gaps },
         now,
       });
     }
@@ -2893,12 +2913,35 @@ export async function executeWorkspaceIntent({
       const postingUrl = safeExternalHttpUrl(
         application.link || application.url || application.sourceUrl
       );
+      if (!postingUrl) {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `CareerRat cannot open the supervised handoff for ${applicationLabel(application)} yet. Paste the application link; this application was not marked Applied.`,
+          artifacts: [
+            {
+              kind: "application_link_required",
+              title: `${applicationLabel(application)} — Application link needed`,
+              applicationId: normalized.entity.id,
+              code: "APPLICATION_URL_REQUIRED",
+            },
+          ],
+          metadata: {
+            state: "needs-input",
+            applicationId: normalized.entity.id,
+            submissionVerified: false,
+          },
+          now,
+        });
+      }
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `CareerRat prepared the handoff for ${applicationLabel(application)}. ${questionCaptureText(questionCapture)} The authenticated submission executor is not connected, so open the posting to submit it; this application was not marked Applied.`,
+        text: `CareerRat prepared the handoff for ${applicationLabel(application)}. ${questionCaptureText(questionCapture, application)} The authenticated submission executor is not connected, so open the posting to submit it; this application was not marked Applied.`,
         artifacts: [
           {
             kind: "application_handoff",
@@ -3172,6 +3215,14 @@ function looksLikeTailoringRequest(text) {
   );
 }
 
+function looksLikeApplicationPreparation(text) {
+  const value = String(text || "");
+  return (
+    /\b(?:apply|submit)\b/i.test(value) ||
+    /\b(?:prepare|build|generate)\b.{0,40}\b(?:the\s+)?application\b/i.test(value)
+  );
+}
+
 function reportedOutcomeFromText(text) {
   const value = String(text || "").trim();
   let to = null;
@@ -3399,7 +3450,7 @@ const ACTION_PREVIEW_RULES = [
   {
     test: (text) => {
       const jobUrl = firstHttpUrl(text);
-      return /\b(apply|submit)\b/i.test(text) && Boolean(jobUrl) && looksLikeJobUrl(jobUrl);
+      return looksLikeApplicationPreparation(text) && Boolean(jobUrl) && looksLikeJobUrl(jobUrl);
     },
     label: "Evaluate and prepare this application",
     intent: (text) => ({
@@ -3427,7 +3478,7 @@ const ACTION_PREVIEW_RULES = [
   {
     test: (text, context) =>
       Boolean(openJobId(context)) &&
-      /\b(apply|submit)\b/i.test(text) &&
+      looksLikeApplicationPreparation(text) &&
       /\b(?:this|the)\s+(?:job|role|posting)\b/i.test(text),
     label: "Evaluate and prepare this saved job",
     intent: (_text, context) => ({
@@ -3463,8 +3514,8 @@ const ACTION_PREVIEW_RULES = [
   {
     test: (text) =>
       !firstHttpUrl(text) &&
-      /\b(apply|submit)\b/i.test(text) &&
-      /\b(job|role|posting|opening)\b/i.test(text) &&
+      looksLikeApplicationPreparation(text) &&
+      /\b(job|role|posting|opening|application)\b/i.test(text) &&
       jobReferenceTokens(text).length > 0,
     label: "Evaluate and prepare this saved job",
     intent: (text) => ({

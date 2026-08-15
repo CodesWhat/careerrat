@@ -134,13 +134,24 @@ the saved capture available when a rebuild must be retried. The Jobs drawer repo
 same capture state before exposing the safe site link. A verified executor result is
 still the only path that writes Applied.
 
-Headed isolated-home acceptance passed on 2026-08-15 against Anthropic's live Greenhouse
-board. One Ask request captured the full JD, returned a 96/100 KEEP evaluation, collected
-all 19 public application fields, generated the résumé, cover letter, and answer sheet,
-stopped on five human-review gaps, and left the application in Reviewed Hold. Remaining
-work is the connected authenticated executor, automatic rendered-form capture for sites
-without a public question API, and clean-home/packaged acceptance for pasted and attached
-input.
+Headed packed-install acceptance passed on 2026-08-15 against Anthropic's live Greenhouse
+board. One Ask request captured the full JD, returned a KEEP evaluation, collected all 19
+public application fields, generated the résumé, cover letter, and answer sheet, and left
+the application in Reviewed Hold. The packet now reuses setup facts locally for identity,
+contact, links, work posture, relocation, notice period, authorization, and sponsorship;
+treats the generated résumé as the upload answer; leaves unresolved optional fields blank;
+and reports one plain-English action per required unknown. The clean rebuild reduced 26
+duplicated validator/linter messages to four real review actions, fixed relocation and
+hybrid-office answers, and removed a false private-compensation warning caused by the phrase
+"current base" in a location sentence. Remaining work is the connected authenticated
+executor and automatic rendered-form capture for sites without a public question API.
+
+Final packed acceptance also covered both Universal Intake routes. A pasted JD produced a
+92/100 KEEP, generated the packet, and stopped on the real review actions; an attached JD
+matched the existing application, returned a 91/100 REVIEW, and stopped before packet
+generation. Text-only Apply now asks for the application link instead of offering an
+impossible site handoff, and natural requests such as “Prepare the application for …” route
+to the same visible, confirm-first application workflow.
 
 ## Original skill inventory
 

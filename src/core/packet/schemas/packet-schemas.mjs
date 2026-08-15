@@ -160,6 +160,18 @@ export const packetManifestSchema = {
         },
       },
     },
+    warnings: {
+      type: "array",
+      items: {
+        type: "object",
+        additionalProperties: true,
+        properties: {
+          kind: { type: "string" },
+          code: { type: "string" },
+          message: { type: "string" },
+        },
+      },
+    },
   },
 };
 

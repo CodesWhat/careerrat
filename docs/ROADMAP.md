@@ -366,6 +366,19 @@ The current build order is:
    ambiguity-recovery paths through durable verdict state. Greenhouse and Ashby
    question schemas are captured before packet generation; other ATS forms now use a durable
    in-Ask paste-and-resume path that can retry answer generation without losing the saved questions.
+   Packed Greenhouse acceptance now proves the packet reuses onboarding facts instead of asking
+   the model or user for standard form fields, treats the generated résumé as the upload artifact,
+   leaves unresolved optional fields blank, and reports one plain-English action per required
+   unknown. A real 19-field Anthropic rebuild reduced 26 duplicated internal validation messages
+   to four human review actions while keeping the application in Reviewed Hold. It also fixed
+   relocation, hybrid-office, and notice-period autofill and removed a false private-compensation
+   warning from location wording.
+   Packed Universal Intake acceptance now covers pasted and attached JDs too. Pasted Apply
+   can evaluate and build the packet without pretending a missing site can be opened, then
+   asks for the application link as a typed next action. Attached Apply preserves the user's
+   intent, resolves an existing tracked job, and stops at REVIEW without generating or
+   submitting. “Prepare/build/generate the application” phrases share the same confirm-first
+   path as “apply/submit.”
    Explicit natural outcome reports now resolve
    one saved application and write the typed transition in the same Ask thread; ambiguous or
    missing references stop with specific clarification copy and no mutation. Natural recruiter

@@ -815,6 +815,82 @@ test("job.evaluate-request captures and evaluates a confirmed pasted JD inside w
   assert.equal(message.metadata.sourceIntakeId, id);
 });
 
+test("job.prepare-request asks for the application link when a pasted JD has no URL", async () => {
+  const repoRoot = tempRepo();
+  const rawInput = [
+    "Thornfield Labs",
+    "Forward Deployed AI Engineer",
+    "Own production agent systems and evaluation infrastructure.",
+  ].join("\n");
+  const { id } = intakeCapture({ repoRoot, env: {}, rawInput, inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    env: {},
+    id,
+    patch: {
+      status: "confirmed",
+      decision: "confirm",
+      kind: "jd-text",
+      classification: {
+        kind: "jd-text",
+        entities: { company: "Thornfield Labs", role: "Forward Deployed AI Engineer" },
+      },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "intake", id },
+    },
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 92,
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async (input) => {
+      if (input.body.applyIntent) {
+        const error = new Error("Capture the application questions first.");
+        error.code = "BAD_QUESTION_CAPTURE";
+        throw error;
+      }
+      return {
+        status: "reviewable",
+        uploadReady: false,
+        gaps: [
+          {
+            kind: "answers",
+            code: "QUESTION_CAPTURE_DEFERRED",
+            message: "The site will provide its questions later.",
+          },
+        ],
+        artifacts: { resumePdf: "workspace/tailored/thornfield-resume.pdf" },
+      };
+    },
+  });
+
+  const message = result.messages.at(-1);
+  const packet = message.artifacts.find((artifact) => artifact.kind === "packet_generation");
+  assert.equal(message.metadata.blockingGapCount, 1);
+  assert.equal(packet.blockingGapCount, 1);
+  assert.ok(packet.gaps.some((gap) => gap.code === "APPLICATION_URL_REQUIRED"));
+  assert.match(message.text, /paste the application link/i);
+  assert.doesNotMatch(message.text, /open the site/i);
+  assert.equal(
+    message.artifacts.some((artifact) => artifact.kind === "application_handoff"),
+    false
+  );
+});
+
 test("job.evaluate-request resolves one named saved job without guessing an id", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {
@@ -3279,7 +3355,7 @@ test("Apply on site returns a manual handoff without changing status when no exe
   assert.match(result.messages[1].text, /not marked Applied/i);
 });
 
-test("Apply on site never returns an executable manual-handoff URL", async () => {
+test("Apply on site asks for a safe application link instead of returning an unsafe handoff", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { link: "javascript:alert(1)" });
 
@@ -3292,7 +3368,9 @@ test("Apply on site never returns an executable manual-handoff URL", async () =>
     },
   });
 
-  assert.equal(result.messages.at(-1).artifacts[0].url, null);
+  assert.equal(result.messages.at(-1).artifacts[0].kind, "application_link_required");
+  assert.equal(result.messages.at(-1).artifacts[0].code, "APPLICATION_URL_REQUIRED");
+  assert.match(result.messages.at(-1).text, /paste the application link/i);
   assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
 });
 

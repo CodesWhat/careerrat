@@ -579,7 +579,11 @@ function genericMatch(normalized) {
   }
   if (normalized.includes("email")) return "email";
   if (normalized.includes("phone")) return "phone";
-  if (normalized.includes("location") || normalized === "city") return "location";
+  // "relocation" contains the substring "location" but is a screening
+  // preference, not the candidate's current city. Leave it for
+  // resolveScreeningAnswer instead of filling the home address here.
+  if (normalized.includes("relocat")) return null;
+  if (/(^| )location( |$)/.test(normalized) || normalized === "city") return "location";
   if (normalized.includes("linkedin")) return "linkedin";
   if (normalized.includes("github")) return "github";
   if (
@@ -685,6 +689,22 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
     if (answer != null) return { action: "fill", value: answer, source: "profile.location.hybrid" };
   }
 
+  if (normalized.includes("in person") || normalized.includes("inperson")) {
+    const percentage = String(label).match(/\b(\d{1,3})\s*(?:%|percent\b)/i);
+    const posture = percentage && Number(percentage[1]) < 100 ? location.hybrid : location.onsite;
+    const answer = yesNo(posture);
+    if (answer != null) {
+      return {
+        action: "fill",
+        value: answer,
+        source:
+          percentage && Number(percentage[1]) < 100
+            ? "profile.location.hybrid"
+            : "profile.location.onsite",
+      };
+    }
+  }
+
   if (
     normalized.includes("onsite") ||
     normalized.includes("on site") ||
@@ -696,7 +716,18 @@ export function resolveScreeningAnswer(question, { formDefaults, profile, honest
 
   if (normalized.includes("relocat")) {
     const relocation = listValue(location.relocation);
-    if (normalized.includes("where") || normalized.includes("location")) {
+    if (normalized.includes("type relocating") && relocation.length > 0) {
+      return {
+        action: "fill",
+        value: "relocating",
+        source: "profile.location.relocation",
+      };
+    }
+    if (
+      normalized.includes("where") ||
+      /(^| )location( |$)/.test(normalized) ||
+      normalized.includes("address")
+    ) {
       if (relocation.length > 0) {
         return {
           action: "fill",

@@ -406,6 +406,134 @@ test("draftPacketAnswers sends only non-EEO questions to bounded AI and preserve
   assert.deepEqual(result.excludedQuestionIds, ["eeo-1"]);
 });
 
+test("draftPacketAnswers fills onboarding facts locally and only blocks on required unknowns", async () => {
+  const { draftPacketAnswers } = await loadAnswersModule();
+  const seenQuestions = [];
+
+  const result = await draftPacketAnswers({
+    context: {
+      ...PACKET_CONTEXT,
+      application: {
+        ...PACKET_CONTEXT.application,
+        link: "https://job-boards.greenhouse.io/acme/jobs/123",
+      },
+      profile: {
+        ...PACKET_CONTEXT.profile,
+        candidate: {
+          full_name: "Alex Rivera",
+          email: "alex@example.com",
+          phone: "+1-555-0199",
+          linkedin: "https://linkedin.com/in/alexrivera",
+        },
+        location: {
+          home: "Austin, TX",
+          hybrid: true,
+          onsite: false,
+          relocation: ["San Francisco, CA", "New York, NY"],
+        },
+        authorization: { notice_period: "2 weeks" },
+      },
+    },
+    questions: {
+      answerable: [
+        { id: "first_name", label: "First Name", type: "text", required: true },
+        { id: "email", label: "Email", type: "text", required: true },
+        { id: "resume", label: "Resume/CV", type: "file", required: true },
+        {
+          id: "hybrid",
+          label: "Are you open to working in-person in one of our offices 25% of the time?",
+          type: "boolean",
+          required: true,
+        },
+        {
+          id: "relocation",
+          label: "Are you open to relocation for this role?",
+          type: "boolean",
+          required: true,
+        },
+        {
+          id: "relocating",
+          label:
+            'What is the address from which you plan on working? If you would need to relocate, please type "relocating".',
+          type: "text",
+          required: false,
+        },
+        {
+          id: "start",
+          label: "When is the earliest you would want to start working with us?",
+          type: "text",
+          required: false,
+        },
+        {
+          id: "preferences",
+          label: "(Optional) Personal Preferences",
+          type: "text",
+          required: false,
+        },
+        {
+          id: "policy",
+          label: "AI Policy for Application",
+          type: "boolean",
+          required: true,
+        },
+      ],
+      excluded: [],
+    },
+    runAI: async ({ messages }) => {
+      const prompt = messages.at(-1).content;
+      const questions = JSON.parse(prompt.split("Questions:\n")[1].split("\n\nContext:")[0]);
+      seenQuestions.push(...questions.map((question) => question.id));
+      return {
+        body: {
+          ok: true,
+          ai: { used: true },
+          data: {
+            answers: [
+              {
+                questionId: "preferences",
+                answer: "NEEDS YOU — add this only if you want to.",
+                evidenceIds: [],
+                gap: "personal preference",
+              },
+              {
+                questionId: "policy",
+                answer: "NEEDS YOU — attest to your own use of AI.",
+                evidenceIds: [],
+                gap: "personal attestation",
+              },
+            ],
+          },
+        },
+      };
+    },
+  });
+
+  assert.deepEqual(seenQuestions, ["preferences", "policy"]);
+  assert.equal(result.answers.find((answer) => answer.questionId === "first_name").answer, "Alex");
+  assert.equal(
+    result.answers.find((answer) => answer.questionId === "email").answer,
+    "alex@example.com"
+  );
+  assert.match(
+    result.answers.find((answer) => answer.questionId === "resume").answer,
+    /generated resume/i
+  );
+  assert.equal(result.answers.find((answer) => answer.questionId === "hybrid").answer, "Yes");
+  assert.equal(result.answers.find((answer) => answer.questionId === "relocation").answer, "Yes");
+  assert.equal(
+    result.answers.find((answer) => answer.questionId === "relocating").answer,
+    "relocating"
+  );
+  assert.match(result.answers.find((answer) => answer.questionId === "start").answer, /2 weeks/i);
+  assert.equal(
+    result.answers.find((answer) => answer.questionId === "preferences").uploadReady,
+    true
+  );
+  assert.equal(result.answers.find((answer) => answer.questionId === "preferences").skipped, true);
+  assert.equal(result.answers.find((answer) => answer.questionId === "policy").uploadReady, false);
+  assert.equal(result.uploadReady, false);
+});
+
 test("draftPacketAnswers accepts a story id selected into the answers prompt", async () => {
   const { draftPacketAnswers } = await loadAnswersModule();
   const result = await draftPacketAnswers({
