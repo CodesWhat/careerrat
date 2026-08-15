@@ -99,8 +99,12 @@ an explicitly open saved job, and deterministic natural references such as "the 
 role." It captures or reuses the full JD, promotes sourced roles, runs the gate, saves
 the verdict, and renders a structured result plus Review and typed Prepare application
 actions in Ask. Ambiguous and missing natural references fail visibly instead of
-guessing. Packed-app acceptance covers the open-saved-job REVIEW/CUT path; clean-home
-and packaged acceptance for pasted/attached and natural-reference inputs remains.
+guessing. Clean packed-install acceptance now covers URL evaluation, an open saved job,
+named saved-job resolution, pasted-JD capture and evaluation, attached-text-JD confirmation
+and evaluation, structured REVIEW/CUT rendering, durable full-JD capture, and ambiguous-name
+recovery. The pass also fixed adaptive-thinking truncation in the packet gate, shipped the
+intake routing table in the npm package, and moved installed intake classification onto the
+configured AI seam.
 
 ### "Apply to this job"
 
@@ -156,7 +160,7 @@ Status meanings:
 | `research-boards` | Ask starts or reopens an embedded guided board search with Add source/Skip review | native | Keep clean-home and packaged acceptance for new-source, duplicate-source, skip-all, and runtime-restart paths. |
 | `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
-| `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | partial | Run clean-home and packaged acceptance for every input shape, including ambiguity and recovery. |
+| `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | native | Preserve full-JD capture, typed verdict rendering, deterministic resolution, and ambiguity recovery in clean packed-install acceptance. |
 | `tailor-application` | Job packet actions plus URL, open-job, and named-job tailoring/apply Ask chains | partial | Keep returning gaps/artifacts in chat, keep tailoring separate from form capture and submission, and add packaged-input acceptance. |
 | `apply-job` | Ask/manual handoff, deterministic Greenhouse/Ashby question capture, paste-and-resume fallback, Apply on site, and skill runtime | partial | Connect the authenticated executor and rendered-form capture for non-public ATS forms; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Keep ambiguity, missing-reference, and durable write-back coverage in clean-home and packaged acceptance. |

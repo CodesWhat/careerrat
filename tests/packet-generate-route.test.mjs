@@ -17,6 +17,7 @@ import {
   candidateConfigPatch,
   candidateEvidenceMerge,
 } from "../src/core/db/verbs/candidate.mjs";
+import { evaluatePacketGate } from "../src/core/packet/gate.mjs";
 import { dispatchHttpRoute } from "../src/core/tracker/route-dispatch.mjs";
 
 const cleanupRoots = [];
@@ -404,6 +405,35 @@ test("POST /api/packet/gate: captures supplied JD body and stamps artifacts.jd b
   } finally {
     await closeServer(server);
   }
+});
+
+test("packet gate reserves output budget for model reasoning plus the typed verdict", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  let seenOptions = null;
+
+  const result = await evaluatePacketGate({
+    repoRoot,
+    body: { applicationId: "app-packet" },
+    runAI: async (options) => {
+      seenOptions = options;
+      return {
+        body: {
+          ok: true,
+          ai: { used: true, model: "claude-test" },
+          data: typedGateVerdict(),
+        },
+      };
+    },
+  });
+
+  assert.equal(result.status, 200);
+  assert.equal(result.body.data.gate, "keep");
+  assert.ok(
+    seenOptions.maxTokens >= 4096,
+    "the packet gate must leave room for model reasoning before its JSON verdict"
+  );
+  assert.equal(seenOptions.effort, "low");
 });
 
 test("POST /api/packet/gate: keeps budget-limited evaluation copy readable", async () => {

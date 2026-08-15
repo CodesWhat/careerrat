@@ -192,11 +192,12 @@ const NATIVE_SCHEMA_STRIPPED_KEYS = new Set([
 
 // Deep-clones `schema` and strips value-constraint keywords the native
 // structured-output API rejects, recursing into properties/items/$defs/
-// definitions/anyOf/allOf/oneOf/additionalProperties. Structural keywords
-// (type, properties, required, enum, items, description, title, const,
-// anyOf/allOf/oneOf, $ref, $defs) are left intact. The stripped constraints
-// stay enforced locally by the bounded-AI validation layer after parse, so
-// this only loosens model-side guidance — it never weakens correctness.
+// definitions/anyOf/allOf/oneOf/additionalProperties. Anthropic also requires
+// every object in a native output schema to be closed, so permissive or omitted
+// additionalProperties values become false at this wire seam. Other structural
+// keywords (type, properties, required, enum, items, description, title, const,
+// anyOf/allOf/oneOf, $ref, $defs) are left intact. The stripped constraints stay
+// enforced locally by the bounded-AI validation layer after parse.
 // Never mutates its input (callers often pass frozen module constants).
 // Non-object input is returned unchanged.
 export function sanitizeNativeOutputSchema(schema) {
@@ -224,13 +225,13 @@ export function sanitizeNativeOutputSchema(schema) {
         ? value.map((entry) => sanitizeNativeOutputSchema(entry))
         : value;
     } else if (key === "additionalProperties") {
-      out[key] =
-        value && typeof value === "object" && !Array.isArray(value)
-          ? sanitizeNativeOutputSchema(value)
-          : value;
+      out[key] = false;
     } else {
       out[key] = value;
     }
+  }
+  if (schema.type === "object" && out.additionalProperties === undefined) {
+    out.additionalProperties = false;
   }
   return out;
 }
@@ -249,10 +250,13 @@ function buildRequest(
     operation,
     outputSchema,
     outputMode,
+    effort,
   }
 ) {
   const body = { model, max_tokens: maxTokens, messages, stream };
   if (system) body.system = system;
+  const outputConfig = {};
+  if (effort) outputConfig.effort = effort;
   if (outputMode === "native" && outputSchema) {
     // output_config.format takes only { type, schema } — the API rejects any
     // extra field (400 "Extra inputs are not permitted"). outputName is only
@@ -260,10 +264,12 @@ function buildRequest(
     // schema itself is sanitized (see sanitizeNativeOutputSchema) since the
     // native API also rejects several JSON-Schema value-constraint keywords
     // that product schemas legitimately use for local validation.
-    body.output_config = {
-      format: { type: "json_schema", schema: sanitizeNativeOutputSchema(outputSchema) },
+    outputConfig.format = {
+      type: "json_schema",
+      schema: sanitizeNativeOutputSchema(outputSchema),
     };
   }
+  if (Object.keys(outputConfig).length > 0) body.output_config = outputConfig;
 
   const headers = { "content-type": "application/json" };
   let url;
@@ -474,6 +480,7 @@ export async function callAI({
   outputSchema,
   outputName,
   outputMode = null,
+  effort = null,
   runtimeInventory = null,
   runInstalledRuntimeImpl = runInstalledRuntime,
 } = {}) {
@@ -530,6 +537,7 @@ export async function callAI({
     outputSchema,
     outputName,
     outputMode,
+    effort,
   });
 
   const startedAt = performance.now();
