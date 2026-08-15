@@ -221,6 +221,62 @@ test("previewWorkspaceIntent: apply plus a job URL maps to job.prepare-request",
   });
 });
 
+test("previewWorkspaceIntent: standalone tailoring resolves URL, open-job, and named-job requests", () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://jobs.ashbyhq.com/acme/abc-123";
+
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: `tailor my resume for ${jobUrl}`,
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Evaluate and tailor this job",
+      intent: {
+        type: "job.tailor-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { jobUrl },
+      },
+    }
+  );
+
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "write a cover letter for this job",
+      context: { pathname: "/jobs", jobId: "app-acme" },
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Evaluate and tailor this saved job",
+      intent: {
+        type: "job.tailor-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { jobId: "app-acme" },
+      },
+    }
+  );
+
+  assert.deepEqual(
+    previewWorkspaceIntent({
+      text: "customize my application materials for the Acme Staff AI Engineer role",
+      repoRoot,
+      env: {},
+    }).action,
+    {
+      label: "Evaluate and tailor this saved job",
+      intent: {
+        type: "job.tailor-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          jobReference: "customize my application materials for the Acme Staff AI Engineer role",
+        },
+      },
+    }
+  );
+});
+
 test("previewWorkspaceIntent: this job resolves to the explicitly open saved job", () => {
   const repoRoot = tempRepo();
   const context = { pathname: "/jobs", jobId: "app-acme" };

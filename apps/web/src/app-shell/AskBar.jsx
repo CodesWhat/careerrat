@@ -14,6 +14,7 @@ import {
   sendWorkspaceMessage,
   uploadIntakeFile,
 } from "../lib/api.js";
+import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { errorState, resolveErrorCopy } from "../lib/errorCopy.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
 import { kindLabel } from "../lib/intake-labels.js";
@@ -421,6 +422,7 @@ export function AskBar() {
       }
       if (turnIdRef.current !== turnId) return;
       const isError = last?.kind === "action_error";
+      if (!isError) emitDashboardChanged();
       setTurn((t) =>
         t
           ? {

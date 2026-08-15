@@ -53,6 +53,7 @@ const EXECUTABLE_INTENTS = new Set([
   "job.evaluate",
   "job.evaluate-request",
   "job.prepare-request",
+  "job.tailor-request",
   "job.generate-documents",
   "job.export-documents",
   "search.run",
@@ -710,9 +711,37 @@ function packetNextActions(gaps, applicationId, hasHandoff) {
   ];
 }
 
-function packetGapText(gaps, questionCaptureDeferred) {
+function tailoredPacketNextActions(applicationId) {
+  return [
+    {
+      label: "Export documents",
+      intent: {
+        type: "job.export-documents",
+        entity: { type: "application", id: applicationId },
+        input: { formats: ["pdf"] },
+      },
+    },
+    {
+      label: "Review documents",
+      href: `/jobs?open=${encodeURIComponent(applicationId)}`,
+    },
+  ];
+}
+
+function packetGapText(gaps, questionCaptureDeferred, { tailoring = false } = {}) {
   const blockingCount = blockingPacketGaps(gaps).length;
   const questionsPending = questionCaptureDeferred || gaps.some(isQuestionCaptureGap);
+  if (tailoring) {
+    if (questionsPending && blockingCount === 0) {
+      return "The tailored documents are ready. Screening answers will be handled only if you later choose to apply.";
+    }
+    if (blockingCount > 0) {
+      return `${blockingCount} item${blockingCount === 1 ? "" : "s"} still needs review${
+        questionsPending ? "; screening answers stay pending until you choose to apply" : ""
+      }.`;
+    }
+    return "The tailored documents are ready to review.";
+  }
   if (questionsPending && blockingCount === 0) {
     return "The base documents are ready. Application questions will be completed on the application site.";
   }
@@ -1311,7 +1340,11 @@ export async function executeWorkspaceIntent({
       });
     }
 
-    if (normalized.type === "job.evaluate-request" || normalized.type === "job.prepare-request") {
+    if (
+      normalized.type === "job.evaluate-request" ||
+      normalized.type === "job.prepare-request" ||
+      normalized.type === "job.tailor-request"
+    ) {
       const jobUrl = String(input.jobUrl || "").trim();
       const jobId = String(input.jobId || "").trim();
       const jobReference = String(input.jobReference || "").trim();
@@ -1376,18 +1409,19 @@ export async function executeWorkspaceIntent({
         });
       }
 
+      const applyIntent = normalized.type === "job.prepare-request";
       const { packet, questionCaptureDeferred } = await generateDocumentsWithQuestionFallback({
         repoRoot,
         env,
         applicationId: captured.applicationId,
-        applyIntent: true,
+        applyIntent,
         formats: ["pdf"],
         generateDocumentsImpl,
       });
       const gaps = Array.isArray(packet.gaps) ? packet.gaps : [];
       const blockingGapCount = blockingPacketGaps(gaps).length;
       const handoffArtifact =
-        blockingGapCount === 0
+        applyIntent && blockingGapCount === 0
           ? applicationHandoffArtifact(evaluated.application, captured.applicationId)
           : null;
       const packetArtifact = {
@@ -1400,16 +1434,17 @@ export async function executeWorkspaceIntent({
         gaps,
         blockingGapCount,
       };
-      const nextActions = packetNextActions(gaps, captured.applicationId, Boolean(handoffArtifact));
+      const nextActions = applyIntent
+        ? packetNextActions(gaps, captured.applicationId, Boolean(handoffArtifact))
+        : tailoredPacketNextActions(captured.applicationId);
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `${evaluated.text} Generated the application packet. ${packetGapText(
-          gaps,
-          questionCaptureDeferred
-        )}`,
+        text: `${evaluated.text} Generated the ${
+          applyIntent ? "application" : "tailored application"
+        } packet. ${packetGapText(gaps, questionCaptureDeferred, { tailoring: !applyIntent })}`,
         artifacts: [evaluated.artifact, packetArtifact, handoffArtifact].filter(Boolean),
         metadata: {
           ...evaluationMetadata,
@@ -2601,6 +2636,15 @@ function sourceToggleFromText(text) {
   };
 }
 
+function looksLikeTailoringRequest(text) {
+  const value = String(text || "");
+  const document = /\b(?:resume|résumé|cover\s+letter|application\s+(?:materials|documents))\b/i;
+  return (
+    (/\b(?:tailor|customi[sz]e|rewrite|revise|adapt)\b/i.test(value) && document.test(value)) ||
+    (/\b(?:write|draft|create)\b/i.test(value) && /\bcover\s+letter\b/i.test(value))
+  );
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: looksLikeSourceAdd,
@@ -2653,6 +2697,18 @@ const ACTION_PREVIEW_RULES = [
   {
     test: (text) => {
       const jobUrl = firstHttpUrl(text);
+      return looksLikeTailoringRequest(text) && Boolean(jobUrl) && looksLikeJobUrl(jobUrl);
+    },
+    label: "Evaluate and tailor this job",
+    intent: (text) => ({
+      type: "job.tailor-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl: firstHttpUrl(text) },
+    }),
+  },
+  {
+    test: (text) => {
+      const jobUrl = firstHttpUrl(text);
       return /\b(apply|submit)\b/i.test(text) && Boolean(jobUrl) && looksLikeJobUrl(jobUrl);
     },
     label: "Evaluate and prepare this application",
@@ -2693,6 +2749,18 @@ const ACTION_PREVIEW_RULES = [
   {
     test: (text, context) =>
       Boolean(openJobId(context)) &&
+      looksLikeTailoringRequest(text) &&
+      /\b(?:this|the)\s+(?:job|role|posting)\b/i.test(text),
+    label: "Evaluate and tailor this saved job",
+    intent: (_text, context) => ({
+      type: "job.tailor-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobId: openJobId(context) },
+    }),
+  },
+  {
+    test: (text, context) =>
+      Boolean(openJobId(context)) &&
       /\b(rate|evaluate|review|assess)\b/i.test(text) &&
       /\b(?:this|the)\s+(?:job|role|posting)\b/i.test(text),
     label: "Evaluate this saved job",
@@ -2711,6 +2779,19 @@ const ACTION_PREVIEW_RULES = [
     label: "Evaluate and prepare this saved job",
     intent: (text) => ({
       type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: text },
+    }),
+  },
+  {
+    test: (text) =>
+      !firstHttpUrl(text) &&
+      looksLikeTailoringRequest(text) &&
+      /\b(job|role|posting|opening)\b/i.test(text) &&
+      jobReferenceTokens(text).length > 0,
+    label: "Evaluate and tailor this saved job",
+    intent: (text) => ({
+      type: "job.tailor-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: { jobReference: text },
     }),
