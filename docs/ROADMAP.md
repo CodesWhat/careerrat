@@ -344,10 +344,11 @@ The current build order is:
    write-back in the same durable thread. Short URLs, explicitly open saved jobs, pasted or
    extracted attached JDs, and deterministic natural saved-job references now enter the native
    workspace flow. JD intake saves the full body, evaluates it, renders the structured result, and
-   exposes Review plus the typed Prepare application handoff. Missing and ambiguous references
-   fail visibly instead of guessing. They never mark Applied without confirmation. Remaining work
-   is preserving direct apply intent on an initial pasted/attached JD, the connected authenticated
-   executor and automatic form-question capture, plus clean-home and packaged acceptance coverage.
+   preserves an explicit rate/apply request as a separate confirmed intent. Direct apply intake now
+   returns the evaluation, generated packet, and supervised site handoff in Ask. Missing and
+   ambiguous references fail visibly instead of guessing. They never mark Applied without
+   confirmation. Remaining work is the connected authenticated executor and automatic form-question
+   capture, plus clean-home and packaged acceptance coverage for pasted and attached input.
 3. **Company thesis, not a company allowlist (implemented, acceptance in progress)** — Paul asks about companies or kinds of companies
    whose values, industry, size, stage, business model, or local presence the user likes. He turns
    answers such as fintech, large corporations, fast-food chains, or small Denver accounting firms

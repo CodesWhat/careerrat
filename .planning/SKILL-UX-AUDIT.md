@@ -111,14 +111,15 @@ The app must:
 
 Current implementation resolves a short job URL, explicitly open saved job, or unique
 natural saved-job reference into the evaluate-to-packet chain. A confirmed pasted or
-attached JD evaluates first and exposes the same typed Prepare application action on
-`KEEP`. The chain stops on `CUT`/`REVIEW`, generates base documents on `KEEP`, keeps
-moving when application questions are not discoverable until the form opens, and
-returns a concrete manual handoff without marking the job Applied. A verified executor
-result is still the only path that writes Applied. Packed-app QA proves the REVIEW/CUT
-stop without a false Applied action. Remaining work is the connected authenticated
-executor, automatic form-question capture, direct apply-intent preservation when the
-initial input is a pasted/attached JD, and clean-home/packaged acceptance.
+attached JD preserves an explicit rate/apply request separately from the document,
+confirms the exact evaluate or evaluate-to-packet plan, and returns the structured
+evaluation, generated packet, and supervised application handoff in the same Ask
+receipt. The chain stops on `CUT`/`REVIEW`, generates base documents on `KEEP`, keeps
+moving when application questions are not discoverable until the form opens, and never
+marks the job Applied from a manual handoff. A verified executor result is still the
+only path that writes Applied. Packed-app QA proves the REVIEW/CUT stop without a false
+Applied action. Remaining work is the connected authenticated executor, automatic
+form-question capture, and clean-home/packaged acceptance for pasted and attached input.
 
 ## Original skill inventory
 

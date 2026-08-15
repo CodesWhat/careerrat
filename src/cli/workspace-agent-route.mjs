@@ -138,6 +138,7 @@ export function mountWorkspaceAgentRoutes({
         env,
         text: body?.text,
         inputKind: body?.inputKind,
+        requestedAction: body?.requestedAction,
       });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {

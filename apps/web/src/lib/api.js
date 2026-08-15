@@ -649,15 +649,21 @@ export function findChatBySkill(skill) {
 // `inputKind` is optional — server-side detectInputKind() infers "url" vs
 // "text" from the raw string when omitted; the docked capture bar never
 // needs to guess this itself.
-export function createIntake({ text, inputKind } = {}) {
+export function createIntake({ text, inputKind, requestedAction } = {}) {
   return apiFetch("/api/intake", {
     method: "POST",
-    body: JSON.stringify({ text, ...(inputKind ? { inputKind } : {}) }),
+    body: JSON.stringify({
+      text,
+      ...(inputKind ? { inputKind } : {}),
+      ...(requestedAction ? { requestedAction } : {}),
+    }),
   });
 }
 
-export async function uploadIntakeFile(file) {
-  const res = await fetch(`/api/intake/upload?name=${encodeURIComponent(file.name)}`, {
+export async function uploadIntakeFile(file, { requestedAction } = {}) {
+  const params = new URLSearchParams({ name: file.name });
+  if (requestedAction) params.set("requestedAction", requestedAction);
+  const res = await fetch(`/api/intake/upload?${params.toString()}`, {
     method: "POST",
     body: file,
   });

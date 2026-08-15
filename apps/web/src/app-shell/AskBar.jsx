@@ -138,6 +138,40 @@ function isCaptureCandidate(text) {
   return text.includes("\n") || text.length > CAPTURE_MIN_LENGTH;
 }
 
+function requestedJobAction(text) {
+  const instruction = String(text || "")
+    .trim()
+    .replace(/[,:.!?;-]+$/, "")
+    .trim();
+  const prefix = /^(?:please\s+)?(?:(?:can|could|would|will)\s+you\s+)?/i;
+  const target = "(?:this|the)\\s+(?:job|role|posting|opening)";
+  if (
+    new RegExp(
+      `${prefix.source}(?:apply|submit|prepare)(?:\\s+(?:to|for))?\\s+${target}$`,
+      "i"
+    ).test(instruction)
+  ) {
+    return "prepare";
+  }
+  if (
+    new RegExp(`${prefix.source}(?:rate|evaluate|review|assess)\\s+${target}$`, "i").test(
+      instruction
+    )
+  ) {
+    return "evaluate";
+  }
+  return null;
+}
+
+function splitCaptureInstruction(text) {
+  const raw = String(text || "");
+  const newline = raw.indexOf("\n");
+  if (newline < 0) return { text: raw, requestedAction: null };
+  const requestedAction = requestedJobAction(raw.slice(0, newline));
+  if (!requestedAction) return { text: raw, requestedAction: null };
+  return { text: raw.slice(newline + 1).trimStart(), requestedAction };
+}
+
 // Ported from the deleted CaptureBar.jsx — client-side text extraction for
 // .txt/.md/.markdown drops/attaches. Anything else goes straight to
 // POST /api/intake/upload as raw bytes (no text extraction yet, a known gap
@@ -230,6 +264,7 @@ export function AskBar() {
 
   // Lane B additions — independent of the action/answer machinery above.
   const [captureMode, setCaptureMode] = useState(false);
+  const [captureAction, setCaptureAction] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [decideBusyId, setDecideBusyId] = useState(null);
   const [decideError, setDecideError] = useState(null); // { id, message } | null
@@ -333,7 +368,7 @@ export function AskBar() {
     if (!trimmed) return;
     if (captureMode) {
       if (selected === "capture") {
-        commitCaptureText(trimmed);
+        commitCaptureText(trimmed, captureAction);
       } else {
         setCaptureMode(false);
         commitAnswer(trimmed, null);
@@ -488,7 +523,7 @@ export function AskBar() {
   // single `turn` slot) — a capture is just a third turn kind, carrying a
   // classified intake item instead of an intent/answer result.
 
-  async function commitCaptureText(trimmed) {
+  async function commitCaptureText(trimmed, requestedAction = null) {
     const startedAt = Date.now();
     const turnId = ++turnIdRef.current;
     setTurn({
@@ -498,16 +533,20 @@ export function AskBar() {
       startedAt,
       item: null,
       error: null,
-      request: { text: trimmed },
+      request: { text: trimmed, requestedAction },
       retryable: false,
     });
     setText("");
     setPreview(null);
     setFocused(false);
     setCaptureMode(false);
+    setCaptureAction(null);
 
     try {
-      const { item } = await createIntake({ text: trimmed });
+      const { item } = await createIntake({
+        text: trimmed,
+        ...(requestedAction ? { requestedAction } : {}),
+      });
       if (turnIdRef.current !== turnId) return;
       setTurn((t) => (t && t.kind === "capture" ? { ...t, status: "done", item, error: null } : t));
       emitIntakeChanged();
@@ -521,7 +560,7 @@ export function AskBar() {
     }
   }
 
-  async function commitCaptureFile(file) {
+  async function commitCaptureFile(file, requestedAction = null) {
     const startedAt = Date.now();
     const turnId = ++turnIdRef.current;
     setTurn({
@@ -531,16 +570,19 @@ export function AskBar() {
       startedAt,
       item: null,
       error: null,
-      request: { file },
+      request: { file, requestedAction },
       retryable: false,
     });
     setText("");
     setPreview(null);
     setFocused(false);
     setCaptureMode(false);
+    setCaptureAction(null);
 
     try {
-      const { item } = await uploadIntakeFile(file);
+      const { item } = requestedAction
+        ? await uploadIntakeFile(file, { requestedAction })
+        : await uploadIntakeFile(file);
       if (turnIdRef.current !== turnId) return;
       setTurn((t) => (t && t.kind === "capture" ? { ...t, status: "done", item, error: null } : t));
       emitIntakeChanged();
@@ -585,11 +627,16 @@ export function AskBar() {
   // pre-selected as the Enter-default.
   function ingestText(content) {
     if (!content) return;
-    const merged = text.trim() ? `${text}\n${content}` : content;
-    setText(merged);
+    const typedAction = requestedJobAction(text);
+    const merged = typedAction ? content : text.trim() ? `${text}\n${content}` : content;
+    const split = splitCaptureInstruction(merged);
+    const nextText = split.text;
+    const nextAction = typedAction || split.requestedAction;
+    setText(nextText);
     setFocused(true);
-    if (isCaptureCandidate(merged)) {
+    if (isCaptureCandidate(nextText)) {
       setCaptureMode(true);
+      setCaptureAction(nextAction);
       setSelected("capture");
     }
   }
@@ -613,7 +660,7 @@ export function AskBar() {
       }
       return;
     }
-    await commitCaptureFile(file);
+    await commitCaptureFile(file, requestedJobAction(text));
   }
 
   function handlePaste(e) {
@@ -653,11 +700,11 @@ export function AskBar() {
       return;
     }
     if (turn.kind === "capture" && turn.request?.text) {
-      void commitCaptureText(turn.request.text);
+      void commitCaptureText(turn.request.text, turn.request.requestedAction || null);
       return;
     }
     if (turn.kind === "capture" && turn.request?.file) {
-      void commitCaptureFile(turn.request.file);
+      void commitCaptureFile(turn.request.file, turn.request.requestedAction || null);
     }
   }
 
@@ -704,6 +751,7 @@ export function AskBar() {
             selected={selected}
             onSelect={setSelected}
             captureMode={captureMode}
+            captureAction={captureAction}
           />
         ) : null}
         <div className="ask-bar__row">
@@ -784,7 +832,7 @@ export function AskBar() {
   );
 }
 
-function AskBarPreview({ preview, pending, selected, onSelect, captureMode }) {
+function AskBarPreview({ preview, pending, selected, onSelect, captureMode, captureAction }) {
   if (!captureMode && pending && !preview) {
     return (
       <div
@@ -817,7 +865,13 @@ function AskBarPreview({ preview, pending, selected, onSelect, captureMode }) {
           onClick={() => onSelect("capture")}
         >
           <span className="ask-bar__preview-kind ask-bar__preview-kind--action">Capture</span>
-          <span className="ask-bar__preview-label">Send to triage</span>
+          <span className="ask-bar__preview-label">
+            {captureAction === "prepare"
+              ? "Capture, evaluate, and prepare this application"
+              : captureAction === "evaluate"
+                ? "Capture and evaluate this job"
+                : "Send to triage"}
+          </span>
           <span className="ask-bar__preview-kbd">↵ Send</span>
         </button>
       ) : preview.action ? (
@@ -901,6 +955,13 @@ function AskBarIntakeReceipt({
   const nextIntents = Array.isArray(item.result?.nextActions)
     ? item.result.nextActions.filter((action) => action?.intent)
     : [];
+  const resultArtifacts = Array.isArray(item.result?.artifacts) ? item.result.artifacts : [];
+  const evaluationArtifact = resultArtifacts.find((artifact) => artifact.kind === "job_evaluation");
+  const packetArtifact = resultArtifacts.find((artifact) => artifact.kind === "packet_generation");
+  const handoffArtifact = resultArtifacts.find(
+    (artifact) => artifact.kind === "application_handoff"
+  );
+  const handoffUrl = safeExternalHttpUrl(handoffArtifact?.url);
 
   return (
     <div className="ask-bar__intake">
@@ -930,8 +991,16 @@ function AskBarIntakeReceipt({
       {item.status === "done" ? (
         <>
           <p className="ask-bar__receipt">{describeIntakeResult(item)}</p>
-          {item.result?.evaluation ? (
-            <JobEvaluationCard artifact={{ evaluation: item.result.evaluation }} />
+          {item.result?.evaluation || evaluationArtifact ? (
+            <JobEvaluationCard
+              artifact={evaluationArtifact || { evaluation: item.result.evaluation }}
+            />
+          ) : null}
+          {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
+          {handoffUrl ? (
+            <a className="ask-bar__handoff-link" href={handoffUrl} target="_blank" rel="noreferrer">
+              Open application site
+            </a>
           ) : null}
           {savedJobHref ? (
             <a className="btn btn--secondary" href={savedJobHref}>

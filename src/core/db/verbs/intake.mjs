@@ -22,6 +22,7 @@
 import { randomUUID } from "node:crypto";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
+import { normalizeIntakeRequestedAction } from "../../intake/requested-action.mjs";
 import { userPath } from "../../paths/workspace.mjs";
 import { requireDb } from "../connection.mjs";
 import { withTransaction } from "../transaction.mjs";
@@ -101,11 +102,19 @@ function writeRawCapture({ repoRoot, env, id, inputKind, rawInput, capturedAt })
 // ever runs — a crashed/timed-out classify call still leaves this row (and
 // the recovery file above) intact.
 // ---------------------------------------------------------------------------
-export function intakeCapture({ repoRoot, env, rawInput, inputKind, sourceFilePath = null } = {}) {
+export function intakeCapture({
+  repoRoot,
+  env,
+  rawInput,
+  inputKind,
+  sourceFilePath = null,
+  requestedAction,
+} = {}) {
   if (!inputKind) throw new Error("intakeCapture: inputKind is required");
   if (inputKind !== "file" && !String(rawInput || "").trim()) {
     throw new Error("intakeCapture: rawInput is required for text/url captures");
   }
+  const normalizedRequestedAction = normalizeIntakeRequestedAction(requestedAction);
   const id = `intake_${randomUUID()}`;
   const now = nowIso();
   const capturedPath = writeRawCapture({ repoRoot, env, id, inputKind, rawInput, capturedAt: now });
@@ -119,6 +128,7 @@ export function intakeCapture({ repoRoot, env, rawInput, inputKind, sourceFilePa
       rawInput: rawInput ?? null,
       sourceFilePath,
       capturedPath,
+      requestedAction: normalizedRequestedAction,
       classification: null,
       trackerMatch: null,
       dispatch: null,

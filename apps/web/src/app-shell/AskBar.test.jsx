@@ -1445,6 +1445,48 @@ describe("AskBar — Lane B: paste routing", () => {
 
     expect(api.previewWorkspaceQuery).not.toHaveBeenCalled();
   });
+
+  it("preserves a typed apply request when a JD is pasted after it", async () => {
+    api.createIntake.mockResolvedValue({
+      item: intakeItem({ status: "proposed", requestedAction: "prepare" }),
+    });
+    let tree = render();
+    byClass(tree, "ask-bar__input").props.onChange({ target: { value: "Apply to this job" } });
+    tree = render();
+    byClass(tree, "ask-bar__input").props.onPaste(
+      pasteEvent("Acme\nSRE\nKeep production reliable.")
+    );
+    tree = render();
+
+    expect(textOf(optionRows(tree)[0])).toContain("evaluate, and prepare");
+    byTag(tree, "textarea").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+
+    expect(api.createIntake).toHaveBeenCalledWith({
+      text: "Acme\nSRE\nKeep production reliable.",
+      requestedAction: "prepare",
+    });
+  });
+
+  it("separates an apply instruction from a JD pasted in one block", async () => {
+    api.createIntake.mockResolvedValue({
+      item: intakeItem({ status: "proposed", requestedAction: "prepare" }),
+    });
+    let tree = render();
+    byClass(tree, "ask-bar__input").props.onPaste(
+      pasteEvent("Apply to this job:\nAcme\nSRE\nKeep production reliable.")
+    );
+    tree = render();
+
+    expect(byTag(tree, "textarea").props.value).toBe("Acme\nSRE\nKeep production reliable.");
+    byTag(tree, "textarea").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+
+    expect(api.createIntake).toHaveBeenCalledWith({
+      text: "Acme\nSRE\nKeep production reliable.",
+      requestedAction: "prepare",
+    });
+  });
 });
 
 describe("AskBar — Lane B: drop", () => {
@@ -1483,6 +1525,21 @@ describe("AskBar — Lane B: attach", () => {
     await fileInput.props.onChange({ target: { files: [file], value: "x" } });
 
     expect(api.uploadIntakeFile).toHaveBeenCalledWith(file);
+  });
+
+  it("passes a typed apply request with an attached binary JD", async () => {
+    api.uploadIntakeFile.mockResolvedValue({
+      item: intakeItem({ status: "proposed", requestedAction: "prepare" }),
+    });
+    let tree = render();
+    byClass(tree, "ask-bar__input").props.onChange({ target: { value: "Apply to this job" } });
+    tree = render();
+    const file = { name: "jd.pdf", type: "application/pdf" };
+    await byClass(tree, "ask-bar__file-input").props.onChange({
+      target: { files: [file], value: "x" },
+    });
+
+    expect(api.uploadIntakeFile).toHaveBeenCalledWith(file, { requestedAction: "prepare" });
   });
 });
 
@@ -1562,6 +1619,46 @@ describe("AskBar — Lane B: capture receipt decide actions", () => {
     const link = visit(tree, (node) => node.type === "a" && textOf(node) === "Review this job")[0];
     expect(link.props.href).toBe("/app/jobs?open=app-acme");
     expect(buttonByText(tree, "Prepare application")).toBeTruthy();
+  });
+
+  it("renders the packet and supervised handoff returned by direct apply intake", async () => {
+    api.createIntake.mockResolvedValue({ item: intakeItem({ status: "proposed" }) });
+    api.confirmIntake.mockResolvedValue({
+      item: intakeItem({
+        status: "done",
+        requestedAction: "prepare",
+        result: {
+          summary: "Evaluated Acme — SRE: Keep. Generated the application packet.",
+          applicationId: "app-acme",
+          artifacts: [
+            { kind: "job_evaluation", evaluation: { gate: "keep", fitScore: 91 } },
+            {
+              kind: "packet_generation",
+              status: "ready",
+              uploadReady: true,
+              gaps: [],
+              blockingGapCount: 0,
+            },
+            {
+              kind: "application_handoff",
+              url: "https://boards.greenhouse.io/acme/jobs/123",
+            },
+          ],
+          nextActions: [],
+        },
+      }),
+    });
+    let tree = await commitLongPaste();
+    buttonByText(tree, "Confirm").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(byClass(tree, "ask-bar__packet-status"))).toContain("Application packet: ready");
+    const handoff = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node) === "Open application site"
+    )[0];
+    expect(handoff.props.href).toBe("https://boards.greenhouse.io/acme/jobs/123");
   });
 
   it("Reclassify and Dismiss are offered (not Confirm) for a needs_you item, and hit their APIs", async () => {

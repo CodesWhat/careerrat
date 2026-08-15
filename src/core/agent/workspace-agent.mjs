@@ -2202,6 +2202,7 @@ export async function captureWorkspaceIntake({
   env = process.env,
   text,
   inputKind,
+  requestedAction,
   captureIntakeImpl,
   now = () => new Date(),
 } = {}) {
@@ -2217,7 +2218,7 @@ export async function captureWorkspaceIntake({
     role: "user",
     kind: "intake",
     text: rawText,
-    metadata: { inputKind: inputKind || "auto" },
+    metadata: { inputKind: inputKind || "auto", requestedAction: requestedAction || null },
     now,
   });
 
@@ -2228,7 +2229,13 @@ export async function captureWorkspaceIntake({
         "INTAKE_EXECUTOR_UNAVAILABLE"
       );
     }
-    const item = await captureIntakeImpl({ repoRoot, env, text: rawText, inputKind });
+    const item = await captureIntakeImpl({
+      repoRoot,
+      env,
+      text: rawText,
+      inputKind,
+      ...(requestedAction ? { requestedAction } : {}),
+    });
     const proposedAction = String(item?.classification?.proposedAction || "").trim();
     const needsReason = String(item?.classification?.needsUserReason || item?.error || "").trim();
     let detail = proposedAction;
@@ -2247,6 +2254,7 @@ export async function captureWorkspaceIntake({
         intakeMessageId: intakeMessage.message.id,
         intakeStatus: item.status,
         intakeKind: item.kind,
+        requestedAction: item.requestedAction || null,
         confidence: item.classification?.confidence ?? null,
         needsUser: Boolean(item.classification?.needsUser),
         dispatchSummary: item.dispatchSummary || null,
