@@ -8,23 +8,40 @@
 // driving stays agent-side (snapshot/read each step, zero hardcoded selectors).
 //
 // Provider preference (see AGENTS.md → Browser Automation Contract):
-//   1. extension  — Chrome extension (Claude-in-Chrome / Codex). Preferred: it
-//                   already holds the user's logins + password store.
-//   2. playwright — a persistent Playwright profile the user signs into once per
+//   1. auto       — use Orca in an Orca workspace, otherwise the compatible
+//                   extension session.
+//   2. extension  — Chrome extension (Claude-in-Chrome / Codex), which holds the
+//                   user's logins + password store.
+//   3. orca       — Orca's supervised embedded browser.
+//   4. playwright — a persistent Playwright profile the user signs into once per
 //                   platform (the scripts/capture-board-snapshot.mjs model).
 
 import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
-export const PROVIDER_PREFERENCE = ["extension", "playwright"];
+export const PROVIDER_PREFERENCE = ["auto", "extension", "orca", "playwright"];
 
 export const PROVIDERS = {
+  auto: {
+    id: "auto",
+    label: "Automatic browser connection",
+    preferred: true,
+    needs: "a supported supervised browser available in the current CareerRat session",
+    storesCreds: false,
+  },
   extension: {
     id: "extension",
     label: "Chrome extension (Claude-in-Chrome / Codex)",
-    preferred: true,
+    preferred: false,
     needs: "the browser extension installed and signed into the platform",
+    storesCreds: false,
+  },
+  orca: {
+    id: "orca",
+    label: "Orca supervised browser",
+    preferred: false,
+    needs: "CareerRat running inside an Orca workspace with its browser available",
     storesCreds: false,
   },
   playwright: {
@@ -54,16 +71,26 @@ export function describeProviders() {
 // Resolve the configured session for display. `data` is a loaded automation config
 // (or its absence => defaults). Returns the provider, its descriptor, and the
 // effective Playwright profile root (only meaningful when provider === playwright).
-export function resolveSession({ data } = {}) {
-  const configured = data?.session?.provider || "extension";
-  const provider = PROVIDERS[configured] ? configured : "extension";
+export function resolveSession({ data, env = process.env } = {}) {
+  const configuredProvider = data?.session?.provider || "auto";
+  const configured = PROVIDERS[configuredProvider] ? configuredProvider : "auto";
+  const provider =
+    configured === "auto" && env?.ORCA_WORKTREE_ID
+      ? "orca"
+      : configured === "auto"
+        ? "extension"
+        : configured;
   const profileRoot = data?.session?.profile_root || defaultProfileRoot();
   return {
     provider,
+    configuredProvider: configured,
     descriptor: PROVIDERS[provider],
     preference: PROVIDER_PREFERENCE,
     profileRoot: provider === "playwright" ? profileRoot : null,
-    note: "Tool-agnostic: prefer the extension, fall back to Playwright-with-login-pause. See docs/BROWSER.md.",
+    note:
+      configured === "auto"
+        ? `Automatic setup selected ${PROVIDERS[provider].label}.`
+        : `Using ${PROVIDERS[provider].label}.`,
   };
 }
 
@@ -144,12 +171,22 @@ function detectPlaywrightProfiles(profileRoot) {
 //   missing    — nothing detected (no browser / no profiles).
 //   unknown    — the probe itself failed (informational only; never fatal).
 // This NEVER drives a browser and NEVER throws — doctor must not fail on it.
-export function detectSession({ data } = {}) {
-  const base = resolveSession({ data });
+export function detectSession({ data, env = process.env } = {}) {
+  const base = resolveSession({ data, env });
   let presence;
   try {
     if (base.provider === "playwright") {
       presence = detectPlaywrightProfiles(base.profileRoot);
+    } else if (base.provider === "orca") {
+      presence = env?.ORCA_WORKTREE_ID
+        ? {
+            status: "ready",
+            detail: "Orca workspace detected; browser readiness is verified when Apply starts",
+          }
+        : {
+            status: "unverified",
+            detail: "Orca provider selected; browser readiness is verified when Apply starts",
+          };
     } else {
       const browsers = detectChromeFamily();
       presence = browsers.length

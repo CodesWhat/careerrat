@@ -350,6 +350,30 @@ test("capturePacketQuestions persists question metadata and can reload it by app
   );
 });
 
+test("capturePacketQuestions accepts live rendered fields and excludes demographic prompts", async () => {
+  const { capturePacketQuestions } = await loadQuestionsModule();
+  const capture = await capturePacketQuestions({
+    source: "rendered",
+    url: "https://careers.example.test/jobs/staff-ai/apply",
+    questions: [
+      { id: "name", label: "First Name", type: "text", required: true },
+      { id: "why", label: "Why Example?", type: "text", required: true },
+      { id: "gender", label: "Gender", type: "select", required: false },
+    ],
+  });
+
+  assert.equal(capture.source, "rendered");
+  assert.deepEqual(
+    capture.questions.map((question) => question.label),
+    ["First Name", "Why Example?"]
+  );
+  assert.deepEqual(
+    capture.excluded.map((question) => question.label),
+    ["Gender"]
+  );
+  assert.equal(capture.demographicSectionPresent, true);
+});
+
 test("draftPacketAnswers sends only non-EEO questions to bounded AI and preserves NEEDS YOU gaps", async () => {
   const { draftPacketAnswers } = await loadAnswersModule();
   const filteredQuestions = {

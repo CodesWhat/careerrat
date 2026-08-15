@@ -1216,10 +1216,11 @@ it once via the CLI. **Never auto-run and never run on a schedule** — every au
 session is user-initiated with the agent in the loop.
 
 **No stored credentials.** CareerRat stores no passwords. The browser session holds the
-logins: **prefer the Chrome extension** (Claude-in-Chrome / Codex — it already has the
-user's logins + password store), fall back to a **Playwright persistent profile** the
-user signs into once per platform (`~/.careerrat/board-profiles/<platform>` —
-the `scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
+logins. The default `auto` provider uses Orca's supervised browser inside an Orca
+workspace, otherwise the Chrome extension (Claude-in-Chrome / Codex); a
+**Playwright persistent profile** the user signs into once per platform remains the
+fallback (`~/.careerrat/board-profiles/<platform>` — the
+`scripts/capture-board-snapshot.mjs` model). Write skill prose tool-agnostically — "use
 the session browser," never an MCP namespace or vendor tool name. See
 `src/core/automation/session.mjs` and `docs/BROWSER.md`.
 

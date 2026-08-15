@@ -97,9 +97,9 @@ diff against otherwise.
 ## STEP 2 — OPEN THE PROFILE IN THE SESSION BROWSER (read-only)
 
 Navigate to the candidate's own LinkedIn profile in the session browser. The session
-browser is Layer 3 per `docs/BROWSER.md`: prefer the Chrome extension (it already holds
-the user's login), fall back to a Playwright persistent profile the user signed into once
-(`~/.careerrat/board-profiles/linkedin`).
+browser is Layer 3 per `docs/BROWSER.md`. Keep the provider on `auto` unless the user
+explicitly changes it; CareerRat resolves the current session browser and reuses its
+signed-in session.
 
 Snapshot or read the current page before reading anything. Drive the live DOM
 turn-by-turn; never rely on hardcoded selectors — the same model as `apply-job` and
@@ -303,8 +303,8 @@ changes. The point is an honest profile that reads for the target roles, not a l
   halt and ask the user to resolve it. Never bypass or automate around an auth challenge.
 
 - **Tool-agnostic browser prose.** Say "the session browser," "the browser's
-  element-finder," "an injected script." Prefer the Chrome extension (it holds the login);
-  fall back to a Playwright profile signed into once. Never name an MCP namespace or vendor
+  element-finder," "an injected script." Keep the provider on `auto`; never ask the user
+  to choose a CLI, extension, or browser driver, and never name an MCP namespace or vendor
   tool.
 
 - **Local-only.** Scraped profile text, screenshots, and the before→after document stay

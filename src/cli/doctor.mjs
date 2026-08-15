@@ -334,7 +334,7 @@ if (!automation.exists) {
     `Session browser: ${sessionBrowser.provider}${pref}${setNote} — ${sessionBrowser.presence.detail}.`
   );
   console.log(
-    "  change with `careerrat automation session <extension|playwright> --write` (see docs/BROWSER.md)."
+    "  change with `careerrat automation session <auto|extension|orca|playwright> --write` (see docs/BROWSER.md)."
   );
   console.log("");
 }

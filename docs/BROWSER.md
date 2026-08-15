@@ -46,11 +46,11 @@ commit them. Surface a screenshot in the app only by writing it to a deliberatel
 tracked path. See the **Browser Automation Contract** (Local-only + safety) in `AGENTS.md`.
 
 **Write skill prose tool-agnostically** — say "use the session browser," not a
-specific vendor tool or MCP namespace. Provider preference:
-1. **Prefer the Chrome extension** (Claude-in-Chrome / Codex) — it already holds
-   the user's logins and password store, so authenticated portals just work.
-2. **Fall back to Playwright with a one-time login pause** (a persistent profile,
-   the `scripts/capture-board-snapshot.mjs` model) when no extension is available.
+specific vendor tool or MCP namespace. `auto` is the default: it uses Orca's visible,
+supervised browser inside an Orca workspace and the compatible extension session
+otherwise. Playwright persistent profiles remain an explicit fallback. If the selected
+provider cannot execute the concrete workflow, CareerRat exposes a supervised/manual
+handoff instead of claiming the browser ran.
 
 Capabilities the agent uses at this layer (each maps to whichever provider is active):
 
@@ -71,7 +71,7 @@ Capabilities the agent uses at this layer (each maps to whichever provider is ac
 | Bulk-scrape a board into the workspace | 2 | `npm run capture:search-sources` / `capture:board` |
 | Export a résumé / packet to PDF | 2 | `careerrat export` (bundled Playwright) |
 | Fill / submit an application form | 3 | session browser, modal-first uploads, confirm-first submit |
-| Drive a portal that needs the user's login | 3 | session browser — extension preferred, Playwright-with-login-pause fallback |
+| Drive a portal that needs the user's login | 3 | automatically selected session browser, with a supervised handoff when no provider is ready |
 | Read one emailed verification code or opted-in webmail recruiting messages | 3 | session browser gated by `mail_access`; generic `webmail` for one-code reads, Gmail/Outlook for one-code reads and webmail ingest |
 
 ## Opt-in authenticated automation
@@ -107,7 +107,7 @@ careerrat automation consent <platform> --write      # record ToS consent
 careerrat automation enable <capability> [platform] --write
 ```
 
-No credentials are ever stored — the session browser (extension, or a Playwright
+No credentials are ever stored — the session browser (Orca, extension, or a Playwright
 persistent profile) holds the logins. The full normative rules — ToS handling, "never
 on a schedule," halt-on-captcha/2FA, local-only data — are the **Browser Automation
 Contract** in `AGENTS.md`. The capabilities activate phase by phase as their skills
@@ -122,8 +122,10 @@ mail login wall, mail 2FA prompt, captcha, or unexpected interstitial.
 
 ### Choosing the session-browser provider
 
-Which provider drives the live session is itself a setting — `extension` (the
-**recommended default**; it already holds your logins and stores no credentials) or
+Which provider drives the live session is itself a setting. `auto` is the
+**recommended default** and selects a browser CareerRat can detect without asking the
+candidate to understand their CLI or extension setup. Explicit overrides are `extension`,
+`orca` (a supervised embedded browser available inside Orca workspaces), or
 `playwright` (the fallback: a one-time interactive login per platform, persistent
 profile at `~/.careerrat/board-profiles/<platform>`). It's a *how-it-runs* choice and
 never affects `mayRun()` — provider does not gate whether a capability is allowed.
@@ -131,15 +133,12 @@ Change it the same safe way as the toggles (dry-run by default, schema-validated
 comment-preserving; first `--write` scaffolds the file):
 
 ```
-careerrat automation session <extension|playwright> --write
+careerrat automation session <auto|extension|orca|playwright> --write
 ```
 
-`careerrat doctor` reports the configured provider plus a best-effort "is it ready?"
-probe — Playwright profiles you've signed into, or whether a Chrome-family browser is
-even installed (it can't see inside the browser, so the extension itself must be
-confirmed there). The **`configure`** skill is the always-available settings surface
-that walks you through this and the capability/consent switches without re-running
-first-run onboarding.
+`careerrat doctor` and Settings report both the configured choice and the effective
+browser plus a best-effort "is it ready?" probe. Settings uses ordinary connection
+language; the candidate never needs to identify a provider during onboarding.
 
 ## SPA-host escalation
 

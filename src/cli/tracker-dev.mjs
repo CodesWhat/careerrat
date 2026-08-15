@@ -40,6 +40,7 @@ import { createWorkspaceAgentRuntime } from "../core/agent/workspace-agent.mjs";
 import { loadLocalAiEnv } from "../core/ai/ai-env.mjs";
 import { createChatRuntime } from "../core/ai/chat-runtime.mjs";
 import { runSkillStream as defaultRunSkillStream } from "../core/ai/skill-runtime.mjs";
+import { createConfiguredApplyExecutor } from "../core/apply/orca-executor.mjs";
 import { reconcileOrphanedLaneCIntakeItems } from "../core/db/verbs.mjs";
 import { CHAT_PAGE_HTML } from "../core/onboarding/chat-page.mjs";
 import { displayPath, resolveUserPaths, userPath } from "../core/paths/workspace.mjs";
@@ -141,6 +142,7 @@ export function createDevServer({
   // keeps `createDevServer({ repoRoot })` alone still fully functional, same
   // as before M2.
   chatRuntime = createChatRuntime({ repoRoot, env }),
+  applyJobImpl = createConfiguredApplyExecutor({ repoRoot, env }),
   workspaceAgentRuntime = createWorkspaceAgentRuntime({
     repoRoot,
     env,
@@ -148,6 +150,7 @@ export function createDevServer({
     addBoardSourceImpl: addBoardSource,
     addSearchSourceQueryImpl: addSearchSourceQuery,
     setSearchSourceEnabledImpl: setSearchSourceEnabled,
+    applyJobImpl,
     startBoardDiscoveryImpl: ({ request }) =>
       startExplicitDiscoveryChat({
         repoRoot,

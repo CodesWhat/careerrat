@@ -46,7 +46,9 @@ import { normalizeRoleBuckets, RoleLaneFields } from "../onboarding/steps/RoleLa
 import {
   AutomationConsentMatrix,
   AutomationModeChooser,
+  AutomationSessionChooser,
   buildAutomationModePatch,
+  buildAutomationSessionPatch,
 } from "./AutomationControls.jsx";
 import { mapErrors } from "./error-map.js";
 import { InstalledRuntimeChoices } from "./InstalledRuntimeChoices.jsx";
@@ -553,8 +555,15 @@ export function SettingsPage() {
     return saveAutomationPatch(
       buildAutomationModePatch(automationStatus, mode),
       mode === "basic"
-        ? "Basic mode enabled; every external capability is off."
-        : "Advanced controls available; nothing was enabled."
+        ? "Connected services are off."
+        : "Individual connection controls are available; nothing was enabled."
+    );
+  }
+
+  function handleAutomationSession(provider) {
+    return saveAutomationPatch(
+      buildAutomationSessionPatch(provider),
+      "Browser connection updated."
     );
   }
 
@@ -720,7 +729,7 @@ export function SettingsPage() {
         title="Automation permissions"
         actions={
           <span className={`badge ${automationStatus?.liveCount ? "badge--ok" : "badge--muted"}`}>
-            {automationStatus?.mode === "advanced" ? "Advanced" : "Basic"}
+            {automationStatus?.mode === "advanced" ? "Custom" : "All off"}
           </span>
         }
       >
@@ -741,6 +750,13 @@ export function SettingsPage() {
           busy: saving.automation,
           onSetMode: handleAutomationMode,
         })}
+        {automationStatus?.session
+          ? AutomationSessionChooser({
+              session: automationStatus.session,
+              busy: saving.automation,
+              onChange: handleAutomationSession,
+            })
+          : null}
         {automationStatus?.mode === "advanced"
           ? AutomationConsentMatrix({
               status: automationStatus,

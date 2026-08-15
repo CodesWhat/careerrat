@@ -11,9 +11,9 @@
 # Miss any one and the agent will not act — it tells you which switch is off.
 #
 # NO STORED CREDENTIALS. CareerRat never stores your passwords. The browser session
-# holds your logins: either the Chrome extension (preferred — it already has your
-# logins + password store) or a Playwright persistent profile you sign into once per
-# platform. See docs/BROWSER.md and AGENTS.md → Browser Automation Contract.
+# holds your logins. With `session.provider: auto`, CareerRat selects Orca inside an
+# Orca workspace, then a compatible extension or a Playwright persistent profile when
+# available. See docs/BROWSER.md and AGENTS.md → Browser Automation Contract.
 #
 # TERMS OF SERVICE ARE YOUR CALL. Automating a logged-in platform may violate its
 # terms. `consent.<platform>` is your one-time acknowledgment that you've read that
@@ -157,8 +157,10 @@ capabilities:
       outlook_calendar: false
 
 # ── Session browser (tool-agnostic) ───────────────────────────────────────────
-# provider: extension (preferred — holds your logins) | playwright (persistent
-# profile you log into once per platform). profile_root null = ~/.careerrat/board-profiles
+# provider: auto (recommended; Orca in Orca, compatible extension otherwise) |
+# extension (holds your logins) | orca (supervised embedded browser) |
+# playwright (persistent profile you log into once per platform).
+# profile_root null = ~/.careerrat/board-profiles
 session:
-  provider: extension
+  provider: auto
   profile_root: null

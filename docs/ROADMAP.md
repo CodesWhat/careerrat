@@ -57,9 +57,11 @@ nurse, a driver, and an engineer each bring their own config.
   can read one recent emailed verification code from any webmail provider and continue.
   The agent-led workflow and safety gates are shipped. Native Ask and Apply on site
   deterministically capture public Greenhouse and Ashby questions before packet
-  generation, provide an in-chat paste-and-resume path for every other ATS, and never
-  write Applied from a handoff. Connecting the native app to the authenticated executor
-  remains part of the active product coherence gate below.
+  generation. The native Orca executor captures rendered questions for other forms,
+  rebuilds the packet, fills confirmed fields and generated PDFs from a fresh snapshot
+  before every action, then stops before Submit. Paste remains the fallback. Applied is
+  written only after a confirmation page and screenshot are captured or the user reports
+  completion.
 - **One-command start** (`careerrat start [agent]`) — scaffolds the workspace,
   installs the skills, brings up the local app, and launches a supported detected
   agent or an explicitly named compatible command with a starter message, so first
@@ -359,9 +361,11 @@ The current build order is:
    ambiguous references fail visibly instead of guessing. They never mark Applied without
    confirmation. Standalone résumé, cover-letter, and application-material tailoring now resolves
    a URL, the open job, or one named saved job, evaluates it first, generates only on KEEP, and
-   returns review/export actions without implying submission. Remaining work is the connected
-   authenticated executor and rendered-form capture for sites without a public question API, plus
-   clean-home and packaged apply-chain acceptance for pasted and attached input. The rating flow's
+   returns review/export actions without implying submission. Automatic session-browser selection,
+   the connected Orca executor, rendered-form capture, deterministic field/file filling, blockers,
+   manual Submit boundary, confirmation re-scan, and screenshot evidence are now wired. Remaining
+   work is multi-step ATS advancement and clean-home packaged acceptance of the entire AI-backed
+   apply chain for pasted and attached input. The rating flow's
    packed acceptance now completes URL, open-job, named-job, pasted-JD, attached-JD, and
    ambiguity-recovery paths through durable verdict state. Greenhouse and Ashby
    question schemas are captured before packet generation; other ATS forms now use a durable
@@ -418,7 +422,10 @@ The current build order is:
    install CLI and Settings acceptance now covers the manifest and UI-facing source-write path.
 6. **Fresh acceptance pass (current tranche complete)** — clean-home onboarding, restart, Ask
    rate/apply, provider Settings, native Electron, npm install, lint, tests, and builds pass. The
-   broader original-skill rows stay active in the linked audit instead of being hidden by this gate.
+   packed supervised-Apply pass now also proves automatic Orca detection, known-field filling,
+   manual Submit, confirmation screenshot capture, and verified-only Applied write-back against a
+   controlled local form. The broader original-skill rows stay active in the linked audit instead
+   of being hidden by this gate.
 
 ### Product-surface acceptance sweep (updated August 14, 2026)
 
@@ -565,10 +572,9 @@ extra surface area.
   artifacts by default.
 - **Brand-logo modernization** — refine the wordmark/mark so it feels welcoming
   and human while staying restrained, favicon-legible, and theme-agnostic.
-- **Browser automation inside the app** — the consent-gated session-browser capabilities
-  (authenticated search, message ingest, status sync, assisted apply) exist today for
-  agent-driven runs; surfacing them as first-class buttons inside the app UI waits until
-  the browser-free core has been proven with real users.
+- **Finish browser automation inside the app** — assisted Apply now has a first-class native Orca
+  path. Authenticated search, message ingest, status sync, multi-step ATS advancement, and the
+  extension/Playwright executor bridges still need the same visible progress and recovery contract.
 
 ## Principles
 

@@ -23,7 +23,7 @@ import {
 } from "../src/core/agent/workspace-thread.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
-import { appUpsert } from "../src/core/db/verbs/app.mjs";
+import { appRegisterPacketQuestionCapture, appUpsert } from "../src/core/db/verbs/app.mjs";
 import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
 import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
@@ -58,6 +58,34 @@ function readApplication(repoRoot, id) {
     .prepare("SELECT data FROM applications WHERE id = ?")
     .get(id);
   return row ? JSON.parse(row.data) : null;
+}
+
+function preparedApplyDeps(overrides = {}) {
+  return {
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 92,
+          fitReasons: ["Strong fit"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async () => ({
+      status: "ready",
+      uploadReady: true,
+      gaps: [],
+      artifacts: {
+        resumePdf: "workspace/tailored/temporal-resume.pdf",
+        coverLetterPdf: "workspace/tailored/temporal-cover-letter.pdf",
+      },
+    }),
+    ...overrides,
+  };
 }
 
 function seedCommunication(repoRoot, overrides = {}) {
@@ -1384,6 +1412,54 @@ test("job.prepare-request captures public application questions before generatin
     demographicSectionPresent: true,
   });
   assert.match(result.messages.at(-1).text, /captured 1 application question/i);
+});
+
+test("job.prepare-request offers the connected supervised executor as the next Apply action", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://careers.example.test/jobs/staff-ai";
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async () => ({
+      status: "ready",
+      uploadReady: true,
+      gaps: [],
+      artifacts: { resumePdf: "workspace/tailored/acme-resume.pdf" },
+    }),
+    applyJobImpl: async () => ({ verified: false, state: "awaiting-submit" }),
+  });
+
+  const last = result.messages.at(-1);
+  const handoff = last.artifacts.find((artifact) => artifact.kind === "application_handoff");
+  assert.equal(handoff.executorAvailable, true);
+  assert.equal(last.metadata.nextActions[0].label, "Start supervised apply");
+  assert.equal(last.metadata.nextActions[0].intent.type, "job.apply");
 });
 
 test("job.prepare-request falls back to pasted questions when public capture returns nothing", async () => {
@@ -3339,6 +3415,7 @@ test("Apply on site returns a manual handoff without changing status when no exe
       type: "job.apply",
       entity: { type: "application", id: "app-temporal" },
     },
+    ...preparedApplyDeps(),
   });
 
   assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
@@ -3357,6 +3434,8 @@ test("Apply on site returns a manual handoff without changing status when no exe
     result.messages[1].metadata.nextActions[0].intent.type,
     "application.record-external"
   );
+  assert.match(result.messages[1].text, /couldn't connect to a supervised browser/i);
+  assert.doesNotMatch(result.messages[1].text, /executor/i);
   assert.match(result.messages[1].text, /not marked Applied/i);
 });
 
@@ -3371,6 +3450,7 @@ test("Apply on site asks for a safe application link instead of returning an uns
       type: "job.apply",
       entity: { type: "application", id: "app-temporal" },
     },
+    ...preparedApplyDeps(),
   });
 
   assert.equal(result.messages.at(-1).artifacts[0].kind, "application_link_required");
@@ -3392,6 +3472,7 @@ test("Apply on site captures supported public questions before the supervised ha
       type: "job.apply",
       entity: { type: "application", id: "app-temporal" },
     },
+    ...preparedApplyDeps(),
     captureQuestionsImpl: async (input) => {
       captures.push(input);
       return {
@@ -3416,6 +3497,145 @@ test("Apply on site captures supported public questions before the supervised ha
   });
 });
 
+test("Apply on site runs the KEEP gate and packet build before opening the executor", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  const steps = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    evaluateJobImpl: async ({ body }) => {
+      steps.push("evaluate");
+      return preparedApplyDeps().evaluateJobImpl({ body });
+    },
+    generateDocumentsImpl: async () => {
+      steps.push("packet");
+      return preparedApplyDeps().generateDocumentsImpl();
+    },
+    applyJobImpl: async () => {
+      steps.push("executor");
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        reason: "Review the form.",
+        session: { provider: "orca", filledCount: 3, unresolved: [], blockers: [] },
+      };
+    },
+  });
+
+  assert.deepEqual(steps, ["evaluate", "packet", "executor"]);
+  assert.equal(result.messages.at(-1).metadata.state, "awaiting-submit");
+});
+
+test("Apply on site stops on CUT before packet generation or browser execution", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  let packetCalls = 0;
+  let executorCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "cut",
+          fitScore: 31,
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async () => {
+      packetCalls += 1;
+      return preparedApplyDeps().generateDocumentsImpl();
+    },
+    applyJobImpl: async () => {
+      executorCalls += 1;
+      return { verified: true };
+    },
+  });
+
+  assert.equal(packetCalls, 0);
+  assert.equal(executorCalls, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "cut");
+  assert.match(result.messages.at(-1).text, /did not open the application form/i);
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+});
+
+test("Apply on site rebuilds the packet after the live browser discovers rendered questions", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  const steps = [];
+  let executorCalls = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    evaluateJobImpl: async ({ body }) => {
+      steps.push("evaluate");
+      return preparedApplyDeps().evaluateJobImpl({ body });
+    },
+    generateDocumentsImpl: async () => {
+      steps.push("packet");
+      return preparedApplyDeps().generateDocumentsImpl();
+    },
+    applyJobImpl: async ({ questionCapture }) => {
+      executorCalls += 1;
+      steps.push(executorCalls === 1 ? "executor-inspect" : "executor-fill");
+      if (executorCalls === 1) {
+        appRegisterPacketQuestionCapture({
+          repoRoot,
+          env: {},
+          id: "app-temporal",
+          path: "workspace/jobs/temporal-rendered.questions.json",
+          questions: [
+            { id: "q1", label: "Why Temporal?" },
+            { id: "q2", label: "Describe a system you owned." },
+          ],
+          excluded: [],
+        });
+        return {
+          available: true,
+          verified: false,
+          state: "questions-captured",
+          questionCaptureUpdated: true,
+          session: { provider: "orca", answerableCount: 2, excludedCount: 0 },
+        };
+      }
+      assert.equal(questionCapture.state, "captured");
+      assert.equal(questionCapture.answerableCount, 2);
+      return {
+        available: true,
+        verified: false,
+        state: "awaiting-submit",
+        reason: "Review the form.",
+        session: { provider: "orca", filledCount: 6, unresolved: [], blockers: [] },
+      };
+    },
+  });
+
+  assert.deepEqual(steps, ["evaluate", "packet", "executor-inspect", "packet", "executor-fill"]);
+  assert.equal(result.messages.at(-1).metadata.state, "awaiting-submit");
+  assert.equal(result.messages.at(-1).artifacts[0].questionCapture.answerableCount, 2);
+});
+
 test("Apply on site writes Applied only after its executor returns verified confirmation", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
@@ -3428,6 +3648,7 @@ test("Apply on site writes Applied only after its executor returns verified conf
         type: "job.apply",
         entity: { type: "application", id: "app-temporal" },
       },
+      ...preparedApplyDeps(),
       applyJobImpl: async () => ({ verified: false, reason: "No confirmation page found." }),
     }),
     (error) => error.code === "APPLICATION_NOT_VERIFIED"
@@ -3442,6 +3663,7 @@ test("Apply on site writes Applied only after its executor returns verified conf
       type: "job.apply",
       entity: { type: "application", id: "app-temporal" },
     },
+    ...preparedApplyDeps(),
     applyJobImpl: async (input) => {
       calls.push(input);
       return {
@@ -3462,6 +3684,48 @@ test("Apply on site writes Applied only after its executor returns verified conf
   assert.equal(result.messages.at(-1).kind, "action_result");
   assert.equal(result.messages.at(-1).metadata.submissionVerified, true);
   assert.equal(result.messages.at(-1).metadata.confirmation, "Application received");
+});
+
+test("Apply on site keeps an active supervised browser session without treating it as failure", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.apply",
+      entity: { type: "application", id: "app-temporal" },
+    },
+    ...preparedApplyDeps(),
+    applyJobImpl: async () => ({
+      available: true,
+      verified: false,
+      state: "awaiting-submit",
+      reason: "Review and submit in the supervised browser.",
+      currentUrl: "https://jobs.example.test/temporal/applied-ai-engineer/apply",
+      session: {
+        provider: "orca",
+        filledCount: 5,
+        uploadedCount: 2,
+        unresolved: [{ label: "Portfolio", required: true }],
+        blockers: [],
+        submitMode: "manual",
+      },
+    }),
+  });
+
+  assert.equal(readApplication(repoRoot, "app-temporal").status, "reviewed-hold");
+  const last = result.messages.at(-1);
+  assert.equal(last.metadata.state, "awaiting-submit");
+  assert.equal(last.metadata.submissionVerified, false);
+  assert.equal(last.artifacts[0].kind, "application_handoff");
+  assert.equal(last.artifacts[0].session.filledCount, 5);
+  assert.equal(last.metadata.nextActions[0].label, "Rescan and verify");
+  assert.equal(last.metadata.nextActions[0].intent.type, "job.apply");
+  assert.match(last.text, /filled 5 fields/i);
+  assert.match(last.text, /attached 2 files/i);
+  assert.match(last.text, /not marked Applied/i);
 });
 
 test("Draft reply uses the same agent context and persists a reviewable communication draft", async () => {

@@ -140,9 +140,23 @@ function applyOnSiteNotice(response) {
   if (last?.metadata?.state === "submitted" && last?.metadata?.submissionVerified === true) {
     return "Application submitted and verified.";
   }
-  const questionCapture = last?.artifacts?.find(
-    (artifact) => artifact.kind === "application_handoff"
-  )?.questionCapture;
+  const handoff = last?.artifacts?.find((artifact) => artifact.kind === "application_handoff");
+  const session = handoff?.session;
+  if (session) {
+    const filledCount = Number(session.filledCount) || 0;
+    const uploadedCount = Number(session.uploadedCount) || 0;
+    const unresolvedCount = Array.isArray(session.unresolved) ? session.unresolved.length : 0;
+    return `Supervised browser filled ${filledCount} field${filledCount === 1 ? "" : "s"}. ${
+      uploadedCount
+        ? `CareerRat attached ${uploadedCount} file${uploadedCount === 1 ? "" : "s"}. `
+        : ""
+    }${
+      unresolvedCount
+        ? `${unresolvedCount} field${unresolvedCount === 1 ? "" : "s"} still ${unresolvedCount === 1 ? "needs" : "need"} you. `
+        : ""
+    }Continue in Ask to rescan and verify. Nothing was marked Applied yet.`;
+  }
+  const questionCapture = handoff?.questionCapture;
   const capturedCount = Number(questionCapture?.answerableCount) || 0;
   const questionNote =
     questionCapture?.state === "captured"

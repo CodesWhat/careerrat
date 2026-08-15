@@ -147,7 +147,11 @@ Then stop for that source and continue with the next.
 
 **If both gates pass — scrape via the session browser.**
 
-Navigate to the source's saved-search URL in the session browser (Layer 3 per `docs/BROWSER.md`). Prefer the Chrome extension, which already holds the user's logins; fall back to a Playwright persistent profile the user signs into once per platform (`~/.careerrat/board-profiles/<platform>`, the `scripts/capture-board-snapshot.mjs` model). Snapshot or read the current page state before each action — never rely on hardcoded selectors. Drive the live DOM turn-by-turn.
+Navigate to the source's saved-search URL in the session browser (Layer 3 per
+`docs/BROWSER.md`). Keep the provider on `auto` unless the user explicitly changes it;
+CareerRat resolves the current session browser and reuses its signed-in session.
+Snapshot or read the current page state before each action — never rely on hardcoded
+selectors. Drive the live DOM turn-by-turn.
 
 Scrape the visible postings (title, company, URL, posted date where available). Then feed every scraped posting through the **same** existing pipeline this skill already uses for other sources: intake → dedupe against tracker and `workspace/jobs/` → liveness check → coarse triage (STEP 3) → JD save (STEP 4) → watermark (STEP 5). Do not invent a parallel pipeline.
 
@@ -224,7 +228,7 @@ A coarse honest estimate beats no fit at all. Closed or expired postings get sta
 For each sourced entry not cut outright (i.e., not `excluded-company` or `app-limit-blocked`), save the **full JD body** — the durable copy that outlives the live posting (see the **JD-body capture invariant** in AGENTS.md). A saved URL is not enough: reqs close and login sessions expire, so capture the text now while it's reachable.
 
 - If `workspace/scan-results/sourced-<date>.json` already has the body text, use it.
-- If the body is missing from the snapshot, try `WebFetch` on the posting URL first. If the response is empty, truncated, login-walled, or clearly JS-rendered (no meaningful role content), escalate to the session browser: render the page and read `document.body.innerText`. The session browser holds the user's existing logins, so it reaches login-gated postings `WebFetch` can't. Prefer the Chrome extension (Claude-in-Chrome); fall back to Playwright with a login pause if the extension is unavailable. See `docs/BROWSER.md` for the full escalation ladder. Do not invoke the browser on every posting — only when `WebFetch` returns insufficient content. Treat a `WebFetch` failure as "escalate to the browser," never as "the posting is gone."
+- If the body is missing from the snapshot, try `WebFetch` on the posting URL first. If the response is empty, truncated, login-walled, or clearly JS-rendered (no meaningful role content), escalate to the session browser: render the page and read `document.body.innerText`. The session browser holds the user's existing logins, so it reaches login-gated postings `WebFetch` can't. Keep the provider on `auto`; CareerRat resolves the current session browser. See `docs/BROWSER.md` for the full escalation ladder. Do not invoke the browser on every posting — only when `WebFetch` returns insufficient content. Treat a `WebFetch` failure as "escalate to the browser," never as "the posting is gone."
 
 Write to `workspace/jobs/<company>-<slug>.md` with frontmatter:
 
@@ -354,5 +358,7 @@ coverage before another refresh.
 - **User-initiated only. Never on a schedule.**
 - **Halt on any auth challenge** (captcha, 2FA, login wall, unexpected interstitial). Never bypass.
 - **Local-only.** Scraped pages and screenshots stay under `workspace/`. Nothing goes outbound.
-- **Tool-agnostic browser prose.** Prefer the Chrome extension (holds existing logins); fall back to Playwright with a one-time login pause. Never name an MCP namespace or vendor tool.
+- **Tool-agnostic browser prose.** Keep the provider on `auto` and use the available
+  session browser. Never ask the user to choose a CLI, extension, or browser driver, and
+  never name an MCP namespace or vendor tool.
 - **Domain-neutral.** No hardcoded platforms beyond what source config and `consent.mjs` define. No bracketed placeholder tokens — if a detail is unknown, omit or go generic.

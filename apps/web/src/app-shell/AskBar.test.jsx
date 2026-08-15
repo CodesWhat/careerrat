@@ -1499,6 +1499,76 @@ describe("AskBar — acting", () => {
     expect(textOf(tree)).not.toContain("Application submitted and verified");
   });
 
+  it("renders live supervised form progress and the exact fields that still need the user", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({ type: "job.apply", label: "Apply on this site" })
+    );
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "CareerRat filled 5 fields. 1 field still needs your review.",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                applicationId: "app-acme",
+                url: "https://careers.example.test/jobs/staff-ai/apply",
+                executorAvailable: true,
+                submissionVerified: false,
+                session: {
+                  provider: "orca",
+                  filledCount: 5,
+                  uploadedCount: 2,
+                  unresolved: [{ label: "Portfolio", required: true }],
+                  blockers: [],
+                  submitMode: "manual",
+                },
+              },
+            ],
+            metadata: {
+              state: "awaiting-submit",
+              submissionVerified: false,
+              nextActions: [
+                {
+                  label: "Rescan and verify",
+                  intent: {
+                    type: "job.apply",
+                    entity: { type: "application", id: "app-acme" },
+                    input: { resumeSession: true },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "apply to the Acme role" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const session = byClass(tree, "ask-bar__application-session");
+    expect(textOf(session)).toContain("Orca supervised browser");
+    expect(textOf(session)).toContain("5 fields filled");
+    expect(textOf(session)).toContain("2 files attached");
+    expect(textOf(session)).toContain("Portfolio");
+    expect(textOf(session)).toContain("Review the form, then submit in the browser");
+    expect(buttonByText(tree, "Rescan and verify")).toBeTruthy();
+    expect(textOf(tree)).not.toContain("Application submitted and verified");
+  });
+
   it("captures pasted application questions and rebuilds answers inside Ask", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(
       jobActionPreview({

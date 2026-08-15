@@ -8,7 +8,7 @@
   "properties": {
     "version": { "type": "integer" },
     "setup_mode": {
-      "description": "Basic is a hard off switch. Advanced only reveals per-capability opt-ins; it enables nothing by itself.",
+      "description": "The off state disables every external capability. The custom state only reveals per-capability opt-ins; it enables nothing by itself.",
       "enum": ["basic", "advanced"],
       "default": "basic"
     },
@@ -108,7 +108,7 @@
       "type": "object",
       "additionalProperties": true,
       "properties": {
-        "provider": { "enum": ["extension", "playwright"], "default": "extension" },
+        "provider": { "enum": ["auto", "extension", "orca", "playwright"], "default": "auto" },
         "profile_root": { "type": ["string", "null"] }
       }
     }

@@ -33,10 +33,14 @@ Anything the agent drives step-by-step: rendering JS pages, filling application
 forms, reading in-platform DMs, polling ATS status. The agent reads the live DOM
 before each action, never uses hardcoded selectors, and stays confirm-first.
 
-**Provider preference:**
-1. Chrome extension (recommended) — already holds your logins, no credential store
-2. Playwright persistent profile (fallback) — one-time login per platform, profile
-   at `~/.careerrat/board-profiles/<platform>`
+**Automatic provider selection:** Orca's visible supervised browser is used inside an
+Orca workspace; the compatible extension session is selected otherwise. Playwright
+persistent profiles remain an explicit fallback at
+`~/.careerrat/board-profiles/<platform>`. If the selected provider cannot execute a
+workflow, CareerRat shows a supervised/manual handoff instead of claiming it ran.
+
+Automatic is the default. Settings shows the effective browser and allows an explicit
+override without requiring the candidate to understand their CLI setup during onboarding.
 
 ## Opt-in authenticated capabilities
 

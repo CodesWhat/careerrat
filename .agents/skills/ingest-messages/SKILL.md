@@ -66,10 +66,9 @@ that is not `allowed: true` and note the reason.
 ## STEP 2 — OPEN THE MESSAGES INBOX IN THE SESSION BROWSER
 
 For each allowed platform, navigate to that platform's messages or DM inbox URL in
-the session browser. The session browser is Layer 3 per `docs/BROWSER.md`: prefer
-the Chrome extension (it already holds the user's logins), fall back to a Playwright
-persistent profile the user has signed into once
-(`~/.careerrat/board-profiles/<platform>`).
+the session browser. The session browser is Layer 3 per `docs/BROWSER.md`. Keep the
+provider on `auto` unless the user explicitly changes it; CareerRat resolves the current
+session browser and reuses its signed-in session.
 
 Before reading anything, snapshot or read the current page state. Drive the live DOM
 turn-by-turn. Never rely on hardcoded selectors — the same model as `apply-job`.
@@ -429,9 +428,8 @@ Ingest complete:
   or automate around an auth challenge.
 
 - **Tool-agnostic browser prose.** Say "the session browser," "snapshot or read the
-  page." Prefer the Chrome extension (it holds existing logins); fall back to Playwright
-  with a one-time login pause (`~/.careerrat/board-profiles/<platform>`). Never name an
-  MCP namespace or vendor tool.
+  page." Keep the provider on `auto`; never ask the user to choose a CLI, extension, or
+  browser driver, and never name an MCP namespace or vendor tool.
 
 - **Local-only.** Message bodies, thread artifacts, and screenshots stay under
   `workspace/`. Nothing goes outbound. No credentials are stored — the session browser

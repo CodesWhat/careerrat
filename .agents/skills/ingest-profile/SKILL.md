@@ -446,7 +446,13 @@ off. Never hand-edit `candidate/automation.yml`.
 
 ---
 
-**Session browser — install the extension first.** Prefer the **Chrome extension** (Claude-in-Chrome or equivalent): it already holds the user's logins and password store, so no credentials are ever stored by CareerRat. The fallback is a **Playwright persistent profile** (`~/.careerrat/board-profiles/<platform>`) that the user signs into once per platform. All skill prose says "use the session browser" — specific tool names are an implementation detail. See `docs/BROWSER.md` and the Browser Automation Contract in `AGENTS.md`.
+**Session browser — use the connection already available.** Keep the provider set to
+`auto` unless the user explicitly changes it. CareerRat selects Orca inside an Orca
+workspace, then a compatible browser extension or a Playwright persistent profile
+(`~/.careerrat/board-profiles/<platform>`) when available. The browser session holds the
+user's logins; CareerRat never stores site credentials. All skill prose says "use the
+session browser" because the concrete provider is an implementation detail. See
+`docs/BROWSER.md` and the Browser Automation Contract in `AGENTS.md`.
 
 **No credentials are ever stored by CareerRat.** The browser session holds the logins.
 

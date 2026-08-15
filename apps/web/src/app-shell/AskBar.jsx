@@ -1265,6 +1265,15 @@ function ApplicationHandoffCard({ artifact }) {
   const applicationId = String(artifact.applicationId || "").trim();
   const captureRequired = capture?.state === "site-required";
   const inputId = `application-questions-${applicationId || "current"}`;
+  const session = artifact.session || null;
+  const sessionProvider =
+    session?.provider === "orca"
+      ? "Orca supervised browser"
+      : session?.provider
+        ? `${session.provider} browser`
+        : null;
+  const unresolved = Array.isArray(session?.unresolved) ? session.unresolved : [];
+  const blockers = Array.isArray(session?.blockers) ? session.blockers : [];
 
   async function rebuildAnswers(answerableCount = Number(capture?.answerableCount) || 0) {
     setBusy(true);
@@ -1339,8 +1348,45 @@ function ApplicationHandoffCard({ artifact }) {
           <strong>Finish this application</strong>
           <span>CareerRat will not mark it Applied until submission is confirmed.</span>
         </div>
-        <span className="badge badge--warn">Supervised</span>
+        <span className="badge badge--warn">{session ? "Live" : "Supervised"}</span>
       </div>
+      {session ? (
+        <div className="ask-bar__application-session-state" aria-live="polite">
+          <strong>{sessionProvider || "Supervised browser"}</strong>
+          <span>
+            {Number(session.filledCount) || 0} field
+            {Number(session.filledCount) === 1 ? "" : "s"} filled
+          </span>
+          {Number(session.uploadedCount) > 0 ? (
+            <span>
+              {Number(session.uploadedCount)} file
+              {Number(session.uploadedCount) === 1 ? "" : "s"} attached
+            </span>
+          ) : null}
+          {unresolved.length ? (
+            <>
+              <span>
+                {unresolved.length} field{unresolved.length === 1 ? "" : "s"} need you:
+              </span>
+              <ul>
+                {unresolved.slice(0, 6).map((field) => (
+                  <li key={field.label}>{field.label}</li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+          {blockers.length ? (
+            <span>Stopped on: {blockers.join(", ")}</span>
+          ) : (
+            <span>Review the form, then submit in the browser. CareerRat will verify it next.</span>
+          )}
+        </div>
+      ) : artifact.executorAvailable ? (
+        <p className="ask-bar__application-session-state">
+          CareerRat can open the live form, capture its rendered questions, and fill confirmed
+          answers in a supervised browser.
+        </p>
+      ) : null}
       {capture?.state === "captured" ? (
         <p className="ask-bar__application-session-state">
           {capture.answerableCount} application question
