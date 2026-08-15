@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-15
 
-Gate result: all 93 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 96 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, update/restart, and native Electron checks pass.
 The broader native skill-to-screen build gate remains tracked separately in
 `SKILL-UX-AUDIT.md`.
@@ -1701,3 +1701,48 @@ Test homes:
   traversal-safe behavior.
 - Live retest: a fresh headed Jobs load rendered the `RD` initials fallback and the complete apply
   handoff with zero console errors and zero warnings.
+
+### `F-094` Live job evaluation exhausts its output budget before emitting JSON
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, a normal saved-job evaluation could spend its entire output budget
+  on adaptive thinking and fall back to manual review instead of returning a typed verdict.
+- Reproduction: rate the saved Grafana Labs role through Ask with the default Sonnet model; both
+  attempts stopped at exactly 700 output tokens with no parseable verdict.
+- Root cause: the packet gate sized `max_tokens` only for the visible JSON, even though current
+  models count adaptive thinking and visible output against the same hard cap.
+- Fix: carry provider effort through the bounded/native AI seam, use low effort for this bounded
+  classification task, and reserve 4,096 output tokens for reasoning plus the typed verdict.
+- Regression: packet-gate, bounded-AI, and call-AI tests pin the budget and effort wire format.
+- Live retest: the packed app evaluated the same 9,333-character JD in one call, saved a 58/100
+  REVIEW verdict, and rendered compensation plus three fit reasons and risks with no schema fallback.
+
+### `F-095` The npm package omits Universal Intake's routing table
+
+- Status: `FIXED`
+- Severity: P1 packaged-workflow blocker, attached or pasted JDs fail classification only after
+  install even though the source checkout works.
+- Reproduction: attach a text JD in a clean npm install and choose `Capture and evaluate this job`.
+- Root cause: `config/paste-intake-routes.json` is a runtime dependency, but the package allowlist
+  shipped only schemas and example config files.
+- Fix: add the routing table explicitly to the package allowlist and pin it in release-safety tests.
+- Regression: the release test requires the exact runtime file and npm dry-run inspection confirms
+  it is present in the tarball.
+- Live retest: the rebuilt clean install loaded the routing table and classified the attached JD as
+  `Northstar Ledger — Senior Platform Engineer` instead of throwing ENOENT.
+
+### `F-096` Installed intake classification ignores configured credentials and sends an invalid native schema
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, Universal Intake could report no AI route despite a working BYOK
+  key, then fail with a provider 400 after it was moved onto the shared native route.
+- Reproduction: classify an attached JD in the installed app with the same key that successfully
+  evaluates saved jobs.
+- Root cause: intake classification used the Agent SDK-only one-shot path instead of `callAI`; its
+  nested `additionalProperties:true` schema was also invalid for Anthropic native structured output.
+- Fix: use the configured installed/BYOK/proxy bounded-AI seam in production, keep the SDK injection
+  only as a compatibility test path, and close permissive nested objects at the native schema seam.
+- Regression: intake-classify and call-AI tests pin configured-route use, low effort, output budget,
+  and provider-compatible nested schemas.
+- Live retest: the packed app classified the attachment, showed the confirm boundary, captured the
+  full JD, returned a 38/100 CUT, rendered the reasons and compensation, and persisted the verdict.

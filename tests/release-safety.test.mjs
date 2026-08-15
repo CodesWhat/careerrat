@@ -417,6 +417,10 @@ test("npm package allowlist names app files, not broad private-data roots", asyn
   assert.ok(files.includes("src"));
   assert.ok(files.includes("config/*.schema.json"));
   assert.ok(files.includes("config/*.example.*"));
+  assert.ok(
+    files.includes("config/paste-intake-routes.json"),
+    "the installed intake classifier needs its canonical routing table"
+  );
   assert.ok(files.includes(".agents/skills/apply-job/SKILL.md"));
   assert.ok(files.includes(".agents/skills/calendar-sync/SKILL.md"));
   assert.ok(files.includes(".agents/skills/relationship-sourcing/SKILL.md"));

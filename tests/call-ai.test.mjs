@@ -13,7 +13,12 @@ import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { callAI, extractSSEEvents, resolveAIRoute } from "../src/core/ai/call-ai.mjs";
+import {
+  callAI,
+  extractSSEEvents,
+  resolveAIRoute,
+  sanitizeNativeOutputSchema,
+} from "../src/core/ai/call-ai.mjs";
 import { writeInstalledRuntimeSelection } from "../src/core/ai/runtime-selection.mjs";
 import { readUsageEvents } from "../src/core/ai/usage-log.mjs";
 
@@ -46,6 +51,22 @@ const OUTPUT_SCHEMA = {
   },
   required: ["verdict", "confidence"],
 };
+
+test("sanitizeNativeOutputSchema closes permissive nested objects for Anthropic", () => {
+  const sanitized = sanitizeNativeOutputSchema({
+    type: "object",
+    properties: {
+      entities: {
+        type: "object",
+        additionalProperties: true,
+        properties: { company: { type: ["string", "null"] } },
+      },
+    },
+  });
+
+  assert.equal(sanitized.additionalProperties, false);
+  assert.equal(sanitized.properties.entities.additionalProperties, false);
+});
 
 const ALLOWED_USAGE_KEYS = [
   "id",
@@ -407,6 +428,7 @@ test("callAI (BYOK, native output): sends Anthropic json_schema output_config", 
       messages: [{ role: "user", content: "classify" }],
       maxTokens: 16,
       outputMode: "native",
+      effort: "low",
       outputName: "classification",
       outputSchema: OUTPUT_SCHEMA,
       skill: "discover-companies",
@@ -417,6 +439,7 @@ test("callAI (BYOK, native output): sends Anthropic json_schema output_config", 
     assert.equal(upstream.requests.length, 1);
     const [req] = upstream.requests;
     assert.equal(req.headers["x-api-key"], "sk-ant-test");
+    assert.equal(req.body.output_config.effort, "low");
     assert.equal(req.body.output_config.format.type, "json_schema");
     // format.name is never sent natively — the Anthropic API 400s on it
     // ("Extra inputs are not permitted"); outputName only matters to the

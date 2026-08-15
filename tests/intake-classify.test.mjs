@@ -245,6 +245,41 @@ test("classifyIntakeItem: a text input goes through bounded AI with intake label
   assert.equal(seenOptions.maxTurns, 1);
 });
 
+test("classifyIntakeItem: the installed product uses the configured AI seam without requiring the agent SDK", async () => {
+  const repoRoot = tempRepo();
+  let seenOptions = null;
+  const outcome = await classifyIntakeItem({
+    rawInput: "Acme is hiring a Staff Engineer to own its production platform.",
+    inputKind: "text",
+    repoRoot,
+    env: {},
+    runAI: async (options) => {
+      seenOptions = options;
+      return {
+        body: {
+          ok: true,
+          data: JSON.parse(VALID_REPLY.match(/```json\n([\s\S]+)\n```/)[1]),
+          ai: {
+            used: true,
+            skill: "intake",
+            action: "classify",
+            operation: "intake.classify",
+            mode: "native",
+            retried: false,
+          },
+        },
+      };
+    },
+  });
+
+  assert.equal(outcome.ok, true);
+  assert.equal(outcome.data.kind, "jd-text");
+  assert.equal(seenOptions.structuredMode, "native-preferred");
+  assert.equal(seenOptions.effort, "low");
+  assert.ok(seenOptions.maxTokens >= 4096);
+  assert.match(seenOptions.messages[0].content, /Acme is hiring a Staff Engineer/);
+});
+
 test("classifyIntakeItem: an inputKind:'file' item (extracted upload text) has no zero-AI shortcut and goes through bounded AI", async () => {
   const repoRoot = tempRepo();
   let loadSdkCalled = false;

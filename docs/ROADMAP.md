@@ -361,7 +361,9 @@ The current build order is:
    a URL, the open job, or one named saved job, evaluates it first, generates only on KEEP, and
    returns review/export actions without implying submission. Remaining work is the connected
    authenticated executor and rendered-form capture for sites without a public question API, plus
-   clean-home and packaged acceptance coverage for pasted and attached input. Greenhouse and Ashby
+   clean-home and packaged apply-chain acceptance for pasted and attached input. The rating flow's
+   packed acceptance now completes URL, open-job, named-job, pasted-JD, attached-JD, and
+   ambiguity-recovery paths through durable verdict state. Greenhouse and Ashby
    question schemas are captured before packet generation; other ATS forms now use a durable
    in-Ask paste-and-resume path that can retry answer generation without losing the saved questions.
    Explicit natural outcome reports now resolve

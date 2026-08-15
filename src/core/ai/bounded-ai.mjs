@@ -211,6 +211,7 @@ async function runNativePreferred({
   messages,
   system,
   model: requestedModel,
+  effort,
   tier,
   maxTokens,
   outputName,
@@ -239,7 +240,7 @@ async function runNativePreferred({
           outputMode: "native",
           outputSchema: schema,
         },
-        { system, model: requestedModel, tier, maxTokens, outputName, root, env, signal }
+        { system, model: requestedModel, effort, tier, maxTokens, outputName, root, env, signal }
       )
     );
     const unwrapped = unwrapInvocationResult(response);
@@ -300,6 +301,7 @@ export async function runBoundedAI({
   messages,
   system,
   model,
+  effort,
   tier,
   maxTokens,
   outputName,
@@ -330,6 +332,7 @@ export async function runBoundedAI({
         messages,
         system,
         model,
+        effort,
         tier,
         maxTokens,
         outputName,
