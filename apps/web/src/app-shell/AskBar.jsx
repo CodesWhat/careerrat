@@ -22,6 +22,7 @@ import { kindLabel } from "../lib/intake-labels.js";
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
 import { useGlobalShortcut } from "../lib/useGlobalShortcut.js";
 import { ChatPanel } from "../onboarding/ChatPanel.jsx";
+import { ASK_BAR_REQUEST_EVENT } from "./ask-events.js";
 import { useNeedsYouCount } from "./useNeedsYouCount.js";
 
 // AskBar — the W3 shell-docked ask bar (DESIGN-SPEC.md "Ask bar (component)").
@@ -287,6 +288,21 @@ export function AskBar() {
   useGlobalShortcut("k", () => {
     inputRef.current?.focus();
   });
+
+  useEffect(() => {
+    function onAskRequest(event) {
+      const requestedText = String(event?.detail?.text || "").trim();
+      if (!requestedText) return;
+      setText(requestedText);
+      setCaptureMode(false);
+      setCaptureAction(null);
+      setSelected("answer");
+      setFocused(true);
+      inputRef.current?.focus();
+    }
+    document.addEventListener(ASK_BAR_REQUEST_EVENT, onAskRequest);
+    return () => document.removeEventListener(ASK_BAR_REQUEST_EVENT, onAskRequest);
+  }, []);
 
   // Outside click / Escape close the preview panel without a modal backdrop —
   // same pattern as ActivityBell.jsx's popover.
@@ -1174,6 +1190,9 @@ function AskBarTurn({
   const searchSourceArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "search_source"
   );
+  const schedulingArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "scheduling_plan"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1182,6 +1201,7 @@ function AskBarTurn({
       {evaluationArtifact ? <JobEvaluationCard artifact={evaluationArtifact} /> : null}
       {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
       {searchSourceArtifact ? <SearchSourceStatus artifact={searchSourceArtifact} /> : null}
+      {schedulingArtifact ? <SchedulingPlanCard artifact={schedulingArtifact} /> : null}
       {companyProposalsArtifact ? (
         <CompanyProposalsCard artifact={companyProposalsArtifact} onRunAction={onRunAction} />
       ) : null}
@@ -1381,6 +1401,75 @@ function SearchSourceStatus({ artifact }) {
       {artifact.auth === true && artifact.enabled === false ? (
         <span>Browser consent required before use</span>
       ) : null}
+    </section>
+  );
+}
+
+function schedulingMissingLabel(values) {
+  const rows = (Array.isArray(values) ? values : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean)
+    .slice(0, 4);
+  if (!rows.length) return "a little more scheduling context";
+  if (rows.length === 1) return rows[0];
+  return `${rows.slice(0, -1).join(", ")} and ${rows.at(-1)}`;
+}
+
+function safeSchedulingHold(hold) {
+  const filename = String(hold?.filename || "").trim();
+  const ics = String(hold?.ics || "");
+  if (!/^[a-z0-9][a-z0-9._-]{0,119}\.ics$/i.test(filename)) return null;
+  if (!ics.startsWith("BEGIN:VCALENDAR") || ics.length > 100_000) return null;
+  return {
+    filename,
+    href: `data:text/calendar;charset=utf-8,${encodeURIComponent(ics)}`,
+  };
+}
+
+function SchedulingPlanCard({ artifact }) {
+  const plan = artifact?.plan;
+  const hold = safeSchedulingHold(artifact?.hold);
+  const slots = Array.isArray(plan?.slots) ? plan.slots.slice(0, 6) : [];
+  const needsUser = artifact?.status !== "ready" || !plan;
+  return (
+    <section className="ask-bar__scheduling-plan" aria-label="Interview scheduling plan">
+      <div className="ask-bar__scheduling-head">
+        <strong>{needsUser ? "Scheduling needs you" : "Scheduling reply ready"}</strong>
+        <span className={`badge ${needsUser ? "badge--warn" : "badge--ok"}`}>
+          {needsUser ? "Needs you" : "Review first"}
+        </span>
+      </div>
+      <p className="ask-bar__scheduling-state">
+        {artifact?.calendarChecked
+          ? "Calendar conflicts checked"
+          : "Calendar conflicts not checked"}
+        {plan?.timezone ? ` · ${plan.timezone}` : ""}
+      </p>
+      {needsUser ? (
+        <p>Needs your {schedulingMissingLabel(artifact?.missing)}.</p>
+      ) : (
+        <>
+          {slots.length ? (
+            <ul className="ask-bar__scheduling-slots">
+              {slots.map((slot) => (
+                <li key={`${slot.startIso || "slot"}:${slot.endIso || ""}`}>
+                  {slot.label || slot.startIso}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {plan.subject ? (
+            <strong className="ask-bar__scheduling-subject">{plan.subject}</strong>
+          ) : null}
+          {plan.body ? <p className="ask-bar__scheduling-draft">{plan.body}</p> : null}
+          <p className="ask-bar__scheduling-state">Nothing has been sent or booked.</p>
+          {hold ? (
+            <a className="btn btn--secondary" href={hold.href} download={hold.filename}>
+              Download tentative hold (.ics)
+            </a>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }

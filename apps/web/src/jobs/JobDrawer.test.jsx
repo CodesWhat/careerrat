@@ -41,6 +41,7 @@ const hooks = vi.hoisted(() => ({
 }));
 
 const dashboard = vi.hoisted(() => ({ refetch: vi.fn() }));
+const askEvents = vi.hoisted(() => ({ requestAskBar: vi.fn() }));
 const api = vi.hoisted(() => ({
   ApiError: class ApiError extends Error {},
   applyOnSite: vi.fn(),
@@ -74,6 +75,7 @@ vi.mock("react", async (importOriginal) => {
 vi.mock("../app-shell/DashboardContext.jsx", () => ({
   useDashboardSnapshot: () => ({ refetch: dashboard.refetch }),
 }));
+vi.mock("../app-shell/ask-events.js", () => askEvents);
 vi.mock("../lib/api.js", () => api);
 vi.mock("../lib/dashboard-events.js", () => ({ emitDashboardChanged: vi.fn() }));
 vi.mock("../components/Button.jsx", () => ({ Button: "button", IconButton: "button" }));
@@ -93,7 +95,7 @@ vi.mock("./PacketDocumentsCard.jsx", () => ({ PacketDocumentsCard: "packet-docum
 vi.mock("./PacketGateCard.jsx", () => ({ PacketGateCard: "packet-gate-card" }));
 
 import * as jobDrawerModule from "./JobDrawer.jsx";
-import { CommsThreadCard, CommThread, JobDrawer } from "./JobDrawer.jsx";
+import { CommsThreadCard, CommThread, JobDrawer, ScheduleInterviewCard } from "./JobDrawer.jsx";
 
 const applicationRow = {
   id: "app-1",
@@ -182,6 +184,25 @@ beforeEach(() => {
 });
 
 describe("JobDrawer", () => {
+  it("makes Paul the primary scheduling input and keeps manual entry for a confirmed time", async () => {
+    hooks.reset();
+    const onClose = vi.fn();
+    const tree = ScheduleInterviewCard({
+      app: applicationRow,
+      busy: false,
+      onSchedule: vi.fn(),
+      onClose,
+    });
+    const ask = button(tree, "Ask Paul to plan scheduling");
+    expect(ask).toBeTruthy();
+    ask.props.onClick();
+    expect(askEvents.requestAskBar).toHaveBeenCalledWith(
+      "Help me schedule the Northstar Solutions Engineer interview."
+    );
+    expect(onClose).toHaveBeenCalledOnce();
+    expect(JSON.stringify(tree)).toContain("Record a confirmed time");
+  });
+
   it("renders only real HTTP posting links, never internal intake provenance", async () => {
     const internal = {
       ...applicationRow,

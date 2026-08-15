@@ -22,6 +22,8 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "interview.prepare-request": ["workspace"],
   "interview.schedule": ["application"],
   "interview.capture-context": ["intake"],
+  "scheduling.prepare": ["communication"],
+  "scheduling.prepare-request": ["workspace"],
   "job.evaluate": ["application", "sourced"],
   "job.evaluate-request": ["workspace", "intake"],
   "job.prepare-request": ["workspace", "intake"],

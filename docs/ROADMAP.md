@@ -165,13 +165,16 @@ nurse, a driver, and an engineer each bring their own config.
   evidence, and a flagged claim that's actually true is grounded into your evidence rather than
   cut. *(Shipped; the suggest path has been live-validated, and write-back remains a separate
   per-field opt-in.)*
-- **Meeting scheduler** (`schedule-meeting`) — a dedicated scheduling workflow that turns recruiter
-  or hiring-team availability threads into clear proposed time blocks, a calendar-ready hold, and a
-  polished reply. It reads your tracker communications and (when available) calendar context to
-  avoid double-booking, resolves and labels timezones clearly, and stays confirm-first before
-  sending anything or creating a calendar event. With no calendar connector it degrades to
-  draft-only plus an `.ics` hold you import by hand. An optional availability block in your profile
-  lets it stop asking once you've told it your timezone and preferred times.
+- **Meeting scheduler** (`schedule-meeting`): Ask and each job drawer now route scheduling through
+  Paul. He reads the saved recruiter thread, profile availability and timezone, and opaque calendar
+  busy blocks; blocks conflicts using the configured buffer; prepares a timezone-explicit reply;
+  and creates a downloadable tentative `.ics` hold for an accepted slot. The draft is saved to the
+  linked communication for review, while sending, booking, and `interviewAt` remain untouched until
+  the user confirms those separate actions. Missing availability and AI failure stay in Ask with a
+  specific recovery prompt. The old datetime form remains collapsed under **Record a confirmed
+  time** for out-of-band bookings. *(Shipped and live-validated in an isolated workspace on
+  2026-08-15, including conflict rejection, draft-only write-back, ICS validity, restart, desktop,
+  and 390px layout.)*
 - **Calendar export** — the Calendar dashboard page turns tracker-derived interviews,
   assessments, follow-ups, deadlines, and prep blocks into portable real-calendar
   actions: one-click per-event `.ics` downloads, week-level `.ics` export, and

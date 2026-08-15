@@ -9,6 +9,7 @@
 // one-level merge (verbs/app.mjs) — patching a nested object from anything
 // less than its full current shape silently drops sibling keys.
 import { useCallback, useEffect, useRef, useState } from "react";
+import { requestAskBar } from "../app-shell/ask-events.js";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
 import { Button, IconButton } from "../components/Button.jsx";
 import { Card } from "../components/Card.jsx";
@@ -482,8 +483,9 @@ export function JobDrawer({ row, onClose, initialSection }) {
 
           {isApplication ? (
             <ScheduleInterviewCard
-              app={app}
+              app={app || row}
               busy={busyKey === "schedule"}
+              onClose={onClose}
               onSchedule={(payload) =>
                 runWrite(
                   "schedule",
@@ -787,7 +789,7 @@ export function JobDrawer({ row, onClose, initialSection }) {
   );
 }
 
-function ScheduleInterviewCard({ app, busy, onSchedule }) {
+export function ScheduleInterviewCard({ app, busy, onSchedule, onClose }) {
   const [at, setAt] = useState(toDatetimeLocal(app?.interviewAt) || "");
   const [round, setRound] = useState("recruiter screen");
   const [note, setNote] = useState("");
@@ -797,38 +799,55 @@ function ScheduleInterviewCard({ app, busy, onSchedule }) {
   }, [app?.interviewAt]);
 
   return (
-    <Card title="Schedule / update interview">
-      <div className="field-row">
-        <Field label="Date & time" htmlFor="drawer-interview-at">
-          <TextField id="drawer-interview-at" type="datetime-local" value={at} onChange={setAt} />
-        </Field>
-        <Field label="Round" htmlFor="drawer-interview-round">
-          <Select
-            id="drawer-interview-round"
-            value={round}
-            onChange={setRound}
-            options={ROUND_OPTIONS}
-          />
-        </Field>
-      </div>
-      <Field label="Note (optional, ≤60 chars)" htmlFor="drawer-interview-note">
-        <TextArea
-          id="drawer-interview-note"
-          rows={2}
-          value={note}
-          onChange={(v) => setNote(v.slice(0, 60))}
-        />
-      </Field>
+    <Card title="Interview scheduling">
+      <p className="field__hint">
+        Paul can read the recruiter thread, use your availability and timezone, check saved busy
+        blocks, and prepare the reply without sending or booking anything.
+      </p>
       <Button
-        variant="secondary"
-        disabled={busy || !at}
         onClick={() => {
-          if (!at) return;
-          onSchedule({ at: new Date(at).toISOString(), round, note: note || undefined });
+          requestAskBar(
+            `Help me schedule the ${[app?.company, app?.role].filter(Boolean).join(" ")} interview.`
+          );
+          onClose?.();
         }}
       >
-        {busy ? "Saving…" : "Save interview"}
+        Ask Paul to plan scheduling
       </Button>
+      <details className="job-drawer__manual-schedule">
+        <summary>Record a confirmed time</summary>
+        <div className="field-row">
+          <Field label="Date & time" htmlFor="drawer-interview-at">
+            <TextField id="drawer-interview-at" type="datetime-local" value={at} onChange={setAt} />
+          </Field>
+          <Field label="Round" htmlFor="drawer-interview-round">
+            <Select
+              id="drawer-interview-round"
+              value={round}
+              onChange={setRound}
+              options={ROUND_OPTIONS}
+            />
+          </Field>
+        </div>
+        <Field label="Note (optional, ≤60 chars)" htmlFor="drawer-interview-note">
+          <TextArea
+            id="drawer-interview-note"
+            rows={2}
+            value={note}
+            onChange={(v) => setNote(v.slice(0, 60))}
+          />
+        </Field>
+        <Button
+          variant="secondary"
+          disabled={busy || !at}
+          onClick={() => {
+            if (!at) return;
+            onSchedule({ at: new Date(at).toISOString(), round, note: note || undefined });
+          }}
+        >
+          {busy ? "Saving…" : "Save confirmed interview"}
+        </Button>
+      </details>
     </Card>
   );
 }
