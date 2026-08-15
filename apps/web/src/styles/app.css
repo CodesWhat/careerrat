@@ -6313,6 +6313,55 @@ button.chip {
   color: var(--ink);
 }
 
+.ask-bar__screening-answers {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+
+.ask-bar__screening-head,
+.ask-bar__screening-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ask-bar__screening-answer {
+  display: grid;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+
+.ask-bar__screening-answer strong {
+  color: var(--ink);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.ask-bar__screening-answer p,
+.ask-bar__screening-note {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.ask-bar__screening-answer p {
+  color: var(--ink);
+  white-space: pre-wrap;
+}
+
+.ask-bar__screening-meta {
+  justify-content: flex-start;
+  color: var(--ink-soft);
+  font-size: 11px;
+}
+
 .ask-bar__scheduling-plan {
   display: grid;
   gap: 8px;

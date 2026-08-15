@@ -4,7 +4,7 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-15
 
-Gate result: all 101 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+Gate result: all 102 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
 rate/apply, deterministic-provider, npm install, update/restart, and native Electron checks pass.
 The broader native skill-to-screen build gate remains tracked separately in
 `SKILL-UX-AUDIT.md`.
@@ -1853,3 +1853,31 @@ Test homes:
   filled name, email, and work authorization, left the optional portfolio blank, and stopped before
   Submit. After the explicit test submission, re-scan found the confirmation page, captured a local
   PNG receipt, and only then moved the application to Applied. No employer form was submitted.
+
+### `F-102` One-off application questions have no coherent native Ask path
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, a user could ask how to answer a newly surfaced application
+  question, but the primary chat treated it as generic advice while the dedicated `/answer` page
+  was retired and no longer reachable from the product.
+- Reproduction: type `How should I answer this application question: Will you now or later require
+  sponsorship?` into Ask and inspect the preview and result.
+- Root cause: the evidence-grounded packet answer engine and `answer-question` skill existed, but
+  workspace intent classification, execution, result rendering, and reusable-answer confirmation
+  were never connected.
+- Fix: add typed `screening.answer` and `screening.answer-save` intents, reuse the packet answer
+  engine and saved application context, render reviewable provenance-aware answer cards, preserve
+  NEEDS YOU and self-identification exclusions, append tracked answer artifacts idempotently, and
+  expose persistence only for reviewed recurring disclosure answers. Employer-specific prose is
+  never saved as a global default, and the result explicitly says nothing was submitted.
+- Regression: one-off answer, workspace preview/execution, route-status, and AskBar suites cover
+  deterministic profile reuse, evidence/NEEDS YOU behavior, durable classification, non-durable
+  rejection, tracked artifact stamping, typed request bodies, and the review/save UI.
+- Live retest: an isolated 8-of-8 candidate with one deterministic source and a completed first
+  search entered the real app, previewed the typed Ask action, received the saved no-sponsorship
+  answer without an AI call, reviewed and saved it, and retained both the exact
+  `screening_answers` value and durable workspace receipt after a full server restart. Browser
+  console output contained zero warnings or errors. A clean 545-file npm package also ran the real
+  deterministic draft and confirmed save against a fresh candidate home, reopened the database to
+  verify the exact default and both durable thread records, and verified that the shipped UI bundle
+  contains the review card.

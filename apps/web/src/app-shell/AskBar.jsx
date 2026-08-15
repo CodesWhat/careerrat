@@ -1205,6 +1205,9 @@ function AskBarTurn({
   const schedulingArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "scheduling_plan"
   );
+  const screeningAnswersArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "screening_answers"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1214,6 +1217,9 @@ function AskBarTurn({
       {packetArtifact ? <PacketStatus artifact={packetArtifact} /> : null}
       {searchSourceArtifact ? <SearchSourceStatus artifact={searchSourceArtifact} /> : null}
       {schedulingArtifact ? <SchedulingPlanCard artifact={schedulingArtifact} /> : null}
+      {screeningAnswersArtifact ? (
+        <ScreeningAnswersCard artifact={screeningAnswersArtifact} />
+      ) : null}
       {companyProposalsArtifact ? (
         <CompanyProposalsCard artifact={companyProposalsArtifact} onRunAction={onRunAction} />
       ) : null}
@@ -1240,7 +1246,7 @@ function AskBarTurn({
             return action.intent ? (
               <Button
                 variant="secondary"
-                key={`${action.intent.type}:${action.intent.entity?.type}:${action.intent.entity?.id}`}
+                key={`${action.intent.type}:${action.intent.entity?.type}:${action.intent.entity?.id}:${action.intent.input?.key || action.label || ""}`}
                 onClick={() => onRunAction(action)}
               >
                 {action.label || "Continue"}
@@ -1459,6 +1465,52 @@ function SearchSourceStatus({ artifact }) {
       {artifact.auth === true && artifact.enabled === false ? (
         <span>Browser consent required before use</span>
       ) : null}
+    </section>
+  );
+}
+
+function screeningAnswerSourceLabel(source) {
+  const labels = {
+    screening_answers: "Reused a saved application answer",
+    evidence: "Grounded in evidence",
+    profile: "Grounded in profile",
+    mixed: "Grounded in profile and evidence",
+    "needs-you": "Needs your input",
+  };
+  return labels[source] || "Grounded in candidate context";
+}
+
+function ScreeningAnswersCard({ artifact }) {
+  const answers = Array.isArray(artifact?.answers) ? artifact.answers : [];
+  const excluded = Array.isArray(artifact?.excluded) ? artifact.excluded : [];
+  return (
+    <section className="ask-bar__screening-answers" aria-label="Screening answers">
+      <div className="ask-bar__screening-head">
+        <strong>{answers.length === 1 ? "Screening answer" : "Screening answers"}</strong>
+        <span className="badge badge--warn">Review first</span>
+      </div>
+      {answers.map((answer, index) => (
+        <article
+          className="ask-bar__screening-answer"
+          key={answer.key || answer.question || `answer-${index}`}
+        >
+          <strong>{answer.question}</strong>
+          <p>{answer.answer}</p>
+          <div className="ask-bar__screening-meta">
+            <span>{screeningAnswerSourceLabel(answer.source)}</span>
+            {answer.durable && answer.uploadReady ? (
+              <span className="badge badge--muted">Reusable</span>
+            ) : null}
+          </div>
+        </article>
+      ))}
+      {excluded.length ? (
+        <p className="ask-bar__screening-note">
+          CareerRat skipped {excluded.length} self-identification question
+          {excluded.length === 1 ? "" : "s"}.
+        </p>
+      ) : null}
+      <p className="ask-bar__screening-note">Nothing was submitted.</p>
     </section>
   );
 }

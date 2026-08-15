@@ -192,11 +192,29 @@ Status meanings:
 | `optimize-linkedin` | External agent/session-browser workflow | agent-only | Add opt-in read, diff, approval, and separate write-back steps in the app. |
 | `reevaluate-strategy` | Server-derived strategy view model | partial | Render the strategy surface and route the review CTA through the workspace thread. |
 | `configure` | Settings pages | partial | Let Ask explain and propose validated settings changes without creating a second write path. |
+| `answer-question` | Explicit application/screening questions route through Ask to grounded review cards and confirmed reusable-answer saves | native | Keep profile reuse, evidence-backed prose, NEEDS YOU, self-identification exclusion, tracked-answer append, and restart persistence in regression coverage. |
+| `company-health` | External agent workflow | agent-only | Add job/company Ask routing and a cited health result linked to the tracked company. |
+| `report-issue` | External agent workflow | agent-only | Add a native error-context entry, redacted diagnostic review, explicit GitHub confirmation, and durable result. |
+| `resume-extract` | Internal onboarding helper with visible streamed progress and retry | internal | Keep extraction progress, failure, retry, and manual fallback inside Paul's setup flow. |
+| `intake-extract` | Internal Universal Intake helper with visible progress and review | internal | Keep extraction progress, errors, and decisions inside the invoking Ask capture flow. |
 
-The five skills added after the original release follow the same rule:
-`answer-question`, `company-health`, and `report-issue` need coherent user-facing
-entry/results; `resume-extract` and `intake-extract` remain internal helpers whose
-work is shown through onboarding or universal intake.
+### One-off application questions
+
+Ask recognizes explicit requests such as "How should I answer this application
+question: ..." without misclassifying ordinary career advice. It reuses the packet
+answer engine, candidate setup, honesty boundaries, evidence, and saved application
+context; self-identification questions remain excluded and missing facts return the
+literal NEEDS YOU state instead of a guess. The result renders as a review card and
+states that nothing was submitted. Recurring disclosure answers expose a separate
+**Save for future applications** confirmation; job-specific prose never does. A
+tracked application with an existing answer sheet receives an idempotent appended
+Q&A and artifact stamp, while standalone questions still produce the required
+Activity Pulse entry. Headed isolated-home acceptance passed against the real backend:
+an 8-of-8 candidate with a completed deterministic first search received the saved
+profile answer without an AI call, reviewed and persisted it through Ask, then retained
+the exact answer and workspace receipt after a full server restart with no browser
+warnings or errors. A clean 545-file npm package then ran the same deterministic draft,
+review/save, restart readback, durable thread-receipt, and shipped-UI checks successfully.
 
 ## Company thesis and continuous discovery
 
