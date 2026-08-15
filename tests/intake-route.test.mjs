@@ -492,6 +492,56 @@ test("POST /api/intake: a classified JD proposes evaluation in workspace-main", 
   }
 });
 
+test("POST /api/intake: direct apply intent survives JD classification and proposes preparation", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot, {
+    loadSdk: async () =>
+      fakeSdk(
+        assistantTextRun(
+          jsonReply(
+            classificationFixture({ kind: "jd-text", entities: { company: "Acme", role: "SRE" } })
+          )
+        )
+      ),
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/intake", {
+      text: "Acme\nSRE\nKeep production reliable.",
+      requestedAction: "prepare",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.item.requestedAction, "prepare");
+    assert.deepEqual(body.item.dispatch, {
+      lane: "W",
+      action: "workspace_intent",
+      params: { intentType: "job.prepare-request" },
+    });
+    assert.equal(
+      body.item.dispatchSummary,
+      "capture, evaluate, and prepare this application in your workspace"
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake rejects an unsupported requested action", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await postJson(server, "/api/intake", {
+      text: "Acme\nSRE\nKeep production reliable.",
+      requestedAction: "submit-without-confirmation",
+    });
+    assert.equal(status, 400);
+    assert.match(body.error, /requestedAction must be "evaluate" or "prepare"/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/intake: a bare URL auto-detects inputKind:'url' and skips AI when a known-ATS fetch resolves", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -642,6 +692,33 @@ test("POST /api/intake/upload: .txt and .md uploads decode locally and flow into
     assert.equal(md.body.item.status, "proposed");
     assert.equal(md.body.item.extraction, "local");
     assert.match(md.body.item.rawInput, /# Senior SRE/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake/upload preserves direct apply intent for an attached JD", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot, {
+    loadSdk: async () =>
+      fakeSdk(
+        assistantTextRun(
+          jsonReply(
+            classificationFixture({ kind: "jd-text", entities: { company: "Acme", role: "SRE" } })
+          )
+        )
+      ),
+  });
+  try {
+    const { status, body } = await postRaw(
+      server,
+      "/api/intake/upload?name=jd.txt&requestedAction=prepare",
+      Buffer.from("Acme\nSRE\nKeep production reliable.")
+    );
+    assert.equal(status, 200);
+    assert.equal(body.item.requestedAction, "prepare");
+    assert.equal(body.item.dispatch.params.intentType, "job.prepare-request");
   } finally {
     await closeServer(server);
   }
@@ -1415,6 +1492,78 @@ test("POST /api/intake/confirm: a JD evaluates through workspace-main and return
           entity: { type: "intake", id },
         },
       },
+    ]);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake/confirm returns a prepared packet and supervised handoff for direct apply intake", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({
+    repoRoot,
+    rawInput: "Acme\nSRE\nKeep production reliable.",
+    inputKind: "text",
+    requestedAction: "prepare",
+  });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture({
+        entities: { company: "Acme", role: "SRE" },
+      }),
+      dispatch: {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "job.prepare-request" },
+      },
+    },
+  });
+
+  const packet = {
+    kind: "packet_generation",
+    status: "ready",
+    uploadReady: true,
+    gaps: [],
+    blockingGapCount: 0,
+  };
+  const handoff = {
+    kind: "application_handoff",
+    url: "https://boards.greenhouse.io/acme/jobs/123",
+  };
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime: {
+      async executeIntent() {
+        return {
+          thread: { id: "workspace-main" },
+          messages: [
+            {
+              kind: "action_result",
+              text: "Evaluated Acme — SRE: Keep. Generated the application packet.",
+              artifacts: [
+                { kind: "job_evaluation", evaluation: { gate: "keep", fitScore: 91 } },
+                packet,
+                handoff,
+              ],
+              metadata: { applicationId: "app-acme", state: "ready", nextActions: [] },
+            },
+          ],
+        };
+      },
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(status, 200);
+    assert.equal(body.item.status, "done");
+    assert.deepEqual(body.item.result.artifacts, [
+      { kind: "job_evaluation", evaluation: { gate: "keep", fitScore: 91 } },
+      packet,
+      handoff,
     ]);
   } finally {
     await closeServer(server);

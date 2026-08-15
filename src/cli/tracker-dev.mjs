@@ -361,8 +361,12 @@ export function createDevServer({
     env,
     chatRuntime,
     workspaceAgentRuntime,
-    captureTextImpl: async ({ text, inputKind }) => {
-      const result = await workspaceAgentRuntime.captureIntake({ text, inputKind });
+    captureTextImpl: async ({ text, inputKind, requestedAction }) => {
+      const result = await workspaceAgentRuntime.captureIntake({
+        text,
+        inputKind,
+        requestedAction,
+      });
       return result.intake;
     },
   });

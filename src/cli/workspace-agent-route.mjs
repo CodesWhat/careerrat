@@ -61,6 +61,7 @@ function statusForError(error) {
       "EMPTY_COMMUNICATION_NOTE",
       "INTERVIEW_APPLICATION_REQUIRED",
       "TEXT_TOO_LONG",
+      "BAD_REQUESTED_ACTION",
       "UNSUPPORTED_INTENT",
     ].includes(error?.code)
   ) {
@@ -138,6 +139,7 @@ export function mountWorkspaceAgentRoutes({
         env,
         text: body?.text,
         inputKind: body?.inputKind,
+        requestedAction: body?.requestedAction,
       });
       sendJson(res, 200, { ok: true, data });
     } catch (error) {

@@ -49,5 +49,11 @@ export function summarizeDispatch(dispatch) {
   ) {
     return "capture and evaluate this job in your workspace";
   }
+  if (
+    dispatch.action === "workspace_intent" &&
+    dispatch.params.intentType === "job.prepare-request"
+  ) {
+    return "capture, evaluate, and prepare this application in your workspace";
+  }
   return dispatch.action;
 }

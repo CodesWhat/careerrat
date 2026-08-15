@@ -31,7 +31,14 @@ function isUnambiguousApplicationMatch(trackerMatch) {
   );
 }
 
-export function resolveIntakeDispatch({ kind, entities = {}, trackerMatch = null } = {}) {
+export function resolveIntakeDispatch({
+  kind,
+  entities = {},
+  trackerMatch = null,
+  requestedAction = null,
+} = {}) {
+  const jobIntentType =
+    requestedAction === "prepare" ? "job.prepare-request" : "job.evaluate-request";
   switch (kind) {
     case "jd-text":
       if (!String(entities.company || "").trim() || !String(entities.role || "").trim()) {
@@ -42,14 +49,14 @@ export function resolveIntakeDispatch({ kind, entities = {}, trackerMatch = null
       return {
         lane: "W",
         action: "workspace_intent",
-        params: { intentType: "job.evaluate-request" },
+        params: { intentType: jobIntentType },
       };
 
     case "job-url":
       return {
         lane: "W",
         action: "workspace_intent",
-        params: { intentType: "job.evaluate-request" },
+        params: { intentType: jobIntentType },
       };
 
     case "recruiter-email":

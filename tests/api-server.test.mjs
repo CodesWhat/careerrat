@@ -252,6 +252,55 @@ test("GET /api/discovery/state is mounted on the app server", async () => {
   }
 });
 
+test("the production intake mount preserves a requested apply action", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  const seen = [];
+  const workspaceAgentRuntime = {
+    async captureIntake(input) {
+      seen.push(input);
+      return {
+        intake: {
+          id: "intake-apply-1",
+          status: "proposed",
+          kind: "jd-text",
+          requestedAction: input.requestedAction,
+        },
+      };
+    },
+    async executeIntent() {
+      throw new Error("not used");
+    },
+    async runTurn() {
+      throw new Error("not used");
+    },
+  };
+  const dev = createDevServer({ repoRoot, workspaceAgentRuntime });
+  dev.startWatching();
+  await new Promise((resolve) => dev.server.listen(0, resolve));
+  try {
+    const res = await fetch(`${baseUrl(dev)}/api/intake`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        text: "Acme\nSRE\nKeep production reliable.",
+        requestedAction: "prepare",
+      }),
+    });
+    assert.equal(res.status, 200);
+    assert.equal((await res.json()).item.requestedAction, "prepare");
+    assert.deepEqual(seen, [
+      {
+        text: "Acme\nSRE\nKeep production reliable.",
+        inputKind: undefined,
+        requestedAction: "prepare",
+      },
+    ]);
+  } finally {
+    teardown(dev, repoRoot);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // M10 — boot-time Lane-C orphan reconciliation. createDevServer() must run
 // reconcileOrphanedLaneCIntakeItems() once before returning (see that

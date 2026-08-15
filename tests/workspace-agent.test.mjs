@@ -1867,6 +1867,25 @@ test("a failed chat-first intake still preserves the original paste and visible 
   assert.equal(result.messages[1].error.code, "INTAKE_CAPTURE_FAILED");
 });
 
+test("chat-first intake rejects an invalid requested action before writing the thread", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    captureWorkspaceIntake({
+      repoRoot,
+      env: {},
+      text: "Temporal Labs is hiring an Applied AI Engineer.",
+      requestedAction: "submit-without-confirmation",
+      captureIntakeImpl: async () => {
+        assert.fail("invalid requested actions must not reach intake capture");
+      },
+    }),
+    (error) => error.code === "BAD_REQUESTED_ACTION"
+  );
+
+  assert.deepEqual(workspaceThreadRead({ repoRoot, env: {} }).messages, []);
+});
+
 test("ISSUE-038 confirmed recruiter intake becomes a communication through workspace-main", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);
@@ -2588,4 +2607,21 @@ test("workspace intake route sends paste and link captures through the same seri
   assert.equal(seen[0].text, "https://jobs.example.test/temporal/applied-ai-engineer");
   assert.equal(seen[0].inputKind, "url");
   assert.equal(response.body.data.intake.id, "intake-link-1");
+});
+
+test("workspace intake route returns 400 for an invalid requested action", async () => {
+  const repoRoot = tempRepo();
+  const invalidAction = new Error('requestedAction must be "evaluate" or "prepare"');
+  invalidAction.code = "BAD_REQUESTED_ACTION";
+  const routes = mountDirect(repoRoot, undefined, undefined, async () => {
+    throw invalidAction;
+  });
+
+  const response = await callDirect(routes, "POST", "/api/workspace/intake", {
+    text: "Temporal Labs is hiring an Applied AI Engineer.",
+    requestedAction: "submit-without-confirmation",
+  });
+
+  assert.equal(response.status, 400);
+  assert.equal(response.body.code, "BAD_REQUESTED_ACTION");
 });

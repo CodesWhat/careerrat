@@ -62,6 +62,7 @@ import { classifyIntakeItem } from "../core/intake/classify.mjs";
 import { resolveIntakeDispatch } from "../core/intake/dispatch.mjs";
 import { summarizeDispatch } from "../core/intake/dispatch-summary.mjs";
 import { matchTrackerRecord } from "../core/intake/match.mjs";
+import { normalizeIntakeRequestedAction } from "../core/intake/requested-action.mjs";
 import { resolveJobUrl } from "../core/intake/resolve.mjs";
 import { extractDocxResumeText, normalizeDocxResumeText } from "../core/onboarding/resume-docx.mjs";
 import { userPath } from "../core/paths/workspace.mjs";
@@ -386,7 +387,16 @@ async function extractUploadText({
 // the item to status "error" (with the message) rather than 500ing the whole
 // request and leaving the caller unsure whether anything was saved at all.
 // ---------------------------------------------------------------------------
-async function classifyAndPropose({ repoRoot, env, id, inputKind, rawInput, fetchImpl, loadSdk }) {
+async function classifyAndPropose({
+  repoRoot,
+  env,
+  id,
+  inputKind,
+  rawInput,
+  requestedAction,
+  fetchImpl,
+  loadSdk,
+}) {
   try {
     intakeUpdate({ repoRoot, env, id, patch: { status: "classifying" } });
 
@@ -449,6 +459,7 @@ async function classifyAndPropose({ repoRoot, env, id, inputKind, rawInput, fetc
         kind: classification.kind,
         entities,
         trackerMatch: finalMatch,
+        requestedAction,
       });
       nextStatus = dispatch.action === "needs_you" ? "needs_you" : "proposed";
     }
@@ -498,6 +509,7 @@ export async function captureIntakeText({
   env = process.env,
   text,
   inputKind,
+  requestedAction,
   fetchImpl = fetch,
   loadSdk,
 } = {}) {
@@ -512,14 +524,22 @@ export async function captureIntakeText({
     error.code = "BAD_INTAKE_KIND";
     throw error;
   }
+  const normalizedRequestedAction = normalizeIntakeRequestedAction(requestedAction);
   const resolvedKind = inputKind || detectInputKind(rawText);
-  const captured = intakeCapture({ repoRoot, env, rawInput: rawText, inputKind: resolvedKind });
+  const captured = intakeCapture({
+    repoRoot,
+    env,
+    rawInput: rawText,
+    inputKind: resolvedKind,
+    requestedAction: normalizedRequestedAction,
+  });
   const finalItem = await classifyAndPropose({
     repoRoot,
     env,
     id: captured.id,
     inputKind: resolvedKind,
     rawInput: rawText,
+    requestedAction: normalizedRequestedAction,
     fetchImpl,
     loadSdk,
   });
@@ -705,6 +725,11 @@ async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime
   const evaluationArtifact = actionResult?.artifacts?.find(
     (artifact) => artifact.kind === "job_evaluation"
   );
+  const resultArtifacts = Array.isArray(actionResult?.artifacts)
+    ? actionResult.artifacts.filter((artifact) =>
+        ["job_evaluation", "packet_generation", "application_handoff"].includes(artifact?.kind)
+      )
+    : [];
   return intakeUpdate({
     repoRoot,
     env,
@@ -718,6 +743,7 @@ async function executeLaneW({ repoRoot, env, id, dispatch, workspaceAgentRuntime
         communicationId: actionResult?.metadata?.communicationId || null,
         applicationId: actionResult?.metadata?.applicationId || null,
         evaluation: evaluationArtifact?.evaluation || null,
+        artifacts: resultArtifacts,
         state: actionResult?.metadata?.state || null,
         nextActions: actionResult?.metadata?.nextActions || [],
       },
@@ -756,6 +782,7 @@ export function mountIntakeRoutes({
         env,
         text: body?.text,
         inputKind: body?.inputKind,
+        requestedAction: body?.requestedAction,
         fetchImpl,
         loadSdk,
       });
@@ -794,6 +821,15 @@ export function mountIntakeRoutes({
 
     const safeName = sanitizeUploadFilename(name);
     const ext = extname(safeName).toLowerCase();
+    let requestedAction;
+    try {
+      requestedAction = normalizeIntakeRequestedAction(
+        requestUrl.searchParams.get("requestedAction")
+      );
+    } catch (err) {
+      respondError(res, err);
+      return;
+    }
     const relPath = `workspace/intake/uploads/${Date.now()}-${safeName}`;
     const absPath = userPath({ repoRoot, env }, relPath);
     mkdirSync(dirname(absPath), { recursive: true });
@@ -801,7 +837,13 @@ export function mountIntakeRoutes({
 
     let captured;
     try {
-      captured = intakeCapture({ repoRoot, env, inputKind: "file", sourceFilePath: relPath });
+      captured = intakeCapture({
+        repoRoot,
+        env,
+        inputKind: "file",
+        sourceFilePath: relPath,
+        requestedAction,
+      });
     } catch (err) {
       respondError(res, err);
       return;
@@ -829,6 +871,7 @@ export function mountIntakeRoutes({
         id: captured.id,
         inputKind: "file",
         rawInput: extraction.text,
+        requestedAction,
         fetchImpl,
         loadSdk,
       });
@@ -945,6 +988,7 @@ export function mountIntakeRoutes({
       id,
       inputKind: existing.inputKind,
       rawInput: existing.rawInput,
+      requestedAction: existing.requestedAction,
       fetchImpl,
       loadSdk,
     });
