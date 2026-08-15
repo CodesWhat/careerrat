@@ -38,7 +38,11 @@ export function resolveIntakeDispatch({
   requestedAction = null,
 } = {}) {
   const jobIntentType =
-    requestedAction === "prepare" ? "job.prepare-request" : "job.evaluate-request";
+    requestedAction === "prepare"
+      ? "job.prepare-request"
+      : requestedAction === "tailor"
+        ? "job.tailor-request"
+        : "job.evaluate-request";
   switch (kind) {
     case "jd-text":
       if (!String(entities.company || "").trim() || !String(entities.role || "").trim()) {

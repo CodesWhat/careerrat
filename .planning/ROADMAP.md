@@ -225,6 +225,7 @@ Plans:
 2. Resume intake supports the formats candidates and job boards actually need, with PDF as the standard and text/markdown fallback; export needs for DOCX/PDF are recorded for packet generation.
 3. When `search_ready` first becomes true, the app starts a DB-backed sourcing run automatically and returns the user to onboarding/deep ingest instead of launching a hidden skill.
 4. React shows durable sourcing run state, progress, errors, and results while all writes go through DB verbs.
+5. Paul cannot graduate a candidate until deterministic sources are durable and the first search is running or complete. A failure stays inside onboarding with retry, guided repair, or a durable Pause setup checkpoint, never a zero-source Jobs error.
 
 ### Phase 8: Deep Ingest Lane
 

@@ -526,6 +526,40 @@ test("POST /api/intake: direct apply intent survives JD classification and propo
   }
 });
 
+test("POST /api/intake: direct tailor intent survives JD classification", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const server = await bootServer(repoRoot, {
+    loadSdk: async () =>
+      fakeSdk(
+        assistantTextRun(
+          jsonReply(
+            classificationFixture({ kind: "jd-text", entities: { company: "Acme", role: "SRE" } })
+          )
+        )
+      ),
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/intake", {
+      text: "Acme\nSRE\nKeep production reliable.",
+      requestedAction: "tailor",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.item.requestedAction, "tailor");
+    assert.deepEqual(body.item.dispatch, {
+      lane: "W",
+      action: "workspace_intent",
+      params: { intentType: "job.tailor-request" },
+    });
+    assert.equal(
+      body.item.dispatchSummary,
+      "capture, evaluate, and tailor documents for this job in your workspace"
+    );
+  } finally {
+    await closeServer(server);
+  }
+});
+
 test("POST /api/intake rejects an unsupported requested action", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
@@ -536,7 +570,7 @@ test("POST /api/intake rejects an unsupported requested action", async () => {
       requestedAction: "submit-without-confirmation",
     });
     assert.equal(status, 400);
-    assert.match(body.error, /requestedAction must be "evaluate" or "prepare"/);
+    assert.match(body.error, /requestedAction must be "evaluate", "prepare", or "tailor"/);
   } finally {
     await closeServer(server);
   }

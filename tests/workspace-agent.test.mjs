@@ -1637,11 +1637,12 @@ test("job.tailor-request evaluates a KEEP job and generates reviewable documents
     result.messages.at(-1).artifacts.map((artifact) => artifact.kind),
     ["job_evaluation", "packet_generation"]
   );
+  assert.equal(result.messages.at(-1).artifacts[1].purpose, "tailoring");
   assert.equal(result.messages.at(-1).metadata.nextActions[0].label, "Export documents");
   assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.export-documents");
   assert.equal(result.messages.at(-1).metadata.nextActions[1].label, "Review documents");
   assert.match(result.messages.at(-1).metadata.nextActions[1].href, /^\/jobs\?open=/);
-  assert.match(result.messages.at(-1).text, /tailored application packet/i);
+  assert.match(result.messages.at(-1).text, /tailored résumé and cover letter/i);
   assert.match(result.messages.at(-1).text, /tailored documents are ready to review/i);
   assert.doesNotMatch(result.messages.at(-1).text, /submission handoff|will be completed/i);
 });
@@ -1803,6 +1804,7 @@ test("document generation executes behind workspace-main and preserves artifact 
   ]);
   assert.deepEqual(result.messages[1].artifacts[0], {
     kind: "packet_generation",
+    purpose: "tailoring",
     title: "Temporal Labs — Applied AI Engineer — Documents",
     applicationId: "app-temporal",
     status: "reviewable",
@@ -1813,11 +1815,14 @@ test("document generation executes behind workspace-main and preserves artifact 
   });
   assert.equal(result.messages[1].metadata.state, "reviewable");
   assert.equal(result.messages[1].metadata.gapCount, 1);
-  assert.match(result.messages[1].text, /application questions/i);
+  assert.match(result.messages[1].text, /tailored résumé and cover letter/i);
+  assert.match(result.messages[1].text, /only if you later choose to apply/i);
   assert.equal(result.messages[1].metadata.blockingGapCount, 0);
+  assert.equal(result.messages[1].metadata.nextActions[0].intent.type, "job.export-documents");
+  assert.equal(result.messages[1].metadata.nextActions[1].label, "Review documents");
   assert.equal(
-    result.messages[1].metadata.nextActions[0].intent.type,
-    "application.record-external"
+    result.messages[1].artifacts.some((artifact) => artifact.kind === "application_handoff"),
+    false
   );
 
   const modelCalls = [];
@@ -3796,7 +3801,7 @@ test("workspace intake route sends paste and link captures through the same seri
 
 test("workspace intake route returns 400 for an invalid requested action", async () => {
   const repoRoot = tempRepo();
-  const invalidAction = new Error('requestedAction must be "evaluate" or "prepare"');
+  const invalidAction = new Error('requestedAction must be "evaluate", "prepare", or "tailor"');
   invalidAction.code = "BAD_REQUESTED_ACTION";
   const routes = mountDirect(repoRoot, undefined, undefined, async () => {
     throw invalidAction;

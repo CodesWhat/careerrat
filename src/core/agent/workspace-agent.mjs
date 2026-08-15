@@ -1840,6 +1840,7 @@ export async function executeWorkspaceIntent({
           : null;
       const packetArtifact = {
         kind: "packet_generation",
+        purpose: applyIntent ? "application" : "tailoring",
         title: `${applicationLabel(evaluated.application)} — Documents`,
         applicationId: captured.applicationId,
         status: packet.status || "reviewable",
@@ -1856,9 +1857,11 @@ export async function executeWorkspaceIntent({
         env,
         normalized,
         intentMessage,
-        text: `${evaluated.text} ${questionCaptureText(questionCapture, evaluated.application)} Generated the ${
-          applyIntent ? "application" : "tailored application"
-        } packet. ${packetGapText(gaps, questionCaptureDeferred, { tailoring: !applyIntent })}`,
+        text: `${evaluated.text} ${
+          applyIntent
+            ? `${questionCaptureText(questionCapture, evaluated.application)} Generated the application packet.`
+            : "Generated the tailored résumé and cover letter."
+        } ${packetGapText(gaps, questionCaptureDeferred, { tailoring: !applyIntent })}`,
         artifacts: [evaluated.artifact, packetArtifact, handoffArtifact].filter(Boolean),
         metadata: {
           ...evaluationMetadata,
@@ -1937,19 +1940,26 @@ export async function executeWorkspaceIntent({
       const gaps = packetGapsForApplication(operation.gaps, application, applyIntent);
       const blockingGapCount = blockingPacketGaps(gaps).length;
       const handoffArtifact =
-        blockingGapCount === 0
+        applyIntent && blockingGapCount === 0
           ? applicationHandoffArtifact(application, normalized.entity.id, questionCapture)
           : null;
-      const gapText = packetGapText(gaps, questionCaptureDeferred);
+      const gapText = packetGapText(gaps, questionCaptureDeferred, {
+        tailoring: !applyIntent,
+      });
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `${questionCaptureText(questionCapture, application)} Generated documents for ${applicationLabel(application)}. ${gapText}`.trim(),
+        text: `${
+          applyIntent
+            ? `${questionCaptureText(questionCapture, application)} Generated documents for ${applicationLabel(application)}.`
+            : `Generated the tailored résumé and cover letter for ${applicationLabel(application)}.`
+        } ${gapText}`.trim(),
         artifacts: [
           {
             kind: "packet_generation",
+            purpose: applyIntent ? "application" : "tailoring",
             title: `${applicationLabel(application)} — Documents`,
             applicationId: normalized.entity.id,
             status: operation.status || "reviewable",
@@ -1965,7 +1975,9 @@ export async function executeWorkspaceIntent({
           uploadReady: Boolean(operation.uploadReady),
           gapCount: gaps.length,
           blockingGapCount,
-          nextActions: packetNextActions(gaps, normalized.entity.id, Boolean(handoffArtifact)),
+          nextActions: applyIntent
+            ? packetNextActions(gaps, normalized.entity.id, Boolean(handoffArtifact))
+            : tailoredPacketNextActions(normalized.entity.id),
         },
         operationResult: { ...operation, gaps },
         now,

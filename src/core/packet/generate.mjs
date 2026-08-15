@@ -104,14 +104,14 @@ function honestyFromContext(context = {}) {
   return context.honesty || { education: { add_education_section: false }, tools: {} };
 }
 
-function normalizeQuestionCapture(input, context = {}) {
+function normalizeQuestionCapture(input, context = {}, { fallbackToContext = true } = {}) {
   const artifacts = artifactsFromContext(context);
   const packetSummary = appFromContext(context).packetManifest?.questions;
   const questions = Array.isArray(input?.questions)
     ? input.questions
     : Array.isArray(input?.answerable)
       ? input.answerable
-      : Array.isArray(packetSummary?.answerableIds)
+      : fallbackToContext && Array.isArray(packetSummary?.answerableIds)
         ? packetSummary.answerableIds.map((id) => ({
             id: String(id),
             label: String(id),
@@ -121,17 +121,23 @@ function normalizeQuestionCapture(input, context = {}) {
         : [];
   return {
     source: input?.source || "manual",
-    path: artifacts.packetQuestionsSource || input?.path || packetSummary?.source || null,
-    capturedAt: input?.capturedAt || packetSummary?.capturedAt || null,
+    path:
+      input?.path ||
+      (fallbackToContext ? artifacts.packetQuestionsSource || packetSummary?.source || null : null),
+    capturedAt: input?.capturedAt || (fallbackToContext ? packetSummary?.capturedAt || null : null),
     questions,
     excluded: Array.isArray(input?.excluded) ? input.excluded : [],
   };
 }
 
-export function enumeratePacketSources(context = {}, questionCapture = null) {
+export function enumeratePacketSources(
+  context = {},
+  questionCapture = null,
+  { fallbackToContext = true } = {}
+) {
   const app = appFromContext(context);
   const artifacts = artifactsFromContext(context);
-  const capture = normalizeQuestionCapture(questionCapture, context);
+  const capture = normalizeQuestionCapture(questionCapture, context, { fallbackToContext });
   const sources = {
     candidateProfile: profileFromContext(context),
     sourceResume: withoutPrivateFields(context.sourceResume || null),
@@ -1142,13 +1148,16 @@ export async function generatePacket({
       env,
       applicationId: id,
     });
-  const capture = await loadCaptureForGeneration({
-    repoRoot,
-    env,
-    appId: id,
-    context: packetContext,
-    questionCapture,
-  });
+  const includeAnswers = Boolean(applyIntent || questionCapture);
+  const capture = includeAnswers
+    ? await loadCaptureForGeneration({
+        repoRoot,
+        env,
+        appId: id,
+        context: packetContext,
+        questionCapture,
+      })
+    : normalizeQuestionCapture(null, packetContext, { fallbackToContext: false });
   const hasQuestionCapture = Boolean(capture.path) || capture.questions.length > 0;
   // applyIntent (the submit-ready path, e.g. apply-job) still hard-requires a
   // real question capture so the answers artifact can be produced before an
@@ -1163,7 +1172,9 @@ export async function generatePacket({
     throw err;
   }
   const skipAnswers = !hasQuestionCapture;
-  const sourceMap = enumeratePacketSources(packetContext, capture);
+  const sourceMap = enumeratePacketSources(packetContext, capture, {
+    fallbackToContext: includeAnswers,
+  });
   const sourceSplit = splitConfirmedAndProposedPacketSources(sourceMap);
   // The resume and cover-letter drafts are independent AI calls (different
   // schemas, different prompts) — run them concurrently rather than

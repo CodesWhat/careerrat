@@ -950,7 +950,7 @@ test("POST /api/packet/generate: requires a persisted KEEP before starting AI", 
   }
 });
 
-test("POST /api/packet/generate: threads packetResumeCall into tailored resume generation", async () => {
+test("POST /api/packet/generate: standalone tailoring ignores saved application questions", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);
   let resumeCallCount = 0;
@@ -958,7 +958,15 @@ test("POST /api/packet/generate: threads packetResumeCall into tailored resume g
     resumeCallCount += 1;
     return validPacketResumeCall();
   };
-  const server = await bootServer(repoRoot, validPacketCalls({ packetResumeCall }));
+  let packetAnswersCallCount = 0;
+  const packetAnswersCall = async () => {
+    packetAnswersCallCount += 1;
+    throw new Error("standalone tailoring must not draft application answers");
+  };
+  const server = await bootServer(
+    repoRoot,
+    validPacketCalls({ packetResumeCall, packetAnswersCall })
+  );
   try {
     const generated = await postJson(server, "/api/packet/generate", {
       appId: "app-packet",
@@ -968,11 +976,17 @@ test("POST /api/packet/generate: threads packetResumeCall into tailored resume g
     assert.equal(generated.status, 200);
     assert.equal(generated.body.ok, true);
     assert.equal(resumeCallCount, 1);
+    assert.equal(packetAnswersCallCount, 0);
     assert.match(
       generated.body.data.sources.resume,
       /\*\*Northwind Digital\*\* - New York, NY \| 2020 - 2024/
     );
     assert.match(generated.body.data.sources.resume, /### Applied AI Engineer \| 2022 - 2024/);
+    assert.equal(generated.body.data.sources.answers ?? null, null);
+    assert.equal(generated.body.data.artifacts.answers ?? null, null);
+    assert.equal(generated.body.data.artifacts.answersSource ?? null, null);
+    assert.equal(generated.body.data.manifest.questions.length, 0);
+    assert.equal(generated.body.data.manifest.questionCaptureSource ?? null, null);
   } finally {
     await closeServer(server);
   }
@@ -1116,7 +1130,7 @@ test("POST /api/packet/generate: no capture with apply intent returns BAD_QUESTI
   }
 });
 
-test("POST /api/packet/generate: schema-invalid saved capture returns BAD_PACKET_QUESTIONS", async () => {
+test("POST /api/packet/generate: apply intent rejects a schema-invalid saved capture", async () => {
   const repoRoot = tempRepo();
   seedPacketReadyApp(repoRoot);
   writeFileSync(
@@ -1128,7 +1142,7 @@ test("POST /api/packet/generate: schema-invalid saved capture returns BAD_PACKET
   try {
     const generated = await postJson(server, "/api/packet/generate", {
       applicationId: "app-packet",
-      applyIntent: false,
+      applyIntent: true,
     });
     assert.equal(generated.status, 400);
     assert.equal(generated.body.code, "BAD_PACKET_QUESTIONS");

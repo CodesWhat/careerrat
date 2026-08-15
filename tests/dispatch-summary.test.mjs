@@ -71,6 +71,15 @@ test("summarizeDispatch keeps interview intake in the workspace conversation", (
   assert.equal(summary, "capture this interview context in your workspace conversation");
 });
 
+test("summarizeDispatch describes standalone tailoring without implying application", () => {
+  const summary = summarizeDispatch({
+    lane: "W",
+    action: "workspace_intent",
+    params: { intentType: "job.tailor-request" },
+  });
+  assert.equal(summary, "capture, evaluate, and tailor documents for this job in your workspace");
+});
+
 test("summarizeDispatch: an unrecognized action falls back to the bare action string", () => {
   const summary = summarizeDispatch({ lane: null, action: "needs_you", params: { reason: "x" } });
   assert.equal(summary, "needs_you");

@@ -21,6 +21,21 @@ test("jd-text and job-url both dispatch to the durable workspace job evaluator",
   }
 });
 
+test("tailor intake dispatches pasted and attached jobs to standalone tailoring", () => {
+  for (const kind of ["jd-text", "job-url"]) {
+    const result = resolveIntakeDispatch({
+      kind,
+      entities: { company: "Acme", role: "SRE" },
+      requestedAction: "tailor",
+    });
+    assert.deepEqual(result, {
+      lane: "W",
+      action: "workspace_intent",
+      params: { intentType: "job.tailor-request" },
+    });
+  }
+});
+
 test("jd-text without a company and role stays in needs-you instead of creating a guessed job", () => {
   const result = resolveIntakeDispatch({ kind: "jd-text", entities: {}, trackerMatch: null });
   assert.equal(result.lane, null);
