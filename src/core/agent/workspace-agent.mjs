@@ -36,6 +36,10 @@ import {
 import { evaluateAndPersistPacketGate } from "../packet/evaluate.mjs";
 import { exportPacketArtifacts } from "../packet/exports.mjs";
 import { generateApplicationPacket } from "../packet/generate-operation.mjs";
+import {
+  draftOneOffScreeningAnswers,
+  saveOneOffScreeningAnswer,
+} from "../packet/one-off-answer.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
@@ -66,6 +70,8 @@ const EXECUTABLE_INTENTS = new Set([
   "job.tailor-request",
   "job.generate-documents",
   "job.export-documents",
+  "screening.answer",
+  "screening.answer-save",
   "search.run",
   "sourced.promote",
   "sourced.skip",
@@ -195,7 +201,11 @@ function messageForModel(message) {
     const schedulingContext = scheduling
       ? `\n[Scheduling plan state: ${JSON.stringify(scheduling).slice(0, 6_000)}]`
       : "";
-    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}${companyContext}${sourceContext}${schedulingContext}`;
+    const screening = message.artifacts?.find((artifact) => artifact.kind === "screening_answers");
+    const screeningContext = screening
+      ? `\n[Screening answer state: ${JSON.stringify(screening).slice(0, 6_000)}]`
+      : "";
+    content = `[Action completed: ${message.artifacts?.map((artifact) => artifact.title || artifact.kind).join(", ") || "completed"}] ${content}${draftContext}${evaluationContext}${packetContext}${packetExportContext}${searchContext}${companyContext}${sourceContext}${schedulingContext}${screeningContext}`;
   } else if (message.kind === "action_error") {
     content = `[Action failed: ${message.error?.code || "ACTION_FAILED"}] ${content}`;
   } else if (message.kind === "agent_error") {
@@ -1609,6 +1619,8 @@ export async function executeWorkspaceIntent({
   searchFetchImpl,
   applyJobImpl,
   captureQuestionsImpl = capturePacketQuestions,
+  answerScreeningQuestionsImpl = draftOneOffScreeningAnswers,
+  saveScreeningAnswerImpl = saveOneOffScreeningAnswer,
   prepareSchedulingPlanImpl = planSchedulingReply,
   callAIImpl = callAI,
   sendCommunicationImpl,
@@ -1621,6 +1633,94 @@ export async function executeWorkspaceIntent({
   try {
     normalized = resolveNaturalWorkspaceRequest({ repoRoot, env, intent: normalized });
     const input = normalized.input || {};
+    if (normalized.type === "screening.answer") {
+      const questionText = String(input.questionText || "").trim();
+      if (!questionText) {
+        throw actionError("Paste the application question you want answered.", "QUESTION_REQUIRED");
+      }
+      const operation = await answerScreeningQuestionsImpl({
+        repoRoot,
+        env,
+        questionText,
+        applicationId: normalized.entity.type === "application" ? normalized.entity.id : undefined,
+      });
+      const reusableAnswers = (operation.answers || []).filter(
+        (answer) => answer.durable && answer.uploadReady
+      );
+      const count = (operation.answers || []).length;
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `${count === 1 ? "I drafted this answer" : `I drafted ${count} answers`}. Review ${count === 1 ? "this answer" : "them"} before using ${count === 1 ? "it" : "them"}. Nothing was submitted.`,
+        artifacts: [
+          {
+            kind: "screening_answers",
+            title: operation.applicationId
+              ? `${operation.company || "Application"} — Screening answers`
+              : "Screening answers",
+            applicationId: operation.applicationId || null,
+            answers: operation.answers || [],
+            excluded: operation.excluded || [],
+            artifactPath: operation.artifactPath || null,
+          },
+        ],
+        metadata: {
+          state: operation.needsUser ? "needs-user" : "reviewable",
+          requiresReview: true,
+          persisted: false,
+          ai: operation.ai || { used: false },
+          ...(reusableAnswers.length
+            ? {
+                nextActions: reusableAnswers.map((answer) => ({
+                  label: "Save for future applications",
+                  intent: {
+                    type: "screening.answer-save",
+                    entity: { type: "candidate", id: "candidate" },
+                    input: {
+                      question: answer.question,
+                      key: answer.key,
+                      answer: answer.answer,
+                    },
+                  },
+                })),
+              }
+            : {}),
+        },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "screening.answer-save") {
+      const operation = await saveScreeningAnswerImpl({
+        repoRoot,
+        env,
+        question: input.question,
+        key: input.key,
+        answer: input.answer,
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "Saved this reviewed answer for future applications.",
+        artifacts: [
+          {
+            kind: "screening_answer_saved",
+            title: "Reusable screening answer saved",
+            key: operation.key,
+            answer: operation.answer,
+          },
+        ],
+        metadata: { state: "saved", persisted: true },
+        operationResult: operation,
+        now,
+      });
+    }
+
     if (normalized.type === "communication.capture-inbound") {
       const item = intakeOne({ repoRoot, env, id: normalized.entity.id });
       if (!item) throw actionError(`Intake item not found: ${normalized.entity.id}`, "NOT_FOUND");
@@ -3658,7 +3758,31 @@ function schedulingRequestFromText(text) {
   };
 }
 
+function screeningQuestionRequestFromText(text) {
+  const value = String(text || "").trim();
+  const patterns = [
+    /^(?:(?:how\s+should\s+i|(?:can|could|would)\s+you|please)\s+)?(?:answer|respond\s+to)\s+(?:(?:this|the|an?)\s+)?(?:application|screening|form(?:[-\s]+form)?)\s+questions?\s*[:-]\s*([\s\S]+)$/i,
+    /^what\s+should\s+i\s+say\s+(?:for|to)\s+(?:(?:this|the|an?)\s+)?(?:application|screening|form(?:[-\s]+form)?)\s+questions?\s*[:-]\s*([\s\S]+)$/i,
+  ];
+  for (const pattern of patterns) {
+    const questionText = value.match(pattern)?.[1]?.trim();
+    if (questionText) return { questionText };
+  }
+  return null;
+}
+
 const ACTION_PREVIEW_RULES = [
+  {
+    test: (text) => Boolean(screeningQuestionRequestFromText(text)),
+    label: "Draft an evidence-backed answer",
+    intent: (text, context) => ({
+      type: "screening.answer",
+      entity: openJobId(context)
+        ? { type: "application", id: openJobId(context) }
+        : { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: screeningQuestionRequestFromText(text),
+    }),
+  },
   {
     test: looksLikeReportedApplication,
     label: "Record that I applied",
@@ -4032,6 +4156,8 @@ export function createWorkspaceAgentRuntime({
   searchFetchImpl = fetch,
   applyJobImpl,
   captureQuestionsImpl = capturePacketQuestions,
+  answerScreeningQuestionsImpl = draftOneOffScreeningAnswers,
+  saveScreeningAnswerImpl = saveOneOffScreeningAnswer,
   captureIntakeImpl,
   sendCommunicationImpl,
 } = {}) {
@@ -4092,6 +4218,8 @@ export function createWorkspaceAgentRuntime({
           searchFetchImpl,
           applyJobImpl,
           captureQuestionsImpl,
+          answerScreeningQuestionsImpl,
+          saveScreeningAnswerImpl,
           callAIImpl,
           sendCommunicationImpl,
           ...input,

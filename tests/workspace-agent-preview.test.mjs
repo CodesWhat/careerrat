@@ -453,6 +453,42 @@ test("previewWorkspaceIntent: recruiter reply requests become typed communicatio
   });
 });
 
+test("previewWorkspaceIntent: explicit screening questions become typed Ask actions", () => {
+  const repoRoot = tempRepo();
+  const text =
+    "How should I answer this application question: Will you now or later require sponsorship?";
+  assert.deepEqual(previewWorkspaceIntent({ text, repoRoot, env: {} }).action, {
+    label: "Draft an evidence-backed answer",
+    intent: {
+      type: "screening.answer",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { questionText: "Will you now or later require sponsorship?" },
+    },
+  });
+
+  const openJob = previewWorkspaceIntent({
+    text: "Answer this screening question: Why are you interested in this role?",
+    context: { pathname: "/jobs", jobId: "app-temporal" },
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(openJob.action.intent, {
+    type: "screening.answer",
+    entity: { type: "application", id: "app-temporal" },
+    input: { questionText: "Why are you interested in this role?" },
+  });
+
+  assert.equal(
+    previewWorkspaceIntent({
+      text: "How should I prioritize my applications?",
+      repoRoot,
+      env: {},
+    }).action,
+    null,
+    "ordinary advice must stay an answer instead of being misclassified"
+  );
+});
+
 test("previewWorkspaceIntent: scheduling language routes to the meeting planner before generic drafting", () => {
   const repoRoot = tempRepo();
   const text = "Reply to the Temporal Labs recruiter with my availability Tuesday afternoon.";

@@ -1499,6 +1499,117 @@ describe("AskBar — acting", () => {
     expect(textOf(tree)).not.toContain("Application submitted and verified");
   });
 
+  it("renders evidence-backed screening answers and saves reusable answers only after review", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue({
+      action: {
+        label: "Draft an evidence-backed answer",
+        intent: {
+          type: "screening.answer",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { questionText: "Will you now or later require sponsorship?" },
+        },
+      },
+      answer: { label: "Answer" },
+      engineAvailable: true,
+    });
+    const draftResponse = {
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Review this answer before using it.",
+            artifacts: [
+              {
+                kind: "screening_answers",
+                answers: [
+                  {
+                    question: "Will you now or later require sponsorship?",
+                    answer: "I do not require employment sponsorship.",
+                    source: "profile",
+                    durable: true,
+                    uploadReady: true,
+                  },
+                ],
+                excluded: [],
+              },
+            ],
+            metadata: {
+              requiresReview: true,
+              persisted: false,
+              nextActions: [
+                {
+                  label: "Save for future applications",
+                  intent: {
+                    type: "screening.answer-save",
+                    entity: { type: "candidate", id: "candidate" },
+                    input: {
+                      question: "Will you now or later require sponsorship?",
+                      key: "will you now or later require sponsorship",
+                      answer: "I do not require employment sponsorship.",
+                    },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    };
+    const savedResponse = {
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Saved this answer for future applications.",
+            artifacts: [{ kind: "screening_answer_saved" }],
+            metadata: { persisted: true },
+          },
+        ],
+      },
+    };
+    api.runWorkspaceIntent.mockImplementation((type) =>
+      Promise.resolve(type === "screening.answer-save" ? savedResponse : draftResponse)
+    );
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({
+      target: {
+        value:
+          "How should I answer this application question: Will you now or later require sponsorship?",
+      },
+    });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const card = byClass(tree, "ask-bar__screening-answers");
+    expect(textOf(card)).toContain("Will you now or later require sponsorship?");
+    expect(textOf(card)).toContain("I do not require employment sponsorship.");
+    expect(textOf(card)).toContain("Grounded in profile");
+    const save = buttonByText(tree, "Save for future applications");
+    save.props.onClick();
+    await flushMicrotasks();
+
+    expect(api.runWorkspaceIntent).toHaveBeenLastCalledWith(
+      "screening.answer-save",
+      { type: "candidate", id: "candidate" },
+      {
+        question: "Will you now or later require sponsorship?",
+        key: "will you now or later require sponsorship",
+        answer: "I do not require employment sponsorship.",
+      }
+    );
+  });
+
   it("renders live supervised form progress and the exact fields that still need the user", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(
       jobActionPreview({ type: "job.apply", label: "Apply on this site" })

@@ -3404,6 +3404,131 @@ test("natural recruiter requests refuse ambiguous threads without drafting", asy
   assert.equal(readCommunication(repoRoot, "comm-temporal-two").draft, undefined);
 });
 
+test("one-off screening questions draft inside Ask and offer confirmed durable reuse", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "application", id: "app-temporal" },
+      input: { questionText: "Will you now or later require sponsorship?" },
+    },
+    answerScreeningQuestionsImpl: async (input) => {
+      calls.push(input);
+      return {
+        applicationId: "app-temporal",
+        company: "Temporal Labs",
+        role: "Applied AI Engineer",
+        answers: [
+          {
+            key: "will you now or later require sponsorship",
+            question: "Will you now or later require sponsorship?",
+            answer: "I do not require employment sponsorship.",
+            source: "profile",
+            durable: true,
+            uploadReady: true,
+          },
+        ],
+        excluded: [],
+        needsUser: false,
+        artifactPath: null,
+        ai: { engine: { label: "Codex" }, elapsedMs: 18 },
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].applicationId, "app-temporal");
+  assert.equal(calls[0].questionText, "Will you now or later require sponsorship?");
+  const message = result.messages.at(-1);
+  assert.equal(message.artifacts[0].kind, "screening_answers");
+  assert.equal(message.artifacts[0].answers[0].source, "profile");
+  assert.equal(message.metadata.requiresReview, true);
+  assert.equal(message.metadata.persisted, false);
+  assert.deepEqual(message.metadata.nextActions, [
+    {
+      label: "Save for future applications",
+      intent: {
+        type: "screening.answer-save",
+        entity: { type: "candidate", id: "candidate" },
+        input: {
+          question: "Will you now or later require sponsorship?",
+          key: "will you now or later require sponsorship",
+          answer: "I do not require employment sponsorship.",
+        },
+      },
+    },
+  ]);
+  assert.match(message.text, /review this answer/i);
+});
+
+test("one-off screening questions reuse saved profile disclosures without requiring AI", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "profile",
+    patch: { authorization: { requires_sponsorship: false } },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { questionText: "Will you now or later require sponsorship?" },
+    },
+  });
+
+  const message = result.messages.at(-1);
+  const answer = message.artifacts[0].answers[0];
+  assert.equal(answer.source, "profile");
+  assert.equal(answer.durable, true);
+  assert.match(answer.answer, /do not require sponsorship/i);
+  assert.equal(message.metadata.ai.used, false);
+  assert.equal(message.metadata.nextActions[0].intent.type, "screening.answer-save");
+});
+
+test("confirmed reusable screening answers persist through the owning candidate settings writer", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "screening.answer-save",
+      entity: { type: "candidate", id: "candidate" },
+      input: {
+        question: "Will you now or later require sponsorship?",
+        key: "will you now or later require sponsorship",
+        answer: "I do not require employment sponsorship.",
+      },
+    },
+    saveScreeningAnswerImpl: (input) => {
+      calls.push(input);
+      return {
+        key: input.key,
+        answer: input.answer,
+        persisted: true,
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].key, "will you now or later require sponsorship");
+  const message = result.messages.at(-1);
+  assert.equal(message.artifacts[0].kind, "screening_answer_saved");
+  assert.equal(message.metadata.persisted, true);
+  assert.equal(message.metadata.nextActions, undefined);
+  assert.match(message.text, /future applications/i);
+});
+
 test("Apply on site returns a manual handoff without changing status when no executor is connected", async () => {
   const repoRoot = tempRepo();
   const seeded = seedApplication(repoRoot);

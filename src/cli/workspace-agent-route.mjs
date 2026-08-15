@@ -20,6 +20,8 @@ const CONFLICT_CODES = new Set([
   "COMMUNICATION_NOT_VERIFIED",
   "INTAKE_CONFIRMATION_REQUIRED",
   "EVALUATION_APPLICATION_REQUIRED",
+  "BAD_PACKET_ARTIFACT",
+  "NEEDS_USER",
 ]);
 
 function statusForError(error) {
@@ -64,6 +66,9 @@ function statusForError(error) {
       "INTERVIEW_APPLICATION_REQUIRED",
       "TEXT_TOO_LONG",
       "BAD_REQUESTED_ACTION",
+      "BAD_REQUEST",
+      "QUESTION_REQUIRED",
+      "NON_DURABLE_ANSWER",
       "UNSUPPORTED_INTENT",
     ].includes(error?.code)
   ) {
