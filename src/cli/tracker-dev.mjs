@@ -67,7 +67,7 @@ import { mountChatRoute } from "./chat-route.mjs";
 import { mountDashboardRoutes } from "./dashboard-route.mjs";
 import { mountDataRoutes } from "./data-route.mjs";
 import { mountDeepIngestRoutes } from "./deep-ingest-route.mjs";
-import { mountDiscoveryRoutes } from "./discovery-route.mjs";
+import { mountDiscoveryRoutes, startExplicitDiscoveryChat } from "./discovery-route.mjs";
 import { mountHostedInterestRoutes } from "./hosted-interest-route.mjs";
 import { mountInstalledRuntimeRoutes } from "./installed-runtime-route.mjs";
 import { captureIntakeText, mountIntakeRoutes } from "./intake-route.mjs";
@@ -140,6 +140,14 @@ export function createDevServer({
     repoRoot,
     env,
     captureIntakeImpl: captureIntakeText,
+    startBoardDiscoveryImpl: ({ request }) =>
+      startExplicitDiscoveryChat({
+        repoRoot,
+        env,
+        chatRuntime,
+        skill: "research-boards",
+        request,
+      }),
   }),
 } = {}) {
   // Boot-load any stored BYOK key from .internal/ai.env (see ai-env.mjs)

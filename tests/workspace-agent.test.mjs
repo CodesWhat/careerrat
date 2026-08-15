@@ -235,6 +235,62 @@ test("company discovery and proposal decisions are typed workspace intents", () 
   );
 });
 
+test("job-board discovery starts a visible research session inside workspace-main", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "source.discover",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { request: "find more job boards for me" },
+    },
+    startBoardDiscoveryImpl: async (input) => {
+      calls.push(input);
+      return {
+        chat: {
+          chatId: "research-boards-chat",
+          skill: "research-boards",
+          state: "running",
+          reused: false,
+        },
+      };
+    },
+    now: () => new Date("2026-08-09T14:02:30.000Z"),
+  });
+
+  assert.deepEqual(calls, [
+    {
+      repoRoot,
+      env: {},
+      request: "find more job boards for me",
+    },
+  ]);
+  assert.deepEqual(
+    result.messages.map(({ role, kind }) => ({ role, kind })),
+    [
+      { role: "user", kind: "intent" },
+      { role: "assistant", kind: "action_result" },
+    ]
+  );
+  assert.deepEqual(result.messages.at(-1).artifacts, [
+    {
+      kind: "board_discovery_chat",
+      title: "Job board discovery",
+      chatId: "research-boards-chat",
+      skill: "research-boards",
+      state: "running",
+      reused: false,
+    },
+  ]);
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    { label: "Search jobs", href: "/jobs?tab=search" },
+    { label: "Manage sources", href: "/settings" },
+  ]);
+});
+
 test("interview prep executes behind the same thread and appends its artifact result", async () => {
   const repoRoot = tempRepo();
   const calls = [];

@@ -252,6 +252,53 @@ test("GET /api/discovery/state is mounted on the app server", async () => {
   }
 });
 
+test("the production workspace runtime starts explicit board discovery with the shared chat runtime", async () => {
+  const repoRoot = tempRepo();
+  writeTracker(repoRoot);
+  openDb({ repoRoot });
+  const starts = [];
+  const live = new Map();
+  const chatRuntime = {
+    startSweep() {},
+    startSession({ skill, input }) {
+      starts.push({ skill, input });
+      const session = { chatId: "research-boards-live", skill, state: "running" };
+      live.set(skill, session);
+      return session;
+    },
+    findBySkill(skill) {
+      return live.get(skill) || null;
+    },
+    listSessions() {
+      return [...live.values()];
+    },
+  };
+  const dev = createDevServer({ repoRoot, chatRuntime });
+  dev.startWatching();
+  await new Promise((resolve) => dev.server.listen(0, resolve));
+  try {
+    const res = await fetch(`${baseUrl(dev)}/api/workspace/intent`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        intent: {
+          type: "source.discover",
+          entity: { type: "workspace", id: "workspace-main" },
+          input: { request: "find more job boards" },
+        },
+      }),
+    });
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.equal(starts.length, 1);
+    assert.equal(starts[0].skill, "research-boards");
+    assert.match(starts[0].input, /Outbound-safe candidate context|Run research-boards/);
+    assert.equal(body.data.messages.at(-1).artifacts[0].chatId, "research-boards-live");
+  } finally {
+    teardown(dev, repoRoot);
+  }
+});
+
 test("the production intake mount preserves a requested apply action", async () => {
   const repoRoot = tempRepo();
   writeTracker(repoRoot);

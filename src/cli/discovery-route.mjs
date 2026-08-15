@@ -155,6 +155,33 @@ function outboundCandidateContext({ repoRoot, env }) {
   }
 }
 
+export async function startExplicitDiscoveryChat({
+  repoRoot,
+  env = process.env,
+  chatRuntime,
+  skill,
+  request,
+} = {}) {
+  if (!DISCOVERY_CHAT_SKILLS.includes(skill)) {
+    const error = new Error(`Unsupported discovery skill: ${skill || "missing"}`);
+    error.code = "SKILL_NOT_ALLOWED";
+    error.status = 400;
+    throw error;
+  }
+  return startOrReuseDiscoveryChat({
+    chatRuntime,
+    guidance: {
+      nextSkill: skill,
+      message:
+        String(request || "").trim() ||
+        `Run ${skill} from the candidate's current workspace context.`,
+      ctaLabel: `Run ${skill}`,
+    },
+    candidateContext: outboundCandidateContext({ repoRoot, env }),
+    source: "The user started this discovery step from Ask.",
+  });
+}
+
 function statusForStartError(err) {
   switch (err?.code) {
     case "SKILL_REQUIRED":

@@ -76,6 +76,32 @@ test("previewWorkspaceIntent: company expansion phrasings map to company.discove
   }
 });
 
+test("previewWorkspaceIntent: new board discovery stays distinct from a job sweep", () => {
+  const repoRoot = tempRepo();
+  const phrasings = [
+    "find more job boards for me",
+    "discover new sources for my search",
+    "research niche job boards",
+  ];
+  for (const text of phrasings) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(result.action, {
+      label: "Find and review new job boards",
+      intent: {
+        type: "source.discover",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { request: text },
+      },
+    });
+  }
+
+  assert.equal(
+    previewWorkspaceIntent({ text: "sweep my pinned boards", repoRoot, env: {} }).action.intent
+      .type,
+    "search.run"
+  );
+});
+
 test("previewWorkspaceIntent: rate or evaluate plus a job URL maps to job.evaluate-request", () => {
   const repoRoot = tempRepo();
   const jobUrl = "https://boards.greenhouse.io/acme/jobs/12345";
