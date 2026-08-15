@@ -180,6 +180,8 @@ export function buildInterviewDossier({
   const persisted = appRegisterInterviewDossier({ repoRoot, env, id, dossier });
   return {
     applicationId: id,
+    company: context.app.company,
+    role: context.app.role,
     dossier: persisted.dossier,
     audience: inferredAudience,
     jobSignals: signals,

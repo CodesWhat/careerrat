@@ -356,7 +356,13 @@ The current build order is:
    a URL, the open job, or one named saved job, evaluates it first, generates only on KEEP, and
    returns review/export actions without implying submission. Remaining work is the connected
    authenticated executor and automatic form-question capture, plus clean-home and packaged
-   acceptance coverage for pasted and attached input.
+   acceptance coverage for pasted and attached input. Explicit natural outcome reports now resolve
+   one saved application and write the typed transition in the same Ask thread; ambiguous or
+   missing references stop with specific clarification copy and no mutation. Natural recruiter
+   requests now resolve one communication for an AI-backed reviewable draft or a user-reported
+   sent write-back. Natural interview-prep requests resolve one interview application, build the
+   saved-JD dossier, and return an immediate deep link in Ask. The remaining communications gap is
+   connected verified sending, not reference resolution or durable draft/sent-report state.
 3. **Company thesis, not a company allowlist (implemented, acceptance in progress)** — Paul asks about companies or kinds of companies
    whose values, industry, size, stage, business model, or local presence the user likes. He turns
    answers such as fintech, large corporations, fast-food chains, or small Denver accounting firms
@@ -376,7 +382,9 @@ The current build order is:
    source work back to Jobs and Settings. Natural source setup now recognizes explicit board-URL
    imports, keyword-search additions, and named source enable/disable requests; the Ask preview is
    the confirmation boundary, writes reuse validated SQLite source config, duplicates are no-ops,
-   and the durable receipt returns to Jobs or Settings. The remaining original-skill rows stay
+   and the durable receipt returns to Jobs or Settings. Natural application outcomes and interview
+   prep now satisfy the same typed, durable Ask contract. Recruiter drafts and reported sends also
+   use that contract, while verified delivery remains open. The remaining original-skill rows stay
    tracked in the linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
@@ -392,11 +400,11 @@ The current build order is:
 ### Product-surface acceptance sweep (updated August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. All 88 recorded findings are fixed and
+section remains the release-level source of truth. All 90 recorded findings are fixed and
 live-retested. The broader skill-to-screen audit above remains active until every user-facing
 original skill has a coherent native path.
 
-Current verification: 2,550 repository tests passed with 5 intentional skips; 693 web tests passed;
+Current verification: 2,565 repository tests completed with 5 intentional skips; 696 web tests passed;
 lint completed with no errors; web, website, docs, and desktop builds passed; and the final 541-file
 npm tarball installed into a clean home without lifecycle warnings. The clean setup, background
 search, restart, Ask rate/apply, provider Settings, and source Electron checks produced no HTTP or

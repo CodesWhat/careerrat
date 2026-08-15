@@ -170,6 +170,8 @@ test("buildInterviewDossier renders and persists an evidence-grounded dossier", 
     now: new Date("2026-08-09T15:00:00.000Z"),
   });
 
+  assert.equal(result.company, "Temporal Labs");
+  assert.equal(result.role, "Applied AI Engineer");
   assert.equal(result.dossier.title, "Temporal Labs — Applied AI Engineer");
   assert.equal(result.dossier.round, "Hiring manager");
   assert.equal(result.audience, "hiring-manager");

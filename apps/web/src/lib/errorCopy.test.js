@@ -153,6 +153,32 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "ambiguous recruiter thread reference",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_REFERENCE_AMBIGUOUS",
+      error: { message: "internal text must not render" },
+      details: {
+        matches: [
+          { company: "Acme", role: "Senior AI Engineer", subject: "Interview availability" },
+          { company: "Acme", role: "Staff Platform Engineer", subject: "Application update" },
+        ],
+      },
+    }),
+    message:
+      "That matches more than one recruiter thread: Acme — Senior AI Engineer — Interview availability; Acme — Staff Platform Engineer — Application update. Name the company, role, or subject more specifically.",
+    action: null,
+  },
+  {
+    name: "missing recruiter thread reference",
+    err: new ApiError(404, {
+      code: "COMMUNICATION_REFERENCE_NOT_FOUND",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "CareerRat couldn't find that recruiter thread. Check the company, role, or subject and try again.",
+    action: null,
+  },
+  {
     name: "PDF/DOCX not supported prefix",
     err: new ApiError(400, { error: "PDF/DOCX not supported yet, use text or markdown" }),
     message:

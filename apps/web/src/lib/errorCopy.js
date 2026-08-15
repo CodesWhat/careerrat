@@ -50,6 +50,21 @@ function savedJobAmbiguityMessage(details) {
     : "That matches more than one saved job. Name the company and role more specifically.";
 }
 
+function communicationAmbiguityMessage(details) {
+  const matches = Array.isArray(details?.matches) ? details.matches : [];
+  const labels = matches
+    .slice(0, 5)
+    .map(({ company, role, subject }) =>
+      [String(company || "").trim(), String(role || "").trim(), String(subject || "").trim()]
+        .filter(Boolean)
+        .join(" — ")
+    )
+    .filter(Boolean);
+  return labels.length
+    ? `That matches more than one recruiter thread: ${labels.join("; ")}. Name the company, role, or subject more specifically.`
+    : "That matches more than one recruiter thread. Name the company, role, or subject more specifically.";
+}
+
 const RULES = [
   {
     match: ({ raw, code }) => code === "missing_key" || startsWith(raw, "No AI key is configured"),
@@ -131,6 +146,17 @@ const RULES = [
   {
     match: ({ code }) => code === "JOB_REFERENCE_NOT_FOUND",
     message: "CareerRat couldn't find that saved job. Check the company or role and try again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_REFERENCE_AMBIGUOUS",
+    message: ({ details }) => communicationAmbiguityMessage(details),
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_REFERENCE_NOT_FOUND",
+    message:
+      "CareerRat couldn't find that recruiter thread. Check the company, role, or subject and try again.",
     action: null,
   },
   {

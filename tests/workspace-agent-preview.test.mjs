@@ -355,6 +355,90 @@ test("previewWorkspaceIntent: named saved job references are resolved by the exe
   });
 });
 
+test("previewWorkspaceIntent: natural application outcomes become confirmed typed writes", () => {
+  const repoRoot = tempRepo();
+  const rejected = "I got rejected by Temporal Labs.";
+  assert.deepEqual(previewWorkspaceIntent({ text: rejected, repoRoot, env: {} }).action, {
+    label: "Record this application as rejected",
+    intent: {
+      type: "outcome.record-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: rejected, to: "rejected", note: rejected },
+    },
+  });
+
+  const offered = "Temporal Labs made me an offer for the Applied AI Engineer role.";
+  assert.deepEqual(previewWorkspaceIntent({ text: offered, repoRoot, env: {} }).action, {
+    label: "Record this application as offer",
+    intent: {
+      type: "outcome.record-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: offered, to: "offer", note: offered },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: a user-reported application is distinct from an apply request", () => {
+  const repoRoot = tempRepo();
+  const reported = "I applied to the Temporal Labs Applied AI Engineer role.";
+  assert.deepEqual(previewWorkspaceIntent({ text: reported, repoRoot, env: {} }).action, {
+    label: "Record that I applied",
+    intent: {
+      type: "application.record-external-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: reported },
+    },
+  });
+
+  assert.equal(
+    previewWorkspaceIntent({
+      text: "Can you apply to the Temporal Labs Applied AI Engineer role?",
+      repoRoot,
+      env: {},
+    }).action.intent.type,
+    "job.prepare-request"
+  );
+});
+
+test("previewWorkspaceIntent: interview prep resolves a natural saved-job reference", () => {
+  const repoRoot = tempRepo();
+  const text = "Prepare me for my Temporal Labs Applied AI Engineer interview.";
+  assert.deepEqual(previewWorkspaceIntent({ text, repoRoot, env: {} }).action, {
+    label: "Prepare this interview",
+    intent: {
+      type: "interview.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: text },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: recruiter reply requests become typed communication actions", () => {
+  const repoRoot = tempRepo();
+  const draft = "Draft a reply to the Temporal Labs recruiter saying Tuesday afternoon works.";
+  assert.deepEqual(previewWorkspaceIntent({ text: draft, repoRoot, env: {} }).action, {
+    label: "Draft this recruiter reply",
+    intent: {
+      type: "communication.draft-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Tuesday afternoon works.",
+      },
+    },
+  });
+
+  const sent = "I sent the Temporal Labs recruiter reply.";
+  assert.deepEqual(previewWorkspaceIntent({ text: sent, repoRoot, env: {} }).action, {
+    label: "Record that I sent this reply",
+    intent: {
+      type: "communication.record-external-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { communicationReference: "the Temporal Labs recruiter" },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: a non-job URL stays answer-only", () => {
   const repoRoot = tempRepo();
   for (const text of [

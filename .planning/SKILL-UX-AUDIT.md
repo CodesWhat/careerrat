@@ -149,10 +149,10 @@ Status meanings:
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | partial | Run clean-home and packaged acceptance for every input shape, including ambiguity and recovery. |
 | `tailor-application` | Job packet actions plus URL, open-job, and named-job tailoring/apply Ask chains | partial | Add browser-captured screening questions; keep returning gaps/artifacts in chat and keep tailoring separate from submission. |
 | `apply-job` | Ask/manual handoff, Apply on site, and skill runtime | partial | Connect the supervised executor and automatic form-question capture; preserve verified-only Applied write-back. |
-| `track-outcomes` | Status controls and classified pasted updates | partial | Resolve natural job references and make external outcomes one-turn durable actions. |
-| `email-comms` | Draft, note, and external-send controls | partial | Resolve natural thread references and connect a verified send executor or explicit supervised handoff. |
+| `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Keep ambiguity, missing-reference, and durable write-back coverage in clean-home and packaged acceptance. |
+| `email-comms` | Draft, note, external-send controls, and natural Ask draft/sent-report flows | partial | Add natural note capture and connect a verified send executor or explicit supervised handoff. |
 | `schedule-meeting` | Manual interview scheduling form | partial | Add availability, timezone, busy-calendar, thread reply, hold, and next-action flow. |
-| `interview-prep` | Dossier actions and featured interview state | partial | Route natural interview references and return the packet plus immediate prep actions in chat. |
+| `interview-prep` | Dossier actions, featured interview state, and natural Ask prep with an immediate dossier link | native | Keep saved-JD, missing-JD, ambiguity, and dossier deep-link coverage in packaged acceptance. |
 | `calendar-sync` | ICS, Google, and Outlook export links | partial | Distinguish export from real provider sync and expose confirmed provider writes when connected. |
 | `ingest-mail` | External agent/session-browser workflow | agent-only | Add an opt-in native entry, visible consent, progress, review, and tracker write result. |
 | `ingest-messages` | External agent/session-browser workflow | agent-only | Add an opt-in native entry for LinkedIn/Wellfound message sync with the same review contract. |
@@ -239,6 +239,31 @@ imported and enabled a Greenhouse board through Ask with no console errors; an
 isolated populated DB also passed exact duplicate no-op, visible-label toggle,
 query add/dedup, continuous follow-up typing, and durable DB/UI receipt checks.
 Packaged-install acceptance remains open.
+
+## Natural outcomes, recruiter threads, and interview prep
+
+Ask now treats explicit user reports such as "I applied to the Acme role" and
+"I got rejected by Acme" as confirmed typed writes instead of answer-only chat.
+It resolves only against saved applications, refuses ambiguous company-only
+references with candidate-safe choices, and leaves every possible match untouched
+until the user is specific.
+
+Recruiter draft requests and user-reported sends resolve natural company, role, or
+subject references to the existing communication workflow. Drafting uses the
+selected AI runtime and persists a reviewable draft. Reporting that a reply was
+sent transitions the thread to waiting, records the outbound history, and clears
+the draft and completed next action in the same write. Missing and ambiguous
+threads return specific recovery copy instead of a generic server error. Connected,
+verified sending remains open, so `email-comms` stays partial.
+
+Natural interview-prep requests resolve only against applications with interview
+context, build the evidence-grounded dossier from the saved JD, and return an
+immediate **Open dossier** link in Ask. Headed isolated-home acceptance passed on
+2026-08-15 for a durable rejection, non-mutating ambiguous outcome recovery, a real
+Codex recruiter draft followed by an external-send report, dossier creation, and the
+`/app/jobs?dossier=<application-id>` deep link. Canonical SQLite exports confirmed
+the same status, message history, cleared draft, untouched ambiguous rows, and
+persisted dossier shown in the UI.
 
 ## Standalone tailoring
 

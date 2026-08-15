@@ -2538,6 +2538,28 @@ test("I applied elsewhere records only the user-reported outcome in the same thr
   });
 });
 
+test("a natural user-reported application resolves one saved job and records it", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "application.record-external-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "I applied to the Temporal Labs Applied AI Engineer role." },
+    },
+    now: () => new Date("2026-08-15T14:30:00.000Z"),
+  });
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "applied");
+  assert.equal(app.appliedAt, "2026-08-15T14:30:00.000Z");
+  assert.equal(result.messages[0].intent.type, "application.record-external-request");
+  assert.deepEqual(result.messages[1].entity, { type: "application", id: "app-temporal" });
+});
+
 test("chat-first outcome buttons update the application and remain visible in workspace-main", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, { status: "interview" });
@@ -2560,6 +2582,99 @@ test("chat-first outcome buttons update the application and remain visible in wo
   assert.equal(result.messages[1].metadata.previousState, "interview");
   assert.equal(result.messages[1].metadata.state, "rejected");
   assert.match(result.messages[1].text, /recorded.*rejected/i);
+});
+
+test("natural outcome requests resolve one application and persist the typed transition", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { status: "interview" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "outcome.record-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        jobReference: "I got rejected by Temporal Labs.",
+        to: "rejected",
+        note: "I got rejected by Temporal Labs.",
+      },
+    },
+  });
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "rejected");
+  assert.equal(app.statusNote, "I got rejected by Temporal Labs.");
+  assert.equal(result.messages[0].intent.type, "outcome.record-request");
+  assert.deepEqual(result.messages[1].entity, { type: "application", id: "app-temporal" });
+  assert.equal(result.messages[1].metadata.state, "rejected");
+});
+
+test("natural outcome requests refuse an ambiguous application instead of guessing", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal-ai", role: "Applied AI Engineer" });
+  seedApplication(repoRoot, { id: "app-temporal-platform", role: "Platform Engineer" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "outcome.record-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          jobReference: "I got rejected by Temporal Labs.",
+          to: "rejected",
+          note: "I got rejected by Temporal Labs.",
+        },
+      },
+    }),
+    (error) => error.code === "JOB_REFERENCE_AMBIGUOUS"
+  );
+
+  assert.equal(readApplication(repoRoot, "app-temporal-ai").status, "reviewed-hold");
+  assert.equal(readApplication(repoRoot, "app-temporal-platform").status, "reviewed-hold");
+  const messages = workspaceThreadRead({ repoRoot, env: {} }).messages;
+  assert.equal(messages.at(-1).kind, "action_error");
+  assert.match(messages.at(-1).text, /more than one saved job/i);
+});
+
+test("natural interview prep resolves one application and returns the dossier in Ask", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { status: "interview" });
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "interview.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        jobReference: "Prepare me for my Temporal Labs Applied AI Engineer interview.",
+      },
+    },
+    buildInterviewDossierImpl: (input) => {
+      calls.push(input);
+      return {
+        company: "Temporal Labs",
+        role: "Applied AI Engineer",
+        dossier: {
+          title: "Temporal Labs interview dossier",
+          path: "workspace/interview-prep/temporal.md",
+          markdown: "# Temporal Labs",
+        },
+      };
+    },
+  });
+
+  assert.equal(calls[0].applicationId, "app-temporal");
+  assert.equal(result.messages[0].intent.type, "interview.prepare-request");
+  assert.deepEqual(result.messages[1].entity, { type: "application", id: "app-temporal" });
+  assert.equal(result.messages[1].artifacts[0].kind, "interview_dossier");
+  assert.deepEqual(result.messages[1].metadata.nextActions, [
+    { label: "Open dossier", href: "/jobs?dossier=app-temporal" },
+  ]);
 });
 
 test("sourced Promote and Skip buttons execute as typed actions in workspace-main", async () => {
@@ -2659,6 +2774,81 @@ test("communication notes and user-reported sends stay in workspace-main", async
   assert.equal(result.messages.at(-2).intent.type, "communication.record-external");
   assert.equal(result.messages.at(-1).metadata.deliveryVerified, false);
   assert.equal(result.messages.at(-1).metadata.recordingMode, "external_report");
+});
+
+test("natural recruiter requests resolve one thread for drafting and user-reported sends", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+
+  const drafted = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.draft-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        communicationReference: "the Temporal Labs recruiter",
+        instruction: "Tuesday afternoon works.",
+      },
+    },
+    callAIImpl: async () => ({
+      content: [{ type: "text", text: "Thanks. Tuesday afternoon works for me." }],
+      engine: { label: "Codex" },
+    }),
+  });
+
+  assert.equal(readCommunication(repoRoot, "comm-temporal-recruiter").status, "drafted");
+  assert.equal(drafted.messages[0].intent.type, "communication.draft-request");
+  assert.deepEqual(drafted.messages[1].entity, {
+    type: "communication",
+    id: "comm-temporal-recruiter",
+  });
+
+  const sent = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.record-external-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { communicationReference: "the Temporal Labs recruiter" },
+    },
+  });
+
+  const communication = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(communication.status, "waiting");
+  assert.equal(communication.draft, null);
+  assert.equal(sent.messages.at(-2).intent.type, "communication.record-external-request");
+  assert.equal(sent.messages.at(-1).metadata.recordingMode, "external_report");
+});
+
+test("natural recruiter requests refuse ambiguous threads without drafting", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, { id: "comm-temporal-one", subject: "Interview availability" });
+  seedCommunication(repoRoot, { id: "comm-temporal-two", subject: "Application update" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.draft-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          communicationReference: "the Temporal Labs recruiter",
+          instruction: "Tuesday works.",
+        },
+      },
+      callAIImpl: async () => {
+        throw new Error("must not draft an ambiguous thread");
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_REFERENCE_AMBIGUOUS"
+  );
+
+  assert.equal(readCommunication(repoRoot, "comm-temporal-one").draft, undefined);
+  assert.equal(readCommunication(repoRoot, "comm-temporal-two").draft, undefined);
 });
 
 test("Apply on site returns a manual handoff without changing status when no executor is connected", async () => {
@@ -2996,6 +3186,8 @@ test("workspace action errors return actionable client statuses instead of serve
     ["JOB_IDENTITY_REQUIRED", 400],
     ["JOB_REFERENCE_NOT_FOUND", 404],
     ["JOB_REFERENCE_AMBIGUOUS", 409],
+    ["COMMUNICATION_REFERENCE_NOT_FOUND", 404],
+    ["COMMUNICATION_REFERENCE_AMBIGUOUS", 409],
     ["JOB_CAPTURE_FAILED", 409],
     ["JOB_BODY_REQUIRES_BROWSER", 409],
     ["CONFLICT", 409],
