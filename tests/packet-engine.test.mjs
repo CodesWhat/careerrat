@@ -491,6 +491,112 @@ test("private compensation and unconfirmed claims are rejected before upload-rea
   );
 });
 
+test("a location sentence using current base is not treated as private compensation", async () => {
+  const { validatePacketEvidenceIds } = await loadGenerateModule();
+
+  const result = validatePacketEvidenceIds({
+    context: PACKET_CONTEXT,
+    proposals: [
+      {
+        kind: "answer",
+        text: "My current base is Austin, TX.",
+        evidenceIds: ["ev-ai-001"],
+      },
+    ],
+  });
+
+  assert.equal(result.ok, true);
+});
+
+test("generatePacket reports one plain-language action per required unresolved answer", async () => {
+  const { generatePacket } = await loadGenerateModule();
+  const result = await generatePacket({
+    applyIntent: true,
+    context: PACKET_CONTEXT,
+    questionCapture: {
+      source: "manual",
+      questions: [
+        { id: "policy", label: "AI Policy for Application", type: "boolean", required: true },
+        {
+          id: "history",
+          label: "Have you interviewed here before?",
+          type: "boolean",
+          required: true,
+        },
+        { id: "preferences", label: "Personal preferences", type: "text", required: false },
+      ],
+      excluded: [],
+    },
+    draftResumeProposal: async () => ({
+      ...(await RESUME_DRAFT()),
+      gaps: [
+        {
+          kind: "resume",
+          message: "skills omitted (not found in sources): ImaginaryDB",
+        },
+      ],
+    }),
+    draftCoverLetterBlocks: async () => ({
+      blocks: [{ text: "NEEDS YOU: confirm the cover-letter proof points.", evidenceIds: [] }],
+      uploadReady: false,
+      manual: { required: true },
+      gaps: [
+        { kind: "coverLetter", message: "user confirmation is required" },
+        { kind: "coverLetter", message: "user confirmation is required" },
+      ],
+    }),
+    draftPacketAnswers: async () => ({
+      answers: [
+        {
+          questionId: "policy",
+          question: "AI Policy for Application",
+          answer: "NEEDS YOU — attest to your own AI usage.",
+          evidenceIds: [],
+          required: true,
+          uploadReady: false,
+        },
+        {
+          questionId: "history",
+          question: "Have you interviewed here before?",
+          answer: "NEEDS YOU — answer from your own recollection.",
+          evidenceIds: [],
+          required: true,
+          uploadReady: false,
+        },
+        {
+          questionId: "preferences",
+          question: "Personal preferences",
+          answer: "Leave blank (optional).",
+          evidenceIds: [],
+          required: false,
+          uploadReady: true,
+          skipped: true,
+        },
+      ],
+      uploadReady: false,
+      gaps: [
+        { questionId: "policy", reason: "personal attestation" },
+        { questionId: "history", reason: "personal history" },
+      ],
+    }),
+  });
+
+  assert.equal(result.gaps.length, 3);
+  assert.deepEqual(
+    result.gaps.map((gap) => gap.code),
+    ["COVER_LETTER_CONFIRMATION", "ANSWER_CONFIRMATION_REQUIRED", "ANSWER_CONFIRMATION_REQUIRED"]
+  );
+  assert.match(result.gaps[1].message, /AI Policy for Application/);
+  assert.match(result.gaps[2].message, /interviewed here before/i);
+  assert.doesNotMatch(
+    JSON.stringify(result.gaps),
+    /confirmed evidence ID|private current compensation|skills omitted|NEEDS YOU/i
+  );
+  assert.equal(result.manifest.gapCount, 3);
+  assert.equal(result.manifest.warnings.length, 1);
+  assert.match(result.manifest.warnings[0].message, /skills omitted/i);
+});
+
 test("cover-letter and answer grounding accept prompt-selected story ids and reject unknown or artifact-absent stories", async () => {
   const { validatePacketEvidenceIds } = await loadGenerateModule();
 

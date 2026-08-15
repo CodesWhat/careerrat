@@ -36,6 +36,10 @@ function cleanText(value) {
   return String(value || "").trim();
 }
 
+function needsUser(text) {
+  return /^NEEDS YOU\b/i.test(cleanText(text));
+}
+
 function slugPart(value) {
   return (
     String(value || "")
@@ -326,7 +330,9 @@ export function buildPromptVisibleSources(
 
 function privateLeakMessage(text) {
   if (
-    /PRIVATE_CURRENT|current[_ -]?base|current compensation|current salary|current pay/i.test(text)
+    /PRIVATE_CURRENT|current_base|current-base|current compensation|current salary|current pay|current base\s+(?:salary|pay|compensation)|current base\s*(?:[:=]|\bis\b)\s*[$£€]?\s*\d/i.test(
+      text
+    )
   ) {
     return "private current compensation appears in packet proposal";
   }
@@ -364,9 +370,9 @@ export function validatePacketGroundedIds({
     const issues = [];
     const privateIssue = privateLeakMessage(text);
     if (privateIssue) issues.push(privateIssue);
-    if (/^NEEDS YOU:/i.test(text)) issues.push("user confirmation is required");
+    if (needsUser(text)) issues.push("user confirmation is required");
     const missing = ids.filter((id) => !allowed.has(id));
-    if (!ids.length && !/^NEEDS YOU:/i.test(text)) issues.push("confirmed evidence ID is required");
+    if (!ids.length && !needsUser(text)) issues.push("confirmed evidence ID is required");
     if (missing.length) issues.push(`missing evidence IDs: ${missing.join(", ")}`);
     const forbiddenHits = forbidden.filter((phrase) => containsForbiddenPhrase(text, phrase));
     if (forbiddenHits.length) issues.push(`forbidden wording: ${forbiddenHits.join(", ")}`);
@@ -822,12 +828,12 @@ function buildSourceArtifacts({
   }
 
   const coverBlocks = coverLetter.blocks || [];
-  const coverHasNeedsYou = coverBlocks.some((block) => /^NEEDS YOU:/i.test(block.text || ""));
+  const coverHasNeedsYou = coverBlocks.some((block) => needsUser(block.text));
   const coverLetterMarkdown = coverHasNeedsYou
     ? renderManualCoverLetter({
         context: { ...context, job },
         reason:
-          coverBlocks.find((block) => /^NEEDS YOU:/i.test(block.text || ""))?.gap ||
+          coverBlocks.find((block) => needsUser(block.text))?.gap ||
           "confirm the cover-letter proof points.",
       })
     : (services.buildCoverLetterScaffold || buildCoverLetterScaffold)({
@@ -947,6 +953,7 @@ function manifestFor({
   gaps,
   uploadReady,
   deepIngestWarnings = [],
+  warnings = [],
 }) {
   const generatedAt = new Date().toISOString();
   const artifacts = {};
@@ -984,6 +991,7 @@ function manifestFor({
       gapContextCount: sourceSplit.gapContext.length,
     },
     gaps,
+    warnings,
     // Advisory-only, separate from gaps[]: gaps[] gates uploadReady
     // (generatePacket requires gaps.length === 0), so privacy-skipped/
     // malformed deep-ingest rows (context.deepIngestDiagnostics — reader.
@@ -1031,9 +1039,74 @@ function gapObjects(...lists) {
         : {
             kind: gap.kind || gap.reason || "review",
             ...(gap.code ? { code: gap.code } : {}),
+            ...(gap.questionId ? { questionId: String(gap.questionId) } : {}),
             message: gap.message || gap.reason || "review",
           }
     );
+}
+
+function packetReviewState({ validation, coverLetter, answers, skippedAnswersGap }) {
+  const gaps = [];
+  const warnings = [];
+  const answerRows = Array.isArray(answers?.answers) ? answers.answers : [];
+  const unresolvedAnswerIds = new Set();
+
+  if (
+    coverLetter?.manual?.required === true ||
+    (coverLetter?.blocks || []).some((block) => needsUser(block?.text))
+  ) {
+    gaps.push({
+      kind: "coverLetter",
+      code: "COVER_LETTER_CONFIRMATION",
+      message: "Review and confirm the cover letter proof points.",
+    });
+  }
+
+  for (const answer of answerRows) {
+    if (answer?.required === false || answer?.uploadReady !== false) continue;
+    const questionId = String(answer?.questionId || "");
+    if (questionId && unresolvedAnswerIds.has(questionId)) continue;
+    if (questionId) unresolvedAnswerIds.add(questionId);
+    const question = cleanText(answer?.question) || "a required application question";
+    gaps.push({
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      ...(questionId ? { questionId } : {}),
+      message: `Answer “${question}”.`,
+    });
+  }
+
+  const coveredValidationMessages = [
+    /user confirmation is required/i,
+    /confirmed evidence ID is required/i,
+  ];
+  const hardValidationKinds = new Set();
+  for (const gap of validation?.gaps || []) {
+    const message = cleanText(gap?.message);
+    if (coveredValidationMessages.some((pattern) => pattern.test(message))) continue;
+    hardValidationKinds.add(cleanText(gap?.kind) || "document");
+  }
+  for (const kind of hardValidationKinds) {
+    gaps.push({
+      kind,
+      code: "GENERATED_CONTENT_REVIEW_REQUIRED",
+      message: `Review generated ${kind === "answer" ? "application answers" : kind} that could not be verified.`,
+    });
+  }
+
+  for (const gap of gapObjects(answers?.gaps)) {
+    const questionId = String(gap?.questionId || "");
+    if (questionId && unresolvedAnswerIds.has(questionId)) continue;
+    if (gaps.some((item) => item.kind === "answers")) continue;
+    gaps.push({
+      kind: "answers",
+      code: "ANSWER_CONFIRMATION_REQUIRED",
+      message: "Review a required application answer.",
+    });
+  }
+
+  gaps.push(...gapObjects(skippedAnswersGap));
+  return { gaps, warnings };
 }
 
 export async function generatePacket({
@@ -1137,7 +1210,7 @@ export async function generatePacket({
       // current compensation, so it must never be run through the
       // private-leak check either. Excluding them from proposals entirely
       // covers both.
-      .filter((answer) => !answer.disclosure)
+      .filter((answer) => !answer.disclosure && !answer.deterministic && !answer.skipped)
       .map((answer) => ({
         kind: "answer",
         text: answer.answer,
@@ -1149,11 +1222,6 @@ export async function generatePacket({
     ok: coverValidation.ok && answersValidation.ok,
     gaps: [...coverValidation.gaps, ...answersValidation.gaps],
   };
-  const lintGaps = Object.entries(sources).flatMap(([kind, markdown]) =>
-    lintArtifact(markdown)
-      .findings.filter((finding) => finding.pattern === "needs-you-marker")
-      .map((finding) => ({ kind, message: finding.text }))
-  );
   // Explicit skip record for the artifacts-only degrade path (BAD_QUESTION_
   // CAPTURE relaxation above) — the UI needs to see *why* no answers artifact
   // exists rather than inferring it from a missing key.
@@ -1167,14 +1235,14 @@ export async function generatePacket({
         },
       ]
     : [];
-  const gaps = gapObjects(
-    validation.gaps,
-    coverLetter.gaps,
-    resumeProposal?.gaps,
-    answers.gaps,
-    lintGaps,
-    skippedAnswersGap
-  );
+  const reviewState = packetReviewState({
+    validation,
+    coverLetter,
+    answers,
+    skippedAnswersGap,
+  });
+  const gaps = reviewState.gaps;
+  const warnings = [...reviewState.warnings, ...gapObjects(resumeProposal?.gaps)];
   const uploadReady =
     Boolean(applyIntent) &&
     gaps.length === 0 &&
@@ -1192,6 +1260,7 @@ export async function generatePacket({
     deepIngestWarnings: Array.isArray(packetContext?.deepIngestDiagnostics)
       ? packetContext.deepIngestDiagnostics
       : [],
+    warnings,
   });
 
   let artifacts = {};

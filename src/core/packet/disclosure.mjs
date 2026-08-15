@@ -15,7 +15,7 @@ const CATEGORY_PATTERNS = [
   ["salary", /salary|compensation|pay\s+(range|expectation)|base\s+pay/i],
   [
     "noticePeriod",
-    /notice\s+period|when\s+can\s+you\s+start|start\s+date|availability\s+to\s+start/i,
+    /notice\s+period|when\s+can\s+you\s+start|earliest[^?]{0,50}\bstart|want\s+to\s+start\s+working|start\s+date|availability\s+to\s+start/i,
   ],
 ];
 

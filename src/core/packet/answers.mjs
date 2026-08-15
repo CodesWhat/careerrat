@@ -1,4 +1,5 @@
 import { runBoundedAI } from "../ai/bounded-ai.mjs";
+import { buildFillPlan, hostnameToPortal } from "../apply/form-fill.mjs";
 import { candidateConfigGet } from "../db/verbs.mjs";
 import { buildShortAnswer, forbiddenWordingFor } from "../documents/tailor.mjs";
 import { resolveDisclosureAnswer } from "./disclosure.mjs";
@@ -14,6 +15,10 @@ const LABELS = Object.freeze({
 
 function cleanText(value) {
   return String(value || "").trim();
+}
+
+function needsUser(text) {
+  return /^NEEDS YOU\b/i.test(cleanText(text));
 }
 
 function withoutPrivateFields(value) {
@@ -80,29 +85,98 @@ function needsYouAnswer(question, reason) {
     question: question.label,
     answer: `NEEDS YOU: ${reason}`,
     evidenceIds: [],
+    required: question.required !== false,
     uploadReady: false,
     gap: reason,
   };
+}
+
+function optionalSkippedAnswer(question) {
+  return {
+    questionId: String(question.id),
+    question: question.label,
+    answer: "Leave blank (optional).",
+    evidenceIds: [],
+    required: false,
+    uploadReady: true,
+    gap: null,
+    skipped: true,
+  };
+}
+
+function generatedResumeAnswer(question) {
+  return {
+    questionId: String(question.id),
+    question: question.label,
+    answer: "Attach the generated resume file.",
+    evidenceIds: [],
+    required: question.required !== false,
+    uploadReady: true,
+    gap: null,
+    deterministic: true,
+    source: "packet.resume",
+  };
+}
+
+function isResumeUpload(question) {
+  return (
+    String(question?.type || "").toLowerCase() === "file" &&
+    /\b(resume|résumé|cv)\b/i.test(String(question?.label || question?.id || ""))
+  );
+}
+
+function configuredAnswerEntry(question, plan, { honesty, forbidden } = {}) {
+  try {
+    const answer = buildShortAnswer({
+      question: question.label,
+      answer: String(plan.value),
+      honesty,
+      forbidden,
+    });
+    return {
+      questionId: String(question.id),
+      question: question.label,
+      answer,
+      evidenceIds: [],
+      required: question.required !== false,
+      uploadReady: true,
+      gap: null,
+      deterministic: true,
+      source: plan.source || plan.canonicalField || "candidate setup",
+    };
+  } catch (err) {
+    return question.required === false
+      ? optionalSkippedAnswer(question)
+      : needsYouAnswer(question, err?.message || "confirm this answer");
+  }
 }
 
 function normalizeAnswer({ proposal, question, context, allowedEvidenceIds, forbidden }) {
   const answer = cleanText(proposal?.answer);
   const ids = Array.isArray(proposal?.evidenceIds) ? proposal.evidenceIds.map(String) : [];
   const gap = cleanText(proposal?.gap);
-  if (!answer) return needsYouAnswer(question, "draft an answer for this question");
-  if (/^NEEDS YOU:/.test(answer) || gap) {
+  if (!answer) {
+    return question.required === false
+      ? optionalSkippedAnswer(question)
+      : needsYouAnswer(question, "draft an answer for this question");
+  }
+  if (needsUser(answer) || gap) {
+    if (question.required === false) return optionalSkippedAnswer(question);
     return {
       questionId: String(question.id),
       question: question.label,
       answer,
       evidenceIds: ids.filter((id) => allowedEvidenceIds.has(id)),
+      required: true,
       uploadReady: false,
       gap: gap || "needs-user-input",
     };
   }
   const invalidEvidence = ids.filter((id) => !allowedEvidenceIds.has(id));
   if (!ids.length || invalidEvidence.length) {
-    return needsYouAnswer(question, "confirm evidence for this answer");
+    return question.required === false
+      ? optionalSkippedAnswer(question)
+      : needsYouAnswer(question, "confirm evidence for this answer");
   }
   try {
     return {
@@ -115,16 +189,21 @@ function normalizeAnswer({ proposal, question, context, allowedEvidenceIds, forb
         forbidden,
       }),
       evidenceIds: ids,
+      required: question.required !== false,
       uploadReady: true,
       gap: null,
     };
   } catch (err) {
-    return needsYouAnswer(question, err?.message || "revise this answer");
+    return question.required === false
+      ? optionalSkippedAnswer(question)
+      : needsYouAnswer(question, err?.message || "revise this answer");
   }
 }
 
 function manualAnswers(questions, reason) {
-  return questions.map((question) => needsYouAnswer(question, reason));
+  return questions.map((question) =>
+    question.required === false ? optionalSkippedAnswer(question) : needsYouAnswer(question, reason)
+  );
 }
 
 // Best-effort persisted screening-answer lookup — screening_answers lives in
@@ -159,6 +238,7 @@ function disclosureAnswerEntry(question, resolved, { honesty, forbidden } = {}) 
       question: question.label,
       answer,
       evidenceIds: [],
+      required: question.required !== false,
       uploadReady: true,
       gap: null,
       disclosure: true,
@@ -169,17 +249,36 @@ function disclosureAnswerEntry(question, resolved, { honesty, forbidden } = {}) 
   }
 }
 
-// Split captured questions into ones answerable deterministically (work
-// authorization / sponsorship / salary floor / notice period, resolved from
-// persisted screening answers or profile facts) and everything else, which
-// still goes to the AI exactly as before.
-function partitionDisclosureQuestions({ questions, formDefaults, profile, honesty, forbidden }) {
+// Split captured questions into ones answerable deterministically from setup
+// and everything else, which still goes to AI. Standard identity/contact/link
+// fields use the same form-fill map as the supervised apply path, disclosure
+// answers keep their richer wording, and the generated resume satisfies a
+// resume upload without asking the user to answer a file field in prose.
+function partitionDeterministicAnswers({
+  questions,
+  formDefaults,
+  profile,
+  honesty,
+  forbidden,
+  applicationUrl,
+}) {
   const deterministic = [];
   const aiBatch = [];
-  for (const question of questions) {
+  const portal = hostnameToPortal(applicationUrl);
+  const plans = buildFillPlan({ fields: questions, formDefaults, profile, honesty, portal });
+  for (const [index, question] of questions.entries()) {
     const resolved = resolveDisclosureAnswer(question, { formDefaults, profile });
     if (resolved) {
       deterministic.push(disclosureAnswerEntry(question, resolved, { honesty, forbidden }));
+    } else if (isResumeUpload(question)) {
+      deterministic.push(generatedResumeAnswer(question));
+    } else if (plans[index]?.action === "fill") {
+      deterministic.push(
+        configuredAnswerEntry(question, plans[index], {
+          honesty,
+          forbidden,
+        })
+      );
     } else {
       aiBatch.push(question);
     }
@@ -215,17 +314,23 @@ export async function draftPacketAnswers({
 
   const formDefaults = loadFormDefaults({ repoRoot, env });
   const profile = context?.profile || context?.candidate || {};
+  const application = context?.application || context?.app || {};
   // Computed once, ahead of the deterministic/AI split, so deterministic
   // disclosure answers enforce the exact same combined forbidden wording
   // (evidence + honesty + confirmed boundaries) the AI batch does below.
   const honesty = context?.honesty || {};
   const forbidden = forbiddenForContext(context);
-  const { deterministic, aiBatch } = partitionDisclosureQuestions({
+  const { deterministic, aiBatch } = partitionDeterministicAnswers({
     questions: answerable,
     formDefaults,
     profile,
     honesty,
     forbidden,
+    applicationUrl:
+      application.link ||
+      application.url ||
+      application.sourceUrl ||
+      context?.job?.frontmatter?.url,
   });
   const deterministicMap = new Map(deterministic.map((answer) => [answer.questionId, answer]));
 
@@ -234,9 +339,11 @@ export async function draftPacketAnswers({
     return {
       answers,
       excludedQuestionIds,
-      uploadReady: answers.every((answer) => answer.uploadReady),
+      uploadReady: answers.every((answer) => answer.uploadReady || answer.required === false),
       ai: { used: false },
-      manual: { required: answers.some((answer) => !answer.uploadReady) },
+      manual: {
+        required: answers.some((answer) => !answer.uploadReady && answer.required !== false),
+      },
     };
   }
 
@@ -306,8 +413,10 @@ export async function draftPacketAnswers({
   return {
     answers,
     excludedQuestionIds,
-    uploadReady: answers.every((answer) => answer.uploadReady),
+    uploadReady: answers.every((answer) => answer.uploadReady || answer.required === false),
     ai: aiResult.body.ai,
-    manual: { required: answers.some((answer) => !answer.uploadReady) },
+    manual: {
+      required: answers.some((answer) => !answer.uploadReady && answer.required !== false),
+    },
   };
 }

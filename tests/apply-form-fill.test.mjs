@@ -593,7 +593,9 @@ describe("buildFillPlan", () => {
         "Notice period",
         "Are you open to remote work?",
         "Are you open to onsite work?",
+        "Are you open to working in-person in one of our offices 25% of the time?",
         "Are you willing to relocate?",
+        'What is the address from which you plan on working? If you would need to relocate, please type "relocating".',
         "How much travel are you comfortable with?",
       ],
       formDefaults: FORM_DEFAULTS_BASIC,
@@ -602,7 +604,9 @@ describe("buildFillPlan", () => {
     assert.equal(plan.find((s) => s.label === "Notice period").value, "2 weeks");
     assert.equal(plan.find((s) => s.label === "Are you open to remote work?").value, "Yes");
     assert.equal(plan.find((s) => s.label === "Are you open to onsite work?").value, "No");
+    assert.equal(plan.find((s) => /in-person/.test(s.label)).value, "Yes");
     assert.equal(plan.find((s) => s.label === "Are you willing to relocate?").value, "Yes");
+    assert.equal(plan.find((s) => /type "relocating"/.test(s.label)).value, "relocating");
     assert.equal(
       plan.find((s) => s.label === "How much travel are you comfortable with?").value,
       "Up to 25% travel for customer work."

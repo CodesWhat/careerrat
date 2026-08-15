@@ -353,6 +353,20 @@ test("previewWorkspaceIntent: named saved job references are resolved by the exe
       input: { jobReference: "Apply to the Northstar Staff AI role" },
     },
   });
+
+  const prepare = previewWorkspaceIntent({
+    text: "Prepare the application for Anthropic Applied AI Engineer",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(prepare.action, {
+    label: "Evaluate and prepare this saved job",
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "Prepare the application for Anthropic Applied AI Engineer" },
+    },
+  });
 });
 
 test("previewWorkspaceIntent: natural application outcomes become confirmed typed writes", () => {

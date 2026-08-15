@@ -1746,3 +1746,49 @@ Test homes:
   and provider-compatible nested schemas.
 - Live retest: the packed app classified the attachment, showed the confirm boundary, captured the
   full JD, returned a 38/100 CUT, rendered the reasons and compensation, and persisted the verdict.
+
+### `F-097` Application packets expose internal validation noise and wrong setup-derived answers
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, a prepared application told an ordinary user that 26 items needed
+  review even though most were duplicate evidence-validator and placeholder-linter messages. The
+  same packet incorrectly filled a relocation boolean with the candidate's home city, filled an
+  address-or-relocating field with `Yes`, and flagged `Current base is Austin` as private pay.
+- Reproduction: prepare Anthropic's public Greenhouse application from a fully onboarded packed
+  install and inspect the 19-field answer sheet plus packet manifest.
+- Root cause: packet answers sent standard setup fields through the AI evidence lane, every safety
+  layer appended its own copy of the same unresolved item, generic location matching treated the
+  substring in `relocation` as current location, and the private-pay phrase detector treated any
+  use of `current base` as compensation.
+- Fix: resolve standard form fields through the existing deterministic fill plan, treat the
+  generated résumé as the file-upload answer, leave unresolved optional questions blank, normalize
+  all `NEEDS YOU` punctuation, store omitted unsupported skills as advisory warnings, and persist
+  one typed plain-English gap per required human action. Relocation, percentage-based hybrid work,
+  and notice-period prompts now use the confirmed setup fields without entering the AI lane.
+- Regression: packet-answer, packet-engine, and apply-form-fill tests pin deterministic profile
+  reuse, optional-question behavior, deduplicated action counts, location-versus-compensation
+  privacy, and exact relocation/hybrid/start answers.
+- Live retest: the rebuilt npm package recaptured all 19 Anthropic fields, generated all packet
+  artifacts, reported four real review actions instead of 26 internal messages, filled hybrid
+  office posture as `Yes`, start availability from the two-week notice period, relocation as `Yes`,
+  and the work-address field as `relocating`. The application stayed Reviewed Hold with no applied
+  or submitted timestamp.
+
+### `F-098` Text-only Apply intake offers an impossible site handoff
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, a pasted or attached JD without a posting URL could finish packet
+  preparation and then tell the user to open the application site even though no safe link existed.
+- Reproduction: paste a JD into Ask, request Apply, confirm the proposed capture/evaluate/prepare
+  action, and inspect the final handoff.
+- Root cause: the Apply result only modeled an executable handoff and the intent router recognized
+  `apply` and `submit`, but not ordinary preparation phrases such as `prepare the application`.
+- Fix: emit a typed `APPLICATION_URL_REQUIRED` action with direct paste-the-link guidance when a
+  safe URL is absent. Route prepare/build/generate-application language through the same visible,
+  confirm-first Apply workflow.
+- Regression: workspace-agent tests pin the typed missing-link action, null executable handoff,
+  preserved Apply intent for Universal Intake, and preparation-language routing.
+- Live retest: the packed app evaluated a pasted JD at 92/100 KEEP and generated its packet without
+  submitting; an attached JD resolved the existing tracked application, returned a 91/100 REVIEW,
+  and stopped before packet generation. The final package previewed `Prepare the application for
+  Anthropic Applied AI Engineer` as a `job.prepare-request` action.
