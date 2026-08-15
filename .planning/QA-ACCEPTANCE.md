@@ -4,10 +4,10 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-14
 
-Gate result: 87 of 88 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
-rate/apply, deterministic-provider, npm install, restart, and native Electron checks pass. One new
-stale-runtime lifecycle blocker is open. The broader native skill-to-screen build gate remains
-tracked separately in `SKILL-UX-AUDIT.md`.
+Gate result: all 88 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+rate/apply, deterministic-provider, npm install, update/restart, and native Electron checks pass.
+The broader native skill-to-screen build gate remains tracked separately in
+`SKILL-UX-AUDIT.md`.
 
 This is the live execution ledger for the release gate in `docs/ROADMAP.md`. Status values are
 `NOT RUN`, `PASS`, `FAIL`, `FIXED`, or `DEFERRED`. Every failure needs reproduction evidence,
@@ -1594,7 +1594,7 @@ Test homes:
 
 ### `F-088` An old local server survives an update and serves retired onboarding behavior
 
-- Status: `OPEN`
+- Status: `FIXED`
 - Severity: P0 release blocker, the code and installed package can be current while the default
   localhost app continues running an older CareerRat release from memory.
 - Reproduction: leave a 0.7.0 `tracker-dev` process running on port 7777, update the checkout or
@@ -1606,9 +1606,16 @@ Test homes:
 - Root cause: the launcher treats any successful response on the preferred URL as an already-live
   app. It does not compare the running API version with the installed version, and an update does
   not safely replace the recorded owned server.
-- Required fix: add a version-aware health handshake, safely stop/restart only a verified
-  CareerRat-owned recorded process on mismatch, refuse to kill unknown listeners, and make update
-  plus start/relaunch converge on the installed runtime without touching candidate data.
-- Acceptance: automated lifecycle coverage for matching, stale-owned, stale-PID, and foreign-port
-  cases; live in-place update QA from the previous release; hard reload; and confirmation that Paul
-  keeps incomplete or source-less candidates gated with exact pause/resume guidance.
+- Fix: `/api/health` now identifies the CareerRat product, package version, and runtime PID.
+  `careerrat start` compares that handshake with the installed version, replaces only a recorded
+  process whose command is the exact workspace tracker server, and uses the next free loopback port
+  without touching a stale-unowned or foreign listener. `careerrat update` remembers a running owned
+  app and invokes the freshly installed launcher so the same reconciliation runs after extraction.
+- Regression: `local-app-runtime.test.mjs` covers matching, stale-owned, stale-PID, legacy-health,
+  foreign-listener, exact-command, health-identity, and fallback-port cases. `api-server.test.mjs`
+  pins product/version/PID health identity, and `release-safety.test.mjs` pins both launcher paths.
+- Live retest: an isolated 0.7.1 server stayed running while its install advanced to 0.7.2.
+  Relaunch stopped PID 35422, started PID 35604 on the same port with health version 0.7.2, and
+  preserved the workspace tracker byte-for-byte. A separate foreign service on port 7793 remained
+  alive and unchanged while CareerRat selected 7794. The real default app is now serving 0.7.1 and
+  routes the source-less workspace back to Paul with no current-page console errors.

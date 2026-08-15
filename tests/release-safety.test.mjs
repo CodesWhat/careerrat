@@ -168,6 +168,20 @@ test("the published package runs no consumer lifecycle setup and start installs 
   assert.match(launcher, /run\(join\(root, "scripts\/install-skills\.mjs"\), \["--soft"\]\)/);
 });
 
+test("start and update reconcile stale local app runtimes without killing foreign listeners", async () => {
+  const launcher = await readText("bin/careerrat.mjs");
+  const healthRoute = await readText("src/cli/tracker-dev.mjs");
+
+  assert.match(launcher, /classifyLocalAppRuntime/);
+  assert.match(launcher, /findAvailableLoopbackPort/);
+  assert.match(launcher, /runtime\.state === "stale-owned"/);
+  assert.match(launcher, /runtime\.state === "foreign"/);
+  assert.match(launcher, /activeRecordedDashboard/);
+  assert.match(launcher, /restartDashboardAfterUpdate/);
+  assert.match(healthRoute, /product:\s*"careerrat"/);
+  assert.match(healthRoute, /pid:\s*process\.pid/);
+});
+
 test("the trusted-publishing workflow installs dependencies before npm publish", async () => {
   const workflow = await readText(".github/workflows/publish.yml");
   const installAt = workflow.indexOf("run: npm ci");

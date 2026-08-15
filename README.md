@@ -106,6 +106,10 @@ careerrat doctor     # check your setup is healthy
 careerrat update     # pull the latest code; your data is untouched
 ```
 
+If the local app is already running, the update relaunches that recorded
+CareerRat process on the updated code. Unrelated processes are never stopped;
+CareerRat selects another loopback port instead.
+
 The local app comes up with `careerrat start`. To run it on its own:
 
 ```bash
