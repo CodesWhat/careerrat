@@ -1183,14 +1183,23 @@ export async function generatePacket({
     resumeDraft({ repoRoot, env, context: packetContext, call: resumeCall }),
     coverDraft({ repoRoot, env, context: packetContext, call: coverLetterCall }),
   ]);
-  const answers = await draftPacketAnswers({
-    repoRoot,
-    env,
-    appId: id,
-    context: packetContext,
-    questions: capture,
-    call: packetAnswersCall,
-  });
+  const answers = skipAnswers
+    ? {
+        answers: [],
+        excludedQuestionIds: [],
+        gaps: [],
+        uploadReady: true,
+        ai: { used: false },
+        manual: { required: false },
+      }
+    : await draftPacketAnswers({
+        repoRoot,
+        env,
+        appId: id,
+        context: packetContext,
+        questions: capture,
+        call: packetAnswersCall,
+      });
   const sources = buildSourceArtifacts({
     context: packetContext,
     questionCapture: capture,
