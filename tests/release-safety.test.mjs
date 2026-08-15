@@ -540,7 +540,7 @@ test("operational scripts do not hardcode an absolute personal-home path", async
     throw err;
   }
 
-  // A literal home root like /Users/sbenson/ or /home/scott/. The portable forms
+  // A literal home root like /Users/example/ or /home/scott/. The portable forms
   // ($HOME, ${HOME}, ~, and import.meta.url-relative paths) never match.
   const homePath = /\/(?:Users|home)\/[A-Za-z0-9._-]+/;
   const offenders = [];

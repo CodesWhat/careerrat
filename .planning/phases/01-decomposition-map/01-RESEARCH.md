@@ -465,7 +465,7 @@ The command `node --test tests/structured-oneshot.test.mjs tests/discovery-route
 
 | Pattern | STRIDE | Standard Mitigation |
 |---------|--------|---------------------|
-| Prompt injection from web/JD/career-page text | Tampering | Treat fetched content as untrusted data; AI seed output cannot directly write URLs or state. [VERIFIED: /Users/sbenson/.codex/gsd-core/references/untrusted-input-boundary.md; .planning/REQUIREMENTS.md] |
+| Prompt injection from web/JD/career-page text | Tampering | Treat fetched content as untrusted data; AI seed output cannot directly write URLs or state. [VERIFIED: $HOME/.codex/gsd-core/references/untrusted-input-boundary.md; .planning/REQUIREMENTS.md] |
 | Candidate/private data leakage into shipped docs | Information Disclosure | Keep candidate-specific discoveries in user config/workspace logs; use release-safety tests for shipped docs. [VERIFIED: docs/SOURCES.md; tests/release-safety.test.mjs] |
 | Over-broad skill runtime access | Elevation of Privilege | Keep `/api/skill/run` allowlisted and use local routes for deterministic work. [VERIFIED: src/core/ai/skill-runtime.mjs; src/cli/skill-run-route.mjs] |
 | Unvalidated AI JSON controlling downstream code | Tampering | Validate against JSON schema with `runStructuredOneshot()` and reject malformed/invalid outputs. [VERIFIED: src/core/ai/structured-oneshot.mjs; tests/structured-oneshot.test.mjs] |

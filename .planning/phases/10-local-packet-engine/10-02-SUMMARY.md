@@ -121,7 +121,7 @@ Task 2 and Task 3 were initially implemented together, then split into separate 
 ## Issues Encountered
 
 - The full `tests/packet-generate-route.test.mjs` file still has one expected RED failure for `POST /api/packet/generate`. That endpoint is owned by later Phase 10 plans; 10-02 verified the gate subset with `--test-name-pattern 'packet/gate'`.
-- The main checkout was being moved by parallel Phase 11 work, so execution continued in the dedicated `/Users/sbenson/code/careerrat-phase10-exec` worktree pinned to the Phase 10 branch.
+- The main checkout was being moved by parallel Phase 11 work, so execution continued in the dedicated `$HOME/code/careerrat-phase10-exec` worktree pinned to the Phase 10 branch.
 
 ## User Setup Required
 

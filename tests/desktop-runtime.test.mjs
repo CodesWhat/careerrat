@@ -175,7 +175,7 @@ describe("desktop external URL decisions", () => {
     for (const target of [
       "http://example.com",
       "javascript:alert(1)",
-      "file:///Users/sbenson/.ssh/id_rsa",
+      "file:///Users/example/.ssh/id_rsa",
       "data:text/html,<script>alert(1)</script>",
       "not a url",
       "",

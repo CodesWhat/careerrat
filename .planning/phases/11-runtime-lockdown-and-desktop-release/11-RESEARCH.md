@@ -107,7 +107,7 @@ The desktop side is close to pilotable but not yet release-grade: the Electron s
 |----------------|---------|---------|-------------|
 | `xcrun notarytool` | 1.1.2 available | Apple notarization upload/history/store-credentials workflow | Use for Developer ID notarization credentials kept outside source. [VERIFIED: local command] |
 | `xcrun stapler` | Available | Staple and validate notarization tickets for DMG/app artifacts | Use after notarization or via electron-builder automatic stapling when notarize is enabled. [VERIFIED: local command] [CITED: https://www.electron.build/docs/features/code-signing/notarization/] |
-| macOS signing identity | Developer ID Application: Scott Benson (3524374A2S) present | Sign pilot DMG/app for distribution | Electron docs state macOS release distribution requires signing then notarization. [VERIFIED: local command] [CITED: https://www.electronjs.org/docs/latest/tutorial/code-signing] |
+| macOS signing identity | Developer ID Application certificate present | Sign pilot DMG/app for distribution | Electron docs state macOS release distribution requires signing then notarization. [VERIFIED: local command] [CITED: https://www.electronjs.org/docs/latest/tutorial/code-signing] |
 | `mammoth` | 1.12.0 installed/latest | Existing deterministic DOCX intake support | Not central to Phase 11, but retained as existing package surface for release/package audit. [VERIFIED: npm registry] |
 
 ### Alternatives Considered
@@ -524,7 +524,7 @@ for (const file of releaseFacingFiles) {
 | electron-builder | Desktop DMG build | yes | 26.15.3 | None for pilot packaging; use existing workspace dependency. [VERIFIED: local command] |
 | Xcode `xcrun notarytool` | Notarization | yes | 1.1.2 | Blocking for notarized pilot if unavailable. [VERIFIED: local command] |
 | Xcode `xcrun stapler` | Staple/validate notarization ticket | yes | available | Blocking for local stapling validation if unavailable. [VERIFIED: local command] |
-| Developer ID Application certificate | macOS signing | yes | Scott Benson (3524374A2S) | Blocking for pilot signing if unavailable. [VERIFIED: local command] |
+| Developer ID Application certificate | macOS signing | yes | Local keychain profile | Blocking for pilot signing if unavailable. [VERIFIED: local command] |
 | Apple notarization credentials/keychain profile | Notarization | unknown | -- | Planner must add setup/check task; credentials must not be tracked. [ASSUMED] [CITED: https://www.electron.build/docs/features/code-signing/notarization/] |
 | `spctl` / `codesign` verification | Release verification | expected on macOS | -- | Use local Xcode command line tools; planner should verify in release task. [ASSUMED] |
 
