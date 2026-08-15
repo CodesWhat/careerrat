@@ -1187,6 +1187,172 @@ test("job.prepare-request keeps moving when application questions are not captur
   assert.match(result.messages.at(-1).text, /application questions/i);
 });
 
+test("job.tailor-request evaluates a KEEP job and generates reviewable documents without an apply handoff", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/tailor-role";
+  const generationCalls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.tailor-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async (input) => {
+      generationCalls.push(input);
+      return {
+        status: "ready",
+        uploadReady: true,
+        gaps: [],
+        artifacts: {
+          resumePdf: "workspace/tailored/acme-resume.pdf",
+          coverLetterPdf: "workspace/tailored/acme-cover-letter.pdf",
+        },
+      };
+    },
+  });
+
+  assert.equal(generationCalls.length, 1);
+  assert.equal(generationCalls[0].body.applyIntent, false);
+  assert.deepEqual(
+    result.messages.at(-1).artifacts.map((artifact) => artifact.kind),
+    ["job_evaluation", "packet_generation"]
+  );
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].label, "Export documents");
+  assert.equal(result.messages.at(-1).metadata.nextActions[0].intent.type, "job.export-documents");
+  assert.equal(result.messages.at(-1).metadata.nextActions[1].label, "Review documents");
+  assert.match(result.messages.at(-1).metadata.nextActions[1].href, /^\/jobs\?open=/);
+  assert.match(result.messages.at(-1).text, /tailored application packet/i);
+  assert.match(result.messages.at(-1).text, /tailored documents are ready to review/i);
+  assert.doesNotMatch(result.messages.at(-1).text, /submission handoff|will be completed/i);
+});
+
+test("job.tailor-request leaves screening questions until the user chooses to apply", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/tailor-with-questions";
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.tailor-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async () => ({
+      status: "reviewable",
+      uploadReady: false,
+      gaps: [
+        {
+          kind: "answers",
+          code: "QUESTION_CAPTURE_DEFERRED",
+          message: "Capture application questions before applying.",
+        },
+      ],
+      artifacts: {
+        resume: "workspace/tailored/acme-resume.md",
+        coverLetter: "workspace/tailored/acme-cover-letter.md",
+      },
+    }),
+  });
+
+  assert.match(result.messages.at(-1).text, /only if you later choose to apply/i);
+  assert.doesNotMatch(result.messages.at(-1).text, /will be completed/i);
+  assert.deepEqual(
+    result.messages.at(-1).artifacts.map((artifact) => artifact.kind),
+    ["job_evaluation", "packet_generation"]
+  );
+});
+
+test("job.tailor-request stops on CUT without generating documents", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/cut-tailor-role";
+  let generated = 0;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.tailor-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Regional Sales Engineer",
+      company: "Acme",
+      bodyText: "Travel weekly and own a quota across the territory.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "cut",
+          fitScore: 30,
+          fitRisks: ["Outside target role family"],
+          manual: { required: false },
+        },
+      },
+    }),
+    generateDocumentsImpl: async () => {
+      generated += 1;
+      return {};
+    },
+  });
+
+  assert.equal(generated, 0);
+  assert.equal(result.messages.at(-1).metadata.state, "cut");
+  assert.deepEqual(
+    result.messages.at(-1).artifacts.map((artifact) => artifact.kind),
+    ["job_evaluation"]
+  );
+});
+
 test("document generation executes behind workspace-main and preserves artifact and gap context", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot, {

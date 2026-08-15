@@ -139,6 +139,9 @@ const api = vi.hoisted(() => ({
 }));
 vi.mock("../lib/api.js", () => api);
 
+const dashboardEvents = vi.hoisted(() => ({ emitDashboardChanged: vi.fn() }));
+vi.mock("../lib/dashboard-events.js", () => dashboardEvents);
+
 import { AskBar } from "./AskBar.jsx";
 
 // ---------------------------------------------------------------------------
@@ -626,6 +629,7 @@ describe("AskBar — nothing runs on a guess", () => {
       { purpose: "manual-search" }
     );
     expect(api.sendWorkspaceMessage).not.toHaveBeenCalled();
+    expect(dashboardEvents.emitDashboardChanged).toHaveBeenCalledTimes(1);
   });
 
   it("Enter commits an ANSWER row via sendWorkspaceMessage when there is no action", async () => {

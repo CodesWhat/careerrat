@@ -347,8 +347,11 @@ The current build order is:
    preserves an explicit rate/apply request as a separate confirmed intent. Direct apply intake now
    returns the evaluation, generated packet, and supervised site handoff in Ask. Missing and
    ambiguous references fail visibly instead of guessing. They never mark Applied without
-   confirmation. Remaining work is the connected authenticated executor and automatic form-question
-   capture, plus clean-home and packaged acceptance coverage for pasted and attached input.
+   confirmation. Standalone résumé, cover-letter, and application-material tailoring now resolves
+   a URL, the open job, or one named saved job, evaluates it first, generates only on KEEP, and
+   returns review/export actions without implying submission. Remaining work is the connected
+   authenticated executor and automatic form-question capture, plus clean-home and packaged
+   acceptance coverage for pasted and attached input.
 3. **Company thesis, not a company allowlist (implemented, acceptance in progress)** — Paul asks about companies or kinds of companies
    whose values, industry, size, stage, business model, or local presence the user likes. He turns
    answers such as fintech, large corporations, fast-food chains, or small Denver accounting firms

@@ -140,7 +140,7 @@ Status meanings:
 | `discover-companies` | Company-thesis onboarding plus native Ask proposals and Track/Skip decisions | native | Keep clean-home and packaged acceptance for explicit, weekly, targeting-change, and pending-review paths. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
 | `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | partial | Run clean-home and packaged acceptance for every input shape, including ambiguity and recovery. |
-| `tailor-application` | Job packet actions plus the open-job Apply Ask chain | partial | Add standalone natural tailoring requests and browser-captured screening questions; keep returning gaps/artifacts in chat. |
+| `tailor-application` | Job packet actions plus URL, open-job, and named-job tailoring/apply Ask chains | partial | Add browser-captured screening questions; keep returning gaps/artifacts in chat and keep tailoring separate from submission. |
 | `apply-job` | Ask/manual handoff, Apply on site, and skill runtime | partial | Connect the supervised executor and automatic form-question capture; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls and classified pasted updates | partial | Resolve natural job references and make external outcomes one-turn durable actions. |
 | `email-comms` | Draft, note, and external-send controls | partial | Resolve natural thread references and connect a verified send executor or explicit supervised handoff. |
@@ -232,6 +232,25 @@ imported and enabled a Greenhouse board through Ask with no console errors; an
 isolated populated DB also passed exact duplicate no-op, visible-label toggle,
 query add/dedup, continuous follow-up typing, and durable DB/UI receipt checks.
 Packaged-install acceptance remains open.
+
+## Standalone tailoring
+
+Ask treats requests to tailor a résumé, write a cover letter, or customize
+application materials as their own typed workflow. A URL, the explicitly open job,
+or one unambiguous named saved job is captured and evaluated first. KEEP generates
+the honest role-specific packet with `applyIntent:false`, returns the evaluation,
+document paths, gaps, Export documents, and Review documents in the workspace
+thread, and never shows an application handoff or claims submission. REVIEW/CUT
+stop before document generation. Automatic browser-side screening-question capture
+remains part of the supervised apply executor gate.
+
+Headed isolated-home repository-build acceptance passed on 2026-08-14 with the
+installed Codex runtime. Ask previewed the open job, REVIEW stopped before
+generation, and a real KEEP 96 run persisted the tailored résumé and cover letter
+while leaving the application Interested. The receipt offered only Export documents
+and Review documents, deferred screening answers unless the user later chooses to
+apply, refreshed the open drawer immediately, and produced no HTTP or console errors.
+Packaged-input and supervised-browser-question acceptance remain open.
 
 ## Deterministic source parity
 
