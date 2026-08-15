@@ -187,13 +187,13 @@ Status meanings:
 | `ingest-messages` | External agent/session-browser workflow | agent-only | Add an opt-in native entry for LinkedIn/Wellfound message sync with the same review contract. |
 | `sync-status` | External agent/session-browser workflow | agent-only | Add an opt-in job/status sync action with proposed transitions before writes. |
 | `relationship-sourcing` | Review existing leads in Network | partial | Let Ask or a company screen start sourcing and return reviewable leads to Network. |
-| `research-company` | Ask resolves natural company requests ("research Acme") to a fresh cached dossier or an embedded research session, cited and linked to the company | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and company-not-found paths. Headed and packaged acceptance are still pending. |
-| `research-comp` | Ask resolves natural comp requests ("market comp for a nurse in Denver") to a fresh cached benchmark or an embedded research session, cited to role and location | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, and missing-role/location paths. Headed and packaged acceptance are still pending. |
+| `research-company` | Ask resolves natural company requests ("research Acme") to a fresh cached dossier or an embedded research session, cited and linked to the company | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and company-not-found paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
+| `research-comp` | Ask resolves natural comp requests ("market comp for a nurse in Denver") to a fresh cached benchmark or an embedded research session, cited to role and location | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, and missing-role/location paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
 | `optimize-linkedin` | External agent/session-browser workflow | agent-only | Add opt-in read, diff, approval, and separate write-back steps in the app. |
 | `reevaluate-strategy` | Server-derived strategy view model | partial | Render the strategy surface and route the review CTA through the workspace thread. |
 | `configure` | Settings pages | partial | Let Ask explain and propose validated settings changes without creating a second write path. |
 | `answer-question` | Explicit application/screening questions route through Ask to grounded review cards and confirmed reusable-answer saves | native | Keep profile reuse, evidence-backed prose, NEEDS YOU, self-identification exclusion, tracked-answer append, and restart persistence in regression coverage. |
-| `company-health` | Ask resolves natural health requests ("is Acme a safe place to land") through the company reference resolver to a fresh cached rating or an embedded research session, with a validated `careerrat health record` write path | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and not-tracked-company paths. Headed and packaged acceptance are still pending. |
+| `company-health` | Ask resolves natural health requests ("is Acme a safe place to land") through the company reference resolver to a fresh cached rating or an embedded research session, with a validated `careerrat health record` write path | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and not-tracked-company paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
 | `report-issue` | External agent workflow | agent-only | Add a native error-context entry, redacted diagnostic review, explicit GitHub confirmation, and durable result. |
 | `resume-extract` | Internal onboarding helper with visible streamed progress and retry | internal | Keep extraction progress, failure, retry, and manual fallback inside Paul's setup flow. |
 | `intake-extract` | Internal Universal Intake helper with visible progress and review | internal | Keep extraction progress, errors, and decisions inside the invoking Ask capture flow. |
@@ -387,8 +387,19 @@ how it was triggered. Both paths call the identical `companyHealthSet` verb, so
 both log the required Activity Pulse event in the same transaction; this replaced
 the prior hand-patched `set-fields`/`upsert-batch` path with one validated verb.
 
-Headed isolated-home acceptance and packaged/clean-install acceptance have not
-run yet for these three rows.
+Headed isolated-home acceptance passed on 2026-08-15 against the real server and
+HTTP API with a non-tech seed (a nurse, a driver, and a medical assistant): all
+new preview phrasings routed to the correct typed intents while board and company
+discovery phrasings kept their old routes; the `careerrat health record` write
+surfaced in the company.health short-circuit, the dashboard drawer, and the
+Activity Pulse event; fresh research artifacts returned reused result cards with
+no session start; `force` with no AI runtime degraded to the actionable
+NO_AI_ROUTE message with no stack trace; ambiguity, not-tracked, and
+missing-input cases returned their exact codes and statuses; `research.record`
+persisted a real artifact and refused a `current_base` payload; and every prior
+thread message, rating, and artifact survived a full server restart. No 5xx and
+no console errors were observed. Packaged/clean-install acceptance and a live
+embedded research session with a real AI runtime remain open for these rows.
 
 ## Deterministic source parity
 

@@ -426,8 +426,12 @@ The current build order is:
    embedded supervised research session, with cited dossiers, benchmarks, and ratings each carrying
    an explicit refresh action. Company-health ratings also gained a validated one-write-path CLI
    (`careerrat health record`, dry-run by default) that replaces the prior hand-patched write and
-   now render in the Jobs drawer alongside the existing row badge. Headed and packaged acceptance
-   for these three rows remain open. The remaining original-skill rows stay
+   now render in the Jobs drawer alongside the existing row badge. Headed isolated-home acceptance
+   passed on 2026-08-15 against the real server: routing, cached-result reuse, the health write
+   path through to the drawer, ambiguity and missing-input recovery, confirmed saves with the
+   private-comp refusal, clean no-AI degradation, and restart durability all held with no server
+   errors. Packaged acceptance and a live embedded research session with a real AI runtime remain
+   open for these rows. The remaining original-skill rows stay
    tracked in the linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
