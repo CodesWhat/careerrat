@@ -119,6 +119,7 @@ function describeDecideError(err, label) {
 // Mirrors executeLaneA/executeLaneB's own result shapes (intake-route.mjs) —
 // ported from IntakeCard.jsx's describeResult().
 function describeIntakeResult(item) {
+  if (item.result?.summary) return item.result.summary;
   if (item.dispatch?.action === "app_set_status") {
     return `Status updated to "${item.result?.to ?? "?"}".`;
   }
@@ -389,8 +390,16 @@ export function AskBar() {
       );
     } catch (err) {
       if (turnIdRef.current !== turnId) return;
+      const resolved = resolveErrorCopy(err);
       setTurn((t) =>
-        t ? { ...t, status: "error", error: describeAskBarError(err), retryable: true } : t
+        t
+          ? {
+              ...t,
+              status: "error",
+              error: resolved.message,
+              retryable: resolved.action?.retry === true,
+            }
+          : t
       );
     }
   }
@@ -858,7 +867,15 @@ function EngineReceipt({ engine, elapsedMs, noEngine }) {
 // Stateless by design (see AskBar.test.jsx's own header comment) — every
 // bit of mutable state (busy/error) lives in AskBar itself and is threaded
 // down as props, same as AskBarPreview above.
-function AskBarIntakeReceipt({ item, busy, error, onConfirm, onReclassify, onDismiss }) {
+function AskBarIntakeReceipt({
+  item,
+  busy,
+  error,
+  onConfirm,
+  onReclassify,
+  onDismiss,
+  onRunAction,
+}) {
   if (!item) return null;
   const needsUser = item.status === "needs_you";
   // M10: read straight off the API response (src/core/intake/dispatch-summary.mjs,
@@ -867,6 +884,12 @@ function AskBarIntakeReceipt({ item, busy, error, onConfirm, onReclassify, onDis
   const canConfirm = item.status === "proposed";
   const canDismiss = ["proposed", "needs_you", "error"].includes(item.status);
   const canReclassify = ["needs_you", "error"].includes(item.status);
+  const savedJobHref = item.result?.applicationId
+    ? appActionHref(`/jobs?open=${encodeURIComponent(item.result.applicationId)}`)
+    : null;
+  const nextIntents = Array.isArray(item.result?.nextActions)
+    ? item.result.nextActions.filter((action) => action?.intent)
+    : [];
 
   return (
     <div className="ask-bar__intake">
@@ -894,7 +917,26 @@ function AskBarIntakeReceipt({ item, busy, error, onConfirm, onReclassify, onDis
         </p>
       ) : null}
       {item.status === "done" ? (
-        <p className="ask-bar__receipt">{describeIntakeResult(item)}</p>
+        <>
+          <p className="ask-bar__receipt">{describeIntakeResult(item)}</p>
+          {item.result?.evaluation ? (
+            <JobEvaluationCard artifact={{ evaluation: item.result.evaluation }} />
+          ) : null}
+          {savedJobHref ? (
+            <a className="btn btn--secondary" href={savedJobHref}>
+              Review this job
+            </a>
+          ) : null}
+          {nextIntents.map((action) => (
+            <Button
+              variant="secondary"
+              key={`${action.intent.type}:${action.intent.entity?.type}:${action.intent.entity?.id}`}
+              onClick={() => onRunAction?.(action)}
+            >
+              {action.label || "Continue"}
+            </Button>
+          ))}
+        </>
       ) : null}
       {item.status === "error" ? (
         <p className="ask-bar__error">{item.error || "The confirmed action failed."}</p>
@@ -991,6 +1033,7 @@ function AskBarTurn({
           onConfirm={onConfirm}
           onReclassify={onReclassify}
           onDismiss={onDismiss}
+          onRunAction={onRunAction}
         />
       </div>
     );

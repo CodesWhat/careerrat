@@ -128,6 +128,31 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "ambiguous saved job reference",
+    err: new ApiError(409, {
+      code: "JOB_REFERENCE_AMBIGUOUS",
+      error: { message: "internal text must not render" },
+      details: {
+        matches: [
+          { company: "Acme", role: "Senior AI Engineer" },
+          { company: "Acme", role: "Staff Platform Engineer" },
+        ],
+      },
+    }),
+    message:
+      "That matches more than one saved job: Acme — Senior AI Engineer; Acme — Staff Platform Engineer. Name the company and role more specifically.",
+    action: null,
+  },
+  {
+    name: "missing saved job reference",
+    err: new ApiError(404, {
+      code: "JOB_REFERENCE_NOT_FOUND",
+      error: { message: "internal text must not render" },
+    }),
+    message: "CareerRat couldn't find that saved job. Check the company or role and try again.",
+    action: null,
+  },
+  {
     name: "PDF/DOCX not supported prefix",
     err: new ApiError(400, { error: "PDF/DOCX not supported yet, use text or markdown" }),
     message:

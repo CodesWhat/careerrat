@@ -6,11 +6,26 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { resolveIntakeDispatch } from "../src/core/intake/dispatch.mjs";
 
-test("jd-text and job-url both dispatch to Lane B: run_skill evaluate-job", () => {
+test("jd-text and job-url both dispatch to the durable workspace job evaluator", () => {
   for (const kind of ["jd-text", "job-url"]) {
-    const result = resolveIntakeDispatch({ kind, entities: {}, trackerMatch: null });
-    assert.deepEqual(result, { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } });
+    const result = resolveIntakeDispatch({
+      kind,
+      entities: { company: "Acme", role: "SRE" },
+      trackerMatch: null,
+    });
+    assert.deepEqual(result, {
+      lane: "W",
+      action: "workspace_intent",
+      params: { intentType: "job.evaluate-request" },
+    });
   }
+});
+
+test("jd-text without a company and role stays in needs-you instead of creating a guessed job", () => {
+  const result = resolveIntakeDispatch({ kind: "jd-text", entities: {}, trackerMatch: null });
+  assert.equal(result.lane, null);
+  assert.equal(result.action, "needs_you");
+  assert.match(result.params.reason, /company and role/i);
 });
 
 test("ISSUE-038 recruiter-email dispatches into the one workspace agent", () => {

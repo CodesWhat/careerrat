@@ -305,7 +305,7 @@ count as native app support.
 
 The current build order is:
 
-1. **One onboarding graduation contract (implemented and accepted)** — as soon as Paul has a resume/no-resume decision,
+1. **One onboarding graduation contract (implemented; stale-runtime guard pending)** — as soon as Paul has a resume/no-resume decision,
    target roles, and a usable location posture, generate baseline deterministic sources and start
    sourcing in the background while the interview continues. Paul covers the settings needed for
    the candidate's intended workflows. The app cannot graduate setup until source config is durable
@@ -329,18 +329,25 @@ The current build order is:
    - unreadable setup state fails closed to Paul, and a pending source read never flashes a false
      zero-source error; and
    - the main app opens only after usable source config is durable and the first search is running
-     or completed, with progress or results already visible.
+     or completed, with progress or results already visible;
+   - `careerrat start` and update/relaunch paths compare the live `/api/health` version with the
+     installed version, safely replace only the recorded CareerRat-owned server when it is stale,
+     and never accept an old in-memory app just because port 7777 returns HTTP 200; and
+   - a clean install, an in-place update with a running old server, and a full restart all preserve
+     the same graduation gate and never expose retired setup copy.
 
 2. **Ask orchestration** — make short job URLs, "rate this job," "apply to this job," natural job
    references, recruiter updates, and settings requests resolve to visible typed workflows instead
    of answer-only chat. Rating captures the JD, evaluates it, saves the verdict, renders the result,
    and offers the correct next action. Applying chains evaluation, promotion, packet generation,
    unresolved questions, confirmation, supervised execution/manual handoff, and verified outcome
-   write-back in the same durable thread. Short URLs and the explicitly open saved job now complete
-   that chain through a truthful manual handoff, including deferred application-question handling;
-   they never mark Applied without confirmation. Remaining work is broader natural saved-job
-   references, pasted/attached JD parity, the connected authenticated executor and automatic form
-   question capture, plus clean-home and packaged acceptance coverage.
+   write-back in the same durable thread. Short URLs, explicitly open saved jobs, pasted or
+   extracted attached JDs, and deterministic natural saved-job references now enter the native
+   workspace flow. JD intake saves the full body, evaluates it, renders the structured result, and
+   exposes Review plus the typed Prepare application handoff. Missing and ambiguous references
+   fail visibly instead of guessing. They never mark Applied without confirmation. Remaining work
+   is preserving direct apply intent on an initial pasted/attached JD, the connected authenticated
+   executor and automatic form-question capture, plus clean-home and packaged acceptance coverage.
 3. **Company thesis, not a company allowlist** — Paul asks about companies or kinds of companies
    whose values, industry, size, stage, business model, or local presence the user likes. He turns
    answers such as fintech, large corporations, fast-food chains, or small Denver accounting firms
@@ -366,9 +373,9 @@ The current build order is:
 ### Product-surface acceptance sweep (updated August 14, 2026)
 
 The live result ledger is [`.planning/QA-ACCEPTANCE.md`](../.planning/QA-ACCEPTANCE.md); this
-section remains the release-level source of truth. The sweep now records 85 findings, and all 85 are
-fixed and live-retested. The broader skill-to-screen audit above remains active until every
-user-facing original skill has a coherent native path.
+section remains the release-level source of truth. The sweep now records 88 findings: 87 are fixed
+and live-retested, and the stale-runtime lifecycle blocker is open. The broader skill-to-screen
+audit above remains active until every user-facing original skill has a coherent native path.
 
 Current verification: 2,487 repository tests passed with 5 intentional skips; 676 web tests passed;
 lint completed with no errors; web, website, docs, and desktop builds passed; and the final 538-file

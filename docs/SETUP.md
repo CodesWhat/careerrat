@@ -72,7 +72,9 @@ Then open your agent in the repo root and send:
 > Read AGENTS.md, run careerrat doctor, then guide me through the next unfinished CareerRat skill.
 
 The agent reads `AGENTS.md`, verifies the skills shim, and runs `ingest-profile`
-conversationally if the candidate profile is not yet set up.
+conversationally if the candidate profile is not yet set up. Once Paul has the
+minimum role and location context, CareerRat starts the deterministic baseline
+search in the background while the rest of setup continues.
 
 ## Candidate Setup
 

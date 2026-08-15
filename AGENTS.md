@@ -64,13 +64,16 @@ let's get started" (or anything that isn't a specific task):
    of typing. Opt-in convenience; nothing to install or configure.
 5. Invite a paste-dump: the user can drop résumés, JDs, recruiter emails, LinkedIn
    exports, notes — in any order. Route each piece via **Paste Intake** below.
-6. Once onboarding has enough profile/targeting data, continue the discovery
-   pipeline in this exact order:
+6. As soon as onboarding reaches minimum `search_ready` candidate state, the app
+   generates/heals deterministic baseline sources and starts or reuses the first
+   search in the background while Paul continues the interview. Then continue the
+   broader discovery pipeline in this exact order:
    `setup-searches -> research-boards -> discover-companies -> search-jobs`.
    `setup-searches` confirms the baseline source config, `research-boards` finds
    additional boards/aggregators, `discover-companies` wires employer ATS boards,
-   and only then should `search-jobs` run the first sweep unless the user
-   explicitly skips one of the discovery steps.
+   and `search-jobs` refreshes the broadened sweep. These skills expand the
+   already-running baseline search; they must not delay all sourcing until the
+   interview ends. The user may still explicitly skip an optional discovery step.
 7. **Follow doctor's Agent guidance.** After `careerrat doctor`, read the
    `Agent guidance` block and treat it as the canonical next handoff: tell the
    user which skill the agent should run next, then run that skill. For clarity:

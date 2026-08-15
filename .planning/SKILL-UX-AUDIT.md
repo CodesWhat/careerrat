@@ -66,7 +66,11 @@ usable source config plus a running/completed first search for graduation, and k
 failed or paused setup inside Paul. Clean packed-install QA proved sourcing at 4 of 8,
 269 postings scanned while the interview continued, two qualified roles waiting on
 Jobs at graduation, no false zero-source state, exact pause/resume restoration, and
-the same ready state after a full server restart.
+the same ready state after a full server restart. A later screenshot of the retired
+zero-source dead end was traced to an owned 0.7.0 local server that remained alive after
+the checkout and installed package reached 0.7.1. The onboarding behavior remains fixed;
+runtime-version handshaking and safe owned-server restart are now the open lifecycle
+blocker in `F-088`.
 
 ### "Rate this job"
 
@@ -83,12 +87,13 @@ The app must:
    asks only for the missing decision, and `CUT` explains why and offers archive or
    gate correction.
 
-Current implementation recognizes short job URLs and an explicitly open saved job,
-captures or reuses the full JD, promotes sourced roles, runs the gate, saves the
-verdict, and renders a structured result plus the correct typed next action in Ask.
-Packed-app acceptance now covers an open saved job through a typed REVIEW/CUT result
-and a working in-app review handoff. The remaining parity work is pasted/attached JD
-routing and natural references to saved jobs that are not already open.
+Current implementation recognizes short job URLs, pasted or extracted attached JDs,
+an explicitly open saved job, and deterministic natural references such as "the Acme
+role." It captures or reuses the full JD, promotes sourced roles, runs the gate, saves
+the verdict, and renders a structured result plus Review and typed Prepare application
+actions in Ask. Ambiguous and missing natural references fail visibly instead of
+guessing. Packed-app acceptance covers the open-saved-job REVIEW/CUT path; clean-home
+and packaged acceptance for pasted/attached and natural-reference inputs remains.
 
 ### "Apply to this job"
 
@@ -104,14 +109,16 @@ The app must:
    give a concrete supervised/manual handoff when it is not; and
 8. mark the application applied only after verified confirmation.
 
-Current implementation resolves a short job URL or explicitly open saved job into
-the evaluate-to-packet chain, stops on `CUT`/`REVIEW`, generates base documents on
-`KEEP`, keeps moving when application questions are not discoverable until the form
-opens, and returns a concrete manual handoff without marking the job Applied. A
-verified executor result is still the only path that writes Applied. Packed-app QA
-proves the REVIEW/CUT stop without a false Applied action. Remaining work is the
-connected authenticated executor, automatic form-question capture, and broader
-natural references.
+Current implementation resolves a short job URL, explicitly open saved job, or unique
+natural saved-job reference into the evaluate-to-packet chain. A confirmed pasted or
+attached JD evaluates first and exposes the same typed Prepare application action on
+`KEEP`. The chain stops on `CUT`/`REVIEW`, generates base documents on `KEEP`, keeps
+moving when application questions are not discoverable until the form opens, and
+returns a concrete manual handoff without marking the job Applied. A verified executor
+result is still the only path that writes Applied. Packed-app QA proves the REVIEW/CUT
+stop without a false Applied action. Remaining work is the connected authenticated
+executor, automatic form-question capture, direct apply-intent preservation when the
+initial input is a pasted/attached JD, and clean-home/packaged acceptance.
 
 ## Original skill inventory
 
@@ -131,7 +138,7 @@ Status meanings:
 | `research-boards` | Guided onboarding discovery chat | partial | Provide a normal post-setup Ask entry and return approved sources to Jobs/Settings. |
 | `discover-companies` | Proposal UI plus guided onboarding chat | partial | Learn a company thesis, mix focus seeds with broad discovery, and run recurring expansion after setup. |
 | `search-jobs` | Jobs search controls and typed `search.run` Ask preview | native | Preserve as the reference interaction contract while source coverage expands. |
-| `evaluate-job` | Application drawer, short-URL Ask, and open-saved-job Ask | partial | Add pasted/attached JD routing, natural references beyond the open drawer, and packaged acceptance coverage. |
+| `evaluate-job` | Application drawer plus Ask for URLs, pasted/attached JDs, open jobs, and named saved jobs | partial | Run clean-home and packaged acceptance for every input shape, including ambiguity and recovery. |
 | `tailor-application` | Job packet actions plus the open-job Apply Ask chain | partial | Add standalone natural tailoring requests and browser-captured screening questions; keep returning gaps/artifacts in chat. |
 | `apply-job` | Ask/manual handoff, Apply on site, and skill runtime | partial | Connect the supervised executor and automatic form-question capture; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls and classified pasted updates | partial | Resolve natural job references and make external outcomes one-turn durable actions. |

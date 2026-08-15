@@ -408,6 +408,141 @@ test("job.evaluate-request resolves a URL, captures the full JD, promotes it, an
   );
 });
 
+test("job.evaluate-request captures and evaluates a confirmed pasted JD inside workspace-main", async () => {
+  const repoRoot = tempRepo();
+  const rawInput = [
+    "Acme",
+    "Senior AI Engineer",
+    "Own production agent systems and evaluation infrastructure.",
+  ].join("\n");
+  const { id } = intakeCapture({ repoRoot, env: {}, rawInput, inputKind: "text" });
+  intakeUpdate({
+    repoRoot,
+    env: {},
+    id,
+    patch: {
+      status: "confirmed",
+      decision: "confirm",
+      kind: "jd-text",
+      classification: {
+        kind: "jd-text",
+        entities: { company: "Acme", role: "Senior AI Engineer" },
+      },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "intake", id },
+    },
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 90,
+          fitReasons: ["Production agent systems"],
+          fitRisks: [],
+          manual: { required: false },
+        },
+      },
+    }),
+    now: () => new Date("2026-08-14T20:00:00.000Z"),
+  });
+
+  const message = result.messages.at(-1);
+  const application = readApplication(repoRoot, message.metadata.applicationId);
+  assert.equal(application.company, "Acme");
+  assert.equal(application.role, "Senior AI Engineer");
+  assert.equal(application.link, null);
+  assert.equal(application.sourceMeta.sourceIntakeId, id);
+  assert.ok(application.artifacts.jd.startsWith("workspace/jobs/"));
+  assert.match(
+    readFileSync(userPath({ repoRoot, env: {} }, application.artifacts.jd), "utf8"),
+    /Own production agent systems and evaluation infrastructure\./
+  );
+  assert.equal(message.artifacts[0].evaluation.fitScore, 90);
+  assert.equal(message.metadata.sourceIntakeId, id);
+});
+
+test("job.evaluate-request resolves one named saved job without guessing an id", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-acme",
+    company: "Acme",
+    role: "Senior AI Engineer",
+    link: "https://jobs.example.test/acme/senior-ai",
+  });
+  seedSourced(repoRoot, {
+    id: "sourced-northstar",
+    company: "Northstar",
+    role: "Staff Platform Engineer",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "Can you rate the Acme role?" },
+    },
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "review",
+          fitScore: 73,
+          manual: { required: true },
+        },
+      },
+    }),
+  });
+
+  assert.equal(result.messages.at(-1).metadata.applicationId, "app-acme");
+});
+
+test("job.evaluate-request rejects ambiguous named saved jobs instead of choosing one", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-acme-ai",
+    company: "Acme",
+    role: "Senior AI Engineer",
+  });
+  seedApplication(repoRoot, {
+    id: "app-acme-platform",
+    company: "Acme",
+    role: "Staff Platform Engineer",
+    link: "https://jobs.example.test/acme/staff-platform",
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "job.evaluate-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { jobReference: "Rate the Acme role" },
+      },
+    }),
+    (error) =>
+      error.code === "JOB_REFERENCE_AMBIGUOUS" &&
+      /Senior AI Engineer/.test(error.message) &&
+      error.details?.matches?.length === 2
+  );
+  const last = workspaceThreadRead({ repoRoot, env: {} }).messages.at(-1);
+  assert.equal(last.kind, "action_error");
+  assert.equal(last.error.code, "JOB_REFERENCE_AMBIGUOUS");
+});
+
 test("job.evaluate-request reuses a matching application while refreshing its JD capture", async () => {
   const repoRoot = tempRepo();
   const jobUrl = "https://jobs.lever.co/temporal/abc-123";
@@ -1989,6 +2124,8 @@ test("workspace job-request errors return actionable client statuses instead of 
   const cases = [
     ["JOB_URL_REQUIRED", 400],
     ["JOB_IDENTITY_REQUIRED", 400],
+    ["JOB_REFERENCE_NOT_FOUND", 404],
+    ["JOB_REFERENCE_AMBIGUOUS", 409],
     ["JOB_CAPTURE_FAILED", 409],
     ["JOB_BODY_REQUIRES_BROWSER", 409],
   ];
@@ -2009,6 +2146,34 @@ test("workspace job-request errors return actionable client statuses instead of 
     assert.equal(response.status, expectedStatus, code);
     assert.equal(response.body.code, code);
   }
+});
+
+test("workspace ambiguity errors expose only structured candidate-safe match labels", async () => {
+  const repoRoot = tempRepo();
+  const routes = mountDirect(repoRoot, async () => {
+    const error = new Error("internal ambiguity detail");
+    error.code = "JOB_REFERENCE_AMBIGUOUS";
+    error.details = {
+      matches: [
+        { company: "Acme", role: "Senior AI Engineer" },
+        { company: "Acme", role: "Staff Platform Engineer" },
+      ],
+    };
+    throw error;
+  });
+  const response = await callDirect(routes, "POST", "/api/workspace/intent", {
+    intent: {
+      type: "job.evaluate-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: "rate the Acme role" },
+    },
+  });
+
+  assert.equal(response.status, 409);
+  assert.deepEqual(response.body.details.matches, [
+    { company: "Acme", role: "Senior AI Engineer" },
+    { company: "Acme", role: "Staff Platform Engineer" },
+  ]);
 });
 
 test("workspace message route waits for the same agent turn and returns its durable reply", async () => {

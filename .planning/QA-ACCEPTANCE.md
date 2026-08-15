@@ -4,9 +4,10 @@ Started: 2026-08-13
 Reopened: 2026-08-14
 Current tranche completed: 2026-08-14
 
-Gate result: all 85 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
-rate/apply, deterministic-provider, npm install, restart, and native Electron checks pass. The
-broader native skill-to-screen build gate remains tracked separately in `SKILL-UX-AUDIT.md`.
+Gate result: 87 of 88 recorded findings are fixed and live-retested. The clean-home onboarding, Ask
+rate/apply, deterministic-provider, npm install, restart, and native Electron checks pass. One new
+stale-runtime lifecycle blocker is open. The broader native skill-to-screen build gate remains
+tracked separately in `SKILL-UX-AUDIT.md`.
 
 This is the live execution ledger for the release gate in `docs/ROADMAP.md`. Status values are
 `NOT RUN`, `PASS`, `FAIL`, `FIXED`, or `DEFERRED`. Every failure needs reproduction evidence,
@@ -1557,3 +1558,57 @@ Test homes:
 - Regression: the focused SSE test passes 50 consecutive runs before the full release suite.
 - Live retest: PASS in the complete 0.7.1 release suite: 2,487 repository tests passed with five
   intentional skips, including the watcher assertion under full parallel load.
+
+### `F-086` Pasted-job provenance renders as a fake external posting link
+
+- Status: `FIXED`
+- Severity: P1 product-coherence blocker, a job created from pasted or extracted JD text opened a
+  drawer with a `View posting` link backed by the internal `careerrat://intake/...` locator.
+- Reproduction: paste and confirm a new JD in Ask, follow the evaluation result to the saved job,
+  and inspect the drawer header.
+- Root cause: sourced persistence requires a stable locator while the row is created, and promotion
+  copied that internal locator into the application `link` field. The drawer also trusted any
+  non-empty `drawer.link` instead of applying the existing external-HTTP URL guard.
+- Fix: clear the synthetic link after promotion, persist `sourceIntakeId` as typed provenance, keep
+  the full JD artifact, and allow the drawer's `View posting` action only for real HTTP(S) URLs.
+- Regression: `workspace-agent.test.mjs` pins null external link plus durable intake provenance;
+  `JobDrawer.test.jsx` pins real HTTP links and rejects internal locator schemes.
+- Live retest: a fresh confirmed Nova Forge JD saved `link:null`, the matching intake provenance,
+  and a readable `workspace/jobs/...md` artifact. The earlier internal-link row also rendered no
+  `View posting` action after the client hardening.
+
+### `F-087` Ambiguous Ask job references collapse into a generic computer error
+
+- Status: `FIXED`
+- Severity: P1 workflow blocker, Paul correctly refused to guess between saved jobs but did not tell
+  the user which roles matched or how to clarify.
+- Reproduction: enter `rate the Aperture Science role` when two Aperture Science jobs are saved.
+- Root cause: the executor returned `JOB_REFERENCE_AMBIGUOUS`, but the HTTP response exposed no
+  structured match list and Ask mapped every rejected action request to the generic retry error.
+- Fix: return bounded company/role match labels as structured error details, translate that code to
+  candidate-safe clarification copy, and suppress blind retry when the input itself needs revision.
+- Regression: workspace route, error-copy, and Ask tests cover structured labels, safe rendering,
+  and the absence of a useless retry button.
+- Live retest: Ask named `Forward Deployed Engineer` and `Research Engineer, Enrichment Systems`,
+  asked for a more specific company and role, and did not choose or mutate either job.
+
+### `F-088` An old local server survives an update and serves retired onboarding behavior
+
+- Status: `OPEN`
+- Severity: P0 release blocker, the code and installed package can be current while the default
+  localhost app continues running an older CareerRat release from memory.
+- Reproduction: leave a 0.7.0 `tracker-dev` process running on port 7777, update the checkout or
+  package to 0.7.1, and reopen the existing app URL. The old Jobs page can still show "No search
+  sources set up yet" even though that dead end no longer exists in current source.
+- Evidence: on 2026-08-14 the default server process had started on 2026-08-13, `/api/health`
+  reported `version: 0.7.0`, the checkout reported 0.7.1, and the server's candidate workspace had
+  zero sources. Restarting that owned server loaded 0.7.1 and restored the current route gate.
+- Root cause: the launcher treats any successful response on the preferred URL as an already-live
+  app. It does not compare the running API version with the installed version, and an update does
+  not safely replace the recorded owned server.
+- Required fix: add a version-aware health handshake, safely stop/restart only a verified
+  CareerRat-owned recorded process on mismatch, refuse to kill unknown listeners, and make update
+  plus start/relaunch converge on the installed runtime without touching candidate data.
+- Acceptance: automated lifecycle coverage for matching, stale-owned, stale-PID, and foreign-port
+  cases; live in-place update QA from the previous release; hard reload; and confirmation that Paul
+  keeps incomplete or source-less candidates gated with exact pause/resume guidance.

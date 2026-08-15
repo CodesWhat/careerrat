@@ -103,7 +103,7 @@ const WORKSPACE_DIRS = [
 // The single starter message that hands a freshly-scaffolded workspace to the
 // agent. It anchors every new session to doctor-driven next-step routing.
 const STARTER_PROMPT =
-  "Read AGENTS.md, run careerrat doctor, then guide me through the next unfinished CareerRat skill. If setup is complete, follow setup-searches -> research-boards -> discover-companies -> search-jobs before the first job sweep.";
+  "Read AGENTS.md, run careerrat doctor, then guide me through the next unfinished CareerRat skill. Once setup is search-ready, inspect or reuse the baseline search while Paul continues, then expand it through setup-searches -> research-boards -> discover-companies -> search-jobs.";
 
 // Agent CLIs we know how to launch, in preference order. Each is started with
 // the starter prompt as a single positional argument (the seed-a-session form

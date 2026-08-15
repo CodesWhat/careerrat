@@ -457,7 +457,7 @@ test("POST /api/intake can preserve the current client contract while routing th
   }
 });
 
-test("POST /api/intake: captures text, classifies via the mocked AI route, ends at 'proposed' with a Lane B dispatch", async () => {
+test("POST /api/intake: a classified JD proposes evaluation in workspace-main", async () => {
   const repoRoot = tempRepo();
   openDb({ repoRoot });
   const server = await bootServer(repoRoot, {
@@ -478,15 +478,15 @@ test("POST /api/intake: captures text, classifies via the mocked AI route, ends 
     assert.equal(body.item.status, "proposed");
     assert.equal(body.item.kind, "jd-text");
     assert.deepEqual(body.item.dispatch, {
-      lane: "B",
-      action: "run_skill",
-      params: { skill: "evaluate-job" },
+      lane: "W",
+      action: "workspace_intent",
+      params: { intentType: "job.evaluate-request" },
     });
     assert.equal(body.item.inputKind, "text");
     // M10 — every response carrying a dispatch also carries the matching
     // dispatchSummary string (dispatch-summary.mjs, shared with the confirm-
     // time activity-log title — one implementation, not a client-side mirror).
-    assert.equal(body.item.dispatchSummary, "run evaluate-job");
+    assert.equal(body.item.dispatchSummary, "capture and evaluate this job in your workspace");
   } finally {
     await closeServer(server);
   }
@@ -652,7 +652,16 @@ test("POST /api/intake/upload: a .docx upload extracts real text via mammoth and
   openDb({ repoRoot });
   const server = await bootServer(repoRoot, {
     loadSdk: async () =>
-      fakeSdk(assistantTextRun(jsonReply(classificationFixture({ kind: "jd-text" })))),
+      fakeSdk(
+        assistantTextRun(
+          jsonReply(
+            classificationFixture({
+              kind: "jd-text",
+              entities: { company: "Acme Corp", role: "Senior SRE" },
+            })
+          )
+        )
+      ),
   });
   try {
     const docxBytes = buildMinimalDocx([
@@ -772,7 +781,16 @@ test("POST /api/intake/upload: a .pdf upload with AI configured runs the intake-
       return { ok: true };
     },
     loadSdk: async () =>
-      fakeSdk(assistantTextRun(jsonReply(classificationFixture({ kind: "jd-text" })))),
+      fakeSdk(
+        assistantTextRun(
+          jsonReply(
+            classificationFixture({
+              kind: "jd-text",
+              entities: { company: "Acme", role: "Staff Engineer" },
+            })
+          )
+        )
+      ),
   });
   try {
     const { status, body } = await postRaw(
@@ -1329,6 +1347,75 @@ test("POST /api/intake/confirm: Lane A calls appSetStatus directly and settles a
 
     const row = db.prepare("SELECT data FROM applications WHERE id = ?").get("app-1");
     assert.equal(JSON.parse(row.data).status, "rejected");
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/intake/confirm: a JD evaluates through workspace-main and returns its typed result", async () => {
+  const repoRoot = tempRepo();
+  openDb({ repoRoot });
+  const { id } = intakeCapture({
+    repoRoot,
+    rawInput: "Acme\nSRE\nKeep production reliable.",
+    inputKind: "text",
+  });
+  intakeUpdate({
+    repoRoot,
+    id,
+    patch: {
+      status: "proposed",
+      kind: "jd-text",
+      classification: classificationFixture({
+        entities: { company: "Acme", role: "SRE" },
+      }),
+      dispatch: {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "job.evaluate-request" },
+      },
+    },
+  });
+
+  const seen = [];
+  const evaluation = {
+    gate: "keep",
+    fitScore: 91,
+    fitReasons: ["Strong reliability evidence"],
+  };
+  const server = await bootServer(repoRoot, {
+    workspaceAgentRuntime: {
+      async executeIntent(input) {
+        seen.push(input);
+        return {
+          thread: { id: "workspace-main" },
+          messages: [
+            {
+              kind: "action_result",
+              text: "Evaluated Acme — SRE: Keep (91/100 fit).",
+              artifacts: [{ kind: "job_evaluation", evaluation }],
+              metadata: { applicationId: "app-acme", state: "keep" },
+            },
+          ],
+        };
+      },
+    },
+  });
+  try {
+    const { status, body } = await postJson(server, "/api/intake/confirm", { id });
+    assert.equal(status, 200);
+    assert.equal(body.item.status, "done");
+    assert.equal(body.item.result.summary, "Evaluated Acme — SRE: Keep (91/100 fit).");
+    assert.equal(body.item.result.applicationId, "app-acme");
+    assert.deepEqual(body.item.result.evaluation, evaluation);
+    assert.deepEqual(seen, [
+      {
+        intent: {
+          type: "job.evaluate-request",
+          entity: { type: "intake", id },
+        },
+      },
+    ]);
   } finally {
     await closeServer(server);
   }

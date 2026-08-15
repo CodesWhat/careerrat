@@ -491,33 +491,47 @@ Run these commands in sequence. Fix any failure before proceeding to the next.
 
 ---
 
-## STEP 16 — POST-ONBOARDING DISCOVERY HANDOFF
+## STEP 16 — BACKGROUND FIRST SEARCH + DISCOVERY HANDOFF
 
-Onboarding complete means the candidate profile and baseline source config exist. It does
-**not** mean the job market has been searched yet.
+Do not wait for the full interview to finish before searching. As soon as the
+canonical candidate state becomes `search_ready` (resume/no-resume decision,
+target role, and usable remote/location posture), the conversational web surface
+must generate or heal baseline deterministic sources and start or reuse the first
+search in the background. This is code-owned onboarding work: while Paul continues
+asking the remaining setup questions, the visible first-search task runs. He never tells
+the candidate to repair missing sources later in Settings.
 
-Hand off in this exact order:
+Full onboarding may finish only when baseline source config is durable and the
+first search is `running` or `completed`. If source generation or the search cannot
+continue, keep the candidate in Paul, name the exact missing fact or dependency,
+and offer retry, guided repair, or **Pause setup**. A pause saves the current
+checkpoint and resumes at that item; it is not graduation.
+
+The deeper discovery sequence expands the already-running baseline search. Hand
+off in this exact order:
 
 ```
 setup-searches -> research-boards -> discover-companies -> search-jobs
 ```
 
-1. `setup-searches` — confirm or refresh the baseline `config/search-sources.yml` from
-   targeting and show `careerrat searches` readiness.
+1. `setup-searches` — confirm or refresh the baseline source config from targeting
+   and show `careerrat searches` readiness. In conversational onboarding this must
+   reconcile with the baseline sources already started by the app, not create a
+   second first-search run.
 2. `research-boards` — find additional boards/aggregators for this candidate's domain.
    This is confirm-first; run it unless the user explicitly says the baseline sources are
    enough for now.
 3. `discover-companies` — find employers and wire boards supported by CareerRat's pinned
    73-adapter public provider catalog into source config. This is confirm-first; run it
-   before the first sweep unless the user explicitly wants a board-only search.
-4. `search-jobs` — run the first sourced sweep only after the source and company discovery
-   steps are complete or intentionally skipped.
+   before the broadened sweep unless the user explicitly wants a board-only search.
+4. `search-jobs` — continue or refresh the sourced sweep after broader source and
+   company discovery. It is not the first moment any search may run.
 
 End the onboarding summary with:
 
 ```
 NEXT DISCOVERY ORDER: setup-searches -> research-boards -> discover-companies -> search-jobs
-NEXT: run setup-searches, then research-boards, then discover-companies before the first search-jobs sweep.
+NEXT: inspect the running/completed baseline search, then expand it through setup-searches, research-boards, discover-companies, and search-jobs.
 ```
 
 ---

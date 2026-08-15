@@ -34,8 +34,23 @@ function isUnambiguousApplicationMatch(trackerMatch) {
 export function resolveIntakeDispatch({ kind, entities = {}, trackerMatch = null } = {}) {
   switch (kind) {
     case "jd-text":
+      if (!String(entities.company || "").trim() || !String(entities.role || "").trim()) {
+        return NEEDS_YOU(
+          "the job description needs both a company and role before CareerRat can save and evaluate it"
+        );
+      }
+      return {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "job.evaluate-request" },
+      };
+
     case "job-url":
-      return { lane: "B", action: "run_skill", params: { skill: "evaluate-job" } };
+      return {
+        lane: "W",
+        action: "workspace_intent",
+        params: { intentType: "job.evaluate-request" },
+      };
 
     case "recruiter-email":
       return {
