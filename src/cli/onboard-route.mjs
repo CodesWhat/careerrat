@@ -22,6 +22,7 @@
 //   GET  /api/onboard/state              candidate-file + key + config status
 //   GET  /api/onboard/draft              resumable wizard step + unsaved UI seeds
 //   POST /api/onboard/draft              persist resumable wizard step + unsaved UI seeds
+//   POST /api/onboard/finish             verify graduation + carry Paul into workspace-main
 //   POST /api/onboard/init               ensureCandidateFiles() (never overwrites)
 //   POST /api/onboard/resume             parse a pasted/loaded resume (2MB cap)
 //   POST /api/onboard/resume-ai          M8 — AI-extract a PDF/image resume (5MB
@@ -52,7 +53,10 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { basename, dirname, extname, join } from "node:path";
-import { WORKSPACE_THREAD_ID } from "../core/agent/workspace-thread.mjs";
+import {
+  WORKSPACE_THREAD_ID,
+  workspaceOnboardingHandoff,
+} from "../core/agent/workspace-thread.mjs";
 import { writeLocalAiKey } from "../core/ai/ai-env.mjs";
 import { makeBoundedAIEnvelope, runBoundedAI } from "../core/ai/bounded-ai.mjs";
 import { resolveAIRoute } from "../core/ai/call-ai.mjs";
@@ -509,6 +513,110 @@ function writeOnboardingDraft(pathCtx, draft) {
   mkdirSync(dirname(draftPath), { recursive: true });
   atomicWriteFile(draftPath, `${JSON.stringify(next, null, 2)}\n`);
   return next;
+}
+
+export function finishOnboarding({ repoRoot, env = process.env, now } = {}) {
+  const pathCtx = { repoRoot, env };
+  if (!dbExists(pathCtx)) {
+    return {
+      status: 409,
+      body: {
+        ok: false,
+        code: "ONBOARDING_NOT_READY",
+        error: "Paul still needs to finish candidate setup before opening the workspace.",
+      },
+    };
+  }
+
+  try {
+    const config = candidateConfigGet(pathCtx);
+    const sourceResumePresent =
+      dbSourceResumePresent(pathCtx) || existsSync(userPath(pathCtx, "candidate/SOURCE_RESUME.md"));
+    const stateData = {
+      profile: config.profile,
+      targeting: config.targeting,
+      evidence: config.evidence,
+      "form-defaults": config["form-defaults"],
+      setup: config.setup,
+    };
+    const setupProgress = computeSetupProgress({
+      data: stateData,
+      sourceResumePresent,
+      keyConfigured: resolveAIRoute(env, { repoRoot }).type !== "none",
+    });
+    const deterministicSources = dbDeterministicSourceCounts(pathCtx, config);
+    const firstSearchRun = latestSourcingRunForUi({
+      repoRoot,
+      env,
+      purpose: "first-search",
+    });
+    const firstSearchStatus = firstSearchRun.run?.status;
+    const firstSearchReady = firstSearchStatus === "running" || firstSearchStatus === "completed";
+    const ready =
+      setupProgress.complete &&
+      config.setup?.readiness?.search_ready === true &&
+      deterministicSources.attempted > 0 &&
+      firstSearchReady;
+
+    if (!ready) {
+      return {
+        status: 409,
+        body: {
+          ok: false,
+          code: "ONBOARDING_NOT_READY",
+          error:
+            "Paul still has setup work to finish. Your answers are saved, so retry or pause here.",
+          setupProgress,
+          readiness: config.setup?.readiness || {},
+          deterministicSources,
+          firstSearchRun,
+        },
+      };
+    }
+
+    const draft = readOnboardingDraft(pathCtx);
+    const finishedAt = draft.finishedAt || dateIsoForOnboarding(now);
+    const handoff = workspaceOnboardingHandoff({
+      repoRoot,
+      env,
+      transcript: draft.transcript,
+      handoffText:
+        firstSearchStatus === "completed"
+          ? "Setup is complete. Your first search finished, and I’ll continue here with your job search."
+          : "Setup is complete and your first search is underway. I’ll continue here with your job search.",
+      finishedAt,
+      now,
+    });
+    const savedDraft = writeOnboardingDraft(pathCtx, { finishedAt: handoff.finishedAt });
+    return {
+      status: 200,
+      body: {
+        ok: true,
+        draft: savedDraft,
+        handoff: {
+          reused: handoff.reused,
+          messageCount: handoff.messages.length,
+          finishedAt: handoff.finishedAt,
+        },
+      },
+    };
+  } catch (err) {
+    return {
+      status: err?.code === "NO_DATABASE" ? 409 : 500,
+      body: {
+        ok: false,
+        code: err?.code || "ONBOARDING_FINISH_FAILED",
+        error: err?.message || String(err),
+      },
+    };
+  }
+}
+
+function dateIsoForOnboarding(now) {
+  const value = typeof now === "function" ? now() : now;
+  const date = value instanceof Date ? value : value ? new Date(value) : new Date();
+  if (!Number.isFinite(date.getTime())) throw new Error("invalid onboarding completion date");
+  return date.toISOString();
 }
 
 // Assign the next unused claim id. Prefers the caller's own id (from a
@@ -1073,6 +1181,7 @@ export function mountOnboardRoutes({
   workspaceAgentRuntime,
   startFirstSearchImpl = startFirstSearchRun,
   runSearchInBackgroundImpl = runFirstSearchInBackground,
+  finishOnboardingImpl = finishOnboarding,
 }) {
   const pathCtx = { repoRoot, env };
 
@@ -1249,6 +1358,19 @@ export function mountOnboardRoutes({
       sendJson(res, 500, {
         ok: false,
         error: { message: err instanceof Error ? err.message : String(err) },
+      });
+    }
+  });
+
+  addRoute("POST", "/api/onboard/finish", async (_req, res) => {
+    try {
+      const result = await finishOnboardingImpl({ repoRoot, env });
+      sendJson(res, result.status, result.body);
+    } catch (err) {
+      sendJson(res, 500, {
+        ok: false,
+        code: err?.code || "ONBOARDING_FINISH_FAILED",
+        error: err?.message || String(err),
       });
     }
   });

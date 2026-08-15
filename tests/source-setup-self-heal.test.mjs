@@ -164,29 +164,32 @@ test("tech-majority pre-fix source config heals once and persists deterministic 
   assert.equal(sourceConfigUpdatedAt(repoRoot), updatedAfterFirst);
 });
 
-test("non-tech config never enables deterministic sources and converges without a write loop", () => {
+test("non-tech config adds one broad deterministic source and converges without a write loop", () => {
   const repoRoot = tempRepo();
   seedCandidate(repoRoot, ["Registered Nurse", "Nurse Practitioner", "Clinical Manager"]);
   putPreFixSearchSources(repoRoot);
 
   const first = healSearchSourceConfig({ repoRoot, env: {} });
-  assert.equal(first.deterministicSources.attempted, 0);
+  assert.equal(first.deterministicSources.attempted, 1);
   assert.equal(first.deterministicSources.rss, 0);
-  assert.equal(first.deterministicSources.boards, 0);
+  assert.equal(first.deterministicSources.boards, 1);
   assert.equal(
     first.searchSources.searches.some(
       (source) =>
-        (source.source_type === "rss" || source.source_type === "board") && source.enabled !== false
+        source.provider === "arbeitnow" &&
+        source.source_type === "board" &&
+        source.enabled !== false &&
+        source.max_pages === 1
     ),
-    false,
-    "the heal must not fabricate an enabled deterministic source"
+    true,
+    "the heal must add the bounded domain-neutral baseline"
   );
 
   const storedAfterFirst = sourceConfigGet({ repoRoot, name: "search-sources" }).data;
   const updatedAfterFirst = sourceConfigUpdatedAt(repoRoot);
   const second = healSearchSourceConfig({ repoRoot, env: {} });
   assert.equal(second.healed, false);
-  assert.equal(second.deterministicSources.attempted, 0);
+  assert.equal(second.deterministicSources.attempted, 1);
   assert.deepEqual(second.searchSources, storedAfterFirst);
   assert.equal(sourceConfigUpdatedAt(repoRoot), updatedAfterFirst);
 });

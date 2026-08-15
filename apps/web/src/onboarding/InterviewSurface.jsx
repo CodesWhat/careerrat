@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { UploadIcon } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
 import {
@@ -9,6 +9,7 @@ import {
   extractResumeAi,
   extractResumeDocx,
   findChatBySkill,
+  finishOnboarding,
   getAutomationSettings,
   getCompanyProposals,
   getOnboardingDraft,
@@ -1365,12 +1366,15 @@ function CompletionScreen({
   onPauseSourceSetup,
   onResumeSourceSetup,
 }) {
+  const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
   const [discoveryChat, setDiscoveryChat] = useState(null);
   const [startingDiscovery, setStartingDiscovery] = useState(false);
   const [discoveryError, setDiscoveryError] = useState(null);
   const [firstSearchReady, setFirstSearchReady] = useState(false);
   const [searchNotice, setSearchNotice] = useState(null);
+  const [finishing, setFinishing] = useState(false);
+  const [finishError, setFinishError] = useState(null);
   const disclosureRows = setupDisclosureRows({ state, runtime });
   const graduated = setupCanGraduate(state);
   const durableRun =
@@ -1479,6 +1483,21 @@ function CompletionScreen({
     }
   }
 
+  async function handleFinish() {
+    setFinishing(true);
+    setFinishError(null);
+    try {
+      await finishOnboarding();
+      navigate("/");
+    } catch (err) {
+      setFinishError(
+        errorState(err, "Paul couldn't finish setup. Your answers are still saved. Try again.")
+      );
+    } finally {
+      setFinishing(false);
+    }
+  }
+
   return (
     <div className="onboarding-app">
       <header className="onboarding-app__header">
@@ -1531,6 +1550,9 @@ function CompletionScreen({
             action={discoveryError.action}
             detail={discoveryError.detail}
           />
+        ) : null}
+        {finishError ? (
+          <InlineAlert message={finishError.message} detail={finishError.detail} />
         ) : null}
         {sourcingPause ? (
           <div className="onboarding-done__search-started" role="status">
@@ -1624,9 +1646,14 @@ function CompletionScreen({
           </button>
         )}
         {graduated ? (
-          <Link className="btn btn--primary" to="/">
-            Go to your dashboard
-          </Link>
+          <button
+            type="button"
+            className="btn btn--primary"
+            onClick={handleFinish}
+            disabled={finishing}
+          >
+            {finishing ? "Opening your workspace…" : "Go to your dashboard"}
+          </button>
         ) : null}
       </main>
     </div>

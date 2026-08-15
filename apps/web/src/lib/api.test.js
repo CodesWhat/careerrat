@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   applyOnSite,
+  finishOnboarding,
   markCommSent,
   promoteSourced,
   recordExternalApplication,
@@ -13,6 +14,27 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
+});
+
+describe("finishOnboarding", () => {
+  it("commits onboarding graduation before the app navigates", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        })
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await finishOnboarding();
+
+    expect(fetchMock).toHaveBeenCalledWith("/api/onboard/finish", {
+      method: "POST",
+      body: JSON.stringify({}),
+      headers: { "content-type": "application/json" },
+    });
+  });
 });
 
 describe("runAiWebSearchStream", () => {

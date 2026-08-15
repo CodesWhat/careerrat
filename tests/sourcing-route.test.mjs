@@ -113,6 +113,13 @@ function seedNoDeterministicSources(repoRoot) {
           url: "https://example.test/search?q=ai",
           enabled: true,
         },
+        {
+          provider: "arbeitnow",
+          label: "Arbeitnow",
+          source_type: "board",
+          url: "https://www.arbeitnow.com/api/job-board-api",
+          enabled: false,
+        },
       ],
       tracked_companies: [],
       source_catalog: {},
@@ -317,14 +324,12 @@ test("POST /api/sourcing/first-run/start returns 409 when candidate setup is not
   }
 });
 
-test("first run with zero deterministic sources records failed run with actionable setup error", async () => {
+test("first run with every deterministic source disabled records an actionable setup error", async () => {
   const repoRoot = tempRepo();
   markSearchReady(repoRoot);
-  // markSearchReady's shared "AI Engineer" titles now read as tech-shaped
-  // under generate-search-sources.mjs's title-inference fallback (no
-  // candidate.domain is set here), which would seed enabled tech boards and
-  // defeat this test's own "zero deterministic sources" premise — override
-  // with non-tech titles so that premise still holds.
+  // Use non-tech titles so only the domain-neutral baseline is generated.
+  // seedNoDeterministicSources stores that source as explicitly disabled,
+  // preserving the test's no-runnable-source premise.
   candidateConfigPatch({
     repoRoot,
     name: "targeting",

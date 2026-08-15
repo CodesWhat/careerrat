@@ -224,10 +224,15 @@ test("buildSearchSources: empty-domain title inference requires a strict tech-ti
     );
     assert.equal(
       result.searches
-        .filter((source) => source.source_type === "board")
+        .filter((source) => source.enabled_reason === "domain-gate")
         .every((source) => source.enabled === false),
       true,
-      `${label} must keep every seeded board disabled`
+      `${label} must keep every tech-gated board disabled`
+    );
+    assert.equal(
+      result.searches.some((source) => source.provider === "arbeitnow" && source.enabled === true),
+      titles.length > 0,
+      `${label} must enable the broad fallback only after a target title exists`
     );
   }
 });
@@ -250,7 +255,7 @@ test("buildSearchSources: exactly one RemoteVibeCodingJobs entry with rssUrl whe
   );
 });
 
-test("buildSearchSources: seeds exactly three enabled lowercase board providers for tech", () => {
+test("buildSearchSources: seeds broad public fallback plus tech boards for tech", () => {
   const result = buildSearchSources(targeting, {
     ...profile,
     candidate: { ...profile.candidate, domain: "software engineering" },
@@ -283,11 +288,17 @@ test("buildSearchSources: seeds exactly three enabled lowercase board providers 
         enabled: true,
         enabled_reason: "domain-gate",
       },
+      {
+        provider: "arbeitnow",
+        source_type: "board",
+        enabled: true,
+        enabled_reason: "baseline",
+      },
     ]
   );
 });
 
-test("buildSearchSources: seeds the same three boards disabled for healthcare", () => {
+test("buildSearchSources: keeps tech boards disabled but runs a broad public fallback for healthcare", () => {
   const result = buildSearchSources(targeting, {
     ...profile,
     candidate: { ...profile.candidate, domain: "nursing and healthcare" },
@@ -300,8 +311,10 @@ test("buildSearchSources: seeds the same three boards disabled for healthcare", 
       { provider: "remoteok", source_type: "board", enabled: false },
       { provider: "remotive", source_type: "board", enabled: false },
       { provider: "workingnomads", source_type: "board", enabled: false },
+      { provider: "arbeitnow", source_type: "board", enabled: true },
     ]
   );
+  assert.equal(boards.at(-1).max_pages, 1);
   assert.equal(
     result.searches.some((source) => source.provider === "RemoteVibeCodingJobs"),
     false,
