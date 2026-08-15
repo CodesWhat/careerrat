@@ -1308,6 +1308,61 @@ test("job.prepare-request captures public application questions before generatin
   assert.match(result.messages.at(-1).text, /captured 1 application question/i);
 });
 
+test("job.prepare-request falls back to pasted questions when public capture returns nothing", async () => {
+  const repoRoot = tempRepo();
+  const jobUrl = "https://boards.greenhouse.io/acme/jobs/123";
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "job.prepare-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobUrl },
+    },
+    resolveJobUrlImpl: async () => ({
+      bodyFetchStatus: "resolved",
+      url: jobUrl,
+      title: "Staff AI Engineer",
+      company: "Acme",
+      bodyText: "Lead production AI systems and platform strategy.",
+    }),
+    evaluateJobImpl: async ({ body }) => ({
+      status: 200,
+      body: {
+        ok: true,
+        data: {
+          applicationId: body.applicationId,
+          gate: "keep",
+          fitScore: 94,
+          fitReasons: ["Production AI leadership"],
+          manual: { required: false },
+        },
+      },
+    }),
+    captureQuestionsImpl: async () => ({ source: "greenhouse", questions: [], excluded: [] }),
+    generateDocumentsImpl: async () => ({
+      status: "ready",
+      uploadReady: true,
+      gaps: [],
+      artifacts: { resumePdf: "workspace/tailored/acme-resume.pdf" },
+    }),
+  });
+
+  const handoff = result.messages
+    .at(-1)
+    .artifacts.find((artifact) => artifact.kind === "application_handoff");
+  assert.deepEqual(handoff.questionCapture, {
+    state: "site-required",
+    source: null,
+    answerableCount: 0,
+    excludedCount: 0,
+    demographicSectionPresent: false,
+    attempted: true,
+  });
+  assert.match(result.messages.at(-1).text, /paste the questions here/i);
+});
+
 test("job.prepare-request keeps a paste-and-resume question path for unsupported sites", async () => {
   const repoRoot = tempRepo();
   const jobUrl = "https://careers.example.test/jobs/staff-ai";

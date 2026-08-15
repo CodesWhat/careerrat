@@ -136,7 +136,7 @@ function toDatetimeLocal(iso) {
 function applyOnSiteNotice(response) {
   const messages = (response?.data || response)?.messages || [];
   const last = messages[messages.length - 1];
-  if (last?.metadata?.state === "applied" && last?.metadata?.submissionVerified === true) {
+  if (last?.metadata?.state === "submitted" && last?.metadata?.submissionVerified === true) {
     return "Application submitted and verified.";
   }
   const questionCapture = last?.artifacts?.find(

@@ -76,13 +76,18 @@ function queryParam(req, name) {
   return url.searchParams.get(name);
 }
 
-function sendImageMiss(req, res) {
+function sendImageMiss(req, res, { cacheable = false } = {}) {
+  const cacheControl = cacheable ? "public, max-age=3600" : "no-store";
   if (queryParam(req, "fallback") === "initials") {
-    res.writeHead(204, { "Cache-Control": "public, max-age=3600" });
+    res.writeHead(204, { "Cache-Control": cacheControl });
     res.end();
     return;
   }
-  sendJson(res, 404, { error: "no logo for this domain" });
+  res.writeHead(404, {
+    "Content-Type": "application/json; charset=utf-8",
+    "Cache-Control": cacheControl,
+  });
+  res.end(JSON.stringify({ error: "no logo for this domain" }));
 }
 
 // ---------------------------------------------------------------------------
@@ -359,7 +364,7 @@ export function mountLogoRoutes({ addRoute, repoRoot, env = process.env, fetchIm
     }
 
     if (!upstream.ok) {
-      sendImageMiss(req, res);
+      sendImageMiss(req, res, { cacheable: upstream.status === 404 });
       return;
     }
 

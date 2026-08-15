@@ -409,7 +409,7 @@ describe("JobDrawer", () => {
         messages: [
           {
             kind: "action_result",
-            metadata: { state: "applied", submissionVerified: true },
+            metadata: { state: "submitted", submissionVerified: true },
           },
         ],
       },

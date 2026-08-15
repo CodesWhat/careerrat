@@ -437,18 +437,37 @@ test("POST /api/packet/gate: keeps budget-limited evaluation copy readable", asy
       applicationId: "app-packet",
     });
     assert.equal(status, 200);
-    assert.equal(
-      body.data.fitReasons[0],
-      "Riley owns discovery-through-deployment AI rollouts for enterprise customers…"
-    );
-    assert.equal(
-      body.data.fitRisks[0],
-      "The role requires three days per week in an office; Riley is open to hybrid…"
-    );
-    assert.equal(
-      body.data.compensation.summary,
-      "Posted annual salary range is $200,000–$320,000 USD. The minimum clears Riley’s $190,000 base floor, and the range includes the…"
-    );
+    assert.ok(body.data.fitReasons[0].length <= 72);
+    assert.ok(body.data.fitRisks[0].length <= 72);
+    assert.ok(body.data.compensation.summary.length <= 130);
+    assert.match(body.data.fitReasons[0], /…$/);
+    assert.match(body.data.fitRisks[0], /…$/);
+    assert.doesNotMatch(body.data.fitRisks[0], /\band…$/i);
+    assert.match(body.data.compensation.summary, /…$/);
+  } finally {
+    await closeServer(server);
+  }
+});
+
+test("POST /api/packet/gate: replaces blank summaries with the typed fallbacks", async () => {
+  const repoRoot = tempRepo();
+  seedPacketReadyApp(repoRoot);
+  const server = await bootServer(repoRoot, {
+    packetGateInvoke: async () =>
+      `\`\`\`json\n${JSON.stringify({
+        ...typedGateVerdict(),
+        fitSummary: "   ",
+        compensation: { ...typedGateVerdict().compensation, summary: "" },
+      })}\n\`\`\``,
+  });
+
+  try {
+    const { status, body } = await postJson(server, "/api/packet/gate", {
+      applicationId: "app-packet",
+    });
+    assert.equal(status, 200);
+    assert.equal(body.data.fitSummary, "Fit needs review.");
+    assert.equal(body.data.compensation.summary, "Compensation needs review.");
   } finally {
     await closeServer(server);
   }

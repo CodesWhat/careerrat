@@ -1234,7 +1234,7 @@ function ApplicationHandoffCard({ artifact }) {
   const captureRequired = capture?.state === "site-required";
   const inputId = `application-questions-${applicationId || "current"}`;
 
-  async function rebuildAnswers() {
+  async function rebuildAnswers(answerableCount = Number(capture?.answerableCount) || 0) {
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -1246,7 +1246,7 @@ function ApplicationHandoffCard({ artifact }) {
       );
       setAnswersNeedRebuild(false);
       setNotice(
-        `Captured ${capture?.answerableCount || 0} application question${capture?.answerableCount === 1 ? "" : "s"} and rebuilt the answers.`
+        `Captured ${answerableCount} application question${answerableCount === 1 ? "" : "s"} and rebuilt the answers.`
       );
       emitDashboardChanged();
     } catch (err) {
@@ -1264,6 +1264,7 @@ function ApplicationHandoffCard({ artifact }) {
     setBusy(true);
     setError(null);
     setNotice(null);
+    let answerableCount = 0;
     try {
       const response = await capturePacketQuestions({
         applicationId,
@@ -1272,10 +1273,11 @@ function ApplicationHandoffCard({ artifact }) {
         url: handoffUrl || artifact.url || "",
       });
       const result = response?.data || response;
-      const answerableCount = Array.isArray(result?.questions) ? result.questions.length : 0;
+      answerableCount = Array.isArray(result?.questions) ? result.questions.length : 0;
       const excludedCount = Array.isArray(result?.excluded) ? result.excluded.length : 0;
       if (answerableCount + excludedCount === 0) {
         setError("No application questions were recognized. Paste one question per line.");
+        setBusy(false);
         return;
       }
       const nextCapture = {
@@ -1289,27 +1291,13 @@ function ApplicationHandoffCard({ artifact }) {
       setAnswersNeedRebuild(true);
       setQuestions("");
       emitDashboardChanged();
-      try {
-        await runWorkspaceIntent(
-          "job.generate-documents",
-          { type: "application", id: applicationId },
-          { applyIntent: true, formats: ["pdf"] }
-        );
-        setAnswersNeedRebuild(false);
-        setNotice(
-          `Captured ${answerableCount} application question${answerableCount === 1 ? "" : "s"} and rebuilt the answers.`
-        );
-        emitDashboardChanged();
-      } catch (err) {
-        setError(
-          `Questions were saved, but the answers could not be rebuilt: ${resolveErrorCopy(err).message}`
-        );
-      }
     } catch (err) {
       setError(resolveErrorCopy(err).message);
-    } finally {
       setBusy(false);
+      return;
     }
+    setBusy(false);
+    await rebuildAnswers(answerableCount);
   }
 
   return (
@@ -1331,7 +1319,7 @@ function ApplicationHandoffCard({ artifact }) {
         </p>
       ) : null}
       {answersNeedRebuild ? (
-        <Button disabled={busy} onClick={rebuildAnswers}>
+        <Button disabled={busy || !applicationId} onClick={() => rebuildAnswers()}>
           {busy ? "Rebuilding answers…" : "Retry answer build"}
         </Button>
       ) : null}
@@ -1353,7 +1341,10 @@ function ApplicationHandoffCard({ artifact }) {
             placeholder="Paste the employer's questions here"
             onChange={(event) => setQuestions(event.target.value)}
           />
-          <Button disabled={busy || !questions.trim()} onClick={handleQuestionCapture}>
+          <Button
+            disabled={busy || !applicationId || !questions.trim()}
+            onClick={handleQuestionCapture}
+          >
             {busy ? "Rebuilding answers…" : "Save questions and rebuild answers"}
           </Button>
         </div>

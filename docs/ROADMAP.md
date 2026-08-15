@@ -409,7 +409,7 @@ section remains the release-level source of truth. All 93 recorded findings are 
 live-retested. The broader skill-to-screen audit above remains active until every user-facing
 original skill has a coherent native path.
 
-Current verification: 2,566 repository tests passed with 5 intentional skips; 699 web tests passed;
+Current verification: 2,570 repository tests passed with 5 intentional skips; 700 web tests passed;
 lint completed with no errors; web, website, docs, and desktop builds passed; and the final 541-file
 npm tarball installed into a clean home without lifecycle warnings. The clean setup, background
 search, restart, Ask rate/apply, provider Settings, and source Electron checks produced no HTTP or

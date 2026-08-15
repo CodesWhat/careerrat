@@ -891,11 +891,14 @@ function blockingPacketGaps(gaps) {
 function questionCaptureFromApplication(application) {
   const summary = application?.packetManifest?.questions;
   if (!summary || typeof summary !== "object") return null;
+  const answerableCount = Number(summary.answerableCount) || 0;
+  const excludedCount = Number(summary.excludedCount) || 0;
+  if (answerableCount + excludedCount === 0) return null;
   return {
     state: "captured",
     source: "saved",
-    answerableCount: Number(summary.answerableCount) || 0,
-    excludedCount: Number(summary.excludedCount) || 0,
+    answerableCount,
+    excludedCount,
     demographicSectionPresent: summary.demographicSectionPresent === true,
   };
 }
@@ -935,11 +938,16 @@ async function prepareApplicationQuestions({
       url,
       fetchImpl,
     });
+    const answerableCount = Array.isArray(capture?.questions) ? capture.questions.length : 0;
+    const excludedCount = Array.isArray(capture?.excluded) ? capture.excluded.length : 0;
+    if (answerableCount + excludedCount === 0) {
+      return siteRequiredQuestionCapture({ attempted: true });
+    }
     return {
       state: "captured",
       source: String(capture?.source || request.provider),
-      answerableCount: Array.isArray(capture?.questions) ? capture.questions.length : 0,
-      excludedCount: Array.isArray(capture?.excluded) ? capture.excluded.length : 0,
+      answerableCount,
+      excludedCount,
       demographicSectionPresent: capture?.demographicSectionPresent === true,
     };
   } catch (error) {

@@ -14,16 +14,17 @@ const LABELS = Object.freeze({
 });
 
 function boundedDisplayText(value, maxLength, fallback = "") {
-  const raw = String(value ?? fallback);
-  const text = raw.trim();
+  const raw = String(value ?? "").trim();
+  const text = raw || String(fallback).trim();
   if (!text) return "";
-  const looksBudgetClipped = raw.length >= maxLength && !/[.!?…)}\]"']$/u.test(text);
+  const looksBudgetClipped = text.length >= maxLength && !/[.!?…)}\]"']$/u.test(text);
   const danglingConnector = /\b(?:a|an|and|but|for|or|the|to|with)$/iu.test(text);
   if (text.length <= maxLength && !looksBudgetClipped && !danglingConnector) return text;
 
-  let prefix = danglingConnector
-    ? text.replace(/\s+\b(?:a|an|and|but|for|or|the|to|with)$/iu, "").trimEnd()
-    : text.slice(0, Math.max(1, maxLength - 1)).trimEnd();
+  const withoutDanglingConnector = danglingConnector
+    ? text.replace(/\s+\b(?:a|an|and|but|for|or|the|to|with)$/iu, "")
+    : text;
+  let prefix = withoutDanglingConnector.slice(0, Math.max(1, maxLength - 1)).trimEnd();
   const comma = prefix.lastIndexOf(",");
   const commaBoundary =
     comma >= 0 &&
@@ -37,7 +38,7 @@ function boundedDisplayText(value, maxLength, fallback = "") {
     prefix.lastIndexOf(";"),
     prefix.lastIndexOf(":")
   );
-  if (!danglingConnector && boundary >= Math.floor(maxLength * 0.6)) {
+  if (boundary >= Math.floor(maxLength * 0.6)) {
     prefix = prefix.slice(0, boundary).trimEnd();
   }
   prefix = prefix.replace(/[,:;–—-]+$/u, "").trimEnd();
@@ -62,7 +63,7 @@ function reviewData({ applicationId, code, reason, ai = { used: false }, source 
     },
     action: "manual",
     fitReasons: [],
-    fitRisks: [boundedDisplayText(reason, 80)],
+    fitRisks: [boundedDisplayText(reason, 72)],
     confidence: "low",
     manual: {
       required: true,
@@ -91,7 +92,7 @@ function normalizeVerdict(verdict, { applicationId, ai, source }) {
     minBase,
     maxBase,
     source: ["job-description", "market"].includes(rawComp.source) ? rawComp.source : "unknown",
-    summary: boundedDisplayText(rawComp.summary, 140, "Compensation needs review."),
+    summary: boundedDisplayText(rawComp.summary, 130, "Compensation needs review."),
   };
   return {
     appId: applicationId,
@@ -99,14 +100,14 @@ function normalizeVerdict(verdict, { applicationId, ai, source }) {
     gate: safeGate,
     fitScore,
     fitBucket,
-    fitSummary: boundedDisplayText(verdict?.fitSummary, 160, "Fit needs review."),
+    fitSummary: boundedDisplayText(verdict?.fitSummary, 150, "Fit needs review."),
     compensation,
     action: String(verdict?.action || (safeGate === "keep" ? "generate-packet" : "manual")),
     fitReasons: (Array.isArray(verdict?.fitReasons) ? verdict.fitReasons : [])
-      .map((value) => boundedDisplayText(value, 80))
+      .map((value) => boundedDisplayText(value, 72))
       .slice(0, 3),
     fitRisks: (Array.isArray(verdict?.fitRisks) ? verdict.fitRisks : [])
-      .map((value) => boundedDisplayText(value, 80))
+      .map((value) => boundedDisplayText(value, 72))
       .slice(0, 3),
     confidence: String(verdict?.confidence || "medium").toLowerCase(),
     manual: { required: safeGate === "review" },

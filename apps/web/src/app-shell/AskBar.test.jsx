@@ -1405,12 +1405,14 @@ describe("AskBar — acting", () => {
           ],
         },
       });
-    api.capturePacketQuestions.mockResolvedValue({
-      data: {
-        questions: [{ id: "q1", label: "Why Acme?", required: true }],
-        excluded: [],
-      },
-    });
+    api.capturePacketQuestions
+      .mockResolvedValueOnce({ data: { questions: [], excluded: [] } })
+      .mockResolvedValueOnce({
+        data: {
+          questions: [{ id: "q1", label: "Why Acme?", required: true }],
+          excluded: [],
+        },
+      });
 
     let tree = render();
     const input = byTag(tree, "input");
@@ -1433,7 +1435,15 @@ describe("AskBar — acting", () => {
       target: { value: "Why do you want to work at Acme?\nDescribe a system you owned." },
     });
     tree = render();
-    await buttonByText(tree, "Save questions and rebuild answers").props.onClick();
+    let saveQuestions = buttonByText(tree, "Save questions and rebuild answers");
+    await saveQuestions.props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("No application questions were recognized.");
+    saveQuestions = buttonByText(tree, "Save questions and rebuild answers");
+    expect(saveQuestions.props.disabled).toBe(false);
+    await saveQuestions.props.onClick();
     await flushMicrotasks();
     tree = render();
 
@@ -1449,6 +1459,55 @@ describe("AskBar — acting", () => {
       { applyIntent: true, formats: ["pdf"] }
     );
     expect(textOf(tree)).toContain("Captured 1 application question and rebuilt the answers.");
+  });
+
+  it("disables question capture when the handoff has no application id", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(
+      jobActionPreview({
+        type: "job.prepare-request",
+        label: "Evaluate and prepare this application",
+      })
+    );
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Paste the questions here when the site shows them.",
+            artifacts: [
+              {
+                kind: "application_handoff",
+                url: "https://careers.example.test/jobs/staff-ai",
+                questionCapture: { state: "site-required" },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "apply to the Acme role" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    const questions = visit(
+      tree,
+      (node) => node.type === "textarea" && node.props["aria-label"] === "Application questions"
+    )[0];
+    questions.props.onChange({ target: { value: "Why Acme?" } });
+    tree = render();
+
+    expect(buttonByText(tree, "Save questions and rebuild answers").props.disabled).toBe(true);
   });
 
   it("keeps captured questions saved when rebuilding answers fails", async () => {
