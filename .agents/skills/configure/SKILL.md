@@ -145,6 +145,36 @@ Report what changed. If validation fails, surface the exact error and fix it bef
 
 ---
 
+## Conversational workspace settings
+
+In the Ask workspace, showing settings and applying a targeted change are native:
+the app runs typed intents (`settings.explain`, `settings.apply`) directly in
+`workspace-agent.mjs`, not this skill's CLI routing. A terminal or
+external-agent run of this skill still follows STEP 1 → 3 exactly as written.
+Both intents reuse the same validated write paths this skill routes to
+(`candidateConfigPatch`, the gate routes); neither opens a new mutation path.
+
+- **Explain.** "What are my settings", "show my automation permissions", and
+  "what mode am I in" return a read-only `settings_overview` card built by
+  strict allow-list: modes, the automation capability and platform matrix, and
+  gate values (comp floor/target/expected, excluded-company count, cut/keep
+  signals, do-not-claim). `current_base` is never read, and a leak backstop
+  refuses the whole card rather than surface it.
+- **Apply.** Free-text changes ("set my comp floor to $150k", "exclude Acme
+  from my search", "switch usage mode to full", "turn off status polling
+  on Greenhouse", "set setup mode to advanced") preview as a labeled action chip;
+  confirming runs one narrow, schema-validated write and returns a
+  `settings_apply` receipt with the prior and new value. "…to match my current
+  salary" phrasings are refused with private-comp copy, never parsed.
+- **What stays in Settings.** Consent grants and enabling any capability beyond
+  `status_polling`/`authenticated_search` are not accepted conversationally,
+  by handler rule, not just matcher scope: the terms and permissions need the
+  Settings page's full explanation first. Disabling any capability is always
+  allowed from Ask. AI keys, runtime selection, and search-source edits keep
+  their own owning flows.
+
+---
+
 ## Rules
 
 - **Never a new mutation path.** configure reads state and routes. Every write goes through the CLI or the owning skill — never a direct YAML or SQLite edit from this skill.

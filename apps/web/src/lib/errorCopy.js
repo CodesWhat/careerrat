@@ -72,6 +72,28 @@ function communicationChannelUnsupportedMessage(details) {
     : "CareerRat can only prepare email sends. Reply on that channel yourself, then choose “I sent this”.";
 }
 
+function settingsChangeUnsupportedMessage(details) {
+  const reason = details?.reason;
+  if (reason === "consent") {
+    return "Consent changes happen in Settings, where CareerRat shows you exactly what each platform allows.";
+  }
+  if (reason === "capability-tier") {
+    return "That automation level gets turned on in Settings so you can review what it does first.";
+  }
+  return "CareerRat can't change that setting from here. Use the Settings page.";
+}
+
+function settingsChangeInvalidMessage(details) {
+  if (details?.reason === "comp-reference") {
+    return "CareerRat keeps your current pay private and never uses it to set search settings. Give the number you want instead.";
+  }
+  let message = "CareerRat couldn't apply that settings change as written.";
+  if (Array.isArray(details?.options) && details.options.length) {
+    message += ` Valid options: ${details.options.join(", ")}.`;
+  }
+  return message;
+}
+
 function companyAmbiguityMessage(details) {
   const matches = Array.isArray(details?.matches) ? details.matches : [];
   const labels = matches
@@ -202,6 +224,16 @@ const RULES = [
   {
     match: ({ code }) => code === "COMMUNICATION_DRAFT_PLACEHOLDER",
     message: "This draft still has unfinished placeholder text. Finish the draft before sending.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "SETTINGS_CHANGE_UNSUPPORTED",
+    message: ({ details }) => settingsChangeUnsupportedMessage(details),
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
+    match: ({ code }) => code === "SETTINGS_CHANGE_INVALID",
+    message: ({ details }) => settingsChangeInvalidMessage(details),
     action: null,
   },
   {

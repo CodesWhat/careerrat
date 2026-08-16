@@ -101,7 +101,10 @@ export const GATE_ROUTES = {
 };
 
 export function resolveRoute(type) {
-  const route = GATE_ROUTES[type];
+  // Object.hasOwn, not a bare truthy lookup: `type` can arrive straight from
+  // an HTTP body, and prototype-chain keys ("__proto__", "constructor",
+  // "toString", ...) index a plain object literal to something truthy.
+  const route = Object.hasOwn(GATE_ROUTES, type) ? GATE_ROUTES[type] : undefined;
   if (!route) {
     throw new Error(`unknown gate type "${type}". Known: ${Object.keys(GATE_ROUTES).join(", ")}`);
   }

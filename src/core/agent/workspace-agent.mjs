@@ -3,6 +3,16 @@ import { closeSync, openSync, readSync } from "node:fs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
+import {
+  automationStatus,
+  CAPABILITIES,
+  CAPABILITY_KEYS,
+  isCapability,
+  loadAutomation,
+  mergeAutomationDefaults,
+  PLATFORMS,
+} from "../automation/consent.mjs";
+import { PROVIDERS } from "../automation/session.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
@@ -13,7 +23,7 @@ import {
   appSetFields,
   appSetStatus,
 } from "../db/verbs/app.mjs";
-import { candidateConfigGet } from "../db/verbs/candidate.mjs";
+import { candidateConfigGet, candidateConfigPatch } from "../db/verbs/candidate.mjs";
 import {
   commAppendMessage,
   commCaptureInbound,
@@ -46,7 +56,9 @@ import {
 } from "../packet/one-off-answer.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
-import { findCurrentBaseToken } from "../profile/comp-guard.mjs";
+import { findCompLeak, findCurrentBaseToken } from "../profile/comp-guard.mjs";
+import { applyGateWrite, GATE_APPLY_SUMMARIES } from "../profile/gate-apply.mjs";
+import { GATE_ROUTES } from "../profile/gate-writer.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import {
   isStale,
@@ -113,6 +125,8 @@ const EXECUTABLE_INTENTS = new Set([
   "strategy.review",
   "strategy.apply",
   "strategy.stamp",
+  "settings.explain",
+  "settings.apply",
   "job.apply",
   "communication.draft",
   "communication.draft-request",
@@ -3364,6 +3378,328 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    // settings.explain — the read half of the Ask "configure" row. A pure,
+    // side-effect-free read built by STRICT ALLOW-LIST (never a spread of a
+    // config doc), so a field that shouldn't leave this module (current_base,
+    // email, phone, ...) can never ride along by accident. automationStatus
+    // already fills every known capability/platform in from CAPABILITIES —
+    // even ones the stored doc predates — so a newly-added capability reads
+    // false here, never undefined.
+    if (normalized.type === "settings.explain") {
+      const domain = new Set(["automation", "modes", "gates"]).has(input.domain)
+        ? input.domain
+        : "all";
+      const config = candidateConfigGet({ repoRoot, env });
+      const modesDoc = config.modes || {};
+      const targeting = config.targeting || {};
+      // PRIVACY (AGENTS.md): current_base is a private gate input and is
+      // never read here — comp fields come from minimum_base/target_base/
+      // expected_base only, same as buildStrategyReviewContext (review.mjs).
+      const compensation = config.profile?.compensation || {};
+
+      const modes =
+        domain === "all" || domain === "modes"
+          ? {
+              usage_mode: modesDoc.usage_mode || null,
+              application_mode: modesDoc.application_mode || null,
+              agent_voice: modesDoc.agent_voice || null,
+            }
+          : null;
+
+      let automation = null;
+      if (domain === "all" || domain === "automation") {
+        const status = automationStatus({ root: repoRoot });
+        automation = {
+          setup_mode: status.mode,
+          session_provider: status.session?.provider || null,
+          capabilities: status.capabilities.map((cap) => ({
+            key: cap.capability,
+            label: cap.label,
+            enabled: cap.enabled,
+            platforms: cap.platforms.map((platform) => ({
+              key: platform.platform,
+              enabled: platform.enabled,
+              consent: platform.consent,
+            })),
+          })),
+        };
+      }
+
+      const gates =
+        domain === "all" || domain === "gates"
+          ? {
+              comp_floor: compensation.minimum_base ?? null,
+              comp_target: compensation.target_base ?? null,
+              comp_expected: compensation.expected_base ?? null,
+              excluded_companies: Array.isArray(targeting.excluded_companies)
+                ? targeting.excluded_companies.length
+                : 0,
+              cut_signals: Array.isArray(targeting.cut_signals) ? targeting.cut_signals : [],
+              keep_signals: Array.isArray(targeting.keep_signals) ? targeting.keep_signals : [],
+              do_not_claim: Array.isArray(config.honesty?.tools?.do_not_claim)
+                ? config.honesty.tools.do_not_claim
+                : [],
+            }
+          : null;
+
+      const artifact = { kind: "settings_overview", domain, modes, automation, gates };
+
+      // Backstop, mirroring the leak checks elsewhere in this file (e.g. the
+      // communication.send handler above): if the private field token slips
+      // in despite the allow-list above, refuse to surface it rather than
+      // let it reach the thread. This is a code bug if it ever fires, not a
+      // user-input problem, so it is deliberately NOT in the route's 400 list.
+      if (findCurrentBaseToken(JSON.stringify(artifact))) {
+        throw actionError(
+          "CareerRat could not build the settings summary without exposing a private field.",
+          "SETTINGS_EXPLAIN_LEAK"
+        );
+      }
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "Here are your current settings.",
+        artifacts: [artifact],
+        metadata: { domain },
+        operationResult: artifact,
+        now,
+      });
+    }
+
+    // settings.apply — a single confirm-first setting change, fired only by
+    // the preview chip (or Enter) built from settingsApplyFromText below.
+    // REST can call this intent directly, so every restriction is enforced
+    // HERE in the handler, not just in the matcher. Reuses the same validated
+    // write paths every other surface uses: applyGateWrite for gate types
+    // (Step 1's shared primitive), candidateConfigPatch directly for modes,
+    // and candidateConfigPatch with a narrow automation patch (deepMerge in
+    // candidateConfigPatch recurses plain objects, so a narrow patch is
+    // sibling-safe). candidateConfigPatch already logs the Activity Pulse
+    // event for each of these — no manual activityAppend call here.
+    if (normalized.type === "settings.apply") {
+      const change = input.change;
+      if (!change || typeof change !== "object" || !change.kind) {
+        throw actionError("A setting change is required to apply it.", "SETTINGS_CHANGE_INVALID");
+      }
+
+      let result;
+      if (change.kind === "gate") {
+        // Re-derived here, not trusted from the matcher's compReference flag:
+        // REST can call this intent directly with any flag value, so the
+        // privacy refusal has to fire on the value itself either way.
+        if (change.compReference || findCompLeak(String(change.value ?? ""))) {
+          const error = actionError(
+            "CareerRat keeps your current pay private and never uses it to set search settings; give the number you want instead.",
+            "SETTINGS_CHANGE_INVALID"
+          );
+          error.details = { reason: "comp-reference" };
+          throw error;
+        }
+        if (String(change.value ?? "").length > 200) {
+          throw actionError(
+            "That value is too long for a settings change.",
+            "SETTINGS_CHANGE_INVALID"
+          );
+        }
+        const type = String(change.type || "");
+        let applied;
+        try {
+          applied = applyGateWrite({ repoRoot, env, type, value: change.value });
+        } catch (error) {
+          // applyGateWrite throws plain, candidate-safe errors (unknown gate
+          // type, non-numeric comp amount, a schema-invalid write) — surface
+          // the message as-is rather than inventing a new one.
+          throw actionError(error.message, "SETTINGS_CHANGE_INVALID");
+        }
+        result = {
+          label: GATE_ROUTES[type]?.label || type,
+          field: applied.field,
+          from: applied.from,
+          to: applied.value,
+          summary: applied.summary,
+          changed: applied.changed,
+        };
+      } else if (change.kind === "mode") {
+        const field = String(change.field || "");
+        if (!new Set(["usage_mode", "application_mode"]).has(field)) {
+          throw actionError(`Unsupported setting field "${field}".`, "SETTINGS_CHANGE_UNSUPPORTED");
+        }
+        const value = String(change.value || "").trim();
+        if (!value) {
+          throw actionError("A value is required to change this mode.", "SETTINGS_CHANGE_INVALID");
+        }
+        const modesDoc = candidateConfigGet({ repoRoot, env }).modes || {};
+        const from = modesDoc[field] ?? null;
+        candidateConfigPatch({ repoRoot, env, name: "modes", patch: { [field]: value } });
+        const label = field === "usage_mode" ? "Usage mode" : "Application mode";
+        result = { label, field, from, to: value, summary: `${label} set to ${value}.` };
+      } else if (change.kind === "automation") {
+        const op = String(change.op || "");
+        if (op === "consent") {
+          const error = actionError(
+            "Consent changes happen in Settings where the terms are shown.",
+            "SETTINGS_CHANGE_UNSUPPORTED"
+          );
+          error.details = { reason: "consent" };
+          throw error;
+        }
+        // One normalized boolean for both the tier gate and the writers below
+        // — REST callers have sent the flag as either `enabled` or `value`,
+        // and gating on one while persisting the other would let "turn this
+        // on" record it off.
+        const requested = change.enabled === true || change.value === true;
+        if ((op === "capability" || op === "platform") && requested) {
+          const capability = change.capability;
+          if (!isCapability(capability)) {
+            const error = actionError(
+              `Unknown capability "${capability}".`,
+              "SETTINGS_CHANGE_INVALID"
+            );
+            error.details = { options: CAPABILITY_KEYS };
+            throw error;
+          }
+          if (!new Set(["status_polling", "authenticated_search"]).has(capability)) {
+            const error = actionError(
+              `Turning on ${CAPABILITIES[capability].label} happens in Settings, where the permissions are explained.`,
+              "SETTINGS_CHANGE_UNSUPPORTED"
+            );
+            error.details = { reason: "capability-tier", capability };
+            throw error;
+          }
+        }
+
+        const automationDoc = mergeAutomationDefaults(loadAutomation({ root: repoRoot }).data);
+        let patch;
+        if (op === "setup_mode") {
+          const value = String(change.value || "");
+          if (value !== "basic" && value !== "advanced") {
+            throw actionError(
+              'Setup mode must be "basic" or "advanced".',
+              "SETTINGS_CHANGE_INVALID"
+            );
+          }
+          const from = automationDoc.setup_mode || "basic";
+          patch = { setup_mode: value };
+          result = {
+            label: "Automation setup mode",
+            field: "setup_mode",
+            from,
+            to: value,
+            summary: `Setup mode set to ${value}.`,
+          };
+        } else if (op === "capability") {
+          const capability = change.capability;
+          if (!isCapability(capability)) {
+            const error = actionError(
+              `Unknown capability "${capability}".`,
+              "SETTINGS_CHANGE_INVALID"
+            );
+            error.details = { options: CAPABILITY_KEYS };
+            throw error;
+          }
+          const value = requested;
+          const from = automationDoc.capabilities?.[capability]?.enabled === true;
+          patch = { capabilities: { [capability]: { enabled: value } } };
+          const label = `${CAPABILITIES[capability].label} (global switch)`;
+          result = {
+            label,
+            field: `capabilities.${capability}.enabled`,
+            from,
+            to: value,
+            summary: `${value ? "Turned on" : "Turned off"} ${CAPABILITIES[capability].label}.`,
+          };
+        } else if (op === "platform") {
+          const capability = change.capability;
+          const platform = change.platform;
+          if (!isCapability(capability)) {
+            const error = actionError(
+              `Unknown capability "${capability}".`,
+              "SETTINGS_CHANGE_INVALID"
+            );
+            error.details = { options: CAPABILITY_KEYS };
+            throw error;
+          }
+          if (!CAPABILITIES[capability].platforms.includes(platform)) {
+            const error = actionError(
+              `Unknown platform "${platform}" for ${capability}.`,
+              "SETTINGS_CHANGE_INVALID"
+            );
+            error.details = { options: CAPABILITIES[capability].platforms };
+            throw error;
+          }
+          const value = requested;
+          const from = automationDoc.capabilities?.[capability]?.platforms?.[platform] === true;
+          patch = { capabilities: { [capability]: { platforms: { [platform]: value } } } };
+          result = {
+            label: `${capability} on ${platform}`,
+            field: `capabilities.${capability}.platforms.${platform}`,
+            from,
+            to: value,
+            summary: `${value ? "Turned on" : "Turned off"} ${capability} for ${platform}.`,
+          };
+        } else if (op === "session") {
+          const provider = String(change.value || "").trim();
+          // Object.hasOwn: `provider` is HTTP-body input, and prototype-chain
+          // keys would pass a bare truthy lookup on the PROVIDERS literal.
+          if (!Object.hasOwn(PROVIDERS, provider)) {
+            const error = actionError(
+              `Unknown session provider "${provider}".`,
+              "SETTINGS_CHANGE_INVALID"
+            );
+            error.details = { options: Object.keys(PROVIDERS) };
+            throw error;
+          }
+          const from = automationDoc.session?.provider || "auto";
+          patch = { session: { provider } };
+          result = {
+            label: "Session browser provider",
+            field: "session.provider",
+            from,
+            to: provider,
+            summary: `Session browser set to ${provider}.`,
+          };
+        } else {
+          throw actionError(
+            `Unsupported automation change "${op}".`,
+            "SETTINGS_CHANGE_UNSUPPORTED"
+          );
+        }
+        candidateConfigPatch({ repoRoot, env, name: "automation", patch });
+      } else {
+        throw actionError(
+          `Unsupported setting change kind "${change.kind}".`,
+          "SETTINGS_CHANGE_UNSUPPORTED"
+        );
+      }
+
+      const artifact = {
+        kind: "settings_apply",
+        domain: change.kind,
+        label: result.label,
+        field: result.field,
+        from: result.from,
+        to: result.to,
+        summary: result.summary,
+        // Only the gate branch reports a no-op (applyGateWrite's changed:
+        // false); mode/automation writes always persist. Absent means changed.
+        ...(result.changed === false ? { changed: false } : {}),
+      };
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: result.summary,
+        artifacts: [artifact],
+        metadata: { domain: change.kind },
+        operationResult: result,
+        now,
+      });
+    }
+
     if (normalized.type === "company.proposal-decide") {
       const action = String(input.action || "").trim();
       if (!new Set(["approve-supported-ats", "reject"]).has(action)) {
@@ -4971,6 +5307,238 @@ function strategyReviewRequestFromText(text) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// settings.explain / settings.apply phrasings — the free-text half of the
+// Ask "configure" row. Anchored on words the terminal search.run catch-all
+// below doesn't own (settings, mode, automation, consent, capability,
+// polling, one-click apply, setup mode) — never the bare word "search",
+// which is owned by the source/search intents above.
+// ---------------------------------------------------------------------------
+
+function settingsExplainFromText(text) {
+  const value = String(text || "").trim();
+  if (/^(?:please\s+)?what(?:\s+are)?\s+my\s+settings\s*[.?!]*$/i.test(value)) return {};
+  if (/^(?:please\s+)?show\s+my\s+settings\s*[.?!]*$/i.test(value)) return {};
+  if (/^(?:please\s+)?show\s+my\s+automation\s+permissions\s*[.?!]*$/i.test(value))
+    return { domain: "automation" };
+  if (/^what\s+automation\s+is\s+enabled\s*[.?!]*$/i.test(value)) return { domain: "automation" };
+  if (/^what\s+mode\s+am\s+i\s+in\s*[.?!]*$/i.test(value)) return { domain: "modes" };
+  return null;
+}
+
+// "$150k", "150000", "$150,000" → 150000. Returns null on anything that
+// doesn't reduce to a finite non-negative number.
+function parseSettingsCompAmount(text) {
+  const match = String(text || "")
+    .trim()
+    .match(/^\$?\s*([\d,]+(?:\.\d+)?)\s*(k)?\s*$/i);
+  if (!match) return null;
+  const n = Number(match[1].replace(/,/g, ""));
+  if (!Number.isFinite(n) || n < 0) return null;
+  return match[2] ? n * 1000 : n;
+}
+
+// "set/change/raise/lower my comp floor|minimum|comp target|target comp|
+// expected comp|expected base to <amount>" → one GATE_ROUTES comp type, with
+// the raw (unparsed) value text so the caller can still detect a comp-leak
+// phrase ("to match my current salary") before treating it as a number.
+function settingsCompGateFromText(text) {
+  const value = String(text || "").trim();
+  const match = value.match(
+    /^(?:please\s+)?(?:set|change|raise|lower)\s+my\s+(comp\s+floor|minimum|comp\s+target|target\s+comp|expected\s+comp|expected\s+base)\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (!match) return null;
+  const noun = match[1].toLowerCase();
+  const rawValue = match[2].trim();
+  const type = /floor|minimum/.test(noun)
+    ? "comp-floor"
+    : /target/.test(noun)
+      ? "comp-target"
+      : "comp-expected";
+  return { type, rawValue };
+}
+
+// "exclude <Company> from my search", "never claim <tool>", "add <x> as a
+// cut/keep signal", "never fabricate <claim>" → one GATE_ROUTES signal type.
+function settingsGateSignalFromText(text) {
+  const value = String(text || "").trim();
+  let match = value.match(/^(?:please\s+)?exclude\s+(.+?)\s+from\s+my\s+search\s*[.?!]*$/i);
+  if (match) return { type: "exclude-company", rawValue: match[1].trim() };
+  match = value.match(/^(?:please\s+)?never\s+claim\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { type: "do-not-claim", rawValue: match[1].trim() };
+  match = value.match(/^(?:please\s+)?never\s+fabricate\s+(.+?)\s*[.?!]*$/i);
+  if (match) return { type: "do-not-fabricate", rawValue: match[1].trim() };
+  match = value.match(/^(?:please\s+)?add\s+(.+?)\s+as\s+a\s+cut\s+signal\s*[.?!]*$/i);
+  if (match) return { type: "cut-signal", rawValue: match[1].trim() };
+  match = value.match(/^(?:please\s+)?add\s+(.+?)\s+as\s+a\s+keep\s+signal\s*[.?!]*$/i);
+  if (match) return { type: "keep-signal", rawValue: match[1].trim() };
+  return null;
+}
+
+// "switch/set/change usage mode to <v>", "switch/set/change application mode
+// to <v>".
+function settingsModeFromText(text) {
+  const value = String(text || "").trim();
+  let match = value.match(
+    /^(?:please\s+)?(?:switch|set|change)\s+(?:my\s+)?usage\s+mode\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) return { field: "usage_mode", value: match[1].trim().toLowerCase() };
+  match = value.match(
+    /^(?:please\s+)?(?:switch|set|change)\s+(?:my\s+)?application\s+mode\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) return { field: "application_mode", value: match[1].trim().toLowerCase() };
+  return null;
+}
+
+// Human phrasings for a capability, mapped to the canonical CAPABILITIES key
+// — used by the "turn on/off <capability> [on <platform>]" matcher below.
+const AUTOMATION_CAPABILITY_PHRASES = {
+  "status polling": "status_polling",
+  "portal status polling": "status_polling",
+  "authenticated search": "authenticated_search",
+  "authenticated search scanning": "authenticated_search",
+  messaging: "messaging",
+  "in-platform messaging": "messaging",
+  "one-click apply": "one_click_apply",
+  "one click apply": "one_click_apply",
+  "profile optimize": "profile_optimize",
+  "profile apply": "profile_apply",
+  "mail access": "mail_access",
+  "webmail access": "mail_access",
+  "relationship sourcing": "relationship_sourcing",
+  "calendar sync": "calendar_sync",
+  "calendar read": "calendar_read",
+};
+
+function matchAutomationCapabilityPhrase(text) {
+  const lower = String(text || "")
+    .trim()
+    .toLowerCase();
+  for (const [phrase, key] of Object.entries(AUTOMATION_CAPABILITY_PHRASES)) {
+    if (lower === phrase) return key;
+  }
+  return null;
+}
+
+function matchAutomationPlatformPhrase(text) {
+  const lower = String(text || "")
+    .trim()
+    .toLowerCase();
+  return PLATFORMS.find((platform) => lower === platform || lower === platform.replace(/_/g, " "));
+}
+
+// "turn off <capability> [on <platform>]" (any capability — disabling is
+// always allowed), "turn on status polling / authenticated search [on
+// <platform>]" (the ONLY capabilities allowed to enable from Ask — see the
+// settings.apply handler's own capability-tier restriction, enforced there
+// too since REST can call the intent directly), "set setup mode to
+// advanced/basic", "use <provider> for browser sessions".
+function settingsAutomationFromText(text) {
+  const value = String(text || "").trim();
+
+  let match = value.match(/^(?:please\s+)?set\s+setup\s+mode\s+to\s+(advanced|basic)\s*[.?!]*$/i);
+  if (match) return { op: "setup_mode", value: match[1].toLowerCase() };
+
+  match = value.match(/^(?:please\s+)?use\s+(.+?)\s+for\s+browser\s+sessions\s*[.?!]*$/i);
+  if (match) {
+    const provider = match[1].trim().toLowerCase();
+    return Object.hasOwn(PROVIDERS, provider) ? { op: "session", value: provider } : null;
+  }
+
+  match = value.match(/^(?:please\s+)?turn\s+off\s+(.+?)(?:\s+on\s+(.+?))?\s*[.?!]*$/i);
+  if (match) {
+    const capability = matchAutomationCapabilityPhrase(match[1]);
+    if (!capability) return null;
+    return automationToggleChange(capability, match[2], false);
+  }
+
+  match = value.match(/^(?:please\s+)?turn\s+on\s+(.+?)(?:\s+on\s+(.+?))?\s*[.?!]*$/i);
+  if (match) {
+    const capability = matchAutomationCapabilityPhrase(match[1]);
+    if (!capability || !new Set(["status_polling", "authenticated_search"]).has(capability))
+      return null;
+    return automationToggleChange(capability, match[2], true);
+  }
+
+  return null;
+}
+
+// Named a platform? It must be one this capability actually runs on (each
+// capability has its own platform list in CAPABILITIES — status_polling is
+// ATS portals, not linkedin). A platform phrase that doesn't fit the
+// capability returns null so the user gets no chip (and falls through to
+// chat) instead of a plausible-looking chip the handler is guaranteed to
+// reject. No named platform means the capability-wide toggle.
+function automationToggleChange(capability, platformPhrase, enabled) {
+  if (!platformPhrase) return { op: "capability", capability, enabled };
+  const platform = matchAutomationPlatformPhrase(platformPhrase);
+  if (!platform || !CAPABILITIES[capability].platforms.includes(platform)) return null;
+  return { op: "platform", capability, platform, enabled };
+}
+
+// Combines the four settings.apply sub-matchers above into one discriminated
+// `change` object (or null when nothing matches). Runs the comp-leak
+// backstop BEFORE parsing a comp gate's amount, so "raise my comp floor to
+// match my current salary" never even reaches parseSettingsCompAmount.
+function settingsApplyFromText(text) {
+  const value = String(text || "").trim();
+
+  const compGate = settingsCompGateFromText(value);
+  if (compGate) {
+    if (findCompLeak(value)) {
+      return { kind: "gate", type: compGate.type, value: null, compReference: true };
+    }
+    const amount = parseSettingsCompAmount(compGate.rawValue);
+    return amount === null ? null : { kind: "gate", type: compGate.type, value: amount };
+  }
+
+  const gateSignal = settingsGateSignalFromText(value);
+  if (gateSignal) return { kind: "gate", type: gateSignal.type, value: gateSignal.rawValue };
+
+  const mode = settingsModeFromText(value);
+  if (mode) return { kind: "mode", field: mode.field, value: mode.value };
+
+  const automation = settingsAutomationFromText(value);
+  if (automation) return { kind: "automation", ...automation };
+
+  return null;
+}
+
+function formatSettingsUsd(amount) {
+  return `$${Number(amount).toLocaleString("en-US")}`;
+}
+
+// Human-readable preview-chip label for a settings.apply change. Reuses
+// GATE_APPLY_SUMMARIES formatting for the signal-append gate types (the same
+// completed-tense sentence works fine as a preview here); comp/mode/
+// automation changes get a present-tense action phrasing instead.
+function settingsApplyPreviewLabel(change) {
+  if (change.kind === "gate") {
+    if (change.compReference) return "Update this comp setting";
+    if (change.type === "comp-floor") return `Set comp floor to ${formatSettingsUsd(change.value)}`;
+    if (change.type === "comp-target")
+      return `Set comp target to ${formatSettingsUsd(change.value)}`;
+    if (change.type === "comp-expected")
+      return `Set expected comp to ${formatSettingsUsd(change.value)}`;
+    if (change.type === "exclude-company") return `Exclude "${change.value}" from your search`;
+    return GATE_APPLY_SUMMARIES[change.type]?.(change.value) || `Update ${change.type}`;
+  }
+  if (change.kind === "mode") {
+    const label = change.field === "usage_mode" ? "usage mode" : "application mode";
+    return `Set ${label} to ${change.value}`;
+  }
+  if (change.kind === "automation") {
+    if (change.op === "setup_mode") return `Set automation setup mode to ${change.value}`;
+    if (change.op === "session") return `Use ${change.value} for browser sessions`;
+    const capabilityLabel = CAPABILITIES[change.capability]?.label || change.capability;
+    const verb = change.enabled ? "Turn on" : "Turn off";
+    return change.platform
+      ? `${verb} ${capabilityLabel} on ${change.platform}`
+      : `${verb} ${capabilityLabel}`;
+  }
+  return "Update this setting";
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -5308,6 +5876,29 @@ const ACTION_PREVIEW_RULES = [
       type: "job.evaluate-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: { jobUrl: firstHttpUrl(text) },
+    }),
+  },
+  // ORDERING REQUIREMENT: settings.explain / settings.apply MUST stay above
+  // the terminal search.run catch-all immediately below — that rule matches
+  // a bare "check"/"search"/"find"/"run" verb near "jobs/roles/postings/
+  // boards/sources" and would otherwise never let phrasings like "turn off
+  // status polling" or "check my settings" reach these rules first.
+  {
+    test: (text) => Boolean(settingsExplainFromText(text)),
+    label: "Show my settings",
+    intent: (text) => ({
+      type: "settings.explain",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: settingsExplainFromText(text),
+    }),
+  },
+  {
+    test: (text) => Boolean(settingsApplyFromText(text)),
+    label: (text) => settingsApplyPreviewLabel(settingsApplyFromText(text)),
+    intent: (text) => ({
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: settingsApplyFromText(text) },
     }),
   },
   {

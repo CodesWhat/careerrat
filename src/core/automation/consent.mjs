@@ -134,6 +134,31 @@ export function defaultAutomation() {
   };
 }
 
+// mergeAutomationDefaults — fill in every capability/platform/session field a
+// stored automation doc doesn't set yet, so a newly-added capability (or a
+// doc that predates one) reads `false`/defaults instead of `undefined`. Used
+// by the CLI's DB-mode edit path (src/cli/automation.mjs) and by the
+// settings.explain/settings.apply Ask intents (workspace-agent.mjs) so both
+// surfaces compute the same "current value" for a toggle.
+export function mergeAutomationDefaults(data) {
+  return deepMerge(defaultAutomation(), data && typeof data === "object" ? data : {});
+}
+
+function deepMerge(base, patch) {
+  if (Array.isArray(patch)) return patch.slice();
+  if (!patch || typeof patch !== "object") return patch;
+  const out = { ...(base && typeof base === "object" && !Array.isArray(base) ? base : {}) };
+  for (const [key, value] of Object.entries(patch)) {
+    out[key] =
+      value && typeof value === "object" && !Array.isArray(value)
+        ? deepMerge(out[key], value)
+        : Array.isArray(value)
+          ? value.slice()
+          : value;
+  }
+  return out;
+}
+
 export function automationModePatch(mode) {
   if (mode === "advanced") return { setup_mode: "advanced" };
   if (mode !== "basic") throw new Error('automation mode must be "basic" or "advanced"');
