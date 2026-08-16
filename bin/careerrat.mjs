@@ -64,6 +64,7 @@ import {
   readUpdateNotice,
   refreshUpdateCacheInBackground,
 } from "../src/core/update/update-core.mjs";
+import { readVersion } from "../src/core/version.mjs";
 
 const root = join(fileURLToPath(new URL("..", import.meta.url)));
 const pathCtx = { repoRoot: root };
@@ -481,14 +482,6 @@ function run(scriptPath, extra) {
     return 1;
   }
   return res.status == null ? 1 : res.status;
-}
-
-function readVersion() {
-  try {
-    return JSON.parse(readFileSync(join(root, "package.json"), "utf8")).version || "unknown";
-  } catch {
-    return "unknown";
-  }
 }
 
 function parseUpdateArgs(extra) {

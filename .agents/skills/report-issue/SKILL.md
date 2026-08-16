@@ -144,6 +144,43 @@ Give the user the issue URL (or the prefilled link) and a one-line confirmation 
 
 ---
 
+## Conversational workspace path
+
+In the Ask workspace, preparing a redacted report and recording the filed
+result are native: the app runs typed intents (`issue.report`,
+`issue.record-filed`) directly in `workspace-agent.mjs`, not this skill's
+CLI steps. A terminal or external-agent run still follows STEP 1 → 6 exactly
+as written, using `gh` directly.
+
+- **Prepare.** "Report a bug" (optionally with a description) builds an
+  `issue_report` draft from the most recent workspace error, the app and Node
+  versions, and the platform. Diagnostics are codes-primary: the error code
+  maps to a generic developer-facing description, and raw error text is
+  included only for unmapped codes after redaction; if any workspace
+  identifier survives the scrub, the raw text is withheld entirely and the
+  card says so. Home paths normalize, tracked company/role names, candidate
+  location strings, and candidate identity strings are replaced, and comp
+  phrasings in the user's own description are refused with a rewrite ask.
+  Bare dollar figures split by source: in the user's own description they
+  get a visible review warning, while in machine-generated error text they
+  have no human in the loop to review them, so that text is withheld
+  entirely like any other unredactable message.
+- **File.** The card shows the full draft for review with a prefilled GitHub
+  new-issue link. The app never runs `gh`, never holds GitHub credentials,
+  and never posts: the user files it in their own browser under their own
+  account, which is the explicit-consent step. STEP 3's dedup search has no
+  workspace equivalent (the app cannot query GitHub); GitHub's own
+  similar-issue suggestions on the new-issue page are the fallback, a known
+  trade-off of this path.
+- **Record.** "I filed it" runs `issue.record-filed`, which stores an
+  `issue_filed` receipt in the workspace thread (with the issue URL when
+  pasted, strictly validated to this repo's issue shape). Like STEP 6, this
+  writes no Activity Pulse entry, and neither artifact lands in Downloads:
+  the tooling-action exemption covers the Artifact Contract's export rule
+  too, not just the Activity log.
+
+---
+
 ## Rules
 
 - **Confirm-first, always.** The rendered issue is shown and approved before anything posts. Never auto-file.

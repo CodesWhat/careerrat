@@ -309,6 +309,26 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "issue report: description referenced pay figures or personal/company names",
+    err: new ApiError(400, {
+      code: "ISSUE_REPORT_COMP_LEAK",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "Rewrite the description without pay figures or personal or company names, then try again.",
+    action: null,
+  },
+  {
+    name: "issue record-filed: url isn't a CodesWhat/careerrat issue link",
+    err: new ApiError(400, {
+      code: "ISSUE_URL_INVALID",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "That doesn't look like a CareerRat GitHub issue link. Paste the full issue URL, like https://github.com/CodesWhat/careerrat/issues/123.",
+    action: null,
+  },
+  {
     name: "PDF/DOCX not supported prefix",
     err: new ApiError(400, { error: "PDF/DOCX not supported yet, use text or markdown" }),
     message:

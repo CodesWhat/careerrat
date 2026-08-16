@@ -2687,6 +2687,195 @@ async function runStrategyReviewTurn(message) {
   return render();
 }
 
+// ---------------------------------------------------------------------------
+// 4c. issue_report / issue_filed artifacts (report-issue skill —
+// IssueReportCard/IssueFiledCard, src/core/agent/issue-report.mjs's
+// buildIssueReport/buildIssueUrl feeding the issue.report/issue.record-filed
+// handlers in workspace-agent.mjs)
+// ---------------------------------------------------------------------------
+
+function issueReportActionPreview() {
+  return {
+    action: {
+      label: "Prepare a bug report",
+      intent: {
+        type: "issue.report",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { description: "" },
+      },
+    },
+    answer: { label: "Answer about filing a bug report" },
+    engineAvailable: true,
+  };
+}
+
+async function runIssueTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(issueReportActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "report a bug" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — issue_report / issue_filed artifacts", () => {
+  it("renders an IssueReportCard with every conditional note and a working GitHub link when every flag is set", async () => {
+    const tree = await runIssueTurn({
+      text: "I put together a redacted bug report, but this looks like it could be a setup problem.",
+      artifacts: [
+        {
+          kind: "issue_report",
+          title: "CareerRat crashed while tailoring",
+          body: "## What happened\nSomething broke.",
+          url: "https://github.com/CodesWhat/careerrat/issues/new?title=T&body=B&labels=bug",
+          truncated: true,
+          hasError: true,
+          errorCode: "NO_DATABASE",
+          configHint: true,
+          compFlagged: true,
+          errorMessageDropped: true,
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("Bug report draft");
+    expect(textOf(tree)).toContain("CareerRat crashed while tailoring");
+    expect(textOf(tree)).toContain("## What happened");
+    expect(textOf(tree)).toMatch(/setup problem/i);
+    expect(textOf(tree)).toMatch(/pay figure/i);
+    expect(textOf(tree)).toMatch(/left out because it referenced workspace data/i);
+    expect(textOf(tree)).toMatch(/prefilled form is shortened/i);
+
+    const link = visit(tree, (n) => n.type === "a" && textOf(n) === "Open GitHub to file")[0];
+    expect(link).toBeTruthy();
+    expect(link.props.href).toBe(
+      "https://github.com/CodesWhat/careerrat/issues/new?title=T&body=B&labels=bug"
+    );
+    expect(link.props.target).toBe("_blank");
+    expect(link.props.rel).toBe("noreferrer");
+
+    expect(buttonByText(tree, "Copy full report")).toBeTruthy();
+  });
+
+  it("renders an IssueReportCard with no conditional notes and no link when every flag is clear or the url is hostile", async () => {
+    const tree = await runIssueTurn({
+      text: "I put together a redacted bug report for you to review before filing.",
+      artifacts: [
+        {
+          kind: "issue_report",
+          title: "CareerRat crashed",
+          body: "## What happened\nSomething broke.",
+          url: "javascript:alert(1)",
+          truncated: false,
+          hasError: false,
+          errorCode: null,
+          configHint: false,
+          compFlagged: false,
+          errorMessageDropped: false,
+        },
+      ],
+    });
+
+    expect(textOf(tree)).not.toMatch(/setup problem/i);
+    expect(textOf(tree)).not.toMatch(/pay figure/i);
+    expect(textOf(tree)).not.toMatch(/left out because it referenced workspace data/i);
+    expect(textOf(tree)).not.toMatch(/prefilled form is shortened/i);
+    expect(visit(tree, (n) => n.type === "a" && textOf(n) === "Open GitHub to file")).toHaveLength(
+      0
+    );
+    expect(buttonByText(tree, "Copy full report")).toBeTruthy();
+  });
+
+  it("renders an IssueFiledCard link for a strict CodesWhat/careerrat issue URL", async () => {
+    const url = "https://github.com/CodesWhat/careerrat/issues/456";
+    const tree = await runIssueTurn({
+      text: `Recorded — filed at ${url}.`,
+      artifacts: [{ kind: "issue_filed", url, at: "2026-08-15T00:00:00.000Z" }],
+    });
+
+    expect(textOf(tree)).toContain("Bug report filed");
+    const link = visit(tree, (n) => n.type === "a" && textOf(n) === url)[0];
+    expect(link).toBeTruthy();
+    expect(link.props.href).toBe(url);
+    expect(link.props.target).toBe("_blank");
+    expect(link.props.rel).toBe("noreferrer");
+    expect(textOf(tree)).not.toContain("This issue was recorded.");
+  });
+
+  it("falls back to 'This issue was recorded.' for a hostile issue_filed url, rendering no link at all", async () => {
+    const tree = await runIssueTurn({
+      text: "Recorded that you filed the issue.",
+      artifacts: [
+        { kind: "issue_filed", url: "javascript:alert(1)", at: "2026-08-15T00:00:00.000Z" },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("Bug report filed");
+    expect(textOf(tree)).toContain("This issue was recorded.");
+    expect(
+      visit(tree, (n) => n.type === "a" && n.props.href?.startsWith("javascript:"))
+    ).toHaveLength(0);
+  });
+
+  it("falls back to 'This issue was recorded.' for an issue_filed url pointing at a different repo", async () => {
+    const tree = await runIssueTurn({
+      text: "Recorded that you filed the issue.",
+      artifacts: [
+        {
+          kind: "issue_filed",
+          url: "https://github.com/EvilOrg/careerrat/issues/456",
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("This issue was recorded.");
+    expect(
+      visit(
+        tree,
+        (n) => n.type === "a" && textOf(n) === "https://github.com/EvilOrg/careerrat/issues/456"
+      )
+    ).toHaveLength(0);
+  });
+
+  it("omits the setup-problem note when issue.report's configHint is false, even with other flags set", async () => {
+    const tree = await runIssueTurn({
+      text: "I put together a redacted bug report for you to review before filing.",
+      artifacts: [
+        {
+          kind: "issue_report",
+          title: "CareerRat crashed",
+          body: "## What happened\nSomething broke.",
+          url: null,
+          truncated: false,
+          hasError: true,
+          errorCode: "SEARCH_FAILED",
+          configHint: false,
+          compFlagged: false,
+          errorMessageDropped: false,
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("Bug report draft");
+    expect(textOf(tree)).not.toMatch(/setup problem/i);
+    expect(visit(tree, (n) => n.type === "a" && textOf(n) === "Open GitHub to file")).toHaveLength(
+      0
+    );
+  });
+});
+
 describe("AskBar — strategy_review / strategy_apply artifacts", () => {
   it("renders a drafted review with headline, findings, per-type chips, gated Apply buttons, consequence copy, and a manual row for writing-style", async () => {
     const tree = await runStrategyReviewTurn({

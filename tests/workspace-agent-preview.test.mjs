@@ -1044,6 +1044,60 @@ test("previewWorkspaceIntent: unrelated outcome and note phrasings are unaffecte
   assert.equal(previewWorkspaceIntent({ text: noteToSelf, repoRoot, env: {} }).action, null);
 });
 
+// ---------------------------------------------------------------------------
+// issue.report matcher (report-issue skill)
+// ---------------------------------------------------------------------------
+
+test("previewWorkspaceIntent: bug-report phrasings map to issue.report with the trailing text captured as description", () => {
+  const repoRoot = tempRepo();
+  const cases = [
+    ["report a bug", ""],
+    ["file an issue: the tailor step crashed", "the tailor step crashed"],
+    ["careerrat crashed", ""],
+    ["the app is broken", ""],
+  ];
+  for (const [text, description] of cases) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(
+      result.action,
+      {
+        label: "Prepare a bug report",
+        intent: {
+          type: "issue.report",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { description },
+        },
+      },
+      `expected "${text}" to map to issue.report`
+    );
+  }
+});
+
+test("previewWorkspaceIntent: bare 'broken' phrasings without a report/file verb or product token stay ordinary chat", () => {
+  const repoRoot = tempRepo();
+  for (const text of ["this offer is broken", "this is broken", "report on my pipeline"]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(result.action, null, `expected "${text}" to not classify as an action`);
+  }
+});
+
+test("previewWorkspaceIntent: 'report a bug' stays issue.report even when the trailing text mentions searching for jobs", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "report a bug when I search for jobs",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Prepare a bug report",
+    intent: {
+      type: "issue.report",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { description: "when I search for jobs" },
+    },
+  });
+});
+
 test("previewWorkspaceIntent: excluding a company classifies as a settings.apply gate change", () => {
   const repoRoot = tempRepo();
   const result = previewWorkspaceIntent({

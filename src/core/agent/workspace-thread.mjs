@@ -69,6 +69,8 @@ export const WORKSPACE_INTENT_ENTITY_TYPES = Object.freeze({
   "outcome.record": ["application"],
   "outcome.record-request": ["workspace"],
   "profile.enrich": ["candidate"],
+  "issue.report": ["workspace"],
+  "issue.record-filed": ["workspace"],
 });
 
 function makeError(message, code) {
@@ -394,6 +396,8 @@ function intentText(intent) {
     "outcome.record": "Record this outcome",
     "outcome.record-request": "Resolve and record this outcome",
     "profile.enrich": "Enrich my profile",
+    "issue.report": "Prepare a redacted bug report",
+    "issue.record-filed": "Record that I filed the issue",
   };
   return `${descriptions[intent.type]} (${intent.entity.type}:${intent.entity.id}).`;
 }

@@ -98,6 +98,8 @@ function statusForError(error) {
       "STRATEGY_APPLY_INVALID",
       "SETTINGS_CHANGE_UNSUPPORTED",
       "SETTINGS_CHANGE_INVALID",
+      "ISSUE_REPORT_COMP_LEAK",
+      "ISSUE_URL_INVALID",
     ].includes(error?.code)
   ) {
     return 400;
