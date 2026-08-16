@@ -961,6 +961,160 @@ test("calendarWriteAppend appends calendar write history, dedupes provider/event
   assert.ok(activityRow(db, second.event.id));
 });
 
+test("calendarWriteAppend defaults provenance to manual, coerces an invalid value, and persists automated when explicitly set", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  const defaulted = calendarWriteAppend({
+    repoRoot,
+    record: {
+      provider: "google_calendar",
+      eventId: "evt-default",
+      title: "Interview hold",
+      eventIso: "2030-02-01T14:00:00.000Z",
+    },
+  });
+  assert.equal(defaulted.record.provenance, "manual");
+  assert.equal(defaulted.event.title, "Calendar write recorded");
+
+  const invalid = calendarWriteAppend({
+    repoRoot,
+    record: {
+      provider: "apple_calendar",
+      eventId: "evt-invalid",
+      title: "Onsite hold",
+      eventIso: "2030-02-02T14:00:00.000Z",
+      provenance: "definitely-not-real",
+    },
+  });
+  assert.equal(invalid.record.provenance, "manual");
+  assert.equal(invalid.event.title, "Calendar write recorded");
+
+  // The verb itself gates automated provenance on a live calendar_sync
+  // grant, so the consent has to exist before an automated row can persist.
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: { calendar_sync: { enabled: true, platforms: { outlook_calendar: true } } },
+      consent: { outlook_calendar: true },
+    },
+  });
+  const automated = calendarWriteAppend({
+    repoRoot,
+    record: {
+      provider: "outlook_calendar",
+      eventId: "evt-automated",
+      title: "Screen hold",
+      eventIso: "2030-02-03T14:00:00.000Z",
+      provenance: "automated",
+    },
+  });
+  assert.equal(automated.record.provenance, "automated");
+  assert.equal(automated.event.title, "Calendar event synced");
+
+  const stored = readKv(db, "calendarWrites");
+  assert.equal(stored.length, 3);
+});
+
+test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated always beats a manual self-report of the same event", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  // Automated rows in the matrix below must clear the verb-level consent
+  // gate, so grant calendar_sync for the matrix provider up front.
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: { calendar_sync: { enabled: true, platforms: { google_calendar: true } } },
+      consent: { google_calendar: true },
+    },
+  });
+
+  const sameEvent = {
+    provider: "google_calendar",
+    eventId: "evt-matrix",
+    title: "Recurring hold",
+    eventIso: "2030-03-01T14:00:00.000Z",
+  };
+
+  // manual then manual -> second replaces (a corrected summary wins).
+  calendarWriteAppend({
+    repoRoot,
+    record: { ...sameEvent, provenance: "manual", summary: "First manual." },
+  });
+  let result = calendarWriteAppend({
+    repoRoot,
+    record: { ...sameEvent, provenance: "manual", summary: "Second manual." },
+  });
+  assert.equal(result.record.provenance, "manual");
+  assert.equal(result.record.summary, "Second manual.");
+  assert.equal(readKv(db, "calendarWrites").length, 1);
+
+  // manual then automated -> automated replaces.
+  result = calendarWriteAppend({
+    repoRoot,
+    record: { ...sameEvent, provenance: "automated", summary: "Now automated." },
+  });
+  assert.equal(result.record.provenance, "automated");
+  assert.equal(result.record.summary, "Now automated.");
+  assert.equal(readKv(db, "calendarWrites").length, 1);
+
+  // automated then manual -> automated stays; the manual self-report is dropped,
+  // never downgrading an already app-verified record. A dropped no-op also
+  // logs no activity event, so repeated self-reports can't pile up audit rows.
+  result = calendarWriteAppend({
+    repoRoot,
+    record: { ...sameEvent, provenance: "manual", summary: "Attempted downgrade." },
+  });
+  assert.equal(result.record.provenance, "automated");
+  assert.equal(result.record.summary, "Now automated.");
+  assert.equal(result.replaced, false);
+  assert.equal(result.event, null);
+  assert.equal(readKv(db, "calendarWrites").length, 1);
+
+  // automated then automated -> second replaces.
+  result = calendarWriteAppend({
+    repoRoot,
+    record: { ...sameEvent, provenance: "automated", summary: "Second automated." },
+  });
+  assert.equal(result.record.provenance, "automated");
+  assert.equal(result.record.summary, "Second automated.");
+  assert.equal(readKv(db, "calendarWrites").length, 1);
+});
+
+test("calendarWriteAppend refuses an automated record without a live calendar_sync grant", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  // The gate lives in the verb itself, so the ungated legacy entry points
+  // (the data route and the CLI) meet the same bar as the Ask intent: no
+  // grant, no "automated, app-verified" row.
+  assert.throws(
+    () =>
+      calendarWriteAppend({
+        repoRoot,
+        record: {
+          provider: "google_calendar",
+          eventId: "evt-ungated",
+          title: "Fabricated hold",
+          eventIso: "2030-04-01T14:00:00.000Z",
+          provenance: "automated",
+        },
+      }),
+    (error) => error.code === "CALENDAR_WRITE_NOT_ALLOWED"
+  );
+  assert.equal(readKv(db, "calendarWrites"), null);
+});
+
 test("relationshipLeadUpsertBatch stores review leads, dedupes company/name/platform, and clears sourcing CTAs on linked apps", () => {
   const repoRoot = tempRepo();
   seedFixture(repoRoot);

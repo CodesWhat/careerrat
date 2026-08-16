@@ -377,3 +377,87 @@ describe("CalendarPage", () => {
     expect(event).toBeLessThan(laterHeading);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Calendar apps sync panel (buildCalendarSync — dashboard-data.js), a plain
+// status readout: which calendar providers are connected and the last few
+// confirmed writes. Nothing here is scheduling data.
+// ---------------------------------------------------------------------------
+
+const CALENDAR_SYNC_DATA = {
+  ...CALENDAR_DATA,
+  sync: {
+    capability: "calendar_sync",
+    posture: "Confirm-first",
+    providers: [
+      { key: "apple_calendar", label: "Apple Calendar", status: "Ready" },
+      { key: "google_calendar", label: "Google Calendar", status: "Needs setup" },
+      { key: "outlook_calendar", label: "Outlook Calendar", status: "Off" },
+      { key: "automation_tools", label: "Automation tools", status: "Consent gated" },
+    ],
+    history: [
+      {
+        id: "cal-write-automated",
+        provider: "apple_calendar",
+        providerLabel: "Apple Calendar",
+        title: "Temporal onsite",
+        eventIso: "2026-07-15",
+        atLabel: "Jul 15",
+        provenance: "automated",
+      },
+      {
+        id: "cal-write-manual",
+        provider: "google_calendar",
+        providerLabel: "Google Calendar",
+        title: "Globex screen",
+        eventIso: "2026-07-09",
+        atLabel: "Jul 9",
+        provenance: "manual",
+      },
+    ],
+  },
+};
+
+describe("CalendarPage — calendar apps sync panel", () => {
+  it("reserves the ok badge for a Ready provider and shows every other status as muted", () => {
+    const html = renderCalendarPage({ data: { calendar: CALENDAR_SYNC_DATA } });
+
+    expect(html).toContain("Calendar apps");
+    expect(html).toContain("CareerRat only writes to a calendar after you approve it.");
+
+    expect(html).toMatch(/<span class="badge badge--ok">Ready<\/span>/);
+    expect(html).toMatch(/<span class="badge badge--muted">Needs setup<\/span>/);
+    expect(html).toMatch(/<span class="badge badge--muted">Off<\/span>/);
+    expect(html).toMatch(/<span class="badge badge--muted">Consent gated<\/span>/);
+  });
+
+  it("labels an automated write as synced and a manual self-report as recorded", () => {
+    const html = renderCalendarPage({ data: { calendar: CALENDAR_SYNC_DATA } });
+
+    expect(html).toContain("Temporal onsite");
+    expect(html).toContain("Globex screen");
+    expect(html).toMatch(/<small>Apple Calendar · [^<]*synced<\/small>/);
+    expect(html).toMatch(/<small>Google Calendar · [^<]*recorded<\/small>/);
+  });
+
+  it("shows the empty-history line when there are no confirmed calendar writes yet", () => {
+    const html = renderCalendarPage({
+      data: {
+        calendar: {
+          ...CALENDAR_DATA,
+          sync: { ...CALENDAR_SYNC_DATA.sync, history: [] },
+        },
+      },
+    });
+
+    expect(html).toContain("No confirmed calendar writes yet.");
+  });
+
+  it("shows the export microcopy note beside the .ics/Google/Outlook links", () => {
+    const html = renderCalendarPage();
+
+    expect(html).toContain(
+      "These links create an event in your calendar app. Nothing stays in sync."
+    );
+  });
+});

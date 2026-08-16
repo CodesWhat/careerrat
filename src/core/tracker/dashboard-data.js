@@ -2181,10 +2181,25 @@ function normalizeCalendarWrite(record) {
     atLabel: formatDateShort(isoDate(wroteAt), "Recent"),
     eventIso: record.eventIso || isoDate(record.eventAt || record.date || ""),
     summary: compactUiText(record.summary || record.note || "Confirmed calendar write.", 120),
+    // Rows written before provenance existed all came through the automated
+    // skill/CLI path, so anything not explicitly manual reads as automated.
+    provenance: record.provenance === "manual" ? "manual" : "automated",
   };
 }
 
-function buildCalendarSync(trackerData) {
+// providerStatus is the route-merged per-provider automation status map
+// ({ [providerKey]: { allowed, enabled, consent } }, from automationStatus()'s
+// calendar_sync platforms — see dashboard-route.mjs). allowed means the
+// switches (capability/platform/consent) are all on; enabled/consent on their
+// own with allowed false means partial setup; neither on means untouched.
+function calendarProviderStatusLabel(entry) {
+  if (!entry) return "Consent gated";
+  if (entry.allowed) return "Ready";
+  if (entry.enabled || entry.consent) return "Needs setup";
+  return "Off";
+}
+
+function buildCalendarSync(trackerData, providerStatus) {
   const writes = [
     ...arrayOrEmpty(trackerData?.calendarWrites),
     ...arrayOrEmpty(trackerData?.calendarSync?.writes),
@@ -2199,7 +2214,7 @@ function buildCalendarSync(trackerData) {
     posture: "Confirm-first",
     providers: CALENDAR_SYNC_PROVIDERS.map((provider) => ({
       ...provider,
-      status: "Consent gated",
+      status: calendarProviderStatusLabel(providerStatus?.[provider.key]),
     })),
     history: writes,
   };
@@ -2582,7 +2597,7 @@ function buildCalendarProtectedPrep(events, todayIso) {
   };
 }
 
-function buildCalendar(trackerData, { now = new Date() } = {}) {
+function buildCalendar(trackerData, { now = new Date(), calendarProviderStatus = null } = {}) {
   const todayIso = isoDate(now);
   const events = buildCalendarEvents(trackerData, now);
   const busyEvents = buildCalendarBusy(trackerData);
@@ -2621,7 +2636,7 @@ function buildCalendar(trackerData, { now = new Date() } = {}) {
       events: upcomingEvents,
     },
     protectedPrep: buildCalendarProtectedPrep(events, todayIso),
-    sync: buildCalendarSync(trackerData),
+    sync: buildCalendarSync(trackerData, calendarProviderStatus),
   };
 }
 
@@ -5188,6 +5203,7 @@ export function buildDashboardViewModel(
     settings = null,
     library = null,
     agentGuidance = null,
+    calendarProviderStatus = null,
   } = {}
 ) {
   activeCandidateName = normalizeName(settings?.profile?.candidate || "");
@@ -5214,7 +5230,7 @@ export function buildDashboardViewModel(
     latestRoles,
     sourcedRoles: buildSourcedRoles(trackerData),
     reviewHoldRoles: buildReviewHoldRoles(trackerData),
-    calendar: buildCalendar(trackerData, { now }),
+    calendar: buildCalendar(trackerData, { now, calendarProviderStatus }),
     strategy: buildStrategyInsights(trackerData, { now }),
     jobs: buildJobs(trackerData, {
       now,

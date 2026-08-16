@@ -401,6 +401,34 @@ const RULE_CASES = [
     message: "Advanced mode must be turned on first.",
     action: null,
   },
+  {
+    name: "CALENDAR_WRITE_PROVIDER_INVALID code",
+    err: new ApiError(400, {
+      code: "CALENDAR_WRITE_PROVIDER_INVALID",
+      error: "provider must be one of apple_calendar, google_calendar, outlook_calendar",
+    }),
+    message: "Say which calendar app you used: Google, Outlook, or Apple.",
+    action: null,
+  },
+  {
+    name: "CALENDAR_WRITE_EVENT_UNRESOLVED code",
+    err: new ApiError(400, {
+      code: "CALENDAR_WRITE_EVENT_UNRESOLVED",
+      error: "Tell me which tracked interview or event you mean, like the company name.",
+    }),
+    message: "Name the tracked interview or event, like the company it's with.",
+    action: null,
+  },
+  {
+    name: "CALENDAR_WRITE_NOT_ALLOWED code",
+    err: new ApiError(400, {
+      code: "CALENDAR_WRITE_NOT_ALLOWED",
+      error:
+        "Automated calendar sync isn't enabled for that provider. Turn it on in Settings first.",
+    }),
+    message: "Automated calendar sync is off for that provider. You can turn it on in Settings.",
+    action: null,
+  },
 ];
 
 describe("resolveErrorCopy — mapped rules", () => {

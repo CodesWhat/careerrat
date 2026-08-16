@@ -6,6 +6,7 @@
 // invariant (start/end only, label always "Busy") that callers should not be
 // able to bypass.
 import { createHash } from "node:crypto";
+import { mayRun } from "../../automation/consent.mjs";
 import { bumpMeta, logActivityEvent, nowIso, runVerb } from "./shared.mjs";
 
 const CALENDAR_BUSY_KEY = "calendarBusy";
@@ -16,12 +17,13 @@ const PROVIDERS = new Set([
   "google_calendar",
   "outlook_calendar",
 ]);
-const WRITE_PROVIDERS = new Set([
+export const WRITE_PROVIDERS = new Set([
   "apple_calendar",
   "google_calendar",
   "outlook_calendar",
   "automation_tools",
 ]);
+const WRITE_PROVENANCES = new Set(["automated", "manual"]);
 
 function readKvArray(db, key) {
   const row = db.prepare("SELECT data FROM kv WHERE key = ?").get(key);
@@ -164,10 +166,12 @@ function normalizeCalendarWrite(record, { wroteAt } = {}) {
   assertWriteIso("wroteAt", writeAt);
 
   const eventId = trimOrNull(record.eventId || record.calendarEventId);
+  const provenance = WRITE_PROVENANCES.has(record.provenance) ? record.provenance : "manual";
   const normalized = {
     id: trimOrNull(record.id) || stableCalendarWriteId(provider, eventId, eventIso, title),
     eventId,
     provider,
+    provenance,
     title,
     status: trimOrNull(record.status) || "written",
     wroteAt: writeAt,
@@ -185,6 +189,26 @@ function normalizeCalendarWrite(record, { wroteAt } = {}) {
 // calendarWriteAppend({record}) — append one confirm-first external calendar
 // write audit row to top-level calendarWrites[], deduped by provider/event/date/title.
 export function calendarWriteAppend({ repoRoot, env, record } = {}) {
+  // The consent gate lives HERE, at the single function that persists a
+  // calendarWrites[] row, so every caller (workspace-agent intent, data
+  // route, CLI) meets the same bar: "automated" asserts the app's own
+  // sanctioned automation wrote the event, which must be backed by a live
+  // calendar_sync grant. Manual self-reports are never gated.
+  if (record?.provenance === "automated") {
+    const verdict = mayRun({
+      capability: "calendar_sync",
+      platform: record.provider || record.platform,
+      root: repoRoot,
+      env,
+    });
+    if (!verdict.allowed) {
+      const error = new Error(
+        "Automated calendar sync isn't enabled for that provider, so an automated write can't be recorded."
+      );
+      error.code = "CALENDAR_WRITE_NOT_ALLOWED";
+      throw error;
+    }
+  }
   return runVerb({ repoRoot, env }, (db) => {
     const wroteAt = nowIso();
     const normalized = normalizeCalendarWrite(record, { wroteAt });
@@ -193,23 +217,49 @@ export function calendarWriteAppend({ repoRoot, env, record } = {}) {
       const current = normalizeCalendarWrite(existing, { wroteAt: existing.wroteAt || wroteAt });
       merged.set(writeDedupeKey(current), current);
     }
-    merged.set(writeDedupeKey(normalized), normalized);
+    const key = writeDedupeKey(normalized);
+    const existingRecord = merged.get(key);
+    // Dedupe policy: writeDedupeKey (provider+eventId+eventIso+title) has no
+    // provenance in it, so a manual self-report and an automated write of the
+    // SAME event collide on it. Re-records replace the existing row (a
+    // corrected summary should win) with one exception: a manual self-report
+    // never downgrades an automated, app-verified record already on file.
+    const shouldReplace =
+      !existingRecord ||
+      !(existingRecord.provenance === "automated" && normalized.provenance === "manual");
+    if (shouldReplace) merged.set(key, normalized);
+    const finalRecord = merged.get(key);
 
     const writes = [...merged.values()].sort((a, b) =>
       String(a.wroteAt || "").localeCompare(String(b.wroteAt || ""))
     );
     putKvArray(db, CALENDAR_WRITES_KEY, writes);
     const meta = bumpMeta(db);
-    const event = logActivityEvent(db, {
-      type: "system",
-      title: "Calendar event synced",
-      summary: normalized.summary || "Confirmed event written to the selected calendar provider.",
-      refs: record?.applicationId
-        ? { applicationId: record.applicationId, company: record.company, role: record.role }
-        : { company: record?.company, role: record?.role },
-      tags: ["calendar"],
-      operation: "calendar:write-append",
-    });
-    return { key: CALENDAR_WRITES_KEY, count: writes.length, record: normalized, meta, event };
+    // A dropped no-op collision changes nothing on file, so it logs nothing:
+    // repeated self-reports of the same event must not pile up audit rows.
+    const event = shouldReplace
+      ? logActivityEvent(db, {
+          type: "system",
+          title:
+            normalized.provenance === "automated"
+              ? "Calendar event synced"
+              : "Calendar write recorded",
+          summary:
+            normalized.summary || "Confirmed event written to the selected calendar provider.",
+          refs: record?.applicationId
+            ? { applicationId: record.applicationId, company: record.company, role: record.role }
+            : { company: record?.company, role: record?.role },
+          tags: ["calendar"],
+          operation: "calendar:write-append",
+        })
+      : null;
+    return {
+      key: CALENDAR_WRITES_KEY,
+      count: writes.length,
+      record: finalRecord,
+      replaced: shouldReplace,
+      meta,
+      event,
+    };
   });
 }

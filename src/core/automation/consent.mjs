@@ -181,12 +181,12 @@ function effectiveAutomationMode(cfg) {
 // loadAutomation — read + validate. Absent file => all-OFF synthetic, exists:false.
 // ---------------------------------------------------------------------------
 
-export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
-  const path = userPath({ repoRoot: root }, AUTOMATION_FILE);
-  const display = displayPath({ repoRoot: root }, AUTOMATION_FILE);
-  const source = candidateConfigSource({ repoRoot: root });
+export function loadAutomation({ root = DEFAULT_ROOT, env = process.env } = {}) {
+  const path = userPath({ repoRoot: root, env }, AUTOMATION_FILE);
+  const display = displayPath({ repoRoot: root, env }, AUTOMATION_FILE);
+  const source = candidateConfigSource({ repoRoot: root, env });
   if (source === "db") {
-    const data = loadCandidateDoc("automation", { repoRoot: root }) || {};
+    const data = loadCandidateDoc("automation", { repoRoot: root, env }) || {};
     const schemaPath = join(root, AUTOMATION_SCHEMA);
     const schema = existsSync(schemaPath) ? JSON.parse(readFileSync(schemaPath, "utf8")) : null;
     const { valid, errors } = schema ? validate(data, schema) : { valid: true, errors: [] };
@@ -241,7 +241,13 @@ export function loadAutomation({ root = DEFAULT_ROOT } = {}) {
 // checks } so callers can show the user exactly which switch is off.
 // ---------------------------------------------------------------------------
 
-export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {}) {
+export function mayRun({
+  capability,
+  platform,
+  data,
+  root = DEFAULT_ROOT,
+  env = process.env,
+} = {}) {
   const reasons = [];
   if (!isCapability(capability)) {
     return { allowed: false, reasons: [`unknown capability "${capability}"`], checks: {} };
@@ -256,7 +262,7 @@ export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {})
     };
   }
 
-  const cfg = data || loadAutomation({ root }).data;
+  const cfg = data || loadAutomation({ root, env }).data;
   const advancedMode = effectiveAutomationMode(cfg) === "advanced";
   const cap = cfg.capabilities?.[capability] || {};
   const globalOn = cap.enabled === true;
@@ -290,8 +296,8 @@ export function mayRun({ capability, platform, data, root = DEFAULT_ROOT } = {})
 // status — the full matrix for `automation status`, doctor, and skills.
 // ---------------------------------------------------------------------------
 
-export function automationStatus({ root = DEFAULT_ROOT } = {}) {
-  const loaded = loadAutomation({ root });
+export function automationStatus({ root = DEFAULT_ROOT, env = process.env } = {}) {
+  const loaded = loadAutomation({ root, env });
   const cfg = loaded.data;
 
   const capabilities = CAPABILITY_KEYS.map((cap) => {

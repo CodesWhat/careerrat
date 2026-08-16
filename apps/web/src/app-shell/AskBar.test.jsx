@@ -2869,6 +2869,96 @@ describe("AskBar — issue_report / issue_filed artifacts", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 4d. calendar_write artifact (calendar-sync skill — CalendarWriteCard, the
+// confirm-first receipt for a candidate's calendar self-report handled by
+// calendar.record-write in workspace-agent.mjs)
+// ---------------------------------------------------------------------------
+
+function calendarWriteActionPreview() {
+  return {
+    action: {
+      label: "Record the calendar event you added",
+      intent: {
+        type: "calendar.record-write",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { provider: "google_calendar", event: { title: "interview" } },
+      },
+    },
+    answer: { label: "Answer about recording a calendar event" },
+    engineAvailable: true,
+  };
+}
+
+async function runCalendarTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(calendarWriteActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "I added the interview to my google calendar" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — calendar_write artifact (CalendarWriteCard)", () => {
+  it("renders a Synced badge, the company/role line, and no anchor elements for an automated write", async () => {
+    const tree = await runCalendarTurn({
+      text: "Recorded the synced calendar event.",
+      artifacts: [
+        {
+          kind: "calendar_write",
+          provider: "google_calendar",
+          provenance: "automated",
+          title: "Temporal Labs interview",
+          eventIso: "2026-08-20",
+          company: "Temporal Labs",
+          role: "Applied AI Engineer",
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--ok"))[0];
+    expect(textOf(badge)).toBe("Synced");
+    expect(textOf(tree)).toContain("Calendar event recorded");
+    expect(textOf(tree)).toContain("Temporal Labs — Applied AI Engineer");
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
+  });
+
+  it("renders a Recorded badge and the company/role line for a manual self-report", async () => {
+    const tree = await runCalendarTurn({
+      text: "Recorded that you added it to your calendar.",
+      artifacts: [
+        {
+          kind: "calendar_write",
+          provider: "apple_calendar",
+          provenance: "manual",
+          title: "Globex onsite",
+          eventIso: "2026-07-15",
+          company: "Globex",
+          role: "Staff Engineer",
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--ok"))[0];
+    expect(textOf(badge)).toBe("Recorded");
+    expect(textOf(tree)).toContain("Globex — Staff Engineer");
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
+  });
+});
+
 describe("AskBar — strategy_review / strategy_apply artifacts", () => {
   it("renders a drafted review with headline, findings, per-type chips, gated Apply buttons, consequence copy, and a manual row for writing-style", async () => {
     const tree = await runStrategyReviewTurn({

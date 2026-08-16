@@ -13,19 +13,24 @@
 // now only snapshots/summarizes tracker.json. This route is the sole live
 // caller of buildDashboardViewModel.) Its verified input contract (read
 // directly off its own top ~20 lines, `buildDashboardViewModel(trackerData,
-// {now, activityEvents, modes, settings, library, agentGuidance})`) is
-// assembled from these sources:
+// {now, activityEvents, modes, settings, library, agentGuidance,
+// calendarProviderStatus})`) is assembled from these sources:
 //
-//   trackerData     assembleTrackerObject(db)      src/core/db/export-to-tracker.mjs
-//   activityEvents  assembleActivityEvents(db)     same module
-//   modes           loadModes({ root })            src/core/profile/modes.mjs
-//   settings        loadSettingsSnapshot({ root })  src/core/tracker/settings-snapshot.mjs
-//   library         loadLibrarySnapshot({ root })   src/core/tracker/library-snapshot.mjs
-//   agentGuidance   loadAgentGuidanceSnapshot(...)  src/core/tracker/agent-guidance-snapshot.mjs
+//   trackerData             assembleTrackerObject(db)      src/core/db/export-to-tracker.mjs
+//   activityEvents          assembleActivityEvents(db)     same module
+//   modes                   loadModes({ root })            src/core/profile/modes.mjs
+//   settings                loadSettingsSnapshot({ root })  src/core/tracker/settings-snapshot.mjs
+//   library                 loadLibrarySnapshot({ root })   src/core/tracker/library-snapshot.mjs
+//   agentGuidance           loadAgentGuidanceSnapshot(...)  src/core/tracker/agent-guidance-snapshot.mjs
+//   calendarProviderStatus  automationStatus({ root })      src/core/automation/consent.mjs
 //
-// The last four are config-file-derived (candidate/*.yml, workspace/setup-
+// The middle four are config-file-derived (candidate/*.yml, workspace/setup-
 // state.json) and completely independent of the db/tracker.json — reusing the
 // same loaders tracker.mjs calls is not an assumption, it's the same code path.
+// calendarProviderStatus is calendar_sync's per-platform {enabled, consent,
+// allowed} from candidate/automation.yml, keyed by platform — degrades to
+// null (buildCalendarSync's existing "Consent gated" fallback) if that file
+// is missing or automationStatus throws.
 // Every buildXStatus() reader inside buildDashboardViewModel defaults its own
 // input to `{}`/`null` (buildModeStatus, buildSettingsStatus, buildLibraryStatus,
 // buildAgentGuidanceStatus — see dashboard-data.js:504-608), so this route
@@ -36,6 +41,7 @@
 // see data-route.mjs's own header comment). Envelope shape matches that same
 // file, with setup readiness kept outside the parity-tested view model:
 // { ok, meta: { version, lastUpdatedAt }, data, setup }.
+import { automationStatus } from "../core/automation/consent.mjs";
 import { requireDb } from "../core/db/connection.mjs";
 import { assembleActivityEvents, assembleTrackerObject } from "../core/db/export-to-tracker.mjs";
 import { candidateConfigGet } from "../core/db/verbs.mjs";
@@ -72,6 +78,27 @@ function readSetup({ repoRoot, env, candidateConfigGetForRoute }) {
   }
 }
 
+// Reduces automationStatus()'s full capability matrix down to calendar_sync's
+// per-platform {enabled, consent, allowed}, keyed by platform — the shape
+// buildCalendarSync (dashboard-data.js) expects as its providerStatus arg.
+// Degrades to null (its existing "Consent gated" fallback) rather than
+// failing the whole dashboard route if automation.yml is missing/invalid.
+function readCalendarProviderStatus({ repoRoot, env, automationStatusForRoute }) {
+  try {
+    const status = automationStatusForRoute({ root: repoRoot, env });
+    const calendarSync = status.capabilities.find((c) => c.capability === "calendar_sync");
+    if (!calendarSync) return null;
+    return Object.fromEntries(
+      calendarSync.platforms.map((p) => [
+        p.platform,
+        { enabled: p.enabled, consent: p.consent, allowed: p.allowed },
+      ])
+    );
+  } catch {
+    return null;
+  }
+}
+
 // `now` is injectable (mirrors chat-runtime.mjs's own `now = () => Date.now()`
 // convention) so a parity test can hand the route the SAME Date instance a
 // direct buildDashboardViewModel() call uses — otherwise two `new Date()`
@@ -83,6 +110,7 @@ export function mountDashboardRoutes({
   env = process.env,
   now = () => new Date(),
   candidateConfigGet: candidateConfigGetForRoute = candidateConfigGet,
+  automationStatus: automationStatusForRoute = automationStatus,
 }) {
   addRoute("GET", "/api/data/dashboard", (_req, res) => {
     let db;
@@ -100,6 +128,11 @@ export function mountDashboardRoutes({
       const settings = loadSettingsSnapshot({ root: repoRoot });
       const library = loadLibrarySnapshot({ root: repoRoot });
       const agentGuidance = loadAgentGuidanceSnapshot({ root: repoRoot, env });
+      const calendarProviderStatus = readCalendarProviderStatus({
+        repoRoot,
+        env,
+        automationStatusForRoute,
+      });
 
       const viewModel = buildDashboardViewModel(trackerData, {
         now: now(),
@@ -108,6 +141,7 @@ export function mountDashboardRoutes({
         settings,
         library,
         agentGuidance,
+        calendarProviderStatus,
       });
 
       const setup = readSetup({ repoRoot, env, candidateConfigGetForRoute });

@@ -319,4 +319,56 @@ export const PREVIEW_CALENDAR = {
   upcoming: {
     events: [massiveDynamicInterview, cloudscaleDeadline],
   },
+  // Shaped like buildCalendarSync()'s output (dashboard-data.js) so the
+  // Calendar apps panel renders in dev even with no real calendar writes yet.
+  // One "Ready" provider and one "Needs setup" provider, plus one automated
+  // and one manual history row, so both badge/word variants are visible.
+  sync: {
+    capability: "calendar_sync",
+    posture: "Confirm-first",
+    providers: [
+      {
+        key: "google_calendar",
+        label: "Google Calendar",
+        channel: "Provider writer",
+        summary: "Confirm-first Google Calendar event creation.",
+        status: "Ready",
+      },
+      {
+        key: "apple_calendar",
+        label: "Apple Calendar",
+        channel: "Local writer",
+        summary: "Confirm-first local calendar event creation.",
+        status: "Needs setup",
+      },
+    ],
+    history: [
+      {
+        id: "preview-write-blackmesa",
+        provider: "google_calendar",
+        providerLabel: "Google Calendar",
+        title: "Black Mesa phone screen",
+        status: "written",
+        statusLabel: "Written",
+        wroteAt: "2026-07-05T15:00:00Z",
+        atLabel: "Jul 5",
+        eventIso: "2026-07-02",
+        provenance: "automated",
+        summary: "Confirmed event written to Google Calendar.",
+      },
+      {
+        id: "preview-write-tyrell",
+        provider: "apple_calendar",
+        providerLabel: "Apple Calendar",
+        title: "Prep Tyrell Corporation enterprise AI stories",
+        status: "written",
+        statusLabel: "Written",
+        wroteAt: "2026-07-06T09:00:00Z",
+        atLabel: "Jul 6",
+        eventIso: "2026-07-08",
+        provenance: "manual",
+        summary: "Recorded as added to Apple Calendar by hand.",
+      },
+    ],
+  },
 };

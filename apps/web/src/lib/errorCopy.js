@@ -288,6 +288,21 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "CALENDAR_WRITE_PROVIDER_INVALID",
+    message: "Say which calendar app you used: Google, Outlook, or Apple.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "CALENDAR_WRITE_EVENT_UNRESOLVED",
+    message: "Name the tracked interview or event, like the company it's with.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "CALENDAR_WRITE_NOT_ALLOWED",
+    message: "Automated calendar sync is off for that provider. You can turn it on in Settings.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
