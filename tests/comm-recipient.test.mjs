@@ -167,4 +167,23 @@ describe("parity with apps/web/src/lib/commLinks.js", () => {
     };
     assert.equal(buildSendLinks(input).mailto, buildMailtoLink(input));
   });
+
+  it("builds identical mailto, Gmail, and Outlook links for the same input", async () => {
+    const { buildComposeLinks } = await import("../apps/web/src/lib/commLinks.js");
+    const inputs = [
+      {
+        to: "avery@acme.test",
+        subject: "Re: Nurse role, days & pay",
+        body: "Hi Avery,\nTuesday works.\n",
+      },
+      { to: "", subject: "Re: Follow-up", body: "Checking in." },
+    ];
+    for (const input of inputs) {
+      assert.deepEqual(
+        buildComposeLinks(input),
+        buildSendLinks(input),
+        `compose-link drift for ${JSON.stringify(input)}`
+      );
+    }
+  });
 });

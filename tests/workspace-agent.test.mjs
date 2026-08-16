@@ -4428,6 +4428,7 @@ test("communication.handoff prepares a ready-to-send artifact as a pure read —
   assert.equal(artifact.company, "Temporal Labs");
   assert.equal(artifact.role, "Applied AI Engineer");
   assert.equal(artifact.subject, "Re: Interview availability");
+  assert.equal(artifact.body, "Tuesday afternoon works for me.");
   assert.equal(artifact.to, "avery@temporal.test");
   assert.equal(artifact.state, "ready");
   assert.match(artifact.links.mailto, /^mailto:avery%40temporal\.test\?subject=/);

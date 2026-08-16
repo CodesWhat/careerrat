@@ -2111,6 +2111,7 @@ describe("AskBar — acting", () => {
                 company: "Temporal Labs",
                 role: "Applied AI Engineer",
                 subject: "Re: Interview availability",
+                body: "Tuesday works.",
                 to: "avery@temporal.test",
                 state: "ready",
                 links: {
@@ -2238,7 +2239,7 @@ describe("AskBar — acting", () => {
     expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Outlook")).toHaveLength(0);
   });
 
-  it("drops handoff links that do not match their expected scheme or host instead of rendering them", async () => {
+  it("ignores the artifact's pre-built link strings and builds compose hrefs from parts, so tampered links never render", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
     api.runWorkspaceIntent.mockResolvedValue({
       data: {
@@ -2254,6 +2255,7 @@ describe("AskBar — acting", () => {
                 company: "Temporal Labs",
                 role: "Applied AI Engineer",
                 subject: "Re: Interview availability",
+                body: "Tuesday works.",
                 to: "avery@temporal.test",
                 state: "ready",
                 links: {
@@ -2281,13 +2283,22 @@ describe("AskBar — acting", () => {
     await flushMicrotasks();
     tree = render();
 
-    // The card still renders, but none of the tampered links become anchors.
+    // Every anchor href is locally built from to/subject/body; the tampered
+    // strings in artifact.links appear nowhere.
     expect(textOf(tree)).toContain("Ready to send");
-    expect(
-      visit(tree, (node) => node.type === "a" && textOf(node) === "Open in email app")
-    ).toHaveLength(0);
-    expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Gmail")).toHaveLength(0);
-    expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Outlook")).toHaveLength(0);
+    const mailtoLink = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node) === "Open in email app"
+    )[0];
+    expect(mailtoLink.props.href).toBe(
+      "mailto:avery%40temporal.test?subject=Re%3A%20Interview%20availability&body=Tuesday%20works."
+    );
+    const gmailLink = visit(tree, (node) => node.type === "a" && textOf(node) === "Gmail")[0];
+    expect(gmailLink.props.href).toMatch(/^https:\/\/mail\.google\.com\//);
+    const outlookLink = visit(tree, (node) => node.type === "a" && textOf(node) === "Outlook")[0];
+    expect(outlookLink.props.href).toMatch(/^https:\/\/outlook\.live\.com\//);
+    expect(outlookLink.props.href).not.toBe("data:text/html,oops");
+    expect(gmailLink.props.href).not.toBe("https://evil.example/phish");
   });
 
   it("renders a CommunicationNoteCard receipt for a saved thread note", async () => {

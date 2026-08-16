@@ -4029,6 +4029,7 @@ export async function executeWorkspaceIntent({
             company: communication.company || null,
             role: communication.role || null,
             subject,
+            body,
             to,
             state: recipient.state,
             links,

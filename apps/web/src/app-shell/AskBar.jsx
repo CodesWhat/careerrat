@@ -16,6 +16,7 @@ import {
   uploadIntakeFile,
   WORKSPACE_ENTITY,
 } from "../lib/api.js";
+import { buildComposeLinks } from "../lib/commLinks.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { errorState, resolveErrorCopy } from "../lib/errorCopy.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
@@ -1992,25 +1993,25 @@ function CommunicationNoteCard({ artifact }) {
 }
 
 // communication_handoff (email-comms skill, the supervised send handoff) —
-// same card chrome as CommunicationNoteCard above. The links (mailto, Gmail,
-// Outlook compose) come pre-built from the server, which owns recipient
-// resolution; the "I sent this" confirm is not rendered here — it arrives as
-// a generic metadata.nextActions entry and renders through the shared block
-// below this card.
-// Artifacts are durable thread data, so the compose hrefs are re-checked
-// against their expected scheme/origin here before rendering: only the exact
-// link shapes the server builds can become clickable.
-function safeHandoffHref(href, prefix) {
-  const value = String(href || "");
-  return value.startsWith(prefix) ? value : null;
-}
-
+// same card chrome as CommunicationNoteCard above. The server owns recipient
+// resolution and ships to/subject/body on the artifact; the compose hrefs are
+// built here from those parts (literal scheme/host + encodeURIComponent'd
+// values), never rendered from the artifact's pre-built link strings, so a
+// tampered durable artifact can't smuggle an arbitrary URL into an anchor.
+// The "I sent this" confirm is not rendered here — it arrives as a generic
+// metadata.nextActions entry and renders through the shared block below this
+// card.
 function CommunicationHandoffCard({ artifact }) {
   const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
   const ready = artifact.state === "ready";
-  const mailtoHref = safeHandoffHref(artifact.links?.mailto, "mailto:");
-  const gmailHref = safeHandoffHref(artifact.links?.gmail, "https://mail.google.com/");
-  const outlookHref = safeHandoffHref(artifact.links?.outlook, "https://outlook.live.com/");
+  const links = buildComposeLinks({
+    to: artifact.to,
+    subject: artifact.subject,
+    body: artifact.body,
+  });
+  const mailtoHref = ready ? links.mailto : null;
+  const gmailHref = ready ? links.gmail : null;
+  const outlookHref = ready ? links.outlook : null;
   return (
     <section className="ask-bar__strategy-apply" aria-label="Prepared reply">
       <div className="ask-bar__strategy-review-head">
