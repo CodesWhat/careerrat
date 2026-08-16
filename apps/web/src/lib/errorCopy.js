@@ -334,6 +334,12 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ code }) => code === "MESSAGES_SYNC_NOT_ALLOWED",
+    message:
+      "Message sync isn't turned on yet. Turn on in-platform messaging for LinkedIn or Wellfound in Settings first.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
     match: ({ code }) => code === "STATUS_UPDATE_INVALID",
     message:
       "Name the company and what the portal said, like: Greenhouse says phone screen scheduled for Acme.",

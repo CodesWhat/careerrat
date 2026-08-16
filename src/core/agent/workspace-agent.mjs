@@ -167,6 +167,7 @@ const EXECUTABLE_INTENTS = new Set([
   "relationship.source-request",
   "status.sync-request",
   "mail.sync-request",
+  "messages.sync-request",
   "status.record-portal-request",
   "status.record-portal",
   "status.apply-transition",
@@ -408,6 +409,27 @@ export function mailSyncSources({ repoRoot, env, hostPlatform, tracker }) {
   }
 
   return sources;
+}
+
+// Messages sync sources: one entry per ingest-messages platform (the list
+// lives in CAPABILITIES.messaging so this never drifts from what
+// ingest-messages actually supports). `tracker` lets callers that already
+// fetched assembleTrackerObject this request reuse it instead of hitting the
+// db twice; omit it and the helper fetches its own.
+export function messagesSyncSources({ repoRoot, env, tracker }) {
+  const trackerObject = tracker || assembleTrackerObject(requireDb({ repoRoot, env }));
+  const trackerSources = trackerObject.sources || [];
+  const lastRunAtFor = (id) => trackerSources.find((row) => row.id === id)?.lastRunAt || null;
+
+  return CAPABILITIES.messaging.platforms.map((platform) => {
+    const id = `${platform}-messages`;
+    return {
+      id,
+      platform,
+      allowed: mayRun({ capability: "messaging", platform, root: repoRoot, env }).allowed,
+      lastRunAt: lastRunAtFor(id),
+    };
+  });
 }
 
 async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fetchImpl, now }) {
@@ -4601,6 +4623,43 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "messages.sync-request") {
+      const tracker = assembleTrackerObject(requireDb({ repoRoot, env }));
+      const sources = messagesSyncSources({ repoRoot, env, tracker });
+      if (sources.every((source) => !source.allowed)) {
+        throw actionError(
+          "Message sync isn't turned on yet. Turn on in-platform messaging for LinkedIn or Wellfound in Settings first.",
+          "MESSAGES_SYNC_NOT_ALLOWED"
+        );
+      }
+
+      // Count only — never surface thread rows, subjects, participants, or
+      // bodies in the artifact (privacy rule). Wellfound threads record as
+      // channel "portal" (shared with ATS portal threads), so the card counts
+      // only the LinkedIn channel and labels it that way, never overclaiming.
+      const needsReply = (tracker.communications || []).filter(
+        (comm) => comm.channel === "linkedin" && comm.status === "needs-reply"
+      ).length;
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "Message check requested. Run the ingest-messages skill from your agent or terminal to read your messages; anything it finds comes back here for review.",
+        artifacts: [
+          {
+            kind: "messages_sync_handoff",
+            sources,
+            needsReply,
+            at: requestDate(now).toISOString(),
+          },
+        ],
+        metadata: { state: "requested" },
+        now,
+      });
+    }
+
     if (normalized.type === "scheduling.prepare") {
       const communication = communicationForIntent({
         repoRoot,
@@ -6586,6 +6645,31 @@ function mailSyncRequestFromText(text) {
   return match ? { input: {} } : null;
 }
 
+// "check my messages" / "any new linkedin messages" — a consent-checked
+// handoff to the ingest-messages skill. Anchored (^...$) like
+// mailSyncRequestFromText so it never matches "message"/"dm" mentioned
+// mid-sentence: sending a message, drafting a reply, messaging settings, or
+// unrelated status/email checks that happen to share the word "check".
+function messagesSyncRequestFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  // The qualifier loop between verb and noun accepts only messages-shaped
+  // filler ("check for any new linkedin messages"); any other word there
+  // ("check my message drafts", "check my application statuses") breaks the
+  // match and falls through.
+  const match =
+    /^(?:please\s+)?(?:can\s+you\s+)?(?:check|sync|scan|refresh)\s+(?:(?:for|my|any|new|linkedin|wellfound|recruiter)\s+)*(?:messages?|dms?)\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^(?:any\s+)?new\s+(?:(?:linkedin|wellfound|recruiter)\s+)*(?:messages?|dms?)\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^(?:do\s+i\s+have|did\s+i\s+get|is\s+there|are\s+there)\s+(?:any\s+)?(?:new\s+)?(?:(?:linkedin|wellfound|recruiter)\s+)*(?:messages?|dms?)\s*[.?!]*$/i.test(
+      value
+    );
+  return match ? { input: {} } : null;
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -6927,14 +7011,14 @@ const ACTION_PREVIEW_RULES = [
   },
   // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report /
   // calendar.record-write / relationship.record-lead / relationship.source-request /
-  // status.record-portal-request / status.sync-request / mail.sync-request
-  // MUST stay above the terminal search.run catch-all immediately below —
-  // that rule matches a bare "check"/"search"/"find"/"run" verb near
-  // "jobs/roles/postings/boards/sources" and would otherwise never let
-  // phrasings like "turn off status polling", "check my settings", "report a
-  // bug", "I added the interview to my calendar", "find a recruiter at
-  // Acme", "check my application statuses", or "check my inbox" reach these
-  // rules first.
+  // status.record-portal-request / status.sync-request / mail.sync-request /
+  // messages.sync-request MUST stay above the terminal search.run catch-all
+  // immediately below — that rule matches a bare "check"/"search"/"find"/"run"
+  // verb near "jobs/roles/postings/boards/sources" and would otherwise never
+  // let phrasings like "turn off status polling", "check my settings",
+  // "report a bug", "I added the interview to my calendar", "find a
+  // recruiter at Acme", "check my application statuses", "check my inbox",
+  // or "check my messages" reach these rules first.
   // relationship.record-lead MUST also stay above relationship.source-request:
   // both match "recruiter at <company>" vocabulary, but only record-lead's
   // patterns require a person's name, so the more specific self-report rule
@@ -7027,6 +7111,15 @@ const ACTION_PREVIEW_RULES = [
       type: "mail.sync-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: mailSyncRequestFromText(text).input,
+    }),
+  },
+  {
+    test: (text) => Boolean(messagesSyncRequestFromText(text)),
+    label: "Check for new messages",
+    intent: (text) => ({
+      type: "messages.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: messagesSyncRequestFromText(text).input,
     }),
   },
   {

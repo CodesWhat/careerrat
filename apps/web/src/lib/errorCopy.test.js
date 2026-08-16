@@ -485,6 +485,16 @@ const RULE_CASES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    name: "MESSAGES_SYNC_NOT_ALLOWED code",
+    err: new ApiError(400, {
+      code: "MESSAGES_SYNC_NOT_ALLOWED",
+      error: "Message sync isn't turned on yet. Turn on in-platform messaging first.",
+    }),
+    message:
+      "Message sync isn't turned on yet. Turn on in-platform messaging for LinkedIn or Wellfound in Settings first.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
     name: "STATUS_UPDATE_INVALID code",
     err: new ApiError(400, {
       code: "STATUS_UPDATE_INVALID",

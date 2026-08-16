@@ -452,3 +452,31 @@ Ingest complete:
 - **Domain-neutral.** No hardcoded companies, roles, or candidate-specific values in
   this skill. No bracketed placeholder tokens anywhere — if a detail is unknown, omit
   it or go generic; never emit `[Company]`, `[Role]`, `[Name]`, or any bracket.
+
+---
+
+## Conversational workspace path
+
+In the Ask workspace, one narrow piece of this skill is native: the app runs a
+typed `messages.sync-request` intent directly in `workspace-agent.mjs`, not
+this skill's message-reading steps. A terminal or external-agent run still
+follows the steps above exactly as written, and all message reading always
+happens there. The app never opens LinkedIn or Wellfound itself.
+
+- **Requesting a message check** (`messages.sync-request`). "Check my LinkedIn
+  messages" or "any new DMs?" offers a "Check for new messages" chip. The
+  handler returns a handoff card showing each platform's real `mayRun` consent
+  state for the `messaging` capability, the last sweep time from that
+  platform's `sources[]` watermark ("Never checked" before a first run), and
+  how many LinkedIn threads are currently waiting on a reply. The count is
+  LinkedIn-scoped on purpose: Wellfound threads record under the shared
+  `portal` channel, so counting that channel would overclaim what a message
+  sync covers. With every platform off, the request refuses toward Settings;
+  there is no ungated fallback source here, unlike mail's local Apple Mail
+  path. The intent reads no messages and changes no tracker state; the only
+  record it leaves is its own receipt message in the Ask conversation, like
+  every other workspace request.
+- **What stays here.** The session-browser reads, the two-sided relevance
+  classification, the escalation table, body pulls, `communications[]` and
+  watermark writes, and the track-outcomes handoff all remain this skill's
+  agent path. Reply drafting stays with email-comms.

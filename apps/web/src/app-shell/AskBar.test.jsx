@@ -3297,6 +3297,113 @@ describe("AskBar — mail_sync_handoff artifact (MailSyncHandoffCard)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// messages_sync_handoff artifact (messages.sync-request intent,
+// ingest-messages skill — MessagesSyncHandoffCard). Same receipt shape as
+// mail_sync_handoff above: the request landed, the actual message read
+// happens in the agent/terminal skill run, not here.
+// ---------------------------------------------------------------------------
+
+function messagesActionPreview() {
+  return {
+    action: {
+      label: "Check for new messages",
+      intent: {
+        type: "messages.sync-request",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {},
+      },
+    },
+    answer: { label: "Answer about messages" },
+    engineAvailable: true,
+  };
+}
+
+async function runMessagesTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(messagesActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "check my messages" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — messages_sync_handoff artifact (MessagesSyncHandoffCard)", () => {
+  it("renders a Handoff badge, source labels/status lines, and the needsReply count for needsReply: 2", async () => {
+    const tree = await runMessagesTurn({
+      text: "Message check requested. Run the ingest-messages skill from your agent or terminal to read your messages; anything it finds comes back here for review.",
+      artifacts: [
+        {
+          kind: "messages_sync_handoff",
+          sources: [
+            { id: "linkedin-messages", platform: "linkedin", allowed: true, lastRunAt: null },
+            { id: "wellfound-messages", platform: "wellfound", allowed: false, lastRunAt: null },
+          ],
+          needsReply: 2,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--muted"))[0];
+    expect(textOf(badge)).toBe("Handoff");
+    expect(textOf(tree)).toContain("LinkedIn");
+    expect(textOf(tree)).toContain("Wellfound");
+    expect(textOf(tree)).toContain("Off in Settings");
+    expect(textOf(tree)).toContain("Never checked");
+    expect(textOf(tree)).toContain("2 LinkedIn message threads are waiting on a reply.");
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
+  });
+
+  it("renders the singular-safe zero-count line for needsReply: 0", async () => {
+    const tree = await runMessagesTurn({
+      text: "Message check requested. Run the ingest-messages skill from your agent or terminal to read your messages; anything it finds comes back here for review.",
+      artifacts: [
+        {
+          kind: "messages_sync_handoff",
+          sources: [
+            { id: "linkedin-messages", platform: "linkedin", allowed: false, lastRunAt: null },
+            { id: "wellfound-messages", platform: "wellfound", allowed: false, lastRunAt: null },
+          ],
+          needsReply: 0,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("No LinkedIn message threads are waiting on a reply.");
+  });
+
+  it("tells the candidate to run the skill from their agent or terminal", async () => {
+    const tree = await runMessagesTurn({
+      text: "Message check requested. Run the ingest-messages skill from your agent or terminal to read your messages; anything it finds comes back here for review.",
+      artifacts: [
+        {
+          kind: "messages_sync_handoff",
+          sources: [
+            { id: "linkedin-messages", platform: "linkedin", allowed: true, lastRunAt: null },
+          ],
+          needsReply: 0,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("from your agent or terminal");
+  });
+});
+
 describe("AskBar — status_transition_proposal artifact (StatusTransitionProposalCard)", () => {
   it("renders a Review first badge and an Apply button that fires status.apply-transition with the proposal's from/to", async () => {
     let tree = await runStatusTurn({
