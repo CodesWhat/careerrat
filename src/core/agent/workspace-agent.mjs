@@ -2186,6 +2186,7 @@ export async function executeWorkspaceIntent({
   repoRoot,
   env = process.env,
   intent,
+  hostPlatform = process.platform,
   buildInterviewDossierImpl = buildInterviewDossier,
   evaluateJobImpl = evaluateAndPersistPacketGate,
   resolveJobUrlImpl = resolveJobUrl,
@@ -4565,7 +4566,7 @@ export async function executeWorkspaceIntent({
       const sources = mailSyncSources({
         repoRoot,
         env,
-        hostPlatform: process.platform,
+        hostPlatform,
         tracker,
       });
       if (sources.every((source) => !source.allowed)) {

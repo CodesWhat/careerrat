@@ -435,8 +435,9 @@ The app never opens Apple Mail, Gmail, or Outlook itself.
   from that source's `sources[]` watermark ("Never checked" before a first
   run), and the card adds how many email threads are currently waiting on a
   reply. On a non-macOS host with both webmail platforms off, the request
-  refuses toward Settings instead. The intent writes nothing; it is a receipt,
-  not a sweep.
+  refuses toward Settings instead. The intent reads no mail and changes no
+  tracker state; the only record it leaves is its own receipt message in the
+  Ask conversation, like every other workspace request.
 - **What stays here.** The actual mail reading (AppleScript, SQLite fallback,
   or session-browser webmail), the STEP 5 match/skip review table, body pulls,
   `communications[]` and watermark writes, and the track-outcomes handoff all

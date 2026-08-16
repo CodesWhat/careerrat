@@ -7371,6 +7371,7 @@ test("mail.sync-request: gmail-only grant on darwin returns a mail_sync_handoff 
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    hostPlatform: "darwin",
     intent: {
       type: "mail.sync-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -7395,6 +7396,7 @@ test("mail.sync-request: zero mail_access grant on darwin still returns the card
   const result = await executeWorkspaceIntent({
     repoRoot,
     env: {},
+    hostPlatform: "darwin",
     intent: {
       type: "mail.sync-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
@@ -7408,6 +7410,27 @@ test("mail.sync-request: zero mail_access grant on darwin still returns the card
   assert.equal(byId["apple-mail"].allowed, true);
   assert.equal(byId["gmail-webmail"].allowed, false);
   assert.equal(byId["outlook-webmail"].allowed, false);
+});
+
+test("mail.sync-request: zero mail_access grant off darwin refuses with MAIL_SYNC_NOT_ALLOWED (no apple-mail source to keep it alive)", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      hostPlatform: "linux",
+      intent: {
+        type: "mail.sync-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {},
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "MAIL_SYNC_NOT_ALLOWED");
+      return true;
+    }
+  );
 });
 
 test("mail.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {

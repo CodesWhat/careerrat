@@ -2543,11 +2543,14 @@ function MailSyncHandoffCard({ artifact }) {
         <span className="badge badge--muted">Handoff</span>
       </div>
       {sources.map((source) => {
-        const statusText = !source.allowed
-          ? "Off in Settings"
-          : source.lastRunAt
+        const statusText = [
+          source.allowed ? null : "Off in Settings",
+          source.lastRunAt
             ? `Last checked ${formatRelativeDate(source.lastRunAt)}`
-            : "Never checked";
+            : "Never checked",
+        ]
+          .filter(Boolean)
+          .join(" · ");
         return (
           <p key={source.id}>
             {[mailSyncSourceLabel(source), statusText].filter(Boolean).join(" · ")}
