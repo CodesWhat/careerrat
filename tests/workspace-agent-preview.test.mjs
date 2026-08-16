@@ -1191,6 +1191,99 @@ test("previewWorkspaceIntent: forward-looking calendar requests never fire the s
 });
 
 // ---------------------------------------------------------------------------
+// relationship.record-lead / relationship.source-request matchers
+// (relationshipRecordLeadFromText / relationshipSourceRequestFromText,
+// workspace-agent.mjs ~6072/~6115). record-lead is a self-report of a
+// contact the candidate already found; source-request is a consent-checked
+// ask for CareerRat to go find one. record-lead MUST win when a phrase
+// matches both vocabularies (ordering requirement documented at ~6478).
+// ---------------------------------------------------------------------------
+
+test("previewWorkspaceIntent: self-reported contact phrasings map to relationship.record-lead", () => {
+  const repoRoot = tempRepo();
+
+  const foundNamed = previewWorkspaceIntent({
+    text: "I found a recruiter at Acme on linkedin, named Jordan Lee",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(foundNamed.action.label, "Record the contact you found");
+  assert.equal(foundNamed.action.intent.type, "relationship.record-lead");
+  assert.equal(foundNamed.action.intent.entity.type, "workspace");
+  assert.equal(foundNamed.action.intent.entity.id, WORKSPACE_THREAD_ID);
+  assert.equal(foundNamed.action.intent.input.name, "Jordan Lee");
+  assert.equal(foundNamed.action.intent.input.company, "Acme");
+  assert.equal(foundNamed.action.intent.input.type, "Recruiter");
+  assert.equal(foundNamed.action.intent.input.platform, "linkedin");
+
+  const addAs = previewWorkspaceIntent({
+    text: "add Casey Wu as a hiring manager at Globex",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(addAs.action.label, "Record the contact you found");
+  assert.equal(addAs.action.intent.type, "relationship.record-lead");
+  assert.equal(addAs.action.intent.input.name, "Casey Wu");
+  assert.equal(addAs.action.intent.input.company, "Globex");
+  assert.equal(addAs.action.intent.input.type, "Decision maker");
+});
+
+test("previewWorkspaceIntent: sourcing-request phrasings map to relationship.source-request", () => {
+  const repoRoot = tempRepo();
+  const cases = [
+    ["find a recruiter at Acme", "Acme"],
+    ["who can refer me at Globex", "Globex"],
+    ["warm intro to Initech", "Initech"],
+  ];
+  for (const [text, company] of cases) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(
+      result.action.label,
+      "Request people sourcing",
+      `expected "${text}" to map to relationship.source-request`
+    );
+    assert.equal(result.action.intent.type, "relationship.source-request");
+    assert.equal(result.action.intent.entity.type, "workspace");
+    assert.equal(result.action.intent.entity.id, WORKSPACE_THREAD_ID);
+    assert.equal(result.action.intent.input.company, company);
+  }
+});
+
+test("previewWorkspaceIntent: relationship-adjacent phrasings never misfire into relationship.record-lead/source-request", () => {
+  const repoRoot = tempRepo();
+
+  const research = previewWorkspaceIntent({ text: "research Acme", repoRoot, env: {} });
+  assert.doesNotMatch(research.action?.intent?.type || "", /^relationship\./);
+
+  const jobs = previewWorkspaceIntent({ text: "find jobs at Acme", repoRoot, env: {} });
+  assert.equal(jobs.action.intent.type, "search.run");
+
+  // "found" (not "find") with no "named X" never fires record-lead — it
+  // fails closed to ordinary chat rather than routing anywhere at all.
+  const noName = previewWorkspaceIntent({ text: "found a recruiter at Acme", repoRoot, env: {} });
+  assert.equal(noName.action, null);
+
+  const sources = previewWorkspaceIntent({
+    text: "check my calendar sources",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(sources.action.intent.type, "search.run");
+});
+
+test("previewWorkspaceIntent: relationship.record-lead wins over relationship.source-request when a phrase matches both vocabularies", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "I found a recruiter at Acme named Jordan Lee",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action.intent.type, "relationship.record-lead");
+  assert.equal(result.action.intent.input.name, "Jordan Lee");
+  assert.equal(result.action.intent.input.company, "Acme");
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/workspace/preview
 // ---------------------------------------------------------------------------
 

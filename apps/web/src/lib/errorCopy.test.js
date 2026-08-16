@@ -429,6 +429,42 @@ const RULE_CASES = [
     message: "Automated calendar sync is off for that provider. You can turn it on in Settings.",
     action: { label: "Open Settings", to: "/settings" },
   },
+  {
+    name: "RELATIONSHIP_SOURCING_NOT_ALLOWED code",
+    err: new ApiError(400, {
+      code: "RELATIONSHIP_SOURCING_NOT_ALLOWED",
+      error: "Relationship sourcing isn't turned on yet. Turn it on in Settings first.",
+    }),
+    message: "Relationship sourcing is off. You can turn it on in Settings.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
+    name: "RELATIONSHIP_SOURCING_COMPANY_REQUIRED code",
+    err: new ApiError(400, {
+      code: "RELATIONSHIP_SOURCING_COMPANY_REQUIRED",
+      error: "Name the company you want people sourcing for, like: find a recruiter at Acme.",
+    }),
+    message: "Name the company you want help sourcing people for.",
+    action: null,
+  },
+  {
+    name: "RELATIONSHIP_LEAD_INVALID code",
+    err: new ApiError(400, {
+      code: "RELATIONSHIP_LEAD_INVALID",
+      error: "Give the person's name and the company, like: add Jordan Lee as a recruiter at Acme.",
+    }),
+    message: "Give the person's name and the company so the contact can be recorded.",
+    action: null,
+  },
+  {
+    name: "RELATIONSHIP_LEAD_COMP_LEAK code",
+    err: new ApiError(400, {
+      code: "RELATIONSHIP_LEAD_COMP_LEAK",
+      error: "That note still contains your private current pay figure. Remove it, then try again.",
+    }),
+    message: "That note includes your private current pay. Remove the number and try again.",
+    action: null,
+  },
 ];
 
 describe("resolveErrorCopy — mapped rules", () => {

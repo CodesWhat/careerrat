@@ -2981,6 +2981,147 @@ describe("AskBar — calendar_write artifact (CalendarWriteCard)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 4e. sourcing_handoff / lead_receipt artifacts (relationship-sourcing skill
+// — SourcingHandoffCard/LeadReceiptCard, the confirm-first receipts for
+// relationship.source-request / relationship.record-lead in
+// workspace-agent.mjs)
+// ---------------------------------------------------------------------------
+
+function sourcingHandoffActionPreview() {
+  return {
+    action: {
+      label: "Request people sourcing",
+      intent: {
+        type: "relationship.source-request",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: { company: "Lumon Industries" },
+      },
+    },
+    answer: { label: "Answer about relationship sourcing" },
+    engineAvailable: true,
+  };
+}
+
+async function runSourcingTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(sourcingHandoffActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "find a recruiter at Lumon Industries" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+function leadReceiptActionPreview() {
+  return {
+    action: {
+      label: "Record the contact you found",
+      intent: {
+        type: "relationship.record-lead",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {
+          name: "Jordan Lee",
+          company: "Lumon Industries",
+          type: "recruiter",
+          platform: "wellfound",
+        },
+      },
+    },
+    answer: { label: "Answer about recording a contact" },
+    engineAvailable: true,
+  };
+}
+
+async function runLeadTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(leadReceiptActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({
+    target: { value: "found a recruiter at Lumon Industries, named Jordan Lee" },
+  });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — sourcing_handoff artifact (SourcingHandoffCard)", () => {
+  it("renders a Handoff badge, per-platform allowed lines, the CTA note, and no anchor elements", async () => {
+    const tree = await runSourcingTurn({
+      text:
+        "Sourcing requested for Lumon Industries. Run the relationship-sourcing skill from your " +
+        "agent or terminal to search; new leads land in the Network tab for your review.",
+      artifacts: [
+        {
+          kind: "sourcing_handoff",
+          company: "Lumon Industries",
+          applicationId: "app-lumon",
+          platforms: [
+            { platform: "linkedin", allowed: true },
+            { platform: "wellfound", allowed: false },
+          ],
+          ctaRecorded: true,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--muted"))[0];
+    expect(textOf(badge)).toBe("Handoff");
+    expect(textOf(tree)).toContain("LinkedIn · Allowed");
+    expect(textOf(tree)).toContain("Wellfound · Off in Settings");
+    expect(textOf(tree)).toContain("A reminder was added");
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
+  });
+});
+
+describe("AskBar — lead_receipt artifact (LeadReceiptCard)", () => {
+  it("renders a Review first badge, the type-at-company line, the Network tab note, and no anchor elements", async () => {
+    const tree = await runLeadTurn({
+      text: "Recorded Jordan Lee for your review in the Network tab.",
+      artifacts: [
+        {
+          kind: "lead_receipt",
+          leadId: "lead-lumon-industries-jordan-lee-wellfound",
+          name: "Jordan Lee",
+          company: "Lumon Industries",
+          applicationId: "app-lumon",
+          type: "Recruiter",
+          platform: "wellfound",
+          status: "review",
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--warn"))[0];
+    expect(textOf(badge)).toBe("Review first");
+    expect(textOf(tree)).toContain("Recruiter at Lumon Industries");
+    expect(textOf(tree)).toContain("Approve or reject it in the Network tab.");
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
+  });
+});
+
 describe("AskBar — strategy_review / strategy_apply artifacts", () => {
   it("renders a drafted review with headline, findings, per-type chips, gated Apply buttons, consequence copy, and a manual row for writing-style", async () => {
     const tree = await runStrategyReviewTurn({

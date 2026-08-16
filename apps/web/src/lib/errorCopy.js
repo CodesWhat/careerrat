@@ -303,6 +303,26 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ code }) => code === "RELATIONSHIP_SOURCING_NOT_ALLOWED",
+    message: "Relationship sourcing is off. You can turn it on in Settings.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
+    match: ({ code }) => code === "RELATIONSHIP_SOURCING_COMPANY_REQUIRED",
+    message: "Name the company you want help sourcing people for.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "RELATIONSHIP_LEAD_INVALID",
+    message: "Give the person's name and the company so the contact can be recorded.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "RELATIONSHIP_LEAD_COMP_LEAK",
+    message: "That note includes your private current pay. Remove the number and try again.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
