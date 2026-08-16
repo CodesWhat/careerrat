@@ -9,6 +9,7 @@ import {
   CAPABILITY_KEYS,
   isCapability,
   loadAutomation,
+  mayRun,
   mergeAutomationDefaults,
   PLATFORMS,
 } from "../automation/consent.mjs";
@@ -23,6 +24,10 @@ import {
   appSetFields,
   appSetStatus,
 } from "../db/verbs/app.mjs";
+import {
+  WRITE_PROVIDERS as CALENDAR_WRITE_PROVIDERS,
+  calendarWriteAppend,
+} from "../db/verbs/calendar.mjs";
 import { candidateConfigGet, candidateConfigPatch } from "../db/verbs/candidate.mjs";
 import {
   commAppendMessage,
@@ -149,6 +154,7 @@ const EXECUTABLE_INTENTS = new Set([
   "outcome.record-request",
   "issue.report",
   "issue.record-filed",
+  "calendar.record-write",
 ]);
 
 function compactCandidateSnapshot({ repoRoot, env }) {
@@ -756,6 +762,59 @@ function resolveReferencedApplication({ repoRoot, env, jobReference, interviewOn
     throw error;
   }
   return matches[0];
+}
+
+// Resolves a calendar.record-write's `event` reference to exactly one tracked
+// interview — either a direct applicationId, or a token match against
+// upcoming (not-yet-happened) scheduled interviews' company/role, mirroring
+// resolveReferencedApplication's tokenized matching above. Unlike that
+// resolver, both the zero-match and multi-match cases collapse into a single
+// CALENDAR_WRITE_EVENT_UNRESOLVED and the raw reference text is never echoed
+// back (a self-report should never look like it captured something it
+// didn't).
+function resolveCalendarWriteEvent({ repoRoot, env, event }) {
+  const unresolved = () =>
+    actionError(
+      "Tell me which tracked interview or event you mean, like the company name.",
+      "CALENDAR_WRITE_EVENT_UNRESOLVED"
+    );
+
+  const applicationId = String(event?.applicationId || "").trim();
+  let application;
+  if (applicationId) {
+    application = applicationForIntent({ repoRoot, env, id: applicationId });
+  } else {
+    const tokens = jobReferenceTokens(event?.title);
+    if (!tokens.length) throw unresolved();
+    const db = requireDb({ repoRoot, env });
+    const now = Date.now();
+    const matches = db
+      .prepare("SELECT data FROM applications ORDER BY rowid ASC")
+      .all()
+      .map((row) => JSON.parse(row.data))
+      .filter((app) => {
+        const iso = app.nextInterviewAt || app.interviewAt || "";
+        return Boolean(iso) && !Number.isNaN(Date.parse(iso)) && Date.parse(iso) >= now;
+      })
+      .filter((app) => {
+        const candidateTokens = new Set(
+          jobReferenceTokens(`${app.company || ""} ${app.role || ""}`)
+        );
+        return tokens.every((token) => candidateTokens.has(token));
+      });
+    if (matches.length !== 1) throw unresolved();
+    application = matches[0];
+  }
+
+  const eventIso = application.nextInterviewAt || application.interviewAt || "";
+  if (!eventIso) throw unresolved();
+  return {
+    applicationId: application.id,
+    company: application.company || "",
+    role: application.role || "",
+    title: `${application.company || "This"} interview`,
+    eventIso,
+  };
 }
 
 const COMMUNICATION_REFERENCE_STOP_WORDS = new Set([
@@ -4086,6 +4145,77 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "calendar.record-write") {
+      const provider = String(input.provider || "").trim();
+      if (!provider || !CALENDAR_WRITE_PROVIDERS.has(provider)) {
+        throw actionError(
+          "Which calendar did you add it to: Google, Outlook, or Apple?",
+          "CALENDAR_WRITE_PROVIDER_INVALID"
+        );
+      }
+      // Manual provenance (a self-report of something the candidate already did
+      // in their own calendar app) is NOT consent-gated — CareerRat isn't writing
+      // anything. Automated provenance IS gated: it asserts the app itself wrote
+      // the event, so it must be backed by an actual calendar_sync consent grant.
+      const provenance = input.provenance === "automated" ? "automated" : "manual";
+      if (provenance === "automated") {
+        const verdict = mayRun({
+          capability: "calendar_sync",
+          platform: provider,
+          root: repoRoot,
+          env,
+        });
+        if (!verdict.allowed) {
+          throw actionError(
+            "Automated calendar sync isn't enabled for that provider. Turn it on in Settings first.",
+            "CALENDAR_WRITE_NOT_ALLOWED"
+          );
+        }
+      }
+
+      const resolved = resolveCalendarWriteEvent({ repoRoot, env, event: input.event });
+      const operation = calendarWriteAppend({
+        repoRoot,
+        env,
+        record: {
+          provider,
+          provenance,
+          eventId: resolved.applicationId ? `app:${resolved.applicationId}` : undefined,
+          eventIso: resolved.eventIso,
+          title: resolved.title,
+          applicationId: resolved.applicationId,
+          company: resolved.company,
+          role: resolved.role,
+        },
+      });
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text:
+          provenance === "manual"
+            ? "Recorded that you added it to your calendar."
+            : "Recorded the synced calendar event.",
+        artifacts: [
+          {
+            kind: "calendar_write",
+            provider,
+            provenance,
+            title: resolved.title,
+            eventIso: resolved.eventIso,
+            company: resolved.company || null,
+            role: resolved.role || null,
+            at: operation.record.wroteAt,
+          },
+        ],
+        metadata: { state: "recorded", provider, provenance },
+        operationResult: operation,
+        now,
+      });
+    }
+
     if (normalized.type === "scheduling.prepare") {
       const communication = communicationForIntent({
         repoRoot,
@@ -5688,6 +5818,58 @@ function issueReportFromText(text) {
   return null;
 }
 
+function calendarWriteProviderFromText(value) {
+  if (/\bgoogle\b/i.test(value)) return "google_calendar";
+  if (/\boutlook\b/i.test(value)) return "outlook_calendar";
+  if (/\bapple\b/i.test(value)) return "apple_calendar";
+  return null;
+}
+
+// Grabs the object between the write verb and the "to/on/in(to) my ...
+// calendar/google/outlook/apple" tail — e.g. "put the Acme interview on my
+// calendar" -> "Acme interview". Pronoun-only fragments ("it", "that") and the
+// generic nouns the regex itself anchors on are not company/role names, so
+// those are dropped rather than surfaced as a bogus title.
+function calendarWriteTitleFromText(value) {
+  const match = value.match(
+    /\b(?:added|put|created|entered|logged|synced)\s+(?:the\s+|an?\s+)?(.+?)\s+(?:to|on|in|into)\s+(?:my\s+)?(?:google|outlook|apple|calendar)\b/i
+  );
+  if (!match) return "";
+  const fragment = match[1].trim().replace(/\s+/g, " ");
+  if (!fragment || /^(?:it|that|this|them|event|calendar)$/i.test(fragment)) return "";
+  return fragment.slice(0, 120);
+}
+
+// Past-tense self-reports of a calendar write the candidate already made in
+// their own calendar app — "I added the interview to my Google calendar",
+// "I put the Acme interview on my calendar", "added it to outlook", "I
+// created the event in apple calendar". The write-verb requirement is what
+// keeps read/query phrasings ("check my calendar", "what's on my calendar",
+// "calendar sources") from ever matching — none of those contain a write verb.
+// A phrasing with no provider name ("I added it to my calendar") still fires
+// with provider null; the handler asks which calendar app rather than the
+// matcher guessing.
+function calendarRecordWriteFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  // This intent RECORDS a write the candidate already made themselves; it
+  // never performs one. Forward-looking requests ("please put this on my
+  // calendar", "can you add it") must not be offered a self-report chip, so
+  // the verb needs a first-person past-tense anchor ("I added", "I put") or
+  // an elliptical self-report opener ("added it to outlook"). Bare
+  // imperatives ("put"/"create"/"enter"/"sync" without "I") never match.
+  if (/\b(?:can|could|would|will)\s+you\b/i.test(value) || /^please\b/i.test(value)) return null;
+  const firstPerson =
+    /\bi(?:'ve)?\s+(?:already\s+|just\s+)?(?:added|put|created|entered|logged|synced)\b/i;
+  const elliptical = /^(?:already\s+|just\s+)?(?:added|logged|synced)\b/i;
+  if (!firstPerson.test(value) && !elliptical.test(value)) return null;
+  if (!/\b(?:to|on|in|into)\b/i.test(value)) return null;
+  const provider = calendarWriteProviderFromText(value);
+  if (!provider && !/\bcalendar\b/i.test(value)) return null;
+  const title = calendarWriteTitleFromText(value);
+  return { provider, event: title ? { title } : {} };
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -6027,12 +6209,13 @@ const ACTION_PREVIEW_RULES = [
       input: { jobUrl: firstHttpUrl(text) },
     }),
   },
-  // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report
-  // MUST stay above the terminal search.run catch-all immediately below —
-  // that rule matches a bare "check"/"search"/"find"/"run" verb near
-  // "jobs/roles/postings/boards/sources" and would otherwise never let
-  // phrasings like "turn off status polling", "check my settings", or
-  // "report a bug" reach these rules first.
+  // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report /
+  // calendar.record-write MUST stay above the terminal search.run catch-all
+  // immediately below — that rule matches a bare "check"/"search"/"find"/"run"
+  // verb near "jobs/roles/postings/boards/sources" and would otherwise never
+  // let phrasings like "turn off status polling", "check my settings",
+  // "report a bug", or "I added the interview to my calendar" reach these
+  // rules first.
   {
     test: (text) => Boolean(settingsExplainFromText(text)),
     label: "Show my settings",
@@ -6060,6 +6243,17 @@ const ACTION_PREVIEW_RULES = [
       type: "issue.report",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: { description: issueReportFromText(text)?.description || "" },
+    }),
+  },
+  {
+    test: (text) => Boolean(calendarRecordWriteFromText(text)),
+    // Never overpromise: this records the candidate's self-report, it does
+    // not write anything to a calendar provider itself.
+    label: "Record the calendar event you added",
+    intent: (text) => ({
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: calendarRecordWriteFromText(text),
     }),
   },
   {

@@ -521,6 +521,100 @@ test("Calendar counts and names a scheduled round inside the rolling 14-day hori
   assert.equal(event?.iso, "2026-08-20");
 });
 
+test("buildCalendarSync maps each providerStatus shape to its status label", () => {
+  const tracker = { applications: [], sourced: [], sources: [], communications: [] };
+
+  const withMap = buildDashboardViewModel(tracker, {
+    now: new Date("2026-08-15T12:00:00.000Z"),
+    calendarProviderStatus: {
+      google_calendar: { allowed: true, enabled: true, consent: true },
+      outlook_calendar: { allowed: false, enabled: true, consent: false },
+      apple_calendar: { allowed: false, enabled: false, consent: true },
+      // automation_tools intentionally absent from the map.
+    },
+  });
+  const statusByKey = Object.fromEntries(
+    withMap.calendar.sync.providers.map((provider) => [provider.key, provider.status])
+  );
+  assert.equal(statusByKey.google_calendar, "Ready", "allowed:true reads Ready");
+  assert.equal(
+    statusByKey.outlook_calendar,
+    "Needs setup",
+    "allowed:false with enabled:true reads Needs setup"
+  );
+  assert.equal(
+    statusByKey.apple_calendar,
+    "Needs setup",
+    "allowed:false with consent:true reads Needs setup"
+  );
+  assert.equal(
+    statusByKey.automation_tools,
+    "Consent gated",
+    "a provider missing from the map reads Consent gated"
+  );
+
+  const allOff = buildDashboardViewModel(tracker, {
+    now: new Date("2026-08-15T12:00:00.000Z"),
+    calendarProviderStatus: {
+      apple_calendar: { allowed: false, enabled: false, consent: false },
+    },
+  });
+  const appleOff = allOff.calendar.sync.providers.find((p) => p.key === "apple_calendar");
+  assert.equal(appleOff.status, "Off", "neither enabled nor consent reads Off");
+
+  const noProviderStatus = buildDashboardViewModel(tracker, {
+    now: new Date("2026-08-15T12:00:00.000Z"),
+  });
+  for (const provider of noProviderStatus.calendar.sync.providers) {
+    assert.equal(
+      provider.status,
+      "Consent gated",
+      "an absent providerStatus map reads Consent gated"
+    );
+  }
+});
+
+test("normalizeCalendarWrite passes through an explicit manual provenance and defaults every other value to automated", () => {
+  const tracker = {
+    applications: [],
+    sourced: [],
+    sources: [],
+    communications: [],
+    calendarWrites: [
+      {
+        id: "cal-write-manual",
+        provider: "apple_calendar",
+        title: "Globex onsite",
+        wroteAt: "2026-08-14T10:00:00.000Z",
+        eventIso: "2026-08-20",
+        provenance: "manual",
+      },
+      {
+        id: "cal-write-legacy",
+        provider: "google_calendar",
+        title: "Initech screen",
+        wroteAt: "2026-08-13T10:00:00.000Z",
+        eventIso: "2026-08-19",
+        // no provenance field at all — a legacy row from before it existed.
+      },
+      {
+        id: "cal-write-bogus",
+        provider: "outlook_calendar",
+        title: "Hooli follow-up",
+        wroteAt: "2026-08-12T10:00:00.000Z",
+        eventIso: "2026-08-18",
+        provenance: "not-a-real-value",
+      },
+    ],
+  };
+
+  const vm = buildDashboardViewModel(tracker, { now: new Date("2026-08-15T12:00:00.000Z") });
+  const byId = Object.fromEntries(vm.calendar.sync.history.map((entry) => [entry.id, entry]));
+  assert.equal(byId["cal-write-manual"].provenance, "manual");
+  assert.equal(byId["cal-write-legacy"].provenance, "automated");
+  assert.equal(byId["cal-write-bogus"].provenance, "automated");
+});
+
 test("Dashboard shell locks Network to the company relationship map baseline", async () => {
   const html = await readFile(new URL("src/core/tracker/dashboard-shell.html", root), "utf8");
   const networkSection = html.match(

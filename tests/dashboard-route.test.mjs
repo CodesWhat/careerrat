@@ -26,8 +26,10 @@ import { after, test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { mountDashboardRoutes } from "../src/cli/dashboard-route.mjs";
 import { mountDataRoutes } from "../src/cli/data-route.mjs";
+import { automationStatus } from "../src/core/automation/consent.mjs";
 import { closeAll } from "../src/core/db/connection.mjs";
 import { importFromTracker } from "../src/core/db/import-from-tracker.mjs";
+import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { loadModes } from "../src/core/profile/modes.mjs";
 import { loadAgentGuidanceSnapshot } from "../src/core/tracker/agent-guidance-snapshot.mjs";
 import { buildDashboardViewModel } from "../src/core/tracker/dashboard-data.js";
@@ -214,6 +216,25 @@ test("GET /api/data/dashboard: the route's view model deep-equals a direct build
     const settings = loadSettingsSnapshot({ root: repoRoot });
     const library = loadLibrarySnapshot({ root: repoRoot });
     const agentGuidance = loadAgentGuidanceSnapshot({ root: repoRoot, env: {} });
+    // The route's default automationStatusForRoute is the real automationStatus()
+    // (src/core/automation/consent.mjs), reduced by readCalendarProviderStatus
+    // (dashboard-route.mjs) into calendar_sync's per-platform {enabled, consent,
+    // allowed}. A direct buildDashboardViewModel() call that omits this input
+    // defaults to null ("Consent gated" for every provider), which disagreed with
+    // the route's real (all-off, but non-null) calendarProviderStatus — mirror the
+    // same reduction here so both sides compute the identical calendar.sync.providers.
+    const rawAutomationStatus = automationStatus({ root: repoRoot });
+    const calendarSync = rawAutomationStatus.capabilities.find(
+      (capability) => capability.capability === "calendar_sync"
+    );
+    const calendarProviderStatus = calendarSync
+      ? Object.fromEntries(
+          calendarSync.platforms.map((platform) => [
+            platform.platform,
+            { enabled: platform.enabled, consent: platform.consent, allowed: platform.allowed },
+          ])
+        )
+      : null;
 
     const direct = buildDashboardViewModel(source, {
       now: FIXED_NOW,
@@ -222,6 +243,7 @@ test("GET /api/data/dashboard: the route's view model deep-equals a direct build
       settings,
       library,
       agentGuidance,
+      calendarProviderStatus,
     });
 
     assert.deepEqual(body.data, direct);
@@ -354,5 +376,49 @@ test("GET /api/data/dashboard: focus card features the interview within the 3-ho
     assert.notEqual(body.data.focus.kind, "interview");
   } finally {
     await closeServer(serverPast);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// calendar_sync provider status — the route reduces the real automationStatus()
+// (candidate/automation.yml via the DB store) into calendar.sync.providers[].status
+// (readCalendarProviderStatus -> buildCalendarSync's calendarProviderStatusLabel).
+// ---------------------------------------------------------------------------
+
+test("GET /api/data/dashboard: calendar sync providers reflect real automation consent — the granted platform reads Ready, every other platform does not", async () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot, {
+    meta: {},
+    applications: [],
+    sourced: [],
+    sources: [],
+    communications: [],
+  });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        calendar_sync: { enabled: true, platforms: { google_calendar: true } },
+      },
+      consent: { google_calendar: true },
+    },
+  });
+
+  const server = await bootServer(repoRoot);
+  try {
+    const { status, body } = await getJson(server, "/api/data/dashboard");
+    assert.equal(status, 200);
+    const statusByKey = Object.fromEntries(
+      body.data.calendar.sync.providers.map((provider) => [provider.key, provider.status])
+    );
+    assert.equal(statusByKey.google_calendar, "Ready");
+    assert.notEqual(statusByKey.outlook_calendar, "Ready");
+    assert.notEqual(statusByKey.apple_calendar, "Ready");
+    assert.notEqual(statusByKey.automation_tools, "Ready");
+  } finally {
+    await closeServer(server);
   }
 });

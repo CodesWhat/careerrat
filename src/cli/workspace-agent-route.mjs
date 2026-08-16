@@ -100,6 +100,9 @@ function statusForError(error) {
       "SETTINGS_CHANGE_INVALID",
       "ISSUE_REPORT_COMP_LEAK",
       "ISSUE_URL_INVALID",
+      "CALENDAR_WRITE_PROVIDER_INVALID",
+      "CALENDAR_WRITE_EVENT_UNRESOLVED",
+      "CALENDAR_WRITE_NOT_ALLOWED",
     ].includes(error?.code)
   ) {
     return 400;

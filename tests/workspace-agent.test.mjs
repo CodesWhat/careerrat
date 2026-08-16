@@ -5848,6 +5848,280 @@ test("settings.apply writes exactly one action_result thread message and one act
   assert.equal(activityAfter, activityBefore + 1);
 });
 
+// ---------------------------------------------------------------------------
+// calendar.record-write — the calendar-sync skill's confirm-first self-report
+// handler (workspace-agent.mjs ~4148). Manual provenance records what the
+// candidate already did in their own calendar app (never consent-gated: the
+// app writes nothing). Automated provenance asserts the app itself wrote the
+// event, so it is gated on real calendar_sync consent (mayRun(), consent.mjs).
+// ---------------------------------------------------------------------------
+
+test("calendar.record-write rejects a missing or unknown provider with CALENDAR_WRITE_PROVIDER_INVALID and the which-calendar copy", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { nextInterviewAt: "2030-09-01T18:00:00.000Z" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "calendar.record-write",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { event: { applicationId: "app-temporal" } },
+      },
+    }),
+    (error) =>
+      error.code === "CALENDAR_WRITE_PROVIDER_INVALID" && /Which calendar/.test(error.message)
+  );
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "calendar.record-write",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { provider: "yahoo_calendar", event: { applicationId: "app-temporal" } },
+      },
+    }),
+    (error) => error.code === "CALENDAR_WRITE_PROVIDER_INVALID"
+  );
+});
+
+test("calendar.record-write gates automated provenance on real calendar_sync consent and never appends a row when denied", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { nextInterviewAt: "2030-09-02T18:00:00.000Z" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "calendar.record-write",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          provider: "google_calendar",
+          provenance: "automated",
+          event: { applicationId: "app-temporal" },
+        },
+      },
+    }),
+    (error) => error.code === "CALENDAR_WRITE_NOT_ALLOWED"
+  );
+
+  const db = openDb({ repoRoot, env: {} });
+  const stored = db.prepare("SELECT data FROM kv WHERE key = ?").get("calendarWrites");
+  assert.equal(
+    stored,
+    undefined,
+    "a denied automated write must never append a calendarWrites row"
+  );
+});
+
+test("calendar.record-write: a manual self-report succeeds with no consent grant at all — the gate is scoped to automated only", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { nextInterviewAt: "2030-09-03T18:00:00.000Z" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        provider: "google_calendar",
+        provenance: "manual",
+        event: { applicationId: "app-temporal" },
+      },
+    },
+  });
+
+  assert.equal(result.messages.at(-1).text, "Recorded that you added it to your calendar.");
+});
+
+test("calendar.record-write: automated provenance succeeds once calendar_sync consent is granted for that provider", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { nextInterviewAt: "2030-09-04T18:00:00.000Z" });
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        calendar_sync: { enabled: true, platforms: { google_calendar: true } },
+      },
+      consent: { google_calendar: true },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        provider: "google_calendar",
+        provenance: "automated",
+        event: { applicationId: "app-temporal" },
+      },
+    },
+  });
+
+  assert.equal(result.messages.at(-1).text, "Recorded the synced calendar event.");
+});
+
+test("calendar.record-write resolves the event by applicationId and carries its company/role/eventIso onto the artifact", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    company: "Temporal Labs",
+    role: "Applied AI Engineer",
+    nextInterviewAt: "2030-09-05T18:00:00.000Z",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        provider: "google_calendar",
+        provenance: "manual",
+        event: { applicationId: "app-temporal" },
+      },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.company, "Temporal Labs");
+  assert.equal(artifact.role, "Applied AI Engineer");
+  assert.equal(artifact.eventIso, "2030-09-05T18:00:00.000Z");
+});
+
+test("calendar.record-write resolves the event by a title token matching exactly one upcoming scheduled interview", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    company: "Temporal Labs",
+    role: "Applied AI Engineer",
+    nextInterviewAt: "2030-09-06T18:00:00.000Z",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        provider: "google_calendar",
+        provenance: "manual",
+        event: { title: "Temporal Labs interview" },
+      },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.company, "Temporal Labs");
+});
+
+test("calendar.record-write throws CALENDAR_WRITE_EVENT_UNRESOLVED for zero or ambiguous title matches, and never echoes the reference text back", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    id: "app-temporal-a",
+    company: "Temporal Labs",
+    role: "Applied AI Engineer",
+    nextInterviewAt: "2030-09-07T18:00:00.000Z",
+  });
+  seedApplication(repoRoot, {
+    id: "app-temporal-b",
+    company: "Temporal Systems",
+    role: "Staff AI Engineer",
+    nextInterviewAt: "2030-09-08T18:00:00.000Z",
+  });
+
+  const referenceText = "Zorptastic Corp";
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "calendar.record-write",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          provider: "google_calendar",
+          provenance: "manual",
+          event: { title: referenceText },
+        },
+      },
+    }),
+    (error) =>
+      error.code === "CALENDAR_WRITE_EVENT_UNRESOLVED" && !error.message.includes(referenceText)
+  );
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "calendar.record-write",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          provider: "google_calendar",
+          provenance: "manual",
+          event: { title: "Temporal interview" },
+        },
+      },
+    }),
+    (error) =>
+      error.code === "CALENDAR_WRITE_EVENT_UNRESOLVED" && !error.message.includes("Temporal")
+  );
+});
+
+test("calendar.record-write artifact carries exactly the calendar_write contract fields", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, {
+    company: "Temporal Labs",
+    role: "Applied AI Engineer",
+    nextInterviewAt: "2030-09-09T18:00:00.000Z",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "calendar.record-write",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        provider: "google_calendar",
+        provenance: "manual",
+        event: { applicationId: "app-temporal" },
+      },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.deepEqual(Object.keys(artifact).sort(), [
+    "at",
+    "company",
+    "eventIso",
+    "kind",
+    "provenance",
+    "provider",
+    "role",
+    "title",
+  ]);
+  assert.equal(artifact.kind, "calendar_write");
+  assert.equal(artifact.provider, "google_calendar");
+  assert.equal(artifact.provenance, "manual");
+  assert.equal(artifact.title, "Temporal Labs interview");
+  assert.equal(artifact.eventIso, "2030-09-09T18:00:00.000Z");
+  assert.equal(artifact.company, "Temporal Labs");
+  assert.equal(artifact.role, "Applied AI Engineer");
+  assert.ok(artifact.at);
+});
+
 function mountDirect(repoRoot, executeIntentImpl, runTurnImpl, captureIntakeImpl) {
   const routes = new Map();
   mountWorkspaceAgentRoutes({
@@ -5944,6 +6218,9 @@ test("workspace action errors return actionable client statuses instead of serve
     ["STRATEGY_APPLY_STALE", 409],
     ["SETTINGS_CHANGE_UNSUPPORTED", 400],
     ["SETTINGS_CHANGE_INVALID", 400],
+    ["CALENDAR_WRITE_PROVIDER_INVALID", 400],
+    ["CALENDAR_WRITE_EVENT_UNRESOLVED", 400],
+    ["CALENDAR_WRITE_NOT_ALLOWED", 400],
   ];
 
   for (const [code, expectedStatus] of cases) {

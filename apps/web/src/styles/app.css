@@ -2284,7 +2284,16 @@ button {
 .calendar__export {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+}
+
+/* Forces the "these links create an event" line onto its own row below the
+   .ics/Google/Outlook links, overriding the nowrap it would otherwise inherit
+   from .calendar__event-trailing. */
+.calendar__export-hint {
+  flex-basis: 100%;
+  white-space: normal;
 }
 
 .calendar__export-link {
@@ -2323,6 +2332,18 @@ button {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+/* Calendar apps section — no exact "name + badge" row exists elsewhere in
+   calendar__*, so this is the one new class the sync panel needed. No
+   border/background of its own; it sits inside the existing
+   .calendar__bucket/.calendar__bucket-body chrome. */
+.calendar__sync-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
 }
 
 @media (max-width: 1120px) {

@@ -45,7 +45,7 @@ export function CalendarPage() {
       ) : null}
       {loading ? <p className="dashboard-home__loading">Loading…</p> : null}
 
-      {calendar ? <CalendarBody model={model} /> : null}
+      {calendar ? <CalendarBody model={model} sync={calendar.sync} /> : null}
     </div>
   );
 }
@@ -68,7 +68,7 @@ function CalendarHero({ metrics }) {
   );
 }
 
-function CalendarBody({ model }) {
+function CalendarBody({ model, sync }) {
   const [windowStartIso, setWindowStartIso] = useState(model.todayIso);
 
   const handleToday = () => setWindowStartIso(model.todayIso);
@@ -100,8 +100,73 @@ function CalendarBody({ model }) {
       </section>
 
       <RecentSection events={model.recent} />
+
+      <CalendarSyncSection sync={sync} />
     </>
   );
+}
+
+// data.calendar.sync — the calendar_sync capability's read model (see
+// buildCalendarSync() in dashboard-data.js). Shown as a plain status panel:
+// which calendar apps are connected and the last few confirmed writes.
+// Nothing here is scheduling data, so it reuses .calendar__bucket chrome
+// rather than living in the agenda/date-strip flow above.
+function CalendarSyncSection({ sync }) {
+  const providers = Array.isArray(sync?.providers) ? sync.providers : [];
+  const history = Array.isArray(sync?.history) ? sync.history : [];
+  if (!providers.length) return null;
+
+  return (
+    <article className="calendar__bucket" aria-label="Calendar apps">
+      <header className="calendar__bucket-header">
+        <h2>Calendar apps</h2>
+      </header>
+      <div className="calendar__bucket-body">
+        <p className="field__hint">CareerRat only writes to a calendar after you approve it.</p>
+
+        <div className="calendar__recent-body">
+          {providers.map((provider) => (
+            <div className="calendar__sync-row" key={provider.key}>
+              <span>{provider.label}</span>
+              <span className={`badge ${calendarSyncBadgeTone(provider.status)}`}>
+                {provider.status}
+              </span>
+            </div>
+          ))}
+        </div>
+
+        {history.length ? (
+          <div className="calendar__recent-body">
+            {history.map((entry) => (
+              <div className="calendar__sync-row" key={calendarSyncHistoryKey(entry)}>
+                <span className="calendar__event-copy">
+                  <strong>{entry.title}</strong>
+                  <small>{calendarSyncHistoryMeta(entry)}</small>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div className="calendar__empty">No confirmed calendar writes yet.</div>
+        )}
+      </div>
+    </article>
+  );
+}
+
+function calendarSyncBadgeTone(status) {
+  return status === "Ready" ? "badge--ok" : "badge--muted";
+}
+
+function calendarSyncHistoryKey(entry) {
+  return entry.id || `${entry.provider || "calendar"}-${entry.eventIso || ""}-${entry.title || ""}`;
+}
+
+function calendarSyncHistoryMeta(entry) {
+  const providerLabel = entry.providerLabel || calendarKindLabel(entry.provider);
+  const dateLabel = entry.eventIso ? formatDateWithWeekday(entry.eventIso) : entry.atLabel || "";
+  const word = entry.provenance === "manual" ? "recorded" : "synced";
+  return [providerLabel, dateLabel, word].filter(Boolean).join(" · ");
 }
 
 function DateStrip({
@@ -257,6 +322,9 @@ function EventExportControls({ exportData }) {
       >
         Outlook
       </a>
+      <span className="field__hint calendar__export-hint">
+        These links create an event in your calendar app. Nothing stays in sync.
+      </span>
     </div>
   );
 }

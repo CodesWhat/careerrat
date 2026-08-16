@@ -1115,6 +1115,81 @@ test("previewWorkspaceIntent: excluding a company classifies as a settings.apply
   });
 });
 
+test("previewWorkspaceIntent: a past-tense calendar self-report maps to calendar.record-write with the provider parsed from text", () => {
+  const repoRoot = tempRepo();
+
+  const google = previewWorkspaceIntent({
+    text: "I added the interview to my google calendar",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(google.action.label, "Record the calendar event you added");
+  assert.equal(google.action.intent.type, "calendar.record-write");
+  assert.equal(google.action.intent.entity.type, "workspace");
+  assert.equal(google.action.intent.entity.id, WORKSPACE_THREAD_ID);
+  assert.equal(google.action.intent.input.provider, "google_calendar");
+
+  const outlook = previewWorkspaceIntent({
+    text: "added it to outlook",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(outlook.action.intent.type, "calendar.record-write");
+  assert.equal(outlook.action.intent.input.provider, "outlook_calendar");
+});
+
+test("previewWorkspaceIntent: a calendar self-report with no named provider still fires the chip with provider null", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "I put the Acme interview on my calendar",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action.label, "Record the calendar event you added");
+  assert.equal(result.action.intent.type, "calendar.record-write");
+  assert.equal(result.action.intent.input.provider, null);
+});
+
+test("previewWorkspaceIntent: a read/query calendar phrasing never fires calendar.record-write, and a sources check still routes to search.run", () => {
+  const repoRoot = tempRepo();
+
+  for (const text of ["check my calendar", "what's on my calendar"]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.notEqual(
+      result.action?.intent?.type,
+      "calendar.record-write",
+      `unexpected for "${text}"`
+    );
+  }
+
+  const sourcesCheck = previewWorkspaceIntent({
+    text: "check my calendar sources",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(sourcesCheck.action.intent.type, "search.run");
+});
+
+test("previewWorkspaceIntent: forward-looking calendar requests never fire the self-report chip", () => {
+  const repoRoot = tempRepo();
+
+  // These ask the app to write, which calendar.record-write never does; only
+  // first-person past-tense self-reports may offer the chip.
+  for (const text of [
+    "Please put my next interview into my calendar",
+    "Can you put this on my calendar for me",
+    "put the interview on my calendar",
+    "add the onsite to google calendar",
+  ]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.notEqual(
+      result.action?.intent?.type,
+      "calendar.record-write",
+      `unexpected for "${text}"`
+    );
+  }
+});
+
 // ---------------------------------------------------------------------------
 // POST /api/workspace/preview
 // ---------------------------------------------------------------------------

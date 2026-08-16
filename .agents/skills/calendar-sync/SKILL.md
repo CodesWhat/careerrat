@@ -154,7 +154,12 @@ careerrat tracker
 Add concrete `--company`, `--role`, or `--app-id` refs when the synced event maps
 cleanly to one tracker row.
 
-The Calendar dashboard will show the provider readiness and recent write history.
+The Calendar dashboard renders per-provider readiness derived from
+`candidate/automation.yml`'s `calendar_sync` capability — `Ready` when the
+capability/platform/consent switches are all on for that provider, `Needs
+setup` when some but not all are on, `Off` when none are, and `Consent
+gated` only when no automation status could be read at all — plus the 5 most
+recent `calendarWrites[]` rows.
 
 ## STEP 5 — If the write cannot complete
 
@@ -165,3 +170,43 @@ If provider sync is blocked, preserve the no-auth fallback:
 - record no `calendarWrites[]` success row unless an actual provider write happened
 
 Do not silently mark a write complete.
+
+---
+
+## Conversational workspace path
+
+In the Ask workspace, recording a calendar write is native: the app runs the
+typed intent `calendar.record-write` directly in `workspace-agent.mjs`, not
+this skill's CLI/browser steps. A terminal or external-agent run still
+follows STEP 0 → 5 exactly as written.
+
+- **Trigger.** Past-tense self-reports the candidate already made in their
+  own calendar app — "I added the interview to my Google calendar", "I put
+  the Acme interview on my calendar", "added it to outlook" — match and offer
+  a "Record the calendar event you added" chip. Read/query phrasings ("check
+  my calendar", "what's on my calendar", "calendar sources") never match; only
+  a write-report verb does.
+- **Resolve.** The event resolves to exactly one tracked interview — by a
+  direct application reference, or by matching company/role tokens against
+  upcoming (not-yet-happened) scheduled interviews. Zero or multiple matches
+  refuse with a plain ask for the company name rather than guessing, and the
+  refusal never echoes the candidate's raw, unresolved text back at them.
+  Naming no provider ("I added it to my calendar") still offers the chip; the
+  handler then asks which calendar app before recording anything.
+- **Provenance gate.** Two provenances exist: `manual` (the default — the
+  candidate did the write themselves, so there's nothing for CareerRat to be
+  permitted to do) and `automated` (an app-verified write, gated exactly like
+  STEP 0 above — `mayRun` must return `allowed` for that `calendar_sync`
+  platform). The gate is enforced by the recording verb itself, so every
+  entry point (the Ask intent, the data route, and STEP 4's CLI write) meets
+  the same bar; the Ask intent additionally refuses up front with a plain
+  "turn it on in Settings" message. Manual self-reports are never
+  consent-gated.
+- **Record, never write.** The app never drives a browser or local automation
+  tool from Ask. `calendar.record-write` only appends the
+  `calendarWrites[]` audit row (STEP 4's dedupe policy, extended so an
+  automated record supersedes an existing manual one for the same event) and
+  confirms in the thread — it does not open Apple/Google/Outlook or perform
+  the provider write itself. The `.ics` export and prefilled Google/Outlook
+  links (STEP 5) remain the only no-consent path when the candidate wants
+  CareerRat to hand them something to add themselves.

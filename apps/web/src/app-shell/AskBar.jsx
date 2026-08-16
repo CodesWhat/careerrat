@@ -1261,6 +1261,9 @@ function AskBarTurn({
   );
   const issueReportArtifact = turn.artifacts?.find((artifact) => artifact.kind === "issue_report");
   const issueFiledArtifact = turn.artifacts?.find((artifact) => artifact.kind === "issue_filed");
+  const calendarWriteArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "calendar_write"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1311,6 +1314,7 @@ function AskBarTurn({
       {settingsApplyArtifact ? <SettingsApplyCard artifact={settingsApplyArtifact} /> : null}
       {issueReportArtifact ? <IssueReportCard artifact={issueReportArtifact} /> : null}
       {issueFiledArtifact ? <IssueFiledCard artifact={issueFiledArtifact} /> : null}
+      {calendarWriteArtifact ? <CalendarWriteCard artifact={calendarWriteArtifact} /> : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -1603,7 +1607,10 @@ function formatRelativeDate(value) {
   const dayMs = 24 * 60 * 60 * 1000;
   const startOfDay = (d) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   const days = Math.round((startOfDay(new Date()) - startOfDay(date)) / dayMs);
-  if (days <= 0) return "today";
+  // Future dates (a calendar receipt's event date, for one) read as the
+  // absolute date, not "today".
+  if (days < 0) return RELATIVE_DATE_FORMAT.format(date);
+  if (days === 0) return "today";
   if (days === 1) return "yesterday";
   if (days < 7) return `${days} days ago`;
   return RELATIVE_DATE_FORMAT.format(date);
@@ -2358,6 +2365,37 @@ function IssueFiledCard({ artifact }) {
       ) : (
         <p>This issue was recorded.</p>
       )}
+    </section>
+  );
+}
+
+// calendar_write (calendar-sync skill) — a receipt, same chrome as
+// IssueFiledCard above (plain receipt, no left-edge accent).
+const CALENDAR_PROVIDER_LABELS = {
+  google_calendar: "Google Calendar",
+  outlook_calendar: "Outlook Calendar",
+  apple_calendar: "Apple Calendar",
+  automation_tools: "Automation tools",
+};
+function calendarWriteProviderLabel(provider) {
+  return CALENDAR_PROVIDER_LABELS[provider] || "Calendar";
+}
+
+function CalendarWriteCard({ artifact }) {
+  const isManual = artifact.provenance === "manual";
+  const companyRole = [artifact.company, artifact.role].filter(Boolean).join(" — ");
+  const dateLabel = formatRelativeDate(artifact.eventIso || artifact.at);
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Calendar event recorded">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Calendar event recorded</strong>
+        <span className="badge badge--ok">{isManual ? "Recorded" : "Synced"}</span>
+      </div>
+      <p>{artifact.title}</p>
+      {companyRole ? <p>{companyRole}</p> : null}
+      <p className="ask-bar__screening-note">
+        {[calendarWriteProviderLabel(artifact.provider), dateLabel].filter(Boolean).join(" · ")}
+      </p>
     </section>
   );
 }
