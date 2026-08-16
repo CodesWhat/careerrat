@@ -414,6 +414,19 @@ export const EASY_APPLY_ADVANCE_LABELS = [
 /** Button-text substrings (lowercase) for the FINAL submit action in Easy Apply. */
 export const EASY_APPLY_SUBMIT_LABELS = ["submit application"];
 
+/**
+ * Fail-safe disqualifier tokens for findAdvanceButtonRef: a normalized label
+ * containing ANY of these tokens anywhere is never treated as an advance
+ * button, even when it also matches an EASY_APPLY_ADVANCE_LABELS needle (e.g.
+ * "Submit and continue", "Review and submit"). A needle-list scan against
+ * EASY_APPLY_SUBMIT_LABELS is not enough — that only catches the exact final
+ * label, not every submit-flavored variant. Over-blocking is deliberate: a
+ * wrongly skipped advance ends in the awaiting-submit human handoff, a
+ * wrongly clicked submit is irreversible. Do not add "apply" here — it would
+ * disqualify the legitimate "Continue applying" advance label.
+ */
+const ADVANCE_DISQUALIFY_TOKENS = ["submit", "send"];
+
 // ---------------------------------------------------------------------------
 // EASY_APPLY_STEPS
 // ---------------------------------------------------------------------------
@@ -451,6 +464,33 @@ export const EASY_APPLY_STEPS = [
     note: "Final submit action; gated by auto_submit.",
   },
 ];
+
+// ---------------------------------------------------------------------------
+// findAdvanceButtonRef
+// ---------------------------------------------------------------------------
+
+/**
+ * Find the ref of a button that advances a multi-step Easy Apply modal to its
+ * next section. Safety invariant: a label containing any ADVANCE_DISQUALIFY_TOKENS
+ * token is NEVER returned, even when it also matches an advance label — the
+ * token check always disqualifies the ref, regardless of where in the label
+ * the token appears ("Submit and continue", "Review and submit"). Returns
+ * null when no safe advance button is present on the snapshot.
+ *
+ * @param {{ refs?: Record<string, { role?: string, name?: string }> }} snapshot
+ * @returns {string|null}
+ */
+export function findAdvanceButtonRef(snapshot) {
+  const refs = snapshot?.refs && typeof snapshot.refs === "object" ? snapshot.refs : {};
+  for (const [ref, entry] of Object.entries(refs)) {
+    if (String(entry?.role || "").toLowerCase() !== "button") continue;
+    const label = normalizeLabel(entry?.name);
+    if (!label) continue;
+    if (ADVANCE_DISQUALIFY_TOKENS.some((token) => label.includes(token))) continue;
+    if (EASY_APPLY_ADVANCE_LABELS.some((needle) => label.includes(needle))) return ref;
+  }
+  return null;
+}
 
 // ---------------------------------------------------------------------------
 // Internal helpers
