@@ -1005,6 +1005,7 @@ test("calendarWriteAppend defaults provenance to manual, coerces an invalid valu
   });
   const automated = calendarWriteAppend({
     repoRoot,
+    env: {},
     record: {
       provider: "outlook_calendar",
       eventId: "evt-automated",
@@ -1048,10 +1049,12 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   // manual then manual -> second replaces (a corrected summary wins).
   calendarWriteAppend({
     repoRoot,
+    env: {},
     record: { ...sameEvent, provenance: "manual", summary: "First manual." },
   });
   let result = calendarWriteAppend({
     repoRoot,
+    env: {},
     record: { ...sameEvent, provenance: "manual", summary: "Second manual." },
   });
   assert.equal(result.record.provenance, "manual");
@@ -1061,6 +1064,7 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   // manual then automated -> automated replaces.
   result = calendarWriteAppend({
     repoRoot,
+    env: {},
     record: { ...sameEvent, provenance: "automated", summary: "Now automated." },
   });
   assert.equal(result.record.provenance, "automated");
@@ -1072,6 +1076,7 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   // logs no activity event, so repeated self-reports can't pile up audit rows.
   result = calendarWriteAppend({
     repoRoot,
+    env: {},
     record: { ...sameEvent, provenance: "manual", summary: "Attempted downgrade." },
   });
   assert.equal(result.record.provenance, "automated");
@@ -1083,6 +1088,7 @@ test("calendarWriteAppend dedupe policy: same-kind re-records replace, automated
   // automated then automated -> second replaces.
   result = calendarWriteAppend({
     repoRoot,
+    env: {},
     record: { ...sameEvent, provenance: "automated", summary: "Second automated." },
   });
   assert.equal(result.record.provenance, "automated");
@@ -1102,6 +1108,7 @@ test("calendarWriteAppend refuses an automated record without a live calendar_sy
     () =>
       calendarWriteAppend({
         repoRoot,
+        env: {},
         record: {
           provider: "google_calendar",
           eventId: "evt-ungated",

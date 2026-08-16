@@ -427,7 +427,7 @@ const RULE_CASES = [
         "Automated calendar sync isn't enabled for that provider. Turn it on in Settings first.",
     }),
     message: "Automated calendar sync is off for that provider. You can turn it on in Settings.",
-    action: null,
+    action: { label: "Open Settings", to: "/settings" },
   },
 ];
 

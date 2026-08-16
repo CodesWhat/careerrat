@@ -1607,7 +1607,10 @@ function formatRelativeDate(value) {
   const dayMs = 24 * 60 * 60 * 1000;
   const startOfDay = (d) => Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
   const days = Math.round((startOfDay(new Date()) - startOfDay(date)) / dayMs);
-  if (days <= 0) return "today";
+  // Future dates (a calendar receipt's event date, for one) read as the
+  // absolute date, not "today".
+  if (days < 0) return RELATIVE_DATE_FORMAT.format(date);
+  if (days === 0) return "today";
   if (days === 1) return "yesterday";
   if (days < 7) return `${days} days ago`;
   return RELATIVE_DATE_FORMAT.format(date);

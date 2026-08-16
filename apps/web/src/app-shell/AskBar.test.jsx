@@ -2957,6 +2957,28 @@ describe("AskBar — calendar_write artifact (CalendarWriteCard)", () => {
     expect(textOf(tree)).toContain("Globex — Staff Engineer");
     expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
   });
+
+  it("renders a future event date as the absolute date, never as today", async () => {
+    const tree = await runCalendarTurn({
+      text: "Recorded that you added it to your calendar.",
+      artifacts: [
+        {
+          kind: "calendar_write",
+          provider: "google_calendar",
+          provenance: "manual",
+          title: "Initech final round",
+          eventIso: "2031-01-05T15:00:00.000Z",
+          company: "Initech",
+          role: "Platform Engineer",
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const note = visit(tree, (n) => hasClass(n, "ask-bar__screening-note"))[0];
+    expect(textOf(note)).toContain("2031");
+    expect(textOf(note)).not.toContain("today");
+  });
 });
 
 describe("AskBar — strategy_review / strategy_apply artifacts", () => {

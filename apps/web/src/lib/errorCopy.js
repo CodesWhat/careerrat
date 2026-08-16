@@ -300,7 +300,7 @@ const RULES = [
   {
     match: ({ code }) => code === "CALENDAR_WRITE_NOT_ALLOWED",
     message: "Automated calendar sync is off for that provider. You can turn it on in Settings.",
-    action: null,
+    action: { label: "Open Settings", to: "/settings" },
   },
   {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
