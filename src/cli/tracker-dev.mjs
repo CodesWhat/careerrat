@@ -61,6 +61,7 @@ import {
   sendLocalSecurityError,
 } from "../core/tracker/request-security.mjs";
 import { dispatchHttpRoute } from "../core/tracker/route-dispatch.mjs";
+import { readVersion } from "../core/version.mjs";
 import { mountAssistRoutes } from "./assist-route.mjs";
 import { mountAutomationRoutes } from "./automation-route.mjs";
 import {
@@ -101,13 +102,7 @@ const LOCAL_BROWSER_SECURITY_HEADERS = securityHeaders({
 // The running package's own version is a property of the CODE, not of whichever
 // workspace/data root a given createDevServer() instance points at — read it
 // once from the install location, not per-instance.
-const PACKAGE_VERSION = (() => {
-  try {
-    return JSON.parse(readFileSync(join(DEFAULT_ROOT, "package.json"), "utf8")).version || null;
-  } catch {
-    return null;
-  }
-})();
+const PACKAGE_VERSION = readVersion();
 
 // A monotonic-ish stamp for SSE payloads without Date.now() determinism worries.
 let tick = 0;

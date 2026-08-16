@@ -6050,3 +6050,208 @@ test("workspace intake route returns 400 for an invalid requested action", async
   assert.equal(response.status, 400);
   assert.equal(response.body.code, "BAD_REQUESTED_ACTION");
 });
+
+// ---------------------------------------------------------------------------
+// issue.report / issue.record-filed (report-issue skill)
+// ---------------------------------------------------------------------------
+
+test("issue.report code-point-safely truncates a description that would otherwise split a surrogate pair", async () => {
+  const repoRoot = tempRepo();
+  // 1999 code points, then one emoji (U+1F600 — a UTF-16 surrogate pair, two
+  // code units but one code point) landing exactly on the naive 2000-char
+  // cut, then more text past that. A UTF-16-unit slice would keep the
+  // emoji's high surrogate and drop its low surrogate, and that lone
+  // surrogate used to crash encodeURIComponent inside buildIssueUrl. A
+  // code-point-safe slice keeps the whole emoji (or drops it whole) instead.
+  const description = `${"x".repeat(1999)}\u{1F600}${"y".repeat(50)}`;
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "issue.report",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { description },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "issue_report");
+  assert.equal(typeof artifact.url, "string");
+  assert.equal(typeof artifact.body, "string");
+});
+
+test("issue.report and issue.record-filed never write an Activity Pulse event", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot, env: {} });
+  const before = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
+
+  const reported = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "issue.report",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { description: "The tailor step crashed while generating documents." },
+    },
+  });
+  assert.equal(reported.messages.at(-1).kind, "action_result");
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n,
+    before,
+    "issue.report must never append to Activity Pulse"
+  );
+
+  const filed = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "issue.record-filed",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { url: "https://github.com/CodesWhat/careerrat/issues/123" },
+    },
+  });
+  assert.equal(filed.messages.at(-1).artifacts[0].kind, "issue_filed");
+  assert.equal(
+    db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n,
+    before,
+    "issue.record-filed must never append to Activity Pulse"
+  );
+});
+
+test("issue.report ignores an action_error more than 20 messages back", async () => {
+  const repoRoot = tempRepo();
+  workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "assistant",
+    kind: "action_error",
+    text: "Old failure.",
+    error: { code: "OLD_SEARCH_FAILED", message: "old failure detail" },
+  });
+  for (let i = 0; i < 24; i++) {
+    workspaceMessageAppend({ repoRoot, env: {}, role: "user", kind: "text", text: `filler ${i}` });
+  }
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "issue.report",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { description: "" },
+    },
+  });
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.hasError, false);
+  assert.equal(artifact.errorCode, null);
+});
+
+test("issue.report picks up the most recent action_error within the last 20 messages", async () => {
+  const repoRoot = tempRepo();
+  workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "assistant",
+    kind: "action_error",
+    text: "First failure.",
+    error: { code: "SEARCH_FAILED", message: "first failure detail" },
+  });
+  workspaceMessageAppend({ repoRoot, env: {}, role: "user", kind: "text", text: "still going" });
+  workspaceMessageAppend({
+    repoRoot,
+    env: {},
+    role: "assistant",
+    kind: "action_error",
+    text: "Second failure.",
+    error: { code: "NO_DATABASE", message: "second failure detail" },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "issue.report",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { description: "" },
+    },
+  });
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.hasError, true);
+  assert.equal(artifact.errorCode, "NO_DATABASE");
+  // NO_DATABASE is a config-family code — confirms configHint rides along
+  // with whichever error the lookback actually picked.
+  assert.equal(artifact.configHint, true);
+});
+
+test("issue.record-filed accepts canonical CodesWhat/careerrat issue URLs and rejects everything else", async () => {
+  const repoRoot = tempRepo();
+
+  for (const url of [
+    "https://github.com/CodesWhat/careerrat/issues/123",
+    "https://github.com/CodesWhat/careerrat/issues/123/",
+  ]) {
+    const result = await executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "issue.record-filed",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { url },
+      },
+    });
+    assert.equal(result.messages.at(-1).artifacts[0].url, url, url);
+  }
+
+  const noUrl = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "issue.record-filed",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+  assert.equal(noUrl.messages.at(-1).artifacts[0].url, null);
+
+  for (const url of [
+    "https://github.com/OtherOrg/careerrat/issues/123",
+    "https://github.com/CodesWhat/careerrat/pull/123",
+    "https://github.com/CodesWhat/careerrat/issues/123-extra",
+    "javascript:alert(1)",
+  ]) {
+    await assert.rejects(
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent: {
+          type: "issue.record-filed",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: { url },
+        },
+      }),
+      (error) => error.code === "ISSUE_URL_INVALID",
+      url
+    );
+  }
+});
+
+test("workspace action errors map issue-report failure codes to 400", async () => {
+  const repoRoot = tempRepo();
+  for (const code of ["ISSUE_REPORT_COMP_LEAK", "ISSUE_URL_INVALID"]) {
+    const routes = mountDirect(repoRoot, async () => {
+      const error = new Error(`issue action failed: ${code}`);
+      error.code = code;
+      throw error;
+    });
+    const response = await callDirect(routes, "POST", "/api/workspace/intent", {
+      intent: {
+        type: "issue.report",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { description: "" },
+      },
+    });
+    assert.equal(response.status, 400, code);
+    assert.equal(response.body.code, code);
+  }
+});

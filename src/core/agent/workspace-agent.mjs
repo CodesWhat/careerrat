@@ -81,6 +81,13 @@ import {
   draftStrategyReview,
   stampStrategyReview,
 } from "../strategy/review.mjs";
+import { readVersion } from "../version.mjs";
+import {
+  buildIssueReport,
+  buildIssueUrl,
+  FILED_ISSUE_URL_RE,
+  ISSUE_REPORT_COMP_LEAK_MARKER,
+} from "./issue-report.mjs";
 import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
@@ -140,6 +147,8 @@ const EXECUTABLE_INTENTS = new Set([
   "communication.capture-inbound",
   "outcome.record",
   "outcome.record-request",
+  "issue.report",
+  "issue.record-filed",
 ]);
 
 function compactCandidateSnapshot({ repoRoot, env }) {
@@ -3700,6 +3709,115 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    // issue.report — a pure read (beyond appending to this thread): no
+    // browser, no `gh`, no Activity Pulse. It assembles a redacted bug
+    // report + prefilled GitHub URL for the user to review, and only offers
+    // the "I filed it" follow-up (issue.record-filed); filing itself always
+    // happens in the user's own browser/terminal, never here. The most
+    // recent action_error/agent_error in the last 20 thread messages is
+    // reused as context so the user doesn't have to re-describe a failure
+    // that's already visible in the conversation.
+    if (normalized.type === "issue.report") {
+      // Array.from + join truncates by code point, not UTF-16 code unit, so
+      // a surrogate pair never gets split (a lone trailing surrogate would
+      // later crash encodeURIComponent in buildIssueUrl).
+      const description = Array.from(String(input.description || ""))
+        .slice(0, 2000)
+        .join("");
+      const recentMessages = (workspaceThreadRead({ repoRoot, env }).messages || []).slice(-20);
+      let lastError = null;
+      for (let i = recentMessages.length - 1; i >= 0; i--) {
+        const candidate = recentMessages[i];
+        if (candidate.kind === "action_error" || candidate.kind === "agent_error") {
+          lastError = candidate.error || null;
+          break;
+        }
+      }
+
+      let report;
+      try {
+        report = buildIssueReport({
+          repoRoot,
+          env,
+          description,
+          lastError,
+          version: readVersion(),
+          nodeVersion: process.version,
+          platform: process.platform,
+        });
+      } catch (error) {
+        if (error?.code === ISSUE_REPORT_COMP_LEAK_MARKER) {
+          throw actionError(
+            "Rewrite the description without pay figures or personal/company names, then try again.",
+            "ISSUE_REPORT_COMP_LEAK"
+          );
+        }
+        throw error;
+      }
+
+      const { url, truncated } = buildIssueUrl({ title: report.title, body: report.body });
+      const artifact = {
+        kind: "issue_report",
+        title: report.title,
+        body: report.body,
+        url,
+        truncated,
+        hasError: report.state.hasError,
+        errorCode: lastError?.code || null,
+        configHint: report.state.configHint,
+        compFlagged: report.state.compFlagged,
+        errorMessageDropped: report.state.errorMessageDropped,
+      };
+      const text = report.state.configHint
+        ? "I put together a redacted bug report, but this looks like it could be a setup problem — Settings or careerrat doctor may fix it faster. Review the report below and file it if you still think it's a defect."
+        : "I put together a redacted bug report for you to review before filing.";
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text,
+        artifacts: [artifact],
+        metadata: {
+          nextActions: [
+            {
+              label: "I filed it",
+              intent: {
+                type: "issue.record-filed",
+                entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+              },
+            },
+          ],
+        },
+        operationResult: artifact,
+        now,
+      });
+    }
+
+    // issue.record-filed — a tooling action, not a job-search event: no
+    // Activity Pulse entry (see report-issue's SKILL.md STEP 6).
+    if (normalized.type === "issue.record-filed") {
+      const rawUrl = input.url !== undefined ? String(input.url).trim() : "";
+      if (rawUrl && !FILED_ISSUE_URL_RE.test(rawUrl)) {
+        throw actionError(
+          "That doesn't look like a link to an issue on the CareerRat repo.",
+          "ISSUE_URL_INVALID"
+        );
+      }
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: rawUrl ? `Recorded — filed at ${rawUrl}.` : "Recorded that you filed the issue.",
+        artifacts: [
+          { kind: "issue_filed", url: rawUrl || null, at: requestDate(now).toISOString() },
+        ],
+        now,
+      });
+    }
+
     if (normalized.type === "company.proposal-decide") {
       const action = String(input.action || "").trim();
       if (!new Set(["approve-supported-ats", "reject"]).has(action)) {
@@ -5539,6 +5657,37 @@ function settingsApplyPreviewLabel(change) {
   return "Update this setting";
 }
 
+// "report a bug[: <desc>]", "file an issue[: <desc>]", "report an issue",
+// "careerrat crashed[ ...]", "something went wrong with careerrat[ ...]",
+// "careerrat/the app/this tool is broken". Every pattern is anchored on an
+// explicit report/file verb or names careerrat/app/tool, so a bare "this is
+// broken" (no product token) never matches — that's ordinary chat, not a bug
+// report. Any trailing text becomes the free-text description.
+function issueReportFromText(text) {
+  const value = String(text || "").trim();
+  const patterns = [
+    /^(?:please\s+)?report\s+a\s+bug\b[:,]?\s*(.*)$/i,
+    /^(?:please\s+)?file\s+an\s+issue\b[:,]?\s*(.*)$/i,
+    /^(?:please\s+)?report\s+an\s+issue\b[:,]?\s*(.*)$/i,
+    /^careerrat\s+(?:just\s+)?crashed\b[:,]?\s*(.*)$/i,
+    /^something\s+went\s+wrong\s+with\s+careerrat\b[:,]?\s*(.*)$/i,
+    /^careerrat\s+is\s+broken\b[:,]?\s*(.*)$/i,
+    /^(?:the\s+)?app\s+is\s+broken\b[:,]?\s*(.*)$/i,
+    /^this\s+tool\s+is\s+broken\b[:,]?\s*(.*)$/i,
+  ];
+  for (const pattern of patterns) {
+    const match = value.match(pattern);
+    if (match) {
+      return {
+        description: String(match[1] || "")
+          .replace(/^[.?!]+\s*/, "")
+          .trim(),
+      };
+    }
+  }
+  return null;
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -5878,11 +6027,12 @@ const ACTION_PREVIEW_RULES = [
       input: { jobUrl: firstHttpUrl(text) },
     }),
   },
-  // ORDERING REQUIREMENT: settings.explain / settings.apply MUST stay above
-  // the terminal search.run catch-all immediately below — that rule matches
-  // a bare "check"/"search"/"find"/"run" verb near "jobs/roles/postings/
-  // boards/sources" and would otherwise never let phrasings like "turn off
-  // status polling" or "check my settings" reach these rules first.
+  // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report
+  // MUST stay above the terminal search.run catch-all immediately below —
+  // that rule matches a bare "check"/"search"/"find"/"run" verb near
+  // "jobs/roles/postings/boards/sources" and would otherwise never let
+  // phrasings like "turn off status polling", "check my settings", or
+  // "report a bug" reach these rules first.
   {
     test: (text) => Boolean(settingsExplainFromText(text)),
     label: "Show my settings",
@@ -5899,6 +6049,17 @@ const ACTION_PREVIEW_RULES = [
       type: "settings.apply",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: { change: settingsApplyFromText(text) },
+    }),
+  },
+  {
+    test: (text) => Boolean(issueReportFromText(text)),
+    // Fixed label — the card shows the redacted report content, so the
+    // description is never echoed into the preview chip itself.
+    label: "Prepare a bug report",
+    intent: (text) => ({
+      type: "issue.report",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { description: issueReportFromText(text)?.description || "" },
     }),
   },
   {

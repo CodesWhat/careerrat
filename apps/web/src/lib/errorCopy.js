@@ -276,6 +276,18 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "ISSUE_REPORT_COMP_LEAK",
+    message:
+      "Rewrite the description without pay figures or personal or company names, then try again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "ISSUE_URL_INVALID",
+    message:
+      "That doesn't look like a CareerRat GitHub issue link. Paste the full issue URL, like https://github.com/CodesWhat/careerrat/issues/123.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",

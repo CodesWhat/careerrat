@@ -1259,6 +1259,8 @@ function AskBarTurn({
   const settingsApplyArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "settings_apply"
   );
+  const issueReportArtifact = turn.artifacts?.find((artifact) => artifact.kind === "issue_report");
+  const issueFiledArtifact = turn.artifacts?.find((artifact) => artifact.kind === "issue_filed");
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1307,6 +1309,8 @@ function AskBarTurn({
         <SettingsOverviewCard artifact={settingsOverviewArtifact} />
       ) : null}
       {settingsApplyArtifact ? <SettingsApplyCard artifact={settingsApplyArtifact} /> : null}
+      {issueReportArtifact ? <IssueReportCard artifact={issueReportArtifact} /> : null}
+      {issueFiledArtifact ? <IssueFiledCard artifact={issueFiledArtifact} /> : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -2228,6 +2232,132 @@ function SettingsApplyCard({ artifact }) {
       </div>
       {artifact.summary ? <p>{artifact.summary}</p> : null}
       {fromToLine ? <p>{fromToLine}</p> : null}
+    </section>
+  );
+}
+
+// clipboard.writeText is the primary path; a hidden-textarea + execCommand
+// fallback covers browsers/contexts where the async Clipboard API is
+// unavailable or blocked (non-secure context, permission denial). Ported
+// from LibraryPage.jsx's own copyTextToClipboard() (not shared — that file
+// is out of scope here) so "Copy full report" still works rather than
+// silently failing.
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // Fall through to the legacy fallback below.
+  }
+  if (typeof document === "undefined") return false;
+  try {
+    const textarea = document.createElement("textarea");
+    textarea.value = text;
+    textarea.setAttribute("readonly", "");
+    textarea.style.position = "fixed";
+    textarea.style.opacity = "0";
+    document.body.appendChild(textarea);
+    textarea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textarea);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+// issue_report (report-issue skill) — the drafted GitHub bug-report artifact.
+// The "I filed it" confirm is not rendered here — it arrives as a generic
+// metadata.nextActions entry and renders through the shared block, same
+// contract as CommunicationHandoffCard/ApplicationHandoffCard above.
+function IssueReportCard({ artifact }) {
+  const [copied, setCopied] = useState(false);
+  const title = artifact.title || "Bug report draft";
+  const body = artifact.body || "";
+  const url = safeExternalHttpUrl(artifact.url);
+
+  async function copyDraft() {
+    setCopied(await copyTextToClipboard(`${title}\n\n${body}`));
+  }
+
+  return (
+    <section className="ask-bar__research-card" aria-label="Bug report draft">
+      <div className="ask-bar__research-head">
+        <strong>Bug report draft</strong>
+        <span className="badge badge--ok">Ready to file</span>
+      </div>
+      {artifact.configHint ? (
+        <p className="ask-bar__strategy-note">
+          This looks like it might be a setup problem. Checking Settings or running careerrat doctor
+          may fix it faster than filing a bug.
+        </p>
+      ) : null}
+      <strong>{title}</strong>
+      <div className="ask-bar__research-markdown">{body}</div>
+      {artifact.compFlagged ? (
+        <p className="ask-bar__health-fit-note">
+          This might include a pay figure. Review the draft carefully before filing.
+        </p>
+      ) : null}
+      {artifact.errorMessageDropped ? (
+        <p className="ask-bar__strategy-note">
+          The raw error text was left out because it referenced workspace data.
+        </p>
+      ) : null}
+      {artifact.truncated ? (
+        <p className="ask-bar__strategy-note">
+          The prefilled form is shortened. Copy the full report below if you need all of it.
+        </p>
+      ) : null}
+      <div className="ask-bar__company-proposal-actions">
+        {url ? (
+          <a className="ask-bar__handoff-link" href={url} target="_blank" rel="noreferrer">
+            Open GitHub to file
+          </a>
+        ) : null}
+        <Button variant="secondary" onClick={copyDraft}>
+          {copied ? "Copied" : "Copy full report"}
+        </Button>
+      </div>
+    </section>
+  );
+}
+
+// Strict shape check (defense in depth alongside whatever the server already
+// validated) — a durable artifact rendering an arbitrary URL as a link is
+// exactly the risk CommunicationHandoffCard's own header comment calls out.
+// The repo slug is intentionally a literal here, independent of the server's
+// bugs.url-derived validator: an allowlist the artifact itself could vary
+// would be no allowlist at all. A fork that rebrands the upstream repo
+// updates this one constant (worst case before then: the receipt renders as
+// plain text instead of a link).
+const ISSUE_URL_PATTERN = /^https:\/\/github\.com\/CodesWhat\/careerrat\/issues\/\d+\/?$/;
+function safeIssueUrl(value) {
+  const url = String(value || "").trim();
+  return ISSUE_URL_PATTERN.test(url) ? url : null;
+}
+
+// issue_filed (report-issue skill) — a receipt, same chrome as
+// SettingsApplyCard/CommunicationNoteCard above (plain receipt, no
+// left-edge accent).
+function IssueFiledCard({ artifact }) {
+  const issueUrl = safeIssueUrl(artifact.url);
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Issue filed">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Bug report filed</strong>
+        <span className="badge badge--ok">Issue filed</span>
+      </div>
+      {issueUrl ? (
+        <a className="ask-bar__handoff-link" href={issueUrl} target="_blank" rel="noreferrer">
+          {issueUrl}
+        </a>
+      ) : (
+        <p>This issue was recorded.</p>
+      )}
     </section>
   );
 }
