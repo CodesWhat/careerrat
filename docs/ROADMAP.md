@@ -419,7 +419,19 @@ The current build order is:
    the confirmation boundary, writes reuse validated SQLite source config, duplicates are no-ops,
    and the durable receipt returns to Jobs or Settings. Natural application outcomes and interview
    prep now satisfy the same typed, durable Ask contract. Recruiter drafts and reported sends also
-   use that contract, while verified delivery remains open. One-off screening answers now satisfy
+   use that contract. Email-comms now additionally handles a free-text note-capture request
+   (durable note receipt in Ask) and a supervised send handoff: a read-only card with the thread's
+   draft prefilled into mailto/Gmail/Outlook compose links and an "I sent this" confirm, never an
+   automated send. Recording a send now distinguishes three verification tiers: `verified`
+   (executor-confirmed, still gated behind a not-yet-connected delivery executor), `supervised`
+   (CareerRat prepared the draft and the candidate confirmed sending it), and `user_report` (a bare
+   self-report). `communication.send` now also refuses non-email-channel threads before
+   checking for an executor. An in-browser compose executor that would reach `verified` sends
+   directly was evaluated and deferred behind recorded entry criteria (keystroke-safe compose-DOM
+   handling, per-account Sent-folder verification, and a distinct Sent-folder read consent
+   capability); recipient provenance, the prior open blocker, is now solved. Headed isolated-home
+   acceptance for the note-capture, handoff, and verification-tier changes remains open. One-off
+   screening answers now satisfy
    the same contract with review-before-reuse persistence. Company research, comp benchmarking, and
    company health now satisfy the same typed Ask contract too: natural requests resolve through a
    shared company reference resolver into either a fresh cached result rendered immediately or an

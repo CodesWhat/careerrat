@@ -179,7 +179,7 @@ Status meanings:
 | `tailor-application` | Ask handles URL, pasted, attached, open-job, and named-job tailoring as a documents-only workflow | native | Preserve the separate tailoring/apply boundary, typed artifacts, and packed URL/paste/file-picker acceptance. |
 | `apply-job` | Ask, deterministic/public and rendered question capture, automatic Orca fill, supervised Submit boundary, confirmation evidence, and manual fallback | partial | Add safe multi-step ATS advancement and extension/Playwright executor bridges; preserve verified-only Applied write-back. |
 | `track-outcomes` | Status controls, classified pasted updates, and natural Ask outcome reports | native | Keep ambiguity, missing-reference, and durable write-back coverage in clean-home and packaged acceptance. |
-| `email-comms` | Draft, note, external-send controls, and natural Ask draft/sent-report flows | partial | Add natural note capture and connect a verified send executor or explicit supervised handoff. |
+| `email-comms` | Draft, note, external-send controls, and natural Ask note-capture, draft, supervised-handoff, and sent-report flows with tiered send verification | native | Keep acceptance coverage; the in-browser compose executor remains future work behind the recorded entry criteria. |
 | `schedule-meeting` | Ask plus job-drawer shortcut reads the saved thread, availability, timezone, and busy blocks; returns a reviewable reply and tentative hold | native | Preserve no-conflict/no-draft behavior, explicit timezone, tentative ICS validity, full-thread artifact reads, and separate confirmed-time write-back in packaged acceptance. |
 | `interview-prep` | Dossier actions, featured interview state, and natural Ask prep with an immediate dossier link | native | Keep saved-JD, missing-JD, ambiguity, and dossier deep-link coverage in packaged acceptance. |
 | `calendar-sync` | ICS, Google, and Outlook export links | partial | Distinguish export from real provider sync and expose confirmed provider writes when connected. |
@@ -300,8 +300,34 @@ subject references to the existing communication workflow. Drafting uses the
 selected AI runtime and persists a reviewable draft. Reporting that a reply was
 sent transitions the thread to waiting, records the outbound history, and clears
 the draft and completed next action in the same write. Missing and ambiguous
-threads return specific recovery copy instead of a generic server error. Connected,
-verified sending remains open, so `email-comms` stays partial.
+threads return specific recovery copy instead of a generic server error.
+
+Ask now also handles natural note capture and a supervised send handoff. A
+free-text request such as "add a note to the Acme thread: called to follow up"
+resolves the same reference and returns a durable note receipt in the thread; an
+empty note or an unresolved reference returns specific recovery copy instead of a
+generic error. A request such as "send my reply to Acme" returns a supervised
+handoff: a read-only card carrying the thread's draft prefilled into mailto,
+Gmail, and Outlook compose links, built from the first participant's email
+address, with an explicit no-recipient state when the thread has no address on
+file. CareerRat never sends on the candidate's behalf; the handoff's "I sent
+this" action runs the existing sent-report confirm. Recording a send now
+distinguishes three verification tiers: `verified` (an executor confirmed
+delivery; `communication.send` still requires a connected delivery executor and
+returns a conflict if none exists), `supervised` (CareerRat prepared the draft
+and the candidate confirmed sending it through the handoff), and `user_report` (a
+bare self-report with no CareerRat-prepared draft). `communication.send` also now
+checks the thread's channel first and refuses non-email threads, pointing the
+candidate back to the handoff/sent-report path instead of a generic error. An
+in-browser compose executor that could reach `verified` sends directly was
+evaluated and deferred; its entry criteria (a keystroke-safe design validated
+against real webmail compose DOMs, per-account compose/Sent verification, and a
+distinct Sent-folder read consent capability separate from today's
+verification-code-only `mail_access`) are recorded for when that work resumes.
+Recipient provenance, previously an open blocker, is now solved by the same
+resolver the handoff uses. Headed acceptance for the note-capture, handoff, and
+verification-tier changes is pending; a separate acceptance pass is in progress
+and its results are not yet recorded here.
 
 Natural interview-prep requests resolve only against applications with interview
 context, build the evidence-grounded dossier from the saved JD, and return an

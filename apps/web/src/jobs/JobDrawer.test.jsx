@@ -160,6 +160,17 @@ function button(tree, label) {
   return visit(tree, (node) => node.type === "button" && textOf(node) === label)[0];
 }
 
+// ReadyToSendCard (and friends) are local, unexported function components in
+// JobDrawer.jsx — the raw tree from renderDrawer() never invokes them (visit()
+// only walks already-built host elements), so tests that need to reach inside
+// one locate the un-invoked element by its function name and call it directly
+// to get its own returned subtree. Safe here because ReadyToSendCard is a
+// pure function of its props (no hooks of its own).
+function invokeFunctionComponent(tree, name) {
+  const node = visit(tree, (n) => typeof n.type === "function" && n.type.name === name)[0];
+  return node ? node.type(node.props) : null;
+}
+
 beforeEach(() => {
   hooks.reset();
   vi.clearAllMocks();
@@ -675,6 +686,66 @@ describe("JobDrawer", () => {
     await runEffects();
     tree = renderDrawer(applicationRow);
     expect(JSON.stringify(tree)).not.toMatch(/Send|Deliver/);
+  });
+
+  it("ReadyToSendCard's 'Open in email app' anchor is present only when a participant email exists", async () => {
+    api.getCommunications.mockResolvedValue({
+      data: [
+        {
+          id: "comm-1",
+          applicationId: "app-1",
+          company: "Northstar",
+          status: "drafted",
+          draft: { subject: "Re: Solutions Engineer", body: "Tuesday afternoon works for me." },
+          participants: [{ name: "Avery Recruiter", email: "avery@northstar.test" }],
+        },
+      ],
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    const tree = renderDrawer(applicationRow);
+
+    const card = invokeFunctionComponent(tree, "ReadyToSendCard");
+    expect(card).toBeTruthy();
+    expect(card.props.title).toBe("Ready to send");
+    const mailtoLink = visit(
+      card,
+      (node) => node.type === "a" && textOf(node) === "Open in email app"
+    )[0];
+    expect(mailtoLink).toBeTruthy();
+    expect(mailtoLink.props.href).toMatch(/^mailto:avery%40northstar\.test\?subject=/);
+
+    const sendButton = button(card, "I sent this");
+    expect(sendButton).toBeTruthy();
+    await sendButton.props.onClick();
+    expect(api.markCommSent).toHaveBeenCalledWith({ id: "comm-1" });
+  });
+
+  it("ReadyToSendCard omits 'Open in email app' when no participant has a usable email", async () => {
+    api.getCommunications.mockResolvedValue({
+      data: [
+        {
+          id: "comm-1",
+          applicationId: "app-1",
+          company: "Northstar",
+          status: "drafted",
+          draft: { subject: "Re: Solutions Engineer", body: "Tuesday afternoon works for me." },
+          participants: [],
+        },
+      ],
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    const tree = renderDrawer(applicationRow);
+
+    const card = invokeFunctionComponent(tree, "ReadyToSendCard");
+    expect(card).toBeTruthy();
+    expect(card.props.title).toBe("Ready to send");
+    expect(
+      visit(card, (node) => node.type === "a" && textOf(node) === "Open in email app")
+    ).toHaveLength(0);
+    // The record-it-sent path stays available even without a resolvable address.
+    expect(button(card, "I sent this")).toBeTruthy();
   });
 
   it("routes runWrite failures through resolveErrorCopy — a friendly message, never the raw server string — and wires a working retry", async () => {

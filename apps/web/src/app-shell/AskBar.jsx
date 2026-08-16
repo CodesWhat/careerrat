@@ -1246,6 +1246,12 @@ function AskBarTurn({
   const strategyStampArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "strategy_review_stamp"
   );
+  const communicationNoteArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "communication_note"
+  );
+  const communicationHandoffArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "communication_handoff"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1284,6 +1290,12 @@ function AskBarTurn({
       ) : null}
       {strategyApplyArtifact ? <StrategyApplyCard artifact={strategyApplyArtifact} /> : null}
       {strategyStampArtifact ? <StrategyStampCard artifact={strategyStampArtifact} /> : null}
+      {communicationNoteArtifact ? (
+        <CommunicationNoteCard artifact={communicationNoteArtifact} />
+      ) : null}
+      {communicationHandoffArtifact ? (
+        <CommunicationHandoffCard artifact={communicationHandoffArtifact} />
+      ) : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -1960,6 +1972,70 @@ function StrategyStampCard({ artifact }) {
       {counts.length ? (
         <p>Snapshot at review: {counts.map(([label, value]) => `${value} ${label}`).join(", ")}.</p>
       ) : null}
+    </section>
+  );
+}
+
+// communication_note (email-comms free-text note capture) — same card
+// chrome as StrategyStampCard: a plain receipt, no left-edge accent.
+function CommunicationNoteCard({ artifact }) {
+  const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Note added to thread">
+      <div className="ask-bar__strategy-review-head">
+        <strong>{title}</strong>
+        <span className="badge badge--muted">Note saved</span>
+      </div>
+      {artifact.note ? <p>{artifact.note}</p> : null}
+    </section>
+  );
+}
+
+// communication_handoff (email-comms skill, the supervised send handoff) —
+// same card chrome as CommunicationNoteCard above. The links (mailto, Gmail,
+// Outlook compose) come pre-built from the server, which owns recipient
+// resolution; the "I sent this" confirm is not rendered here — it arrives as
+// a generic metadata.nextActions entry and renders through the shared block
+// below this card.
+function CommunicationHandoffCard({ artifact }) {
+  const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
+  const ready = artifact.state === "ready";
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Prepared reply">
+      <div className="ask-bar__strategy-review-head">
+        <strong>{title}</strong>
+        <span className={`badge ${ready ? "badge--ok" : "badge--warn"}`}>
+          {ready ? "Ready to send" : "Needs an address"}
+        </span>
+      </div>
+      {artifact.subject ? <p>{artifact.subject}</p> : null}
+      {ready ? (
+        <div className="ask-bar__company-proposal-actions">
+          <a className="ask-bar__handoff-link" href={artifact.links?.mailto}>
+            Open in email app
+          </a>
+          <a
+            className="ask-bar__handoff-link"
+            href={artifact.links?.gmail}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Gmail
+          </a>
+          <a
+            className="ask-bar__handoff-link"
+            href={artifact.links?.outlook}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Outlook
+          </a>
+        </div>
+      ) : (
+        <p className="ask-bar__strategy-note">
+          Add the contact's email address to this thread, then CareerRat can prepare the send.
+        </p>
+      )}
     </section>
   );
 }

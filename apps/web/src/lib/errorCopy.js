@@ -65,6 +65,13 @@ function communicationAmbiguityMessage(details) {
     : "That matches more than one recruiter thread. Name the company, role, or subject more specifically.";
 }
 
+function communicationChannelUnsupportedMessage(details) {
+  const channel = String(details?.channel || "").trim();
+  return channel
+    ? `This thread is on ${channel}. CareerRat can only prepare email sends. Reply there yourself, then choose “I sent this”.`
+    : "CareerRat can only prepare email sends. Reply on that channel yourself, then choose “I sent this”.";
+}
+
 function companyAmbiguityMessage(details) {
   const matches = Array.isArray(details?.matches) ? details.matches : [];
   const labels = matches
@@ -168,6 +175,22 @@ const RULES = [
     match: ({ code }) => code === "COMMUNICATION_REFERENCE_NOT_FOUND",
     message:
       "CareerRat couldn't find that recruiter thread. Check the company, role, or subject and try again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_EXECUTOR_UNAVAILABLE",
+    message:
+      "CareerRat can't send email for you yet. Use Open in your email app, send it yourself, then choose I sent this.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_CHANNEL_UNSUPPORTED",
+    message: ({ details }) => communicationChannelUnsupportedMessage(details),
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_NOT_VERIFIED",
+    message: "CareerRat couldn't confirm that send. If you sent it yourself, choose I sent this.",
     action: null,
   },
   {

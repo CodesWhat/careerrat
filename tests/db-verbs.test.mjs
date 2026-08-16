@@ -274,6 +274,134 @@ test("commMarkSent clears comm.draft AND the linked app's followUp.draft in the 
   assert.equal(app.followUp.draft, null);
 });
 
+// ---------------------------------------------------------------------------
+// commMarkSent: verification tiers (email-comms skill's supervised handoff +
+// verified-send paths). "verified" is executor-confirmed delivery evidence,
+// "supervised" is CareerRat-prepared with the user confirming the send, and
+// "user_report" is an out-of-band self report with nothing CareerRat can
+// vouch for. Omitted values derive from draft presence (supervised when a
+// CareerRat draft was in place, user_report otherwise) so every surface of
+// the verb records the same tier; unknown explicit values normalize to the
+// least-trusted tier rather than silently upgrading to a stronger claim than
+// the caller made. The sent-clears-draft invariant above holds across every
+// tier.
+// ---------------------------------------------------------------------------
+
+test("commMarkSent normalizes verification: 'verified', 'supervised', and 'user_report' each round-trip, and an unknown value falls back to 'user_report'", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+
+  const verified = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "verified",
+    at: "2026-08-09T17:00:00.000Z",
+  });
+  assert.equal(verified.verification, "verified");
+
+  const supervised = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "supervised",
+    at: "2026-08-09T17:05:00.000Z",
+  });
+  assert.equal(supervised.verification, "supervised");
+
+  const userReport = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "user_report",
+    at: "2026-08-09T17:10:00.000Z",
+  });
+  assert.equal(userReport.verification, "user_report");
+
+  const unknown = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "made-up-tier",
+    at: "2026-08-09T17:15:00.000Z",
+  });
+  assert.equal(unknown.verification, "user_report");
+
+  const omitted = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    at: "2026-08-09T17:20:00.000Z",
+  });
+  assert.equal(omitted.verification, "user_report");
+});
+
+test("commMarkSent derives the tier when verification is omitted: supervised with a draft in place, user_report without", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+
+  const withDraft = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    at: "2026-08-09T17:00:00.000Z",
+  });
+  assert.equal(withDraft.verification, "supervised");
+
+  const draftAlreadyCleared = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    at: "2026-08-09T17:05:00.000Z",
+  });
+  assert.equal(draftAlreadyCleared.verification, "user_report");
+});
+
+test("commMarkSent writes a distinct activity-log summary per verification tier", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+
+  const verified = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "verified",
+    at: "2026-08-09T17:00:00.000Z",
+  });
+  assert.match(verified.event.summary, /delivery was verified/i);
+  assert.match(verified.event.summary, /draft was cleared/i);
+
+  const supervised = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "supervised",
+    at: "2026-08-09T17:05:00.000Z",
+  });
+  assert.match(supervised.event.summary, /careerrat prepared this message/i);
+  assert.match(supervised.event.summary, /user confirmed it was sent/i);
+
+  const userReport = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "user_report",
+    at: "2026-08-09T17:10:00.000Z",
+  });
+  assert.match(userReport.event.summary, /user reported the message sent/i);
+
+  // Every tier's summary is distinct from the other two.
+  const summaries = new Set([
+    verified.event.summary,
+    supervised.event.summary,
+    userReport.event.summary,
+  ]);
+  assert.equal(summaries.size, 3);
+});
+
+test("commMarkSent still clears comm.draft (sent-clears-draft invariant) regardless of verification tier", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  commMarkSent({ repoRoot, id: "comm-with-draft", verification: "user_report" });
+
+  const commRow = db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft");
+  const comm = JSON.parse(commRow.data);
+  assert.equal(comm.status, "waiting");
+  assert.equal(comm.draft, null);
+});
+
 test("commSetDraft stores a reviewable draft and appends its durable message history", () => {
   const repoRoot = tempRepo();
   seedFixture(repoRoot);

@@ -2094,6 +2094,190 @@ describe("AskBar — acting", () => {
     const receipt = byClass(tree, "ask-bar__receipt--no-engine");
     expect(textOf(receipt)).toBe("No engine");
   });
+
+  it("renders a ready-to-send CommunicationHandoffCard with target/rel-safe webmail links and the 'I sent this' next action", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Your reply is ready to send. Open it in your email app, send it, then tell CareerRat you sent it.",
+            artifacts: [
+              {
+                kind: "communication_handoff",
+                communicationId: "comm-temporal-recruiter",
+                company: "Temporal Labs",
+                role: "Applied AI Engineer",
+                subject: "Re: Interview availability",
+                to: "avery@temporal.test",
+                state: "ready",
+                links: {
+                  mailto:
+                    "mailto:avery%40temporal.test?subject=Re%3A%20Interview&body=Tuesday%20works.",
+                  gmail:
+                    "https://mail.google.com/mail/?view=cm&fs=1&to=avery%40temporal.test&su=Re%3A%20Interview&body=Tuesday%20works.",
+                  outlook:
+                    "https://outlook.live.com/mail/0/deeplink/compose?to=avery%40temporal.test&subject=Re%3A%20Interview&body=Tuesday%20works.",
+                },
+              },
+            ],
+            metadata: {
+              nextActions: [
+                {
+                  label: "I sent this",
+                  intent: {
+                    type: "communication.record-external",
+                    entity: { type: "communication", id: "comm-temporal-recruiter" },
+                  },
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "send my reply to the Temporal Labs recruiter" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("Ready to send");
+    expect(textOf(tree)).toContain("Re: Interview availability");
+
+    const mailtoLink = visit(
+      tree,
+      (node) => node.type === "a" && textOf(node) === "Open in email app"
+    )[0];
+    expect(mailtoLink.props.href).toMatch(/^mailto:avery%40temporal\.test/);
+    expect(mailtoLink.props.target).toBeUndefined();
+
+    const gmailLink = visit(tree, (node) => node.type === "a" && textOf(node) === "Gmail")[0];
+    expect(gmailLink.props.href).toMatch(/^https:\/\/mail\.google\.com\//);
+    expect(gmailLink.props.target).toBe("_blank");
+    expect(gmailLink.props.rel).toBe("noopener noreferrer");
+
+    const outlookLink = visit(tree, (node) => node.type === "a" && textOf(node) === "Outlook")[0];
+    expect(outlookLink.props.href).toMatch(/^https:\/\/outlook\.live\.com\//);
+    expect(outlookLink.props.target).toBe("_blank");
+    expect(outlookLink.props.rel).toBe("noopener noreferrer");
+
+    const sentButton = buttonByText(tree, "I sent this");
+    expect(sentButton).toBeTruthy();
+    sentButton.props.onClick();
+    await flushMicrotasks();
+
+    expect(api.runWorkspaceIntent).toHaveBeenLastCalledWith(
+      "communication.record-external",
+      { type: "communication", id: "comm-temporal-recruiter" },
+      undefined
+    );
+  });
+
+  it("renders a no-recipient CommunicationHandoffCard hint without any dead email links", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "This thread has no contact email address yet. Add one, then CareerRat can prepare the send. Once you've sent it, tell CareerRat you sent it.",
+            artifacts: [
+              {
+                kind: "communication_handoff",
+                communicationId: "comm-temporal-recruiter",
+                company: "Temporal Labs",
+                role: "Applied AI Engineer",
+                subject: "Re: Interview availability",
+                to: null,
+                state: "no-recipient",
+                links: {
+                  mailto: "mailto:?subject=Re%3A%20Interview&body=Tuesday%20works.",
+                  gmail:
+                    "https://mail.google.com/mail/?view=cm&fs=1&su=Re%3A%20Interview&body=Tuesday%20works.",
+                  outlook:
+                    "https://outlook.live.com/mail/0/deeplink/compose?subject=Re%3A%20Interview&body=Tuesday%20works.",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "send my reply to the Temporal Labs recruiter" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("Needs an address");
+    expect(textOf(tree)).toMatch(/Add the contact's email address/i);
+    expect(
+      visit(tree, (node) => node.type === "a" && textOf(node) === "Open in email app")
+    ).toHaveLength(0);
+    expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Gmail")).toHaveLength(0);
+    expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Outlook")).toHaveLength(0);
+  });
+
+  it("renders a CommunicationNoteCard receipt for a saved thread note", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Noted on Temporal Labs — Applied AI Engineer.",
+            artifacts: [
+              {
+                kind: "communication_note",
+                communicationId: "comm-temporal-recruiter",
+                company: "Temporal Labs",
+                role: "Applied AI Engineer",
+                note: "Candidate prefers Tuesday afternoon.",
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "note on the Temporal Labs thread" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    expect(textOf(tree)).toContain("Note saved");
+    expect(textOf(tree)).toContain("Temporal Labs — Applied AI Engineer");
+    expect(textOf(tree)).toContain("Candidate prefers Tuesday afternoon.");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -179,6 +179,46 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "communication send: no connected delivery executor",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_EXECUTOR_UNAVAILABLE",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "CareerRat can't send email for you yet. Use Open in your email app, send it yourself, then choose I sent this.",
+    action: null,
+  },
+  {
+    name: "communication send: unsupported channel, with the channel named in copy",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_CHANNEL_UNSUPPORTED",
+      error: { message: "internal text must not render" },
+      details: { channel: "linkedin" },
+    }),
+    message:
+      "This thread is on linkedin. CareerRat can only prepare email sends. Reply there yourself, then choose “I sent this”.",
+    action: null,
+  },
+  {
+    name: "communication send: unsupported channel, no channel in details falls back to generic copy",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_CHANNEL_UNSUPPORTED",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "CareerRat can only prepare email sends. Reply on that channel yourself, then choose “I sent this”.",
+    action: null,
+  },
+  {
+    name: "communication send: delivery not verified",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_NOT_VERIFIED",
+      error: { message: "internal text must not render" },
+    }),
+    message: "CareerRat couldn't confirm that send. If you sent it yourself, choose I sent this.",
+    action: null,
+  },
+  {
     name: "company research: no tracked company matches",
     err: new ApiError(404, {
       code: "COMPANY_NOT_FOUND",
