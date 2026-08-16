@@ -473,7 +473,9 @@ happens there. The app never opens LinkedIn or Wellfound itself.
   `portal` channel, so counting that channel would overclaim what a message
   sync covers. With every platform off, the request refuses toward Settings;
   there is no ungated fallback source here, unlike mail's local Apple Mail
-  path. The intent writes nothing; it is a receipt, not a sweep.
+  path. The intent reads no messages and changes no tracker state; the only
+  record it leaves is its own receipt message in the Ask conversation, like
+  every other workspace request.
 - **What stays here.** The session-browser reads, the two-sided relevance
   classification, the escalation table, body pulls, `communications[]` and
   watermark writes, and the track-outcomes handoff all remain this skill's
