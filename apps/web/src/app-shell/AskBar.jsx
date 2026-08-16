@@ -2211,12 +2211,20 @@ function settingsApplyFromToLine(from, to) {
 // StrategyStampCard/CommunicationNoteCard above (plain receipt, no left-edge
 // accent).
 function SettingsApplyCard({ artifact }) {
-  const fromToLine = settingsApplyFromToLine(artifact.from, artifact.to);
+  // changed: false only arrives from a gate no-op ("Already saved"); absent
+  // means the write happened.
+  const changed = artifact.changed !== false;
+  const fromToLine = changed ? settingsApplyFromToLine(artifact.from, artifact.to) : null;
   return (
-    <section className="ask-bar__strategy-apply" aria-label="Setting updated">
+    <section
+      className="ask-bar__strategy-apply"
+      aria-label={changed ? "Setting updated" : "Setting unchanged"}
+    >
       <div className="ask-bar__strategy-review-head">
         <strong>{artifact.label || "Setting updated"}</strong>
-        <span className="badge badge--ok">Setting updated</span>
+        <span className={`badge ${changed ? "badge--ok" : "badge--muted"}`}>
+          {changed ? "Setting updated" : "No change"}
+        </span>
       </div>
       {artifact.summary ? <p>{artifact.summary}</p> : null}
       {fromToLine ? <p>{fromToLine}</p> : null}

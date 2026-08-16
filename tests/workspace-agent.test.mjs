@@ -5558,7 +5558,11 @@ test("settings.apply gate happy path: comp-floor writes minimum_base, repeats no
       input: { change: { kind: "gate", type: "comp-floor", value: 150000 } },
     },
   });
-  assert.equal(settingsArtifact(repeated).summary, "Already saved. Nothing changed.");
+  const repeatedArtifact = settingsArtifact(repeated);
+  assert.equal(repeatedArtifact.summary, "Already saved. Nothing changed.");
+  assert.equal(repeatedArtifact.changed, false);
+  // The first write carries no `changed` key at all; absent means changed.
+  assert.ok(!("changed" in firstArtifact));
 
   const appended = await executeWorkspaceIntent({
     repoRoot,
@@ -5729,6 +5733,48 @@ test("settings.apply automation: enabling a high-tier capability is unsupported 
       assert.equal(error.details.capability, "one_click_apply");
       return true;
     }
+  );
+});
+
+test("settings.apply automation: the value/enabled flag aliases agree — value: true both passes the gate and persists as enabled", async () => {
+  const repoRoot = tempRepo();
+
+  // A REST caller sending the flag as `value` instead of `enabled` must not
+  // pass the tier gate as an enable and then persist a disable.
+  const applied = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: { kind: "automation", op: "capability", capability: "status_polling", value: true },
+      },
+    },
+  });
+  assert.equal(settingsArtifact(applied).to, true);
+  const doc = candidateConfigGet({ repoRoot, env: {} }).automation;
+  assert.equal(doc.capabilities.status_polling.enabled, true);
+
+  // And the alias is tier-gated exactly like `enabled`.
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "automation",
+            op: "capability",
+            capability: "one_click_apply",
+            value: true,
+          },
+        },
+      },
+    }),
+    (error) => error.code === "SETTINGS_CHANGE_UNSUPPORTED"
   );
 });
 

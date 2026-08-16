@@ -3520,6 +3520,7 @@ export async function executeWorkspaceIntent({
           from: applied.from,
           to: applied.value,
           summary: applied.summary,
+          changed: applied.changed,
         };
       } else if (change.kind === "mode") {
         const field = String(change.field || "");
@@ -3545,8 +3546,12 @@ export async function executeWorkspaceIntent({
           error.details = { reason: "consent" };
           throw error;
         }
-        const enabling = change.enabled === true || change.value === true;
-        if ((op === "capability" || op === "platform") && enabling) {
+        // One normalized boolean for both the tier gate and the writers below
+        // — REST callers have sent the flag as either `enabled` or `value`,
+        // and gating on one while persisting the other would let "turn this
+        // on" record it off.
+        const requested = change.enabled === true || change.value === true;
+        if ((op === "capability" || op === "platform") && requested) {
           const capability = change.capability;
           if (!isCapability(capability)) {
             const error = actionError(
@@ -3595,7 +3600,7 @@ export async function executeWorkspaceIntent({
             error.details = { options: CAPABILITY_KEYS };
             throw error;
           }
-          const value = change.enabled === true;
+          const value = requested;
           const from = automationDoc.capabilities?.[capability]?.enabled === true;
           patch = { capabilities: { [capability]: { enabled: value } } };
           const label = `${CAPABILITIES[capability].label} (global switch)`;
@@ -3625,7 +3630,7 @@ export async function executeWorkspaceIntent({
             error.details = { options: CAPABILITIES[capability].platforms };
             throw error;
           }
-          const value = change.enabled === true;
+          const value = requested;
           const from = automationDoc.capabilities?.[capability]?.platforms?.[platform] === true;
           patch = { capabilities: { [capability]: { platforms: { [platform]: value } } } };
           result = {
@@ -3678,6 +3683,9 @@ export async function executeWorkspaceIntent({
         from: result.from,
         to: result.to,
         summary: result.summary,
+        // Only the gate branch reports a no-op (applyGateWrite's changed:
+        // false); mode/automation writes always persist. Absent means changed.
+        ...(result.changed === false ? { changed: false } : {}),
       };
       return appendActionResult({
         repoRoot,

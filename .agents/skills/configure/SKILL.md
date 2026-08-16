@@ -161,8 +161,8 @@ Both intents reuse the same validated write paths this skill routes to
   signals, do-not-claim). `current_base` is never read, and a leak backstop
   refuses the whole card rather than surface it.
 - **Apply.** Free-text changes ("set my comp floor to $150k", "exclude Acme
-  from my search", "switch usage mode to unlimited", "turn off status polling
-  on LinkedIn", "set setup mode to advanced") preview as a labeled action chip;
+  from my search", "switch usage mode to full", "turn off status polling
+  on Greenhouse", "set setup mode to advanced") preview as a labeled action chip;
   confirming runs one narrow, schema-validated write and returns a
   `settings_apply` receipt with the prior and new value. "…to match my current
   salary" phrasings are refused with private-comp copy, never parsed.
