@@ -42,8 +42,10 @@ criteria:
 
 - The application's host platform maps to one of the `allowed: true` platforms
   from STEP 0. Derive the platform from the `channel` field or the application
-  URL — `greenhouse.io` → `greenhouse`, `myworkday` / `wd1` / `wd3` →
-  `workday`, `ashby.com` → `ashby`, `lever.co` → `lever`.
+  URL, using the same host patterns the app's `hostnameToPortal` mapper uses —
+  `boards.greenhouse.io` / `job-boards(.eu).greenhouse.io` → `greenhouse`,
+  `*.myworkdayjobs.com` / `*.myworkday.com` → `workday`,
+  `jobs.ashbyhq.com` → `ashby`, `jobs(.eu).lever.co` → `lever`.
 - The application is still in-flight: `status` is not `rejected`, `withdrawn`,
   or `offer` (where the offer has already been accepted or closed).
 
@@ -180,3 +182,35 @@ the comm thread open after a portal-confirmed transition.
 - Local-only. Scraped bodies and screenshots stay under `workspace/`. Nothing goes outbound.
 - Domain-neutral. No hardcoded companies, roles, or candidate-specific values. No bracketed placeholder tokens anywhere — if a detail is unknown, omit it or go generic; never emit `[Company]`, `[Role]`, or any bracket.
 - Auto-apply only `autoApplicable: true` results. Surface `direction: "regress"`, `confidence: "low"`, and `changed: false` rows for human confirmation before handing anything to `track-outcomes`.
+
+---
+
+## Conversational workspace path
+
+In the Ask workspace, three narrow pieces of this skill are native: the app runs
+typed intents directly in `workspace-agent.mjs`, not this skill's browser steps.
+A terminal or external-agent run still follows STEP 0 → 5 exactly as written,
+and the actual portal reading always happens there. The app never opens
+Greenhouse, Workday, Ashby, or Lever itself.
+
+- **Requesting a status check** (`status.sync-request`). "Check my application
+  statuses" offers a "Check portal statuses" chip. The handler checks `mayRun`
+  for `status_polling` per platform: with every platform off it refuses and
+  points at Settings; otherwise it returns a handoff card showing each
+  platform's real consent state and how many in-flight applications map to it
+  by URL host. The read itself stays on this skill's agent path.
+- **Recording one portal-observed update** (`status.record-portal`, offered as
+  "Record this portal status update"). "Greenhouse says 'phone screen
+  scheduled' for Acme" resolves the application, then runs the same
+  deterministic `status-map` normalization STEP 3 uses. A confident forward or
+  terminal step (`autoApplicable`) records immediately through the
+  track-outcomes vocabulary (`screen`/`assessment` fold into `interview`,
+  `reviewing` into `awaiting`; round granularity is preserved separately). A
+  regress or low-confidence read never writes: it renders a review card whose
+  Apply button fires `status.apply-transition`, which re-checks the
+  application's current status and refuses stale proposals. No consent gate
+  applies to these self-reports; the candidate saw the portal themselves. The
+  note on every write says so: `Portal status reported by user: "<raw>"`.
+- **What stays here.** Live portal reads, the one-browser rule, batch sweeps
+  across many applications, and the batched `track-outcomes` handoff remain
+  this skill's agent path. STEP 5's confirmation-list contract is unchanged.

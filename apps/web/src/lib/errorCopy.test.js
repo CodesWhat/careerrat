@@ -465,6 +465,64 @@ const RULE_CASES = [
     message: "That note includes your private current pay. Remove the number and try again.",
     action: null,
   },
+  {
+    name: "STATUS_SYNC_NOT_ALLOWED code",
+    err: new ApiError(400, {
+      code: "STATUS_SYNC_NOT_ALLOWED",
+      error: "Portal status polling isn't turned on yet. Turn it on in Settings first.",
+    }),
+    message: "Portal status polling is off. You can turn it on in Settings.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
+    name: "STATUS_UPDATE_INVALID code",
+    err: new ApiError(400, {
+      code: "STATUS_UPDATE_INVALID",
+      error: "Say what the portal shows, like: Greenhouse says phone screen scheduled for Acme.",
+    }),
+    message:
+      "Name the company and what the portal said, like: Greenhouse says phone screen scheduled for Acme.",
+    action: null,
+  },
+  {
+    name: "STATUS_UPDATE_COMP_LEAK code",
+    err: new ApiError(400, {
+      code: "STATUS_UPDATE_COMP_LEAK",
+      error: "That update includes your private current pay figure. Remove it, then try again.",
+    }),
+    message: "That update includes your private current pay. Remove the number and try again.",
+    action: null,
+  },
+  {
+    name: "STATUS_APPLY_INVALID code",
+    err: new ApiError(400, {
+      code: "STATUS_APPLY_INVALID",
+      error: "CareerRat couldn't apply that status update as proposed.",
+    }),
+    message: "CareerRat couldn't apply that status update as proposed.",
+    action: null,
+  },
+  {
+    name: "STATUS_TRANSITION_STALE code",
+    err: new ApiError(409, {
+      code: "STATUS_TRANSITION_STALE",
+      error:
+        "This application changed since that update was proposed. Ask CareerRat to check the status again.",
+    }),
+    message:
+      "That status update is out of date. This application changed since it was proposed, so ask CareerRat to check again.",
+    action: null,
+  },
+  {
+    name: "BAD_OUTCOME_STATUS renders fixed copy, never the raw server string",
+    err: new ApiError(400, {
+      code: "BAD_OUTCOME_STATUS",
+      error:
+        "Outcome status must be one of: manual-apply, awaiting, interview, offer, rejected, withdrawn.",
+    }),
+    message: "That status isn't one CareerRat can record. Use one of its tracked stages instead.",
+    action: null,
+  },
 ];
 
 describe("resolveErrorCopy — mapped rules", () => {

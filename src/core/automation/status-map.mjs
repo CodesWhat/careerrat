@@ -293,11 +293,15 @@ export function statusTransition(currentStatus, scrapedRaw) {
   }
   const to = classifyStage(norm.canonical);
   const changed = to.id !== from.id;
+  // manual-apply sits above applied on the display ladder (order 1.5 vs 1),
+  // but a portal read that the application is now submitted means the manual
+  // submission landed — that is forward progress, not a step backward.
+  const manualApplyLanded = from.id === "manual-apply" && to.id === "applied";
   const direction = !changed
     ? "same"
     : TERMINAL_STAGE_IDS.has(to.id)
       ? "terminal"
-      : to.order > from.order
+      : to.order > from.order || manualApplyLanded
         ? "advance"
         : "regress";
   return {
@@ -317,4 +321,44 @@ export function statusTransition(currentStatus, scrapedRaw) {
       (direction === "advance" || direction === "terminal"),
     norm,
   };
+}
+
+/**
+ * Map the wider canonical status vocabulary (VALID_APP_STATUSES) onto the
+ * narrower Ask-native track-outcome allowlist (TRACK_OUTCOME_STATUSES).
+ * app.status stays coarse per the track-outcomes SSOT; screen/assessment
+ * granularity lives in the round vocabulary, not the status — so both
+ * collapse into "interview" here, and "reviewing" collapses into "awaiting".
+ *
+ * @param {string|null} canonical a VALID_APP_STATUSES value, or null
+ * @returns {string|null} a TRACK_OUTCOME_STATUSES value, or null for
+ *   null/unknown input
+ */
+export function toTrackOutcomeStatus(canonical) {
+  switch (canonical) {
+    case "reviewing":
+      return "awaiting";
+    case "screen":
+    case "assessment":
+      return "interview";
+    case "withdrawn":
+    case "rejected":
+    case "offer":
+    case "interview":
+    case "awaiting":
+      return canonical;
+    default:
+      return null;
+  }
+}
+
+// Dev guard: every canonical the rules table can emit must map to a
+// track-outcome status. The auto-apply path in the Ask workspace writes
+// toTrackOutcomeStatus(canonical) directly, so a rule added to
+// ATS_STATUS_RULES without a mapping here would surface as a runtime write
+// failure instead of this immediate import-time error.
+for (const [canonical] of ATS_STATUS_RULES) {
+  if (toTrackOutcomeStatus(canonical) === null) {
+    throw new Error(`status-map: toTrackOutcomeStatus has no mapping for "${canonical}"`);
+  }
 }

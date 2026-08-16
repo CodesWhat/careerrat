@@ -6877,3 +6877,313 @@ test("workspace action errors map issue-report failure codes to 400", async () =
     assert.equal(response.body.code, code);
   }
 });
+
+// ---------------------------------------------------------------------------
+// status.sync-request / status.record-portal-request / status.record-portal /
+// status.apply-transition (sync-status skill — status-map.mjs's
+// normalizeAtsStatus/statusTransition/toTrackOutcomeStatus, wired through
+// workspace-agent.mjs's status.* handlers). status_polling is a per-platform
+// capability (greenhouse/workday/ashby/lever) like relationship_sourcing
+// above; status.record-portal/apply-transition write through appSetStatus,
+// the only DB write path in this cluster.
+// ---------------------------------------------------------------------------
+
+function grantStatusPolling(repoRoot, platforms) {
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        status_polling: {
+          enabled: true,
+          platforms: Object.fromEntries(platforms.map((p) => [p, true])),
+        },
+      },
+      consent: Object.fromEntries(platforms.map((p) => [p, true])),
+    },
+  });
+}
+
+test("status.sync-request: zero status_polling consent throws STATUS_SYNC_NOT_ALLOWED", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "status.sync-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {},
+      },
+    }),
+    (error) => error.code === "STATUS_SYNC_NOT_ALLOWED"
+  );
+});
+
+test("status.sync-request: greenhouse consent produces a per-platform artifact with eligible counts scoped to that platform", async () => {
+  const repoRoot = tempRepo();
+  grantStatusPolling(repoRoot, ["greenhouse"]);
+  seedApplication(repoRoot, {
+    id: "app-acme-active",
+    company: "Acme",
+    status: "applied",
+    link: "https://boards.greenhouse.io/acme/jobs/1",
+  });
+  seedApplication(repoRoot, {
+    id: "app-acme-rejected",
+    company: "Acme",
+    status: "rejected",
+    link: "https://boards.greenhouse.io/acme/jobs/2",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "status_sync_handoff");
+  const byPlatform = Object.fromEntries(artifact.platforms.map((p) => [p.platform, p]));
+  assert.equal(byPlatform.greenhouse.allowed, true);
+  assert.equal(byPlatform.greenhouse.eligible, 1);
+  assert.equal(byPlatform.workday.allowed, false);
+  assert.equal(byPlatform.ashby.allowed, false);
+  assert.equal(byPlatform.lever.allowed, false);
+});
+
+test("status.record-portal: an autoApplicable transition writes the status and a receipt with applied:true", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "applied" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.record-portal",
+      entity: { type: "application", id: "app-temporal" },
+      input: { rawStatus: "Interview scheduled" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "status_transition_receipt");
+  assert.equal(artifact.applied, true);
+  assert.equal(artifact.changed, true);
+  assert.equal(artifact.to, "interview");
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "interview");
+  assert.match(app.statusNote, /Portal status reported by user/);
+});
+
+test("status.record-portal: a raw label that maps to the current stage records a receipt with changed:false and writes nothing", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "applied" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.record-portal",
+      entity: { type: "application", id: "app-temporal" },
+      input: { rawStatus: "Application submitted" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "status_transition_receipt");
+  assert.equal(artifact.changed, false);
+  assert.equal(artifact.applied, false);
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "applied");
+});
+
+test("status.record-portal: a regress proposes instead of writing", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "interview" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.record-portal",
+      entity: { type: "application", id: "app-temporal" },
+      input: { rawStatus: "Application received" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "status_transition_proposal");
+  assert.equal(artifact.direction, "regress");
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "interview");
+});
+
+test("status.record-portal: low-confidence unrecognized text proposes awaiting instead of writing", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.record-portal",
+      entity: { type: "application", id: "app-temporal" },
+      input: { rawStatus: "Zzyx quantum flux capacitor status." },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "status_transition_proposal");
+  assert.equal(artifact.confidence, "low");
+  assert.equal(artifact.to, "awaiting");
+});
+
+test("status.record-portal: a comp leak throws STATUS_UPDATE_COMP_LEAK; an empty raw status throws STATUS_UPDATE_INVALID", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "status.record-portal",
+        entity: { type: "application", id: "app-temporal" },
+        input: { rawStatus: "they said my current_base is 180000" },
+      },
+    }),
+    (error) => error.code === "STATUS_UPDATE_COMP_LEAK"
+  );
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "status.record-portal",
+        entity: { type: "application", id: "app-temporal" },
+        input: { rawStatus: "" },
+      },
+    }),
+    (error) => error.code === "STATUS_UPDATE_INVALID"
+  );
+});
+
+test("status.apply-transition: a matching from writes the status and returns applied:true", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "applied" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.apply-transition",
+      entity: { type: "application", id: "app-temporal" },
+      input: { from: "applied", to: "interview", rawStatus: "Phone screen scheduled" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "status_transition_receipt");
+  assert.equal(artifact.applied, true);
+  assert.equal(artifact.to, "interview");
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "interview");
+});
+
+test("status.apply-transition: a stale from throws STATUS_TRANSITION_STALE and writes nothing", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "applied" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "status.apply-transition",
+        entity: { type: "application", id: "app-temporal" },
+        input: { from: "interview", to: "offer" },
+      },
+    }),
+    (error) => error.code === "STATUS_TRANSITION_STALE"
+  );
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "applied");
+});
+
+test("status.apply-transition: a to outside TRACK_OUTCOME_STATUSES throws STATUS_APPLY_INVALID", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "applied" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "status.apply-transition",
+        entity: { type: "application", id: "app-temporal" },
+        input: { from: "applied", to: "screen" },
+      },
+    }),
+    (error) => error.code === "STATUS_APPLY_INVALID"
+  );
+});
+
+test("status.record-portal-request: a comp phrase in the job reference refuses before the lookup can echo it", async () => {
+  // Regression: an unmatched jobReference is echoed verbatim inside
+  // JOB_REFERENCE_NOT_FOUND, so a pay figure in the reference tail must be
+  // caught here — never surfaced through the not-found message.
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "applied" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "status.record-portal-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          rawStatus: "Offer extended",
+          jobReference: "Acme, and my current base is 190k so I want to negotiate",
+        },
+      },
+    }),
+    (error) => error.code === "STATUS_UPDATE_COMP_LEAK" && !String(error.message).includes("190k")
+  );
+});
+
+test("status.record-portal: a portal read confirming a manual-apply submission auto-applies as an advance", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "manual-apply" });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.record-portal",
+      entity: { type: "application", id: "app-temporal" },
+      input: { rawStatus: "Application received" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "status_transition_receipt");
+  assert.equal(artifact.applied, true);
+  assert.equal(artifact.to, "awaiting");
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "awaiting");
+});

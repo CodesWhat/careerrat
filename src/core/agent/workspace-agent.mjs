@@ -2,6 +2,7 @@ import { closeSync, openSync, readSync } from "node:fs";
 
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
+import { hostnameToPortal } from "../apply/form-fill.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
 import {
   automationStatus,
@@ -14,6 +15,7 @@ import {
   PLATFORMS,
 } from "../automation/consent.mjs";
 import { PROVIDERS } from "../automation/session.mjs";
+import { statusTransition, toTrackOutcomeStatus } from "../automation/status-map.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
@@ -87,6 +89,7 @@ import {
   draftStrategyReview,
   stampStrategyReview,
 } from "../strategy/review.mjs";
+import { classifyStage } from "../tracker/dashboard.mjs";
 import { readVersion } from "../version.mjs";
 import {
   buildIssueReport,
@@ -158,6 +161,10 @@ const EXECUTABLE_INTENTS = new Set([
   "calendar.record-write",
   "relationship.record-lead",
   "relationship.source-request",
+  "status.sync-request",
+  "status.record-portal-request",
+  "status.record-portal",
+  "status.apply-transition",
 ]);
 
 function compactCandidateSnapshot({ repoRoot, env }) {
@@ -336,6 +343,29 @@ function safeExternalHttpUrl(value) {
   } catch {
     return null;
   }
+}
+
+// Status polling only supports the ATS platforms that expose a candidate
+// portal CareerRat can scrape. hostnameToPortal (form-fill.mjs) already
+// covers greenhouse/ashby/lever/workable/smartrecruiters/linkedin; Workday
+// isn't a form-fill recipe host, so it gets its own hostname check here.
+function statusPollingPlatformForUrl(url) {
+  const portal = hostnameToPortal(url);
+  if (portal === "greenhouse" || portal === "ashby" || portal === "lever") return portal;
+  try {
+    const hostname = new URL(String(url || "")).hostname.toLowerCase();
+    if (
+      hostname === "myworkdayjobs.com" ||
+      hostname === "myworkday.com" ||
+      hostname.endsWith(".myworkdayjobs.com") ||
+      hostname.endsWith(".myworkday.com")
+    ) {
+      return "workday";
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fetchImpl, now }) {
@@ -1185,6 +1215,28 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
     return {
       ...intent,
       type: "outcome.record",
+      entity: { type: "application", id: application.id },
+    };
+  }
+  if (intent.type === "status.record-portal-request") {
+    // Guard both captured fields before resolution: an unmatched jobReference
+    // is echoed back verbatim in JOB_REFERENCE_NOT_FOUND, so a comp phrase in
+    // either capture must refuse here, not after the lookup.
+    const guarded = `${String(input.jobReference || "")}\n${String(input.rawStatus || "")}`;
+    if (findCurrentBaseToken(guarded) || findCompLeak(guarded)) {
+      throw actionError(
+        "That update includes your private current pay figure. Remove it, then try again.",
+        "STATUS_UPDATE_COMP_LEAK"
+      );
+    }
+    const application = resolveReferencedApplication({
+      repoRoot,
+      env,
+      jobReference: input.jobReference,
+    });
+    return {
+      ...intent,
+      type: "status.record-portal",
       entity: { type: "application", id: application.id },
     };
   }
@@ -4419,6 +4471,57 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "status.sync-request") {
+      const platforms = ["greenhouse", "workday", "ashby", "lever"].map((platform) => ({
+        platform,
+        allowed: mayRun({ capability: "status_polling", platform, root: repoRoot, env }).allowed,
+      }));
+      if (platforms.every((entry) => !entry.allowed)) {
+        throw actionError(
+          "Portal status polling isn't turned on yet. Turn it on in Settings first.",
+          "STATUS_SYNC_NOT_ALLOWED"
+        );
+      }
+
+      const db = requireDb({ repoRoot, env });
+      const applications = db
+        .prepare("SELECT data FROM applications ORDER BY rowid ASC")
+        .all()
+        .map((row) => JSON.parse(row.data));
+      for (const entry of platforms) {
+        entry.eligible = applications.filter((application) => {
+          if (
+            statusPollingPlatformForUrl(
+              application.link || application.url || application.sourceUrl
+            ) !== entry.platform
+          ) {
+            return false;
+          }
+          const stageId = classifyStage(application.status).id;
+          if (stageId === "rejected" || stageId === "withdrawn") return false;
+          if (application.status === "offer") return false;
+          return true;
+        }).length;
+      }
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "Status check requested. Run the sync-status skill from your agent or terminal to read your job portals; any updates come back here for review.",
+        artifacts: [
+          {
+            kind: "status_sync_handoff",
+            platforms,
+            at: requestDate(now).toISOString(),
+          },
+        ],
+        metadata: { state: "requested" },
+        now,
+      });
+    }
+
     if (normalized.type === "scheduling.prepare") {
       const communication = communicationForIntent({
         repoRoot,
@@ -4896,6 +4999,180 @@ export async function executeWorkspaceIntent({
           recordingMode: "external_report",
           submissionVerified: false,
           appliedAt,
+        },
+        now,
+      });
+    }
+
+    if (normalized.type === "status.record-portal") {
+      const rawStatus = String(input.rawStatus || "")
+        .trim()
+        .slice(0, 160);
+      if (!rawStatus) {
+        throw actionError(
+          "Say what the portal shows, like: Greenhouse says phone screen scheduled for Acme.",
+          "STATUS_UPDATE_INVALID"
+        );
+      }
+      if (findCurrentBaseToken(rawStatus) || findCompLeak(rawStatus)) {
+        throw actionError(
+          "That update includes your private current pay figure. Remove it, then try again.",
+          "STATUS_UPDATE_COMP_LEAK"
+        );
+      }
+
+      const at = requestDate(now).toISOString();
+      const transition = statusTransition(application.status, rawStatus);
+
+      if (!transition.changed) {
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `No change recorded: ${applicationLabel(application)} is already tracked at that stage.`,
+          artifacts: [
+            {
+              kind: "status_transition_receipt",
+              applicationId: normalized.entity.id,
+              company: application.company || null,
+              role: application.role || null,
+              from: application.status || null,
+              to: null,
+              rawStatus,
+              changed: false,
+              applied: false,
+              at,
+            },
+          ],
+          metadata: { state: "unchanged" },
+          now,
+        });
+      }
+
+      if (transition.autoApplicable) {
+        const to = toTrackOutcomeStatus(transition.canonical);
+        appSetStatus({
+          repoRoot,
+          env,
+          id: normalized.entity.id,
+          to,
+          note: `Portal status reported by user: "${rawStatus}"`,
+        });
+        return appendActionResult({
+          repoRoot,
+          env,
+          normalized,
+          intentMessage,
+          text: `Recorded ${applicationLabel(application)} as ${to}.`,
+          artifacts: [
+            {
+              kind: "status_transition_receipt",
+              applicationId: normalized.entity.id,
+              company: application.company || null,
+              role: application.role || null,
+              from: application.status || null,
+              to,
+              rawStatus,
+              changed: true,
+              applied: true,
+              at,
+            },
+          ],
+          metadata: {
+            previousState: application.status || null,
+            state: to,
+            provenance: "portal-self-report",
+          },
+          now,
+        });
+      }
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text:
+          transition.direction === "regress"
+            ? "The portal shows a step backward from where this application is tracked. Review it and press Apply to record it anyway."
+            : "CareerRat isn't sure how that maps to a tracked stage. Review it and press Apply to record it.",
+        artifacts: [
+          {
+            kind: "status_transition_proposal",
+            applicationId: normalized.entity.id,
+            company: application.company || null,
+            role: application.role || null,
+            from: application.status || null,
+            rawStatus,
+            to: toTrackOutcomeStatus(transition.canonical),
+            direction: transition.direction,
+            confidence: transition.confidence,
+            round: transition.norm?.round || null,
+            at,
+          },
+        ],
+        metadata: { state: "proposed", direction: transition.direction },
+        now,
+      });
+    }
+
+    if (normalized.type === "status.apply-transition") {
+      const to = String(input.to || "")
+        .trim()
+        .toLowerCase();
+      if (!to || !TRACK_OUTCOME_STATUSES.includes(to)) {
+        throw actionError(
+          "CareerRat couldn't apply that status update as proposed.",
+          "STATUS_APPLY_INVALID"
+        );
+      }
+      if ((application.status || null) !== (input.from || null)) {
+        throw actionError(
+          "This application changed since that update was proposed. Ask CareerRat to check the status again.",
+          "STATUS_TRANSITION_STALE"
+        );
+      }
+      const rawStatus =
+        input.rawStatus == null ? null : String(input.rawStatus).trim().slice(0, 160) || null;
+      if (rawStatus && (findCurrentBaseToken(rawStatus) || findCompLeak(rawStatus))) {
+        throw actionError(
+          "That update includes your private current pay figure. Remove it, then try again.",
+          "STATUS_UPDATE_COMP_LEAK"
+        );
+      }
+
+      appSetStatus({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+        to,
+        note: rawStatus ? `Portal status reported by user: "${rawStatus}"` : undefined,
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Recorded ${applicationLabel(application)} as ${to}.`,
+        artifacts: [
+          {
+            kind: "status_transition_receipt",
+            applicationId: normalized.entity.id,
+            company: application.company || null,
+            role: application.role || null,
+            from: input.from || null,
+            to,
+            rawStatus,
+            changed: true,
+            applied: true,
+            at: requestDate(now).toISOString(),
+          },
+        ],
+        metadata: {
+          previousState: input.from || null,
+          state: to,
+          provenance: "portal-self-report",
         },
         now,
       });
@@ -6156,6 +6433,54 @@ function relationshipSourceRequestFromText(text) {
   return { input: { company } };
 }
 
+// "Greenhouse says phone screen scheduled for Acme" / "the portal moved Acme
+// to interview" — a self-report of a raw ATS-portal status label, not a
+// request for CareerRat to go read the portal itself. Returns null (rather
+// than routing with an empty capture) when a pattern matches but either
+// group comes back empty after trim, so it fails closed to other
+// matchers/AI capture instead of ever recording a blank status.
+function statusRecordPortalFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+
+  let match = value.match(
+    /^(?:the\s+)?(greenhouse|workday|ashby|lever|portal)\s+(?:says|shows|lists)\s+['"“]?(.+?)['"”]?\s+for\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const rawStatus = match[2].trim();
+    const jobReference = match[3].trim();
+    if (!rawStatus || !jobReference) return null;
+    return { input: { jobReference, rawStatus } };
+  }
+
+  match = value.match(
+    /^(?:the\s+)?(greenhouse|workday|ashby|lever|portal)\s+moved\s+(.+?)\s+to\s+(.+?)\s*[.?!]*$/i
+  );
+  if (match) {
+    const jobReference = match[2].trim();
+    const rawStatus = match[3].trim();
+    if (!rawStatus || !jobReference) return null;
+    return { input: { jobReference, rawStatus } };
+  }
+
+  return null;
+}
+
+// "check my application statuses" / "sync my portal status" — a
+// consent-checked handoff to the sync-status skill. Deliberately requires
+// the word status/statuses so it never collides with the generic
+// jobs/roles/postings/boards/sources vocabulary the terminal search.run
+// catch-all owns.
+function statusSyncRequestFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  const match =
+    /^(?:please\s+)?(?:can\s+you\s+)?(?:check|sync|refresh|update)\s+(?:my\s+)?(?:application|portal|ats|job)?\s*status(?:es)?\b(?:\s+(?:from|on)\s+(?:greenhouse|workday|ashby|lever))?\s*[.?!]*$/i.test(
+      value
+    );
+  return match ? { input: {} } : null;
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -6496,17 +6821,23 @@ const ACTION_PREVIEW_RULES = [
     }),
   },
   // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report /
-  // calendar.record-write / relationship.record-lead / relationship.source-request
-  // MUST stay above the terminal search.run catch-all immediately below — that
-  // rule matches a bare "check"/"search"/"find"/"run" verb near
+  // calendar.record-write / relationship.record-lead / relationship.source-request /
+  // status.record-portal-request / status.sync-request MUST stay above the
+  // terminal search.run catch-all immediately below — that rule matches a
+  // bare "check"/"search"/"find"/"run" verb near
   // "jobs/roles/postings/boards/sources" and would otherwise never let
   // phrasings like "turn off status polling", "check my settings", "report a
-  // bug", "I added the interview to my calendar", or "find a recruiter at
-  // Acme" reach these rules first. relationship.record-lead MUST also stay
-  // above relationship.source-request: both match "recruiter at <company>"
-  // vocabulary, but only record-lead's patterns require a person's name, so
-  // the more specific self-report rule has to win before the generic sourcing
-  // request rule gets a chance.
+  // bug", "I added the interview to my calendar", "find a recruiter at
+  // Acme", or "check my application statuses" reach these rules first.
+  // relationship.record-lead MUST also stay above relationship.source-request:
+  // both match "recruiter at <company>" vocabulary, but only record-lead's
+  // patterns require a person's name, so the more specific self-report rule
+  // has to win before the generic sourcing request rule gets a chance.
+  // status.record-portal-request MUST stay above status.sync-request for the
+  // same reason: both involve "check"/"status" vocabulary, but a future edit
+  // to either regex could collide on those verbs, so the more specific
+  // portal-label self-report has to win before the generic sync request gets
+  // a chance.
   {
     test: (text) => Boolean(settingsExplainFromText(text)),
     label: "Show my settings",
@@ -6563,6 +6894,24 @@ const ACTION_PREVIEW_RULES = [
       type: "relationship.source-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: relationshipSourceRequestFromText(text).input,
+    }),
+  },
+  {
+    test: (text) => Boolean(statusRecordPortalFromText(text)),
+    label: "Record this portal status update",
+    intent: (text) => ({
+      type: "status.record-portal-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: statusRecordPortalFromText(text).input,
+    }),
+  },
+  {
+    test: (text) => Boolean(statusSyncRequestFromText(text)),
+    label: "Check portal statuses",
+    intent: (text) => ({
+      type: "status.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: statusSyncRequestFromText(text).input,
     }),
   },
   {
