@@ -339,7 +339,9 @@ test("draftStrategyReview degrades to a manual, deterministic result when the AI
   assert.deepEqual(draft.findings, []);
   assert.deepEqual(draft.recommendations, []);
   assert.ok(draft.manual);
-  assert.equal(draft.manual.reason, "no ai route configured for this workspace");
+  assert.equal(draft.manual.reason, "No AI engine was available for this review.");
+  assert.equal(draft.manual.detail, "no ai route configured for this workspace");
+  assert.equal(draft.manual.code, "NO_AI_ROUTE");
   assert.ok(draft.manual.surfaceSummary, "expected the deterministic recommendation to surface");
   assert.equal(typeof draft.manual.surfaceSummary.title, "string");
   assert.ok(draft.manual.surfaceSummary.title.length > 0);
@@ -564,10 +566,45 @@ test("applyStrategyRecommendation rerank: a stale id fails the whole batch befor
         proposal: { ids: ["app-live", "app-gone"], priority: "low" },
       },
     }),
-    (error) => error.code === "NOT_FOUND"
+    (error) => error.code === "STRATEGY_APPLY_STALE"
   );
 
   assert.equal(readApplication(repoRoot, "app-live").priority, undefined);
+});
+
+test("applyStrategyRecommendation rerank rejects an unrecognized status and a malformed priority before writing", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-1", status: "applied" });
+
+  await assert.rejects(
+    applyStrategyRecommendation({
+      repoRoot,
+      env: {},
+      recommendation: {
+        type: "rerank",
+        title: "Typo status",
+        proposal: { ids: ["app-1"], toStatus: "banana-tier" },
+      },
+    }),
+    (error) => error.code === "STRATEGY_APPLY_INVALID"
+  );
+
+  await assert.rejects(
+    applyStrategyRecommendation({
+      repoRoot,
+      env: {},
+      recommendation: {
+        type: "rerank",
+        title: "Object priority",
+        proposal: { ids: ["app-1"], priority: { level: "high" } },
+      },
+    }),
+    (error) => error.code === "STRATEGY_APPLY_INVALID"
+  );
+
+  const row = readApplication(repoRoot, "app-1");
+  assert.equal(row.status, "applied");
+  assert.equal(row.priority, undefined);
 });
 
 test("applyStrategyRecommendation keep-signal/cut-signal/exclude-company append through the DB gate path", async () => {

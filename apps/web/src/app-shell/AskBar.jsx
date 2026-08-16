@@ -1873,7 +1873,7 @@ function StrategyReviewCard({ artifact, onRunAction }) {
           ))}
         </div>
       ) : null}
-      {!isFresh && !findings.length && !recommendations.length ? (
+      {!isFresh && !isManual && !findings.length && !recommendations.length ? (
         <p className="ask-bar__strategy-note">Nothing to review yet.</p>
       ) : null}
     </section>

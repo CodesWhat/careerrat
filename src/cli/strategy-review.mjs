@@ -94,7 +94,12 @@ function loadTargeting() {
 function cmdStamp() {
   const trackerData = loadTracker();
   const targeting = loadTargeting();
-  const at = opts.at || new Date().toISOString();
+  const parsedAt = opts.at ? new Date(opts.at) : new Date();
+  if (Number.isNaN(parsedAt.getTime())) {
+    console.error(`--at must be a parseable date (got "${opts.at}").`);
+    process.exit(1);
+  }
+  const at = parsedAt.toISOString();
   const marker = buildStrategyReviewStamp(trackerData, at, targeting);
 
   if (!opts.write) {
@@ -119,7 +124,7 @@ function cmdStamp() {
     written = stampStrategyReview({
       repoRoot: opts.root,
       env: process.env,
-      now: () => new Date(at),
+      now: parsedAt,
     }).strategyReview;
   } else {
     trackerData.strategyReview = marker;

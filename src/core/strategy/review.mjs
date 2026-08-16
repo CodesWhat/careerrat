@@ -44,6 +44,7 @@ import {
 import { sourcedSetStatus } from "../db/verbs/sourced.mjs";
 import { assertNoPrivateLeak, coerceValue, resolveRoute } from "../profile/gate-writer.mjs";
 import { appendLearning, readLearnings, slugifyFamily } from "../profile/learnings.mjs";
+import { isKnownStatusLabel } from "../tracker/dashboard.mjs";
 import {
   buildStrategyInsights,
   buildStrategyReviewStamp,
@@ -279,7 +280,7 @@ function promptFor(context) {
   ].join("\n");
 }
 
-function manualDraftResult({ context, reason }) {
+function manualDraftResult({ context, reason, code = null }) {
   const rec = context.strategy.deterministicRecommendation;
   return {
     state: "manual",
@@ -289,7 +290,14 @@ function manualDraftResult({ context, reason }) {
     headline: rec?.title || "Review manually",
     findings: [],
     recommendations: [],
-    manual: { reason, surfaceSummary: rec || null },
+    manual: {
+      // reason is fixed copy: the raw provider error text stays in detail so
+      // it never renders as if it were CareerRat's own words.
+      reason: "No AI engine was available for this review.",
+      code,
+      detail: reason || null,
+      surfaceSummary: rec || null,
+    },
   };
 }
 
@@ -344,6 +352,7 @@ export async function draftStrategyReview({
     return manualDraftResult({
       context,
       reason: aiResult.body?.error?.message || "AI unavailable; review manually",
+      code: aiResult.body?.code ?? aiResult.body?.error?.code ?? null,
     });
   }
 
@@ -440,6 +449,29 @@ function applyRerank({ repoRoot, env, proposal }) {
       "STRATEGY_APPLY_INVALID"
     );
   }
+  // Status labels are free text by design, but a rerank proposal is model
+  // output: require it to match a known stage keyword so an AI typo can't
+  // write a status that classifies as nothing.
+  if (toStatus && !isKnownStatusLabel(toStatus)) {
+    throw applyError(
+      `"${toStatus}" doesn't match any status CareerRat recognizes.`,
+      "STRATEGY_APPLY_INVALID"
+    );
+  }
+  if (
+    hasPriority &&
+    !(
+      (typeof proposal.priority === "string" &&
+        proposal.priority.trim() &&
+        proposal.priority.length <= 40) ||
+      (typeof proposal.priority === "number" && Number.isFinite(proposal.priority))
+    )
+  ) {
+    throw applyError(
+      "A rerank priority must be a short label or a number.",
+      "STRATEGY_APPLY_INVALID"
+    );
+  }
   const ids = rerankIds(proposal);
   const db = requireDb({ repoRoot, env });
   // Resolve every id before writing any: a rerank proposal's ids were captured
@@ -449,7 +481,12 @@ function applyRerank({ repoRoot, env, proposal }) {
   const hosts = new Map();
   for (const id of ids) {
     const host = findHostRow(db, id);
-    if (!host) throw new NotFoundError(`no application or sourced role with id "${id}"`);
+    if (!host) {
+      throw applyError(
+        `Row "${id}" is no longer on the board, so this recommendation is out of date.`,
+        "STRATEGY_APPLY_STALE"
+      );
+    }
     hosts.set(id, host);
   }
   for (const id of ids) {

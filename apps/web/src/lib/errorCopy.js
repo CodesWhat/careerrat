@@ -200,6 +200,11 @@ const RULES = [
   },
   {
     match: ({ code }) => code === "STRATEGY_APPLY_INVALID",
+    message: "CareerRat couldn't apply that recommendation as written.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "STRATEGY_APPLY_STALE",
     message:
       "That recommendation is out of date. Run the strategy review again, then apply from the fresh result.",
     action: null,

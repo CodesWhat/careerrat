@@ -231,9 +231,18 @@ const RULE_CASES = [
     action: null,
   },
   {
-    name: "strategy apply: recommendation is out of date or malformed",
+    name: "strategy apply: recommendation is malformed",
     err: new ApiError(400, {
       code: "STRATEGY_APPLY_INVALID",
+      error: { message: "internal text must not render" },
+    }),
+    message: "CareerRat couldn't apply that recommendation as written.",
+    action: null,
+  },
+  {
+    name: "strategy apply: recommendation references a row that's gone",
+    err: new ApiError(409, {
+      code: "STRATEGY_APPLY_STALE",
       error: { message: "internal text must not render" },
     }),
     message:

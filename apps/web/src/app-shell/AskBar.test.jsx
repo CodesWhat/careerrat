@@ -2607,6 +2607,7 @@ describe("AskBar — strategy_review / strategy_apply artifacts", () => {
     expect(textOf(card)).toContain("No AI available");
     expect(textOf(card)).toMatch(/AI engine was not available for this review/);
     expect(textOf(card)).toContain("deterministic tracker rules");
+    expect(textOf(card)).not.toContain("Nothing to review yet.");
   });
 
   it("clicking Apply on a recommendation fires strategy.apply with the full recommendation payload", async () => {

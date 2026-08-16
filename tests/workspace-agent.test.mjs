@@ -5038,6 +5038,7 @@ test("workspace action errors return actionable client statuses instead of serve
     ["BAD_HEALTH_RATING", 400],
     ["STRATEGY_APPLY_UNSUPPORTED", 400],
     ["STRATEGY_APPLY_INVALID", 400],
+    ["STRATEGY_APPLY_STALE", 409],
   ];
 
   for (const [code, expectedStatus] of cases) {
