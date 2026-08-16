@@ -4541,6 +4541,82 @@ test("communication.handoff requires a draft before it will prepare a send", asy
   );
 });
 
+test("communication.handoff refuses to build compose links from a draft that leaks current_base", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: {
+      subject: "Re: Compensation",
+      body: "My current_base is 180000, so I'm targeting a step up.",
+    },
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.handoff",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_COMP_LEAK"
+  );
+});
+
+test("communication.handoff refuses a draft with unresolved placeholder text", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: {
+      subject: "Re: Interview availability",
+      body: "Thanks [Recruiter Name], Tuesday afternoon works for me.",
+    },
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.handoff",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_DRAFT_PLACEHOLDER"
+  );
+});
+
+test("communication.handoff normalizes a legacy bare-string draft into subject and body", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: "Tuesday afternoon works for me.",
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.handoff",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.state, "ready");
+  // No subject on a string draft, so the fallback subject kicks in and the
+  // body carries the legacy string.
+  assert.equal(artifact.subject, "Re: Applied AI Engineer at Temporal Labs");
+  assert.match(artifact.links.mailto, /body=Tuesday%20afternoon%20works%20for%20me\./);
+});
+
 test("communication.send also refuses a non-email channel, before checking for a draft or executor", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);

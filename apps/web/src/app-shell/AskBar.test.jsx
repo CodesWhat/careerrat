@@ -2238,6 +2238,58 @@ describe("AskBar — acting", () => {
     expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Outlook")).toHaveLength(0);
   });
 
+  it("drops handoff links that do not match their expected scheme or host instead of rendering them", async () => {
+    api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
+    api.runWorkspaceIntent.mockResolvedValue({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Your reply is ready to send.",
+            artifacts: [
+              {
+                kind: "communication_handoff",
+                communicationId: "comm-temporal-recruiter",
+                company: "Temporal Labs",
+                role: "Applied AI Engineer",
+                subject: "Re: Interview availability",
+                to: "avery@temporal.test",
+                state: "ready",
+                links: {
+                  mailto: "javascript:alert(1)",
+                  gmail: "https://evil.example/phish",
+                  outlook: "data:text/html,oops",
+                },
+              },
+            ],
+          },
+        ],
+      },
+    });
+
+    let tree = render();
+    const input = byTag(tree, "input");
+    input.props.onFocus();
+    input.props.onChange({ target: { value: "send my reply to the Temporal Labs recruiter" } });
+    tree = render();
+    runPendingEffects();
+    await vi.advanceTimersByTimeAsync(300);
+    await flushMicrotasks();
+    tree = render();
+    byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+    await flushMicrotasks();
+    tree = render();
+
+    // The card still renders, but none of the tampered links become anchors.
+    expect(textOf(tree)).toContain("Ready to send");
+    expect(
+      visit(tree, (node) => node.type === "a" && textOf(node) === "Open in email app")
+    ).toHaveLength(0);
+    expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Gmail")).toHaveLength(0);
+    expect(visit(tree, (node) => node.type === "a" && textOf(node) === "Outlook")).toHaveLength(0);
+  });
+
   it("renders a CommunicationNoteCard receipt for a saved thread note", async () => {
     api.previewWorkspaceQuery.mockResolvedValue(actionPreview());
     api.runWorkspaceIntent.mockResolvedValue({

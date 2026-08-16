@@ -27,6 +27,7 @@ import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verb
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
+import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import { matchTrackerRecord } from "../intake/match.mjs";
 import { normalizeIntakeRequestedAction } from "../intake/requested-action.mjs";
 import { resolveJobUrl } from "../intake/resolve.mjs";
@@ -45,6 +46,7 @@ import {
 } from "../packet/one-off-answer.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import {
   isStale,
@@ -3851,6 +3853,11 @@ export async function executeWorkspaceIntent({
         );
       }
       const sentAt = resolvedCommunicationDate(execution.sentAt, now);
+      const confirmation = execution.confirmation
+        ? String(execution.confirmation)
+        : "Verified delivery confirmation";
+      // The evidence string is what lets commMarkSent record "verified" at
+      // all; without it the verb derives a weaker tier by design.
       commMarkSent({
         repoRoot,
         env,
@@ -3858,10 +3865,8 @@ export async function executeWorkspaceIntent({
         at: sentAt,
         summary: execution.summary,
         verification: "verified",
+        deliveryEvidence: confirmation,
       });
-      const confirmation = execution.confirmation
-        ? String(execution.confirmation)
-        : "Verified delivery confirmation";
       return appendActionResult({
         repoRoot,
         env,
@@ -3977,13 +3982,36 @@ export async function executeWorkspaceIntent({
           "COMMUNICATION_DRAFT_REQUIRED"
         );
       }
-      const draft = communication.draft;
+      // Legacy rows can hold a bare-string draft (see sentMessageFromDraft in
+      // verbs/comm.mjs); normalize the same way so the body never opens empty.
+      const draft =
+        typeof communication.draft === "string"
+          ? { body: communication.draft }
+          : communication.draft;
       const subject =
         String(draft.subject || "").trim() ||
         `Re: ${communication.role || "this role"} at ${communication.company || "this company"}`;
+      const body = String(draft.body || "");
+      // Outbound-content backstops before anything goes into a compose link:
+      // the private current_base figure never leaves, and an unfinished draft
+      // with placeholder brackets goes back for editing instead of out.
+      const leak = findCurrentBaseToken(`${subject}\n${body}`);
+      if (leak) {
+        throw actionError(
+          "This draft still contains your private current pay figure. Edit the draft, then try again.",
+          "COMMUNICATION_COMP_LEAK"
+        );
+      }
+      const placeholderLint = lintArtifact(`${subject}\n${body}`);
+      if (!placeholderLint.clean) {
+        throw actionError(
+          "This draft still has unfinished placeholder text. Finish the draft, then try again.",
+          "COMMUNICATION_DRAFT_PLACEHOLDER"
+        );
+      }
       const recipient = resolveRecipient(communication);
       const to = recipient.state === "ready" ? recipient.to : null;
-      const links = buildSendLinks({ to: to || "", subject, body: draft.body });
+      const links = buildSendLinks({ to: to || "", subject, body });
       const text =
         recipient.state === "ready"
           ? "Your reply is ready to send. Open it in your email app, send it, then tell CareerRat you sent it."

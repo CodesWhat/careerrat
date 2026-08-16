@@ -279,7 +279,8 @@ test("commMarkSent clears comm.draft AND the linked app's followUp.draft in the 
 // verified-send paths). "verified" is executor-confirmed delivery evidence,
 // "supervised" is CareerRat-prepared with the user confirming the send, and
 // "user_report" is an out-of-band self report with nothing CareerRat can
-// vouch for. Omitted values derive from draft presence (supervised when a
+// vouch for. "verified" must be earned: without deliveryEvidence the claim
+// downgrades to the derived tier. Omitted values derive from draft presence (supervised when a
 // CareerRat draft was in place, user_report otherwise) so every surface of
 // the verb records the same tier; unknown explicit values normalize to the
 // least-trusted tier rather than silently upgrading to a stronger claim than
@@ -295,6 +296,7 @@ test("commMarkSent normalizes verification: 'verified', 'supervised', and 'user_
     repoRoot,
     id: "comm-with-draft",
     verification: "verified",
+    deliveryEvidence: "Confirmation page captured at workspace/captures/send-1.png",
     at: "2026-08-09T17:00:00.000Z",
   });
   assert.equal(verified.verification, "verified");
@@ -331,6 +333,45 @@ test("commMarkSent normalizes verification: 'verified', 'supervised', and 'user_
   assert.equal(omitted.verification, "user_report");
 });
 
+test("commMarkSent refuses an unearned 'verified': without deliveryEvidence the tier downgrades to the derived one, and evidence is stored on the sent message", () => {
+  const repoRoot = tempRepo();
+  seedFixture(repoRoot);
+  const db = openDb({ repoRoot });
+
+  // Explicit "verified" with no evidence: downgrade to supervised (draft in place).
+  const noEvidence = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "verified",
+    at: "2026-08-09T17:00:00.000Z",
+  });
+  assert.equal(noEvidence.verification, "supervised");
+
+  // Draft is now cleared, so the same unearned claim lands at user_report.
+  const noEvidenceNoDraft = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "verified",
+    at: "2026-08-09T17:05:00.000Z",
+  });
+  assert.equal(noEvidenceNoDraft.verification, "user_report");
+
+  // With real evidence the tier sticks and the evidence lands on the message.
+  const earned = commMarkSent({
+    repoRoot,
+    id: "comm-with-draft",
+    verification: "verified",
+    deliveryEvidence: "Provider accepted message id <abc123@mail>",
+    at: "2026-08-09T17:10:00.000Z",
+  });
+  assert.equal(earned.verification, "verified");
+
+  const commRow = db.prepare("SELECT data FROM communications WHERE id = ?").get("comm-with-draft");
+  const comm = JSON.parse(commRow.data);
+  const lastSent = comm.messages.filter((m) => m.direction === "outbound-sent").at(-1);
+  assert.equal(lastSent.deliveryEvidence, "Provider accepted message id <abc123@mail>");
+});
+
 test("commMarkSent derives the tier when verification is omitted: supervised with a draft in place, user_report without", () => {
   const repoRoot = tempRepo();
   seedFixture(repoRoot);
@@ -358,6 +399,7 @@ test("commMarkSent writes a distinct activity-log summary per verification tier"
     repoRoot,
     id: "comm-with-draft",
     verification: "verified",
+    deliveryEvidence: "Delivery confirmation captured",
     at: "2026-08-09T17:00:00.000Z",
   });
   assert.match(verified.event.summary, /delivery was verified/i);

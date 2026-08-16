@@ -326,8 +326,15 @@ function sentMessageFromDraft(draft, { at, summary }) {
 // a stronger claim than the caller actually made.
 const COMM_VERIFICATION_TIERS = new Set(["verified", "supervised", "user_report"]);
 
-function normalizeCommVerification(value, { hadDraft = false } = {}) {
+// "verified" is an executor-only claim: without delivery evidence to back it,
+// an explicit "verified" from any caller (CLI, REST, a skill) records at the
+// derived tier instead, so the strongest word in the tracker always has
+// something behind it.
+function normalizeCommVerification(value, { hadDraft = false, hasEvidence = false } = {}) {
   const clean = String(value || "").trim();
+  if (clean === "verified") {
+    return hasEvidence ? "verified" : hadDraft ? "supervised" : "user_report";
+  }
   if (COMM_VERIFICATION_TIERS.has(clean)) return clean;
   if (!clean) return hadDraft ? "supervised" : "user_report";
   return "user_report";
@@ -336,12 +343,22 @@ function normalizeCommVerification(value, { hadDraft = false } = {}) {
 // commMarkSent({id, at?, summary?}) — the "sent clears draft" hard invariant
 // (AGENTS.md): status → waiting, comm.draft cleared, and — if the draft was
 // backed by app.followUp.draft — that's cleared too, in the SAME write.
-export function commMarkSent({ repoRoot, env, id, at, summary, verification } = {}) {
+export function commMarkSent({
+  repoRoot,
+  env,
+  id,
+  at,
+  summary,
+  verification,
+  deliveryEvidence,
+} = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const comm = requireRow(db, "communications", id, "communication");
     const sentAt = at || new Date().toISOString();
+    const evidence = String(deliveryEvidence || "").trim();
     const messages = Array.isArray(comm.messages) ? comm.messages.slice() : [];
     const sentMessage = sentMessageFromDraft(comm.draft, { at: sentAt, summary });
+    if (evidence) sentMessage.deliveryEvidence = evidence;
     messages.push(sentMessage);
     const updated = {
       ...comm,
@@ -371,7 +388,10 @@ export function commMarkSent({ repoRoot, env, id, at, summary, verification } = 
       }
     }
 
-    const tier = normalizeCommVerification(verification, { hadDraft: comm.draft != null });
+    const tier = normalizeCommVerification(verification, {
+      hadDraft: comm.draft != null,
+      hasEvidence: Boolean(evidence),
+    });
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",

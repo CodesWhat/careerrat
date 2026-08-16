@@ -194,6 +194,17 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "COMMUNICATION_COMP_LEAK",
+    message:
+      "This draft still contains your private current pay figure. Edit the draft before sending.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "COMMUNICATION_DRAFT_PLACEHOLDER",
+    message: "This draft still has unfinished placeholder text. Finish the draft before sending.",
+    action: null,
+  },
+  {
     match: ({ code }) => code === "COMPANY_NOT_FOUND",
     message:
       "CareerRat couldn't find that company among your saved jobs. Name it exactly as it appears there.",

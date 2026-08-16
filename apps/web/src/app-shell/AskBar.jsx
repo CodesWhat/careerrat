@@ -1997,9 +1997,20 @@ function CommunicationNoteCard({ artifact }) {
 // resolution; the "I sent this" confirm is not rendered here — it arrives as
 // a generic metadata.nextActions entry and renders through the shared block
 // below this card.
+// Artifacts are durable thread data, so the compose hrefs are re-checked
+// against their expected scheme/origin here before rendering: only the exact
+// link shapes the server builds can become clickable.
+function safeHandoffHref(href, prefix) {
+  const value = String(href || "");
+  return value.startsWith(prefix) ? value : null;
+}
+
 function CommunicationHandoffCard({ artifact }) {
   const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
   const ready = artifact.state === "ready";
+  const mailtoHref = safeHandoffHref(artifact.links?.mailto, "mailto:");
+  const gmailHref = safeHandoffHref(artifact.links?.gmail, "https://mail.google.com/");
+  const outlookHref = safeHandoffHref(artifact.links?.outlook, "https://outlook.live.com/");
   return (
     <section className="ask-bar__strategy-apply" aria-label="Prepared reply">
       <div className="ask-bar__strategy-review-head">
@@ -2011,25 +2022,31 @@ function CommunicationHandoffCard({ artifact }) {
       {artifact.subject ? <p>{artifact.subject}</p> : null}
       {ready ? (
         <div className="ask-bar__company-proposal-actions">
-          <a className="ask-bar__handoff-link" href={artifact.links?.mailto}>
-            Open in email app
-          </a>
-          <a
-            className="ask-bar__handoff-link"
-            href={artifact.links?.gmail}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Gmail
-          </a>
-          <a
-            className="ask-bar__handoff-link"
-            href={artifact.links?.outlook}
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Outlook
-          </a>
+          {mailtoHref ? (
+            <a className="ask-bar__handoff-link" href={mailtoHref}>
+              Open in email app
+            </a>
+          ) : null}
+          {gmailHref ? (
+            <a
+              className="ask-bar__handoff-link"
+              href={gmailHref}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Gmail
+            </a>
+          ) : null}
+          {outlookHref ? (
+            <a
+              className="ask-bar__handoff-link"
+              href={outlookHref}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Outlook
+            </a>
+          ) : null}
         </div>
       ) : (
         <p className="ask-bar__strategy-note">

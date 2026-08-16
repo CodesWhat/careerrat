@@ -744,8 +744,37 @@ describe("JobDrawer", () => {
     expect(
       visit(card, (node) => node.type === "a" && textOf(node) === "Open in email app")
     ).toHaveLength(0);
+    // Instead of a silently missing link, the card says why and what to do.
+    expect(textOf(card)).toMatch(/no contact email address yet/i);
     // The record-it-sent path stays available even without a resolvable address.
     expect(button(card, "I sent this")).toBeTruthy();
+  });
+
+  it("ReadyToSendCard normalizes a legacy bare-string draft into a mailto body", async () => {
+    api.getCommunications.mockResolvedValue({
+      data: [
+        {
+          id: "comm-1",
+          applicationId: "app-1",
+          company: "Northstar",
+          status: "drafted",
+          draft: "Tuesday afternoon works for me.",
+          participants: [{ name: "Avery Recruiter", email: "avery@northstar.test" }],
+        },
+      ],
+    });
+    renderDrawer(applicationRow);
+    await runEffects();
+    const tree = renderDrawer(applicationRow);
+
+    const card = invokeFunctionComponent(tree, "ReadyToSendCard");
+    expect(card).toBeTruthy();
+    const mailtoLink = visit(
+      card,
+      (node) => node.type === "a" && textOf(node) === "Open in email app"
+    )[0];
+    expect(mailtoLink).toBeTruthy();
+    expect(mailtoLink.props.href).toMatch(/body=Tuesday%20afternoon%20works%20for%20me\./);
   });
 
   it("routes runWrite failures through resolveErrorCopy — a friendly message, never the raw server string — and wires a working retry", async () => {

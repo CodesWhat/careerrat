@@ -219,6 +219,25 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "communication handoff: draft still holds the private pay figure",
+    err: new ApiError(400, {
+      code: "COMMUNICATION_COMP_LEAK",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "This draft still contains your private current pay figure. Edit the draft before sending.",
+    action: null,
+  },
+  {
+    name: "communication handoff: draft still holds placeholder text",
+    err: new ApiError(409, {
+      code: "COMMUNICATION_DRAFT_PLACEHOLDER",
+      error: { message: "internal text must not render" },
+    }),
+    message: "This draft still has unfinished placeholder text. Finish the draft before sending.",
+    action: null,
+  },
+  {
     name: "company research: no tracked company matches",
     err: new ApiError(404, {
       code: "COMPANY_NOT_FOUND",
