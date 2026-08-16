@@ -14,6 +14,10 @@ import {
   mergeAutomationDefaults,
   PLATFORMS,
 } from "../automation/consent.mjs";
+import {
+  MAIL_ACCESS_CAPABILITY,
+  MAIL_ACCESS_INGEST_PLATFORMS,
+} from "../automation/mail-access.mjs";
 import { PROVIDERS } from "../automation/session.mjs";
 import { statusTransition, toTrackOutcomeStatus } from "../automation/status-map.mjs";
 import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
@@ -162,6 +166,7 @@ const EXECUTABLE_INTENTS = new Set([
   "relationship.record-lead",
   "relationship.source-request",
   "status.sync-request",
+  "mail.sync-request",
   "status.record-portal-request",
   "status.record-portal",
   "status.apply-transition",
@@ -366,6 +371,43 @@ function statusPollingPlatformForUrl(url) {
     return null;
   }
   return null;
+}
+
+// Mail sync sources: one entry per ingest-mail webmail platform (the list
+// lives in mail-access.mjs so this never drifts from what ingest-mail
+// actually supports), plus a local Apple Mail entry on macOS. `tracker` lets
+// callers that already fetched assembleTrackerObject this request reuse it
+// instead of hitting the db twice; omit it and the helper fetches its own.
+export function mailSyncSources({ repoRoot, env, hostPlatform, tracker }) {
+  const trackerObject = tracker || assembleTrackerObject(requireDb({ repoRoot, env }));
+  const trackerSources = trackerObject.sources || [];
+  const lastRunAtFor = (id) => trackerSources.find((row) => row.id === id)?.lastRunAt || null;
+
+  const sources = MAIL_ACCESS_INGEST_PLATFORMS.map((platform) => {
+    const id = `${platform}-webmail`;
+    return {
+      id,
+      platform,
+      allowed: mayRun({ capability: MAIL_ACCESS_CAPABILITY, platform, root: repoRoot, env })
+        .allowed,
+      lastRunAt: lastRunAtFor(id),
+    };
+  });
+
+  if (hostPlatform === "darwin") {
+    // Apple Mail has no platform/consent gate: it's read locally via the
+    // Mail app rather than a webmail session. This assumes the workspace
+    // server runs on the same machine as the user's Mail app (CareerRat's
+    // local-first single-user model).
+    sources.unshift({
+      id: "apple-mail",
+      platform: null,
+      allowed: true,
+      lastRunAt: lastRunAtFor("apple-mail"),
+    });
+  }
+
+  return sources;
 }
 
 async function captureJobRequest({ repoRoot, env, jobUrl, resolveJobUrlImpl, fetchImpl, now }) {
@@ -4518,6 +4560,46 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "mail.sync-request") {
+      const tracker = assembleTrackerObject(requireDb({ repoRoot, env }));
+      const sources = mailSyncSources({
+        repoRoot,
+        env,
+        hostPlatform: process.platform,
+        tracker,
+      });
+      if (sources.every((source) => !source.allowed)) {
+        throw actionError(
+          "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",
+          "MAIL_SYNC_NOT_ALLOWED"
+        );
+      }
+
+      // Count only — never surface thread rows, subjects, participants, or
+      // bodies in the artifact (privacy rule).
+      const needsReply = (tracker.communications || []).filter(
+        (comm) => comm.channel === "email" && comm.status === "needs-reply"
+      ).length;
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "Mail check requested. Run the ingest-mail skill from your agent or terminal to read your mail; anything it finds comes back here for review.",
+        artifacts: [
+          {
+            kind: "mail_sync_handoff",
+            sources,
+            needsReply,
+            at: requestDate(now).toISOString(),
+          },
+        ],
+        metadata: { state: "requested" },
+        now,
+      });
+    }
+
     if (normalized.type === "scheduling.prepare") {
       const communication = communicationForIntent({
         repoRoot,
@@ -6480,6 +6562,29 @@ function statusSyncRequestFromText(text) {
   return match ? { input: {} } : null;
 }
 
+// "check my inbox" / "any new recruiter emails" — a consent-checked handoff
+// to the ingest-mail skill. Anchored (^...$) like statusSyncRequestFromText
+// so it never matches "email"/"mail" mentioned mid-sentence: drafting a
+// reply, reporting a sent email, mail settings, or job/status vocabulary
+// that happens to share the word "check".
+function mailSyncRequestFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  // The qualifier loop between verb and noun accepts only mail-shaped filler
+  // ("check for any new recruiter emails"); any other word there ("check my
+  // email settings", "check my email for the Acme thread") breaks the match
+  // and falls through.
+  const match =
+    /^(?:please\s+)?(?:can\s+you\s+)?(?:check|sync|scan|refresh)\s+(?:(?:for|my|any|new|recruiter)\s+)*(?:e-?mails?|inbox|mail(?:box)?)\s*[.?!]*$/i.test(
+      value
+    ) ||
+    /^(?:any\s+)?new\s+(?:recruiter\s+)?(?:e-?mails?|mail)\s*[.?!]*$/i.test(value) ||
+    /^(?:do\s+i\s+have|did\s+i\s+get|is\s+there|are\s+there)\s+(?:any\s+)?(?:new\s+)?(?:recruiter\s+)?(?:e-?mails?|mail)\s*[.?!]*$/i.test(
+      value
+    );
+  return match ? { input: {} } : null;
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -6821,13 +6926,14 @@ const ACTION_PREVIEW_RULES = [
   },
   // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report /
   // calendar.record-write / relationship.record-lead / relationship.source-request /
-  // status.record-portal-request / status.sync-request MUST stay above the
-  // terminal search.run catch-all immediately below — that rule matches a
-  // bare "check"/"search"/"find"/"run" verb near
+  // status.record-portal-request / status.sync-request / mail.sync-request
+  // MUST stay above the terminal search.run catch-all immediately below —
+  // that rule matches a bare "check"/"search"/"find"/"run" verb near
   // "jobs/roles/postings/boards/sources" and would otherwise never let
   // phrasings like "turn off status polling", "check my settings", "report a
   // bug", "I added the interview to my calendar", "find a recruiter at
-  // Acme", or "check my application statuses" reach these rules first.
+  // Acme", "check my application statuses", or "check my inbox" reach these
+  // rules first.
   // relationship.record-lead MUST also stay above relationship.source-request:
   // both match "recruiter at <company>" vocabulary, but only record-lead's
   // patterns require a person's name, so the more specific self-report rule
@@ -6911,6 +7017,15 @@ const ACTION_PREVIEW_RULES = [
       type: "status.sync-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: statusSyncRequestFromText(text).input,
+    }),
+  },
+  {
+    test: (text) => Boolean(mailSyncRequestFromText(text)),
+    label: "Check for new mail",
+    intent: (text) => ({
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: mailSyncRequestFromText(text).input,
     }),
   },
   {

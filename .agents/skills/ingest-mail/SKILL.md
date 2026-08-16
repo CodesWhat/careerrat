@@ -415,3 +415,31 @@ Ingest complete:
   Handed to track-outcomes: P  (application IDs: ...)
   Watermark updated:   <lastRunAt>
 ```
+
+---
+
+## Conversational workspace path
+
+In the Ask workspace, one narrow piece of this skill is native: the app runs a
+typed `mail.sync-request` intent directly in `workspace-agent.mjs`, not this
+skill's mail-reading steps. A terminal or external-agent run still follows
+STEP 0 onward exactly as written, and all mail reading always happens there.
+The app never opens Apple Mail, Gmail, or Outlook itself.
+
+- **Requesting a mail check** (`mail.sync-request`). "Check my email" or "any
+  new recruiter emails?" offers a "Check for new mail" chip. The handler
+  returns a handoff card showing each source's real state: Apple Mail (listed
+  only when the app runs on macOS, since it reads the local Mail app and needs
+  no webmail consent), plus Gmail and Outlook with their `mayRun` consent
+  state for the `mail_access` capability. Each row shows the last sweep time
+  from that source's `sources[]` watermark ("Never checked" before a first
+  run), and the card adds how many email threads are currently waiting on a
+  reply. On a non-macOS host with both webmail platforms off, the request
+  refuses toward Settings instead. The intent writes nothing; it is a receipt,
+  not a sweep.
+- **What stays here.** The actual mail reading (AppleScript, SQLite fallback,
+  or session-browser webmail), the STEP 5 match/skip review table, body pulls,
+  `communications[]` and watermark writes, and the track-outcomes handoff all
+  remain this skill's agent path. Recording a single recruiter email the
+  candidate reports themselves stays with email-comms
+  (`communication.capture-inbound` and its sibling intents).
