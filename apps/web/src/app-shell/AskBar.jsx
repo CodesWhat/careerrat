@@ -1268,6 +1268,15 @@ function AskBarTurn({
     (artifact) => artifact.kind === "sourcing_handoff"
   );
   const leadReceiptArtifact = turn.artifacts?.find((artifact) => artifact.kind === "lead_receipt");
+  const statusSyncHandoffArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "status_sync_handoff"
+  );
+  const statusTransitionProposalArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "status_transition_proposal"
+  );
+  const statusTransitionReceiptArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "status_transition_receipt"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1321,6 +1330,18 @@ function AskBarTurn({
       {calendarWriteArtifact ? <CalendarWriteCard artifact={calendarWriteArtifact} /> : null}
       {sourcingHandoffArtifact ? <SourcingHandoffCard artifact={sourcingHandoffArtifact} /> : null}
       {leadReceiptArtifact ? <LeadReceiptCard artifact={leadReceiptArtifact} /> : null}
+      {statusSyncHandoffArtifact ? (
+        <StatusSyncHandoffCard artifact={statusSyncHandoffArtifact} />
+      ) : null}
+      {statusTransitionProposalArtifact ? (
+        <StatusTransitionProposalCard
+          artifact={statusTransitionProposalArtifact}
+          onRunAction={onRunAction}
+        />
+      ) : null}
+      {statusTransitionReceiptArtifact ? (
+        <StatusTransitionReceiptCard artifact={statusTransitionReceiptArtifact} />
+      ) : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -2458,6 +2479,121 @@ function LeadReceiptCard({ artifact }) {
       </p>
     </section>
   );
+}
+
+// status_sync_handoff (sync-status skill) — an acknowledgment that the check
+// was requested, not a result, so the badge stays neutral. Same receipt
+// chrome as SourcingHandoffCard above, no left-edge accent.
+function StatusSyncHandoffCard({ artifact }) {
+  const platforms = Array.isArray(artifact.platforms) ? artifact.platforms : [];
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Status check requested">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Status check requested</strong>
+        <span className="badge badge--muted">Handoff</span>
+      </div>
+      {platforms.map((platform) => {
+        const eligible = Number(platform.eligible) || 0;
+        const statusText = platform.allowed
+          ? eligible > 0
+            ? `Allowed, ${eligible} to check`
+            : "Allowed"
+          : "Off in Settings";
+        return (
+          <p key={platform.platform}>
+            {[settingsPlatformLabel(platform.platform), statusText].filter(Boolean).join(" · ")}
+          </p>
+        );
+      })}
+      <p className="ask-bar__screening-note">
+        Run the sync-status skill from your agent or terminal to read your job portals. Updates come
+        back here for your review.
+      </p>
+    </section>
+  );
+}
+
+// status_transition_proposal (sync-status skill) — a portal-read status that
+// doesn't match a safe auto-apply rule, so it needs a candidate click before
+// it lands in the tracker. Same review-card chrome as StrategyReviewCard's
+// recommendation rows, badge--warn to match ScreeningAnswersCard/LeadReceiptCard's
+// "needs your review" signal.
+function StatusTransitionProposalCard({ artifact, onRunAction }) {
+  const companyRole = [artifact.company, artifact.role].filter(Boolean).join(" at ");
+  const canApply = typeof onRunAction === "function" && Boolean(artifact.to);
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Status update to review">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Status update to review</strong>
+        <span className="badge badge--warn">Review first</span>
+      </div>
+      {companyRole ? <p>{companyRole}</p> : null}
+      <p>{`The portal shows "${artifact.rawStatus}".`}</p>
+      <p>{`Tracked as ${artifact.from || "not started"}, proposed ${artifact.to}.`}</p>
+      <p className="ask-bar__screening-note">
+        {artifact.direction === "regress"
+          ? "This is a step backward from where the application is tracked, so CareerRat won't record it without you."
+          : "CareerRat isn't sure this matches a tracked stage, so it won't record it without you."}
+      </p>
+      {canApply ? (
+        <Button
+          variant="secondary"
+          onClick={() =>
+            onRunAction({
+              label: "Apply status update",
+              intent: {
+                type: "status.apply-transition",
+                entity: { type: "application", id: artifact.applicationId },
+                input: {
+                  from: artifact.from,
+                  to: artifact.to,
+                  rawStatus: artifact.rawStatus,
+                  round: artifact.round,
+                },
+              },
+            })
+          }
+        >
+          Apply
+        </Button>
+      ) : null}
+    </section>
+  );
+}
+
+// status_transition_receipt (sync-status skill, via track-outcomes) — the
+// outcome of an applied or skipped status transition. Same receipt chrome as
+// CalendarWriteCard above, no left-edge accent.
+function StatusTransitionReceiptCard({ artifact }) {
+  const companyRole = [artifact.company, artifact.role].filter(Boolean).join(" at ");
+  if (artifact.applied) {
+    return (
+      <section className="ask-bar__strategy-apply" aria-label="Status recorded">
+        <div className="ask-bar__strategy-review-head">
+          <strong>Status recorded</strong>
+          <span className="badge badge--ok">Recorded</span>
+        </div>
+        {companyRole ? <p>{companyRole}</p> : null}
+        <p>{`${artifact.from || "not started"} to ${artifact.to}`}</p>
+        {artifact.rawStatus ? (
+          <p className="ask-bar__screening-note">{`The portal shows "${artifact.rawStatus}".`}</p>
+        ) : null}
+      </section>
+    );
+  }
+  if (!artifact.changed) {
+    return (
+      <section className="ask-bar__strategy-apply" aria-label="No change">
+        <div className="ask-bar__strategy-review-head">
+          <strong>No change</strong>
+          <span className="badge badge--muted">No change</span>
+        </div>
+        {companyRole ? <p>{companyRole}</p> : null}
+        <p className="ask-bar__screening-note">The portal matches what CareerRat already has.</p>
+      </section>
+    );
+  }
+  return null;
 }
 
 function screeningAnswerSourceLabel(source) {

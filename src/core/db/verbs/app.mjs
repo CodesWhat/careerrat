@@ -143,6 +143,7 @@ export function appSetStatus({
   id,
   to,
   note,
+  round,
   appliedAt,
   followUpDueAt,
   clearInterview,
@@ -163,6 +164,19 @@ export function appSetStatus({
 
     const updated = { ...app, status: to };
     if (note) updated.statusNote = note;
+    // Round vocabulary rides in the same write: a status change that carries a
+    // round kind (e.g. a portal label normalized to "recruiter screen") records
+    // it as the conversation entry, per the sync-status STEP 4 contract.
+    if (round) {
+      const conversations = Array.isArray(app.conversations) ? app.conversations.slice() : [];
+      conversations.push({
+        date: nowIso(),
+        kind: String(round).trim().slice(0, 60),
+        who: null,
+        notes: note || null,
+      });
+      updated.conversations = conversations;
+    }
     if (appliedAt != null) updated.appliedAt = String(appliedAt);
     if (followUpDueAt) updated.followUp = { ...(app.followUp || {}), dueAt: followUpDueAt };
     if (willClear) Object.assign(updated, applyRoundCompletionClearing(app));

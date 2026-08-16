@@ -1284,6 +1284,122 @@ test("previewWorkspaceIntent: relationship.record-lead wins over relationship.so
 });
 
 // ---------------------------------------------------------------------------
+// status.record-portal-request / status.sync-request matchers
+// (statusRecordPortalFromText / statusSyncRequestFromText,
+// workspace-agent.mjs ~6432/~6464). record-portal-request is a self-report
+// of what a portal shows for a specific job; sync-request is a
+// consent-checked ask for CareerRat to go check every portal. Both MUST stay
+// above the search.run catch-all, and record-portal-request MUST win when a
+// phrase could plausibly match both (ordering requirement documented at
+// ~6826).
+// ---------------------------------------------------------------------------
+
+test("previewWorkspaceIntent: '<platform> says/shows/lists' phrasings map to status.record-portal-request", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "Greenhouse says 'Phone screen scheduled' for Lumon",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action.label, "Record this portal status update");
+  assert.equal(result.action.intent.type, "status.record-portal-request");
+  assert.equal(result.action.intent.entity.type, "workspace");
+  assert.equal(result.action.intent.entity.id, WORKSPACE_THREAD_ID);
+  assert.equal(result.action.intent.input.jobReference, "Lumon");
+  assert.equal(result.action.intent.input.rawStatus, "Phone screen scheduled");
+});
+
+test("previewWorkspaceIntent: '<platform> moved X to Y' phrasings also map to status.record-portal-request", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "the portal moved Lumon to interview",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action.intent.type, "status.record-portal-request");
+  assert.equal(result.action.intent.input.jobReference, "Lumon");
+  assert.equal(result.action.intent.input.rawStatus, "interview");
+});
+
+test("previewWorkspaceIntent: 'check my application statuses' maps to status.sync-request", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "check my application statuses",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Check portal statuses",
+    intent: {
+      type: "status.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+});
+
+test("previewWorkspaceIntent: singular 'status' phrasings map to status.sync-request", () => {
+  // Regression: the matcher shipped as /statuses?/ (literally "statuse" plus
+  // an optional "s"), which silently missed every singular phrasing — the
+  // most natural way to ask.
+  const repoRoot = tempRepo();
+  for (const text of ["check my status", "update my application status", "check my job statuses"]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(result.action?.intent?.type, "status.sync-request", text);
+  }
+});
+
+test("previewWorkspaceIntent: 'sync my statuses from <platform>' also maps to status.sync-request", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "sync my statuses from greenhouse",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action.intent.type, "status.sync-request");
+  assert.equal(result.action.label, "Check portal statuses");
+});
+
+test("previewWorkspaceIntent: status matchers never shadow settings, search, or outcome routing", () => {
+  const repoRoot = tempRepo();
+
+  // Turning the capability on/off is a settings change, not a status.*
+  // action — settings.apply already owns capability toggles.
+  const togglePolling = previewWorkspaceIntent({
+    text: "turn on status polling",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(togglePolling.action.intent.type, "settings.apply");
+
+  // Generic "check ... sources" phrasing still falls to the search.run
+  // catch-all, not the new status.sync-request matcher.
+  const checkSources = previewWorkspaceIntent({
+    text: "check job sources",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(checkSources.action.intent.type, "search.run");
+
+  // A self-reported outcome stays on the outcome.record-request path, even
+  // though it mentions "interview" — status.* is for portal-read updates.
+  const reportedOutcome = previewWorkspaceIntent({
+    text: "I got an interview at Acme",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(reportedOutcome.action.intent.type, "outcome.record-request");
+
+  // "check my settings" is unaffected by the new status matchers.
+  const checkSettings = previewWorkspaceIntent({
+    text: "check my settings",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(checkSettings.action, null);
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/workspace/preview
 // ---------------------------------------------------------------------------
 

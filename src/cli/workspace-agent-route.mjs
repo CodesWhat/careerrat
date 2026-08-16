@@ -27,6 +27,7 @@ const CONFLICT_CODES = new Set([
   "EVALUATION_APPLICATION_REQUIRED",
   "BAD_PACKET_ARTIFACT",
   "NEEDS_USER",
+  "STATUS_TRANSITION_STALE",
 ]);
 
 function statusForError(error) {
@@ -108,6 +109,10 @@ function statusForError(error) {
       "RELATIONSHIP_LEAD_COMPANY_UNTRACKED",
       "RELATIONSHIP_SOURCING_COMPANY_REQUIRED",
       "RELATIONSHIP_SOURCING_NOT_ALLOWED",
+      "STATUS_SYNC_NOT_ALLOWED",
+      "STATUS_UPDATE_INVALID",
+      "STATUS_UPDATE_COMP_LEAK",
+      "STATUS_APPLY_INVALID",
     ].includes(error?.code)
   ) {
     return 400;

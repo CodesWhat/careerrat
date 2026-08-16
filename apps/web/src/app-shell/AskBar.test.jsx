@@ -3122,6 +3122,191 @@ describe("AskBar — lead_receipt artifact (LeadReceiptCard)", () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// 4f. status_sync_handoff / status_transition_proposal / status_transition_receipt
+// artifacts (sync-status skill — StatusSyncHandoffCard/StatusTransitionProposalCard/
+// StatusTransitionReceiptCard, the status.sync-request / status.record-portal /
+// status.apply-transition handlers in workspace-agent.mjs)
+// ---------------------------------------------------------------------------
+
+function statusActionPreview() {
+  return {
+    action: {
+      label: "Check portal statuses",
+      intent: {
+        type: "status.sync-request",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {},
+      },
+    },
+    answer: { label: "Answer about status" },
+    engineAvailable: true,
+  };
+}
+
+async function runStatusTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(statusActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "check my application statuses" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — status_sync_handoff artifact (StatusSyncHandoffCard)", () => {
+  it("renders a Handoff badge, per-platform allowed/eligible lines, and no anchor elements", async () => {
+    const tree = await runStatusTurn({
+      text: "Status check requested. Run the sync-status skill from your agent or terminal to read your job portals; any updates come back here for review.",
+      artifacts: [
+        {
+          kind: "status_sync_handoff",
+          platforms: [
+            { platform: "greenhouse", allowed: true, eligible: 2 },
+            { platform: "workday", allowed: false, eligible: 0 },
+          ],
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--muted"))[0];
+    expect(textOf(badge)).toBe("Handoff");
+    expect(textOf(tree)).toContain("Greenhouse");
+    expect(textOf(tree)).toContain("2 to check");
+    expect(textOf(tree)).toContain("Off in Settings");
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
+  });
+});
+
+describe("AskBar — status_transition_proposal artifact (StatusTransitionProposalCard)", () => {
+  it("renders a Review first badge and an Apply button that fires status.apply-transition with the proposal's from/to", async () => {
+    let tree = await runStatusTurn({
+      text: "The portal shows a step backward from where this application is tracked. Review it and press Apply to record it anyway.",
+      artifacts: [
+        {
+          kind: "status_transition_proposal",
+          applicationId: "app-temporal",
+          company: "Temporal Labs",
+          role: "Applied AI Engineer",
+          from: "interview",
+          rawStatus: "Application received",
+          to: "awaiting",
+          direction: "regress",
+          confidence: "high",
+          round: null,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--warn"))[0];
+    expect(textOf(badge)).toBe("Review first");
+    const applyButton = buttonByText(tree, "Apply");
+    expect(applyButton).toBeTruthy();
+
+    api.runWorkspaceIntent.mockResolvedValueOnce({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Recorded Temporal Labs, Applied AI Engineer as awaiting.",
+            artifacts: [
+              {
+                kind: "status_transition_receipt",
+                applicationId: "app-temporal",
+                company: "Temporal Labs",
+                role: "Applied AI Engineer",
+                from: "interview",
+                to: "awaiting",
+                rawStatus: "Application received",
+                changed: true,
+                applied: true,
+                at: "2026-08-15T00:00:01.000Z",
+              },
+            ],
+            metadata: { state: "awaiting" },
+          },
+        ],
+      },
+    });
+
+    applyButton.props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.runWorkspaceIntent).toHaveBeenNthCalledWith(
+      2,
+      "status.apply-transition",
+      { type: "application", id: "app-temporal" },
+      { from: "interview", to: "awaiting", rawStatus: "Application received", round: null }
+    );
+
+    const receiptBadge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--ok"))[0];
+    expect(textOf(receiptBadge)).toBe("Recorded");
+  });
+});
+
+describe("AskBar — status_transition_receipt artifact (StatusTransitionReceiptCard)", () => {
+  it("renders a Recorded badge when applied", async () => {
+    const tree = await runStatusTurn({
+      text: "Recorded Temporal Labs, Applied AI Engineer as interview.",
+      artifacts: [
+        {
+          kind: "status_transition_receipt",
+          applicationId: "app-temporal",
+          company: "Temporal Labs",
+          role: "Applied AI Engineer",
+          from: "applied",
+          to: "interview",
+          rawStatus: "Interview scheduled",
+          changed: true,
+          applied: true,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--ok"))[0];
+    expect(textOf(badge)).toBe("Recorded");
+    expect(textOf(tree)).toContain("Temporal Labs");
+  });
+
+  it("renders a No change badge when changed is false", async () => {
+    const tree = await runStatusTurn({
+      text: "No change recorded: Temporal Labs, Applied AI Engineer is already tracked at that stage.",
+      artifacts: [
+        {
+          kind: "status_transition_receipt",
+          applicationId: "app-temporal",
+          company: "Temporal Labs",
+          role: "Applied AI Engineer",
+          from: "applied",
+          to: null,
+          rawStatus: "Application submitted",
+          changed: false,
+          applied: false,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--muted"))[0];
+    expect(textOf(badge)).toBe("No change");
+  });
+});
+
 describe("AskBar — strategy_review / strategy_apply artifacts", () => {
   it("renders a drafted review with headline, findings, per-type chips, gated Apply buttons, consequence copy, and a manual row for writing-style", async () => {
     const tree = await runStrategyReviewTurn({

@@ -323,6 +323,38 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "STATUS_SYNC_NOT_ALLOWED",
+    message: "Portal status polling is off. You can turn it on in Settings.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
+    match: ({ code }) => code === "STATUS_UPDATE_INVALID",
+    message:
+      "Name the company and what the portal said, like: Greenhouse says phone screen scheduled for Acme.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "STATUS_UPDATE_COMP_LEAK",
+    message: "That update includes your private current pay. Remove the number and try again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "STATUS_APPLY_INVALID",
+    message: "CareerRat couldn't apply that status update as proposed.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "STATUS_TRANSITION_STALE",
+    message:
+      "That status update is out of date. This application changed since it was proposed, so ask CareerRat to check again.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "BAD_OUTCOME_STATUS",
+    message: "That status isn't one CareerRat can record. Use one of its tracked stages instead.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",
