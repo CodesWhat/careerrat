@@ -199,10 +199,11 @@ careerrat data linkedin-proposals record --data '<json>' --write
 ```
 
 where `<json>` is `{ "surfaces": [{ "surfaceId", "surface", "current", "proposed",
-"rationale", "evidenceRef" }] }`. The verb refuses the whole batch if any proposed or
-rationale text trips the `current_base`/comp guard — fix the offending surface and
-re-record. This closes the Artifact Contract's two-places rule: the Downloads doc plus
-this on-record batch.
+"rationale", "evidenceRef" }] }`. The verb scans the entire batch payload, every surface
+field and property, not just proposed/rationale, and refuses the whole batch on any
+`current_base`/comp guard hit anywhere in it — fix the offending surface and re-record.
+This closes the Artifact Contract's two-places rule: the Downloads doc plus this
+on-record batch.
 
 **If `profile_apply` is off, you are done here** — the document plus the recorded batch
 is the deliverable. The user reviews and approves fields in the app or applies edits by
@@ -271,6 +272,11 @@ careerrat data linkedin-proposals mark-applied --batch <id> --surface <surfaceId
 
 Only mark a field applied after the reload-and-re-read confirms it — never on the write
 attempt alone.
+
+Every decision bumps the batch version, and the command above prints the updated batch
+in its response. Each subsequent `mark-applied` call must use the `version` from the
+PREVIOUS call's output, never the original batch's version — re-read the current version
+via `careerrat data linkedin-proposals latest --status null` if you lost track of it.
 
 Then log one event to the Activity Pulse feed (the dashboard's live timeline — see
 **Activity Pulse** in AGENTS.md), actor `agent`:

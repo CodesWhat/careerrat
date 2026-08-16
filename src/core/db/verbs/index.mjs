@@ -76,6 +76,7 @@ export {
 export {
   linkedinProposalBatchGet,
   linkedinProposalBatchLatest,
+  linkedinProposalBatchPreflight,
   linkedinProposalBatchPut,
   linkedinProposalDecide,
 } from "./linkedin-proposals.mjs";

@@ -98,6 +98,7 @@ import {
   intakeOne,
   intakeUpdate,
   linkedinProposalBatchLatest,
+  linkedinProposalBatchPreflight,
   linkedinProposalBatchPut,
   linkedinProposalDecide,
   relationshipLeadSetStatus,
@@ -123,8 +124,10 @@ function parseArgs(argv) {
     else if (a === "--write") opts.write = true;
     else if (a === "--batch") opts.batch = argv[++i];
     else if (a === "--surface") opts.surface = argv[++i];
-    else if (a === "--version") opts.version = Number.parseInt(argv[++i], 10);
-    else if (a === "--root") opts.root = argv[++i];
+    else if (a === "--version") {
+      const rawVersion = argv[++i];
+      opts.version = /^[1-9]\d*$/.test(rawVersion ?? "") ? Number(rawVersion) : Number.NaN;
+    } else if (a === "--root") opts.root = argv[++i];
     else if (a === "--source") opts.source = argv[++i];
     else if (a === "--data") opts.data = argv[++i];
     else if (a === "--data-file") opts.dataFile = argv[++i];
@@ -519,10 +522,12 @@ function cmdRelationship(sub, rest) {
 // linkedin-proposals <sub> — optimize-linkedin's DB-owned confirm-first
 // review state (M... "optimize-linkedin goes native"). `record` mirrors
 // activity.mjs's dry-run-by-default shape: without --write it only previews
-// what would be stored; the actual comp-leak guard and persistence both live
-// in linkedinProposalBatchPut, so --write is what surfaces a
-// LINKEDIN_PROPOSAL_COMP_LEAK refusal (handled by the top-level catch below,
-// same as every other verb's errors).
+// what would be stored, but the dry-run preview still runs
+// linkedinProposalBatchPreflight first — the same shape/comp-leak validation
+// linkedinProposalBatchPut runs before persisting — so a leaking payload is
+// refused before anything reaches stdout, not just once someone passes
+// --write. Either path's LINKEDIN_PROPOSAL_COMP_LEAK throw is handled by the
+// top-level catch below, same as every other verb's errors.
 // ---------------------------------------------------------------------------
 
 function cmdLinkedinProposals(sub, _rest) {
@@ -538,7 +543,7 @@ function cmdLinkedinProposals(sub, _rest) {
       if (!opts.batch || !opts.surface) {
         fail("linkedin-proposals mark-applied requires --batch <id> --surface <surfaceId>");
       }
-      if (!Number.isInteger(opts.version)) {
+      if (!Number.isSafeInteger(opts.version) || opts.version < 1) {
         fail("linkedin-proposals mark-applied requires --version <n>");
       }
       return printResult({
@@ -562,6 +567,11 @@ function cmdLinkedinProposalsRecord() {
   if (!Array.isArray(payload?.surfaces) || payload.surfaces.length === 0) {
     fail("linkedin-proposals record requires a non-empty surfaces array");
   }
+
+  // Preflight before EITHER path prints/persists anything — without this a
+  // dry-run (no --write) would serialize a leaking payload straight to
+  // stdout, since only --write used to reach the comp-leak guard.
+  linkedinProposalBatchPreflight({ batch: payload });
 
   if (!opts.write) {
     const preview = {

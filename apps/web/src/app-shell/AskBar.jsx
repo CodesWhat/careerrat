@@ -3018,19 +3018,31 @@ function linkedinProposalBadge(decision) {
 }
 function LinkedinProposalsCard({ artifact, onRunAction }) {
   const surfaces = Array.isArray(artifact.surfaces) ? artifact.surfaces : [];
-  const decideSurface = (surface, action) =>
-    onRunAction?.({
-      label: "Decide LinkedIn suggestion",
-      intent: {
-        type: "linkedin.proposal-decide",
-        entity: { type: "linkedin-proposal", id: artifact.batchId },
-        input: { surfaceId: surface.surfaceId, action, version: artifact.version },
-      },
+  const [pendingSurfaceId, setPendingSurfaceId] = useState(null);
+  const [pendingAction, setPendingAction] = useState(null);
+  const decideSurface = (surface, action) => {
+    if (pendingSurfaceId) return;
+    setPendingSurfaceId(surface.surfaceId);
+    setPendingAction(action);
+    Promise.resolve(
+      onRunAction?.({
+        label: "Decide LinkedIn suggestion",
+        intent: {
+          type: "linkedin.proposal-decide",
+          entity: { type: "linkedin-proposal", id: artifact.batchId },
+          input: { surfaceId: surface.surfaceId, action, version: artifact.version },
+        },
+      })
+    ).finally(() => {
+      setPendingSurfaceId(null);
+      setPendingAction(null);
     });
+  };
   return (
     <section className="ask-bar__company-proposals" aria-label="LinkedIn suggestions">
       {surfaces.map((surface) => {
         const badge = linkedinProposalBadge(surface.decision);
+        const isPendingSurface = pendingSurfaceId === surface.surfaceId;
         return (
           <article className="ask-bar__company-proposal" key={surface.surfaceId}>
             <div className="ask-bar__company-proposal-head">
@@ -3045,11 +3057,19 @@ function LinkedinProposalsCard({ artifact, onRunAction }) {
             ) : null}
             {!surface.decision ? (
               <div className="ask-bar__company-proposal-actions">
-                <Button variant="secondary" onClick={() => decideSurface(surface, "approve")}>
-                  Approve
+                <Button
+                  variant="secondary"
+                  disabled={Boolean(pendingSurfaceId)}
+                  onClick={() => decideSurface(surface, "approve")}
+                >
+                  {isPendingSurface && pendingAction === "approve" ? "Approving…" : "Approve"}
                 </Button>
-                <Button variant="secondary" onClick={() => decideSurface(surface, "reject")}>
-                  Reject
+                <Button
+                  variant="secondary"
+                  disabled={Boolean(pendingSurfaceId)}
+                  onClick={() => decideSurface(surface, "reject")}
+                >
+                  {isPendingSurface && pendingAction === "reject" ? "Rejecting…" : "Reject"}
                 </Button>
               </div>
             ) : null}

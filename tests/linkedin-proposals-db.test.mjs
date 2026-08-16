@@ -14,6 +14,7 @@ import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import {
   linkedinProposalBatchGet,
   linkedinProposalBatchLatest,
+  linkedinProposalBatchPreflight,
   linkedinProposalBatchPut,
   linkedinProposalDecide,
 } from "../src/core/db/verbs/linkedin-proposals.mjs";
@@ -162,6 +163,111 @@ test("linkedinProposalBatchPut: a comp leak in a surface's current field refuses
   );
   assert.equal(rowCount(repoRoot), 0);
   assert.equal(linkedinProposalBatchLatest({ repoRoot, env: {}, status: null }), null);
+});
+
+test("linkedinProposalBatchPut: a duplicate surfaceId across the batch throws BAD_REQUEST", () => {
+  const repoRoot = tempRepo();
+
+  assert.throws(
+    () =>
+      linkedinProposalBatchPut({
+        repoRoot,
+        env: {},
+        batch: twoSurfaceBatch({
+          surfaces: [surface(), surface({ surface: "Headline again" })],
+        }),
+      }),
+    (error) => {
+      assert.equal(error.code, "BAD_REQUEST");
+      assert.match(error.message, /surfaceIds must be unique/);
+      return true;
+    }
+  );
+  assert.equal(rowCount(repoRoot), 0);
+});
+
+test("linkedinProposalBatchPut: a missing or empty evidenceRef throws BAD_REQUEST", () => {
+  const repoRoot = tempRepo();
+
+  assert.throws(
+    () =>
+      linkedinProposalBatchPut({
+        repoRoot,
+        env: {},
+        batch: twoSurfaceBatch({
+          surfaces: [surface({ evidenceRef: "" }), surface({ surfaceId: "about" })],
+        }),
+      }),
+    (error) => {
+      assert.equal(error.code, "BAD_REQUEST");
+      assert.match(error.message, /evidenceRef/);
+      return true;
+    }
+  );
+  assert.equal(rowCount(repoRoot), 0);
+
+  assert.throws(
+    () =>
+      linkedinProposalBatchPut({
+        repoRoot,
+        env: {},
+        batch: twoSurfaceBatch({
+          surfaces: [surface({ evidenceRef: undefined }), surface({ surfaceId: "about" })],
+        }),
+      }),
+    (error) => {
+      assert.equal(error.code, "BAD_REQUEST");
+      assert.match(error.message, /evidenceRef/);
+      return true;
+    }
+  );
+});
+
+test("linkedinProposalBatchPut: a comp leak in an extra surface property (outside current/proposed/rationale) refuses the whole batch and persists nothing", () => {
+  const repoRoot = tempRepo();
+
+  assert.throws(
+    () =>
+      linkedinProposalBatchPut({
+        repoRoot,
+        env: {},
+        batch: twoSurfaceBatch({
+          surfaces: [surface({ note: "my current base is 180k" }), surface({ surfaceId: "about" })],
+        }),
+      }),
+    (error) => {
+      assert.equal(error.code, "LINKEDIN_PROPOSAL_COMP_LEAK");
+      return true;
+    }
+  );
+  assert.equal(rowCount(repoRoot), 0);
+  assert.equal(linkedinProposalBatchLatest({ repoRoot, env: {}, status: null }), null);
+});
+
+// ---------------------------------------------------------------------------
+// linkedinProposalBatchPreflight
+// ---------------------------------------------------------------------------
+
+test("linkedinProposalBatchPreflight: throws on a leaking payload without touching the DB", () => {
+  const repoRoot = tempRepo();
+
+  assert.throws(
+    () =>
+      linkedinProposalBatchPreflight({
+        batch: twoSurfaceBatch({
+          surfaces: [surface({ note: "my current base is 180k" }), surface({ surfaceId: "about" })],
+        }),
+      }),
+    (error) => {
+      assert.equal(error.code, "LINKEDIN_PROPOSAL_COMP_LEAK");
+      return true;
+    }
+  );
+  assert.equal(rowCount(repoRoot), 0);
+});
+
+test("linkedinProposalBatchPreflight: passes cleanly on a valid batch", () => {
+  assert.doesNotThrow(() => linkedinProposalBatchPreflight({ batch: twoSurfaceBatch() }));
 });
 
 // ---------------------------------------------------------------------------
@@ -421,6 +527,32 @@ test("linkedinProposalDecide: a missing surface throws CONFLICT", () => {
       return true;
     }
   );
+});
+
+test("linkedinProposalDecide: a comp leak smuggled in via reason throws LINKEDIN_PROPOSAL_COMP_LEAK and leaves the batch unchanged", () => {
+  const repoRoot = tempRepo();
+  const { id: batchId } = linkedinProposalBatchPut({ repoRoot, env: {}, batch: twoSurfaceBatch() });
+
+  assert.throws(
+    () =>
+      linkedinProposalDecide({
+        repoRoot,
+        env: {},
+        batchId,
+        surfaceId: "headline",
+        action: "reject",
+        version: 1,
+        reason: "my current base is 180k",
+      }),
+    (error) => {
+      assert.equal(error.code, "LINKEDIN_PROPOSAL_COMP_LEAK");
+      return true;
+    }
+  );
+
+  const batch = linkedinProposalBatchGet({ repoRoot, env: {}, id: batchId });
+  assert.equal(batch.version, 1);
+  assert.equal(batch.surfaces.find((s) => s.surfaceId === "headline").decision, null);
 });
 
 test("linkedinProposalDecide: an invalid action throws BAD_REQUEST", () => {
