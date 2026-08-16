@@ -193,6 +193,18 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "STRATEGY_APPLY_UNSUPPORTED",
+    message:
+      "CareerRat can't apply that recommendation automatically. Review it yourself and make the change by hand.",
+    action: null,
+  },
+  {
+    match: ({ code }) => code === "STRATEGY_APPLY_INVALID",
+    message:
+      "That recommendation is out of date. Run the strategy review again, then apply from the fresh result.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",

@@ -125,6 +125,10 @@ const api = vi.hoisted(() => ({
       this.body = body;
     }
   },
+  // Matches the real constant (lib/api.js) — StrategyRecommendationRow's Apply
+  // button builds its intent off this, so a bare {} mock would silently turn
+  // every strategy.apply intent's entity into undefined.
+  WORKSPACE_ENTITY: { type: "workspace", id: "workspace-main" },
   getWorkspaceThread: vi.fn(),
   previewWorkspaceQuery: vi.fn(),
   runWorkspaceIntent: vi.fn(),
@@ -2393,6 +2397,279 @@ describe("AskBar — research trio artifacts", () => {
     card = byClass(tree, "ask-bar__research-card");
     expect(textOf(card)).toContain("Healthy");
     expect(textOf(card)).not.toMatch(/Lowered this job's fit/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4b. strategy_review / strategy_apply artifacts (strategy.review/strategy.apply
+// — the native reevaluate-strategy Ask workflow, src/core/strategy/review.mjs)
+// ---------------------------------------------------------------------------
+
+function strategyReviewActionPreview({ force = false } = {}) {
+  return {
+    action: {
+      label: "Review my search strategy",
+      intent: {
+        type: "strategy.review",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: force ? { force: true } : {},
+      },
+    },
+    answer: { label: "Answer about strategy review" },
+    engineAvailable: true,
+  };
+}
+
+async function runStrategyReviewTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(strategyReviewActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "review my strategy" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — strategy_review / strategy_apply artifacts", () => {
+  it("renders a drafted review with headline, findings, per-type chips, gated Apply buttons, consequence copy, and a manual row for writing-style", async () => {
+    const tree = await runStrategyReviewTurn({
+      text: "5 new rejections cluster around on-call roles. Review the findings and recommendations, then finish the review.",
+      artifacts: [
+        {
+          kind: "strategy_review",
+          state: "drafted",
+          generatedAt: "2026-08-15T12:00:00.000Z",
+          reviewSignal: { reviewed: true, outcomes: 7, newOutcomes: 5, daysSince: 3 },
+          reevaluation: null,
+          headline: "5 new rejections cluster around on-call roles.",
+          findings: [
+            {
+              id: "f1",
+              title: "On-call roles are rejected",
+              evidence: "4 of 5 on-call-tagged roles were rejected in the last 30 days.",
+            },
+          ],
+          recommendations: [
+            {
+              id: "rec-keep",
+              type: "keep-signal",
+              title: "Keep leaning into remote-first roles",
+              rationale: "Remote-first roles are converting at a higher rate.",
+              evidenceCount: 4,
+              proposal: { signal: "remote-first" },
+            },
+            {
+              id: "rec-comp-target",
+              type: "comp-target",
+              title: "Raise the comp target",
+              rationale: "Recent offers cleared the current target comfortably.",
+              evidenceCount: 2,
+              proposal: { amount: 205000 },
+            },
+            {
+              id: "rec-fit-bands",
+              type: "fit-bands",
+              title: "Tighten the high-fit band",
+              rationale: "High-fit roles are converting well above the current threshold.",
+              evidenceCount: 5,
+              proposal: { patch: { high_min: 82 } },
+            },
+            {
+              id: "rec-writing",
+              type: "writing-style",
+              title: "Lead with quantified impact",
+              rationale: "Cover letters that open with a number get further.",
+              evidenceCount: 2,
+              proposal: { text: "Lead with quantified impact in the first line." },
+            },
+          ],
+        },
+      ],
+      metadata: {
+        state: "drafted",
+        nextActions: [
+          {
+            label: "Finish review",
+            intent: { type: "strategy.stamp", entity: { type: "workspace", id: "workspace-main" } },
+          },
+        ],
+      },
+    });
+
+    const card = byClass(tree, "ask-bar__strategy-review");
+    expect(textOf(byClass(card, "ask-bar__strategy-review-head"))).toContain(
+      "5 new rejections cluster around on-call roles."
+    );
+    // No AI-unavailable badge on a drafted (not manual) review.
+    expect(textOf(card)).not.toContain("No AI available");
+
+    const findings = byClass(card, "ask-bar__strategy-findings");
+    expect(textOf(findings)).toContain("On-call roles are rejected");
+    expect(textOf(findings)).toContain("4 of 5 on-call-tagged roles were rejected");
+
+    const rows = visit(card, (n) => hasClass(n, "ask-bar__strategy-recommendation"));
+    expect(rows).toHaveLength(4);
+
+    // Type chips render the plain-language label, not the machine token.
+    const chips = rows.map((row) => textOf(byClass(row, "badge--muted")));
+    expect(chips).toEqual(["Targeting", "Compensation", "Fit bands", "Writing style"]);
+
+    // Apply buttons render only for automatable types (not writing-style).
+    const [keepSignalRow, compTargetRow, fitBandsRow, writingStyleRow] = rows;
+    expect(buttonByText(keepSignalRow, "Apply")).toBeTruthy();
+    expect(buttonByText(compTargetRow, "Apply")).toBeTruthy();
+    expect(buttonByText(fitBandsRow, "Apply")).toBeTruthy();
+    expect(buttonByText(writingStyleRow, "Apply")).toBeUndefined();
+
+    // Consequence copy only on comp-target/fit-bands, not keep-signal.
+    expect(textOf(keepSignalRow)).not.toContain("Updates the comp target");
+    expect(textOf(compTargetRow)).toContain(
+      "Updates the comp target future evaluations compare against."
+    );
+    expect(textOf(fitBandsRow)).toContain("Re-scores every job on your board.");
+
+    // writing-style shows its manual proposal text instead of a button.
+    expect(textOf(writingStyleRow)).toContain("Manual:");
+    expect(textOf(writingStyleRow)).toContain("Lead with quantified impact in the first line.");
+
+    // Evidence-count meta line.
+    expect(textOf(keepSignalRow)).toContain("Based on 4 outcomes");
+  });
+
+  it("renders a fresh review as a nothing-new summary with no findings or recommendations", async () => {
+    const tree = await runStrategyReviewTurn({
+      text: "Nothing new since your last strategy review.",
+      artifacts: [
+        {
+          kind: "strategy_review",
+          state: "fresh",
+          generatedAt: "2026-08-15T12:00:00.000Z",
+          reviewSignal: { reviewed: true, outcomes: 2, newOutcomes: 0, daysSince: 1 },
+          reevaluation: null,
+          headline: "Nothing new since your last review.",
+          findings: [],
+          recommendations: [],
+        },
+      ],
+      metadata: {
+        state: "fresh",
+        nextActions: [
+          {
+            label: "Run it anyway",
+            intent: {
+              type: "strategy.review",
+              entity: { type: "workspace", id: "workspace-main" },
+              input: { force: true },
+            },
+          },
+        ],
+      },
+    });
+
+    const card = byClass(tree, "ask-bar__strategy-review");
+    expect(textOf(byClass(card, "ask-bar__strategy-review-head"))).toContain(
+      "Nothing new since your last review."
+    );
+    expect(textOf(card)).not.toContain("Nothing to review yet.");
+    expect(visit(card, (n) => hasClass(n, "ask-bar__strategy-recommendation"))).toHaveLength(0);
+    expect(byClass(card, "ask-bar__strategy-findings")).toBeUndefined();
+  });
+
+  it("shows the 'No AI available' badge and manual-degrade note on a manual-state review", async () => {
+    const tree = await runStrategyReviewTurn({
+      text: "Build a measurable loop The AI reviewer wasn't available, so this is the deterministic read — review it, then finish the review.",
+      artifacts: [
+        {
+          kind: "strategy_review",
+          state: "manual",
+          generatedAt: "2026-08-15T12:00:00.000Z",
+          reviewSignal: { reviewed: false, outcomes: 3, newOutcomes: 3, daysSince: null },
+          reevaluation: null,
+          headline: "Build a measurable loop",
+          findings: [],
+          recommendations: [],
+        },
+      ],
+      metadata: { state: "manual" },
+    });
+
+    const card = byClass(tree, "ask-bar__strategy-review");
+    expect(textOf(card)).toContain("No AI available");
+    expect(textOf(card)).toMatch(/AI engine was not available for this review/);
+    expect(textOf(card)).toContain("deterministic tracker rules");
+  });
+
+  it("clicking Apply on a recommendation fires strategy.apply with the full recommendation payload", async () => {
+    const recommendation = {
+      id: "rec-keep",
+      type: "keep-signal",
+      title: "Keep leaning into remote-first roles",
+      rationale: "Remote-first roles are converting at a higher rate.",
+      evidenceCount: 4,
+      proposal: { signal: "remote-first" },
+    };
+    let tree = await runStrategyReviewTurn({
+      text: "Review the findings and recommendations, then finish the review.",
+      artifacts: [
+        {
+          kind: "strategy_review",
+          state: "drafted",
+          generatedAt: "2026-08-15T12:00:00.000Z",
+          reviewSignal: { reviewed: true, outcomes: 7, newOutcomes: 5, daysSince: 3 },
+          reevaluation: null,
+          headline: "Review the findings and recommendations, then finish the review.",
+          findings: [],
+          recommendations: [recommendation],
+        },
+      ],
+      metadata: { state: "drafted" },
+    });
+
+    api.runWorkspaceIntent.mockResolvedValueOnce({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Applied: Keep leaning into remote-first roles.",
+            artifacts: [
+              {
+                kind: "strategy_apply",
+                type: "keep-signal",
+                title: "Keep leaning into remote-first roles",
+                result: { changed: true },
+              },
+            ],
+            metadata: { state: "applied" },
+          },
+        ],
+      },
+    });
+
+    buttonByText(tree, "Apply").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.runWorkspaceIntent).toHaveBeenNthCalledWith(
+      2,
+      "strategy.apply",
+      { type: "workspace", id: "workspace-main" },
+      { recommendation }
+    );
+
+    // The strategy_apply artifact from the apply turn renders its own card.
+    const applyCard = byClass(tree, "ask-bar__strategy-apply");
+    expect(textOf(applyCard)).toContain("Keep leaning into remote-first roles");
   });
 });
 

@@ -26,9 +26,9 @@
 import { existsSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dbExists } from "../core/db/connection.mjs";
-import { kvUpsert } from "../core/db/verbs.mjs";
 import { displayPath, userPath } from "../core/paths/workspace.mjs";
 import { loadCandidateDoc } from "../core/profile/config-store.mjs";
+import { stampStrategyReview } from "../core/strategy/review.mjs";
 import { buildStrategyReviewStamp } from "../core/tracker/dashboard-data.js";
 import { writeTrackerJson } from "../core/tracker/tracker-writer.mjs";
 
@@ -109,17 +109,27 @@ function cmdStamp() {
     process.exit(0);
   }
 
+  // DB-mode: share the exact write + Activity Pulse log the native strategy-
+  // review Ask workflow uses (src/core/strategy/review.mjs's
+  // stampStrategyReview) instead of re-deriving the kvUpsert here — this also
+  // gives the CLI path the activity log SKILL.md STEP 8 previously required a
+  // SEPARATE `careerrat activity append` call for.
+  let written = marker;
   if (dbExists(pathCtx)) {
-    kvUpsert({ ...pathCtx, key: "strategyReview", value: marker });
+    written = stampStrategyReview({
+      repoRoot: opts.root,
+      env: process.env,
+      now: () => new Date(at),
+    }).strategyReview;
   } else {
     trackerData.strategyReview = marker;
     writeTrackerJson(trackerPath, trackerData, { at: marker.lastReviewedAt });
   }
   if (opts.json) {
-    console.log(JSON.stringify({ ok: true, written: true, strategyReview: marker }, null, 2));
+    console.log(JSON.stringify({ ok: true, written: true, strategyReview: written }, null, 2));
   } else {
     console.log(
-      `Stamped strategyReview at ${marker.lastReviewedAt} (outcomes: ${marker.snapshot.outcomes}).`
+      `Stamped strategyReview at ${written.lastReviewedAt} (outcomes: ${written.snapshot.outcomes}).`
     );
     console.log("Re-render to clear the banner: careerrat tracker");
   }

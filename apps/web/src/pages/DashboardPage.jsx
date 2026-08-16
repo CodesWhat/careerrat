@@ -1,15 +1,19 @@
 import { Link } from "react-router-dom";
+import { requestAskAction } from "../app-shell/ask-events.js";
 import { useDashboardSnapshot } from "../app-shell/DashboardContext.jsx";
+import { Button } from "../components/Button.jsx";
 import { CompanyAvatar } from "../components/CompanyAvatar.jsx";
 import {
   ArrowRightIcon,
   CalendarIcon,
   CheckIcon,
   ListIcon,
+  PulseIcon,
   SearchIcon,
   StarIcon,
 } from "../components/icons.jsx";
 import { InlineAlert } from "../components/Toast.jsx";
+import { WORKSPACE_ENTITY } from "../lib/api.js";
 import { DASHBOARD_PREVIEW } from "./dashboardPreviewData.js";
 import {
   DeepIngestPriorityNudge,
@@ -74,6 +78,7 @@ export function DashboardPage() {
           </section>
 
           <PipelinePanel model={model} />
+          <StrategyPanel strategy={dashboard.strategy} />
         </>
       ) : null}
     </div>
@@ -198,6 +203,290 @@ function PipelinePanel({ model }) {
         ))}
       </div>
     </aside>
+  );
+}
+
+// StrategyPanel — the dashboard-side view into the reevaluate-strategy domain
+// rules (data.strategy, buildStrategyInsights in dashboard-data.js). Nothing
+// here recomputes what's converting; every field is rendered as emitted. The
+// top-level metric chips + recommendation/review-trigger callout are the
+// primary reading path; everything past that (source/lane/fit breakdown,
+// quiet applications, cadence nudges, the learning block) collapses behind
+// <details> so the panel doesn't dominate the page (see job-drawer's own
+// <details> "Record a confirmed time" for the same expander idiom). Each
+// sub-section renders only when it has rows — an empty tracker just shows
+// the metric chips and the recommendation's own "nothing yet" copy.
+function StrategyPanel({ strategy }) {
+  if (!strategy) return null;
+  const sources = Array.isArray(strategy.sources) ? strategy.sources : [];
+  const roles = Array.isArray(strategy.roles) ? strategy.roles : [];
+  const fitBands = Array.isArray(strategy.fitBands) ? strategy.fitBands : [];
+  const stale = Array.isArray(strategy.stale) ? strategy.stale : [];
+  const stageAges = Array.isArray(strategy.stageAges) ? strategy.stageAges : [];
+  const cadence = Array.isArray(strategy.cadence) ? strategy.cadence : [];
+  const learning = strategy.learning || null;
+
+  const hasBreakdown = sources.length > 0 || roles.length > 0 || fitBands.length > 0;
+  const hasAttention = stale.length > 0 || stageAges.length > 0;
+  const hasLearning = strategyLearningHasContent(learning);
+
+  return (
+    <article className="dashboard__panel dashboard__panel--strategy">
+      <PanelHeader icon={<PulseIcon />} title="Strategy" to="/jobs" actionLabel="Open Jobs" />
+      <div className="dashboard__strategy-body">
+        <StrategyMetrics metrics={strategy.metrics} />
+        <StrategyHeadline
+          recommendation={strategy.recommendation}
+          reviewTrigger={learning?.reviewTrigger}
+        />
+        {hasBreakdown ? (
+          <details className="dashboard__strategy-expander">
+            <summary>Sources, lanes & fit bands</summary>
+            <StrategyRowGroup title="Top sources" rows={sources} />
+            <StrategyRowGroup title="Role lanes" rows={roles} />
+            <StrategyRowGroup title="Fit bands" rows={fitBands} />
+          </details>
+        ) : null}
+        {hasAttention ? (
+          <details className="dashboard__strategy-expander">
+            <summary>Applications going quiet</summary>
+            <StrategyLinkRowGroup title="Quiet pipeline" rows={stale} />
+            <StrategyLinkRowGroup title="Time in stage" rows={stageAges} />
+          </details>
+        ) : null}
+        {cadence.length ? (
+          <details className="dashboard__strategy-expander">
+            <summary>Follow-up nudges</summary>
+            <StrategyCadenceGroup rows={cadence} />
+          </details>
+        ) : null}
+        {hasLearning ? (
+          <details className="dashboard__strategy-expander">
+            <summary>Learning ({learning.windowLabel || "recent"})</summary>
+            <StrategyLearning learning={learning} />
+          </details>
+        ) : null}
+      </div>
+    </article>
+  );
+}
+
+function strategyLearningHasContent(learning) {
+  if (!learning) return false;
+  return (
+    (Array.isArray(learning.trends) && learning.trends.length > 0) ||
+    (Array.isArray(learning.history) && learning.history.length > 0) ||
+    (Array.isArray(learning.signals) && learning.signals.length > 0)
+  );
+}
+
+function StrategyMetrics({ metrics }) {
+  const items = [
+    { key: "topSource", label: "Top source", data: metrics?.topSource },
+    { key: "bestLane", label: "Best lane", data: metrics?.bestLane },
+    { key: "staleCount", label: "Quiet", data: metrics?.staleCount },
+  ].filter((item) => item.data);
+  if (!items.length) return null;
+  return (
+    <div className="dashboard__strategy-metrics">
+      {items.map((item) => (
+        <div className="dashboard__strategy-metric" key={item.key}>
+          <span>{item.label}</span>
+          <strong>{item.data.value == null ? "—" : String(item.data.value)}</strong>
+          {item.data.rate ? <small>{item.data.rate}</small> : null}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// Both the recommendation card and the review-trigger card can carry a CTA;
+// only the review-trigger's is ever a strategy-review submit (reviewTrigger.
+// ready, or a bare recommendation whose own ctaAction says the same thing).
+// Every other ctaAction (today: "jobs", "actions") has no dedicated route of
+// its own yet, so it opens Jobs — the page that already hosts the pipeline
+// this panel is summarizing.
+function StrategyHeadline({ recommendation, reviewTrigger }) {
+  if (!recommendation && !reviewTrigger) return null;
+  return (
+    <div className="dashboard__strategy-headline">
+      {recommendation ? (
+        <div className="dashboard__strategy-callout">
+          <strong>{recommendation.title}</strong>
+          <p>{recommendation.summary}</p>
+          <StrategyCta ctaLabel={recommendation.ctaLabel} ctaAction={recommendation.ctaAction} />
+        </div>
+      ) : null}
+      {reviewTrigger ? (
+        <div className="dashboard__strategy-callout">
+          <strong>{reviewTrigger.title}</strong>
+          <p>{reviewTrigger.summary}</p>
+          <StrategyCta
+            ctaLabel={reviewTrigger.ctaLabel}
+            ctaAction={reviewTrigger.ctaAction}
+            ready={reviewTrigger.ready}
+          />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// The one place a Dashboard CTA reaches into Ask instead of navigating:
+// reviewTrigger.ready (or a ctaAction that already says "strategy-review")
+// submits the typed strategy.review intent straight into the durable
+// workspace thread via requestAskAction — never a same-page reveal. Every
+// other ctaAction stays a normal in-app Link.
+function StrategyCta({ ctaLabel, ctaAction, ready = false }) {
+  const submitsReview = ready || ctaAction === "strategy-review";
+  if (submitsReview) {
+    return (
+      <Button
+        className="dashboard__strategy-cta"
+        onClick={() =>
+          requestAskAction({
+            label: ctaLabel || "Run strategy review",
+            intent: { type: "strategy.review", entity: WORKSPACE_ENTITY, input: {} },
+          })
+        }
+      >
+        {ctaLabel || "Run strategy review"}
+      </Button>
+    );
+  }
+  return (
+    <Link className="dashboard__secondary-link" to="/jobs">
+      <span>{ctaLabel || "Open Jobs"}</span>
+      <ArrowRightIcon />
+    </Link>
+  );
+}
+
+// Sources/roles/fitBands rows already carry a bar (0-100) and a compact
+// meta string ("N advanced · P% response · T tracked") computed server-side
+// (finalizeStrategyRows) — rendered as given, no client-side math.
+function StrategyRowGroup({ title, rows }) {
+  if (!rows.length) return null;
+  return (
+    <div className="dashboard__strategy-group">
+      <h3>{title}</h3>
+      <div className="dashboard__strategy-rows">
+        {rows.map((row) => (
+          <div className="dashboard__strategy-row" key={row.key || row.id || row.label}>
+            <span className="dashboard__strategy-row-label">{row.label}</span>
+            <span className="dashboard__strategy-row-meter" aria-hidden="true">
+              {Number.isFinite(row.bar) ? <span style={{ width: `${row.bar}%` }} /> : null}
+            </span>
+            <span className="dashboard__strategy-row-rate">{row.meta || row.rate}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// Quiet-pipeline and time-in-stage rows each carry a detailId — deep-linking
+// to the job follows the same /jobs?open= convention every other dashboard
+// row (RoleList, TodayPanel) already uses.
+function StrategyLinkRowGroup({ title, rows }) {
+  if (!rows.length) return null;
+  return (
+    <div className="dashboard__strategy-group">
+      <h3>{title}</h3>
+      <div className="dashboard__strategy-link-list">
+        {rows.map((row) => (
+          <Link
+            className="dashboard__strategy-link-row"
+            key={row.id}
+            to={row.detailId ? `/jobs?open=${encodeURIComponent(row.detailId)}` : "/jobs"}
+          >
+            <span className="dashboard__row-copy">
+              <strong>{row.title}</strong>
+              <small>{row.meta}</small>
+            </span>
+          </Link>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const STRATEGY_CADENCE_TONE_CLASS = {
+  overdue: "dashboard__pill--danger",
+  due: "dashboard__pill--warning",
+  quiet: "dashboard__pill--warning",
+  watch: "dashboard__pill--muted",
+  scheduled: "dashboard__pill--muted",
+};
+
+function StrategyCadenceGroup({ rows }) {
+  if (!rows.length) return null;
+  return (
+    <div className="dashboard__strategy-link-list">
+      {rows.map((row) => {
+        const toneClass = STRATEGY_CADENCE_TONE_CLASS[row.tone] || "dashboard__pill--muted";
+        return (
+          <Link
+            className="dashboard__strategy-link-row"
+            key={row.id}
+            to={row.detailId ? `/jobs?open=${encodeURIComponent(row.detailId)}` : "/jobs"}
+          >
+            <span className="dashboard__row-copy">
+              <strong>{row.title}</strong>
+              <small>{row.meta}</small>
+            </span>
+            {row.badge ? <span className={`dashboard__pill ${toneClass}`}>{row.badge}</span> : null}
+          </Link>
+        );
+      })}
+    </div>
+  );
+}
+
+function StrategyLearning({ learning }) {
+  const trends = Array.isArray(learning?.trends) ? learning.trends : [];
+  const history = Array.isArray(learning?.history) ? learning.history : [];
+  const signals = Array.isArray(learning?.signals) ? learning.signals : [];
+  return (
+    <div className="dashboard__strategy-learning">
+      {trends.length ? (
+        <div className="dashboard__strategy-trends">
+          {trends.map((trend) => (
+            <div className="dashboard__strategy-trend" key={trend.id}>
+              <span>{trend.label}</span>
+              <strong>{formatNumber(trend.value)}</strong>
+              <small>{trend.deltaLabel}</small>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {history.length ? (
+        <div className="dashboard__strategy-history">
+          {history.map((bucket) => (
+            <div className="dashboard__strategy-history-row" key={bucket.label}>
+              <span>{bucket.label}</span>
+              <span>
+                {formatNumber(bucket.applied)} applied · {formatNumber(bucket.responseRate)}%
+                response
+              </span>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {signals.length ? (
+        <div className="dashboard__strategy-group">
+          <h3>Winning signals</h3>
+          <div className="dashboard__strategy-rows">
+            {signals.map((signal) => (
+              <div className="dashboard__strategy-row" key={signal.id}>
+                <span className="dashboard__strategy-row-label">{signal.label}</span>
+                <span className="dashboard__strategy-row-rate">{signal.meta}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 

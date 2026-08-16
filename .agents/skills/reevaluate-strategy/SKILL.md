@@ -278,7 +278,11 @@ Run in sequence:
 
 All steps must pass before declaring the skill complete.
 
-Then log the strategy review to the Activity Pulse feed (see **Activity Pulse** in AGENTS.md):
+Activity Pulse logging: in DB mode, STEP 7(f)'s `strategy-review stamp --write`
+already logs the "Strategy review" event itself — do NOT append a second one.
+Only when the workspace is still in legacy tracker.json mode (no db yet) does the
+stamp skip the log; in that case, and only then, log it manually (see **Activity
+Pulse** in AGENTS.md):
 
 ```
 careerrat activity append --type system --actor agent \

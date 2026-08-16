@@ -62,6 +62,11 @@ import {
 } from "../scoring/sourced-persistence.mjs";
 import { inferProvider } from "../scoring/sourced-scanner.mjs";
 import {
+  applyStrategyRecommendation,
+  draftStrategyReview,
+  stampStrategyReview,
+} from "../strategy/review.mjs";
+import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
   workspaceIntentAppend,
@@ -102,6 +107,9 @@ const EXECUTABLE_INTENTS = new Set([
   "company.health",
   "company.health-request",
   "company.health-record",
+  "strategy.review",
+  "strategy.apply",
+  "strategy.stamp",
   "job.apply",
   "communication.draft",
   "communication.draft-request",
@@ -1999,6 +2007,9 @@ export async function executeWorkspaceIntent({
   answerScreeningQuestionsImpl = draftOneOffScreeningAnswers,
   saveScreeningAnswerImpl = saveOneOffScreeningAnswer,
   prepareSchedulingPlanImpl = planSchedulingReply,
+  draftStrategyReviewImpl = draftStrategyReview,
+  applyStrategyRecommendationImpl = applyStrategyRecommendation,
+  stampStrategyReviewImpl = stampStrategyReview,
   callAIImpl = callAI,
   sendCommunicationImpl,
   now = () => new Date(),
@@ -3205,6 +3216,124 @@ export async function executeWorkspaceIntent({
             { label: "Open in Jobs", href: `/jobs?open=${encodeURIComponent(row.id)}` },
           ],
         },
+        now,
+      });
+    }
+
+    // strategy.review — the embedded-chat sibling of the reevaluate-strategy
+    // skill (src/core/strategy/review.mjs). The card owns the per-recommendation
+    // Apply buttons directly off this artifact's `recommendations[]`; nextActions
+    // here only ever carries the review-level follow-ups (finish, or re-run past
+    // the freshness gate) — never a per-recommendation entry.
+    if (normalized.type === "strategy.review") {
+      const force = Boolean(input.force);
+      const draft = await draftStrategyReviewImpl({ repoRoot, env, force, now: now() });
+      const artifact = {
+        kind: "strategy_review",
+        state: draft.state,
+        generatedAt: draft.generatedAt,
+        reviewSignal: draft.reviewSignal,
+        reevaluation: draft.reevaluation,
+        headline: draft.headline,
+        findings: draft.findings,
+        recommendations: draft.recommendations,
+      };
+      const nextActions =
+        draft.state === "fresh"
+          ? [
+              {
+                label: "Run it anyway",
+                intent: {
+                  type: "strategy.review",
+                  entity: normalized.entity,
+                  input: { force: true },
+                },
+              },
+            ]
+          : [
+              {
+                label: "Finish review",
+                intent: { type: "strategy.stamp", entity: normalized.entity },
+              },
+            ];
+      const text =
+        draft.state === "fresh"
+          ? "Nothing new since your last strategy review."
+          : draft.state === "manual"
+            ? `${draft.headline} The AI reviewer wasn't available, so this is the deterministic read — review it, then finish the review.`
+            : `${draft.headline} Review the findings and recommendations, then finish the review.`;
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text,
+        artifacts: [artifact],
+        metadata: { state: draft.state, nextActions },
+        operationResult: draft,
+        now,
+      });
+    }
+
+    // strategy.apply — a single confirm-first Apply click off a strategy_review
+    // artifact's recommendations[]. Apply intents are only ever fired by a user
+    // click on that card (never auto-fired), so no additional confirm gate runs
+    // here; applyStrategyRecommendation itself validates and dispatches to the
+    // owning writer (gate-writer/candidateConfigPatch, appSetStatus/appSetFields/
+    // sourcedSetStatus, or learnings.mjs) per recommendation type.
+    if (normalized.type === "strategy.apply") {
+      const recommendation = input.recommendation;
+      if (!recommendation || typeof recommendation !== "object") {
+        throw actionError(
+          "A recommendation is required to apply a strategy change.",
+          "STRATEGY_APPLY_INVALID"
+        );
+      }
+      const operation = await applyStrategyRecommendationImpl({
+        repoRoot,
+        env,
+        recommendation,
+      });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Applied: ${operation.title || recommendation.title || "the recommendation"}.`,
+        artifacts: [
+          {
+            kind: "strategy_apply",
+            type: operation.type,
+            title: operation.title,
+            result: operation.result,
+          },
+        ],
+        metadata: { state: "applied" },
+        operationResult: operation,
+        now,
+      });
+    }
+
+    // strategy.stamp — clears the dashboard "review ready" nudge, whether or
+    // not any recommendation was accepted (running the review IS the review;
+    // mirrors reevaluate-strategy SKILL.md STEP 7(f)).
+    if (normalized.type === "strategy.stamp") {
+      const stamp = stampStrategyReviewImpl({ repoRoot, env, now });
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "Recorded this strategy review. The review-ready nudge stays quiet until enough new outcomes accrue.",
+        artifacts: [
+          {
+            kind: "strategy_review_stamp",
+            lastReviewedAt: stamp.strategyReview.lastReviewedAt,
+            snapshot: stamp.strategyReview.snapshot,
+          },
+        ],
+        metadata: { state: "stamped" },
+        operationResult: stamp,
         now,
       });
     }
@@ -4621,6 +4750,23 @@ function companyHealthRequestFromText(text) {
   return null;
 }
 
+// strategy.review phrasings — always targets the fixed workspace thread (no
+// company/job/communication reference to resolve), so unlike research.company
+// / company.health this normalizes straight to the executable intent, never a
+// "-request" variant. Deliberately does NOT match a bare "research ..." lead-in
+// (that belongs to companyResearchRequestFromText above).
+function strategyReviewRequestFromText(text) {
+  const value = String(text || "").trim();
+  return (
+    /\breview\s+my\s+(?:job[-\s]search\s+)?strategy\b/i.test(value) ||
+    /\bstrategy\s+review\b/i.test(value) ||
+    /\bwhat'?s\s+working\s+in\s+my\s+search\b/i.test(value) ||
+    /\bwhy\s+am\s+i\s+getting\s+filtered(?:\s+out)?\b/i.test(value) ||
+    /\bwhat\s+should\s+i\s+change\s+in\s+my\s+search\b/i.test(value) ||
+    /\brun\s+a\s+strategy\s+review\b/i.test(value)
+  );
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -4797,6 +4943,14 @@ const ACTION_PREVIEW_RULES = [
         input: { companyReference: parsed.companyReference },
       };
     },
+  },
+  {
+    test: (text) => Boolean(strategyReviewRequestFromText(text)),
+    label: "Review my search strategy",
+    intent: () => ({
+      type: "strategy.review",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    }),
   },
   {
     test: looksLikeCompanyDiscovery,
@@ -5075,6 +5229,9 @@ export function createWorkspaceAgentRuntime({
   captureQuestionsImpl = capturePacketQuestions,
   answerScreeningQuestionsImpl = draftOneOffScreeningAnswers,
   saveScreeningAnswerImpl = saveOneOffScreeningAnswer,
+  draftStrategyReviewImpl = draftStrategyReview,
+  applyStrategyRecommendationImpl = applyStrategyRecommendation,
+  stampStrategyReviewImpl = stampStrategyReview,
   captureIntakeImpl,
   sendCommunicationImpl,
 } = {}) {
@@ -5140,6 +5297,9 @@ export function createWorkspaceAgentRuntime({
           captureQuestionsImpl,
           answerScreeningQuestionsImpl,
           saveScreeningAnswerImpl,
+          draftStrategyReviewImpl,
+          applyStrategyRecommendationImpl,
+          stampStrategyReviewImpl,
           callAIImpl,
           sendCommunicationImpl,
           ...input,

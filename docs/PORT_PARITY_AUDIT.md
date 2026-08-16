@@ -19,12 +19,12 @@ This was the primary way someone with dozens of active applications managed thei
 - **Data:** `row.searchText`, `row.action`/`actionState`/`workstream`, `row.mode`, `row.baseK`/`compMidpointK`, `row.fit`, `row.needsReview`, already computed per row in `dashboard-data.js:3746-3762,4105-4123,4177-4193`, none wired to any control.
 
 ### 2. Strategy insights panel is gone from the dashboard
+**Status: fixed.** Top source/lane conversion, quiet-application staleness, stage-age, cadence nudges, outcome-learning trend, reevaluation review-trigger, and a recommendation CTA had no renderer at all; the panel is now wired into the Dashboard, and its review-trigger CTA is wired into Ask.
 **Dashboard, high value.**
-Top source/lane conversion, quiet-application staleness, stage-age, cadence nudges, outcome-learning trend, reevaluation review-trigger, and a recommendation CTA, the entire panel is missing.
-It's the dashboard-side view into the reevaluate-strategy domain rules. Without it there's no way to see what's converting or whether there's enough signal to safely retune gates.
+It's the dashboard-side view into the reevaluate-strategy domain rules. Without it there was no way to see what's converting or whether there's enough signal to safely retune gates.
 - **Original:** `buildStrategyInsights` (`dashboard-data.js:2992`, assembled from `:2437`, `:2485`, `:2601`, `:2873`, `:2956`); emitted at `:4802`; rendered at `dashboard-shell.html:6204-6330`.
-- **React:** `apps/web/src/pages/DashboardV2Page.jsx` never references `data.strategy` anywhere. Grep for "strategy"/"insight"/"conversion rate"/"cadence nudge" across `apps/web/src` hits nothing real.
-- **Data:** `strategy`, fully populated top-level field, zero consumers.
+- **React:** `apps/web/src/pages/DashboardPage.jsx`'s `StrategyPanel` now reads `data.strategy` end to end: metric chips (top source/best lane/quiet count), a recommendation + review-trigger callout, and `<details>` expanders for the source/lane/fit-band breakdown, quiet-pipeline and time-in-stage rows (each deep-linking to its job via `/jobs?open=`), cadence nudges, and the 30/60/90 learning block. When the review trigger is ready (or its `ctaAction` says `strategy-review`), the CTA submits a typed `strategy.review` intent straight into the durable Ask thread via `app-shell/ask-events.js`'s `requestAskAction` (new — a typed-intent sibling of the existing text-prefill `requestAskBar`), rendered by `AskBar.jsx`'s new `StrategyReviewCard`/`StrategyApplyCard` for the `strategy_review`/`strategy_apply` artifact kinds.
+- **Data:** `strategy`, fully populated top-level field, now read by `StrategyPanel` and, via the Ask round trip, by the `strategy_review`/`strategy_apply` Ask artifacts.
 
 ### 3. Next Steps queue and the Action Queue drawer both collapse to a bare count
 **Dashboard, high value.**

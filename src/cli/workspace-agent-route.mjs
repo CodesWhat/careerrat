@@ -90,6 +90,8 @@ function statusForError(error) {
       "BAD_HEALTH_FIT_DELTA",
       "HEALTH_COMP_LEAK",
       "HEALTH_RECORD_INVALID",
+      "STRATEGY_APPLY_UNSUPPORTED",
+      "STRATEGY_APPLY_INVALID",
     ].includes(error?.code)
   ) {
     return 400;

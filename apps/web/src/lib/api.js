@@ -920,8 +920,11 @@ export function getApplications() {
 // they act on is free text in `input`, resolved server-side against saved
 // jobs), so — same as every other free-text workspace action (search.run,
 // source.discover, company.discover) — they use the workspace thread itself
-// as their entity, not a real row id.
-const WORKSPACE_ENTITY = { type: "workspace", id: "workspace-main" };
+// as their entity, not a real row id. Exported so callers outside this file
+// (e.g. DashboardPage.jsx's strategy-review CTA, which hands a hand-built
+// intent to ask-events.js's requestAskAction rather than fetching directly)
+// can build the same intent shape without redeclaring the literal.
+export const WORKSPACE_ENTITY = { type: "workspace", id: "workspace-main" };
 
 // research.company — web-searches a company already saved from a job (an
 // application or a still-sourced role) across six domain-neutral axes.
@@ -979,6 +982,39 @@ export function recordCompanyHealth({ targetType, targetId, company, companyHeal
     { type: targetType, id: targetId },
     { ...(company ? { company } : {}), companyHealth }
   );
+}
+
+// ---------------------------------------------------------------------------
+// strategy.review / strategy.apply / strategy.stamp (reevaluate-strategy
+// skill) — same runWorkspaceIntent surface as the research trio above. Like
+// researchCompany/researchComp/companyHealth, these have no dedicated caller
+// in this file: the Dashboard's strategy-review CTA (DashboardPage.jsx) and
+// the Ask strategy_review card's Apply button (AskBar.jsx) both hand-build
+// the same {type, entity, input} triple to commitAction/requestAskAction so
+// the run shows up as a live turn in the durable thread, not a bare fetch.
+// These wrappers exist for parity/direct callers and tests.
+// ---------------------------------------------------------------------------
+
+// strategy.review — runs (or re-runs, with force:true) the reevaluate-
+// strategy skill against the tracker. No row to scope to, so it uses the
+// workspace thread as its entity, same as research.company/research.comp.
+export function strategyReview({ force } = {}) {
+  return runWorkspaceIntent("strategy.review", WORKSPACE_ENTITY, {
+    ...(force ? { force: true } : {}),
+  });
+}
+
+// strategy.apply — applies one recommendation row from a strategy_review
+// artifact (the exact object the Apply button received, unmodified).
+export function applyStrategyRecommendation({ recommendation } = {}) {
+  return runWorkspaceIntent("strategy.apply", WORKSPACE_ENTITY, { recommendation });
+}
+
+// strategy.stamp — records that the current strategy review was seen/
+// finished, so buildStrategyReviewTrigger stays quiet until new signal
+// accrues (see dashboard-data.js's STRATEGY_REVIEW_NEW_SIGNAL/COOLDOWN).
+export function stampStrategyReview() {
+  return runWorkspaceIntent("strategy.stamp", WORKSPACE_ENTITY, {});
 }
 
 // ---------------------------------------------------------------------------
