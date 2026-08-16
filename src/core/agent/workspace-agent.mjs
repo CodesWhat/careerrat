@@ -44,6 +44,10 @@ import {
 import { companyProposalBatchGet } from "../db/verbs/company-discovery.mjs";
 import { companyHealthSet } from "../db/verbs/company-health.mjs";
 import { intakeOne } from "../db/verbs/intake.mjs";
+import {
+  linkedinProposalBatchLatest,
+  linkedinProposalDecide,
+} from "../db/verbs/linkedin-proposals.mjs";
 import { relationshipLeadUpsertBatch } from "../db/verbs/relationship.mjs";
 import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verbs/sourced.mjs";
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
@@ -168,6 +172,8 @@ const EXECUTABLE_INTENTS = new Set([
   "status.sync-request",
   "mail.sync-request",
   "messages.sync-request",
+  "linkedin.optimize-request",
+  "linkedin.proposal-decide",
   "status.record-portal-request",
   "status.record-portal",
   "status.apply-transition",
@@ -1919,6 +1925,45 @@ function companyProposalArtifact(batch = {}, meta = {}) {
     ),
     seedSource: meta.seedSource || null,
     ...((meta.trigger || batch.trigger) && { trigger: meta.trigger || batch.trigger }),
+  };
+}
+
+// linkedin_optimize_handoff / linkedin_profile_proposals — support for the
+// linkedin.optimize-request / linkedin.proposal-decide handlers. Mirrors the
+// mail/messages sync handoff shape: capability gates surfaced per key, plus
+// (when a pending batch exists) a compact summary card and the full
+// per-surface proposals artifact for review.
+function linkedinProposalBatchSummary(batch) {
+  const surfaces = Array.isArray(batch.surfaces) ? batch.surfaces : [];
+  const decided = surfaces.filter((surface) => surface.decision);
+  const approved = decided.filter((surface) =>
+    new Set(["approve", "applied"]).has(surface.decision?.action)
+  );
+  return {
+    id: batch.id,
+    createdAt: batch.createdAt,
+    total: surfaces.length,
+    decidedCount: decided.length,
+    approvedCount: approved.length,
+  };
+}
+
+function linkedinOptimizeHandoffArtifact({ capabilities, batch, now }) {
+  return {
+    kind: "linkedin_optimize_handoff",
+    capabilities,
+    batch: batch ? linkedinProposalBatchSummary(batch) : null,
+    at: requestDate(now).toISOString(),
+  };
+}
+
+function linkedinProfileProposalsArtifact(batch) {
+  return {
+    kind: "linkedin_profile_proposals",
+    batchId: batch.id,
+    version: batch.version,
+    createdAt: batch.createdAt,
+    surfaces: JSON.parse(JSON.stringify(batch.surfaces || [])),
   };
 }
 
@@ -4659,6 +4704,89 @@ export async function executeWorkspaceIntent({
       });
     }
 
+    if (normalized.type === "linkedin.optimize-request") {
+      // Never refuses: the handoff card always renders so the candidate can
+      // see current consent state and turn capabilities on from there. The
+      // gate that actually blocks a browser write lives in the skill, not
+      // here.
+      const capabilities = [
+        {
+          key: "profile_optimize",
+          label: "Read and suggest",
+          allowed: mayRun({
+            capability: "profile_optimize",
+            platform: "linkedin",
+            root: repoRoot,
+            env,
+          }).allowed,
+        },
+        {
+          key: "profile_apply",
+          label: "Write approved edits",
+          allowed: mayRun({
+            capability: "profile_apply",
+            platform: "linkedin",
+            root: repoRoot,
+            env,
+          }).allowed,
+        },
+      ];
+      const batch = linkedinProposalBatchLatest({ repoRoot, env });
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: "LinkedIn review requested. Run the optimize-linkedin skill from your agent or terminal to read your profile and draft suggestions; they come back here for your review.",
+        artifacts: [
+          linkedinOptimizeHandoffArtifact({ capabilities, batch, now }),
+          ...(batch ? [linkedinProfileProposalsArtifact(batch)] : []),
+        ],
+        metadata: { state: "requested" },
+        now,
+      });
+    }
+
+    if (normalized.type === "linkedin.proposal-decide") {
+      const action = String(input.action || "").trim();
+      if (!new Set(["approve", "reject"]).has(action)) {
+        throw actionError(
+          "LinkedIn suggestions can only be approved or rejected from Ask.",
+          "BAD_LINKEDIN_PROPOSAL_ACTION"
+        );
+      }
+      const batchId = normalized.entity.id;
+      if (input.batchId && String(input.batchId) !== batchId) {
+        throw actionError(
+          "The LinkedIn suggestion action does not match the selected batch.",
+          "BAD_INTENT_ENTITY"
+        );
+      }
+      const batch = linkedinProposalDecide({
+        repoRoot,
+        env,
+        batchId,
+        surfaceId: input.surfaceId,
+        action,
+        version: input.version,
+        reason: input.reason,
+      });
+      const surface = (batch.surfaces || []).find((entry) => entry.surfaceId === input.surfaceId);
+      const decisionText = action === "approve" ? "approved" : "rejected";
+
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text: `Recorded: ${surface?.surface || String(input.surfaceId || "suggestion")} ${decisionText}.`,
+        artifacts: [linkedinProfileProposalsArtifact(batch)],
+        metadata: { state: batch.status === "reviewed" ? "complete" : "needs-review" },
+        now,
+      });
+    }
+
     if (normalized.type === "scheduling.prepare") {
       const communication = communicationForIntent({
         repoRoot,
@@ -6669,6 +6797,24 @@ function messagesSyncRequestFromText(text) {
   return match ? { input: {} } : null;
 }
 
+// "optimize my linkedin" / "review my linkedin profile" / "make my linkedin
+// profile read for staff roles" — a consent-checked handoff to the
+// optimize-linkedin skill. Anchored (^...$) and requires the literal token
+// "linkedin" so it never matches "review my profile", "update my resume", or
+// "review my search strategy" (which stays strategy.review), and the verb
+// list (optimize/review/improve/update/polish) never overlaps
+// "check"/"sync"/"scan"/"refresh", so "check my linkedin messages" still
+// falls through to messagesSyncRequestFromText.
+function linkedinOptimizeRequestFromText(text) {
+  const value = String(text || "").trim();
+  if (!value) return null;
+  const match =
+    /^(?:please\s+)?(?:can\s+you\s+)?(?:optimize|review|improve|update|polish)\s+(?:my\s+)?linkedin(?:\s+profile)?\s*[.?!]*$/i.test(
+      value
+    ) || /^make\s+(?:my\s+)?linkedin(?:\s+profile)?\s+read\s+for\s+.{2,80}$/i.test(value);
+  return match ? { input: {} } : null;
+}
+
 const ACTION_PREVIEW_RULES = [
   {
     test: (text) => Boolean(screeningQuestionRequestFromText(text)),
@@ -7011,13 +7157,14 @@ const ACTION_PREVIEW_RULES = [
   // ORDERING REQUIREMENT: settings.explain / settings.apply / issue.report /
   // calendar.record-write / relationship.record-lead / relationship.source-request /
   // status.record-portal-request / status.sync-request / mail.sync-request /
-  // messages.sync-request MUST stay above the terminal search.run catch-all
-  // immediately below — that rule matches a bare "check"/"search"/"find"/"run"
-  // verb near "jobs/roles/postings/boards/sources" and would otherwise never
-  // let phrasings like "turn off status polling", "check my settings",
-  // "report a bug", "I added the interview to my calendar", "find a
-  // recruiter at Acme", "check my application statuses", "check my inbox",
-  // or "check my messages" reach these rules first.
+  // messages.sync-request / linkedin.optimize-request MUST stay above the
+  // terminal search.run catch-all immediately below — that rule matches a
+  // bare "check"/"search"/"find"/"run" verb near "jobs/roles/postings/boards/
+  // sources" and would otherwise never let phrasings like "turn off status
+  // polling", "check my settings", "report a bug", "I added the interview to
+  // my calendar", "find a recruiter at Acme", "check my application
+  // statuses", "check my inbox", "check my messages", or "optimize my
+  // linkedin" reach these rules first.
   // relationship.record-lead MUST also stay above relationship.source-request:
   // both match "recruiter at <company>" vocabulary, but only record-lead's
   // patterns require a person's name, so the more specific self-report rule
@@ -7119,6 +7266,15 @@ const ACTION_PREVIEW_RULES = [
       type: "messages.sync-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: messagesSyncRequestFromText(text).input,
+    }),
+  },
+  {
+    test: (text) => Boolean(linkedinOptimizeRequestFromText(text)),
+    label: "Optimize LinkedIn profile",
+    intent: () => ({
+      type: "linkedin.optimize-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
     }),
   },
   {

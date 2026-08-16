@@ -3404,6 +3404,264 @@ describe("AskBar — messages_sync_handoff artifact (MessagesSyncHandoffCard)", 
   });
 });
 
+// ---------------------------------------------------------------------------
+// linkedin_optimize_handoff / linkedin_profile_proposals artifacts
+// (linkedin.optimize-request / linkedin.proposal-decide intents,
+// optimize-linkedin skill — LinkedinOptimizeHandoffCard/LinkedinProposalsCard).
+// Same acknowledgment shape as mail_sync_handoff/messages_sync_handoff above
+// for the handoff card; the proposals card reuses CompanyProposalsCard's
+// ask-bar__company-proposal* chrome rather than a LinkedIn-specific class set.
+// ---------------------------------------------------------------------------
+
+function linkedinActionPreview() {
+  return {
+    action: {
+      label: "Optimize LinkedIn profile",
+      intent: {
+        type: "linkedin.optimize-request",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {},
+      },
+    },
+    answer: { label: "Answer about linkedin" },
+    engineAvailable: true,
+  };
+}
+
+async function runLinkedinTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(linkedinActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "optimize my linkedin" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — linkedin_optimize_handoff artifact (LinkedinOptimizeHandoffCard)", () => {
+  it("renders a Handoff badge, both capability labels, and their on/off states", async () => {
+    const tree = await runLinkedinTurn({
+      text: "LinkedIn review requested. Run the optimize-linkedin skill from your agent or terminal to read your profile and draft suggestions; they come back here for your review.",
+      artifacts: [
+        {
+          kind: "linkedin_optimize_handoff",
+          capabilities: [
+            { key: "profile_optimize", label: "Read and suggest", allowed: true },
+            { key: "profile_apply", label: "Write approved edits", allowed: false },
+          ],
+          batch: null,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--muted"))[0];
+    expect(textOf(badge)).toBe("Handoff");
+    expect(textOf(tree)).toContain("Read and suggest");
+    expect(textOf(tree)).toContain("Write approved edits");
+    expect(textOf(tree)).toContain("On");
+    expect(textOf(tree)).toContain("Off in Settings");
+    expect(textOf(tree)).toContain("No suggestions waiting. Run the skill to draft some.");
+    expect(textOf(tree)).toContain("Nothing is ever written to LinkedIn from this app.");
+  });
+
+  it("renders the pending-batch waiting line when a batch summary is present", async () => {
+    const tree = await runLinkedinTurn({
+      text: "LinkedIn review requested. Run the optimize-linkedin skill from your agent or terminal to read your profile and draft suggestions; they come back here for your review.",
+      artifacts: [
+        {
+          kind: "linkedin_optimize_handoff",
+          capabilities: [
+            { key: "profile_optimize", label: "Read and suggest", allowed: true },
+            { key: "profile_apply", label: "Write approved edits", allowed: false },
+          ],
+          batch: {
+            id: "linkedin_proposal_1",
+            createdAt: "2026-08-15T00:00:00.000Z",
+            total: 2,
+            decidedCount: 0,
+            approvedCount: 0,
+          },
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("2 suggestions waiting for your review.");
+  });
+});
+
+describe("AskBar — linkedin_profile_proposals artifact (LinkedinProposalsCard)", () => {
+  function proposalsMessage(surfaces) {
+    return {
+      text: "LinkedIn review requested. Run the optimize-linkedin skill from your agent or terminal to read your profile and draft suggestions; they come back here for your review.",
+      artifacts: [
+        {
+          kind: "linkedin_optimize_handoff",
+          capabilities: [
+            { key: "profile_optimize", label: "Read and suggest", allowed: true },
+            { key: "profile_apply", label: "Write approved edits", allowed: false },
+          ],
+          batch: {
+            id: "linkedin_proposal_1",
+            createdAt: "2026-08-15T00:00:00.000Z",
+            total: surfaces.length,
+            decidedCount: surfaces.filter((s) => s.decision).length,
+            approvedCount: surfaces.filter((s) => s.decision?.action === "approve").length,
+          },
+          at: "2026-08-15T00:00:00.000Z",
+        },
+        {
+          kind: "linkedin_profile_proposals",
+          batchId: "linkedin_proposal_1",
+          version: 1,
+          createdAt: "2026-08-15T00:00:00.000Z",
+          surfaces,
+        },
+      ],
+    };
+  }
+
+  it("renders the surface name, Now/Suggested text, and an Approve+Reject pair with a Review first badge while undecided", async () => {
+    const tree = await runLinkedinTurn(
+      proposalsMessage([
+        {
+          surfaceId: "headline",
+          surface: "Headline",
+          current: "Software Engineer",
+          proposed: "Applied AI Engineer | LLM Systems",
+          rationale: "Matches your targeting focus.",
+          evidenceRef: "evidence/ai-projects.md",
+          decision: null,
+        },
+      ])
+    );
+
+    const card = byClass(tree, "ask-bar__company-proposals");
+    expect(textOf(card)).toContain("Headline");
+    expect(textOf(card)).toContain("Now: Software Engineer");
+    expect(textOf(card)).toContain("Suggested: Applied AI Engineer | LLM Systems");
+    const badge = visit(card, (n) => hasClass(n, "badge") && hasClass(n, "badge--warn"))[0];
+    expect(textOf(badge)).toBe("Review first");
+    expect(buttonByText(card, "Approve")).toBeTruthy();
+    expect(buttonByText(card, "Reject")).toBeTruthy();
+  });
+
+  it("hides the Approve/Reject buttons and shows an Approved badge once a surface is decided", async () => {
+    const tree = await runLinkedinTurn(
+      proposalsMessage([
+        {
+          surfaceId: "headline",
+          surface: "Headline",
+          current: "Software Engineer",
+          proposed: "Applied AI Engineer | LLM Systems",
+          rationale: "Matches your targeting focus.",
+          evidenceRef: "evidence/ai-projects.md",
+          decision: { action: "approve", decidedAt: "2026-08-15T00:00:01.000Z" },
+        },
+      ])
+    );
+
+    const card = byClass(tree, "ask-bar__company-proposals");
+    const badge = visit(card, (n) => hasClass(n, "badge") && hasClass(n, "badge--ok"))[0];
+    expect(textOf(badge)).toBe("Approved");
+    expect(buttonByText(card, "Approve")).toBeFalsy();
+    expect(buttonByText(card, "Reject")).toBeFalsy();
+  });
+
+  it("clicking Approve calls onRunAction with a linkedin.proposal-decide intent carrying surfaceId/action/version", async () => {
+    let tree = await runLinkedinTurn(
+      proposalsMessage([
+        {
+          surfaceId: "headline",
+          surface: "Headline",
+          current: "Software Engineer",
+          proposed: "Applied AI Engineer | LLM Systems",
+          rationale: "Matches your targeting focus.",
+          evidenceRef: "evidence/ai-projects.md",
+          decision: null,
+        },
+      ])
+    );
+
+    api.runWorkspaceIntent.mockResolvedValueOnce({
+      data: {
+        messages: [
+          {
+            role: "assistant",
+            kind: "action_result",
+            text: "Recorded: Headline approved.",
+            artifacts: [
+              {
+                kind: "linkedin_profile_proposals",
+                batchId: "linkedin_proposal_1",
+                version: 2,
+                createdAt: "2026-08-15T00:00:00.000Z",
+                surfaces: [
+                  {
+                    surfaceId: "headline",
+                    surface: "Headline",
+                    current: "Software Engineer",
+                    proposed: "Applied AI Engineer | LLM Systems",
+                    rationale: "Matches your targeting focus.",
+                    evidenceRef: "evidence/ai-projects.md",
+                    decision: { action: "approve", decidedAt: "2026-08-15T00:00:01.000Z" },
+                  },
+                ],
+              },
+            ],
+            metadata: { state: "complete" },
+          },
+        ],
+      },
+    });
+
+    buttonByText(byClass(tree, "ask-bar__company-proposals"), "Approve").props.onClick();
+    await flushMicrotasks();
+    tree = render();
+
+    expect(api.runWorkspaceIntent).toHaveBeenNthCalledWith(
+      2,
+      "linkedin.proposal-decide",
+      { type: "linkedin-proposal", id: "linkedin_proposal_1" },
+      { surfaceId: "headline", action: "approve", version: 1 }
+    );
+    const badge = visit(
+      byClass(tree, "ask-bar__company-proposals"),
+      (n) => hasClass(n, "badge") && hasClass(n, "badge--ok")
+    )[0];
+    expect(textOf(badge)).toBe("Approved");
+  });
+
+  it("tells the candidate CareerRat never edits LinkedIn directly", async () => {
+    const tree = await runLinkedinTurn(
+      proposalsMessage([
+        {
+          surfaceId: "headline",
+          surface: "Headline",
+          current: "Software Engineer",
+          proposed: "Applied AI Engineer | LLM Systems",
+          rationale: "Matches your targeting focus.",
+          evidenceRef: "evidence/ai-projects.md",
+          decision: null,
+        },
+      ])
+    );
+
+    expect(textOf(tree)).toContain("CareerRat never edits LinkedIn directly");
+  });
+});
+
 describe("AskBar — status_transition_proposal artifact (StatusTransitionProposalCard)", () => {
   it("renders a Review first badge and an Apply button that fires status.apply-transition with the proposal's from/to", async () => {
     let tree = await runStatusTurn({

@@ -367,6 +367,12 @@ const RULES = [
     action: null,
   },
   {
+    match: ({ code }) => code === "CONFLICT",
+    message:
+      "That changed since this card was made, so the click didn't apply. Check the refreshed card and try again.",
+    action: null,
+  },
+  {
     match: ({ raw }) => startsWith(raw, "PDF/DOCX not supported"),
     message:
       "That file type isn't supported yet. Export your resume as text or markdown, then try again.",

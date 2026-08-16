@@ -1568,6 +1568,78 @@ test("previewWorkspaceIntent: message matchers never shadow reporting a sent mes
 });
 
 // ---------------------------------------------------------------------------
+// linkedin.optimize-request matcher (linkedinOptimizeRequestFromText,
+// workspace-agent.mjs ~6808). Anchored on the literal word "linkedin" so
+// "review my profile" / "review my search strategy" (no "linkedin" mention)
+// never fire it, and the verb list (optimize/review/improve/update/polish)
+// never overlaps "check"/"sync"/"scan"/"refresh", so "check my linkedin
+// messages" still falls through to messagesSyncRequestFromText, which sits
+// above this rule in ACTION_PREVIEW_RULES.
+// ---------------------------------------------------------------------------
+
+test('previewWorkspaceIntent: linkedin phrasings map to linkedin.optimize-request with the "Optimize LinkedIn profile" label', () => {
+  const repoRoot = tempRepo();
+  for (const text of [
+    "optimize my linkedin",
+    "review my linkedin profile",
+    "please can you polish my linkedin",
+    "update my linkedin",
+    "make my linkedin profile read for staff roles",
+  ]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(result.action?.intent?.type, "linkedin.optimize-request", text);
+    assert.equal(result.action?.label, "Optimize LinkedIn profile", text);
+    assert.equal(result.action.intent.entity.type, "workspace");
+    assert.equal(result.action.intent.entity.id, WORKSPACE_THREAD_ID);
+  }
+});
+
+test("previewWorkspaceIntent: linkedin matcher never shadows profile/strategy phrasings without the word linkedin, message sync, or a broken anchor", () => {
+  const repoRoot = tempRepo();
+
+  // No "linkedin" mention at all — outside this matcher's anchor, and
+  // outside every other matcher too, so it falls to the bare answer.
+  const reviewProfile = previewWorkspaceIntent({ text: "review my profile", repoRoot, env: {} });
+  assert.notEqual(reviewProfile.action?.intent?.type, "linkedin.optimize-request");
+  assert.equal(reviewProfile.action, null);
+
+  // strategyReviewRequestFromText only recognizes "job[-\s]search strategy",
+  // not bare "search strategy", so this also falls to the bare answer — it
+  // does not reach strategy.review either, but it must not reach linkedin.
+  const reviewSearchStrategy = previewWorkspaceIntent({
+    text: "review my search strategy",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(reviewSearchStrategy.action?.intent?.type, "linkedin.optimize-request");
+  assert.equal(reviewSearchStrategy.action, null);
+
+  // "linkedin" mentioned mid-sentence, but "messages" is the anchored noun —
+  // messagesSyncRequestFromText's rule sits above linkedinOptimizeRequestFromText's,
+  // so this stays on messages.sync-request.
+  const checkMessages = previewWorkspaceIntent({
+    text: "check my linkedin messages",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(checkMessages.action.intent.type, "messages.sync-request");
+
+  // Unrelated document, no linkedin mention.
+  const updateResume = previewWorkspaceIntent({ text: "update my resume", repoRoot, env: {} });
+  assert.notEqual(updateResume.action?.intent?.type, "linkedin.optimize-request");
+
+  // Trailing words after the anchored "linkedin"/"linkedin profile" noun
+  // ("headline please") fall outside the matcher's anchor, so this must not
+  // route to linkedin.optimize-request.
+  const optimizeHeadline = previewWorkspaceIntent({
+    text: "optimize my linkedin headline please",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(optimizeHeadline.action?.intent?.type, "linkedin.optimize-request");
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/workspace/preview
 // ---------------------------------------------------------------------------
 
