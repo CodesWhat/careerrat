@@ -3,6 +3,7 @@ import { closeSync, openSync, readSync } from "node:fs";
 import { callAI, resolveAIRoute } from "../ai/call-ai.mjs";
 import { TRACK_OUTCOME_STATUSES } from "../ai/track-outcome-bounded.mjs";
 import { buildQuestionsRequest } from "../apply/form-questions.mjs";
+import { buildSendLinks, resolveRecipient } from "../comms/recipient.mjs";
 import { requireDb } from "../db/connection.mjs";
 import { assembleTrackerObject } from "../db/export-to-tracker.mjs";
 import { activityAppend } from "../db/verbs/activity.mjs";
@@ -26,6 +27,7 @@ import { sourcedPromote, sourcedSetStatus, sourcedUpsertBatch } from "../db/verb
 import { companyDiscoveryCadenceState } from "../discovery/company-discovery-cadence.mjs";
 import { applyCompanyProposalDecision } from "../discovery/company-proposal-decisions.mjs";
 import { createCompanyProposalBatch } from "../discovery/company-proposals.mjs";
+import { lintArtifact } from "../documents/placeholder-lint.mjs";
 import { matchTrackerRecord } from "../intake/match.mjs";
 import { normalizeIntakeRequestedAction } from "../intake/requested-action.mjs";
 import { resolveJobUrl } from "../intake/resolve.mjs";
@@ -44,6 +46,7 @@ import {
 } from "../packet/one-off-answer.mjs";
 import { capturePacketQuestions } from "../packet/questions.mjs";
 import { userPath } from "../paths/workspace.mjs";
+import { findCurrentBaseToken } from "../profile/comp-guard.mjs";
 import { platformForHost } from "../providers/search-sources.mjs";
 import {
   isStale,
@@ -115,8 +118,11 @@ const EXECUTABLE_INTENTS = new Set([
   "communication.draft-request",
   "communication.send",
   "communication.add-note",
+  "communication.note-request",
   "communication.record-external",
   "communication.record-external-request",
+  "communication.handoff",
+  "communication.handoff-request",
   "communication.capture-inbound",
   "outcome.record",
   "outcome.record-request",
@@ -1125,6 +1131,7 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
   if (
     intent.type === "communication.draft-request" ||
     intent.type === "communication.record-external-request" ||
+    intent.type === "communication.handoff-request" ||
     intent.type === "scheduling.prepare-request"
   ) {
     const communication = resolveReferencedCommunication({
@@ -1139,8 +1146,27 @@ function resolveNaturalWorkspaceRequest({ repoRoot, env, intent }) {
           ? "communication.draft"
           : intent.type === "scheduling.prepare-request"
             ? "scheduling.prepare"
-            : "communication.record-external",
+            : intent.type === "communication.handoff-request"
+              ? "communication.handoff"
+              : "communication.record-external",
       entity: { type: "communication", id: communication.id },
+    };
+  }
+  if (intent.type === "communication.note-request") {
+    const note = String(input.note || "").trim();
+    if (!note) {
+      throw actionError("Enter a note before saving it.", "EMPTY_COMMUNICATION_NOTE");
+    }
+    const communication = resolveReferencedCommunication({
+      repoRoot,
+      env,
+      communicationReference: input.reference,
+    });
+    return {
+      ...intent,
+      type: "communication.add-note",
+      entity: { type: "communication", id: communication.id },
+      input: { ...input, note },
     };
   }
   if (intent.type === "research.company-request") {
@@ -3788,6 +3814,15 @@ export async function executeWorkspaceIntent({
         env,
         id: normalized.entity.id,
       });
+      const sendChannel = String(communication.channel || "email").trim();
+      if (sendChannel !== "email") {
+        const error = actionError(
+          `This thread is on ${sendChannel}. CareerRat can only prepare email sends; reply there and use I sent this.`,
+          "COMMUNICATION_CHANNEL_UNSUPPORTED"
+        );
+        error.details = { channel: sendChannel };
+        throw error;
+      }
       if (!communication.draft) {
         throw actionError(
           "Draft a reply and review it before sending.",
@@ -3818,16 +3853,20 @@ export async function executeWorkspaceIntent({
         );
       }
       const sentAt = resolvedCommunicationDate(execution.sentAt, now);
+      const confirmation = execution.confirmation
+        ? String(execution.confirmation)
+        : "Verified delivery confirmation";
+      // The evidence string is what lets commMarkSent record "verified" at
+      // all; without it the verb derives a weaker tier by design.
       commMarkSent({
         repoRoot,
         env,
         id: normalized.entity.id,
         at: sentAt,
         summary: execution.summary,
+        verification: "verified",
+        deliveryEvidence: confirmation,
       });
-      const confirmation = execution.confirmation
-        ? String(execution.confirmation)
-        : "Verified delivery confirmation";
       return appendActionResult({
         repoRoot,
         env,
@@ -3850,25 +3889,37 @@ export async function executeWorkspaceIntent({
         env,
         id: normalized.entity.id,
       });
-      const summary = String(input.summary || "")
+      const summary = String(input.summary ?? input.note ?? "")
         .replace(/\s+/g, " ")
         .trim();
       if (!summary) {
         throw actionError("Enter a note before saving it.", "EMPTY_COMMUNICATION_NOTE");
       }
       const at = resolvedCommunicationDate(input.at, now);
+      const notedSummary = summary.slice(0, 200);
       const operation = commAppendMessage({
         repoRoot,
         env,
         id: normalized.entity.id,
-        message: { direction: "note", summary: summary.slice(0, 200), at },
+        message: { direction: "note", summary: notedSummary, at },
       });
+      const company = communication.company || "this company";
+      const role = communication.role || "this role";
       return appendActionResult({
         repoRoot,
         env,
         normalized,
         intentMessage,
-        text: `Added a note to ${communicationLabel(communication)}.`,
+        text: `Noted on ${company} — ${role}.`,
+        artifacts: [
+          {
+            kind: "communication_note",
+            communicationId: normalized.entity.id,
+            company,
+            role,
+            note: notedSummary,
+          },
+        ],
         metadata: { state: communication.status || "noted", at },
         operationResult: operation,
         now,
@@ -3882,13 +3933,16 @@ export async function executeWorkspaceIntent({
         id: normalized.entity.id,
       });
       const sentAt = resolvedCommunicationDate(input.sentAt, now);
+      // No verification passed: commMarkSent derives the tier itself
+      // (supervised when a CareerRat draft was in place, user_report
+      // otherwise), so this surface can never disagree with the CLI/REST
+      // callers of the same verb.
       const operation = commMarkSent({
         repoRoot,
         env,
         id: normalized.entity.id,
         at: sentAt,
         summary: input.summary,
-        verification: "user_report",
       });
       return appendActionResult({
         repoRoot,
@@ -3903,6 +3957,96 @@ export async function executeWorkspaceIntent({
           sentAt,
         },
         operationResult: operation,
+        now,
+      });
+    }
+
+    if (normalized.type === "communication.handoff") {
+      const communication = communicationForIntent({
+        repoRoot,
+        env,
+        id: normalized.entity.id,
+      });
+      const channel = String(communication.channel || "email").trim();
+      if (channel !== "email") {
+        const error = actionError(
+          `This thread is on ${channel}. CareerRat can only prepare email sends; reply there and use I sent this.`,
+          "COMMUNICATION_CHANNEL_UNSUPPORTED"
+        );
+        error.details = { channel };
+        throw error;
+      }
+      if (!communication.draft) {
+        throw actionError(
+          "Draft a reply and review it before sending.",
+          "COMMUNICATION_DRAFT_REQUIRED"
+        );
+      }
+      // Legacy rows can hold a bare-string draft (see sentMessageFromDraft in
+      // verbs/comm.mjs); normalize the same way so the body never opens empty.
+      const draft =
+        typeof communication.draft === "string"
+          ? { body: communication.draft }
+          : communication.draft;
+      const subject =
+        String(draft.subject || "").trim() ||
+        `Re: ${communication.role || "this role"} at ${communication.company || "this company"}`;
+      const body = String(draft.body || "");
+      // Outbound-content backstops before anything goes into a compose link:
+      // the private current_base figure never leaves, and an unfinished draft
+      // with placeholder brackets goes back for editing instead of out.
+      const leak = findCurrentBaseToken(`${subject}\n${body}`);
+      if (leak) {
+        throw actionError(
+          "This draft still contains your private current pay figure. Edit the draft, then try again.",
+          "COMMUNICATION_COMP_LEAK"
+        );
+      }
+      const placeholderLint = lintArtifact(`${subject}\n${body}`);
+      if (!placeholderLint.clean) {
+        throw actionError(
+          "This draft still has unfinished placeholder text. Finish the draft, then try again.",
+          "COMMUNICATION_DRAFT_PLACEHOLDER"
+        );
+      }
+      const recipient = resolveRecipient(communication);
+      const to = recipient.state === "ready" ? recipient.to : null;
+      const links = buildSendLinks({ to: to || "", subject, body });
+      const text =
+        recipient.state === "ready"
+          ? "Your reply is ready to send. Open it in your email app, send it, then tell CareerRat you sent it."
+          : "This thread has no contact email address yet. Add one, then CareerRat can prepare the send. Once you've sent it, tell CareerRat you sent it.";
+      return appendActionResult({
+        repoRoot,
+        env,
+        normalized,
+        intentMessage,
+        text,
+        artifacts: [
+          {
+            kind: "communication_handoff",
+            communicationId: normalized.entity.id,
+            company: communication.company || null,
+            role: communication.role || null,
+            subject,
+            body,
+            to,
+            state: recipient.state,
+            links,
+          },
+        ],
+        metadata: {
+          state: recipient.state,
+          nextActions: [
+            {
+              label: "I sent this",
+              intent: {
+                type: "communication.record-external",
+                entity: { type: "communication", id: normalized.entity.id },
+              },
+            },
+          ],
+        },
         now,
       });
     }
@@ -4627,6 +4771,66 @@ function communicationSentRequestFromText(text) {
   return { communicationReference };
 }
 
+// "add a note to/on the <ref> thread: <note>", "note on the <ref> thread:
+// <note>", "log a note about <ref>: <note>". The leading verb is optional
+// ("note on the Acme thread…" is valid on its own), tolerant of
+// "thread"/"conversation" trailing the reference, and the note text can
+// follow a colon or a comma + "saying". Anchored on the literal word "note"
+// so it never shadows (or is shadowed by) the draft/sent matchers above,
+// which require "draft/write/prepare … reply" or a leading "I sent".
+function communicationNoteRequestFromText(text) {
+  const value = String(text || "").trim();
+  const match = value.match(
+    /^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?((?:add|leave|log|jot\s+down|make)\s+)?a?\s*note\s+(?:to|on|about|for)\s+(?:the\s+)?(.+)$/i
+  );
+  if (!match) return null;
+  const hasVerb = Boolean(match[1]);
+  const remainder = String(match[2] || "").trim();
+  // A verb-less "note to/on <x>" is ordinary chat ("Note to self: ...")
+  // unless it names a thread or conversation explicitly.
+  if (!hasVerb && !/\b(?:thread|conversation)\b/i.test(remainder)) return null;
+  const split = remainder.match(
+    /^(.*?)(?:\s+(?:saying|and\s+say|that\s+says?)\s+|,\s*saying\s+|:\s*)([\s\S]+)$/i
+  );
+  const reference = String(split ? split[1] : remainder)
+    .replace(/\s+(?:thread|conversation)\s*$/i, "")
+    .replace(/[.?!]+$/g, "")
+    .trim();
+  if (/^(?:self|myself|me|this)$/i.test(reference)) return null;
+  const note = String(split?.[2] || "").trim();
+  return { reference, note };
+}
+
+// "send my reply to <ref>", "send the <ref> reply", "send the reply to the
+// <ref> thread", "help me send the <ref> email". Anchored on a leading
+// send/help-me-send verb so it never matches communicationSentRequestFromText's
+// past-tense "I sent …" self-report, or communicationDraftRequestFromText's
+// "draft/write/prepare a reply" phrasing.
+function communicationHandoffRequestFromText(text) {
+  const value = String(text || "").trim();
+  const lead = /^(?:(?:please\s+)?(?:can|could|would)\s+you\s+)?(?:help\s+me\s+)?send\s+/i;
+  if (!lead.test(value)) return null;
+  const remainder = value.replace(lead, "").trim();
+  if (!remainder) return null;
+
+  // "reply to <ref>" / "the reply to the <ref> thread" / "my reply to <ref>"
+  let match = remainder.match(
+    /^(?:me\s+)?(?:my\s+|the\s+)?(?:reply|response|email|message)\s+to\s+(?:the\s+)?(.+?)\s*(?:thread|conversation)?[.?!]*$/i
+  );
+  if (!match) {
+    // "the <ref> reply" / "my <ref> email"
+    match = remainder.match(
+      /^(?:me\s+)?(?:the\s+|my\s+)?(.+?)\s+(?:reply|response|email|message)[.?!]*$/i
+    );
+  }
+  if (!match) return null;
+  const communicationReference = String(match[1] || "")
+    .replace(/\s+(?:thread|conversation)\s*$/i, "")
+    .replace(/[.?!]+$/g, "")
+    .trim();
+  return communicationReference ? { communicationReference } : null;
+}
+
 function schedulingRequestFromText(text) {
   const value = String(text || "").trim();
   const namesScheduling =
@@ -4822,6 +5026,24 @@ const ACTION_PREVIEW_RULES = [
       type: "communication.record-external-request",
       entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
       input: communicationSentRequestFromText(text),
+    }),
+  },
+  {
+    test: (text) => Boolean(communicationNoteRequestFromText(text)),
+    label: "Add this note to the thread",
+    intent: (text) => ({
+      type: "communication.note-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: communicationNoteRequestFromText(text),
+    }),
+  },
+  {
+    test: (text) => Boolean(communicationHandoffRequestFromText(text)),
+    label: "Prepare this reply to send",
+    intent: (text) => ({
+      type: "communication.handoff-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: communicationHandoffRequestFromText(text),
     }),
   },
   {

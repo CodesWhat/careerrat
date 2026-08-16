@@ -453,6 +453,104 @@ test("previewWorkspaceIntent: recruiter reply requests become typed communicatio
   });
 });
 
+test("previewWorkspaceIntent: free-text note phrasings become typed communication.note-request actions", () => {
+  const repoRoot = tempRepo();
+
+  const withColon = "Add a note to the Temporal Labs thread: Candidate prefers Tuesday afternoon.";
+  assert.deepEqual(previewWorkspaceIntent({ text: withColon, repoRoot, env: {} }).action, {
+    label: "Add this note to the thread",
+    intent: {
+      type: "communication.note-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { reference: "Temporal Labs", note: "Candidate prefers Tuesday afternoon." },
+    },
+  });
+
+  const withSaying =
+    "Log a note about the Temporal Labs recruiter, saying they pushed the timeline.";
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: withSaying, repoRoot, env: {} }).action.intent.input,
+    { reference: "Temporal Labs recruiter", note: "they pushed the timeline." }
+  );
+
+  const bare = "Note on the Acme thread: they want a writing sample.";
+  assert.deepEqual(previewWorkspaceIntent({ text: bare, repoRoot, env: {} }).action.intent.input, {
+    reference: "Acme",
+    note: "they want a writing sample.",
+  });
+});
+
+test("previewWorkspaceIntent: 'note to self' and other verb-less non-thread notes stay ordinary chat", () => {
+  const repoRoot = tempRepo();
+
+  const noteToSelf = "Note to self: check comp again before I reply.";
+  assert.equal(previewWorkspaceIntent({ text: noteToSelf, repoRoot, env: {} }).action, null);
+
+  const bareNonThread = "Note to Jordan about pay bands: seemed flexible.";
+  assert.equal(previewWorkspaceIntent({ text: bareNonThread, repoRoot, env: {} }).action, null);
+
+  const verbToSelf = "Add a note to myself: bring the license copy.";
+  assert.equal(previewWorkspaceIntent({ text: verbToSelf, repoRoot, env: {} }).action, null);
+});
+
+test("previewWorkspaceIntent: 'send my reply' phrasings become typed communication.handoff-request actions", () => {
+  const repoRoot = tempRepo();
+
+  const toRecruiter = "Send my reply to the Temporal Labs recruiter.";
+  assert.deepEqual(previewWorkspaceIntent({ text: toRecruiter, repoRoot, env: {} }).action, {
+    label: "Prepare this reply to send",
+    intent: {
+      type: "communication.handoff-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { communicationReference: "Temporal Labs recruiter" },
+    },
+  });
+
+  const shortForm = "Send the Acme reply.";
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: shortForm, repoRoot, env: {} }).action.intent.input,
+    { communicationReference: "Acme" }
+  );
+
+  const helpMe = "Help me send the Temporal Labs email.";
+  assert.deepEqual(previewWorkspaceIntent({ text: helpMe, repoRoot, env: {} }).action.intent, {
+    type: "communication.handoff-request",
+    entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+    input: { communicationReference: "Temporal Labs" },
+  });
+});
+
+test("previewWorkspaceIntent: note, handoff, draft, and sent phrasings never shadow one another", () => {
+  const repoRoot = tempRepo();
+
+  // "I sent the reply to Acme" is past-tense self-report — must hit the sent
+  // matcher, never handoff-request's "send ..." lead-in.
+  const sent = "I sent the reply to Acme.";
+  assert.equal(
+    previewWorkspaceIntent({ text: sent, repoRoot, env: {} }).action.intent.type,
+    "communication.record-external-request"
+  );
+
+  // "draft a reply to Acme" must hit the draft matcher, never note or handoff.
+  const draft = "Draft a reply to Acme.";
+  assert.equal(
+    previewWorkspaceIntent({ text: draft, repoRoot, env: {} }).action.intent.type,
+    "communication.draft-request"
+  );
+
+  // A note phrasing never resolves to a handoff, and vice versa.
+  const note = "Add a note to the Acme thread: called and left voicemail.";
+  assert.equal(
+    previewWorkspaceIntent({ text: note, repoRoot, env: {} }).action.intent.type,
+    "communication.note-request"
+  );
+  const handoff = "Send the Acme reply.";
+  assert.equal(
+    previewWorkspaceIntent({ text: handoff, repoRoot, env: {} }).action.intent.type,
+    "communication.handoff-request"
+  );
+});
+
 test("previewWorkspaceIntent: explicit screening questions become typed Ask actions", () => {
   const repoRoot = tempRepo();
   const text =

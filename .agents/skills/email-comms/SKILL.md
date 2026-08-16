@@ -69,11 +69,67 @@ When the user says they already sent a message, already replied, or already comp
      1. `careerrat data comm append-message <comm-id> --data '{"direction":"outbound-sent","at":"<ISO>","summary":"<what was sent>"}'`
      2. If `status` is advancing to `waiting` (the common case): `careerrat data comm mark-sent <comm-id> --at <iso>` — sets `status: waiting`, clears `comm.draft` (and `app.followUp.draft` when linked), automatically. Otherwise (e.g. `closed`), or to set `nextAction`/`nextActionDue`: read the current row and persist the patched whole row with `careerrat data comm upsert --data '<patched full comm row JSON>'`.
    - **Legacy workspace (no DB):** write to `tracker.json` in one operation — no partial writes.
+   - `mark-sent` also records a verification tier on the write (`verified | supervised | user_report`); see **Conversational workspace handoff** below for what each means. The verb derives the tier itself when none is passed: `supervised` when a CareerRat-prepared draft was in place at send time, `user_report` when nothing was prepared. Never pass `verified` yourself; that tier is reserved for a delivery executor with real confirmation evidence.
 3. **Validate:**
    - **DB workspace:** `careerrat data verify` (re-exports + domain integrity), then `careerrat tracker --verify` (schema-level parity).
    - **Legacy workspace (no DB):** run `careerrat tracker --verify`, confirm clean exit, then **snapshot** (`careerrat tracker`).
 
 The agent not having performed the action is not a reason to leave the CTA up. Record it immediately and clear state.
+
+---
+
+## Conversational workspace handoff
+
+In the Ask workspace, note capture, drafting, the send handoff, and the sent-report
+confirm are native: the app runs typed intents (`communication.note-request`,
+`communication.draft-request`, `communication.handoff-request`,
+`communication.record-external`) directly in `workspace-agent.mjs`, not this
+skill's step-by-step CLI verbs. A terminal or external-agent run of this skill
+still follows STEP 1 → 8 and the out-of-band completion branch above exactly as
+written, issuing the `careerrat data comm ...` commands directly.
+
+- **Note capture.** A free-text request such as "add a note to the Acme thread:
+  called to follow up" resolves the referenced thread and appends a note the same
+  way STEP 6(a) does, then returns a durable `communication_note` receipt card in
+  the thread. An empty note or an unresolved/ambiguous reference returns specific
+  recovery copy instead of a generic error, never a silent no-op.
+- **Send handoff.** A request such as "send my reply to Acme" is a pure read; it
+  never sends anything. It resolves the thread, requires an existing draft (same
+  precondition as `communication.send`), and returns a `communication_handoff`
+  artifact: a read-only card with the draft's subject/body prefilled into mailto,
+  Gmail, and Outlook compose links built from the thread's first participant
+  email. A thread with no resolvable recipient email returns an explicit
+  no-recipient state instead of a dead link. The card's "I sent this" action runs
+  the same `communication.record-external` confirm as the out-of-band branch
+  above. **Never auto-send stays absolute.** No code path in the handoff ever
+  submits, clicks send, or opens a real network connection on the candidate's
+  behalf; it only builds links and waits for the candidate's explicit confirm.
+- **Verification tiers.** `mark-sent` (`careerrat data comm mark-sent` / the
+  `commMarkSent` writer) now records one of three tiers on every send, instead of
+  a bare boolean:
+  - `verified`: an executor confirmed delivery. Only `communication.send` can
+    record this, and it still requires a connected delivery executor
+    (`COMMUNICATION_EXECUTOR_UNAVAILABLE` if none exists) and now checks the
+    thread's channel first (`COMMUNICATION_CHANNEL_UNSUPPORTED` for
+    linkedin/phone/sms/portal threads, since those never had a delivery
+    executor to begin with).
+  - `supervised`: CareerRat prepared the draft (via drafting or the handoff
+    above) and the candidate confirmed, out of band, that they sent it. This is
+    what `communication.record-external` records when a `comm.draft` was present
+    at confirm time.
+  - `user_report`: a bare self-report with no CareerRat-prepared draft behind
+    it. This is the default when no draft exists, and the tier any unrecognized
+    or omitted value normalizes to, since a caller can never silently upgrade to
+    a stronger claim than it actually made.
+- **What's still open.** An in-browser compose executor that could reach
+  `verified` sends directly (instead of requiring the handoff-plus-confirm path)
+  was evaluated and deferred. Its entry criteria: a keystroke-safe design
+  validated against real Gmail/Outlook compose DOMs (webmail send-hotkeys like
+  Ctrl+Enter make "never clicks send" non-trivial), per-account compose/Sent
+  verification for multi-account webmail, and a distinct Sent-folder read
+  consent capability, since today's `mail_access` is verification-code-only and
+  must not silently widen. Recipient provenance, the remaining blocker at the time
+  this was scoped, is solved by the resolver the handoff uses above.
 
 ---
 

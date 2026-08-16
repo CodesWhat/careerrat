@@ -35,6 +35,7 @@ import {
   setAppStatus,
   setSourcedStatus,
 } from "../lib/api.js";
+import { buildMailtoLink, firstParticipantEmail } from "../lib/commLinks.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { resolveErrorCopy } from "../lib/errorCopy.js";
 import { safeExternalHttpUrl } from "../lib/safeExternalUrl.js";
@@ -873,22 +874,49 @@ export function ScheduleInterviewCard({ app, busy, onSchedule, onClose }) {
   );
 }
 
+// Older rows can hold a bare-string draft; normalize to the object shape so
+// legacy drafts still render and link correctly.
+function normalizeDraft(draft) {
+  if (typeof draft === "string") return { body: draft };
+  return draft || null;
+}
+
 function ReadyToSendCard({ comms, busyKey, onSend }) {
-  const active = comms.filter(
-    (c) => c.draft && (c.draft.subject || c.draft.body) && !["waiting", "closed"].includes(c.status)
-  );
+  const active = comms
+    .map((c) => ({ comm: c, draft: normalizeDraft(c.draft) }))
+    .filter(
+      ({ comm, draft }) =>
+        draft && (draft.subject || draft.body) && !["waiting", "closed"].includes(comm.status)
+    );
   if (!active.length) return null;
   return (
     <Card title="Ready to send">
-      {active.map((c) => (
-        <div className="job-drawer__draft" key={c.id}>
-          {c.draft.subject ? <p className="job-drawer__draft-subject">{c.draft.subject}</p> : null}
-          {c.draft.body ? <p className="job-drawer__draft-body">{c.draft.body}</p> : null}
-          <Button disabled={busyKey === `send-${c.id}`} onClick={() => onSend(c.id)}>
-            {busyKey === `send-${c.id}` ? "Recording…" : "I sent this"}
-          </Button>
-        </div>
-      ))}
+      {active.map(({ comm: c, draft }) => {
+        const mailto = buildMailtoLink({
+          to: firstParticipantEmail(c.participants),
+          subject: draft.subject,
+          body: draft.body,
+        });
+        return (
+          <div className="job-drawer__draft" key={c.id}>
+            {draft.subject ? <p className="job-drawer__draft-subject">{draft.subject}</p> : null}
+            {draft.body ? <p className="job-drawer__draft-body">{draft.body}</p> : null}
+            {mailto ? (
+              <a className="btn btn--secondary" href={mailto}>
+                Open in email app
+              </a>
+            ) : (
+              <p>
+                This thread has no contact email address yet. Add one and CareerRat can prepare the
+                send.
+              </p>
+            )}
+            <Button disabled={busyKey === `send-${c.id}`} onClick={() => onSend(c.id)}>
+              {busyKey === `send-${c.id}` ? "Recording…" : "I sent this"}
+            </Button>
+          </div>
+        );
+      })}
     </Card>
   );
 }

@@ -315,15 +315,50 @@ function sentMessageFromDraft(draft, { at, summary }) {
   };
 }
 
+// Verification tiers for a recorded send. "verified" is executor-confirmed
+// delivery evidence (communication.send with a connected executor);
+// "supervised" is CareerRat-prepared (a draft existed) with the user
+// confirming the send; "user_report" is an out-of-band self report with
+// nothing CareerRat can vouch for. The verb derives the tier itself when the
+// caller omits it, so every surface (Ask intent, CLI, REST) records the same
+// tier for the same real-world event; unknown explicit values normalize to
+// "user_report" — the least-trusted tier — rather than silently upgrading to
+// a stronger claim than the caller actually made.
+const COMM_VERIFICATION_TIERS = new Set(["verified", "supervised", "user_report"]);
+
+// "verified" is an executor-only claim: without delivery evidence to back it,
+// an explicit "verified" from any caller (CLI, REST, a skill) records at the
+// derived tier instead, so the strongest word in the tracker always has
+// something behind it.
+function normalizeCommVerification(value, { hadDraft = false, hasEvidence = false } = {}) {
+  const clean = String(value || "").trim();
+  if (clean === "verified") {
+    return hasEvidence ? "verified" : hadDraft ? "supervised" : "user_report";
+  }
+  if (COMM_VERIFICATION_TIERS.has(clean)) return clean;
+  if (!clean) return hadDraft ? "supervised" : "user_report";
+  return "user_report";
+}
+
 // commMarkSent({id, at?, summary?}) — the "sent clears draft" hard invariant
 // (AGENTS.md): status → waiting, comm.draft cleared, and — if the draft was
 // backed by app.followUp.draft — that's cleared too, in the SAME write.
-export function commMarkSent({ repoRoot, env, id, at, summary, verification } = {}) {
+export function commMarkSent({
+  repoRoot,
+  env,
+  id,
+  at,
+  summary,
+  verification,
+  deliveryEvidence,
+} = {}) {
   return runVerb({ repoRoot, env }, (db) => {
     const comm = requireRow(db, "communications", id, "communication");
     const sentAt = at || new Date().toISOString();
+    const evidence = String(deliveryEvidence || "").trim();
     const messages = Array.isArray(comm.messages) ? comm.messages.slice() : [];
     const sentMessage = sentMessageFromDraft(comm.draft, { at: sentAt, summary });
+    if (evidence) sentMessage.deliveryEvidence = evidence;
     messages.push(sentMessage);
     const updated = {
       ...comm,
@@ -353,17 +388,23 @@ export function commMarkSent({ repoRoot, env, id, at, summary, verification } = 
       }
     }
 
+    const tier = normalizeCommVerification(verification, {
+      hadDraft: comm.draft != null,
+      hasEvidence: Boolean(evidence),
+    });
     const meta = bumpMeta(db);
     const event = logActivityEvent(db, {
       type: "message",
       title: `${comm.company || id} — message sent`,
       summary:
-        verification === "user_report"
-          ? "User reported the message sent; the saved draft was cleared."
-          : "Delivery was verified and the saved draft was cleared.",
+        tier === "verified"
+          ? "Delivery was verified and the saved draft was cleared."
+          : tier === "supervised"
+            ? "CareerRat prepared this message; the user confirmed it was sent and the saved draft was cleared."
+            : "User reported the message sent; the saved draft was cleared.",
       refs: { applicationId, company: comm.company, role: comm.role },
       tags: ["operation:communication:send"],
     });
-    return { id, meta, event, clearedAppFollowUpDraft, verification: verification || "verified" };
+    return { id, meta, event, clearedAppFollowUpDraft, verification: tier };
   });
 }

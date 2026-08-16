@@ -4261,6 +4261,385 @@ test("communication notes and user-reported sends stay in workspace-main", async
   assert.equal(result.messages.at(-1).metadata.recordingMode, "external_report");
 });
 
+test("communication.add-note returns a communication_note artifact and falls back from input.summary to input.note", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+
+  const bySummary = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.add-note",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+      input: { summary: "  Candidate prefers Tuesday afternoon.  " },
+    },
+  });
+  assert.deepEqual(bySummary.messages.at(-1).artifacts[0], {
+    kind: "communication_note",
+    communicationId: "comm-temporal-recruiter",
+    company: "Temporal Labs",
+    role: "Applied AI Engineer",
+    note: "Candidate prefers Tuesday afternoon.",
+  });
+
+  const byNoteFallback = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.add-note",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+      input: { note: "They asked about remote flexibility." },
+    },
+  });
+  assert.equal(
+    byNoteFallback.messages.at(-1).artifacts[0].note,
+    "They asked about remote flexibility."
+  );
+});
+
+test("communication.note-request rejects a matched-but-empty note with EMPTY_COMMUNICATION_NOTE before touching the thread", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.note-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { reference: "Temporal Labs", note: "   " },
+      },
+    }),
+    (error) => error.code === "EMPTY_COMMUNICATION_NOTE"
+  );
+  assert.equal(readCommunication(repoRoot, "comm-temporal-recruiter").messages.length, 1);
+});
+
+test("communication.note-request resolves a natural thread reference and appends the note", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot);
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.note-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { reference: "Temporal Labs", note: "Called to confirm availability." },
+    },
+  });
+
+  assert.deepEqual(result.messages.at(-1).entity, {
+    type: "communication",
+    id: "comm-temporal-recruiter",
+  });
+  const comm = readCommunication(repoRoot, "comm-temporal-recruiter");
+  assert.equal(comm.messages.at(-1).direction, "note");
+  assert.equal(comm.messages.at(-1).summary, "Called to confirm availability.");
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "communication_note");
+  assert.equal(artifact.note, "Called to confirm availability.");
+});
+
+test("communication.record-external tiers verification by whether a draft existed", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    id: "comm-drafted",
+    status: "drafted",
+    draft: { subject: "Re: Interview availability", body: "Tuesday works." },
+  });
+  seedCommunication(repoRoot, { id: "comm-bare", status: "needs-reply" });
+
+  const supervised = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.record-external",
+      entity: { type: "communication", id: "comm-drafted" },
+    },
+  });
+  assert.equal(supervised.operationResult.verification, "supervised");
+
+  const userReport = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.record-external",
+      entity: { type: "communication", id: "comm-bare" },
+    },
+  });
+  assert.equal(userReport.operationResult.verification, "user_report");
+});
+
+test("communication.send passes verification: 'verified' explicitly to commMarkSent", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: { subject: "Re: Interview availability", body: "Tuesday afternoon works for me." },
+  });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.send",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+    },
+    sendCommunicationImpl: async () => ({
+      verified: true,
+      sentAt: "2026-08-09T17:30:00.000Z",
+      confirmation: "Provider accepted message",
+    }),
+  });
+
+  const db = openDb({ repoRoot, env: {} });
+  const row = db.prepare("SELECT data FROM activity_events ORDER BY rowid DESC LIMIT 1").get();
+  const event = JSON.parse(row.data);
+  assert.match(event.summary, /delivery was verified/i);
+});
+
+test("communication.handoff prepares a ready-to-send artifact as a pure read — no communication write", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  const seeded = seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: { subject: "Re: Interview availability", body: "Tuesday afternoon works for me." },
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.handoff",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "communication_handoff");
+  assert.equal(artifact.communicationId, "comm-temporal-recruiter");
+  assert.equal(artifact.company, "Temporal Labs");
+  assert.equal(artifact.role, "Applied AI Engineer");
+  assert.equal(artifact.subject, "Re: Interview availability");
+  assert.equal(artifact.body, "Tuesday afternoon works for me.");
+  assert.equal(artifact.to, "avery@temporal.test");
+  assert.equal(artifact.state, "ready");
+  assert.match(artifact.links.mailto, /^mailto:avery%40temporal\.test\?subject=/);
+  assert.match(artifact.links.gmail, /^https:\/\/mail\.google\.com\/mail\//);
+  assert.match(artifact.links.outlook, /^https:\/\/outlook\.live\.com\/mail\//);
+  assert.deepEqual(result.messages.at(-1).metadata.nextActions, [
+    {
+      label: "I sent this",
+      intent: {
+        type: "communication.record-external",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    },
+  ]);
+
+  // Pure read: the communication row is byte-for-byte unchanged.
+  assert.deepEqual(readCommunication(repoRoot, "comm-temporal-recruiter"), seeded);
+});
+
+test("communication.handoff returns no-recipient when the thread has no plausible contact email", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: { subject: "Re: Interview availability", body: "Tuesday afternoon works for me." },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.handoff",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.state, "no-recipient");
+  assert.equal(artifact.to, null);
+  assert.match(result.messages.at(-1).text, /no contact email address/i);
+});
+
+test("communication.handoff-request resolves a natural reference and normalizes to communication.handoff", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: { subject: "Re: Interview availability", body: "Tuesday afternoon works for me." },
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.handoff-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { communicationReference: "the Temporal Labs recruiter" },
+    },
+  });
+
+  assert.equal(result.messages.at(-2).intent.type, "communication.handoff-request");
+  assert.deepEqual(result.messages.at(-1).entity, {
+    type: "communication",
+    id: "comm-temporal-recruiter",
+  });
+  assert.equal(result.messages.at(-1).artifacts[0].state, "ready");
+});
+
+test("communication.handoff refuses a non-email channel with COMMUNICATION_CHANNEL_UNSUPPORTED", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    channel: "linkedin",
+    status: "drafted",
+    draft: { subject: "Re: Interview availability", body: "Tuesday afternoon works for me." },
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.handoff",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "COMMUNICATION_CHANNEL_UNSUPPORTED");
+      assert.equal(error.details.channel, "linkedin");
+      return true;
+    }
+  );
+});
+
+test("communication.handoff requires a draft before it will prepare a send", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, { status: "needs-reply" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.handoff",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_DRAFT_REQUIRED"
+  );
+});
+
+test("communication.handoff refuses to build compose links from a draft that leaks current_base", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: {
+      subject: "Re: Compensation",
+      body: "My current_base is 180000, so I'm targeting a step up.",
+    },
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.handoff",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_COMP_LEAK"
+  );
+});
+
+test("communication.handoff refuses a draft with unresolved placeholder text", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: {
+      subject: "Re: Interview availability",
+      body: "Thanks [Recruiter Name], Tuesday afternoon works for me.",
+    },
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.handoff",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => error.code === "COMMUNICATION_DRAFT_PLACEHOLDER"
+  );
+});
+
+test("communication.handoff normalizes a legacy bare-string draft into subject and body", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, {
+    status: "drafted",
+    draft: "Tuesday afternoon works for me.",
+    participants: [{ name: "Avery Recruiter", email: "avery@temporal.test" }],
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "communication.handoff",
+      entity: { type: "communication", id: "comm-temporal-recruiter" },
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.state, "ready");
+  // No subject on a string draft, so the fallback subject kicks in and the
+  // body carries the legacy string.
+  assert.equal(artifact.subject, "Re: Applied AI Engineer at Temporal Labs");
+  assert.match(artifact.links.mailto, /body=Tuesday%20afternoon%20works%20for%20me\./);
+});
+
+test("communication.send also refuses a non-email channel, before checking for a draft or executor", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot);
+  seedCommunication(repoRoot, { channel: "linkedin", status: "needs-reply" });
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "communication.send",
+        entity: { type: "communication", id: "comm-temporal-recruiter" },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "COMMUNICATION_CHANNEL_UNSUPPORTED");
+      assert.equal(error.details.channel, "linkedin");
+      return true;
+    }
+  );
+});
+
 test("natural recruiter requests resolve one thread for drafting and user-reported sends", async () => {
   const repoRoot = tempRepo();
   seedApplication(repoRoot);

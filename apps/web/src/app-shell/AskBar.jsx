@@ -16,6 +16,7 @@ import {
   uploadIntakeFile,
   WORKSPACE_ENTITY,
 } from "../lib/api.js";
+import { buildComposeLinks } from "../lib/commLinks.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { errorState, resolveErrorCopy } from "../lib/errorCopy.js";
 import { emitIntakeChanged } from "../lib/intake-events.js";
@@ -1246,6 +1247,12 @@ function AskBarTurn({
   const strategyStampArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "strategy_review_stamp"
   );
+  const communicationNoteArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "communication_note"
+  );
+  const communicationHandoffArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "communication_handoff"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1284,6 +1291,12 @@ function AskBarTurn({
       ) : null}
       {strategyApplyArtifact ? <StrategyApplyCard artifact={strategyApplyArtifact} /> : null}
       {strategyStampArtifact ? <StrategyStampCard artifact={strategyStampArtifact} /> : null}
+      {communicationNoteArtifact ? (
+        <CommunicationNoteCard artifact={communicationNoteArtifact} />
+      ) : null}
+      {communicationHandoffArtifact ? (
+        <CommunicationHandoffCard artifact={communicationHandoffArtifact} />
+      ) : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -1960,6 +1973,87 @@ function StrategyStampCard({ artifact }) {
       {counts.length ? (
         <p>Snapshot at review: {counts.map(([label, value]) => `${value} ${label}`).join(", ")}.</p>
       ) : null}
+    </section>
+  );
+}
+
+// communication_note (email-comms free-text note capture) — same card
+// chrome as StrategyStampCard: a plain receipt, no left-edge accent.
+function CommunicationNoteCard({ artifact }) {
+  const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Note added to thread">
+      <div className="ask-bar__strategy-review-head">
+        <strong>{title}</strong>
+        <span className="badge badge--muted">Note saved</span>
+      </div>
+      {artifact.note ? <p>{artifact.note}</p> : null}
+    </section>
+  );
+}
+
+// communication_handoff (email-comms skill, the supervised send handoff) —
+// same card chrome as CommunicationNoteCard above. The server owns recipient
+// resolution and ships to/subject/body on the artifact; the compose hrefs are
+// built here from those parts (literal scheme/host + encodeURIComponent'd
+// values), never rendered from the artifact's pre-built link strings, so a
+// tampered durable artifact can't smuggle an arbitrary URL into an anchor.
+// The "I sent this" confirm is not rendered here — it arrives as a generic
+// metadata.nextActions entry and renders through the shared block below this
+// card.
+function CommunicationHandoffCard({ artifact }) {
+  const title = [artifact.company, artifact.role].filter(Boolean).join(" — ") || "This thread";
+  const ready = artifact.state === "ready";
+  const links = buildComposeLinks({
+    to: artifact.to,
+    subject: artifact.subject,
+    body: artifact.body,
+  });
+  const mailtoHref = ready ? links.mailto : null;
+  const gmailHref = ready ? links.gmail : null;
+  const outlookHref = ready ? links.outlook : null;
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Prepared reply">
+      <div className="ask-bar__strategy-review-head">
+        <strong>{title}</strong>
+        <span className={`badge ${ready ? "badge--ok" : "badge--warn"}`}>
+          {ready ? "Ready to send" : "Needs an address"}
+        </span>
+      </div>
+      {artifact.subject ? <p>{artifact.subject}</p> : null}
+      {ready ? (
+        <div className="ask-bar__company-proposal-actions">
+          {mailtoHref ? (
+            <a className="ask-bar__handoff-link" href={mailtoHref}>
+              Open in email app
+            </a>
+          ) : null}
+          {gmailHref ? (
+            <a
+              className="ask-bar__handoff-link"
+              href={gmailHref}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Gmail
+            </a>
+          ) : null}
+          {outlookHref ? (
+            <a
+              className="ask-bar__handoff-link"
+              href={outlookHref}
+              target="_blank"
+              rel="noopener noreferrer"
+            >
+              Outlook
+            </a>
+          ) : null}
+        </div>
+      ) : (
+        <p className="ask-bar__strategy-note">
+          Add the contact's email address to this thread, then CareerRat can prepare the send.
+        </p>
+      )}
     </section>
   );
 }
