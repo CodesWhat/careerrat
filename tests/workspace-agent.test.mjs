@@ -11,6 +11,7 @@ import {
   createWorkspaceAgentRuntime,
   executeWorkspaceIntent,
   mailSyncSources,
+  messagesSyncSources,
   recordWorkspaceSearchCompletion,
   runWorkspaceAgentTurn,
 } from "../src/core/agent/workspace-agent.mjs";
@@ -7462,4 +7463,151 @@ test("mail.sync-request: needsReply counts only channel email + status needs-rep
 
   const artifact = result.messages.at(-1).artifacts[0];
   assert.equal(artifact.needsReply, 1);
+});
+
+// ---------------------------------------------------------------------------
+// messages.sync-request (ingest-messages skill — messagesSyncSources helper
+// and the messages.sync-request handler in workspace-agent.mjs). messaging is
+// a per-platform capability (linkedin/wellfound, see CAPABILITIES.messaging)
+// like mail_access above, but unlike mail there is no ungated always-allowed
+// entry (no Apple Mail equivalent), so a zero-grant ask refuses outright. The
+// handler never writes: it is a read-only count-and-handoff, never a tracker
+// mutation. needsReply is LinkedIn-scoped only — Wellfound threads record
+// under the shared "portal" channel, so they are deliberately not counted.
+// ---------------------------------------------------------------------------
+
+function grantMessaging(repoRoot, platforms) {
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        messaging: {
+          enabled: true,
+          platforms: Object.fromEntries(platforms.map((p) => [p, true])),
+        },
+      },
+      consent: Object.fromEntries(platforms.map((p) => [p, true])),
+    },
+  });
+}
+
+test("messagesSyncSources: no grants returns linkedin-messages/wellfound-messages, both disallowed", () => {
+  const repoRoot = tempRepo();
+  const sources = messagesSyncSources({ repoRoot, env: {} });
+  assert.deepEqual(
+    sources.map((s) => s.id),
+    ["linkedin-messages", "wellfound-messages"]
+  );
+  assert.ok(sources.every((s) => s.allowed === false));
+});
+
+test("messagesSyncSources: linkedin-only grant allows linkedin-messages, leaves wellfound-messages disallowed", () => {
+  const repoRoot = tempRepo();
+  grantMessaging(repoRoot, ["linkedin"]);
+  const sources = messagesSyncSources({ repoRoot, env: {} });
+  const byId = Object.fromEntries(sources.map((s) => [s.id, s]));
+  assert.equal(byId["linkedin-messages"].allowed, true);
+  assert.equal(byId["wellfound-messages"].allowed, false);
+});
+
+test("messages.sync-request: linkedin grant returns a messages_sync_handoff artifact with per-source allowed/lastRunAt and a needsReply count scoped to linkedin", async () => {
+  const repoRoot = tempRepo();
+  grantMessaging(repoRoot, ["linkedin"]);
+  sourceWatermarkUpsert({
+    repoRoot,
+    env: {},
+    source: { id: "linkedin-messages", lastRunAt: "2026-08-13T10:00:00.000Z" },
+    at: "2026-08-13T10:00:00.000Z",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-linkedin-1",
+    company: "Acme",
+    channel: "linkedin",
+    status: "needs-reply",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-linkedin-2",
+    company: "Beta",
+    channel: "linkedin",
+    status: "needs-reply",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-portal-1",
+    company: "Gamma",
+    channel: "portal",
+    status: "needs-reply",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-email-1",
+    company: "Delta",
+    channel: "email",
+    status: "needs-reply",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "messages.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "messages_sync_handoff");
+  const byId = Object.fromEntries(artifact.sources.map((s) => [s.id, s]));
+  assert.equal(byId["linkedin-messages"].allowed, true);
+  assert.equal(byId["linkedin-messages"].lastRunAt, "2026-08-13T10:00:00.000Z");
+  assert.equal(byId["wellfound-messages"].allowed, false);
+  assert.equal(byId["wellfound-messages"].lastRunAt, null);
+  assert.equal(artifact.needsReply, 2);
+});
+
+test("messages.sync-request: zero messaging grant rejects with MESSAGES_SYNC_NOT_ALLOWED", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    () =>
+      executeWorkspaceIntent({
+        repoRoot,
+        env: {},
+        intent: {
+          type: "messages.sync-request",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+          input: {},
+        },
+      }),
+    (error) => {
+      assert.equal(error.code, "MESSAGES_SYNC_NOT_ALLOWED");
+      return true;
+    }
+  );
+});
+
+test("messages.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
+  const repoRoot = tempRepo();
+  grantMessaging(repoRoot, ["linkedin"]);
+  const app = seedApplication(repoRoot);
+  const comm = seedCommunication(repoRoot);
+  const appBefore = readApplication(repoRoot, app.id);
+  const commBefore = readCommunication(repoRoot, comm.id);
+  const sourcesBefore = readSourceIds(repoRoot);
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "messages.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  assert.deepEqual(readApplication(repoRoot, app.id), appBefore);
+  assert.deepEqual(readCommunication(repoRoot, comm.id), commBefore);
+  assert.deepEqual(readSourceIds(repoRoot), sourcesBefore);
 });

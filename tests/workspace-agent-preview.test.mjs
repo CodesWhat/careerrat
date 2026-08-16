@@ -1489,6 +1489,85 @@ test("previewWorkspaceIntent: mail matchers never shadow reply drafting, setting
 });
 
 // ---------------------------------------------------------------------------
+// messages.sync-request matcher (messagesSyncRequestFromText,
+// workspace-agent.mjs ~6652). Anchored like mailSyncRequestFromText so
+// "message"/"dm" mentioned mid-sentence — sending a message, messaging
+// settings, or unrelated status/email checks — never fires it.
+// ---------------------------------------------------------------------------
+
+test("previewWorkspaceIntent: message phrasings map to messages.sync-request with the 'Check for new messages' label", () => {
+  const repoRoot = tempRepo();
+  for (const text of [
+    "check my messages",
+    "check my linkedin messages",
+    "any new dms?",
+    "do I have new messages",
+    "check for new dms",
+    "sync my dms",
+  ]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(result.action?.intent?.type, "messages.sync-request", text);
+    assert.equal(result.action?.label, "Check for new messages", text);
+    assert.equal(result.action.intent.entity.type, "workspace");
+    assert.equal(result.action.intent.entity.id, WORKSPACE_THREAD_ID);
+  }
+});
+
+test("previewWorkspaceIntent: message matchers never shadow reporting a sent message, settings, mail sync, or status routing", () => {
+  const repoRoot = tempRepo();
+
+  // Reporting a past action mentions "message" but is not a sync ask.
+  const sentMessage = previewWorkspaceIntent({
+    text: "I sent a message to the recruiter",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(sentMessage.action?.intent?.type, "messages.sync-request");
+
+  // Turning the capability on/off is a settings change, not a messages.*
+  // action — settings.apply already owns capability toggles.
+  const toggleMessaging = previewWorkspaceIntent({
+    text: "turn off messaging",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(toggleMessaging.action.intent.type, "settings.apply");
+
+  // Mail vocabulary stays on mail.sync-request.
+  const checkEmail = previewWorkspaceIntent({
+    text: "check my email",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(checkEmail.action.intent.type, "mail.sync-request");
+
+  // Portal status vocabulary stays on status.sync-request.
+  const checkStatuses = previewWorkspaceIntent({
+    text: "check my application statuses",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(checkStatuses.action.intent.type, "status.sync-request");
+
+  // Composing a message mentions "message" but is not a sync ask.
+  const messageRecruiter = previewWorkspaceIntent({
+    text: "message the recruiter",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(messageRecruiter.action?.intent?.type, "messages.sync-request");
+
+  // Trailing words after the anchored messages noun ("drafts") fall outside
+  // the matcher, so this must not route to messages.sync-request.
+  const checkMessageDrafts = previewWorkspaceIntent({
+    text: "check my message drafts",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(checkMessageDrafts.action?.intent?.type, "messages.sync-request");
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/workspace/preview
 // ---------------------------------------------------------------------------
 

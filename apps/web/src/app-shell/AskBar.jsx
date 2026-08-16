@@ -1272,6 +1272,7 @@ function AskBarTurn({
     (artifact) => artifact.kind === "status_sync_handoff"
   );
   const mailSyncHandoff = turn.artifacts?.find((a) => a?.kind === "mail_sync_handoff");
+  const messagesSyncHandoff = turn.artifacts?.find((a) => a?.kind === "messages_sync_handoff");
   const statusTransitionProposalArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "status_transition_proposal"
   );
@@ -1335,6 +1336,7 @@ function AskBarTurn({
         <StatusSyncHandoffCard artifact={statusSyncHandoffArtifact} />
       ) : null}
       {mailSyncHandoff ? <MailSyncHandoffCard artifact={mailSyncHandoff} /> : null}
+      {messagesSyncHandoff ? <MessagesSyncHandoffCard artifact={messagesSyncHandoff} /> : null}
       {statusTransitionProposalArtifact ? (
         <StatusTransitionProposalCard
           artifact={statusTransitionProposalArtifact}
@@ -2558,6 +2560,53 @@ function MailSyncHandoffCard({ artifact }) {
       <p className="ask-bar__screening-note">
         Run the ingest-mail skill from your agent or terminal to read your mail. Updates come back
         here for your review.
+      </p>
+    </section>
+  );
+}
+
+// messages_sync_handoff (messages.sync-request intent, ingest-messages skill)
+// — same acknowledgment shape as MailSyncHandoffCard above: the request
+// landed, the actual message read happens in the agent/terminal skill run,
+// not here. needsReply is LinkedIn-scoped only: Wellfound threads share the
+// portal channel with ATS messages, so they aren't counted here.
+const MESSAGES_SYNC_SOURCE_LABEL = {
+  "linkedin-messages": "LinkedIn",
+  "wellfound-messages": "Wellfound",
+};
+function messagesSyncSourceLabel(source) {
+  return MESSAGES_SYNC_SOURCE_LABEL[source.id] || settingsPlatformLabel(source.platform);
+}
+function messagesSyncNeedsReplyLine(count) {
+  const needsReply = Number(count) || 0;
+  if (needsReply === 0) return "No LinkedIn message threads are waiting on a reply.";
+  if (needsReply === 1) return "1 LinkedIn message thread is waiting on a reply.";
+  return `${needsReply} LinkedIn message threads are waiting on a reply.`;
+}
+function MessagesSyncHandoffCard({ artifact }) {
+  const sources = Array.isArray(artifact.sources) ? artifact.sources : [];
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Message sync requested">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Message sync requested</strong>
+        <span className="badge badge--muted">Handoff</span>
+      </div>
+      {sources.map((source) => {
+        const statusText = !source.allowed
+          ? "Off in Settings"
+          : source.lastRunAt
+            ? `Last checked ${formatRelativeDate(source.lastRunAt)}`
+            : "Never checked";
+        return (
+          <p key={source.id}>
+            {[messagesSyncSourceLabel(source), statusText].filter(Boolean).join(" · ")}
+          </p>
+        );
+      })}
+      <p>{messagesSyncNeedsReplyLine(artifact.needsReply)}</p>
+      <p className="ask-bar__screening-note">
+        Run the ingest-messages skill from your agent or terminal to read your messages. Updates
+        come back here for your review.
       </p>
     </section>
   );
