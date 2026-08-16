@@ -4,8 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 
+import { createConfiguredApplyExecutor } from "../src/core/apply/apply-executor-factory.mjs";
 import {
-  createConfiguredApplyExecutor,
   createOrcaApplyExecutor,
   renderedFieldsFromSnapshot,
   uploadTargetsFromSnapshot,
