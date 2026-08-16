@@ -82,7 +82,12 @@ import {
   stampStrategyReview,
 } from "../strategy/review.mjs";
 import { readVersion } from "../version.mjs";
-import { buildIssueReport, buildIssueUrl, ISSUE_REPORT_COMP_LEAK_MARKER } from "./issue-report.mjs";
+import {
+  buildIssueReport,
+  buildIssueUrl,
+  FILED_ISSUE_URL_RE,
+  ISSUE_REPORT_COMP_LEAK_MARKER,
+} from "./issue-report.mjs";
 import {
   normalizeWorkspaceIntent,
   WORKSPACE_THREAD_ID,
@@ -3794,9 +3799,9 @@ export async function executeWorkspaceIntent({
     // Activity Pulse entry (see report-issue's SKILL.md STEP 6).
     if (normalized.type === "issue.record-filed") {
       const rawUrl = input.url !== undefined ? String(input.url).trim() : "";
-      if (rawUrl && !/^https:\/\/github\.com\/CodesWhat\/careerrat\/issues\/\d+\/?$/.test(rawUrl)) {
+      if (rawUrl && !FILED_ISSUE_URL_RE.test(rawUrl)) {
         throw actionError(
-          "That doesn't look like a CodesWhat/careerrat issue URL.",
+          "That doesn't look like a link to an issue on the CareerRat repo.",
           "ISSUE_URL_INVALID"
         );
       }

@@ -441,3 +441,21 @@ test("issue-report.mjs never imports child_process or shells out to gh", () => {
     "issue-report.mjs must not shell out"
   );
 });
+
+test("buildIssueReport truncates astral-heavy titles and bodies without splitting surrogate pairs", () => {
+  const repoRoot = tempRepo();
+  // 2100 astral code points = 4200 UTF-16 units: enough to trip both the
+  // 60-point title cap and the 4000-point body cap. A unit-based slice
+  // would leave a lone surrogate and make buildIssueUrl's
+  // encodeURIComponent throw URIError.
+  const report = buildIssueReport({
+    repoRoot,
+    env: {},
+    description: "\u{1F600}".repeat(2100),
+    lastError: null,
+    ...REPORT_DEFAULTS,
+  });
+  assert.doesNotMatch(report.title, /[\uD800-\uDBFF]$/);
+  assert.doesNotMatch(report.body, /[\uD800-\uDBFF]$/);
+  assert.doesNotThrow(() => buildIssueUrl({ title: report.title, body: report.body }));
+});

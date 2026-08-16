@@ -2329,6 +2329,11 @@ function IssueReportCard({ artifact }) {
 // Strict shape check (defense in depth alongside whatever the server already
 // validated) — a durable artifact rendering an arbitrary URL as a link is
 // exactly the risk CommunicationHandoffCard's own header comment calls out.
+// The repo slug is intentionally a literal here, independent of the server's
+// bugs.url-derived validator: an allowlist the artifact itself could vary
+// would be no allowlist at all. A fork that rebrands the upstream repo
+// updates this one constant (worst case before then: the receipt renders as
+// plain text instead of a link).
 const ISSUE_URL_PATTERN = /^https:\/\/github\.com\/CodesWhat\/careerrat\/issues\/\d+\/?$/;
 function safeIssueUrl(value) {
   const url = String(value || "").trim();

@@ -32,6 +32,13 @@ const ISSUE_REPO_BASE_URL = (() => {
 })();
 
 // Error-code families that mean "this candidate's setup needs attention,"
+// Strict shape for an already-filed issue URL on the upstream tracker,
+// derived from the same bugs.url-based base as the prefilled new-issue link
+// so a fork that changes package.json keeps both validators in sync.
+export const FILED_ISSUE_URL_RE = ISSUE_REPO_BASE_URL
+  ? new RegExp(`^${ISSUE_REPO_BASE_URL.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}/issues/\\d+/?$`)
+  : /^https:\/\/github\.com\/CodesWhat\/careerrat\/issues\/\d+\/?$/;
+
 // not "CareerRat has a defect." issue.report still offers to file (the user
 // may know better than the heuristic), but the card surfaces this as a hint
 // toward Settings/doctor first.
@@ -243,11 +250,19 @@ export function collectIdentifiers({ repoRoot, env } = {}) {
   return Array.from(identifiers);
 }
 
+// Truncates by code point, not UTF-16 code unit: a naive slice can split a
+// surrogate pair, and the lone surrogate then makes encodeURIComponent throw
+// when the prefilled URL is built.
+function truncateCodePoints(text, max) {
+  const points = Array.from(String(text ?? ""));
+  return points.length > max ? `${points.slice(0, max - 1).join("")}…` : String(text ?? "");
+}
+
 function truncateTitle(text) {
   const compact = String(text ?? "")
     .replace(/\s+/g, " ")
     .trim();
-  return compact.length > 60 ? `${compact.slice(0, 59)}…` : compact;
+  return truncateCodePoints(compact, 60);
 }
 
 // Builds the redacted {title, body} for a CareerRat bug report. Throws
@@ -323,8 +338,7 @@ export function buildIssueReport({
     "_This report was assembled and redacted by CareerRat._"
   );
 
-  let body = bodyLines.join("\n");
-  if (body.length > 4000) body = `${body.slice(0, 3999)}…`;
+  const body = truncateCodePoints(bodyLines.join("\n"), 4000);
 
   const title = descriptionText
     ? truncateTitle(descriptionText)

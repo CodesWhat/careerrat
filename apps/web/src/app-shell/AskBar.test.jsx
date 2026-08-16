@@ -2823,9 +2823,7 @@ describe("AskBar — issue_report / issue_filed artifacts", () => {
 
     expect(textOf(tree)).toContain("Bug report filed");
     expect(textOf(tree)).toContain("This issue was recorded.");
-    expect(
-      visit(tree, (n) => n.type === "a" && n.props.href?.startsWith("javascript:"))
-    ).toHaveLength(0);
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
   });
 
   it("falls back to 'This issue was recorded.' for an issue_filed url pointing at a different repo", async () => {
@@ -2841,12 +2839,7 @@ describe("AskBar — issue_report / issue_filed artifacts", () => {
     });
 
     expect(textOf(tree)).toContain("This issue was recorded.");
-    expect(
-      visit(
-        tree,
-        (n) => n.type === "a" && textOf(n) === "https://github.com/EvilOrg/careerrat/issues/456"
-      )
-    ).toHaveLength(0);
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
   });
 
   it("omits the setup-problem note when issue.report's configHint is false, even with other flags set", async () => {
