@@ -190,7 +190,7 @@ Status meanings:
 | `research-company` | Ask resolves natural company requests ("research Acme") to a fresh cached dossier or an embedded research session, cited and linked to the company | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and company-not-found paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
 | `research-comp` | Ask resolves natural comp requests ("market comp for a nurse in Denver") to a fresh cached benchmark or an embedded research session, cited to role and location | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, and missing-role/location paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
 | `optimize-linkedin` | External agent/session-browser workflow | agent-only | Add opt-in read, diff, approval, and separate write-back steps in the app. |
-| `reevaluate-strategy` | Server-derived strategy view model | partial | Render the strategy surface and route the review CTA through the workspace thread. |
+| `reevaluate-strategy` | Dashboard strategy surface (metrics, source/lane/fit-band performance, quiet pipeline, time-in-stage, cadence nudges, outcome-learning) plus a typed Ask `strategy.review` entry, freshness-gated against the same dashboard review-signal thresholds, with per-recommendation confirm-first `strategy.apply` and a `strategy.stamp` finish action | native | Headed isolated-home acceptance passed 2026-08-15 (freshness gate, confirm-first applies across the gate/comp/fit-band/learning/re-rank writers, no-AI degrade, stamp write-back). Packaged acceptance and a live-AI-runtime run remain. |
 | `configure` | Settings pages | partial | Let Ask explain and propose validated settings changes without creating a second write path. |
 | `answer-question` | Explicit application/screening questions route through Ask to grounded review cards and confirmed reusable-answer saves | native | Keep profile reuse, evidence-backed prose, NEEDS YOU, self-identification exclusion, tracked-answer append, and restart persistence in regression coverage. |
 | `company-health` | Ask resolves natural health requests ("is Acme a safe place to land") through the company reference resolver to a fresh cached rating or an embedded research session, with a validated `careerrat health record` write path | native | Keep clean-home and packaged acceptance for fresh-cache, stale-cache, ambiguous-name, and not-tracked-company paths. Headed isolated-home acceptance passed 2026-08-15; packaged acceptance and a live embedded session with a real AI runtime remain open. |
@@ -400,6 +400,59 @@ persisted a real artifact and refused a `current_base` payload; and every prior
 thread message, rating, and artifact survived a full server restart. No 5xx and
 no console errors were observed. Packaged/clean-install acceptance and a live
 embedded research session with a real AI runtime remain open for these rows.
+
+## Strategy review in Ask
+
+Natural phrasings ("review my strategy," "why am I getting filtered out," "what's
+working in my search," "what should I change in my search") resolve to a typed
+`strategy.review` intent (`strategyReviewRequestFromText` in `workspace-agent.mjs`);
+the Dashboard's Strategy panel submits that same intent directly through
+`requestAskAction` when its review-trigger CTA is ready, so the button and the typed
+phrase land in the identical Ask turn instead of a same-page reveal. The server
+assembles the analysis context deterministically before any AI call — funnel counts
+and role-family breakdown, the dashboard's own source/lane/fit-band insights,
+targeting signals (keep/cut signals, excluded companies, fit bands), comp target/floor
+only (`current_base` is never read here), and compact learning-file headings — then
+makes one bounded, non-agentic structured AI call (no tool access, no web, no shell)
+to draft ranked findings and typed recommendations.
+
+A freshness gate runs first: it reuses the exact `STRATEGY_REVIEW_NEW_SIGNAL`/
+`STRATEGY_REVIEW_COOLDOWN_DAYS` thresholds and the `strategyReviewSignal` function the
+dashboard's own review-ready nudge already uses (now exported from `dashboard-data.js`
+for this purpose rather than re-derived), so the two surfaces can never disagree about
+what counts as new signal. A review with nothing new since the last stamp returns a
+"nothing new since your last review" state with an explicit **Run it anyway** action.
+
+No-AI degrade: when the bounded AI call has no route, the workflow still completes
+with the dashboard's own deterministic strategy recommendation, labeled "No AI
+available" and framed as CareerRat's deterministic tracker rules rather than a
+model-drafted read.
+
+Every recommendation renders with its own Apply control; nothing applies
+automatically — applies are always a user click on the `strategy_review` card.
+`strategy.apply` dispatches one recommendation at a time through the same validated
+writers Settings and the CLI already use: DB-native gate edits for keep/cut signals and
+excluded companies, comp target/floor edits, fit-band patches, learning-file appends,
+and re-ranks capped at 5 rows per apply. Comp-target/floor and fit-band applies carry
+explicit consequence copy before the click ("Updates the comp target future
+evaluations compare against," "Re-scores every job on your board"). Writing-style and
+other free-text recommendations are present-only — no writer exists for them, so the
+card shows the proposed text with no Apply button. `strategy.stamp` ("Finish review")
+writes the same `strategyReview` marker and Activity Pulse event as the CLI's
+`strategy-review stamp --write`, and silences the dashboard's review-ready nudge until
+enough new outcomes accrue again.
+
+Repository and web test suites pass and builds are clean. Headed isolated-home
+acceptance ran 2026-08-15 against the real server with no AI runtime (seeded
+nurse/Denver workspace): all matrix rows passed — preview routing plus
+non-regression, the manual no-AI degrade (200, never a 501), every apply type
+including the 5-row re-rank cap and the writing-style unsupported path, the stamp
+clearing the dashboard nudge, freshness fresh/force, restart durability, and a
+clean 5xx/stack-trace sweep. The one finding (comp-target/floor applies returned
+the raw config-patch result, leaking `current_base` into the response and durable
+thread) is fixed: apply writers now return scoped summaries only, with a
+serialization regression test. Packaged acceptance and a live run against a real
+AI runtime remain open for this row.
 
 ## Deterministic source parity
 

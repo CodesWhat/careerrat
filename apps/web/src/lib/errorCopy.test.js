@@ -221,6 +221,35 @@ const RULE_CASES = [
     action: null,
   },
   {
+    name: "strategy apply: recommendation type has no automated writer",
+    err: new ApiError(400, {
+      code: "STRATEGY_APPLY_UNSUPPORTED",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "CareerRat can't apply that recommendation automatically. Review it yourself and make the change by hand.",
+    action: null,
+  },
+  {
+    name: "strategy apply: recommendation is malformed",
+    err: new ApiError(400, {
+      code: "STRATEGY_APPLY_INVALID",
+      error: { message: "internal text must not render" },
+    }),
+    message: "CareerRat couldn't apply that recommendation as written.",
+    action: null,
+  },
+  {
+    name: "strategy apply: recommendation references a row that's gone",
+    err: new ApiError(409, {
+      code: "STRATEGY_APPLY_STALE",
+      error: { message: "internal text must not render" },
+    }),
+    message:
+      "That recommendation is out of date. Run the strategy review again, then apply from the fresh result.",
+    action: null,
+  },
+  {
     name: "PDF/DOCX not supported prefix",
     err: new ApiError(400, { error: "PDF/DOCX not supported yet, use text or markdown" }),
     message:

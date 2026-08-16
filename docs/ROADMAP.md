@@ -433,8 +433,20 @@ The current build order is:
    path through to the drawer, ambiguity and missing-input recovery, confirmed saves with the
    private-comp refusal, clean no-AI degradation, and restart durability all held with no server
    errors. Packaged acceptance and a live embedded research session with a real AI runtime remain
-   open for these rows. The remaining original-skill rows stay
-   tracked in the linked audit.
+   open for these rows. Search-strategy review now satisfies the same contract too: natural
+   phrasings ("review my strategy," "why am I getting filtered out," "what's working in my
+   search") resolve to a typed `strategy.review` intent, and the Dashboard's Strategy panel's
+   review-trigger CTA submits that identical intent into the durable Ask thread instead of a
+   same-page reveal. The server assembles funnel, targeting, fit-band, and comp-target/floor-only
+   context deterministically before drafting findings and recommendations with one bounded,
+   non-agentic AI call, reusing the dashboard's own review-signal freshness gate so a review with
+   nothing new since the last stamp returns a run-anyway state instead of a duplicate draft. Each
+   recommendation applies individually and confirm-first through `strategy.apply`, routed to the
+   same validated gate, comp, fit-band, and learning writers Settings and the CLI already use —
+   writing-style suggestions stay present-only, with no automated writer — and `strategy.stamp`
+   records the finished review and clears the dashboard nudge. Headed isolated-home acceptance,
+   packaged acceptance, and a live run against a real AI runtime remain open for this row. The
+   remaining original-skill rows stay tracked in the linked audit.
 5. **Free/public source parity before AI (implemented and accepted)** — the pinned manifest
    accounts for all 74 Career Ops provider modules: 73 public-network adapters run through the
    deterministic registry, and `local-parser` is intentionally excluded with a safety reason.

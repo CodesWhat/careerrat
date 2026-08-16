@@ -1545,6 +1545,264 @@ button {
   font-weight: 750;
 }
 
+/* ── Strategy panel (data.strategy, buildStrategyInsights) ─────────────────
+   Same one-card, one-padding, .dashboard__panel-header idiom as every other
+   panel above; only the body below the header is new. Long sub-sections
+   collapse behind <details> (see .dashboard__strategy-expander) so the panel
+   reads as chips + one callout at a glance, detail on demand. */
+.dashboard__strategy-body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: var(--dash-body-gap) var(--dash-gutter) var(--dash-gutter);
+}
+
+.dashboard__strategy-metrics {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboard__strategy-metric {
+  display: flex;
+  min-width: 96px;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+  padding: 7px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--paper-band);
+}
+
+.dashboard__strategy-metric span {
+  color: var(--ink-soft);
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
+.dashboard__strategy-metric strong {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 15px;
+  font-weight: 800;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard__strategy-metric small {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.dashboard__strategy-headline {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dashboard__strategy-callout {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+}
+
+.dashboard__strategy-callout strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.dashboard__strategy-callout p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
+.dashboard__strategy-cta {
+  margin-top: 2px;
+}
+
+.dashboard__strategy-expander {
+  border-top: 1px solid var(--border-soft);
+  padding-top: 12px;
+}
+
+.dashboard__strategy-expander summary {
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.dashboard__strategy-expander[open] summary {
+  margin-bottom: 12px;
+}
+
+.dashboard__strategy-group + .dashboard__strategy-group {
+  margin-top: 14px;
+}
+
+.dashboard__strategy-group h3 {
+  margin: 0 0 8px;
+  color: var(--ink-faint);
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
+.dashboard__strategy-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dashboard__strategy-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 72px auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+}
+
+.dashboard__strategy-row-label {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard__strategy-row-meter {
+  display: block;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border-soft);
+}
+
+.dashboard__strategy-row-meter span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+}
+
+.dashboard__strategy-row-rate {
+  overflow: hidden;
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 650;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dashboard__strategy-link-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dashboard__strategy-link-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: var(--row-radius);
+  background: var(--paper-band);
+  color: var(--ink);
+  text-decoration: none;
+  transition: background 0.16s ease;
+}
+
+.dashboard__strategy-link-row:hover {
+  background: var(--accent-bg);
+}
+
+.dashboard__strategy-link-row:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dashboard__strategy-learning {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.dashboard__strategy-trends {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.dashboard__strategy-trend {
+  display: flex;
+  min-width: 84px;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.dashboard__strategy-trend span {
+  color: var(--ink-soft);
+  font-family: var(--label-font);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: var(--label-tracking);
+  text-transform: uppercase;
+}
+
+.dashboard__strategy-trend strong {
+  color: var(--ink);
+  font-family: "Geist Mono", ui-monospace, monospace;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.dashboard__strategy-trend small {
+  color: var(--ink-soft);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.dashboard__strategy-history {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dashboard__strategy-history-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.dashboard__strategy-history-row span:first-child {
+  color: var(--ink);
+  font-weight: 800;
+}
+
 @media (max-width: 1120px) {
   .dashboard__hero {
     grid-template-columns: 1fr;
@@ -6573,6 +6831,97 @@ button.chip {
 }
 
 .ask-bar__health-fit-note {
+  margin: 0;
+  color: var(--mustard);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* strategy_review / strategy_apply (reevaluate-strategy skill, routed
+   through Ask by the Dashboard's strategy panel) — same card chrome as
+   .ask-bar__research-card, no left-edge accent. */
+.ask-bar__strategy-review,
+.ask-bar__strategy-apply {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--card-radius);
+  background: var(--card);
+}
+
+.ask-bar__strategy-review-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.ask-bar__strategy-note {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ask-bar__strategy-findings {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ask-bar__strategy-findings strong {
+  color: var(--ink);
+}
+
+.ask-bar__strategy-findings span {
+  display: block;
+}
+
+.ask-bar__strategy-recommendations {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ask-bar__strategy-recommendation {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 9px 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--row-radius);
+  background: var(--surface);
+}
+
+.ask-bar__strategy-recommendation p {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.ask-bar__strategy-recommendation-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.ask-bar__strategy-recommendation-meta {
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ask-bar__strategy-consequence {
   margin: 0;
   color: var(--mustard);
   font-size: 12px;

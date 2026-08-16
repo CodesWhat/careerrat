@@ -3129,8 +3129,11 @@ function buildStrategyLearningSignals(applications, now) {
 // outcomes never re-fires: there is nothing new to retune on. Without this gate the
 // banner re-fired on every render forever, since the rolling 30-day counts stay above
 // threshold regardless of whether a review just ran. See the Reevaluation Contract.
-const STRATEGY_REVIEW_NEW_SIGNAL = 5;
-const STRATEGY_REVIEW_COOLDOWN_DAYS = 21;
+// Exported so the native strategy-review Ask workflow (src/core/strategy/review.mjs)
+// reuses the exact same freshness predicate instead of re-deriving it — the dashboard
+// banner and the Ask workflow's "nothing new since your last review" gate must agree.
+export const STRATEGY_REVIEW_NEW_SIGNAL = 5;
+export const STRATEGY_REVIEW_COOLDOWN_DAYS = 21;
 
 // All-time count of resolved learning outcomes (advances + rejections) — the monotonic
 // signal a strategy review consumes. Mirrors exactly what buildStrategyReviewTrigger
@@ -3143,7 +3146,9 @@ function strategyOutcomeTotal(applications) {
 }
 
 // Reconcile the live outcome count against the last recorded review snapshot.
-function strategyReviewSignal(applications, reviewState, now) {
+// Exported for src/core/strategy/review.mjs's freshness gate — see the export
+// note on STRATEGY_REVIEW_NEW_SIGNAL above.
+export function strategyReviewSignal(applications, reviewState, now) {
   const outcomes = strategyOutcomeTotal(applications);
   const lastReviewedAt = reviewState?.lastReviewedAt || null;
   if (!lastReviewedAt) {
@@ -3373,7 +3378,11 @@ function buildStrategyRecommendation({ topSource, bestLane, staleCount, cadence 
   };
 }
 
-function buildStrategyInsights(trackerData, { now = new Date() } = {}) {
+// Exported for src/core/strategy/review.mjs — the native strategy-review Ask
+// workflow reuses this SAME computed view (sources/roles/fitBands/stale/
+// cadence/reviewTrigger) instead of re-deriving it, so the dashboard card and
+// the Ask workflow's context never drift apart.
+export function buildStrategyInsights(trackerData, { now = new Date() } = {}) {
   const applications = trackerData?.applications || [];
   const communications = trackerData?.communications || [];
   const sourceGroups = new Map();

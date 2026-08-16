@@ -9,6 +9,7 @@ import { readJsonBodyCapped, sendJson } from "./skill-run-route.mjs";
 
 const MAX_BODY_BYTES = 1024 * 1024;
 const CONFLICT_CODES = new Set([
+  "STRATEGY_APPLY_STALE",
   "JOB_BODY_REQUIRES_BROWSER",
   "JOB_CAPTURE_FAILED",
   "JOB_REFERENCE_AMBIGUOUS",
@@ -90,6 +91,8 @@ function statusForError(error) {
       "BAD_HEALTH_FIT_DELTA",
       "HEALTH_COMP_LEAK",
       "HEALTH_RECORD_INVALID",
+      "STRATEGY_APPLY_UNSUPPORTED",
+      "STRATEGY_APPLY_INVALID",
     ].includes(error?.code)
   ) {
     return 400;

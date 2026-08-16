@@ -1053,6 +1053,264 @@ test("company.health throws COMPANY_NOT_FOUND instead of starting a chat for a b
   );
 });
 
+// ---------------------------------------------------------------------------
+// strategy.review / strategy.apply / strategy.stamp — the native
+// strategy-review Ask workflow's executor branches (src/core/strategy/
+// review.mjs's draftStrategyReview/applyStrategyRecommendation/
+// stampStrategyReview, injected here the same way company.health injects
+// startCompanyHealthImpl above).
+// ---------------------------------------------------------------------------
+
+test("strategy.review returns a strategy_review artifact and only a 'Run it anyway' nextAction when fresh", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "strategy.review",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+    draftStrategyReviewImpl: async (input) => {
+      calls.push(input);
+      return {
+        state: "fresh",
+        generatedAt: "2026-08-15T12:00:00.000Z",
+        reviewSignal: { reviewed: true, outcomes: 2, newOutcomes: 0, daysSince: 1 },
+        reevaluation: null,
+        headline: "Nothing new since your last review.",
+        findings: [],
+        recommendations: [],
+        lastReview: { lastReviewedAt: "2026-08-14T12:00:00.000Z" },
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].repoRoot, repoRoot);
+  assert.equal(calls[0].force, false);
+
+  const last = result.messages.at(-1);
+  assert.equal(last.text, "Nothing new since your last strategy review.");
+  assert.deepEqual(last.artifacts, [
+    {
+      kind: "strategy_review",
+      state: "fresh",
+      generatedAt: "2026-08-15T12:00:00.000Z",
+      reviewSignal: { reviewed: true, outcomes: 2, newOutcomes: 0, daysSince: 1 },
+      reevaluation: null,
+      headline: "Nothing new since your last review.",
+      findings: [],
+      recommendations: [],
+    },
+  ]);
+  assert.equal(last.metadata.state, "fresh");
+  assert.deepEqual(last.metadata.nextActions, [
+    {
+      label: "Run it anyway",
+      intent: {
+        type: "strategy.review",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { force: true },
+      },
+    },
+  ]);
+});
+
+test("strategy.review returns only a 'Finish review' nextAction once drafted, and passes force through to the impl", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "strategy.review",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { force: true },
+    },
+    draftStrategyReviewImpl: async (input) => {
+      calls.push(input);
+      return {
+        state: "drafted",
+        generatedAt: "2026-08-15T12:00:00.000Z",
+        reviewSignal: { reviewed: true, outcomes: 7, newOutcomes: 5, daysSince: 1 },
+        reevaluation: null,
+        headline: "5 new rejections cluster around on-call roles.",
+        findings: [{ id: "f1", title: "On-call roles are rejected", evidence: "4 of 5 rejected." }],
+        recommendations: [
+          {
+            id: "rec-cut",
+            type: "cut-signal",
+            title: "Cut on-call roles",
+            rationale: "Every on-call-tagged role was rejected.",
+            evidenceCount: 4,
+            proposal: { signal: "on-call-rotation" },
+          },
+        ],
+      };
+    },
+  });
+
+  assert.equal(calls[0].force, true);
+  const last = result.messages.at(-1);
+  assert.equal(
+    last.text,
+    "5 new rejections cluster around on-call roles. Review the findings and recommendations, then finish the review."
+  );
+  assert.equal(last.artifacts[0].recommendations.length, 1);
+  assert.equal(last.metadata.state, "drafted");
+  assert.deepEqual(last.metadata.nextActions, [
+    {
+      label: "Finish review",
+      intent: {
+        type: "strategy.stamp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      },
+    },
+  ]);
+});
+
+test("strategy.review renders a distinct manual-degrade sentence when the AI reviewer was unavailable", async () => {
+  const repoRoot = tempRepo();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "strategy.review",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+    draftStrategyReviewImpl: async () => ({
+      state: "manual",
+      generatedAt: "2026-08-15T12:00:00.000Z",
+      reviewSignal: { reviewed: false, outcomes: 3, newOutcomes: 3, daysSince: null },
+      reevaluation: null,
+      headline: "Build a measurable loop",
+      findings: [],
+      recommendations: [],
+      manual: {
+        reason: "no ai route configured",
+        surfaceSummary: { title: "Build a measurable loop" },
+      },
+    }),
+  });
+
+  const last = result.messages.at(-1);
+  assert.match(last.text, /AI reviewer wasn't available/);
+  assert.equal(last.metadata.state, "manual");
+  assert.deepEqual(last.metadata.nextActions, [
+    {
+      label: "Finish review",
+      intent: {
+        type: "strategy.stamp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      },
+    },
+  ]);
+});
+
+test("strategy.apply requires a recommendation, then routes it to applyStrategyRecommendationImpl and returns a strategy_apply artifact", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "strategy.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {},
+      },
+    }),
+    (error) => error.code === "STRATEGY_APPLY_INVALID"
+  );
+
+  const recommendation = {
+    type: "keep-signal",
+    title: "Keep remote-first",
+    proposal: { signal: "remote-first" },
+  };
+  const calls = [];
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "strategy.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { recommendation },
+    },
+    applyStrategyRecommendationImpl: async (input) => {
+      calls.push(input);
+      return {
+        ok: true,
+        type: "keep-signal",
+        title: "Keep remote-first",
+        result: { changed: true },
+      };
+    },
+  });
+
+  assert.deepEqual(calls[0].recommendation, recommendation);
+  const last = result.messages.at(-1);
+  assert.equal(last.text, "Applied: Keep remote-first.");
+  assert.deepEqual(last.artifacts, [
+    {
+      kind: "strategy_apply",
+      type: "keep-signal",
+      title: "Keep remote-first",
+      result: { changed: true },
+    },
+  ]);
+  assert.equal(last.metadata.state, "applied");
+});
+
+test("strategy.stamp routes to stampStrategyReviewImpl and returns a strategy_review_stamp artifact", async () => {
+  const repoRoot = tempRepo();
+  const calls = [];
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "strategy.stamp",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+    stampStrategyReviewImpl: (input) => {
+      calls.push(input);
+      return {
+        ok: true,
+        strategyReview: {
+          lastReviewedAt: "2026-08-15T12:00:00.000Z",
+          snapshot: { applied: 3, advanced: 1, rejected: 1, outcomes: 2, rejectedByFamily: null },
+        },
+        meta: { version: 4 },
+        event: { type: "system" },
+      };
+    },
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].repoRoot, repoRoot);
+  const last = result.messages.at(-1);
+  assert.equal(
+    last.text,
+    "Recorded this strategy review. The review-ready nudge stays quiet until enough new outcomes accrue."
+  );
+  assert.deepEqual(last.artifacts, [
+    {
+      kind: "strategy_review_stamp",
+      lastReviewedAt: "2026-08-15T12:00:00.000Z",
+      snapshot: { applied: 3, advanced: 1, rejected: 1, outcomes: 2, rejectedByFamily: null },
+    },
+  ]);
+  assert.equal(last.metadata.state, "stamped");
+});
+
 test("resolveReferencedCompany never lets a stop-worded reference fall back to a lone single-char token", async () => {
   const repoRoot = tempRepo();
   seedSourced(repoRoot, {
@@ -4778,6 +5036,9 @@ test("workspace action errors return actionable client statuses instead of serve
     ["RESEARCH_COMP_INPUT_REQUIRED", 400],
     ["RESEARCH_RECORD_INVALID", 400],
     ["BAD_HEALTH_RATING", 400],
+    ["STRATEGY_APPLY_UNSUPPORTED", 400],
+    ["STRATEGY_APPLY_INVALID", 400],
+    ["STRATEGY_APPLY_STALE", 409],
   ];
 
   for (const [code, expectedStatus] of cases) {

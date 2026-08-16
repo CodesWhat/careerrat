@@ -14,6 +14,7 @@ import {
   runWorkspaceIntent,
   sendWorkspaceMessage,
   uploadIntakeFile,
+  WORKSPACE_ENTITY,
 } from "../lib/api.js";
 import { emitDashboardChanged } from "../lib/dashboard-events.js";
 import { errorState, resolveErrorCopy } from "../lib/errorCopy.js";
@@ -299,8 +300,24 @@ export function AskBar() {
     inputRef.current?.focus();
   });
 
+  // commitAction only closes over stable setState/ref values plus its own
+  // `action` argument, so the mount-time closure this effect captures below
+  // behaves identically to a freshly-rendered one.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: mount-only, see above
   useEffect(() => {
     function onAskRequest(event) {
+      // A contextual CTA that already knows exactly which typed intent to
+      // run (e.g. the Dashboard's strategy-review trigger) skips the
+      // prefill-and-wait-for-Enter step entirely and commits straight
+      // through, same as an ACTION preview row would.
+      const requestedAction = event?.detail?.action;
+      if (requestedAction?.intent?.type) {
+        setCaptureMode(false);
+        setCaptureAction(null);
+        setFocused(false);
+        commitAction(requestedAction);
+        return;
+      }
       const requestedText = String(event?.detail?.text || "").trim();
       if (!requestedText) return;
       setText(requestedText);
@@ -1220,6 +1237,15 @@ function AskBarTurn({
   const screeningAnswersArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "screening_answers"
   );
+  const strategyReviewArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "strategy_review"
+  );
+  const strategyApplyArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "strategy_apply"
+  );
+  const strategyStampArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "strategy_review_stamp"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1253,6 +1279,11 @@ function AskBarTurn({
       {companyResearchArtifact ? <CompanyResearchCard artifact={companyResearchArtifact} /> : null}
       {compBenchmarkArtifact ? <CompBenchmarkCard artifact={compBenchmarkArtifact} /> : null}
       {companyHealthArtifact ? <CompanyHealthCard artifact={companyHealthArtifact} /> : null}
+      {strategyReviewArtifact ? (
+        <StrategyReviewCard artifact={strategyReviewArtifact} onRunAction={onRunAction} />
+      ) : null}
+      {strategyApplyArtifact ? <StrategyApplyCard artifact={strategyApplyArtifact} /> : null}
+      {strategyStampArtifact ? <StrategyStampCard artifact={strategyStampArtifact} /> : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -1753,6 +1784,181 @@ function CompanyHealthCard({ artifact }) {
           Lowered this job's fit by {Math.abs(fitDelta)} point{Math.abs(fitDelta) === 1 ? "" : "s"}{" "}
           because it touches what you said you need.
         </p>
+      ) : null}
+    </section>
+  );
+}
+
+// StrategyReviewCard/StrategyApplyCard — the `strategy_review`/`strategy_apply`
+// artifacts (reevaluate-strategy skill, routed through Ask by the Dashboard's
+// strategy panel — see DashboardPage.jsx's StrategyCta). `type` on a
+// recommendation is a machine token (rerank/keep-signal/.../writing-style);
+// STRATEGY_RECOMMENDATION_TYPE_LABEL is the one place that maps it to the
+// plain-language chip a candidate reads.
+const STRATEGY_RECOMMENDATION_TYPE_LABEL = {
+  rerank: "Re-rank",
+  "keep-signal": "Targeting",
+  "cut-signal": "Targeting",
+  "exclude-company": "Targeting",
+  "comp-target": "Compensation",
+  "comp-floor": "Compensation",
+  "fit-bands": "Fit bands",
+  learning: "Learning note",
+  "writing-style": "Writing style",
+  other: "Other",
+};
+
+// A few recommendation types change something with real reach (a re-scored
+// board, a new comp anchor) — their Apply row spells that out before the
+// click, rather than the click just being "Apply" with no stated effect.
+const STRATEGY_RECOMMENDATION_CONSEQUENCE = {
+  "comp-target": "Updates the comp target future evaluations compare against.",
+  "comp-floor": "Updates the comp floor future evaluations gate on.",
+  "fit-bands": "Re-scores every job on your board.",
+};
+
+// writing-style/other recommendations describe a change CareerRat can't make
+// on its own (a phrasing habit, a miscellaneous note) — they show the
+// proposal text and no button, same "manual" contract company-health and
+// screening-answers already use for a step that needs the candidate.
+const STRATEGY_MANUAL_RECOMMENDATION_TYPES = new Set(["writing-style", "other"]);
+
+function strategyRecommendationLabel(type) {
+  return STRATEGY_RECOMMENDATION_TYPE_LABEL[type] || "Other";
+}
+
+function strategyApplyResultText(result) {
+  if (typeof result === "string") return result.trim() || null;
+  if (result && typeof result === "object") {
+    return result.summary || result.message || result.label || null;
+  }
+  return null;
+}
+
+function StrategyReviewCard({ artifact, onRunAction }) {
+  const findings = Array.isArray(artifact.findings) ? artifact.findings : [];
+  const recommendations = Array.isArray(artifact.recommendations) ? artifact.recommendations : [];
+  const isFresh = artifact.state === "fresh";
+  const isManual = artifact.state === "manual";
+  return (
+    <section className="ask-bar__strategy-review" aria-label="Strategy review">
+      <div className="ask-bar__strategy-review-head">
+        <strong>{artifact.headline || "Strategy review"}</strong>
+        {isManual ? <span className="badge badge--muted">No AI available</span> : null}
+      </div>
+      {isManual ? (
+        <p className="ask-bar__strategy-note">
+          An AI engine was not available for this review, so these come from CareerRat's
+          deterministic tracker rules instead.
+        </p>
+      ) : null}
+      {findings.length ? (
+        <ul className="ask-bar__strategy-findings">
+          {findings.map((finding) => (
+            <li key={finding.id || finding.title}>
+              <strong>{finding.title}</strong>
+              {finding.evidence ? <span>{finding.evidence}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {recommendations.length ? (
+        <div className="ask-bar__strategy-recommendations">
+          {recommendations.map((recommendation) => (
+            <StrategyRecommendationRow
+              key={recommendation.id || recommendation.title}
+              recommendation={recommendation}
+              onRunAction={onRunAction}
+            />
+          ))}
+        </div>
+      ) : null}
+      {!isFresh && !isManual && !findings.length && !recommendations.length ? (
+        <p className="ask-bar__strategy-note">Nothing to review yet.</p>
+      ) : null}
+    </section>
+  );
+}
+
+function StrategyRecommendationRow({ recommendation, onRunAction }) {
+  const manual = STRATEGY_MANUAL_RECOMMENDATION_TYPES.has(recommendation.type);
+  const consequence = STRATEGY_RECOMMENDATION_CONSEQUENCE[recommendation.type];
+  const evidenceCount = Number(recommendation.evidenceCount) || 0;
+  return (
+    <article className="ask-bar__strategy-recommendation">
+      <div className="ask-bar__strategy-recommendation-head">
+        <span className="badge badge--muted">
+          {strategyRecommendationLabel(recommendation.type)}
+        </span>
+        <strong>{recommendation.title}</strong>
+      </div>
+      {recommendation.rationale ? <p>{recommendation.rationale}</p> : null}
+      {evidenceCount ? (
+        <span className="ask-bar__strategy-recommendation-meta">
+          Based on {evidenceCount} outcome{evidenceCount === 1 ? "" : "s"}
+        </span>
+      ) : null}
+      {manual ? (
+        <span className="ask-bar__strategy-recommendation-meta">
+          Manual:{" "}
+          {recommendation.proposal?.text || "Review this yourself; CareerRat cannot apply it."}
+        </span>
+      ) : (
+        <>
+          {consequence ? <p className="ask-bar__strategy-consequence">{consequence}</p> : null}
+          <Button
+            variant="secondary"
+            onClick={() =>
+              onRunAction?.({
+                label: `Apply: ${recommendation.title}`,
+                intent: {
+                  type: "strategy.apply",
+                  entity: WORKSPACE_ENTITY,
+                  input: { recommendation },
+                },
+              })
+            }
+          >
+            Apply
+          </Button>
+        </>
+      )}
+    </article>
+  );
+}
+
+function StrategyApplyCard({ artifact }) {
+  const resultText = strategyApplyResultText(artifact.result);
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Strategy update applied">
+      <div className="ask-bar__strategy-review-head">
+        <strong>{artifact.title || "Strategy updated"}</strong>
+        <span className="badge badge--ok">{strategyRecommendationLabel(artifact.type)}</span>
+      </div>
+      {resultText ? <p>{resultText}</p> : null}
+    </section>
+  );
+}
+
+function StrategyStampCard({ artifact }) {
+  const snapshot = artifact.snapshot || {};
+  const counts = [
+    ["applied", snapshot.applied],
+    ["advanced", snapshot.advanced],
+    ["rejected", snapshot.rejected],
+  ].filter(([, value]) => typeof value === "number");
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Strategy review recorded">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Review recorded</strong>
+        {artifact.lastReviewedAt ? (
+          <span className="ask-bar__strategy-recommendation-meta">
+            {artifact.lastReviewedAt.slice(0, 10)}
+          </span>
+        ) : null}
+      </div>
+      {counts.length ? (
+        <p>Snapshot at review: {counts.map(([label, value]) => `${value} ${label}`).join(", ")}.</p>
       ) : null}
     </section>
   );

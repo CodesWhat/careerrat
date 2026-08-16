@@ -610,6 +610,87 @@ test("previewWorkspaceIntent: company-health phrasings map to company.health-req
   }
 });
 
+test("previewWorkspaceIntent: strategy-review phrasings map to strategy.review", () => {
+  const repoRoot = tempRepo();
+  const phrasings = [
+    "review my strategy",
+    "review my job-search strategy",
+    "what's working in my search",
+    "why am I getting filtered out",
+    "why am I getting filtered",
+    "what should I change in my search",
+    "run a strategy review",
+  ];
+  for (const text of phrasings) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.deepEqual(
+      result.action,
+      {
+        label: "Review my search strategy",
+        intent: {
+          type: "strategy.review",
+          entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        },
+      },
+      `expected "${text}" to map to strategy.review`
+    );
+  }
+});
+
+// Non-regression: strategy.review's phrasings (added alongside research.company/
+// research.comp/company.health-request above) must not shadow the pre-existing
+// research trio or company-discovery routes those share vocabulary with
+// ("strategy", "search", "review", "companies").
+test("previewWorkspaceIntent: strategy-review phrasings do not shadow the pre-existing research trio or company discovery", () => {
+  const repoRoot = tempRepo();
+
+  assert.deepEqual(previewWorkspaceIntent({ text: "research Acme", repoRoot, env: {} }).action, {
+    label: "Research this company",
+    intent: {
+      type: "research.company",
+      entity: { type: "company", id: "acme" },
+      input: { company: "Acme" },
+    },
+  });
+
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: "market comp for a nurse in Denver", repoRoot, env: {} }).action,
+    {
+      label: "Research market comp",
+      intent: {
+        type: "research.comp",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { role: "nurse", location: "Denver" },
+      },
+    }
+  );
+
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: "is Acme a safe place to land", repoRoot, env: {} }).action,
+    {
+      label: "Check company health",
+      intent: {
+        type: "company.health-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { companyReference: "Acme" },
+      },
+    }
+  );
+
+  assert.deepEqual(
+    previewWorkspaceIntent({ text: "find companies matching my targeting", repoRoot, env: {} })
+      .action,
+    {
+      label: "Discover more matching companies",
+      intent: {
+        type: "company.discover",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { requestedCount: 12, request: "find companies matching my targeting" },
+      },
+    }
+  );
+});
+
 test("previewWorkspaceIntent: board and generic company phrasings keep their pre-existing routes", () => {
   const repoRoot = tempRepo();
 
