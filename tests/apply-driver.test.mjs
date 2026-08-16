@@ -516,3 +516,93 @@ test("question capture is re-evaluated per step: a later step's custom questions
     ["Why do you want this role?"]
   );
 });
+
+test("step cap after real fills reports cumulative counts, not zero", async () => {
+  const stepOne = {
+    origin: EASY_APPLY_URL,
+    pageText: "Contact info",
+    refs: refsOf([
+      ["e1", "textbox", "First Name", false],
+      ["e2", "button", "Next", false],
+    ]),
+  };
+  const stepTwo = {
+    origin: EASY_APPLY_URL,
+    pageText: "More contact info",
+    refs: refsOf([
+      ["e3", "textbox", "Phone Number", false],
+      ["e4", "button", "Continue", false],
+    ]),
+  };
+  const { ops } = createFakeOps([stepOne, stepTwo]);
+  const execute = makeDriver({ ops, maxEasyApplySteps: 2 });
+
+  const result = await execute({
+    applicationId: "app-cap-counts",
+    application: { id: "app-cap-counts" },
+    postingUrl: EASY_APPLY_URL,
+    questionCapture: { state: "captured" },
+  });
+
+  assert.equal(result.state, "blocked");
+  assert.match(result.reason, /more steps than CareerRat will advance automatically/);
+  assert.equal(result.session.filledCount, 2, "both steps' fills are reported at the cap");
+  assert.equal(result.session.uploadedCount, 0);
+});
+
+test("a dead cached tab is dropped and reopened instead of poisoning every later run", async () => {
+  const snapshot = {
+    origin: GREENHOUSE_URL,
+    pageText: "Application form",
+    refs: refsOf([["e1", "textbox", "First Name", false]]),
+  };
+  const log = [];
+  let pageCounter = 0;
+  const deadPages = new Set();
+  const ops = {
+    async openTab() {
+      pageCounter += 1;
+      const pageId = `page-${pageCounter}`;
+      log.push({ op: "openTab", pageId });
+      return { pageId };
+    },
+    async snapshot({ pageId }) {
+      if (deadPages.has(pageId)) throw new Error("This application's browser tab was closed.");
+      log.push({ op: "snapshot", pageId });
+      return snapshot;
+    },
+    async fillField(args) {
+      log.push({ op: "fillField", ...args });
+    },
+    async selectOption() {},
+    async toggleField() {},
+    async clickButton() {},
+    async upload() {},
+    async screenshot() {
+      return { data: "", format: "png" };
+    },
+  };
+  const execute = makeDriver({ ops });
+  const intent = {
+    applicationId: "app-heal",
+    application: { id: "app-heal" },
+    postingUrl: GREENHOUSE_URL,
+    questionCapture: { state: "captured" },
+  };
+
+  const first = await execute(intent);
+  assert.equal(first.state, "awaiting-submit");
+
+  deadPages.add("page-1");
+  const second = await execute(intent);
+  assert.equal(second.state, "awaiting-submit", "the dead tab is replaced, not fatal");
+  assert.equal(
+    log.filter((entry) => entry.op === "openTab").length,
+    2,
+    "a fresh tab was opened for the retry"
+  );
+  assert.ok(
+    log.some((entry) => entry.op === "snapshot" && entry.pageId === "page-2"),
+    "the retry ran against the fresh tab"
+  );
+});

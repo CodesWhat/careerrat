@@ -197,8 +197,13 @@ function fillPlan({ fields, config, application, answers }) {
 }
 
 function currentField(step, snapshot) {
+  // id + type + raw label: ids are derived from normalized labels with dedupe
+  // suffixes, so a field vanishing between snapshots can shift a suffix onto a
+  // same-label sibling. Raw-label equality narrows a shifted match to a field
+  // that reads identically to the planned one; anything else goes unresolved
+  // instead of being filled with the wrong value.
   return renderedFieldsFromSnapshot(snapshot).find(
-    (field) => field.id === step.id && field.type === step.type
+    (field) => field.id === step.id && field.type === step.type && field.label === step.label
   );
 }
 
@@ -489,6 +494,7 @@ export function createApplyDriver({
     }
 
     let pageId = sessions.get(String(applicationId));
+    const reusedPage = Boolean(pageId);
     if (!pageId) {
       const opened = await ops.openTab({ url });
       pageId = String(opened?.pageId || "").trim();
@@ -496,7 +502,21 @@ export function createApplyDriver({
       sessions.set(String(applicationId), pageId);
     }
 
-    let snapshot = await ops.snapshot({ pageId });
+    let snapshot;
+    try {
+      snapshot = await ops.snapshot({ pageId });
+    } catch (error) {
+      // A cached page id can point at a tab that has since been closed. That
+      // must not poison every later run for this application: drop the stale
+      // entry, open a fresh tab, and retry once.
+      if (!reusedPage) throw error;
+      sessions.delete(String(applicationId));
+      const reopened = await ops.openTab({ url });
+      pageId = String(reopened?.pageId || "").trim();
+      if (!pageId) throw new Error("The supervised browser did not return a browser page id.");
+      sessions.set(String(applicationId), pageId);
+      snapshot = await ops.snapshot({ pageId });
+    }
     const confirmation = confirmationCheck({
       pageText: snapshot.pageText,
       currentUrl: snapshot.origin,
@@ -625,8 +645,8 @@ export function createApplyDriver({
           currentUrl: snapshot.origin || url,
           session: {
             provider: providerLabel,
-            filledCount: 0,
-            uploadedCount: 0,
+            filledCount: totalFilledCount,
+            uploadedCount: totalUploadedCount,
             unresolved: [],
             blockers: ["step limit reached"],
             submitMode: "manual",
@@ -646,8 +666,8 @@ export function createApplyDriver({
           currentUrl: snapshot.origin || url,
           session: {
             provider: providerLabel,
-            filledCount: 0,
-            uploadedCount: 0,
+            filledCount: totalFilledCount,
+            uploadedCount: totalUploadedCount,
             unresolved: [],
             blockers: stepBlockers,
             submitMode: "manual",
