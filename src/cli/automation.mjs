@@ -32,12 +32,12 @@ import {
   automationStatus,
   CAPABILITIES,
   CAPABILITY_KEYS,
-  defaultAutomation,
   ensureAutomationFile,
   isCapability,
   isPlatform,
   loadAutomation,
   mayRun,
+  mergeAutomationDefaults,
   PLATFORMS,
   planAutomationEdit,
   planSessionEdit,
@@ -517,25 +517,6 @@ function handleDbSession(provider) {
     console.log(`Session browser is now: ${provider}${preferredNote}`);
   }
   process.exit(0);
-}
-
-function mergeAutomationDefaults(data) {
-  return deepMerge(defaultAutomation(), data && typeof data === "object" ? data : {});
-}
-
-function deepMerge(base, patch) {
-  if (Array.isArray(patch)) return patch.slice();
-  if (!patch || typeof patch !== "object") return patch;
-  const out = { ...(base && typeof base === "object" && !Array.isArray(base) ? base : {}) };
-  for (const [key, value] of Object.entries(patch)) {
-    out[key] =
-      value && typeof value === "object" && !Array.isArray(value)
-        ? deepMerge(out[key], value)
-        : Array.isArray(value)
-          ? value.slice()
-          : value;
-  }
-  return out;
 }
 
 function getPath(obj, parts) {

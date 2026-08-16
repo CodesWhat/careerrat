@@ -42,7 +42,7 @@ import {
   runVerb,
 } from "../db/verbs/shared.mjs";
 import { sourcedSetStatus } from "../db/verbs/sourced.mjs";
-import { assertNoPrivateLeak, coerceValue, resolveRoute } from "../profile/gate-writer.mjs";
+import { applyGateWrite } from "../profile/gate-apply.mjs";
 import { appendLearning, readLearnings, slugifyFamily } from "../profile/learnings.mjs";
 import { isKnownStatusLabel } from "../tracker/dashboard.mjs";
 import {
@@ -71,16 +71,6 @@ const GATE_APPLY_TYPES = new Set([
   "comp-floor",
   "exclude-company",
 ]);
-
-const GATE_APPLY_SUMMARIES = {
-  "keep-signal": (value) => `Added "${value}" to your keep signals.`,
-  "cut-signal": (value) => `Added "${value}" to your cut signals.`,
-  "exclude-company": (value) => `Added "${value}" to your excluded companies.`,
-  "comp-target": (value) => `Target base is now ${value}.`,
-  "comp-floor": (value) => `Minimum base is now ${value}.`,
-};
-
-const ALREADY_SAVED_SUMMARY = "Already saved. Nothing changed.";
 
 const RECOMMENDATION_TYPES = [
   "rerank",
@@ -525,62 +515,28 @@ function applyRerank({ repoRoot, env, proposal }) {
   };
 }
 
-// DB-native sibling of gate.mjs's computeDbGateEdit + candidateConfigPatch
-// (the CLI's own "DB gate write" branch) — reused here rather than
-// computeGateEdit (gate-writer.mjs's YAML-text pure function), since the
-// workspace-agent HTTP surface this module serves is DB-only throughout, with
-// no legacy-YAML-file fallback anywhere else in that surface.
+// Thin wrapper over gate-apply.mjs's shared applyGateWrite primitive (also
+// used by settings.apply in workspace-agent.mjs) — translates its plain,
+// code-less errors into this module's own STRATEGY_APPLY_INVALID /
+// VALIDATION_FAILED vocabulary so callers and existing tests see identical
+// behavior to when this logic lived here directly.
 function applyGateType({ repoRoot, env, type, value }) {
-  const route = resolveRoute(type);
-  assertNoPrivateLeak(route.file, route.path);
-  let coerced;
   try {
-    coerced = coerceValue(route, value);
+    return applyGateWrite({ repoRoot, env, type, value });
   } catch (error) {
-    // coerceValue throws a plain Error (no code) on e.g. a non-numeric comp
-    // amount; the proposal comes from the AI draft, so treat it as an invalid
-    // recommendation (400), not a server fault (500).
+    // A coded error came from candidateConfigPatch (gate-apply.mjs's own
+    // failures are plain, code-less errors) and keeps the pre-refactor
+    // "could not save" wrapping; everything else (an unknown gate type, a
+    // non-numeric comp amount, ...) is an invalid recommendation (400), not
+    // a server fault (500).
+    if (error.code) {
+      throw applyError(
+        `CareerRat could not save this change: ${error.message}`,
+        error.code === "VALIDATION_FAILED" ? "VALIDATION_FAILED" : "STRATEGY_APPLY_INVALID"
+      );
+    }
     throw applyError(error.message, "STRATEGY_APPLY_INVALID");
   }
-  const config = candidateConfigGet({ repoRoot, env });
-  const doc = config[route.file] || {};
-  const parts = route.path.split(".");
-  let cursor = doc;
-  for (const part of parts)
-    cursor = cursor && typeof cursor === "object" ? cursor[part] : undefined;
-
-  let patchValue = coerced;
-  if (route.op === "append") {
-    const current = Array.isArray(cursor) ? cursor : [];
-    if (current.some((item) => String(item) === String(coerced))) {
-      return { changed: false, field: route.path, value: coerced, summary: ALREADY_SAVED_SUMMARY };
-    }
-    patchValue = [...current, coerced];
-  } else if (cursor === coerced) {
-    return { changed: false, field: route.path, value: coerced, summary: ALREADY_SAVED_SUMMARY };
-  }
-
-  let patch = patchValue;
-  for (let i = parts.length - 1; i >= 0; i--) patch = { [parts[i]]: patch };
-
-  try {
-    candidateConfigPatch({ repoRoot, env, name: route.file, patch });
-  } catch (error) {
-    throw applyError(
-      `CareerRat could not save this change: ${error.message}`,
-      error.code === "VALIDATION_FAILED" ? "VALIDATION_FAILED" : "STRATEGY_APPLY_INVALID"
-    );
-  }
-  // candidateConfigPatch's return carries the full merged doc as `data`; for
-  // the profile-routed types that includes compensation.current_base, and this
-  // function's return lands verbatim in the strategy_apply artifact, the HTTP
-  // response, and the durable thread. Only scoped fields may leave here.
-  return {
-    changed: true,
-    field: route.path,
-    value: coerced,
-    summary: GATE_APPLY_SUMMARIES[type](coerced),
-  };
 }
 
 function applyFitBands({ repoRoot, env, proposal }) {

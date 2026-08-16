@@ -1253,6 +1253,12 @@ function AskBarTurn({
   const communicationHandoffArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "communication_handoff"
   );
+  const settingsOverviewArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "settings_overview"
+  );
+  const settingsApplyArtifact = turn.artifacts?.find(
+    (artifact) => artifact.kind === "settings_apply"
+  );
   const nextActions = Array.isArray(turn.metadata?.nextActions) ? turn.metadata.nextActions : [];
 
   return (
@@ -1297,6 +1303,10 @@ function AskBarTurn({
       {communicationHandoffArtifact ? (
         <CommunicationHandoffCard artifact={communicationHandoffArtifact} />
       ) : null}
+      {settingsOverviewArtifact ? (
+        <SettingsOverviewCard artifact={settingsOverviewArtifact} />
+      ) : null}
+      {settingsApplyArtifact ? <SettingsApplyCard artifact={settingsApplyArtifact} /> : null}
       {handoffArtifact ? <ApplicationHandoffCard artifact={handoffArtifact} /> : null}
       {nextActions.length ? (
         <div className="ask-bar__next-actions">
@@ -2054,6 +2064,162 @@ function CommunicationHandoffCard({ artifact }) {
           Add the contact's email address to this thread, then CareerRat can prepare the send.
         </p>
       )}
+    </section>
+  );
+}
+
+// settings_overview/settings_apply (configure skill) share formatting helpers
+// below. Config values arrive as raw snake_case tokens (usage_mode:
+// "co_pilot" and the like) — humanizeSettingsToken() turns those into plain
+// words, same spirit as healthDimLabel()'s camelCase fallback above.
+function humanizeSettingsToken(value) {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return text
+    .split(/[_\s]+/)
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+const SETTINGS_PLATFORM_LABEL = {
+  linkedin: "LinkedIn",
+  indeed: "Indeed",
+  wellfound: "Wellfound",
+};
+function settingsPlatformLabel(key) {
+  return SETTINGS_PLATFORM_LABEL[key] || humanizeSettingsToken(key);
+}
+
+// "Status polling: on for LinkedIn, Indeed" / "One-click apply: off" — a
+// consented-false platform that's otherwise enabled reads as needing consent
+// rather than silently omitted.
+function settingsCapabilityLine(capability) {
+  const label = capability.label || humanizeSettingsToken(capability.key);
+  if (!capability.enabled) return `${label}: off`;
+  const platforms = Array.isArray(capability.platforms) ? capability.platforms : [];
+  const enabledPlatforms = platforms.filter((platform) => platform.enabled);
+  if (!enabledPlatforms.length) return `${label}: on`;
+  const names = enabledPlatforms.map((platform) =>
+    platform.consent === false
+      ? `${settingsPlatformLabel(platform.key)} (needs consent in Settings)`
+      : settingsPlatformLabel(platform.key)
+  );
+  return `${label}: on for ${names.join(", ")}`;
+}
+
+function formatSettingsDollarAmount(value) {
+  if (value == null || value === "") return null;
+  const number = Number(value);
+  if (!Number.isFinite(number)) return null;
+  return `$${number.toLocaleString()}`;
+}
+
+// First 5 + "and N more" — same truncation spirit as savedJobAmbiguityMessage
+// (errorCopy.js) for a list that could otherwise run unbounded.
+function joinSettingsSignals(list) {
+  const items = (Array.isArray(list) ? list : [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean);
+  if (!items.length) return "";
+  if (items.length <= 5) return items.join(", ");
+  return `${items.slice(0, 5).join(", ")} and ${items.length - 5} more`;
+}
+
+// settings_overview (configure skill) — a read-only receipt of current
+// settings. Sections render only for the non-null groups the server sent;
+// never a field outside the documented contract.
+function SettingsOverviewCard({ artifact }) {
+  const modes = artifact.modes || null;
+  const automation = artifact.automation || null;
+  const gates = artifact.gates || null;
+  const capabilities = Array.isArray(automation?.capabilities) ? automation.capabilities : [];
+  // The server sends a count here, never the list itself.
+  const excludedCount = Number(gates?.excluded_companies) || 0;
+  const cutSignals = joinSettingsSignals(gates?.cut_signals);
+  const keepSignals = joinSettingsSignals(gates?.keep_signals);
+  const doNotClaim = joinSettingsSignals(gates?.do_not_claim);
+  const compFloor = formatSettingsDollarAmount(gates?.comp_floor);
+  const compTarget = formatSettingsDollarAmount(gates?.comp_target);
+  const compExpected = formatSettingsDollarAmount(gates?.comp_expected);
+  const settingsHref = appActionHref("/settings");
+
+  return (
+    <section className="ask-bar__research-card" aria-label="Settings overview">
+      <div className="ask-bar__research-head">
+        <strong>Current settings</strong>
+      </div>
+      {modes ? (
+        <>
+          <p className="ask-bar__research-meta">Modes</p>
+          {modes.usage_mode ? <p>Usage mode: {humanizeSettingsToken(modes.usage_mode)}</p> : null}
+          {modes.application_mode ? (
+            <p>Application mode: {humanizeSettingsToken(modes.application_mode)}</p>
+          ) : null}
+          {modes.agent_voice ? (
+            <p>Agent voice: {humanizeSettingsToken(modes.agent_voice)}</p>
+          ) : null}
+        </>
+      ) : null}
+      {automation ? (
+        <>
+          <p className="ask-bar__research-meta">Automation</p>
+          {automation.setup_mode ? (
+            <p>Setup mode: {humanizeSettingsToken(automation.setup_mode)}</p>
+          ) : null}
+          {capabilities.map((capability) => (
+            <p key={capability.key}>{settingsCapabilityLine(capability)}</p>
+          ))}
+        </>
+      ) : null}
+      {gates ? (
+        <>
+          <p className="ask-bar__research-meta">Gates</p>
+          {compFloor ? <p>Comp floor: {compFloor}</p> : null}
+          {compTarget ? <p>Comp target: {compTarget}</p> : null}
+          {compExpected ? <p>Comp expected: {compExpected}</p> : null}
+          {excludedCount ? <p>Excluded companies: {excludedCount}</p> : null}
+          {cutSignals ? <p>Cut signals: {cutSignals}</p> : null}
+          {keepSignals ? <p>Keep signals: {keepSignals}</p> : null}
+          {doNotClaim ? <p>Do not claim: {doNotClaim}</p> : null}
+        </>
+      ) : null}
+      {settingsHref ? (
+        <a className="btn btn--secondary" href={settingsHref}>
+          Open Settings
+        </a>
+      ) : null}
+    </section>
+  );
+}
+
+function settingsApplyValueText(value) {
+  if (typeof value === "boolean") return value ? "on" : "off";
+  return String(value);
+}
+
+// "Was: <from>. Now: <to>." — no arrows, no em dashes, only when both sides
+// are present and scalar (append-type gate changes send the prior list as
+// `from`; the summary sentence already covers those).
+function settingsApplyFromToLine(from, to) {
+  if (from == null || to == null) return null;
+  if (Array.isArray(from) || Array.isArray(to)) return null;
+  return `Was: ${settingsApplyValueText(from)}. Now: ${settingsApplyValueText(to)}.`;
+}
+
+// settings_apply (configure skill) — a write receipt, same chrome as
+// StrategyStampCard/CommunicationNoteCard above (plain receipt, no left-edge
+// accent).
+function SettingsApplyCard({ artifact }) {
+  const fromToLine = settingsApplyFromToLine(artifact.from, artifact.to);
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Setting updated">
+      <div className="ask-bar__strategy-review-head">
+        <strong>{artifact.label || "Setting updated"}</strong>
+        <span className="badge badge--ok">Setting updated</span>
+      </div>
+      {artifact.summary ? <p>{artifact.summary}</p> : null}
+      {fromToLine ? <p>{fromToLine}</p> : null}
     </section>
   );
 }

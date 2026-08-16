@@ -21,11 +21,12 @@ import {
   workspaceThreadOpen,
   workspaceThreadRead,
 } from "../src/core/agent/workspace-thread.mjs";
+import { CAPABILITY_KEYS } from "../src/core/automation/consent.mjs";
 import { closeAll, openDb } from "../src/core/db/connection.mjs";
 import { ALL_MIGRATIONS } from "../src/core/db/migrations.mjs";
 import { appRegisterPacketQuestionCapture, appUpsert } from "../src/core/db/verbs/app.mjs";
 import { calendarBusyUpsert } from "../src/core/db/verbs/calendar.mjs";
-import { candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
+import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs/candidate.mjs";
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
@@ -5324,6 +5325,483 @@ test("one workspace runtime serializes overlapping turns so later context cannot
   );
 });
 
+// ---------------------------------------------------------------------------
+// settings.explain / settings.apply — the "configure" Ask row
+// ---------------------------------------------------------------------------
+
+function settingsArtifact(result) {
+  return result.messages.at(-1).artifacts[0];
+}
+
+test("settings.explain never leaks current_base and surfaces the other comp fields", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "profile",
+    patch: {
+      compensation: {
+        current_base: 987654,
+        minimum_base: 150000,
+        target_base: 170000,
+        expected_base: 160000,
+      },
+    },
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: { type: "settings.explain", entity: { type: "workspace", id: WORKSPACE_THREAD_ID } },
+  });
+
+  const artifact = settingsArtifact(result);
+  assert.equal(artifact.kind, "settings_overview");
+  const serialized = JSON.stringify(artifact);
+  assert.ok(!serialized.includes("current_base"), "artifact must never mention current_base");
+  assert.ok(!serialized.includes("987654"), "artifact must never carry the private comp value");
+  assert.ok(serialized.includes("150000"), "artifact should still surface minimum_base");
+  assert.equal(artifact.gates.comp_floor, 150000);
+  assert.equal(artifact.gates.comp_target, 170000);
+  assert.equal(artifact.gates.comp_expected, 160000);
+});
+
+test("settings.explain scopes to the requested domain and reads absent automation capabilities as false", async () => {
+  const repoRoot = tempRepo();
+  // A minimal stored automation doc that predates several capabilities —
+  // only one_click_apply is present.
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: { capabilities: { one_click_apply: { enabled: true, platforms: { linkedin: true } } } },
+  });
+
+  const modesOnly = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.explain",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { domain: "modes" },
+    },
+  });
+  const modesArtifact = settingsArtifact(modesOnly);
+  assert.equal(modesArtifact.domain, "modes");
+  assert.ok(modesArtifact.modes);
+  assert.equal(modesArtifact.automation, null);
+  assert.equal(modesArtifact.gates, null);
+
+  const all = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: { type: "settings.explain", entity: { type: "workspace", id: WORKSPACE_THREAD_ID } },
+  });
+  const allArtifact = settingsArtifact(all);
+  assert.equal(allArtifact.domain, "all");
+  assert.ok(allArtifact.modes);
+  assert.ok(allArtifact.automation);
+  assert.ok(allArtifact.gates);
+
+  const statusPolling = allArtifact.automation.capabilities.find(
+    (cap) => cap.key === "status_polling"
+  );
+  assert.ok(statusPolling, "a capability absent from the stored doc must still be listed");
+  assert.equal(statusPolling.enabled, false);
+  for (const platform of statusPolling.platforms) {
+    assert.equal(platform.enabled, false);
+  }
+
+  const oneClickApply = allArtifact.automation.capabilities.find(
+    (cap) => cap.key === "one_click_apply"
+  );
+  assert.equal(oneClickApply.enabled, true);
+});
+
+test("settings.apply rejects a comp-reference change without echoing any value or writing config", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: { kind: "gate", type: "comp-floor", value: null, compReference: true },
+        },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.equal(error.details.reason, "comp-reference");
+      assert.ok(!/\d/.test(error.message), "must not echo a comp number");
+      return true;
+    }
+  );
+
+  const compensation = candidateConfigGet({ repoRoot, env: {} }).profile.compensation;
+  assert.equal(compensation.minimum_base, null);
+});
+
+test("settings.apply re-derives the comp-reference refusal from the value itself, ignoring a REST caller's compReference flag", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "gate",
+            type: "comp-floor",
+            value: "match my current salary",
+            compReference: false,
+          },
+        },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.equal(error.details.reason, "comp-reference");
+      return true;
+    }
+  );
+});
+
+test("settings.apply rejects an oversized gate value and prototype-chain gate types and providers cleanly", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { change: { kind: "gate", type: "cut-signal", value: "x".repeat(500) } },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.match(error.message, /too long/i);
+      return true;
+    }
+  );
+
+  // "__proto__" as a gate type must hit the unknown-gate-type refusal, not a
+  // raw TypeError from a truthy prototype-chain lookup.
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { change: { kind: "gate", type: "__proto__", value: "x" } },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.match(error.message, /unknown gate type/i);
+      return true;
+    }
+  );
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { change: { kind: "automation", op: "session", value: "constructor" } },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.ok(Array.isArray(error.details.options));
+      return true;
+    }
+  );
+});
+
+test("settings.apply gate happy path: comp-floor writes minimum_base, repeats no-op, and an append gate writes targeting", async () => {
+  const repoRoot = tempRepo();
+
+  const applied = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "comp-floor", value: 150000 } },
+    },
+  });
+  const firstArtifact = settingsArtifact(applied);
+  assert.equal(firstArtifact.kind, "settings_apply");
+  assert.equal(firstArtifact.domain, "gate");
+  assert.equal(firstArtifact.field, "compensation.minimum_base");
+  assert.equal(firstArtifact.to, 150000);
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).profile.compensation.minimum_base, 150000);
+
+  const repeated = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "comp-floor", value: 150000 } },
+    },
+  });
+  assert.equal(settingsArtifact(repeated).summary, "Already saved. Nothing changed.");
+
+  const appended = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "cut-signal", value: "on-call rotation" } },
+    },
+  });
+  assert.equal(settingsArtifact(appended).field, "cut_signals");
+  const targeting = candidateConfigGet({ repoRoot, env: {} }).targeting;
+  assert.ok(targeting.cut_signals.includes("on-call rotation"));
+});
+
+test("settings.apply mode happy path persists usage_mode and surfaces VALIDATION_FAILED for an invalid value", async () => {
+  const repoRoot = tempRepo();
+
+  const applied = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "mode", field: "usage_mode", value: "lean" } },
+    },
+  });
+  const artifact = settingsArtifact(applied);
+  assert.equal(artifact.domain, "mode");
+  assert.equal(artifact.field, "usage_mode");
+  assert.equal(artifact.from, "standard");
+  assert.equal(artifact.to, "lean");
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).modes.usage_mode, "lean");
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { change: { kind: "mode", field: "usage_mode", value: "turbo" } },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "VALIDATION_FAILED");
+      return true;
+    }
+  );
+});
+
+test("settings.apply automation: a narrow platform patch preserves every other capability/platform/enabled flag", async () => {
+  const repoRoot = tempRepo();
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      capabilities: {
+        authenticated_search: {
+          enabled: true,
+          platforms: { linkedin: true, indeed: true },
+        },
+        status_polling: {
+          enabled: true,
+          platforms: { greenhouse: true, workday: true },
+        },
+      },
+    },
+  });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "automation",
+          op: "platform",
+          capability: "authenticated_search",
+          platform: "linkedin",
+          enabled: false,
+        },
+      },
+    },
+  });
+
+  const automation = candidateConfigGet({ repoRoot, env: {} }).automation;
+  assert.equal(automation.capabilities.authenticated_search.platforms.linkedin, false);
+  // Every other sibling must be untouched by the narrow patch.
+  assert.equal(automation.capabilities.authenticated_search.platforms.indeed, true);
+  assert.equal(automation.capabilities.authenticated_search.enabled, true);
+  assert.equal(automation.capabilities.status_polling.enabled, true);
+  assert.equal(automation.capabilities.status_polling.platforms.greenhouse, true);
+  assert.equal(automation.capabilities.status_polling.platforms.workday, true);
+});
+
+test("settings.apply automation: capability disable is allowed even for a high-tier capability", async () => {
+  const repoRoot = tempRepo();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "automation",
+          op: "capability",
+          capability: "one_click_apply",
+          enabled: false,
+        },
+      },
+    },
+  });
+  assert.equal(settingsArtifact(result).to, false);
+  assert.equal(
+    candidateConfigGet({ repoRoot, env: {} }).automation.capabilities.one_click_apply.enabled,
+    false
+  );
+});
+
+test("settings.apply automation: consent changes are unsupported from Ask", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: { change: { kind: "automation", op: "consent" } },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
+      assert.equal(error.details.reason, "consent");
+      return true;
+    }
+  );
+});
+
+test("settings.apply automation: enabling a high-tier capability is unsupported from Ask", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "automation",
+            op: "capability",
+            capability: "one_click_apply",
+            enabled: true,
+          },
+        },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_UNSUPPORTED");
+      assert.equal(error.details.reason, "capability-tier");
+      assert.equal(error.details.capability, "one_click_apply");
+      return true;
+    }
+  );
+});
+
+test("settings.apply automation: an unknown capability is invalid and lists the known options", async () => {
+  const repoRoot = tempRepo();
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      intent: {
+        type: "settings.apply",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {
+          change: {
+            kind: "automation",
+            op: "capability",
+            capability: "not_a_real_capability",
+            enabled: false,
+          },
+        },
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "SETTINGS_CHANGE_INVALID");
+      assert.deepEqual(error.details.options, CAPABILITY_KEYS);
+      return true;
+    }
+  );
+});
+
+test("settings.apply automation: setup_mode round-trips to advanced from a basic default", async () => {
+  const repoRoot = tempRepo();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "automation", op: "setup_mode", value: "advanced" } },
+    },
+  });
+  const artifact = settingsArtifact(result);
+  assert.equal(artifact.field, "setup_mode");
+  assert.equal(artifact.from, "basic");
+  assert.equal(artifact.to, "advanced");
+  assert.equal(candidateConfigGet({ repoRoot, env: {} }).automation.setup_mode, "advanced");
+});
+
+test("settings.apply writes exactly one action_result thread message and one activity event", async () => {
+  const repoRoot = tempRepo();
+  const db = openDb({ repoRoot, env: {} });
+  const before = workspaceThreadRead({ repoRoot, env: {} }).messages.length;
+  const activityBefore = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "mode", field: "usage_mode", value: "full" } },
+    },
+  });
+
+  const after = workspaceThreadRead({ repoRoot, env: {} });
+  assert.equal(after.messages.length, before + 2, "one intent message + one action_result message");
+  const actionResults = after.messages.filter((message) => message.kind === "action_result");
+  assert.equal(actionResults.length, 1);
+  const activityAfter = db.prepare("SELECT COUNT(*) AS n FROM activity_events").get().n;
+  assert.equal(activityAfter, activityBefore + 1);
+});
+
 function mountDirect(repoRoot, executeIntentImpl, runTurnImpl, captureIntakeImpl) {
   const routes = new Map();
   mountWorkspaceAgentRoutes({
@@ -5418,6 +5896,8 @@ test("workspace action errors return actionable client statuses instead of serve
     ["STRATEGY_APPLY_UNSUPPORTED", 400],
     ["STRATEGY_APPLY_INVALID", 400],
     ["STRATEGY_APPLY_STALE", 409],
+    ["SETTINGS_CHANGE_UNSUPPORTED", 400],
+    ["SETTINGS_CHANGE_INVALID", 400],
   ];
 
   for (const [code, expectedStatus] of cases) {

@@ -96,6 +96,8 @@ function statusForError(error) {
       "HEALTH_RECORD_INVALID",
       "STRATEGY_APPLY_UNSUPPORTED",
       "STRATEGY_APPLY_INVALID",
+      "SETTINGS_CHANGE_UNSUPPORTED",
+      "SETTINGS_CHANGE_INVALID",
     ].includes(error?.code)
   ) {
     return 400;

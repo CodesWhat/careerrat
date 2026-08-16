@@ -929,6 +929,139 @@ test("previewWorkspaceIntent: never touches the DB or the workspace thread", () 
 });
 
 // ---------------------------------------------------------------------------
+// settings.explain / settings.apply matcher regression
+// ---------------------------------------------------------------------------
+
+test("previewWorkspaceIntent: a comp-floor phrasing classifies as a settings.apply gate change", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "set my comp floor to $150k",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Set comp floor to $150,000",
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "comp-floor", value: 150000 } },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: a comp-floor-to-current-salary phrasing flags compReference instead of a number", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "set my comp floor to match my current salary",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action.intent.type, "settings.apply");
+  assert.deepEqual(result.action.intent.input.change, {
+    kind: "gate",
+    type: "comp-floor",
+    value: null,
+    compReference: true,
+  });
+});
+
+test("previewWorkspaceIntent: turning off one-click apply on a named platform classifies as a settings.apply automation change", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "turn off one-click apply on linkedin",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: "Turn off Authenticated one-click apply on linkedin",
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {
+        change: {
+          kind: "automation",
+          op: "platform",
+          capability: "one_click_apply",
+          platform: "linkedin",
+          enabled: false,
+        },
+      },
+    },
+  });
+});
+
+test("previewWorkspaceIntent: turning on one-click apply is not offered as an Ask action (falls to chat)", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({ text: "turn on one-click apply", repoRoot, env: {} });
+  assert.equal(result.action, null);
+});
+
+test("previewWorkspaceIntent: a platform the capability doesn't run on gets no chip instead of a doomed one", () => {
+  const repoRoot = tempRepo();
+  // status_polling runs on ATS portals, not linkedin — offering a chip here
+  // would guarantee a handler rejection after the click.
+  const result = previewWorkspaceIntent({
+    text: "turn off status polling on linkedin",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(result.action, null);
+});
+
+test("previewWorkspaceIntent: 'what are my settings' classifies as settings.explain", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({ text: "what are my settings", repoRoot, env: {} });
+  assert.deepEqual(result.action, {
+    label: "Show my settings",
+    intent: {
+      type: "settings.explain",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+});
+
+test("previewWorkspaceIntent: a bare job search phrasing still wins the search.run catch-all over settings", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({ text: "search for backend jobs", repoRoot, env: {} });
+  assert.equal(result.action.intent.type, "search.run");
+});
+
+test("previewWorkspaceIntent: unrelated outcome and note phrasings are unaffected by the new settings matchers", () => {
+  const repoRoot = tempRepo();
+
+  const applied = "I applied to the Acme Corp Backend Engineer role.";
+  assert.deepEqual(previewWorkspaceIntent({ text: applied, repoRoot, env: {} }).action, {
+    label: "Record that I applied",
+    intent: {
+      type: "application.record-external-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { jobReference: applied },
+    },
+  });
+
+  const noteToSelf = "Note to self: buy milk.";
+  assert.equal(previewWorkspaceIntent({ text: noteToSelf, repoRoot, env: {} }).action, null);
+});
+
+test("previewWorkspaceIntent: excluding a company classifies as a settings.apply gate change", () => {
+  const repoRoot = tempRepo();
+  const result = previewWorkspaceIntent({
+    text: "exclude Acme Corp from my search",
+    repoRoot,
+    env: {},
+  });
+  assert.deepEqual(result.action, {
+    label: 'Exclude "Acme Corp" from your search',
+    intent: {
+      type: "settings.apply",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: { change: { kind: "gate", type: "exclude-company", value: "Acme Corp" } },
+    },
+  });
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/workspace/preview
 // ---------------------------------------------------------------------------
 
