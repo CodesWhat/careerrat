@@ -7187,3 +7187,94 @@ test("status.record-portal: a portal read confirming a manual-apply submission a
   const app = readApplication(repoRoot, "app-temporal");
   assert.equal(app.status, "awaiting");
 });
+
+test("status.sync-request: offer-stage and accepted raw labels are excluded from eligible counts", async () => {
+  const repoRoot = tempRepo();
+  grantStatusPolling(repoRoot, ["greenhouse"]);
+  seedApplication(repoRoot, {
+    id: "app-active",
+    company: "Acme",
+    status: "applied",
+    link: "https://boards.greenhouse.io/acme/jobs/1",
+  });
+  seedApplication(repoRoot, {
+    id: "app-offer-extended",
+    company: "Acme",
+    status: "offer-extended",
+    link: "https://boards.greenhouse.io/acme/jobs/2",
+  });
+  seedApplication(repoRoot, {
+    id: "app-accepted",
+    company: "Acme",
+    status: "accepted",
+    link: "https://boards.greenhouse.io/acme/jobs/3",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  const greenhouse = artifact.platforms.find((p) => p.platform === "greenhouse");
+  assert.equal(greenhouse.eligible, 1);
+});
+
+test("status.record-portal: an auto-applied transition with a round records the conversation kind in the same write", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "applied" });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.record-portal",
+      entity: { type: "application", id: "app-temporal" },
+      input: { rawStatus: "Phone screen scheduled" },
+    },
+  });
+
+  const app = readApplication(repoRoot, "app-temporal");
+  assert.equal(app.status, "interview");
+  const conversation = (app.conversations || []).at(-1);
+  assert.equal(conversation?.kind, "recruiter screen");
+  assert.match(String(conversation?.notes), /Phone screen scheduled/);
+});
+
+test("status.apply-transition: the proposal's round carries into the conversation entry", async () => {
+  const repoRoot = tempRepo();
+  seedApplication(repoRoot, { id: "app-temporal", status: "interview" });
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.apply-transition",
+      entity: { type: "application", id: "app-temporal" },
+      input: { from: "interview", to: "awaiting", rawStatus: "Application received", round: null },
+    },
+  });
+
+  const noRound = readApplication(repoRoot, "app-temporal");
+  assert.equal(noRound.status, "awaiting");
+  assert.equal((noRound.conversations || []).length, 0);
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "status.apply-transition",
+      entity: { type: "application", id: "app-temporal" },
+      input: { from: "awaiting", to: "interview", rawStatus: "Onsite loop", round: "onsite" },
+    },
+  });
+
+  const app = readApplication(repoRoot, "app-temporal");
+  const conversation = (app.conversations || []).at(-1);
+  assert.equal(conversation?.kind, "onsite");
+});

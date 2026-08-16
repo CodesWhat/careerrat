@@ -4483,11 +4483,7 @@ export async function executeWorkspaceIntent({
         );
       }
 
-      const db = requireDb({ repoRoot, env });
-      const applications = db
-        .prepare("SELECT data FROM applications ORDER BY rowid ASC")
-        .all()
-        .map((row) => JSON.parse(row.data));
+      const applications = assembleTrackerObject(requireDb({ repoRoot, env })).applications || [];
       for (const entry of platforms) {
         entry.eligible = applications.filter((application) => {
           if (
@@ -4497,10 +4493,10 @@ export async function executeWorkspaceIntent({
           ) {
             return false;
           }
+          // In-flight only: settled stages are excluded by classified stage so
+          // raw labels like "offer-extended" or "accepted" count correctly.
           const stageId = classifyStage(application.status).id;
-          if (stageId === "rejected" || stageId === "withdrawn") return false;
-          if (application.status === "offer") return false;
-          return true;
+          return !["rejected", "withdrawn", "offer", "accepted"].includes(stageId);
         }).length;
       }
 
@@ -5058,6 +5054,7 @@ export async function executeWorkspaceIntent({
           id: normalized.entity.id,
           to,
           note: `Portal status reported by user: "${rawStatus}"`,
+          round: transition.norm?.round || undefined,
         });
         return appendActionResult({
           repoRoot,
@@ -5141,6 +5138,7 @@ export async function executeWorkspaceIntent({
           "STATUS_UPDATE_COMP_LEAK"
         );
       }
+      const round = input.round == null ? null : String(input.round).trim().slice(0, 60) || null;
 
       appSetStatus({
         repoRoot,
@@ -5148,6 +5146,7 @@ export async function executeWorkspaceIntent({
         id: normalized.entity.id,
         to,
         note: rawStatus ? `Portal status reported by user: "${rawStatus}"` : undefined,
+        round: round || undefined,
       });
       return appendActionResult({
         repoRoot,
