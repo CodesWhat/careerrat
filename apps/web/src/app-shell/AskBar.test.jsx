@@ -3189,6 +3189,114 @@ describe("AskBar — status_sync_handoff artifact (StatusSyncHandoffCard)", () =
   });
 });
 
+// ---------------------------------------------------------------------------
+// mail_sync_handoff artifact (mail.sync-request intent, ingest-mail skill —
+// MailSyncHandoffCard). Same receipt shape as status_sync_handoff above: the
+// request landed, the actual mail read happens in the agent/terminal skill
+// run, not here.
+// ---------------------------------------------------------------------------
+
+function mailActionPreview() {
+  return {
+    action: {
+      label: "Check for new mail",
+      intent: {
+        type: "mail.sync-request",
+        entity: { type: "workspace", id: "workspace-main" },
+        input: {},
+      },
+    },
+    answer: { label: "Answer about mail" },
+    engineAvailable: true,
+  };
+}
+
+async function runMailTurn(message) {
+  api.previewWorkspaceQuery.mockResolvedValue(mailActionPreview());
+  api.runWorkspaceIntent.mockResolvedValueOnce({
+    data: { messages: [{ role: "assistant", kind: "action_result", ...message }] },
+  });
+
+  let tree = render();
+  const input = byTag(tree, "input");
+  input.props.onFocus();
+  input.props.onChange({ target: { value: "check my email" } });
+  tree = render();
+  runPendingEffects();
+  await vi.advanceTimersByTimeAsync(300);
+  await flushMicrotasks();
+  tree = render();
+  byTag(tree, "input").props.onKeyDown({ key: "Enter", preventDefault: vi.fn() });
+  await flushMicrotasks();
+  return render();
+}
+
+describe("AskBar — mail_sync_handoff artifact (MailSyncHandoffCard)", () => {
+  it("renders a Handoff badge, source labels/status lines, and the needsReply count for needsReply: 2", async () => {
+    const tree = await runMailTurn({
+      text: "Mail check requested. Run the ingest-mail skill from your agent or terminal to read your mail; anything it finds comes back here for review.",
+      artifacts: [
+        {
+          kind: "mail_sync_handoff",
+          sources: [
+            { id: "apple-mail", platform: null, allowed: true, lastRunAt: null },
+            { id: "gmail-webmail", platform: "gmail", allowed: true, lastRunAt: null },
+            { id: "outlook-webmail", platform: "outlook", allowed: false, lastRunAt: null },
+          ],
+          needsReply: 2,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    const badge = visit(tree, (n) => hasClass(n, "badge") && hasClass(n, "badge--muted"))[0];
+    expect(textOf(badge)).toBe("Handoff");
+    expect(textOf(tree)).toContain("Apple Mail (this device)");
+    expect(textOf(tree)).toContain("Gmail");
+    expect(textOf(tree)).toContain("Outlook");
+    expect(textOf(tree)).toContain("Off in Settings");
+    expect(textOf(tree)).toContain("Never checked");
+    expect(textOf(tree)).toContain("2 email threads are waiting on a reply.");
+    expect(visit(tree, (n) => n.type === "a")).toHaveLength(0);
+  });
+
+  it("renders the singular-safe zero-count line for needsReply: 0", async () => {
+    const tree = await runMailTurn({
+      text: "Mail check requested. Run the ingest-mail skill from your agent or terminal to read your mail; anything it finds comes back here for review.",
+      artifacts: [
+        {
+          kind: "mail_sync_handoff",
+          sources: [
+            { id: "apple-mail", platform: null, allowed: true, lastRunAt: null },
+            { id: "gmail-webmail", platform: "gmail", allowed: false, lastRunAt: null },
+            { id: "outlook-webmail", platform: "outlook", allowed: false, lastRunAt: null },
+          ],
+          needsReply: 0,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("No email threads are waiting on a reply.");
+  });
+
+  it("tells the candidate to run the skill from their agent or terminal", async () => {
+    const tree = await runMailTurn({
+      text: "Mail check requested. Run the ingest-mail skill from your agent or terminal to read your mail; anything it finds comes back here for review.",
+      artifacts: [
+        {
+          kind: "mail_sync_handoff",
+          sources: [{ id: "apple-mail", platform: null, allowed: true, lastRunAt: null }],
+          needsReply: 0,
+          at: "2026-08-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    expect(textOf(tree)).toContain("from your agent or terminal");
+  });
+});
+
 describe("AskBar — status_transition_proposal artifact (StatusTransitionProposalCard)", () => {
   it("renders a Review first badge and an Apply button that fires status.apply-transition with the proposal's from/to", async () => {
     let tree = await runStatusTurn({

@@ -10,6 +10,7 @@ import {
   captureWorkspaceIntake,
   createWorkspaceAgentRuntime,
   executeWorkspaceIntent,
+  mailSyncSources,
   recordWorkspaceSearchCompletion,
   runWorkspaceAgentTurn,
 } from "../src/core/agent/workspace-agent.mjs";
@@ -30,6 +31,7 @@ import { candidateConfigGet, candidateConfigPatch } from "../src/core/db/verbs/c
 import { commUpsert } from "../src/core/db/verbs/comm.mjs";
 import { intakeCapture, intakeUpdate } from "../src/core/db/verbs/intake.mjs";
 import { relationshipLeadUpsertBatch } from "../src/core/db/verbs/relationship.mjs";
+import { sourceWatermarkUpsert } from "../src/core/db/verbs/source.mjs";
 import { sourcedUpsertBatch } from "../src/core/db/verbs/sourced.mjs";
 import { userPath } from "../src/core/paths/workspace.mjs";
 import {
@@ -128,6 +130,14 @@ function readCommunication(repoRoot, id) {
     .prepare("SELECT data FROM communications WHERE id = ?")
     .get(id);
   return row ? JSON.parse(row.data) : null;
+}
+
+function readSourceIds(repoRoot) {
+  return openDb({ repoRoot, env: {} })
+    .prepare("SELECT id FROM sources")
+    .all()
+    .map((row) => row.id)
+    .sort();
 }
 
 function seedSourced(repoRoot, overrides = {}) {
@@ -7277,4 +7287,202 @@ test("status.apply-transition: the proposal's round carries into the conversatio
   const app = readApplication(repoRoot, "app-temporal");
   const conversation = (app.conversations || []).at(-1);
   assert.equal(conversation?.kind, "onsite");
+});
+
+// ---------------------------------------------------------------------------
+// mail.sync-request (ingest-mail skill — mailSyncSources helper and the
+// mail.sync-request handler in workspace-agent.mjs). mail_access is a
+// per-platform capability (gmail/outlook, see MAIL_ACCESS_INGEST_PLATFORMS)
+// like status_polling above, plus an ungated Apple Mail row that only
+// appears when hostPlatform is "darwin" — this machine's process.platform,
+// so the handler-level refusal test below only exercises the darwin path.
+// The handler never writes: it is a read-only count-and-handoff, never a
+// tracker mutation.
+// ---------------------------------------------------------------------------
+
+function grantMailAccess(repoRoot, platforms) {
+  candidateConfigPatch({
+    repoRoot,
+    env: {},
+    name: "automation",
+    patch: {
+      setup_mode: "advanced",
+      capabilities: {
+        mail_access: {
+          enabled: true,
+          platforms: Object.fromEntries(platforms.map((p) => [p, true])),
+        },
+      },
+      consent: Object.fromEntries(platforms.map((p) => [p, true])),
+    },
+  });
+}
+
+test("mailSyncSources: non-darwin host with no grants returns gmail/outlook only, both disallowed", () => {
+  const repoRoot = tempRepo();
+  const sources = mailSyncSources({ repoRoot, env: {}, hostPlatform: "linux" });
+  assert.deepEqual(
+    sources.map((s) => s.id),
+    ["gmail-webmail", "outlook-webmail"]
+  );
+  assert.ok(sources.every((s) => s.allowed === false));
+});
+
+test("mailSyncSources: darwin host prepends an always-allowed apple-mail entry", () => {
+  const repoRoot = tempRepo();
+  const sources = mailSyncSources({ repoRoot, env: {}, hostPlatform: "darwin" });
+  assert.equal(sources[0].id, "apple-mail");
+  assert.equal(sources[0].allowed, true);
+  assert.equal(sources[0].platform, null);
+  assert.deepEqual(
+    sources.map((s) => s.id),
+    ["apple-mail", "gmail-webmail", "outlook-webmail"]
+  );
+});
+
+test("mail.sync-request: gmail-only grant on darwin returns a mail_sync_handoff artifact with per-source allowed/lastRunAt and a needsReply count scoped to email", async () => {
+  const repoRoot = tempRepo();
+  grantMailAccess(repoRoot, ["gmail"]);
+  sourceWatermarkUpsert({
+    repoRoot,
+    env: {},
+    source: { id: "apple-mail", lastRunAt: "2026-08-14T09:00:00.000Z" },
+    at: "2026-08-14T09:00:00.000Z",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-email-1",
+    company: "Acme",
+    channel: "email",
+    status: "needs-reply",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-email-2",
+    company: "Beta",
+    channel: "email",
+    status: "needs-reply",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-linkedin-1",
+    company: "Gamma",
+    channel: "linkedin",
+    status: "needs-reply",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    hostPlatform: "darwin",
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "mail_sync_handoff");
+  const byId = Object.fromEntries(artifact.sources.map((s) => [s.id, s]));
+  assert.equal(byId["apple-mail"].allowed, true);
+  assert.equal(byId["apple-mail"].lastRunAt, "2026-08-14T09:00:00.000Z");
+  assert.equal(byId["gmail-webmail"].allowed, true);
+  assert.equal(byId["gmail-webmail"].lastRunAt, null);
+  assert.equal(byId["outlook-webmail"].allowed, false);
+  assert.equal(artifact.needsReply, 2);
+});
+
+test("mail.sync-request: zero mail_access grant on darwin still returns the card because apple-mail keeps it alive", async () => {
+  const repoRoot = tempRepo();
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    hostPlatform: "darwin",
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.kind, "mail_sync_handoff");
+  const byId = Object.fromEntries(artifact.sources.map((s) => [s.id, s]));
+  assert.equal(byId["apple-mail"].allowed, true);
+  assert.equal(byId["gmail-webmail"].allowed, false);
+  assert.equal(byId["outlook-webmail"].allowed, false);
+});
+
+test("mail.sync-request: zero mail_access grant off darwin refuses with MAIL_SYNC_NOT_ALLOWED (no apple-mail source to keep it alive)", async () => {
+  const repoRoot = tempRepo();
+
+  await assert.rejects(
+    executeWorkspaceIntent({
+      repoRoot,
+      env: {},
+      hostPlatform: "linux",
+      intent: {
+        type: "mail.sync-request",
+        entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+        input: {},
+      },
+    }),
+    (error) => {
+      assert.equal(error.code, "MAIL_SYNC_NOT_ALLOWED");
+      return true;
+    }
+  );
+});
+
+test("mail.sync-request: pure read — application and communication rows are byte-for-byte unchanged and no sources rows are created", async () => {
+  const repoRoot = tempRepo();
+  grantMailAccess(repoRoot, ["gmail"]);
+  const app = seedApplication(repoRoot);
+  const comm = seedCommunication(repoRoot);
+  const appBefore = readApplication(repoRoot, app.id);
+  const commBefore = readCommunication(repoRoot, comm.id);
+  const sourcesBefore = readSourceIds(repoRoot);
+
+  await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  assert.deepEqual(readApplication(repoRoot, app.id), appBefore);
+  assert.deepEqual(readCommunication(repoRoot, comm.id), commBefore);
+  assert.deepEqual(readSourceIds(repoRoot), sourcesBefore);
+});
+
+test("mail.sync-request: needsReply counts only channel email + status needs-reply, not other statuses", async () => {
+  const repoRoot = tempRepo();
+  grantMailAccess(repoRoot, ["gmail"]);
+  seedCommunication(repoRoot, {
+    id: "comm-needs-reply",
+    company: "Acme",
+    channel: "email",
+    status: "needs-reply",
+  });
+  seedCommunication(repoRoot, {
+    id: "comm-waiting",
+    company: "Beta",
+    channel: "email",
+    status: "waiting",
+  });
+
+  const result = await executeWorkspaceIntent({
+    repoRoot,
+    env: {},
+    intent: {
+      type: "mail.sync-request",
+      entity: { type: "workspace", id: WORKSPACE_THREAD_ID },
+      input: {},
+    },
+  });
+
+  const artifact = result.messages.at(-1).artifacts[0];
+  assert.equal(artifact.needsReply, 1);
 });

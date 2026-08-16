@@ -328,6 +328,12 @@ const RULES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    match: ({ code }) => code === "MAIL_SYNC_NOT_ALLOWED",
+    message:
+      "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
     match: ({ code }) => code === "STATUS_UPDATE_INVALID",
     message:
       "Name the company and what the portal said, like: Greenhouse says phone screen scheduled for Acme.",

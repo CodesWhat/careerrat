@@ -1271,6 +1271,7 @@ function AskBarTurn({
   const statusSyncHandoffArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "status_sync_handoff"
   );
+  const mailSyncHandoff = turn.artifacts?.find((a) => a?.kind === "mail_sync_handoff");
   const statusTransitionProposalArtifact = turn.artifacts?.find(
     (artifact) => artifact.kind === "status_transition_proposal"
   );
@@ -1333,6 +1334,7 @@ function AskBarTurn({
       {statusSyncHandoffArtifact ? (
         <StatusSyncHandoffCard artifact={statusSyncHandoffArtifact} />
       ) : null}
+      {mailSyncHandoff ? <MailSyncHandoffCard artifact={mailSyncHandoff} /> : null}
       {statusTransitionProposalArtifact ? (
         <StatusTransitionProposalCard
           artifact={statusTransitionProposalArtifact}
@@ -2124,6 +2126,8 @@ const SETTINGS_PLATFORM_LABEL = {
   linkedin: "LinkedIn",
   indeed: "Indeed",
   wellfound: "Wellfound",
+  gmail: "Gmail",
+  outlook: "Outlook",
 };
 function settingsPlatformLabel(key) {
   return SETTINGS_PLATFORM_LABEL[key] || humanizeSettingsToken(key);
@@ -2508,6 +2512,55 @@ function StatusSyncHandoffCard({ artifact }) {
       <p className="ask-bar__screening-note">
         Run the sync-status skill from your agent or terminal to read your job portals. Updates come
         back here for your review.
+      </p>
+    </section>
+  );
+}
+
+// mail_sync_handoff (mail.sync-request intent, ingest-mail skill) — same
+// acknowledgment shape as StatusSyncHandoffCard above: the request landed,
+// the actual mail read happens in the agent/terminal skill run, not here.
+const MAIL_SYNC_SOURCE_LABEL = {
+  "apple-mail": "Apple Mail (this device)",
+  "gmail-webmail": "Gmail",
+  "outlook-webmail": "Outlook",
+};
+function mailSyncSourceLabel(source) {
+  return MAIL_SYNC_SOURCE_LABEL[source.id] || settingsPlatformLabel(source.platform);
+}
+function mailSyncNeedsReplyLine(count) {
+  const needsReply = Number(count) || 0;
+  if (needsReply === 0) return "No email threads are waiting on a reply.";
+  if (needsReply === 1) return "1 email thread is waiting on a reply.";
+  return `${needsReply} email threads are waiting on a reply.`;
+}
+function MailSyncHandoffCard({ artifact }) {
+  const sources = Array.isArray(artifact.sources) ? artifact.sources : [];
+  return (
+    <section className="ask-bar__strategy-apply" aria-label="Mail sync requested">
+      <div className="ask-bar__strategy-review-head">
+        <strong>Mail sync requested</strong>
+        <span className="badge badge--muted">Handoff</span>
+      </div>
+      {sources.map((source) => {
+        const statusText = [
+          source.allowed ? null : "Off in Settings",
+          source.lastRunAt
+            ? `Last checked ${formatRelativeDate(source.lastRunAt)}`
+            : "Never checked",
+        ]
+          .filter(Boolean)
+          .join(" · ");
+        return (
+          <p key={source.id}>
+            {[mailSyncSourceLabel(source), statusText].filter(Boolean).join(" · ")}
+          </p>
+        );
+      })}
+      <p>{mailSyncNeedsReplyLine(artifact.needsReply)}</p>
+      <p className="ask-bar__screening-note">
+        Run the ingest-mail skill from your agent or terminal to read your mail. Updates come back
+        here for your review.
       </p>
     </section>
   );

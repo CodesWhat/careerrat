@@ -1400,6 +1400,95 @@ test("previewWorkspaceIntent: status matchers never shadow settings, search, or 
 });
 
 // ---------------------------------------------------------------------------
+// mail.sync-request matcher (mailSyncRequestFromText, workspace-agent.mjs
+// ~6570). Anchored like statusSyncRequestFromText so "email"/"mail" mentioned
+// mid-sentence — drafting a reply, reporting a sent email, a settings
+// phrase, or generic job/status vocabulary that happens to share the word
+// "check" — never fires it.
+// ---------------------------------------------------------------------------
+
+test("previewWorkspaceIntent: mail phrasings map to mail.sync-request with the 'Check for new mail' label", () => {
+  const repoRoot = tempRepo();
+  for (const text of [
+    "check my email",
+    "sync my inbox",
+    "scan my mailbox",
+    "any new recruiter emails?",
+    "new emails",
+    // Natural phrasings the first matcher draft missed: the chip's own label
+    // shape, bare "mail" as the noun, and did-I-get question forms.
+    "check for new mail",
+    "check for any new mail",
+    "any new mail",
+    "do I have new mail",
+    "did I get any new mail",
+  ]) {
+    const result = previewWorkspaceIntent({ text, repoRoot, env: {} });
+    assert.equal(result.action?.intent?.type, "mail.sync-request", text);
+    assert.equal(result.action?.label, "Check for new mail", text);
+    assert.equal(result.action.intent.entity.type, "workspace");
+    assert.equal(result.action.intent.entity.id, WORKSPACE_THREAD_ID);
+  }
+});
+
+test("previewWorkspaceIntent: mail matchers never shadow reply drafting, settings, search, or status routing", () => {
+  const repoRoot = tempRepo();
+
+  // Drafting a reply mentions "email"/"recruiter" but is a
+  // communication.draft-request, not a mail sync ask.
+  const draftReply = previewWorkspaceIntent({
+    text: "draft a reply to the recruiter",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(draftReply.action?.intent?.type, "mail.sync-request");
+
+  // Turning the capability on/off is a settings change, not a mail.*
+  // action — settings.apply already owns capability toggles.
+  const toggleMailAccess = previewWorkspaceIntent({
+    text: "turn off mail access",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(toggleMailAccess.action.intent.type, "settings.apply");
+
+  // Trailing words after the anchored inbox noun ("settings") fall outside
+  // the matcher, so this must not route to mail.sync-request.
+  const checkEmailSettings = previewWorkspaceIntent({
+    text: "check my email settings",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(checkEmailSettings.action?.intent?.type, "mail.sync-request");
+
+  // Generic "check ... sources" phrasing still falls to the search.run
+  // catch-all.
+  const checkSources = previewWorkspaceIntent({
+    text: "check job sources",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(checkSources.action.intent.type, "search.run");
+
+  // Portal status vocabulary stays on status.sync-request.
+  const checkStatuses = previewWorkspaceIntent({
+    text: "check my application statuses",
+    repoRoot,
+    env: {},
+  });
+  assert.equal(checkStatuses.action.intent.type, "status.sync-request");
+
+  // A self-reported "I sent the email" is a report of a past action, not a
+  // sync ask — it must not route to mail.sync-request.
+  const sentEmail = previewWorkspaceIntent({
+    text: "I sent the email",
+    repoRoot,
+    env: {},
+  });
+  assert.notEqual(sentEmail.action?.intent?.type, "mail.sync-request");
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/workspace/preview
 // ---------------------------------------------------------------------------
 

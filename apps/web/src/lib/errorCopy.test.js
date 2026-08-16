@@ -475,6 +475,16 @@ const RULE_CASES = [
     action: { label: "Open Settings", to: "/settings" },
   },
   {
+    name: "MAIL_SYNC_NOT_ALLOWED code",
+    err: new ApiError(400, {
+      code: "MAIL_SYNC_NOT_ALLOWED",
+      error: "Mail sync isn't available on this device yet. Turn on mail access first.",
+    }),
+    message:
+      "Mail sync isn't available on this device yet. Turn on mail access for Gmail or Outlook in Settings first.",
+    action: { label: "Open Settings", to: "/settings" },
+  },
+  {
     name: "STATUS_UPDATE_INVALID code",
     err: new ApiError(400, {
       code: "STATUS_UPDATE_INVALID",
